@@ -66,3 +66,27 @@ jobs:
           --self-contained true
           --no-restore
           -o artifacts/publish
+
+      - name: Startup process smoke test
+        shell: pwsh
+        run: |
+          $executable = Join-Path $PWD 'artifacts\publish\SteamInputAddonforClaw.exe'
+          if (-not (Test-Path -LiteralPath $executable)) {
+            throw "Published executable was not found: $executable"
+          }
+
+          $process = Start-Process -FilePath $executable -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Published executable exited during startup smoke test with code $($process.ExitCode)."
+            }
+          }
+          finally {
+            $process.Refresh()
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+              $process.WaitForExit()
+            }
+          }
