@@ -49,11 +49,13 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
                 var compatibleIds = GetRegistryMultiString(deviceInfoSet, ref deviceInfo, SpdrpCompatibleIds);
                 var enumeratorName = GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpEnumeratorName);
                 var vendorProductId = ParseVendorProductId(hardwareIds.Concat(compatibleIds));
+                var ancestorInstanceIds = GetAncestorInstanceIds(deviceInfo.DevInst);
 
                 devices.Add(new ControllerDeviceInfo(
                     instanceId,
                     GetContainerId(deviceInfoSet, ref deviceInfo),
-                    GetParentInstanceId(deviceInfo.DevInst),
+                    ancestorInstanceIds.FirstOrDefault(),
+                    ancestorInstanceIds,
                     enumeratorName,
                     hardwareIds,
                     compatibleIds,
@@ -127,15 +129,23 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         return propertyType == DevpropTypeGuid ? new Guid(buffer) : null;
     }
 
-    private static string? GetParentInstanceId(uint deviceInstance)
+    private static IReadOnlyList<string> GetAncestorInstanceIds(uint deviceInstance)
     {
-        if (CM_Get_Parent(out var parentInstance, deviceInstance, 0) != CrSuccess)
+        var ancestors = new List<string>();
+        var currentInstance = deviceInstance;
+        while (CM_Get_Parent(out var parentInstance, currentInstance, 0) == CrSuccess)
         {
-            return null;
+            var buffer = new StringBuilder(1024);
+            if (CM_Get_Device_IDW(parentInstance, buffer, buffer.Capacity, 0) != CrSuccess)
+            {
+                break;
+            }
+
+            ancestors.Add(buffer.ToString());
+            currentInstance = parentInstance;
         }
 
-        var buffer = new StringBuilder(1024);
-        return CM_Get_Device_IDW(parentInstance, buffer, buffer.Capacity, 0) == CrSuccess ? buffer.ToString() : null;
+        return ancestors;
     }
 
     private static (ushort? VendorId, ushort? ProductId) ParseVendorProductId(IEnumerable<string> identifiers)

@@ -97,6 +97,7 @@ public sealed class ControllerDeviceClassifier
             .Concat(device.CompatibleIds)
             .Append(device.InstanceId)
             .Append(device.ParentInstanceId ?? string.Empty)
+            .Concat(device.AncestorInstanceIds)
             .Append(device.EnumeratorName ?? string.Empty)
             .Append(device.Service ?? string.Empty));
     }

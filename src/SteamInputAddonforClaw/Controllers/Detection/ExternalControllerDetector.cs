@@ -24,19 +24,19 @@ public sealed class ExternalControllerDetector
                 })
                 .ToArray();
 
-            if (groups.Any(group => group.Classifications.Contains(ControllerDeviceClassification.Indeterminate)))
-            {
-                return new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, []);
-            }
-
             var externalControllers = groups
                 .Where(group => group.Classifications.Contains(ControllerDeviceClassification.ExternalPhysical))
                 .Select(group => group.Devices[0])
                 .ToArray();
 
-            return externalControllers.Length == 0
-                ? new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, [])
-                : new ExternalControllerAssessment(ExternalControllerAssessmentStatus.ExternalPresent, externalControllers.Length, externalControllers);
+            if (externalControllers.Length > 0)
+            {
+                return new ExternalControllerAssessment(ExternalControllerAssessmentStatus.ExternalPresent, externalControllers.Length, externalControllers);
+            }
+
+            return groups.Any(group => group.Classifications.Contains(ControllerDeviceClassification.Indeterminate))
+                ? new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, [])
+                : new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []);
         }
         catch (Exception)
         {

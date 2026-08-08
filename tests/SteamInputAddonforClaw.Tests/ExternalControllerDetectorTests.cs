@@ -99,11 +99,42 @@ public sealed class ExternalControllerDetectorTests
     }
 
     [Fact]
+    public void Detect_WhenVirtualControllerIdentityIsOnlyInRootAncestor_ReturnsClear()
+    {
+        var assessment = Detect(
+        [
+            GameController(
+                0x045E,
+                0x028E,
+                ancestorInstanceIds:
+                [
+                    "USB\\VID_045E&PID_028E\\NORMAL_USB_PARENT",
+                    "ROOT\\USBIP_WIN2\\UDE"
+                ])
+        ]);
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
+    }
+
+    [Fact]
     public void Detect_WhenControllerHasUnverifiedVirtualIdentity_ReturnsIndeterminate()
     {
         var assessment = Detect([GameController(0x045E, 0x028E, instanceId: "ROOT\\UNKNOWN_CONTROLLER")]);
 
         Assert.Equal(ExternalControllerAssessmentStatus.Indeterminate, assessment.Status);
+    }
+
+    [Fact]
+    public void Detect_WhenPhysicalControllerAndIndeterminateControllerExist_ReturnsExternalPresent()
+    {
+        var assessment = Detect(
+        [
+            GameController(0x045E, 0x0B13),
+            GameController(0x1234, 0x5678, instanceId: "ROOT\\UNKNOWN_CONTROLLER")
+        ]);
+
+        Assert.Equal(ExternalControllerAssessmentStatus.ExternalPresent, assessment.Status);
+        Assert.Equal(1, assessment.DetectedExternalControllerCount);
     }
 
     [Fact]
@@ -117,7 +148,7 @@ public sealed class ExternalControllerDetectorTests
     [Fact]
     public void Detect_WhenOnlyUnrelatedHidExists_ReturnsClear()
     {
-        var mouse = new ControllerDeviceInfo("HID\\MOUSE", Guid.NewGuid(), null, "HID", ["HID\\VID_1234&PID_0001"], [], "HIDClass", null, null, 0x1234, 0x0001, true);
+        var mouse = new ControllerDeviceInfo("HID\\MOUSE", Guid.NewGuid(), null, [], "HID", ["HID\\VID_1234&PID_0001"], [], "HIDClass", null, null, 0x1234, 0x0001, true);
         var assessment = Detect([mouse]);
 
         Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
@@ -128,12 +159,19 @@ public sealed class ExternalControllerDetectorTests
         return new ExternalControllerDetector(new FakeEnumerator(devices), new ControllerDeviceClassifier(exclusionSource)).Detect();
     }
 
-    private static ControllerDeviceInfo GameController(ushort vendorId, ushort productId, Guid? containerId = null, string? enumeratorName = "HID", string? instanceId = null)
+    private static ControllerDeviceInfo GameController(
+        ushort vendorId,
+        ushort productId,
+        Guid? containerId = null,
+        string? enumeratorName = "HID",
+        string? instanceId = null,
+        IReadOnlyList<string>? ancestorInstanceIds = null)
     {
         return new ControllerDeviceInfo(
             instanceId ?? $"HID\\VID_{vendorId:X4}&PID_{productId:X4}",
             containerId ?? Guid.NewGuid(),
             null,
+            ancestorInstanceIds ?? [],
             enumeratorName,
             [$"HID\\VID_{vendorId:X4}&PID_{productId:X4}"],
             ["HID_DEVICE_UP:0001_U:0005"],
