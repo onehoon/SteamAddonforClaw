@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Startup;
+using SteamInputAddonforClaw.Lifecycle;
 
 namespace SteamInputAddonforClaw;
 
@@ -15,9 +16,13 @@ public partial class App : Application
     private SteamSessionWatcher? _steamSessionWatcher;
     private readonly CancellationTokenSource _startupCancellationTokenSource = new();
     private DispatcherQueue? _dispatcherQueue;
+    private readonly bool _showMainWindow;
+    private SystemTrayIcon? _systemTrayIcon;
+    private bool _isExplicitExit;
 
-    public App()
+    public App(string[]? arguments = null)
     {
+        _showMainWindow = ApplicationLifecyclePolicy.ShouldShowMainWindow(arguments ?? []);
         InitializeComponent();
     }
 
@@ -66,6 +71,7 @@ public partial class App : Application
 
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message);
         _mainWindow.Closed += OnMainWindowClosed;
+        _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
         var controllerDetector = new ExternalControllerDetector(
             new WindowsControllerDeviceEnumerator(),
@@ -79,7 +85,11 @@ public partial class App : Application
 
         _steamSessionWatcher.Start();
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);
-        _mainWindow.Activate();
+        _systemTrayIcon = new SystemTrayIcon(ShowMainWindow, ExitApplication);
+        if (_showMainWindow)
+        {
+            _mainWindow.Activate();
+        }
 
     }
 
@@ -93,6 +103,11 @@ public partial class App : Application
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
+        if (!_isExplicitExit)
+        {
+            return;
+        }
+
         _startupCancellationTokenSource.Cancel();
 
         if (_steamSessionWatcher is not null)
@@ -104,10 +119,41 @@ public partial class App : Application
 
         _runningAppIdSource?.Dispose();
         _runningAppIdSource = null;
+        _systemTrayIcon?.Dispose();
+        _systemTrayIcon = null;
+    }
+
+    private void OnMainWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
+    {
+        if (ApplicationLifecyclePolicy.OnWindowClose(_isExplicitExit) == ApplicationCloseAction.HideWindow)
+        {
+            args.Cancel = true;
+            _mainWindow?.AppWindow.Hide();
+        }
+    }
+
+    private void ShowMainWindow()
+    {
+        _dispatcherQueue?.TryEnqueue(() =>
+        {
+            _mainWindow?.AppWindow.Show();
+            _mainWindow?.Activate();
+        });
+    }
+
+    private void ExitApplication()
+    {
+        _dispatcherQueue?.TryEnqueue(() =>
+        {
+            _isExplicitExit = true;
+            _mainWindow?.Close();
+            Exit();
+        });
     }
 
     private void ExitAfterScheduledUpdate()
     {
+        _isExplicitExit = true;
         _startupCancellationTokenSource.Cancel();
         Exit();
     }

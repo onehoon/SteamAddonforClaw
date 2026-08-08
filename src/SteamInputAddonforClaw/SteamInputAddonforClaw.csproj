@@ -5,6 +5,7 @@
     <TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
     <WindowsPackageType>None</WindowsPackageType>
     <UseWinUI>true</UseWinUI>
+    <UseWindowsForms>true</UseWindowsForms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
