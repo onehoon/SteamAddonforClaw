@@ -11,7 +11,7 @@ public sealed class ControllerEnvironmentWaiterTests
     {
         var waiter = CreateWaiter([], requiredStableSnapshots: 3, timeout: TimeSpan.FromMilliseconds(20));
 
-        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
+        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
 
         Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, readiness);
     }
@@ -35,7 +35,18 @@ public sealed class ControllerEnvironmentWaiterTests
             true);
         var waiter = CreateWaiter([claw], requiredStableSnapshots: 3, timeout: TimeSpan.FromSeconds(1));
 
-        var readiness = await waiter.WaitUntilStableAsync(CancellationToken.None);
+        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
+    }
+
+    [Fact]
+    public async Task WaitUntilStableAsync_WhenClawTweaksVirtualTopologyIsStable_DoesNotRequireInternalClaw()
+    {
+        var virtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
+        var waiter = CreateWaiter([virtualController], 3, TimeSpan.FromSeconds(1));
+
+        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.ClawTweaks, CancellationToken.None);
 
         Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
     }

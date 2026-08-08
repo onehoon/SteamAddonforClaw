@@ -12,9 +12,18 @@ internal enum ClawTweaksState
     Indeterminate
 }
 
+internal enum ControllerEnvironmentMode
+{
+    StockCenterM,
+    ClawTweaks,
+    Indeterminate
+}
+
+internal sealed record ControllerEnvironment(ControllerEnvironmentMode Mode, ClawTweaksState ClawTweaksState);
+
 internal interface IControllerEnvironmentDetector
 {
-    ClawTweaksState DetectClawTweaksState();
+    ControllerEnvironment Detect();
 }
 
 internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDetector
@@ -31,13 +40,13 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
         _deviceEnumerator = deviceEnumerator;
     }
 
-    public ClawTweaksState DetectClawTweaksState()
+    public ControllerEnvironment Detect()
     {
         var installed = KnownExecutablePaths.Any(File.Exists);
         var processRunning = Process.GetProcessesByName("ClawTweaks").Length > 0;
         if (!installed && !processRunning)
         {
-            return ClawTweaksState.NotInstalled;
+            return new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled);
         }
 
         try
@@ -53,16 +62,18 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
                 || string.Join('\n', device.AncestorInstanceIds).Contains("USBIP", StringComparison.OrdinalIgnoreCase)
                 || string.Join('\n', device.AncestorInstanceIds).Contains("VIIPER", StringComparison.OrdinalIgnoreCase));
 
-            if (virtualTopologyPresent)
+            if (processRunning && virtualTopologyPresent)
             {
-                return ClawTweaksState.Active;
+                return new ControllerEnvironment(ControllerEnvironmentMode.ClawTweaks, ClawTweaksState.Active);
             }
 
-            return processRunning ? ClawTweaksState.Starting : ClawTweaksState.InstalledInactive;
+            return processRunning
+                ? new ControllerEnvironment(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Starting)
+                : new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.InstalledInactive);
         }
         catch (Exception)
         {
-            return ClawTweaksState.Indeterminate;
+            return new ControllerEnvironment(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Indeterminate);
         }
     }
 }

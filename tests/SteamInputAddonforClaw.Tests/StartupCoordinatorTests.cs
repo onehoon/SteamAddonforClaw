@@ -17,6 +17,7 @@ public sealed class StartupCoordinatorTests
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.True(result.ShouldStartRuntime);
+        Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
         Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentWaiter"], events);
     }
 
@@ -32,6 +33,7 @@ public sealed class StartupCoordinatorTests
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.False(result.ShouldStartRuntime);
+        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
         Assert.Equal(["UpdateGate"], events);
     }
 
@@ -48,6 +50,7 @@ public sealed class StartupCoordinatorTests
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.Equal(ControllerEnvironmentReadiness.Stable, result.EnvironmentReadiness);
+        Assert.Equal(ControllerEnvironmentMode.ClawTweaks, result.EnvironmentMode);
         Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentDetector", "EnvironmentWaiter"], events);
     }
 
@@ -65,6 +68,39 @@ public sealed class StartupCoordinatorTests
 
         Assert.True(result.ShouldStartRuntime);
         Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, result.EnvironmentReadiness);
+        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
+        Assert.DoesNotContain("EnvironmentWaiter", events);
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenClawTweaksIsInstalledInactive_UsesStockCenterMMode()
+    {
+        var events = new List<string>();
+        var waiter = new FakeEnvironmentWaiter(events);
+        var coordinator = new StartupCoordinator(
+            new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events, ClawTweaksState.InstalledInactive),
+            waiter);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
+        Assert.Equal([ControllerEnvironmentMode.StockCenterM], waiter.Modes);
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenClawTweaksStateIsIndeterminate_SkipsReadinessChecks()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(
+            new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events, ClawTweaksState.Indeterminate),
+            new FakeEnvironmentWaiter(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
+        Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, result.EnvironmentReadiness);
         Assert.DoesNotContain("EnvironmentWaiter", events);
     }
 
@@ -79,9 +115,12 @@ public sealed class StartupCoordinatorTests
 
     private sealed class FakeEnvironmentWaiter(List<string> events) : IControllerEnvironmentWaiter
     {
-        public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(CancellationToken cancellationToken)
+        public List<ControllerEnvironmentMode> Modes { get; } = [];
+
+        public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken)
         {
             events.Add("EnvironmentWaiter");
+            Modes.Add(mode);
             return Task.FromResult(ControllerEnvironmentReadiness.Stable);
         }
     }
@@ -90,10 +129,17 @@ public sealed class StartupCoordinatorTests
     {
         private readonly Queue<ClawTweaksState> _states = new(states.Length == 0 ? [ClawTweaksState.NotInstalled] : states);
 
-        public ClawTweaksState DetectClawTweaksState()
+        public ControllerEnvironment Detect()
         {
             events.Add("EnvironmentDetector");
-            return _states.Count > 1 ? _states.Dequeue() : _states.Peek();
+            var state = _states.Count > 1 ? _states.Dequeue() : _states.Peek();
+            var mode = state switch
+            {
+                ClawTweaksState.Active => ControllerEnvironmentMode.ClawTweaks,
+                ClawTweaksState.NotInstalled or ClawTweaksState.InstalledInactive => ControllerEnvironmentMode.StockCenterM,
+                _ => ControllerEnvironmentMode.Indeterminate
+            };
+            return new ControllerEnvironment(mode, state);
         }
     }
 }

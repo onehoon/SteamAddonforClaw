@@ -4,7 +4,7 @@ namespace SteamInputAddonforClaw.Startup;
 
 internal interface IControllerEnvironmentWaiter
 {
-    Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(CancellationToken cancellationToken);
+    Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken);
 }
 
 internal enum ControllerEnvironmentReadiness { Stable, Indeterminate }
@@ -31,7 +31,7 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         _timeout = timeout ?? TimeSpan.FromSeconds(5);
     }
 
-    public async Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(CancellationToken cancellationToken)
+    public async Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken)
     {
         string? previousSnapshot = null;
         var stableSnapshotCount = 0;
@@ -42,8 +42,8 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
             while (DateTimeOffset.UtcNow <= deadline)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var (snapshot, hasInternalClaw) = CreateRelevantTopologySnapshot();
-                if (!hasInternalClaw)
+                var (snapshot, ready) = CreateRelevantTopologySnapshot(mode);
+                if (!ready)
                 {
                     stableSnapshotCount = 0;
                     previousSnapshot = null;
@@ -71,16 +71,32 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         return ControllerEnvironmentReadiness.Indeterminate;
     }
 
-    private (string Snapshot, bool HasInternalClaw) CreateRelevantTopologySnapshot()
+    private (string Snapshot, bool Ready) CreateRelevantTopologySnapshot(ControllerEnvironmentMode mode)
     {
         var devices = _deviceEnumerator.EnumeratePresentDevices();
-        var snapshot = string.Join('\n', devices
-            .Where(_classifier.IsRelevantTopologyDevice)
+        var relevantDevices = mode == ControllerEnvironmentMode.ClawTweaks
+            ? devices.Where(IsClawTweaksVirtualTopologyDevice).ToArray()
+            : devices.Where(_classifier.IsRelevantTopologyDevice).ToArray();
+        var snapshot = string.Join('\n', relevantDevices
             .Select(device => string.Join('|',
                 device.InstanceId,
                 device.ParentInstanceId ?? string.Empty,
                 string.Join(',', device.AncestorInstanceIds)))
             .OrderBy(identity => identity, StringComparer.OrdinalIgnoreCase));
-        return (snapshot, devices.Any(device => _classifier.Classify(device) == ControllerDeviceClassification.InternalClaw));
+        var ready = mode switch
+        {
+            ControllerEnvironmentMode.StockCenterM => devices.Any(device => _classifier.Classify(device) == ControllerDeviceClassification.InternalClaw),
+            ControllerEnvironmentMode.ClawTweaks => relevantDevices.Length > 0,
+            _ => false
+        };
+        return (snapshot, ready);
+    }
+
+    private static bool IsClawTweaksVirtualTopologyDevice(ControllerDeviceInfo device)
+    {
+        var identity = string.Join('\n', device.HardwareIds.Concat(device.CompatibleIds).Append(device.InstanceId).Append(device.ParentInstanceId ?? string.Empty).Concat(device.AncestorInstanceIds).Append(device.Service ?? string.Empty));
+        return identity.Contains("CLAWTWEAKS", StringComparison.OrdinalIgnoreCase)
+            || identity.Contains("VIIPER", StringComparison.OrdinalIgnoreCase)
+            || identity.Contains("USBIP", StringComparison.OrdinalIgnoreCase);
     }
 }
