@@ -6,6 +6,7 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
+using System.Diagnostics;
 
 namespace SteamInputAddonforClaw;
 
@@ -16,7 +17,7 @@ public partial class App : Application
     private SteamSessionWatcher? _steamSessionWatcher;
     private readonly CancellationTokenSource _startupCancellationTokenSource = new();
     private DispatcherQueue? _dispatcherQueue;
-    private readonly bool _showMainWindow;
+    private bool _showMainWindow;
     private SystemTrayIcon? _systemTrayIcon;
     private bool _isExplicitExit;
 
@@ -85,7 +86,15 @@ public partial class App : Application
 
         _steamSessionWatcher.Start();
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);
-        _systemTrayIcon = new SystemTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(_mainWindow), ShowMainWindow, ExitApplication);
+        try
+        {
+            _systemTrayIcon = new SystemTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(_mainWindow), ShowMainWindow, ExitApplication);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"System tray initialization failed; showing the main window. {exception}");
+            _showMainWindow = true;
+        }
         if (_showMainWindow)
         {
             _mainWindow.Activate();

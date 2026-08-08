@@ -33,30 +33,35 @@ internal sealed class SystemTrayIcon : IDisposable
         _icon = ExtractIconW(IntPtr.Zero, Environment.ProcessPath!, 0);
         _taskbarCreatedMessage = RegisterWindowMessageW("TaskbarCreated");
         _subclassProc = WindowProcedure;
-        if (!SetWindowSubclass(_windowHandle, _subclassProc, 1, UIntPtr.Zero))
+        if (!SetWindowSubclass(_windowHandle, _subclassProc, (UIntPtr)1, UIntPtr.Zero))
         {
             throw new InvalidOperationException("Could not subclass the application window.");
         }
 
-        AddIcon();
+        if (!AddIcon())
+        {
+            RemoveWindowSubclass(_windowHandle, _subclassProc, (UIntPtr)1);
+            throw new InvalidOperationException("Could not add the notification area icon.");
+        }
     }
 
     public void Dispose()
     {
-        Shell_NotifyIconW(NIM_DELETE, CreateNotifyIconData());
-        RemoveWindowSubclass(_windowHandle, _subclassProc, 1);
+        var data = CreateNotifyIconData();
+        Shell_NotifyIconW(NIM_DELETE, ref data);
+        RemoveWindowSubclass(_windowHandle, _subclassProc, (UIntPtr)1);
         if (_icon != IntPtr.Zero)
         {
             DestroyIcon(_icon);
         }
     }
 
-    private void AddIcon()
+    private bool AddIcon()
     {
         var data = CreateNotifyIconData();
-        Shell_NotifyIconW(NIM_ADD, data);
+        if (!Shell_NotifyIconW(NIM_ADD, ref data)) return false;
         data.uVersion = NOTIFYICON_VERSION_4;
-        Shell_NotifyIconW(NIM_SETVERSION, data);
+        return Shell_NotifyIconW(NIM_SETVERSION, ref data);
     }
 
     private IntPtr WindowProcedure(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, UIntPtr id, UIntPtr referenceData)
@@ -109,11 +114,11 @@ internal sealed class SystemTrayIcon : IDisposable
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct NOTIFYICONDATA { public int cbSize; public IntPtr hWnd; public uint uID; public uint uFlags; public uint uCallbackMessage; public IntPtr hIcon; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip; public uint dwState; public uint dwStateMask; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szInfo; public uint uTimeoutOrVersion; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle; public uint dwInfoFlags; public Guid guidItem; public IntPtr hBalloonIcon; public uint uVersion { set => uTimeoutOrVersion = value; } }
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X; public int Y; }
     private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData);
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern bool Shell_NotifyIconW(uint message, NOTIFYICONDATA data);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern bool Shell_NotifyIconW(uint message, ref NOTIFYICONDATA data);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr ExtractIconW(IntPtr instance, string fileName, uint index);
     [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr icon);
-    [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(IntPtr window, SubclassProc procedure, uint id, UIntPtr referenceData);
-    [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(IntPtr window, SubclassProc procedure, uint id);
+    [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(IntPtr window, SubclassProc procedure, UIntPtr id, UIntPtr referenceData);
+    [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(IntPtr window, SubclassProc procedure, UIntPtr id);
     [DllImport("comctl32.dll")] private static extern IntPtr DefSubclassProc(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterWindowMessageW(string value);
     [DllImport("user32.dll")] private static extern IntPtr CreatePopupMenu();
