@@ -75,7 +75,7 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
     {
         var devices = _deviceEnumerator.EnumeratePresentDevices();
         var relevantDevices = mode == ControllerEnvironmentMode.ClawTweaks
-            ? devices.Where(IsClawTweaksVirtualTopologyDevice).ToArray()
+            ? devices.Where(_classifier.IsClawTweaksVirtualControllerCandidate).ToArray()
             : devices.Where(_classifier.IsRelevantTopologyDevice).ToArray();
         var snapshot = string.Join('\n', relevantDevices
             .Select(device => string.Join('|',
@@ -90,13 +90,5 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
             _ => false
         };
         return (snapshot, ready);
-    }
-
-    private static bool IsClawTweaksVirtualTopologyDevice(ControllerDeviceInfo device)
-    {
-        var identity = string.Join('\n', device.HardwareIds.Concat(device.CompatibleIds).Append(device.InstanceId).Append(device.ParentInstanceId ?? string.Empty).Concat(device.AncestorInstanceIds).Append(device.Service ?? string.Empty));
-        return identity.Contains("CLAWTWEAKS", StringComparison.OrdinalIgnoreCase)
-            || identity.Contains("VIIPER", StringComparison.OrdinalIgnoreCase)
-            || identity.Contains("USBIP", StringComparison.OrdinalIgnoreCase);
     }
 }

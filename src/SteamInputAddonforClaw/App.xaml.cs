@@ -45,14 +45,14 @@ public partial class App : Application
                 return;
             }
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentReadiness));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
         }
     }
 
-    private void StartNormalRuntime(ControllerDeviceClassifier classifier, ControllerEnvironmentReadiness environmentReadiness)
+    private void StartNormalRuntime(ControllerDeviceClassifier classifier, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness)
     {
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
         _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
@@ -70,9 +70,12 @@ public partial class App : Application
         var controllerDetector = new ExternalControllerDetector(
             new WindowsControllerDeviceEnumerator(),
             classifier);
-        _mainWindow.UpdateExternalControllerAssessment(environmentReadiness == ControllerEnvironmentReadiness.Stable
-            ? controllerDetector.Detect()
-            : new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, []));
+        var externalAssessment = controllerDetector.Detect();
+        _mainWindow.UpdateExternalControllerAssessment(externalAssessment.Status == ExternalControllerAssessmentStatus.ExternalPresent
+            ? externalAssessment
+            : environmentMode == ControllerEnvironmentMode.HHCManaged || environmentReadiness != ControllerEnvironmentReadiness.Stable
+                ? new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, [])
+                : externalAssessment);
 
         _steamSessionWatcher.Start();
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);

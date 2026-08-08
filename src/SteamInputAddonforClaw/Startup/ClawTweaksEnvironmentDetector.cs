@@ -32,6 +32,16 @@ internal interface IHandheldCompanionRuntimeDetector
     bool IsRunning();
 }
 
+internal interface IClawTweaksRuntimeDetector
+{
+    bool IsRunning();
+}
+
+internal sealed class ClawTweaksRuntimeDetector : IClawTweaksRuntimeDetector
+{
+    public bool IsRunning() => Process.GetProcessesByName("ClawTweaks").Length > 0;
+}
+
 internal sealed class HandheldCompanionRuntimeDetector : IHandheldCompanionRuntimeDetector
 {
     public bool IsRunning() => Process.GetProcessesByName("HandheldCompanion").Length > 0;
@@ -46,13 +56,16 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
     ];
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
     private readonly IHandheldCompanionRuntimeDetector _handheldCompanionRuntimeDetector;
+    private readonly IClawTweaksRuntimeDetector _clawTweaksRuntimeDetector;
 
     public ClawTweaksEnvironmentDetector(
         IControllerDeviceEnumerator deviceEnumerator,
-        IHandheldCompanionRuntimeDetector? handheldCompanionRuntimeDetector = null)
+        IHandheldCompanionRuntimeDetector? handheldCompanionRuntimeDetector = null,
+        IClawTweaksRuntimeDetector? clawTweaksRuntimeDetector = null)
     {
         _deviceEnumerator = deviceEnumerator;
         _handheldCompanionRuntimeDetector = handheldCompanionRuntimeDetector ?? new HandheldCompanionRuntimeDetector();
+        _clawTweaksRuntimeDetector = clawTweaksRuntimeDetector ?? new ClawTweaksRuntimeDetector();
     }
 
     public ControllerEnvironment Detect()
@@ -70,7 +83,7 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
         }
 
         var installed = KnownExecutablePaths.Any(File.Exists);
-        var processRunning = Process.GetProcessesByName("ClawTweaks").Length > 0;
+        var processRunning = _clawTweaksRuntimeDetector.IsRunning();
         if (!installed && !processRunning)
         {
             return new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled);
@@ -78,16 +91,8 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
 
         try
         {
-            var virtualTopologyPresent = _deviceEnumerator.EnumeratePresentDevices().Any(device =>
-                string.Join('\n', device.HardwareIds
-                    .Concat(device.CompatibleIds)
-                    .Append(device.InstanceId)
-                    .Append(device.ParentInstanceId ?? string.Empty)
-                    .Concat(device.AncestorInstanceIds)
-                    .Append(device.Service ?? string.Empty))
-                .Contains("CLAWTWEAKS", StringComparison.OrdinalIgnoreCase)
-                || string.Join('\n', device.AncestorInstanceIds).Contains("USBIP", StringComparison.OrdinalIgnoreCase)
-                || string.Join('\n', device.AncestorInstanceIds).Contains("VIIPER", StringComparison.OrdinalIgnoreCase));
+            var virtualTopologyPresent = _deviceEnumerator.EnumeratePresentDevices()
+                .Any(new ControllerDeviceClassifier().IsClawTweaksVirtualControllerCandidate);
 
             if (processRunning && virtualTopologyPresent)
             {

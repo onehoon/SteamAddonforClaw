@@ -75,6 +75,11 @@ public sealed class ControllerDeviceClassifier
             || ContainsKnownVirtualIdentity(device);
     }
 
+    public bool IsClawTweaksVirtualControllerCandidate(ControllerDeviceInfo device)
+    {
+        return IsGameControllerCandidate(device) && ContainsKnownVirtualIdentity(device);
+    }
+
     private static bool IsGameControllerCandidate(ControllerDeviceInfo device)
     {
         var evidence = string.Join('\n', device.HardwareIds.Concat(device.CompatibleIds).Append(device.EnumeratorName ?? string.Empty));

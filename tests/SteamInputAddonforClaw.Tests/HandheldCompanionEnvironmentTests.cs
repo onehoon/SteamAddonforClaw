@@ -44,9 +44,26 @@ public sealed class HandheldCompanionEnvironmentTests
         Assert.Equal(0, waiter.CallCount);
     }
 
+    [Fact]
+    public void Detect_WhenClawTweaksHasOnlyUsbIpNonController_DoesNotTreatItAsActive()
+    {
+        var usbIpDevice = new ControllerDeviceInfo("USB\\VID_1234&PID_5678", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "USB", ["USB\\VID_1234&PID_5678"], [], "USB", null, null, 0x1234, 0x5678, true);
+        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([usbIpDevice]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true));
+
+        var environment = detector.Detect();
+
+        Assert.Equal(ClawTweaksState.Starting, environment.ClawTweaksState);
+        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
+    }
+
     private static ClawTweaksEnvironmentDetector CreateDetector(bool running) => new(new FakeEnumerator([]), new FakeRuntimeDetector(running));
 
     private sealed class FakeRuntimeDetector(bool running) : IHandheldCompanionRuntimeDetector
+    {
+        public bool IsRunning() => running;
+    }
+
+    private sealed class FakeClawTweaksRuntimeDetector(bool running) : IClawTweaksRuntimeDetector
     {
         public bool IsRunning() => running;
     }

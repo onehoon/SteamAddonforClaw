@@ -51,6 +51,17 @@ public sealed class ControllerEnvironmentWaiterTests
         Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
     }
 
+    [Fact]
+    public async Task WaitUntilStableAsync_WhenClawTweaksHasOnlyUsbIpNonController_ReturnsIndeterminate()
+    {
+        var usbIpDevice = new ControllerDeviceInfo("USB\\VID_1234&PID_5678", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "USB", ["USB\\VID_1234&PID_5678"], [], "USB", null, null, 0x1234, 0x5678, true);
+        var waiter = CreateWaiter([usbIpDevice], 3, TimeSpan.FromMilliseconds(20));
+
+        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.ClawTweaks, CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, readiness);
+    }
+
     private static ControllerEnvironmentWaiter CreateWaiter(
         IReadOnlyList<ControllerDeviceInfo> devices,
         int requiredStableSnapshots,
