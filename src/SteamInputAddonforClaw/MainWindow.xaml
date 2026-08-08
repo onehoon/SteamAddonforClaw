@@ -10,6 +10,7 @@
             Text="Steam Input Addon for Claw" />
         <TextBlock Text="Version 0.1.0" />
         <TextBlock FontWeight="SemiBold" Text="Status" />
-        <TextBlock Text="Not initialized" />
+        <TextBlock x:Name="StatusText" Text="Steam inactive" />
+        <TextBlock x:Name="RunningAppIdText" Text="RunningAppID: 0" />
     </StackPanel>
 </Window>

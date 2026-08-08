@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="src/SteamInputAddonforClaw/SteamInputAddonforClaw.csproj" />
+  <Project Path="tests/SteamInputAddonforClaw.Tests/SteamInputAddonforClaw.Tests.csproj" />
 </Solution>
