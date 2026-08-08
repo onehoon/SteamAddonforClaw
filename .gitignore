@@ -1,0 +1,49 @@
+# Local Codex guidance
+AGENTS.md
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+artifacts/
+TestResults/
+
+# Visual Studio, VS Code, and Rider user state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# .NET tooling and package caches
+packages/
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+artifacts-*/
+
+# WinUI 3 / MSIX packaging outputs and local signing material
+AppPackages/
+BundleArtifacts/
+Package.StoreAssociation.xml
+*_TemporaryKey.pfx
+*.pfx
+*.cer
+*.p12
+
+# Local configuration, secrets, and diagnostics
+appsettings.Local.json
+appsettings.Development.json
+secrets.json
+*.log
+*.etl
+*.dmp
+
+# OS files
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
