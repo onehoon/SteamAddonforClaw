@@ -56,6 +56,32 @@ public sealed class HandheldCompanionEnvironmentTests
         Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
     }
 
+    [Theory]
+    [InlineData("ROOT\\VIGEMBUS\\0001")]
+    [InlineData("ROOT\\HANDHELDCOMPANION\\0001")]
+    public void Detect_WhenClawTweaksHasAnotherVirtualController_DoesNotTreatItAsActive(string ancestor)
+    {
+        var virtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, [ancestor], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
+        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([virtualController]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true));
+
+        var environment = detector.Detect();
+
+        Assert.Equal(ClawTweaksState.Starting, environment.ClawTweaksState);
+        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
+    }
+
+    [Fact]
+    public void Detect_WhenClawTweaksHasViiperController_TreatsItAsActive()
+    {
+        var virtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
+        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([virtualController]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true));
+
+        var environment = detector.Detect();
+
+        Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
+        Assert.Equal(ControllerEnvironmentMode.ClawTweaks, environment.Mode);
+    }
+
     private static ClawTweaksEnvironmentDetector CreateDetector(bool running) => new(new FakeEnumerator([]), new FakeRuntimeDetector(running));
 
     private sealed class FakeRuntimeDetector(bool running) : IHandheldCompanionRuntimeDetector
