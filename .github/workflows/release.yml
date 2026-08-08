@@ -52,6 +52,9 @@ jobs:
       - name: Test release metadata
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/release-metadata.tests.ps1
 
+      - name: Test release pruning
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/prune-releases.tests.ps1
+
       - name: Calculate release metadata
         id: metadata
         shell: pwsh
@@ -131,3 +134,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.metadata.outputs.TAG }}
         run: gh release edit $env:TAG --title $env:TAG --notes-file artifacts/release-notes.md
+
+      - name: Prune oldest published release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . ./scripts/prune-releases.ps1
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          $releaseToPrune = Get-ReleaseToPrune -Releases $releases
+          if ($null -eq $releaseToPrune) {
+            Write-Host 'No release pruning is required.'
+            exit 0
+          }
+
+          Write-Host "Deleting oldest published release and tag: $($releaseToPrune.tag_name)"
+          gh release delete $releaseToPrune.tag_name --yes --cleanup-tag
