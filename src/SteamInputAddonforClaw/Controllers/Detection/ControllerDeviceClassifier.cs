@@ -30,6 +30,13 @@ public sealed class ControllerDeviceClassifier
         "HANDHELDCOMPANION",
         "CLAWTWEAKS"
     ];
+    private static readonly string[] ClawTweaksRoutingTokens =
+    [
+        "CLAWTWEAKS",
+        "VIIPER",
+        "USBIP",
+        "USB/IP"
+    ];
 
     private readonly IControllerIdentityExclusionSource _identityExclusionSource;
 
@@ -68,6 +75,18 @@ public sealed class ControllerDeviceClassifier
         return ControllerDeviceClassification.ExternalPhysical;
     }
 
+    public bool IsRelevantTopologyDevice(ControllerDeviceInfo device)
+    {
+        return IsGameControllerCandidate(device)
+            || IsInternalClaw(device)
+            || ContainsKnownVirtualIdentity(device);
+    }
+
+    public bool IsClawTweaksVirtualControllerCandidate(ControllerDeviceInfo device)
+    {
+        return IsGameControllerCandidate(device) && ContainsClawTweaksRoutingIdentity(device);
+    }
+
     private static bool IsGameControllerCandidate(ControllerDeviceInfo device)
     {
         var evidence = string.Join('\n', device.HardwareIds.Concat(device.CompatibleIds).Append(device.EnumeratorName ?? string.Empty));
@@ -83,6 +102,12 @@ public sealed class ControllerDeviceClassifier
     {
         var identity = GetIdentityText(device);
         return KnownVirtualTokens.Any(token => identity.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool ContainsClawTweaksRoutingIdentity(ControllerDeviceInfo device)
+    {
+        var identity = GetIdentityText(device);
+        return ClawTweaksRoutingTokens.Any(token => identity.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool ContainsUnverifiedVirtualIdentity(ControllerDeviceInfo device)
