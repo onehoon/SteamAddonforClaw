@@ -21,9 +21,16 @@ public partial class App : Application
     private bool _showMainWindow;
     private SystemTrayIcon? _systemTrayIcon;
     private bool _isExplicitExit;
+    private readonly SingleInstanceGate _singleInstanceGate;
 
-    public App(string[]? arguments = null)
+    public App()
+        : this(arguments: null, Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized."))
     {
+    }
+
+    internal App(string[]? arguments, SingleInstanceGate singleInstanceGate)
+    {
+        _singleInstanceGate = singleInstanceGate;
         _showMainWindow = ApplicationLifecyclePolicy.ShouldShowMainWindow(arguments ?? []);
         AppLog.Info($"Application launch mode: {(_showMainWindow ? "manual" : "background")}.");
         InitializeComponent();
@@ -32,6 +39,7 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _singleInstanceGate.RegisterActivation(ShowMainWindow);
         _ = StartAsync();
     }
 
@@ -99,7 +107,7 @@ public partial class App : Application
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);
         try
         {
-            _systemTrayIcon = new SystemTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(_mainWindow), ShowMainWindow, ExitApplication);
+            _systemTrayIcon = new SystemTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(_mainWindow), ShowMainWindow, RestartApplication, ExitApplication);
         }
         catch (Exception exception)
         {
@@ -162,6 +170,7 @@ public partial class App : Application
     {
         _dispatcherQueue?.TryEnqueue(() =>
         {
+            _showMainWindow = true;
             _mainWindow?.AppWindow.Show();
             _mainWindow?.Activate();
             AppLog.Info("Main window restored from tray.");
@@ -176,6 +185,37 @@ public partial class App : Application
             AppLog.Info("Explicit application exit requested.");
             _mainWindow?.Close();
             Exit();
+        });
+    }
+
+    private void RestartApplication()
+    {
+        _dispatcherQueue?.TryEnqueue(() =>
+        {
+            try
+            {
+                var executablePath = Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable.");
+                var restartInfo = new ProcessStartInfo(executablePath)
+                {
+                    UseShellExecute = false
+                };
+
+                foreach (var argument in Environment.GetCommandLineArgs().Skip(1).Where(argument => !string.Equals(argument, "--restart", StringComparison.OrdinalIgnoreCase)))
+                {
+                    restartInfo.ArgumentList.Add(argument);
+                }
+
+                restartInfo.ArgumentList.Add("--restart");
+                Process.Start(restartInfo);
+                _isExplicitExit = true;
+                AppLog.Info("Explicit application restart requested.");
+                _mainWindow?.Close();
+                Exit();
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("App", "Application restart could not be started.", exception);
+            }
         });
     }
 
