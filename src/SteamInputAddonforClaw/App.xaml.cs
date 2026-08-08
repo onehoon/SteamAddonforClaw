@@ -6,6 +6,7 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
+using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
 
 namespace SteamInputAddonforClaw;
@@ -24,6 +25,7 @@ public partial class App : Application
     public App(string[]? arguments = null)
     {
         _showMainWindow = ApplicationLifecyclePolicy.ShouldShowMainWindow(arguments ?? []);
+        AppLog.Info($"Application launch mode: {(_showMainWindow ? "manual" : "background")}.");
         InitializeComponent();
     }
 
@@ -35,6 +37,7 @@ public partial class App : Application
 
     private async Task StartAsync()
     {
+        AppLog.Info("Startup coordination started.");
         var classifier = new ControllerDeviceClassifier();
         var deviceEnumerator = new WindowsControllerDeviceEnumerator();
         var coordinator = new StartupCoordinator(
@@ -47,6 +50,7 @@ public partial class App : Application
             var startupResult = await coordinator.RunAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
             if (!startupResult.ShouldStartRuntime)
             {
+                AppLog.Info("Startup scheduled an update restart.");
                 _dispatcherQueue?.TryEnqueue(ExitAfterScheduledUpdate);
                 return;
             }
@@ -56,10 +60,16 @@ public partial class App : Application
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
         }
+        catch (Exception exception)
+        {
+            AppLog.Error("Startup coordination failed.", exception);
+            throw;
+        }
     }
 
     private void StartNormalRuntime(ControllerDeviceClassifier classifier, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness)
     {
+        AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
         _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
         _steamSessionWatcher.StateChanged += OnSteamSessionStateChanged;
@@ -78,6 +88,7 @@ public partial class App : Application
             new WindowsControllerDeviceEnumerator(),
             classifier);
         var externalAssessment = controllerDetector.Detect();
+        AppLog.Info($"External controller assessment: {externalAssessment.Status}.");
         _mainWindow.UpdateExternalControllerAssessment(externalAssessment.Status == ExternalControllerAssessmentStatus.ExternalPresent
             ? externalAssessment
             : environmentMode == ControllerEnvironmentMode.HHCManaged || environmentReadiness != ControllerEnvironmentReadiness.Stable
@@ -98,6 +109,7 @@ public partial class App : Application
         if (_showMainWindow)
         {
             _mainWindow.Activate();
+            AppLog.Info("Main window activated.");
         }
 
     }
@@ -130,6 +142,7 @@ public partial class App : Application
         _runningAppIdSource = null;
         _systemTrayIcon?.Dispose();
         _systemTrayIcon = null;
+        AppLog.Info("Runtime cleanup completed.");
     }
 
     private void OnMainWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
@@ -138,6 +151,7 @@ public partial class App : Application
         {
             args.Cancel = true;
             _mainWindow?.AppWindow.Hide();
+            AppLog.Info("Main window hidden by close request.");
             return;
         }
 
@@ -150,6 +164,7 @@ public partial class App : Application
         {
             _mainWindow?.AppWindow.Show();
             _mainWindow?.Activate();
+            AppLog.Info("Main window restored from tray.");
         });
     }
 
@@ -158,6 +173,7 @@ public partial class App : Application
         _dispatcherQueue?.TryEnqueue(() =>
         {
             _isExplicitExit = true;
+            AppLog.Info("Explicit application exit requested.");
             _mainWindow?.Close();
             Exit();
         });
@@ -166,6 +182,7 @@ public partial class App : Application
     private void ExitAfterScheduledUpdate()
     {
         _isExplicitExit = true;
+        AppLog.Info("Update shutdown requested.");
         _startupCancellationTokenSource.Cancel();
         Exit();
     }
