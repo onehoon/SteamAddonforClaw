@@ -4,7 +4,11 @@ param(
     [string]$Version = '0.1.0',
 
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+
+    [switch]$PreserveReleases,
+
+    [string]$ReleaseNotesPath
 )
 
 Set-StrictMode -Version Latest
@@ -16,29 +20,44 @@ $artifactsDirectory = Join-Path $repositoryRoot 'artifacts'
 $publishDirectory = Join-Path $artifactsDirectory 'publish'
 $releasesDirectory = Join-Path $artifactsDirectory 'Releases'
 
-foreach ($outputDirectory in @($publishDirectory, $releasesDirectory)) {
-    if (Test-Path -LiteralPath $outputDirectory) {
-        Remove-Item -LiteralPath $outputDirectory -Recurse -Force
-    }
+if (Test-Path -LiteralPath $publishDirectory) {
+    Remove-Item -LiteralPath $publishDirectory -Recurse -Force
+}
+
+if (-not $PreserveReleases -and (Test-Path -LiteralPath $releasesDirectory)) {
+    Remove-Item -LiteralPath $releasesDirectory -Recurse -Force
+}
+
+if (-not (Test-Path -LiteralPath $releasesDirectory)) {
+    New-Item -ItemType Directory -Path $releasesDirectory -Force | Out-Null
 }
 
 dotnet publish $projectPath `
     --configuration $Configuration `
     --runtime win-x64 `
     --self-contained true `
+    /p:Version=$Version `
     --output $publishDirectory
 
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE."
 }
 
-vpk pack `
-    --packId SteamInputAddonforClaw `
-    --packTitle 'Steam Input Addon for Claw' `
-    --packVersion $Version `
-    --packDir $publishDirectory `
-    --mainExe SteamInputAddonforClaw.exe `
-    --outputDir $releasesDirectory
+$vpkArguments = @(
+    'vpk', '--version', '1.2.0', 'pack',
+    '--packId', 'SteamInputAddonforClaw',
+    '--packTitle', 'Steam Input Addon for Claw',
+    '--packVersion', $Version,
+    '--packDir', $publishDirectory,
+    '--mainExe', 'SteamInputAddonforClaw.exe',
+    '--outputDir', $releasesDirectory
+)
+
+if ($ReleaseNotesPath) {
+    $vpkArguments += @('--releaseNotes', $ReleaseNotesPath)
+}
+
+dnx @vpkArguments
 
 if ($LASTEXITCODE -ne 0) {
     throw "Velopack packaging failed with exit code $LASTEXITCODE."
