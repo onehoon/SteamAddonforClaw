@@ -6,6 +6,8 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Windowing;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -17,6 +19,8 @@ namespace SteamInputAddonforClaw;
 public sealed partial class MainWindow : Window
 {
     private readonly StartupSettingsCoordinator _startupSettings;
+    private readonly Func<IDirectInputDeviceEnumerator> _directInputEnumeratorFactory;
+    private MsiClawInputSource? _msiClawInputSource;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -25,7 +29,12 @@ public sealed partial class MainWindow : Window
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
 
         InitializeComponent();
+        Title = FormatWindowTitle(GetDisplayVersion());
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         ApplyDefaultWindowSize();
+        var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        _directInputEnumeratorFactory = () => new VorticeDirectInputDeviceEnumerator(windowHandle);
+        Closed += OnWindowClosed;
         VersionText.Text = $"Version {GetDisplayVersion()}";
         LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
@@ -56,6 +65,74 @@ public sealed partial class MainWindow : Window
         var launchAtWindowsStartup = LaunchAtWindowsStartupCheckBox.IsChecked == true;
         var result = _startupSettings.ChangeLaunchAtWindowsStartup(launchAtWindowsStartup);
         StartupSettingsStatusText.Text = result.Message;
+    }
+
+    private void StartM1M2TestButton_Click(object sender, RoutedEventArgs args)
+    {
+        _msiClawInputSource ??= CreateMsiClawInputSource();
+        var result = _msiClawInputSource.Start();
+        M1M2TestStatusText.Text = $"Status: {result.Message}";
+        if (result.Started)
+        {
+            M1TestStatusText.Text = "M1: Waiting";
+            M2TestStatusText.Text = "M2: Waiting";
+            IndependentTestStatusText.Text = "Independent: Waiting";
+            StartM1M2TestButton.IsEnabled = false;
+            StopM1M2TestButton.IsEnabled = true;
+        }
+    }
+
+    private async void StopM1M2TestButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_msiClawInputSource is not null)
+        {
+            await _msiClawInputSource.StopAsync();
+        }
+    }
+
+    private void OnMsiClawInputStateChanged(object? sender, ControllerState state)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (state.M1) M1TestStatusText.Text = "M1: OK";
+            if (state.M2) M2TestStatusText.Text = "M2: OK";
+        });
+    }
+
+    private void OnMsiClawInputIndependentVerified(object? sender, EventArgs args)
+    {
+        DispatcherQueue.TryEnqueue(() => IndependentTestStatusText.Text = "Independent: OK");
+    }
+
+    private void OnMsiClawInputTestCompleted(object? sender, MsiClawInputTestSummary summary)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            M1M2TestStatusText.Text = $"Status: Completed ({summary.DurationMs} ms, {summary.StopReason})";
+            if (summary.Independent) IndependentTestStatusText.Text = "Independent: OK";
+            StartM1M2TestButton.IsEnabled = true;
+            StopM1M2TestButton.IsEnabled = false;
+        });
+    }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        if (_msiClawInputSource is not null)
+        {
+            _msiClawInputSource.StateChanged -= OnMsiClawInputStateChanged;
+            _msiClawInputSource.IndependentVerified -= OnMsiClawInputIndependentVerified;
+            _msiClawInputSource.TestCompleted -= OnMsiClawInputTestCompleted;
+            _msiClawInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+    }
+
+    private MsiClawInputSource CreateMsiClawInputSource()
+    {
+        var source = new MsiClawInputSource(_directInputEnumeratorFactory);
+        source.StateChanged += OnMsiClawInputStateChanged;
+        source.IndependentVerified += OnMsiClawInputIndependentVerified;
+        source.TestCompleted += OnMsiClawInputTestCompleted;
+        return source;
     }
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -130,6 +207,8 @@ public sealed partial class MainWindow : Window
     {
         return Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.1.0";
     }
+
+    internal static string FormatWindowTitle(string version) => $"Steam Input Addon for Claw v{version}";
 
     private enum MainNavigationPage
     {
