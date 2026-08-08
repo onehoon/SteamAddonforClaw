@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Updates;
 
 namespace SteamInputAddonforClaw;
 
@@ -11,6 +12,8 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private SteamRunningAppIdRegistrySource? _runningAppIdSource;
     private SteamSessionWatcher? _steamSessionWatcher;
+    private readonly CancellationTokenSource _updateCancellationTokenSource = new();
+    private bool _isClosing;
 
     public App()
     {
@@ -40,6 +43,8 @@ public partial class App : Application
         _steamSessionWatcher.Start();
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);
         _mainWindow.Activate();
+
+        _ = CheckForUpdatesInBackgroundAsync();
     }
 
     private void OnSteamSessionStateChanged(object? sender, EventArgs e)
@@ -52,6 +57,9 @@ public partial class App : Application
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
+        _isClosing = true;
+        _updateCancellationTokenSource.Cancel();
+
         if (_steamSessionWatcher is not null)
         {
             _steamSessionWatcher.StateChanged -= OnSteamSessionStateChanged;
@@ -61,5 +69,33 @@ public partial class App : Application
 
         _runningAppIdSource?.Dispose();
         _runningAppIdSource = null;
+    }
+
+    private async Task CheckForUpdatesInBackgroundAsync()
+    {
+        try
+        {
+            var updateScheduled = await new SilentUpdateService(new VelopackUpdateClient())
+                .CheckDownloadAndScheduleAsync(_updateCancellationTokenSource.Token)
+                .ConfigureAwait(false);
+
+            if (updateScheduled && !_isClosing)
+            {
+                _mainWindow?.DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!_isClosing)
+                    {
+                        _mainWindow?.Close();
+                    }
+                });
+            }
+        }
+        catch (OperationCanceledException) when (_updateCancellationTokenSource.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            // Update failures are intentionally ignored so the running version remains usable.
+        }
     }
 }
