@@ -3,15 +3,29 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Steam Input Addon for Claw">
-    <StackPanel Padding="32" Spacing="12">
-        <TextBlock
-            FontSize="24"
-            FontWeight="SemiBold"
-            Text="Steam Input Addon for Claw" />
-        <TextBlock x:Name="VersionText" />
-        <TextBlock FontWeight="SemiBold" Text="Status" />
-        <TextBlock x:Name="StatusText" Text="Steam inactive" />
-        <TextBlock x:Name="RunningAppIdText" Text="RunningAppID: 0" />
-        <TextBlock x:Name="ExternalControllerText" Text="External controller: Indeterminate" />
-    </StackPanel>
+    <TabView>
+        <TabViewItem Header="Status">
+            <StackPanel Padding="32" Spacing="12">
+                <TextBlock
+                    FontSize="24"
+                    FontWeight="SemiBold"
+                    Text="Steam Input Addon for Claw" />
+                <TextBlock x:Name="VersionText" />
+                <TextBlock FontWeight="SemiBold" Text="Status" />
+                <TextBlock x:Name="StatusText" Text="Steam inactive" />
+                <TextBlock x:Name="RunningAppIdText" Text="RunningAppID: 0" />
+                <TextBlock x:Name="ExternalControllerText" Text="External controller: Indeterminate" />
+            </StackPanel>
+        </TabViewItem>
+        <TabViewItem Header="Settings">
+            <StackPanel Padding="32" Spacing="12">
+                <TextBlock FontSize="24" FontWeight="SemiBold" Text="Settings" />
+                <CheckBox
+                    x:Name="LaunchAtWindowsStartupCheckBox"
+                    Click="LaunchAtWindowsStartupCheckBox_Click"
+                    Content="Launch at Windows startup" />
+                <TextBlock x:Name="StartupSettingsStatusText" TextWrapping="Wrap" />
+            </StackPanel>
+        </TabViewItem>
+    </TabView>
 </Window>

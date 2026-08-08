@@ -1,5 +1,7 @@
 using Microsoft.UI.Xaml;
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Install;
+using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 
 namespace SteamInputAddonforClaw;
@@ -21,7 +23,13 @@ public partial class App : Application
         _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
         _steamSessionWatcher.StateChanged += OnSteamSessionStateChanged;
 
-        _mainWindow = new MainWindow();
+        var settingsStore = new SettingsStore(VelopackAppPaths.SettingsPath);
+        var settings = settingsStore.Load();
+        var startupRegistration = new WindowsTaskSchedulerStartupManager();
+        var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
+        var startupRegistrationResult = startupSettings.Repair();
+
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message);
         _mainWindow.Closed += OnMainWindowClosed;
 
         var controllerDetector = new ExternalControllerDetector(
