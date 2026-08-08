@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.Foundation;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
@@ -22,6 +23,11 @@ public sealed partial class MainWindow : Window
         VersionText.Text = $"Version {GetDisplayVersion()}";
         LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
+        if (MainNavigationView.SettingsItem is NavigationViewItem settingsItem)
+        {
+            settingsItem.Content = "Settings";
+        }
+
         MainNavigationView.SelectedItem = StatusNavigationItem;
     }
 
@@ -65,6 +71,26 @@ public sealed partial class MainWindow : Window
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
+    {
+        var navigationItems = MainNavigationView.MenuItems
+            .OfType<NavigationViewItem>()
+            .Append(MainNavigationView.SettingsItem)
+            .OfType<NavigationViewItem>();
+        var openPaneLength = navigationItems
+            .Select(MeasureDesiredWidth)
+            .DefaultIfEmpty(MainNavigationView.OpenPaneLength)
+            .Max();
+
+        MainNavigationView.OpenPaneLength = openPaneLength;
+    }
+
+    private static double MeasureDesiredWidth(NavigationViewItem item)
+    {
+        item.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return item.DesiredSize.Width;
     }
 
     private static string GetDisplayVersion()

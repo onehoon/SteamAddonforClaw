@@ -6,6 +6,7 @@
     <NavigationView
         x:Name="MainNavigationView"
         PaneDisplayMode="Left"
+        Loaded="MainNavigationView_Loaded"
         SelectionChanged="MainNavigationView_SelectionChanged">
         <NavigationView.MenuItems>
             <NavigationViewItem
