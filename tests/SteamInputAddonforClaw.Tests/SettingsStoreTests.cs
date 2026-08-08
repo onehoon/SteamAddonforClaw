@@ -29,21 +29,21 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void BuildRunValue_QuotesStableExecutablePath()
+    public void CreateTaskConfiguration_UsesStableExecutablePath()
     {
-        var value = WindowsTaskSchedulerStartupManager.BuildRunValue(@"C:\Custom Install\SteamInputAddonforClaw.exe");
+        var configuration = WindowsTaskSchedulerStartupManager.CreateTaskConfiguration(@"C:\Custom Install\SteamInputAddonforClaw.exe", "DOMAIN\\User");
 
-        Assert.Equal("\"C:\\Custom Install\\SteamInputAddonforClaw.exe\"", value);
+        Assert.Equal(@"C:\Custom Install\SteamInputAddonforClaw.exe", configuration.ExecutablePath);
+        Assert.DoesNotContain("current\\", configuration.ExecutablePath, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void BuildCreateArguments_UsesLogonTriggerAndThreeMinuteDelay()
+    public void CreateTaskConfiguration_UsesCurrentUserAndThreeMinuteDelay()
     {
-        var arguments = WindowsTaskSchedulerStartupManager.BuildCreateArguments(@"C:\Custom Install\SteamInputAddonforClaw.exe");
+        var configuration = WindowsTaskSchedulerStartupManager.CreateTaskConfiguration(@"C:\Custom Install\SteamInputAddonforClaw.exe", "DOMAIN\\User");
 
-        Assert.Contains("/SC ONLOGON", arguments);
-        Assert.Contains("/DELAY 0003:00", arguments);
-        Assert.DoesNotContain("current\\", arguments, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("DOMAIN\\User", configuration.UserId);
+        Assert.Equal(TimeSpan.FromMinutes(3), configuration.Delay);
     }
 
     [Fact]
