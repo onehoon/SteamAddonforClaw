@@ -12,5 +12,6 @@
         <TextBlock FontWeight="SemiBold" Text="Status" />
         <TextBlock x:Name="StatusText" Text="Steam inactive" />
         <TextBlock x:Name="RunningAppIdText" Text="RunningAppID: 0" />
+        <TextBlock x:Name="ExternalControllerText" Text="External controller: Indeterminate" />
     </StackPanel>
 </Window>

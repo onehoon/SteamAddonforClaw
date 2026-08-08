@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Steam;
 using System.Reflection;
 
@@ -19,6 +20,16 @@ public sealed partial class MainWindow : Window
             StatusText.Text = state.IsActive ? "Steam session active" : "Steam inactive";
             RunningAppIdText.Text = $"RunningAppID: {state.RunningAppId}";
         });
+    }
+
+    public void UpdateExternalControllerAssessment(ExternalControllerAssessment assessment)
+    {
+        ExternalControllerText.Text = assessment.Status switch
+        {
+            ExternalControllerAssessmentStatus.Clear => "External controller: None",
+            ExternalControllerAssessmentStatus.ExternalPresent => "External controller: Detected",
+            _ => "External controller: Indeterminate"
+        };
     }
 
     private static string GetDisplayVersion()

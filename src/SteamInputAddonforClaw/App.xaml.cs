@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Steam;
 
 namespace SteamInputAddonforClaw;
@@ -22,6 +23,11 @@ public partial class App : Application
 
         _mainWindow = new MainWindow();
         _mainWindow.Closed += OnMainWindowClosed;
+
+        var controllerDetector = new ExternalControllerDetector(
+            new WindowsControllerDeviceEnumerator(),
+            new ControllerDeviceClassifier());
+        _mainWindow.UpdateExternalControllerAssessment(controllerDetector.Detect());
 
         _steamSessionWatcher.Start();
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);
