@@ -64,6 +64,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
 
             dynamic action = taskDefinition.Actions.Create(TaskActionExec);
             action.Path = configuration.ExecutablePath;
+            action.Arguments = "--background";
 
             rootFolder.RegisterTaskDefinition(
                 configuration.TaskName,

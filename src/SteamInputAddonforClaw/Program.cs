@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw;
 public static class Program
 {
     [STAThread]
-    public static void Main()
+    public static void Main(string[] args)
     {
         VelopackApp.Build().Run();
         ComWrappersSupport.InitializeComWrappers();
@@ -17,7 +17,7 @@ public static class Program
         {
             var synchronizationContext = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
             SynchronizationContext.SetSynchronizationContext(synchronizationContext);
-            new App();
+            new App(args);
         });
     }
 }
