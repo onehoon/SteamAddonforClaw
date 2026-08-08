@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Verify main branch
+        shell: pwsh
+        run: |
+          if ('${{ github.ref }}' -ne 'refs/heads/main') {
+            throw 'Release can only run from main.'
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore SteamInputAddonforClaw.slnx
+
+      - name: Build
+        run: dotnet build SteamInputAddonforClaw.slnx -c Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: |
+          $testProjects = @(Get-ChildItem -Path tests -Filter *.csproj -Recurse -File)
+          foreach ($testProject in $testProjects) {
+            dotnet test $testProject.FullName -c Release --no-restore
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+
+      - name: Test release metadata
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/release-metadata.tests.ps1
+
+      - name: Calculate release metadata
+        id: metadata
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          $publishedTags = @($releases | Where-Object { -not $_.draft -and -not $_.prerelease } | ForEach-Object tag_name)
+          & ./scripts/release-metadata.ps1 -PublishedReleaseTags $publishedTags -OutputFile $env:GITHUB_OUTPUT
+
+      - name: Verify release does not already exist
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.TAG }}
+        run: |
+          git ls-remote --exit-code --tags origin "refs/tags/$env:TAG" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            throw "Tag $env:TAG already exists."
+          }
+
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            throw "Release $env:TAG already exists."
+          }
+
+      - name: Generate release notes
+        shell: pwsh
+        env:
+          PREVIOUS_TAG: ${{ steps.metadata.outputs.PREVIOUS_TAG }}
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release-notes.ps1
+          -PreviousTag "$env:PREVIOUS_TAG"
+          -CurrentSha "${{ github.sha }}"
+          -OutputFile artifacts/release-notes.md
+
+      - name: Download previous Velopack release
+        if: steps.metadata.outputs.PREVIOUS_TAG != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          dnx vpk --version 1.2.0 download github
+          --repoUrl https://github.com/${{ github.repository }}
+          --token $env:GITHUB_TOKEN
+          --outputDir artifacts/Releases
+
+      - name: Package release
+        env:
+          VERSION: ${{ steps.metadata.outputs.VERSION }}
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/pack.ps1
+          -Version $env:VERSION
+          -PreserveReleases
+          -ReleaseNotesPath artifacts/release-notes.md
+
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.metadata.outputs.VERSION }}
+          TAG: ${{ steps.metadata.outputs.TAG }}
+        run: >-
+          dnx vpk --version 1.2.0 upload github
+          --repoUrl https://github.com/${{ github.repository }}
+          --token $env:GITHUB_TOKEN
+          --outputDir artifacts/Releases
+          --publish
+          --releaseName $env:TAG
+          --tag $env:TAG
+          --targetCommitish ${{ github.sha }}
+
+      - name: Apply release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.TAG }}
+        run: gh release edit $env:TAG --title $env:TAG --notes-file artifacts/release-notes.md

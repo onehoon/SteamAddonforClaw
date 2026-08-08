@@ -8,7 +8,7 @@
             FontSize="24"
             FontWeight="SemiBold"
             Text="Steam Input Addon for Claw" />
-        <TextBlock Text="Version 0.1.0" />
+        <TextBlock x:Name="VersionText" />
         <TextBlock FontWeight="SemiBold" Text="Status" />
         <TextBlock x:Name="StatusText" Text="Steam inactive" />
         <TextBlock x:Name="RunningAppIdText" Text="RunningAppID: 0" />
