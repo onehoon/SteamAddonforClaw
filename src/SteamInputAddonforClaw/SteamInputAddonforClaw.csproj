@@ -36,6 +36,7 @@
       <_MissingPri Include="$(OutDir)*.pri" />
       <_MissingAssets Include="$(OutDir)Assets\**\*.*" />
     </ItemGroup>
+    <Message Importance="High" Text="Preserving WinUI publish assets: XBF=@(_MissingXbf); PRI=@(_MissingPri); Assets=@(_MissingAssets)" />
     <Copy SourceFiles="@(_MissingXbf)" DestinationFolder="$(PublishDir)%(RecursiveDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_MissingPri)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_MissingAssets)" DestinationFolder="$(PublishDir)Assets\%(RecursiveDir)" SkipUnchangedFiles="true" />
