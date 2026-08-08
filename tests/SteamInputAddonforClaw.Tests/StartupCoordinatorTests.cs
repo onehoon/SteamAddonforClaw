@@ -1,10 +1,44 @@
 using SteamInputAddonforClaw.Startup;
+using SteamInputAddonforClaw.Recovery;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class StartupCoordinatorTests
 {
+    [Fact]
+    public async Task RecoveryRunsBeforeUpdateAndEnvironmentDetection()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded));
+        var result = await coordinator.RunAsync(CancellationToken.None);
+        Assert.True(result.RecoverySafe);
+        Assert.Equal(["Recovery", "UpdateGate", "EnvironmentDetector", "EnvironmentWaiter"], events);
+    }
+
+    [Fact]
+    public async Task SuccessfulIncompleteRecovery_AllowsStartupToContinue()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Success));
+        var result = await coordinator.RunAsync(CancellationToken.None);
+        Assert.True(result.RecoverySafe);
+        Assert.Contains("EnvironmentDetector", events);
+    }
+
+    [Fact]
+    public async Task RecoveryFailure_BlocksAllUnsafeStartupWork()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure));
+        var result = await coordinator.RunAsync(CancellationToken.None);
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
+        Assert.Equal(["Recovery"], events);
+    }
     [Fact]
     public async Task CanStartRuntimeAsync_WhenNoUpdateExists_WaitsForEnvironmentAfterUpdateGate()
     {
@@ -110,6 +144,16 @@ public sealed class StartupCoordinatorTests
         {
             events.Add("UpdateGate");
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class FakeRecoveryManager(List<string> events, RecoveryStatus status) : IRecoveryManager
+    {
+        public bool HasIncompleteRecovery => status != RecoveryStatus.NoRecoveryNeeded;
+        public RecoveryResult RecoverIncompleteSession()
+        {
+            events.Add("Recovery");
+            return new(status, status == RecoveryStatus.Failure ? "unsafe" : "safe");
         }
     }
 
