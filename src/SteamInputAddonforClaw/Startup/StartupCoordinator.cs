@@ -45,6 +45,10 @@ internal sealed class StartupCoordinator
         {
             return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate);
         }
+        if (environment.Mode == ControllerEnvironmentMode.HHCManaged)
+        {
+            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate);
+        }
         var readiness = await _environmentWaiter.WaitUntilStableAsync(environment.Mode, cancellationToken).ConfigureAwait(false);
         return new StartupResult(true, environment.Mode, readiness);
     }

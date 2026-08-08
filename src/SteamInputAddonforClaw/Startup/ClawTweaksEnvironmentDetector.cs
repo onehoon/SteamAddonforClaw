@@ -16,6 +16,7 @@ internal enum ControllerEnvironmentMode
 {
     StockCenterM,
     ClawTweaks,
+    HHCManaged,
     Indeterminate
 }
 
@@ -26,6 +27,16 @@ internal interface IControllerEnvironmentDetector
     ControllerEnvironment Detect();
 }
 
+internal interface IHandheldCompanionRuntimeDetector
+{
+    bool IsRunning();
+}
+
+internal sealed class HandheldCompanionRuntimeDetector : IHandheldCompanionRuntimeDetector
+{
+    public bool IsRunning() => Process.GetProcessesByName("HandheldCompanion").Length > 0;
+}
+
 internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDetector
 {
     private static readonly string[] KnownExecutablePaths =
@@ -34,14 +45,30 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClawTweaks", "ClawTweaks.exe")
     ];
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
+    private readonly IHandheldCompanionRuntimeDetector _handheldCompanionRuntimeDetector;
 
-    public ClawTweaksEnvironmentDetector(IControllerDeviceEnumerator deviceEnumerator)
+    public ClawTweaksEnvironmentDetector(
+        IControllerDeviceEnumerator deviceEnumerator,
+        IHandheldCompanionRuntimeDetector? handheldCompanionRuntimeDetector = null)
     {
         _deviceEnumerator = deviceEnumerator;
+        _handheldCompanionRuntimeDetector = handheldCompanionRuntimeDetector ?? new HandheldCompanionRuntimeDetector();
     }
 
     public ControllerEnvironment Detect()
     {
+        try
+        {
+            if (_handheldCompanionRuntimeDetector.IsRunning())
+            {
+                return new ControllerEnvironment(ControllerEnvironmentMode.HHCManaged, ClawTweaksState.NotInstalled);
+            }
+        }
+        catch (Exception)
+        {
+            return new ControllerEnvironment(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Indeterminate);
+        }
+
         var installed = KnownExecutablePaths.Any(File.Exists);
         var processRunning = Process.GetProcessesByName("ClawTweaks").Length > 0;
         if (!installed && !processRunning)
