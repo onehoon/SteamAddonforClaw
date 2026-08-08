@@ -68,19 +68,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.metadata.outputs.TAG }}
         run: |
-          git ls-remote --exit-code --tags origin "refs/tags/$env:TAG" *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $existingTag = git tag --list $env:TAG
+          if ($existingTag) {
             throw "Tag $env:TAG already exists."
           }
 
           gh release view $env:TAG *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $releaseExists = $LASTEXITCODE -eq 0
+          if ($releaseExists) {
             throw "Release $env:TAG already exists."
           }
+
+          $global:LASTEXITCODE = 0
 
       - name: Generate release notes
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
           PREVIOUS_TAG: ${{ steps.metadata.outputs.PREVIOUS_TAG }}
         run: >-
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release-notes.ps1
