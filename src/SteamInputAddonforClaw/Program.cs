@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Velopack;
 using WinRT;
 using SteamInputAddonforClaw.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace SteamInputAddonforClaw;
 
@@ -13,7 +14,8 @@ public static class Program
     {
         try
         {
-            AppLog.Info($"Application starting. Arguments: {string.Join(' ', args)}");
+            var launchMode = args.Contains("--background", StringComparer.OrdinalIgnoreCase) ? "Background" : "Manual";
+            AppLog.Info("App", "Application launch header.", ("Version", typeof(Program).Assembly.GetName().Version), ("LaunchMode", launchMode), ("PID", Environment.ProcessId), ("ProcessArchitecture", RuntimeInformation.ProcessArchitecture), ("OSArchitecture", RuntimeInformation.OSArchitecture), ("OS", Environment.OSVersion), ("Runtime", Environment.Version), ("ProcessPath", Environment.ProcessPath), ("BaseDirectory", AppContext.BaseDirectory));
             AppLog.Info("Velopack bootstrap starting.");
             VelopackApp.Build().Run();
             AppLog.Info("Velopack bootstrap completed.");
@@ -34,7 +36,7 @@ public static class Program
         }
         catch (Exception exception)
         {
-            AppLog.Error("Fatal startup exception.", exception);
+            AppLog.Fatal("Startup", "Fatal startup exception.", exception);
             throw;
         }
     }

@@ -174,6 +174,44 @@ public sealed class ExternalControllerDetectorTests
         Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
     }
 
+    [Fact]
+    public void ClassifyDetailed_WhenInternalClawExists_ReportsMsiClawReason()
+    {
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(GameController(0x0DB0, 0x1902));
+
+        Assert.Equal(ControllerDeviceClassification.InternalClaw, result.Classification);
+        Assert.Equal("KnownMsiClawVidPid", result.Reason);
+    }
+
+    [Fact]
+    public void ClassifyDetailed_WhenUsbIpIdentityExists_ReportsUsbIpReason()
+    {
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(
+            GameController(0x045E, 0x028E, ancestorInstanceIds: ["ROOT\\USBIP_WIN2\\UDE"]));
+
+        Assert.Equal(ControllerDeviceClassification.KnownVirtual, result.Classification);
+        Assert.Equal("KnownVirtualUsbIp", result.Reason);
+    }
+
+    [Fact]
+    public void ClassifyDetailed_WhenRootVirtualIdentityExists_ReportsRootReason()
+    {
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(
+            GameController(0x045E, 0x028E, instanceId: "ROOT\\UNKNOWN_CONTROLLER"));
+
+        Assert.Equal(ControllerDeviceClassification.Indeterminate, result.Classification);
+        Assert.Equal("UnverifiedRootVirtualIdentity", result.Reason);
+    }
+
+    [Fact]
+    public void ClassifyDetailed_WhenPhysicalGamepadExists_ReportsPhysicalReason()
+    {
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(GameController(0x045E, 0x0B13));
+
+        Assert.Equal(ControllerDeviceClassification.ExternalPhysical, result.Classification);
+        Assert.Equal("PhysicalGameControllerWithoutExclusion", result.Reason);
+    }
+
     private static ExternalControllerAssessment Detect(IReadOnlyList<ControllerDeviceInfo> devices, IControllerIdentityExclusionSource? exclusionSource = null)
     {
         return new ExternalControllerDetector(new FakeEnumerator(devices), new ControllerDeviceClassifier(exclusionSource)).Detect();

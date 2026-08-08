@@ -1,5 +1,7 @@
 namespace SteamInputAddonforClaw.Steam;
 
+using SteamInputAddonforClaw.Diagnostics;
+
 public sealed class SteamSessionWatcher : IDisposable
 {
     private readonly IRunningAppIdSource _runningAppIdSource;
@@ -40,6 +42,7 @@ public sealed class SteamSessionWatcher : IDisposable
             _isStarted = true;
             _runningAppIdSource.Changed += OnRunningAppIdChanged;
             _state = SteamSessionState.FromRunningAppId(_runningAppIdSource.GetRunningAppId());
+            AppLog.Info("Steam", "SteamSessionWatcher started.", ("RunningAppID", _state.RunningAppId), ("IsActive", _state.IsActive));
         }
     }
 
@@ -54,6 +57,7 @@ public sealed class SteamSessionWatcher : IDisposable
 
             _runningAppIdSource.Changed -= OnRunningAppIdChanged;
             _isStarted = false;
+            AppLog.Info("Steam", "SteamSessionWatcher stopped.");
         }
     }
 
@@ -66,6 +70,7 @@ public sealed class SteamSessionWatcher : IDisposable
 
         Stop();
         _isDisposed = true;
+        AppLog.Info("Steam", "SteamSessionWatcher disposed.");
         GC.SuppressFinalize(this);
     }
 
@@ -83,9 +88,11 @@ public sealed class SteamSessionWatcher : IDisposable
             var nextState = SteamSessionState.FromRunningAppId(_runningAppIdSource.GetRunningAppId());
             if (nextState == _state)
             {
+                AppLog.Trace("Steam", "Registry notification produced no state change.", ("RunningAppID", nextState.RunningAppId));
                 return;
             }
 
+            AppLog.Info("Steam", "Steam session state changed.", ("PreviousRunningAppID", _state.RunningAppId), ("CurrentRunningAppID", nextState.RunningAppId), ("PreviousActive", _state.IsActive), ("CurrentActive", nextState.IsActive));
             _state = nextState;
             changedState = nextState;
         }

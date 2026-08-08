@@ -1,4 +1,6 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using System.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Startup;
 
@@ -36,13 +38,18 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         string? previousSnapshot = null;
         var stableSnapshotCount = 0;
         var deadline = DateTimeOffset.UtcNow + _timeout;
+        var stopwatch = Stopwatch.StartNew();
+        var attempt = 0;
+        AppLog.Info("Environment", "Environment readiness wait started.", ("Mode", mode), ("TimeoutMs", _timeout.TotalMilliseconds), ("PollIntervalMs", _sampleInterval.TotalMilliseconds));
 
         try
         {
             while (DateTimeOffset.UtcNow <= deadline)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                attempt++;
                 var (snapshot, ready) = CreateRelevantTopologySnapshot(mode);
+                AppLog.Trace("Environment", "Readiness poll.", ("Attempt", attempt), ("Ready", ready), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
                 if (!ready)
                 {
                     stableSnapshotCount = 0;
@@ -53,6 +60,7 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
                 stableSnapshotCount = snapshot == previousSnapshot ? stableSnapshotCount + 1 : 1;
                 if (stableSnapshotCount >= _requiredStableSnapshots)
                 {
+                    AppLog.Info("Environment", "Environment readiness stable.", ("Mode", mode), ("Attempts", attempt), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
                     return ControllerEnvironmentReadiness.Stable;
                 }
 
@@ -62,12 +70,15 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            AppLog.Debug("Environment", "Environment readiness wait cancelled.");
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            AppLog.Warn("Environment", "Environment readiness wait failed.", exception, ("Action", "Passive"));
         }
 
+        AppLog.Warn("Environment", "Environment readiness timeout.", null, ("Mode", mode), ("Action", "Passive"), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         return ControllerEnvironmentReadiness.Indeterminate;
     }
 
