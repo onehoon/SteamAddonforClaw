@@ -71,7 +71,7 @@ public sealed class SteamRunningAppIdRegistrySource : IRunningAppIdSource, IDisp
     {
         return value switch
         {
-            int appId when appId >= 0 => (uint)appId,
+            int appId => unchecked((uint)appId),
             uint appId => appId,
             long appId when appId is >= 0 and <= uint.MaxValue => (uint)appId,
             ulong appId when appId <= uint.MaxValue => (uint)appId,
