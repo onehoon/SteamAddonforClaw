@@ -26,6 +26,8 @@ internal sealed class SystemTrayIcon : IDisposable
     private readonly SubclassProc _subclassProc;
     private readonly IntPtr _icon;
 
+    public bool IsAvailable { get; private set; }
+
     public SystemTrayIcon(IntPtr windowHandle, Action open, Action exit)
     {
         _windowHandle = windowHandle;
@@ -39,7 +41,8 @@ internal sealed class SystemTrayIcon : IDisposable
             throw new InvalidOperationException("Could not subclass the application window.");
         }
 
-        if (!AddIcon())
+        IsAvailable = AddIcon();
+        if (!IsAvailable)
         {
             RemoveWindowSubclass(_windowHandle, _subclassProc, (UIntPtr)1);
             throw new InvalidOperationException("Could not add the notification area icon.");
@@ -71,7 +74,11 @@ internal sealed class SystemTrayIcon : IDisposable
     {
         if (message == _taskbarCreatedMessage)
         {
-            AddIcon();
+            IsAvailable = AddIcon();
+            if (!IsAvailable)
+            {
+                _open();
+            }
         }
         else if (message == WM_APP + 1)
         {
