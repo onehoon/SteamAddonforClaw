@@ -1,4 +1,6 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Windows.Foundation;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
@@ -21,6 +23,12 @@ public sealed partial class MainWindow : Window
         VersionText.Text = $"Version {GetDisplayVersion()}";
         LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
+        if (MainNavigationView.SettingsItem is NavigationViewItem settingsItem)
+        {
+            settingsItem.Content = "Settings";
+        }
+
+        MainNavigationView.SelectedItem = StatusNavigationItem;
     }
 
     public void UpdateSteamSessionState(SteamSessionState state)
@@ -49,8 +57,51 @@ public sealed partial class MainWindow : Window
         StartupSettingsStatusText.Text = result.Message;
     }
 
+    private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    {
+        var selectedTag = (args.SelectedItem as NavigationViewItem)?.Tag as string;
+        var page = args.IsSettingsSelected
+            ? MainNavigationPage.Settings
+            : selectedTag switch
+            {
+                "HowToUse" => MainNavigationPage.HowToUse,
+                _ => MainNavigationPage.Status
+            };
+
+        StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
+        HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
+        SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
+    {
+        var navigationItems = MainNavigationView.MenuItems
+            .OfType<NavigationViewItem>()
+            .Append(MainNavigationView.SettingsItem)
+            .OfType<NavigationViewItem>();
+        var openPaneLength = navigationItems
+            .Select(MeasureDesiredWidth)
+            .DefaultIfEmpty(MainNavigationView.OpenPaneLength)
+            .Max();
+
+        MainNavigationView.OpenPaneLength = openPaneLength;
+    }
+
+    private static double MeasureDesiredWidth(NavigationViewItem item)
+    {
+        item.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return item.DesiredSize.Width;
+    }
+
     private static string GetDisplayVersion()
     {
         return Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.1.0";
+    }
+
+    private enum MainNavigationPage
+    {
+        Status,
+        HowToUse,
+        Settings
     }
 }
