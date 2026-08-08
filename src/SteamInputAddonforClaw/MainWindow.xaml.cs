@@ -29,11 +29,6 @@ public sealed partial class MainWindow : Window
         VersionText.Text = $"Version {GetDisplayVersion()}";
         LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
-        if (MainNavigationView.SettingsItem is NavigationViewItem settingsItem)
-        {
-            settingsItem.Content = "Settings";
-        }
-
         MainNavigationView.SelectedItem = StatusNavigationItem;
     }
 
@@ -81,6 +76,8 @@ public sealed partial class MainWindow : Window
 
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
     {
+        SetEnglishSettingsItemContent();
+
         var navigationItems = MainNavigationView.MenuItems
             .OfType<NavigationViewItem>()
             .Append(MainNavigationView.SettingsItem)
@@ -91,6 +88,14 @@ public sealed partial class MainWindow : Window
             .Max();
 
         MainNavigationView.OpenPaneLength = openPaneLength;
+    }
+
+    private void SetEnglishSettingsItemContent()
+    {
+        if (MainNavigationView.SettingsItem is NavigationViewItem settingsItem)
+        {
+            settingsItem.Content = "Settings";
+        }
     }
 
     private static double MeasureDesiredWidth(NavigationViewItem item)
