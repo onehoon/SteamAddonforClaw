@@ -67,6 +67,23 @@ jobs:
           --no-restore
           -o artifacts/publish
 
+      - name: Verify published WinUI assets
+        shell: pwsh
+        run: |
+          $publishDirectory = Join-Path $PWD 'artifacts\publish'
+          $requiredAssets = @(
+            'App.xbf',
+            'MainWindow.xbf',
+            'SteamInputAddonforClaw.pri'
+          )
+
+          foreach ($asset in $requiredAssets) {
+            $assetPath = Join-Path $publishDirectory $asset
+            if (-not (Test-Path -LiteralPath $assetPath)) {
+              throw "Published WinUI asset was not found: $assetPath"
+            }
+          }
+
       - name: Startup process smoke test
         shell: pwsh
         run: |
