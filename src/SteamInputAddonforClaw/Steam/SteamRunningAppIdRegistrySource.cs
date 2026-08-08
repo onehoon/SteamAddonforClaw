@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Steam;
 
@@ -34,10 +35,26 @@ public sealed class SteamRunningAppIdRegistrySource : IRunningAppIdSource, IDisp
         try
         {
             using var steamKey = Registry.CurrentUser.OpenSubKey(SteamRegistryPath, writable: false);
-            return ConvertRegistryValueToRunningAppId(steamKey?.GetValue(RunningAppIdValueName));
+            var rawValue = steamKey?.GetValue(RunningAppIdValueName);
+            var runningAppId = ConvertRegistryValueToRunningAppId(rawValue);
+            AppLog.Trace(
+                "Steam",
+                "RunningAppID registry value read.",
+                ("RawType", rawValue?.GetType().Name ?? "null"),
+                ("RawValue", rawValue),
+                ("RunningAppID", runningAppId),
+                ("Interpretation", rawValue is int ? "DwordBitPattern" : "SupportedRegistryRepresentation"));
+            return runningAppId;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or ObjectDisposedException)
         {
+            AppLog.Warn(
+                "Steam",
+                "RunningAppID registry read failed.",
+                exception,
+                ("Action", "AssumeInactive"),
+                ("RunningAppID", 0),
+                ("Reason", "RegistryReadException"));
             return 0;
         }
     }

@@ -105,7 +105,7 @@ public sealed class SteamSessionWatcherTests
     [InlineData(-1529805393, 2765161903u)]
     [InlineData(456L, 456u)]
     [InlineData(4294967296L, 0u)]
-    public void ConvertRegistryValueToRunningAppId_HandlesMissingAndInvalidValues(object? value, uint expectedAppId)
+    public void ConvertRegistryValueToRunningAppId_HandlesSupportedAndUnsupportedRegistryRepresentations(object? value, uint expectedAppId)
     {
         var appId = SteamRunningAppIdRegistrySource.ConvertRegistryValueToRunningAppId(value);
 
