@@ -42,7 +42,14 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
             while (DateTimeOffset.UtcNow <= deadline)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var snapshot = CreateRelevantTopologySnapshot();
+                var (snapshot, hasInternalClaw) = CreateRelevantTopologySnapshot();
+                if (!hasInternalClaw)
+                {
+                    stableSnapshotCount = 0;
+                    previousSnapshot = null;
+                    await Task.Delay(_sampleInterval, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
                 stableSnapshotCount = snapshot == previousSnapshot ? stableSnapshotCount + 1 : 1;
                 if (stableSnapshotCount >= _requiredStableSnapshots)
                 {
@@ -64,14 +71,16 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         return ControllerEnvironmentReadiness.Indeterminate;
     }
 
-    private string CreateRelevantTopologySnapshot()
+    private (string Snapshot, bool HasInternalClaw) CreateRelevantTopologySnapshot()
     {
-        return string.Join('\n', _deviceEnumerator.EnumeratePresentDevices()
+        var devices = _deviceEnumerator.EnumeratePresentDevices();
+        var snapshot = string.Join('\n', devices
             .Where(_classifier.IsRelevantTopologyDevice)
             .Select(device => string.Join('|',
                 device.InstanceId,
                 device.ParentInstanceId ?? string.Empty,
                 string.Join(',', device.AncestorInstanceIds)))
             .OrderBy(identity => identity, StringComparer.OrdinalIgnoreCase));
+        return (snapshot, devices.Any(device => _classifier.Classify(device) == ControllerDeviceClassification.InternalClaw));
     }
 }

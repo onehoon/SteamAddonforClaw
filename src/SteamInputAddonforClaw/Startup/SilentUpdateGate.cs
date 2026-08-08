@@ -10,9 +10,10 @@ internal sealed class SilentUpdateGate : IUpdateGate
     {
         try
         {
+            using var timeoutCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCancellationTokenSource.CancelAfter(UpdateGateTimeout);
             var restartScheduled = await new SilentUpdateService(new VelopackUpdateClient())
-                .CheckDownloadAndScheduleAsync(cancellationToken)
-                .WaitAsync(UpdateGateTimeout, cancellationToken)
+                .CheckDownloadAndScheduleAsync(timeoutCancellationTokenSource.Token)
                 .ConfigureAwait(false);
             return restartScheduled ? UpdateGateResult.RestartScheduled : UpdateGateResult.Continue;
         }

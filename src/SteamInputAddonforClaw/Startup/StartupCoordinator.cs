@@ -20,7 +20,16 @@ internal sealed class StartupCoordinator
             return new StartupResult(false, ControllerEnvironmentReadiness.Indeterminate);
         }
 
-        _ = _environmentDetector.DetectClawTweaksState();
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+        while (_environmentDetector.DetectClawTweaksState() == ClawTweaksState.Starting)
+        {
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                return new StartupResult(true, ControllerEnvironmentReadiness.Indeterminate);
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(350), cancellationToken).ConfigureAwait(false);
+        }
         var readiness = await _environmentWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
         return new StartupResult(true, readiness);
     }
