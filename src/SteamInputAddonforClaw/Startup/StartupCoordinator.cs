@@ -3,22 +3,27 @@ namespace SteamInputAddonforClaw.Startup;
 internal sealed class StartupCoordinator
 {
     private readonly IUpdateGate _updateGate;
+    private readonly IControllerEnvironmentDetector _environmentDetector;
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
 
-    public StartupCoordinator(IUpdateGate updateGate, IControllerEnvironmentWaiter environmentWaiter)
+    public StartupCoordinator(IUpdateGate updateGate, IControllerEnvironmentDetector environmentDetector, IControllerEnvironmentWaiter environmentWaiter)
     {
         _updateGate = updateGate;
+        _environmentDetector = environmentDetector;
         _environmentWaiter = environmentWaiter;
     }
 
-    public async Task<bool> CanStartRuntimeAsync(CancellationToken cancellationToken)
+    public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
     {
         if (await _updateGate.RunAsync(cancellationToken).ConfigureAwait(false) == UpdateGateResult.RestartScheduled)
         {
-            return false;
+            return new StartupResult(false, ControllerEnvironmentReadiness.Indeterminate);
         }
 
-        await _environmentWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
-        return true;
+        _ = _environmentDetector.DetectClawTweaksState();
+        var readiness = await _environmentWaiter.WaitUntilStableAsync(cancellationToken).ConfigureAwait(false);
+        return new StartupResult(true, readiness);
     }
 }
+
+internal sealed record StartupResult(bool ShouldStartRuntime, ControllerEnvironmentReadiness EnvironmentReadiness);

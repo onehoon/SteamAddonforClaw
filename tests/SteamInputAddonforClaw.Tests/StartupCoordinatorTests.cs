@@ -11,12 +11,13 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var coordinator = new StartupCoordinator(
             new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events),
             new FakeEnvironmentWaiter(events));
 
-        var canStart = await coordinator.CanStartRuntimeAsync(CancellationToken.None);
+        var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.True(canStart);
-        Assert.Equal(["UpdateGate", "EnvironmentWaiter"], events);
+        Assert.True(result.ShouldStartRuntime);
+        Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentWaiter"], events);
     }
 
     [Fact]
@@ -25,11 +26,12 @@ public sealed class StartupCoordinatorTests
         var events = new List<string>();
         var coordinator = new StartupCoordinator(
             new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
+            new FakeEnvironmentDetector(events),
             new FakeEnvironmentWaiter(events));
 
-        var canStart = await coordinator.CanStartRuntimeAsync(CancellationToken.None);
+        var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.False(canStart);
+        Assert.False(result.ShouldStartRuntime);
         Assert.Equal(["UpdateGate"], events);
     }
 
@@ -44,10 +46,19 @@ public sealed class StartupCoordinatorTests
 
     private sealed class FakeEnvironmentWaiter(List<string> events) : IControllerEnvironmentWaiter
     {
-        public Task WaitUntilStableAsync(CancellationToken cancellationToken)
+        public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(CancellationToken cancellationToken)
         {
             events.Add("EnvironmentWaiter");
-            return Task.CompletedTask;
+            return Task.FromResult(ControllerEnvironmentReadiness.Stable);
+        }
+    }
+
+    private sealed class FakeEnvironmentDetector(List<string> events) : IControllerEnvironmentDetector
+    {
+        public ClawTweaksState DetectClawTweaksState()
+        {
+            events.Add("EnvironmentDetector");
+            return ClawTweaksState.NotInstalled;
         }
     }
 }

@@ -30,26 +30,29 @@ public partial class App : Application
     private async Task StartAsync()
     {
         var classifier = new ControllerDeviceClassifier();
+        var deviceEnumerator = new WindowsControllerDeviceEnumerator();
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(),
-            new ControllerEnvironmentWaiter(new WindowsControllerDeviceEnumerator(), classifier));
+            new ClawTweaksEnvironmentDetector(deviceEnumerator),
+            new ControllerEnvironmentWaiter(deviceEnumerator, classifier));
 
         try
         {
-            if (!await coordinator.CanStartRuntimeAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false))
+            var startupResult = await coordinator.RunAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            if (!startupResult.ShouldStartRuntime)
             {
                 _dispatcherQueue?.TryEnqueue(ExitAfterScheduledUpdate);
                 return;
             }
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentReadiness));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
         }
     }
 
-    private void StartNormalRuntime(ControllerDeviceClassifier classifier)
+    private void StartNormalRuntime(ControllerDeviceClassifier classifier, ControllerEnvironmentReadiness environmentReadiness)
     {
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
         _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
@@ -67,7 +70,9 @@ public partial class App : Application
         var controllerDetector = new ExternalControllerDetector(
             new WindowsControllerDeviceEnumerator(),
             classifier);
-        _mainWindow.UpdateExternalControllerAssessment(controllerDetector.Detect());
+        _mainWindow.UpdateExternalControllerAssessment(environmentReadiness == ControllerEnvironmentReadiness.Stable
+            ? controllerDetector.Detect()
+            : new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, []));
 
         _steamSessionWatcher.Start();
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);

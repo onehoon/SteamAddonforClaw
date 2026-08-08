@@ -4,8 +4,10 @@ namespace SteamInputAddonforClaw.Startup;
 
 internal interface IControllerEnvironmentWaiter
 {
-    Task WaitUntilStableAsync(CancellationToken cancellationToken);
+    Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(CancellationToken cancellationToken);
 }
+
+internal enum ControllerEnvironmentReadiness { Stable, Indeterminate }
 
 internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
 {
@@ -29,25 +31,37 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         _timeout = timeout ?? TimeSpan.FromSeconds(5);
     }
 
-    public async Task WaitUntilStableAsync(CancellationToken cancellationToken)
+    public async Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(CancellationToken cancellationToken)
     {
         string? previousSnapshot = null;
         var stableSnapshotCount = 0;
         var deadline = DateTimeOffset.UtcNow + _timeout;
 
-        while (DateTimeOffset.UtcNow <= deadline)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var snapshot = CreateRelevantTopologySnapshot();
-            stableSnapshotCount = snapshot == previousSnapshot ? stableSnapshotCount + 1 : 1;
-            if (stableSnapshotCount >= _requiredStableSnapshots)
+            while (DateTimeOffset.UtcNow <= deadline)
             {
-                return;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+                var snapshot = CreateRelevantTopologySnapshot();
+                stableSnapshotCount = snapshot == previousSnapshot ? stableSnapshotCount + 1 : 1;
+                if (stableSnapshotCount >= _requiredStableSnapshots)
+                {
+                    return ControllerEnvironmentReadiness.Stable;
+                }
 
-            previousSnapshot = snapshot;
-            await Task.Delay(_sampleInterval, cancellationToken).ConfigureAwait(false);
+                previousSnapshot = snapshot;
+                await Task.Delay(_sampleInterval, cancellationToken).ConfigureAwait(false);
+            }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+        }
+
+        return ControllerEnvironmentReadiness.Indeterminate;
     }
 
     private string CreateRelevantTopologySnapshot()
