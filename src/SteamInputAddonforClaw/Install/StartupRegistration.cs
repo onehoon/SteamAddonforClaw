@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using Microsoft.Win32;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Install;
 
@@ -35,8 +36,10 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
     public StartupRegistrationResult Synchronize(bool enabled)
     {
         var stableExecutablePath = _stableExecutablePathProvider();
+        AppLog.Info("TaskScheduler", "Startup task synchronization started.", ("Enabled", enabled), ("TaskName", TaskName), ("ExecutablePath", stableExecutablePath), ("Arguments", "--background"), ("Delay", LogonDelay));
         if (!File.Exists(stableExecutablePath))
         {
+            AppLog.Warn("TaskScheduler", "Startup task synchronization skipped.", null, ("Reason", "StableExecutableMissing"));
             return StartupRegistrationResult.NotInstalled();
         }
 
@@ -48,6 +51,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
             if (!enabled)
             {
                 DeleteOwnedTaskIfPresent(rootFolder);
+                AppLog.Info("TaskScheduler", "Startup task deleted.");
                 return StartupRegistrationResult.Disabled();
             }
 
@@ -74,26 +78,31 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
                 Type.Missing,
                 TaskLogonInteractiveToken,
                 Type.Missing);
+            AppLog.Info("TaskScheduler", "Startup task registered.");
             return StartupRegistrationResult.Enabled();
         }
         catch (COMException exception)
         {
             Debug.WriteLine($"Task Scheduler startup registration failed. HRESULT=0x{exception.HResult:X8}");
+            AppLog.Error("TaskScheduler", "Task Scheduler operation failed.", exception, ("HRESULT", $"0x{exception.HResult:X8}"));
             return StartupRegistrationResult.Failed();
         }
         catch (UnauthorizedAccessException exception)
         {
             Debug.WriteLine($"Task Scheduler startup registration was denied. {exception.Message}");
+            AppLog.Error("TaskScheduler", "Task Scheduler operation was denied.", exception);
             return StartupRegistrationResult.Failed();
         }
         catch (IOException exception)
         {
             Debug.WriteLine($"Task Scheduler startup registration failed. {exception.Message}");
+            AppLog.Error("TaskScheduler", "Task Scheduler IO operation failed.", exception);
             return StartupRegistrationResult.Failed();
         }
         catch (Exception exception)
         {
             Debug.WriteLine($"Task Scheduler startup registration failed. {exception.Message}");
+            AppLog.Error("TaskScheduler", "Task Scheduler operation failed.", exception);
             return StartupRegistrationResult.Failed();
         }
     }
