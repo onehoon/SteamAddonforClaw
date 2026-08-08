@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Windows.Management.Deployment;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
 
@@ -38,9 +39,63 @@ internal interface IClawTweaksRuntimeDetector
     bool IsRunning();
 }
 
+internal sealed record ClawTweaksInstallationInfo(bool Installed, string? PackageFullName, string? InstallLocation, string DetectionSource);
+
+internal interface IClawTweaksInstallationProbe
+{
+    ClawTweaksInstallationInfo Detect();
+}
+
+internal sealed class ClawTweaksInstallationProbe : IClawTweaksInstallationProbe
+{
+    private const string PackageName = "MSIClaw.ClawTweaks";
+
+    public ClawTweaksInstallationInfo Detect()
+    {
+        foreach (var package in new PackageManager().FindPackagesForUser(string.Empty))
+        {
+            if (string.Equals(package.Id.Name, PackageName, StringComparison.OrdinalIgnoreCase))
+            {
+                return new ClawTweaksInstallationInfo(true, package.Id.FullName, package.InstalledLocation?.Path, "MsixPackage");
+            }
+        }
+
+        foreach (var path in ClawTweaksEnvironmentDetector.KnownExecutablePaths)
+        {
+            if (File.Exists(path)) return new ClawTweaksInstallationInfo(true, null, Path.GetDirectoryName(path), "LegacyExecutable");
+        }
+
+        return new ClawTweaksInstallationInfo(false, null, null, "None");
+    }
+}
+
 internal sealed class ClawTweaksRuntimeDetector : IClawTweaksRuntimeDetector
 {
-    public bool IsRunning() => Process.GetProcessesByName("ClawTweaks").Length > 0;
+    public bool IsRunning()
+    {
+        if (Process.GetProcessesByName("ClawTweaks").Length > 0) return true;
+        var installation = new ClawTweaksInstallationProbe().Detect();
+        if (!installation.Installed || string.IsNullOrWhiteSpace(installation.InstallLocation)) return false;
+
+        return Process.GetProcessesByName("XboxGamingBar")
+            .Any(process => IsPackageOwned(process, installation.InstallLocation));
+    }
+
+    private static bool IsPackageOwned(Process process, string installLocation)
+    {
+        try
+        {
+            var path = process.MainModule?.FileName;
+            var owned = path?.StartsWith(installLocation, StringComparison.OrdinalIgnoreCase) == true;
+            AppLog.Debug("ClawTweaks", "Runtime process candidate.", ("ProcessName", process.ProcessName), ("ProcessId", process.Id), ("ImagePath", path), ("PackageOwned", owned));
+            return owned;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Debug("ClawTweaks", "Runtime image path unavailable.", ("ProcessName", process.ProcessName), ("ProcessId", process.Id), ("Reason", exception.GetType().Name), ("Action", "Continue"));
+            return false;
+        }
+    }
 }
 
 internal sealed class HandheldCompanionRuntimeDetector : IHandheldCompanionRuntimeDetector
@@ -50,7 +105,7 @@ internal sealed class HandheldCompanionRuntimeDetector : IHandheldCompanionRunti
 
 internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDetector
 {
-    private static readonly string[] KnownExecutablePaths =
+    internal static readonly string[] KnownExecutablePaths =
     [
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ClawTweaks", "ClawTweaks.exe"),
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClawTweaks", "ClawTweaks.exe")
@@ -58,15 +113,18 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
     private readonly IHandheldCompanionRuntimeDetector _handheldCompanionRuntimeDetector;
     private readonly IClawTweaksRuntimeDetector _clawTweaksRuntimeDetector;
+    private readonly IClawTweaksInstallationProbe _installationProbe;
 
     public ClawTweaksEnvironmentDetector(
         IControllerDeviceEnumerator deviceEnumerator,
         IHandheldCompanionRuntimeDetector? handheldCompanionRuntimeDetector = null,
-        IClawTweaksRuntimeDetector? clawTweaksRuntimeDetector = null)
+        IClawTweaksRuntimeDetector? clawTweaksRuntimeDetector = null,
+        IClawTweaksInstallationProbe? installationProbe = null)
     {
         _deviceEnumerator = deviceEnumerator;
         _handheldCompanionRuntimeDetector = handheldCompanionRuntimeDetector ?? new HandheldCompanionRuntimeDetector();
         _clawTweaksRuntimeDetector = clawTweaksRuntimeDetector ?? new ClawTweaksRuntimeDetector();
+        _installationProbe = installationProbe ?? new ClawTweaksInstallationProbe();
     }
 
     public ControllerEnvironment Detect()
@@ -88,8 +146,9 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
 
         try
         {
-            var installed = KnownExecutablePaths.Any(File.Exists);
-            foreach (var path in KnownExecutablePaths) AppLog.Trace("ClawTweaks", "ClawTweaks installation probe.", ("Path", path), ("Exists", File.Exists(path)));
+            var installation = _installationProbe.Detect();
+            var installed = installation.Installed;
+            AppLog.Info("ClawTweaks", "Installation detection completed.", ("Installed", installed), ("DetectionSource", installation.DetectionSource), ("PackageFullName", installation.PackageFullName), ("InstallLocation", installation.InstallLocation));
             var processRunning = _clawTweaksRuntimeDetector.IsRunning();
             AppLog.Debug("ClawTweaks", "ClawTweaks process inspection completed.", ("Installed", installed), ("Running", processRunning));
             if (!installed && !processRunning)
@@ -98,18 +157,19 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
                 return new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled);
             }
 
-            var virtualTopologyPresent = _deviceEnumerator.EnumeratePresentDevices()
-                .Any(new ControllerDeviceClassifier().IsClawTweaksVirtualControllerCandidate);
+            var devices = _deviceEnumerator.EnumeratePresentDevices();
+            var topology = new ControllerTopologySnapshot(devices);
+            var virtualTopologyPresent = devices.Any(device => new ControllerDeviceClassifier().IsClawTweaksVirtualControllerCandidate(device, topology));
 
             if (processRunning && virtualTopologyPresent)
             {
-                AppLog.Info("Environment", "Environment decision.", ("Mode", ControllerEnvironmentMode.ClawTweaks), ("Reason", "ProcessAndVirtualTopologyPresent"));
+                AppLog.Info("Environment", "Environment decision.", ("Mode", ControllerEnvironmentMode.ClawTweaks), ("ClawTweaksState", ClawTweaksState.Active), ("Installed", installed), ("RuntimePresent", processRunning), ("VirtualTopologyPresent", virtualTopologyPresent), ("Reason", "PackageRuntimeAndVirtualTopologyPresent"));
                 return new ControllerEnvironment(ControllerEnvironmentMode.ClawTweaks, ClawTweaksState.Active);
             }
 
-            return processRunning
-                ? LogDecision(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Starting, "ProcessRunningButRoutingTopologyMissing")
-                : LogDecision(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.InstalledInactive, "InstalledButInactive");
+            if (processRunning) return LogDecision(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Starting, "RuntimePresentButRoutingTopologyMissing");
+            if (virtualTopologyPresent) return LogDecision(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Indeterminate, "VirtualTopologyPresentButRuntimeNotConfirmed");
+            return LogDecision(ControllerEnvironmentMode.StockCenterM, installed ? ClawTweaksState.InstalledInactive : ClawTweaksState.NotInstalled, installed ? "InstalledButInactive" : "ClawTweaksAbsent");
         }
         catch (Exception exception)
         {

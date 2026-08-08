@@ -93,6 +93,31 @@ public sealed class HandheldCompanionEnvironmentTests
         Assert.Equal(ClawTweaksState.Indeterminate, environment.ClawTweaksState);
     }
 
+    [Fact]
+    public void Detect_WhenMsixPackageRuntimeAndUsbIpTopologyExist_UsesClawTweaksMode()
+    {
+        var root = new ControllerDeviceInfo("ROOT\\USB\\0000", Guid.Empty, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "USB", null, "usbip2_ude", null, null, true);
+        var controller = new ControllerDeviceInfo("HID\\VID_045E&PID_028E", Guid.NewGuid(), null, ["ROOT\\USB\\0000"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
+        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([controller, root]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true), new FakeInstallationProbe(true));
+
+        var environment = detector.Detect();
+
+        Assert.Equal(ControllerEnvironmentMode.ClawTweaks, environment.Mode);
+        Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
+    }
+
+    [Fact]
+    public void Detect_WhenPackageAndVirtualTopologyExistWithoutRuntime_ReturnsIndeterminate()
+    {
+        var virtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
+        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([virtualController]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(false), new FakeInstallationProbe(true));
+
+        var environment = detector.Detect();
+
+        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
+        Assert.Equal(ClawTweaksState.Indeterminate, environment.ClawTweaksState);
+    }
+
     private static ClawTweaksEnvironmentDetector CreateDetector(bool running) => new(new FakeEnumerator([]), new FakeRuntimeDetector(running));
 
     private sealed class FakeRuntimeDetector(bool running) : IHandheldCompanionRuntimeDetector
@@ -108,6 +133,13 @@ public sealed class HandheldCompanionEnvironmentTests
     private sealed class ThrowingClawTweaksRuntimeDetector : IClawTweaksRuntimeDetector
     {
         public bool IsRunning() => throw new InvalidOperationException();
+    }
+
+    private sealed class FakeInstallationProbe(bool installed) : IClawTweaksInstallationProbe
+    {
+        public ClawTweaksInstallationInfo Detect() => installed
+            ? new(true, "MSIClaw.ClawTweaks_0.2.0.13_x64__7eszav2039cvc", "C:\\Program Files\\WindowsApps\\MSIClaw.ClawTweaks_0.2.0.13_x64__7eszav2039cvc", "MsixPackage")
+            : new(false, null, null, "None");
     }
 
     private sealed class FakeEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator

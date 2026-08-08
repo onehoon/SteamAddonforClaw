@@ -118,6 +118,39 @@ public sealed class ExternalControllerDetectorTests
     }
 
     [Fact]
+    public void Detect_WhenClawTweaksUsbIpXboxHasResolvedAncestorMetadata_ReturnsClear()
+    {
+        var root = new ControllerDeviceInfo("ROOT\\USB\\0000", Guid.Empty, null, ["HTREE\\ROOT\\0"], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "USB", null, "usbip2_ude", null, null, true);
+        var virtualXbox = GameController(0x045E, 0x028E, ancestorInstanceIds: ["USB\\VID_045E&PID_028E\\296013F", "ROOT\\USB\\0000", "HTREE\\ROOT\\0"]);
+
+        var assessment = Detect([virtualXbox, root]);
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(virtualXbox, new ControllerTopologySnapshot([virtualXbox, root]));
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
+        Assert.Equal("KnownVirtualUsbIpAncestor", result.Reason);
+        Assert.Equal("ROOT\\USB\\0000", result.EvidenceDevice?.InstanceId);
+    }
+
+    [Fact]
+    public void Detect_WhenUsbIpRootIsNotInPhysicalXboxAncestry_ReturnsExternalPresent()
+    {
+        var unrelatedUsbIpRoot = new ControllerDeviceInfo("ROOT\\USB\\0000", Guid.Empty, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "USB", null, "usbip2_ude", null, null, true);
+        var physicalXbox = GameController(0x045E, 0x028E, ancestorInstanceIds: ["USB\\ROOT_HUB30\\1", "PCI\\VEN_1234"]);
+
+        Assert.Equal(ExternalControllerAssessmentStatus.ExternalPresent, Detect([physicalXbox, unrelatedUsbIpRoot]).Status);
+    }
+
+    [Fact]
+    public void Detect_WhenDevicesUseSentinelContainerId_DoesNotMergeUnrelatedControllers()
+    {
+        var sentinel = new Guid("00000000-0000-0000-ffff-ffffffffffff");
+        var first = GameController(0x045E, 0x028E, sentinel, instanceId: "HID\\FIRST");
+        var second = GameController(0x054C, 0x0CE6, sentinel, instanceId: "HID\\SECOND");
+
+        Assert.Equal(2, Detect([first, second]).DetectedExternalControllerCount);
+    }
+
+    [Fact]
     public void Detect_WhenPhysicalXboxHasGenericRootAncestors_ReturnsExternalPresent()
     {
         var assessment = Detect(
