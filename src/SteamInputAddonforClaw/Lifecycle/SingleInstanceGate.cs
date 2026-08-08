@@ -1,9 +1,12 @@
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.Lifecycle;
 
 internal sealed class SingleInstanceGate : IDisposable
 {
     private readonly Mutex _mutex;
     private readonly EventWaitHandle _activationEvent;
+    private readonly Lock _sync = new();
     private RegisteredWaitHandle? _activationRegistration;
     private bool _disposed;
 
@@ -12,10 +15,10 @@ internal sealed class SingleInstanceGate : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(mutexName);
         ArgumentException.ThrowIfNullOrWhiteSpace(activationEventName);
 
-        // Create the event before claiming the mutex so a second launch can always notify the primary process.
         _activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, activationEventName);
         _mutex = new Mutex(initiallyOwned: true, mutexName, out var createdNew);
         IsPrimaryInstance = createdNew;
+        AppLog.Info("SingleInstance", "Single-instance ownership check completed.", ("Primary", IsPrimaryInstance));
     }
 
     internal static SingleInstanceGate CreateForCurrentUser() => new(
@@ -28,44 +31,72 @@ internal sealed class SingleInstanceGate : IDisposable
     {
         if (!IsPrimaryInstance)
         {
-            _activationEvent.Set();
+            var signaled = _activationEvent.Set();
+            AppLog.Info("SingleInstance", "Secondary activation signal sent.", ("Success", signaled));
         }
     }
 
     internal void RegisterActivation(Action activationHandler)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(activationHandler);
-
-        if (!IsPrimaryInstance)
+        lock (_sync)
         {
-            throw new InvalidOperationException("Only the primary instance can receive activation requests.");
-        }
-
-        _activationRegistration = ThreadPool.RegisterWaitForSingleObject(
-            _activationEvent,
-            (_, timedOut) =>
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (!IsPrimaryInstance)
             {
-                if (!timedOut)
-                {
-                    activationHandler();
-                }
-            },
-            state: null,
-            Timeout.Infinite,
-            executeOnlyOnce: false);
+                throw new InvalidOperationException("Only the primary instance can receive activation requests.");
+            }
+            if (_activationRegistration is not null)
+            {
+                throw new InvalidOperationException("An activation handler is already registered.");
+            }
+
+            _activationRegistration = ThreadPool.RegisterWaitForSingleObject(
+                _activationEvent,
+                (_, timedOut) => OnActivationSignaled(activationHandler, timedOut),
+                state: null,
+                Timeout.Infinite,
+                executeOnlyOnce: false);
+        }
     }
 
     public void Dispose()
     {
-        if (_disposed)
+        RegisteredWaitHandle? registration;
+        lock (_sync)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            registration = _activationRegistration;
+            _activationRegistration = null;
+        }
+
+        registration?.Unregister(null);
+        _activationEvent.Dispose();
+        _mutex.Dispose();
+        AppLog.Info("SingleInstance", "Single-instance gate disposed.");
+    }
+
+    private void OnActivationSignaled(Action activationHandler, bool timedOut)
+    {
+        if (timedOut)
         {
             return;
         }
 
-        _disposed = true;
-        _activationRegistration?.Unregister(null);
-        _activationEvent.Dispose();
-        _mutex.Dispose();
+        lock (_sync)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+        }
+
+        AppLog.Info("SingleInstance", "Primary activation received.");
+        activationHandler();
     }
 }

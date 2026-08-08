@@ -26,8 +26,11 @@ public enum MsiClawInputStartStatus
 {
     Started,
     AlreadyRunning,
+    InitializationFailed,
+    EnumerationFailed,
     Pid1902NotFound,
     Indeterminate,
+    CreateDeviceFailed,
     AcquireFailed
 }
 
@@ -43,4 +46,12 @@ public sealed record MsiClawInputTestSummary(
     bool M2Observed,
     bool Independent,
     int ReadFailures,
-    bool CleanupSucceeded);
+    bool CleanupSucceeded,
+    MsiClawInputStopReason StopReason);
+
+public enum MsiClawInputStopReason
+{
+    Stopped,
+    ReadStateFailed,
+    InvalidButtonLayout
+}

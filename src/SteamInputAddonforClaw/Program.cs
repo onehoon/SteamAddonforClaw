@@ -18,30 +18,43 @@ public static class Program
         try
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
+            AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));
+            AppLog.Info("Velopack", "Velopack bootstrap starting.");
+            VelopackApp.Build().Run();
+            AppLog.Info("Velopack", "Velopack bootstrap completed.");
+
             var restartDeadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            var restartAttempt = 0;
             SingleInstanceGate singleInstanceGate;
             while (true)
             {
+                AppLog.Info("SingleInstance", "Single-instance check started.", ("RestartRequested", restartRequested), ("Attempt", restartAttempt + 1));
                 singleInstanceGate = SingleInstanceGate.CreateForCurrentUser();
                 if (singleInstanceGate.IsPrimaryInstance)
                 {
+                    if (restartRequested)
+                    {
+                        AppLog.Info("SingleInstance", "Previous instance lock released.", ("Attempt", restartAttempt + 1));
+                    }
                     break;
                 }
 
                 if (!restartRequested)
                 {
-                    AppLog.Info("App", "Secondary launch detected; activating the existing instance.", ("PID", Environment.ProcessId));
+                    AppLog.Info("SingleInstance", "Secondary launch detected; activating the existing instance.", ("PID", Environment.ProcessId));
                     singleInstanceGate.ActivatePrimaryInstance();
                     return;
                 }
 
                 singleInstanceGate.Dispose();
+                restartAttempt++;
                 if (DateTimeOffset.UtcNow >= restartDeadline)
                 {
-                    AppLog.Error("App", "Restart launch timed out while waiting for the previous instance to exit.", new TimeoutException("The previous instance did not release its single-instance lock."));
+                    AppLog.Error("SingleInstance", "Restart timeout while waiting for the previous instance to exit.", new TimeoutException("The previous instance did not release its single-instance lock."), ("Attempts", restartAttempt));
                     return;
                 }
 
+                AppLog.Trace("SingleInstance", "Restart waiting for previous instance.", ("Attempt", restartAttempt), ("RemainingMs", (restartDeadline - DateTimeOffset.UtcNow).TotalMilliseconds));
                 Thread.Sleep(TimeSpan.FromMilliseconds(100));
             }
 
@@ -50,9 +63,6 @@ public static class Program
                 CurrentSingleInstanceGate = singleInstanceGate;
                 var launchMode = args.Contains("--background", StringComparer.OrdinalIgnoreCase) ? "Background" : "Manual";
                 AppLog.Info("App", "Application launch header.", ("Version", typeof(Program).Assembly.GetName().Version), ("LaunchMode", launchMode), ("PID", Environment.ProcessId), ("ProcessArchitecture", RuntimeInformation.ProcessArchitecture), ("OSArchitecture", RuntimeInformation.OSArchitecture), ("OS", Environment.OSVersion), ("Runtime", Environment.Version), ("ProcessPath", Environment.ProcessPath), ("BaseDirectory", AppContext.BaseDirectory));
-                AppLog.Info("Velopack bootstrap starting.");
-                VelopackApp.Build().Run();
-                AppLog.Info("Velopack bootstrap completed.");
                 AppLog.Info("COM wrapper initialization starting.");
                 ComWrappersSupport.InitializeComWrappers();
                 AppLog.Info("COM wrapper initialization completed.");

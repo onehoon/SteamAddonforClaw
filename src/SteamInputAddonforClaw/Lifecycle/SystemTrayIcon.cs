@@ -129,9 +129,21 @@ internal sealed class SystemTrayIcon : IDisposable
             GetCursorPos(out var point);
             SetForegroundWindow(_windowHandle);
             var command = TrackPopupMenuEx(menu, TPM_RETURNCMD, point.X, point.Y, _windowHandle, IntPtr.Zero);
-            if (command == 1) _open();
-            if (command == 2) _restart();
-            if (command == 3) _exit();
+            if (command == 1)
+            {
+                AppLog.Info("Tray", "Open command selected.");
+                _open();
+            }
+            if (command == 2)
+            {
+                AppLog.Info("Tray", "Restart command selected.");
+                _restart();
+            }
+            if (command == 3)
+            {
+                AppLog.Info("Tray", "Exit command selected.");
+                _exit();
+            }
             PostMessageW(_windowHandle, WM_NULL, IntPtr.Zero, IntPtr.Zero);
         }
         finally { DestroyMenu(menu); }

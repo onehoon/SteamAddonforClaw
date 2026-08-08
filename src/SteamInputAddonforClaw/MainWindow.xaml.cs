@@ -19,7 +19,8 @@ namespace SteamInputAddonforClaw;
 public sealed partial class MainWindow : Window
 {
     private readonly StartupSettingsCoordinator _startupSettings;
-    private readonly MsiClawInputSource _msiClawInputSource;
+    private readonly Func<IDirectInputDeviceEnumerator> _directInputEnumeratorFactory;
+    private MsiClawInputSource? _msiClawInputSource;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -29,9 +30,8 @@ public sealed partial class MainWindow : Window
 
         InitializeComponent();
         ApplyDefaultWindowSize();
-        _msiClawInputSource = new MsiClawInputSource(new VorticeDirectInputDeviceEnumerator(WinRT.Interop.WindowNative.GetWindowHandle(this)));
-        _msiClawInputSource.StateChanged += OnMsiClawInputStateChanged;
-        _msiClawInputSource.TestCompleted += OnMsiClawInputTestCompleted;
+        var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        _directInputEnumeratorFactory = () => new VorticeDirectInputDeviceEnumerator(windowHandle);
         Closed += OnWindowClosed;
         VersionText.Text = $"Version {GetDisplayVersion()}";
         LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
@@ -67,6 +67,7 @@ public sealed partial class MainWindow : Window
 
     private void StartM1M2TestButton_Click(object sender, RoutedEventArgs args)
     {
+        _msiClawInputSource ??= CreateMsiClawInputSource();
         var result = _msiClawInputSource.Start();
         M1M2TestStatusText.Text = $"Status: {result.Message}";
         if (result.Started)
@@ -78,7 +79,10 @@ public sealed partial class MainWindow : Window
 
     private async void StopM1M2TestButton_Click(object sender, RoutedEventArgs args)
     {
-        await _msiClawInputSource.StopAsync();
+        if (_msiClawInputSource is not null)
+        {
+            await _msiClawInputSource.StopAsync();
+        }
     }
 
     private void OnMsiClawInputStateChanged(object? sender, ControllerState state)
@@ -87,15 +91,20 @@ public sealed partial class MainWindow : Window
         {
             if (state.M1) M1TestStatusText.Text = "M1: OK";
             if (state.M2) M2TestStatusText.Text = "M2: OK";
-            if (state.M1 != state.M2) IndependentTestStatusText.Text = "Independent: OK";
         });
+    }
+
+    private void OnMsiClawInputIndependentVerified(object? sender, EventArgs args)
+    {
+        DispatcherQueue.TryEnqueue(() => IndependentTestStatusText.Text = "Independent: OK");
     }
 
     private void OnMsiClawInputTestCompleted(object? sender, MsiClawInputTestSummary summary)
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            M1M2TestStatusText.Text = $"Status: Completed ({summary.DurationMs} ms)";
+            M1M2TestStatusText.Text = $"Status: Completed ({summary.DurationMs} ms, {summary.StopReason})";
+            if (summary.Independent) IndependentTestStatusText.Text = "Independent: OK";
             StartM1M2TestButton.IsEnabled = true;
             StopM1M2TestButton.IsEnabled = false;
         });
@@ -103,9 +112,22 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        _msiClawInputSource.StateChanged -= OnMsiClawInputStateChanged;
-        _msiClawInputSource.TestCompleted -= OnMsiClawInputTestCompleted;
-        _msiClawInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        if (_msiClawInputSource is not null)
+        {
+            _msiClawInputSource.StateChanged -= OnMsiClawInputStateChanged;
+            _msiClawInputSource.IndependentVerified -= OnMsiClawInputIndependentVerified;
+            _msiClawInputSource.TestCompleted -= OnMsiClawInputTestCompleted;
+            _msiClawInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+    }
+
+    private MsiClawInputSource CreateMsiClawInputSource()
+    {
+        var source = new MsiClawInputSource(_directInputEnumeratorFactory);
+        source.StateChanged += OnMsiClawInputStateChanged;
+        source.IndependentVerified += OnMsiClawInputIndependentVerified;
+        source.TestCompleted += OnMsiClawInputTestCompleted;
+        return source;
     }
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)

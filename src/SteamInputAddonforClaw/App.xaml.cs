@@ -206,9 +206,10 @@ public partial class App : Application
                 }
 
                 restartInfo.ArgumentList.Add("--restart");
-                Process.Start(restartInfo);
+                AppLog.Info("App", "Application restart requested.", ("ExecutablePath", executablePath), ("Background", restartInfo.ArgumentList.Contains("--background")), ("Restart", true));
+                var process = Process.Start(restartInfo);
+                AppLog.Info("App", "Application restart process started.", ("ProcessId", process?.Id), ("Started", process is not null));
                 _isExplicitExit = true;
-                AppLog.Info("Explicit application restart requested.");
                 _mainWindow?.Close();
                 Exit();
             }
