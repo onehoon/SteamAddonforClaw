@@ -23,4 +23,22 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
     <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
+
+  <!--
+    dotnet publish for an unpackaged WinUI 3 app omits the XAML binary files
+    and the app PRI that dotnet build produces in $(OutDir). Application.Start
+    then fails while loading App.xaml/MainWindow.xaml. Preserve those generated
+    runtime assets in the Velopack publish payload.
+  -->
+  <Target Name="CopyMissingWinUIPublishAssets" AfterTargets="Publish">
+    <ItemGroup>
+      <_MissingXbf Include="$(OutDir)**\*.xbf" />
+      <_MissingPri Include="$(OutDir)*.pri" />
+      <_MissingAssets Include="$(OutDir)Assets\**\*.*" />
+    </ItemGroup>
+    <Message Importance="High" Text="Preserving WinUI publish assets: XBF=@(_MissingXbf); PRI=@(_MissingPri); Assets=@(_MissingAssets)" />
+    <Copy SourceFiles="@(_MissingXbf)" DestinationFolder="$(PublishDir)%(RecursiveDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_MissingPri)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_MissingAssets)" DestinationFolder="$(PublishDir)Assets\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

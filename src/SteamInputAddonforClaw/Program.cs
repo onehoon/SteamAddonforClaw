@@ -22,6 +22,13 @@ public static class Program
             AppLog.Info("COM wrapper initialization starting.");
             ComWrappersSupport.InitializeComWrappers();
             AppLog.Info("COM wrapper initialization completed.");
+            var winUiAssets = WinUiRuntimeAssetProbe.Inspect(AppContext.BaseDirectory);
+            AppLog.Info("Startup", "WinUI runtime assets.",
+                ("BaseDirectory", AppContext.BaseDirectory),
+                ("AppXbf", winUiAssets[0].Exists), ("AppXbfBytes", winUiAssets[0].SizeBytes),
+                ("MainWindowXbf", winUiAssets[1].Exists), ("MainWindowXbfBytes", winUiAssets[1].SizeBytes),
+                ("Pri", winUiAssets[2].Exists), ("PriBytes", winUiAssets[2].SizeBytes),
+                ("AppIcon", winUiAssets[3].Exists), ("AppIconBytes", winUiAssets[3].SizeBytes));
             AppLog.Info("XAML Application.Start entering.");
             Application.Start(_ =>
             {

@@ -67,6 +67,12 @@ jobs:
           --no-restore
           -o artifacts/publish
 
+      - name: Verify published WinUI assets
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass
+          -File scripts/verify-publish-assets.ps1
+          -PublishDirectory artifacts/publish
+
       - name: Startup process smoke test
         shell: pwsh
         run: |
