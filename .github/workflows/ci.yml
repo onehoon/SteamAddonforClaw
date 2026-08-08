@@ -1,0 +1,65 @@
+name: Build and Test
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore SteamInputAddonforClaw.slnx
+
+      - name: Build
+        run: dotnet build SteamInputAddonforClaw.slnx -c Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: |
+          $testProjects = @()
+          if (Test-Path tests) {
+            $testProjects = @(Get-ChildItem -Path tests -Filter *.csproj -Recurse -File)
+          }
+
+          if ($testProjects.Count -eq 0) {
+            Write-Host 'No test projects found. Skipping tests.'
+            exit 0
+          }
+
+          foreach ($testProject in $testProjects) {
+            dotnet test $testProject.FullName -c Release --no-restore
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+
+      - name: Publish smoke test
+        run: >-
+          dotnet publish src/SteamInputAddonforClaw/SteamInputAddonforClaw.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          --no-restore
+          -o artifacts/publish
