@@ -1,484 +1,697 @@
-# Steam Input Addon for Claw — Project Instructions
+# Steam Input Addon for Claw
 
-## 1. Project Identity
+A lightweight Steam Input bridge for MSI Claw handheld PCs.
 
-* **Project name:** Steam Input Addon for Claw
-* **GitHub repository:** `onehoon/SteamInputAddonforClaw`
-* **Repository:** Public
-* **Target OS:** Windows 11
-* **Target devices:** MSI Claw handheld PCs
+The project exposes the MSI Claw built-in controller to Steam as a **Classic Steam Controller**, allowing the rear M1/M2 buttons to appear as independent Steam Controller grip buttons.
+
+The addon intentionally does not implement its own remapping, macros, profiles, or controller configuration system. Those functions are delegated to **Steam Input**.
+
+> Unofficial project. Not affiliated with MSI or Valve.
+
+## Project
+
+* **Platform:** Windows 11 24H2 or later
+* **Device family:** MSI Claw handheld PCs
+* **Architecture:** x64
+* **Application:** WinUI 3 / .NET 10
+* **Distribution:** Velopack
 * **License:** GPL-3.0-or-later
 
-This is an unofficial project and is not affiliated with MSI or Valve.
-
 ---
 
-## 2. Project Purpose
+# Goals
 
-Steam Input Addon for Claw is a lightweight companion application that enables the MSI Claw built-in controller, including its M1/M2 rear buttons, to work through Steam Input.
-
-The application must not become a general controller remapping or macro application.
-
-For Steam-launched games:
-
-* Controller remapping is handled by Steam Input.
-* Macros are handled by Steam Input.
-* Action Sets, long press, double press, keyboard mappings, etc. are handled by Steam Input.
-* M1/M2 must be exposed to Steam Input as independent Steam Controller grip buttons.
-
-For non-Steam use, the application should behave as though it is not installed.
-
-The application must support both:
-
-1. MSI Center M stock environments.
-2. MSI Center M + ClawTweaks environments.
-
-ClawTweaks integration is optional compatibility behavior, not a hard runtime dependency.
-
----
-
-## 3. Core Behavioral Principle
-
-The application should intervene only when all of the following are true:
-
-1. A game or Non-Steam Shortcut launched through Steam is currently running.
-2. No external physical controller is connected.
-
-Otherwise the application must remain passive.
-
-Priority:
+The addon exists for one specific purpose:
 
 ```text
-External Controller Present?
-    YES → Do nothing.
-
-Steam Game Running?
-    NO → Do nothing.
-
-Otherwise
-    → Activate Steam Input bridge.
-```
-
-“Do nothing” should mean as close as practical to the application not being installed:
-
-* No virtual controller exposed.
-* No physical controller acquired unnecessarily.
-* No MSI controller mode changes.
-* No HidHide configuration changes.
-* No modification of the user's normal Center M or ClawTweaks behavior.
-
----
-
-## 4. Steam Session Detection
-
-Do not identify individual games unless later required.
-
-The current requirement is only to determine:
-
-> Is Steam currently running a game?
-
-Use the Steam client registry state:
-
-```text
-HKCU\Software\Valve\Steam
-RunningAppID
-```
-
-Observed behavior:
-
-```text
-RunningAppID == 0
-→ No Steam game session.
-
-RunningAppID != 0
-→ Steam game session active.
-```
-
-This has been verified to work for:
-
-* Normal Steam games.
-* Non-Steam games/shortcuts launched through Steam.
-
-Prefer event-driven registry monitoring where practical instead of unnecessarily frequent polling.
-
-Foreground application changes must NOT terminate the Steam session.
-
-Example:
-
-```text
-Steam game
-→ Explorer
-→ Edge
-→ Discord
-→ Steam
-→ Game
-
-Steam virtual controller remains active for the entire Steam session.
-```
-
-The Steam session ends only when `RunningAppID` returns to 0.
-
----
-
-## 5. External Controller Veto
-
-External physical controller presence has higher priority than Steam session detection.
-
-If an external controller is connected:
-
-```text
-Steam Input Addon = completely inactive
-```
-
-This applies even if a Steam game is running.
-
-Examples include:
-
-* Xbox controllers.
-* DualSense / DualShock.
-* 8BitDo controllers.
-* Other external physical gamepads.
-
-Do not treat these as external controllers:
-
-* MSI Claw internal controller interfaces.
-* The application's own VIIPER devices.
-* ClawTweaks virtual devices.
-* USB/IP virtual devices.
-* ViGEm virtual devices.
-
-Prefer PnP/SetupAPI device enumeration and physical device/container identification rather than determining external controller presence from XInput slot count.
-
-The application should not acquire external controller input handles.
-
-### External controller connected during an active Steam session
-
-If an external controller is connected while the addon is active:
-
-1. Immediately stop the Steam Input bridge.
-2. Remove the addon's virtual controllers.
-3. Restore the MSI/ClawTweaks native controller state.
-4. Set an `ExternalControllerVeto` for the remainder of that Steam session.
-
-If the external controller is disconnected again during the same Steam session, do NOT automatically reactivate the addon.
-
-Wait until the next Steam session.
-
-This avoids repeated controller hotplug/re-enumeration.
-
----
-
-## 6. MSI Claw Physical Input Source
-
-The preferred physical input source is the MSI Claw DirectInput interface.
-
-Known MSI Claw controller interfaces:
-
-```text
-VID: 0x0DB0
-
-PID 0x1901 → XInput
-PID 0x1902 → DirectInput
-PID 0x1903 → testing/other mode
-```
-
-Handheld Companion currently uses a dedicated MSI Claw DirectInput controller implementation.
-
-The known DirectInput mappings include:
-
-```text
-M1 → DirectInput Button[15]
-M2 → DirectInput Button[16]
-```
-
-Use this architecture as a hardware/protocol reference.
-
-Do not depend on reading M1/M2 from an XInput virtual controller because XInput cannot expose these additional rear buttons independently.
-
-The addon should maintain an internal normalized `ControllerState` containing at minimum:
-
-```text
-A / B / X / Y
-D-Pad
-LB / RB
-LT / RT
-Left Stick
-Right Stick
-L3 / R3
-Start / Select
-M1
-M2
-```
-
----
-
-## 7. MSI Center M Stock Environment
-
-When no Steam session is active, leave MSI Center M and the internal controller completely untouched.
-
-When a Steam session starts and no external controller is present:
-
-1. Snapshot the current controller/environment state.
-2. If required, switch the MSI Claw internal controller to DirectInput mode.
-3. Wait for PID_1902 to become available.
-4. Acquire only the MSI Claw DirectInput controller.
-5. Hide the appropriate physical gamepad interface from games if required.
-6. Create the virtual Steam Controller.
-7. Route Claw input into it.
-
-When the Steam session ends:
-
-1. Remove temporary XInput output if present.
-2. Remove the Steam Controller.
-3. Release DirectInput.
-4. Restore HidHide changes made by this application.
-5. Restore the original MSI controller mode.
-
-The result should be indistinguishable from the addon not being active.
-
-Never hard-code the assumption that the original controller mode was XInput; snapshot and restore it.
-
----
-
-## 8. ClawTweaks Environment
-
-ClawTweaks currently uses controller virtualization and HidHide, and its latest installed builds include:
-
-```text
-libviiper.dll
-SharpDX.DirectInput.dll
-HidSharp.dll
-Nefarius.Drivers.HidHide.dll
-```
-
-usbip-win2 is installed by current ClawTweaks.
-
-ViGEmBus may not be installed and must not be assumed to exist.
-
-Current ClawTweaks appears to use embedded `libVIIPER` rather than a standalone `viiper.exe`.
-
-Do not depend on ClawTweaks private implementation details.
-
-Do not attempt to mutate or steal a ClawTweaks-owned VIIPER device.
-
-During a Steam override session:
-
-* ClawTweaks controller mapping/macros are intentionally not used.
-* Steam Input is responsible for game controller mapping and macros.
-* Prevent ClawTweaks virtual controller output from causing duplicate game input.
-* Preserve all unrelated ClawTweaks functionality such as TDP, OSD, fan control, performance settings, etc.
-
-After the Steam session, restore normal ClawTweaks controller behavior.
-
----
-
-## 9. Virtual Steam Controller
-
-Initial target:
-
-```text
+MSI Claw built-in controller
+        ↓
+Steam Input Addon for Claw
+        ↓
 Classic Steam Controller
-Valve VID/PID: 28DE:1102
+        ↓
+Steam
+        ↓
+Steam Input
+        ↓
+Game
 ```
 
-Do not prioritize the newer 2026 Steam Controller/Triton protocol for the first implementation.
+For games launched through Steam, including **Non-Steam Shortcuts**, the Claw built-in controller should be exposed as a Classic Steam Controller.
 
-Classic Steam Controller is preferred because:
-
-* HHC already proves VIIPER-based Steam Controller emulation is practical.
-* It exposes two rear grip inputs, which map naturally to the Claw's M1/M2.
-* It avoids implementing the newer Triton HID protocol.
-
-Recommended fixed physical mapping:
+Fixed rear-button mapping:
 
 ```text
 Claw M1 → Steam Controller Left Grip
 Claw M2 → Steam Controller Right Grip
 ```
 
-The addon must NOT implement per-game mapping for these inputs.
+Steam Input is responsible for everything that happens after this physical mapping.
 
-Steam Input handles all mapping after this point.
+This includes:
+
+* controller remapping;
+* keyboard and mouse mapping;
+* macros;
+* turbo;
+* long press;
+* double press;
+* Action Sets;
+* Action Layers;
+* radial menus;
+* per-game layouts;
+* other Steam Input features.
+
+The addon must not duplicate these features.
 
 ---
 
-## 10. Steam Input Responsibility
+# Non-Goals
 
-Once the virtual Steam Controller is active:
+This project is **not** intended to become:
+
+* a general controller manager;
+* a controller remapping application;
+* a macro editor;
+* a keyboard/mouse mapping application;
+* a game profile manager;
+* a game database;
+* a Steam Input replacement;
+* a Handheld Companion replacement;
+* a ClawTweaks replacement.
+
+The addon should remain a small routing layer between the MSI Claw controller and Steam Input.
+
+---
+
+# Supported Environments
+
+The target environments are:
+
+1. **Stock MSI Center M**
+2. **MSI Center M + ClawTweaks**
+
+ClawTweaks support is compatibility behavior only.
+
+ClawTweaks is **not a runtime dependency** and the addon must not require modifications to ClawTweaks.
+
+The addon must also preserve unrelated ClawTweaks features such as:
+
+* TDP controls;
+* fan controls;
+* OSD;
+* performance controls;
+* other non-controller functionality.
+
+---
+
+# Core Behavioral Rule
+
+The addon may intervene only when:
 
 ```text
-MSI Claw
+Steam session active
+AND
+no external physical controller
+```
+
+Anything else means:
+
+```text
+PASSIVE
+```
+
+PASSIVE should behave as closely as possible to the addon not being installed.
+
+In PASSIVE state:
+
+* no addon virtual controller exists;
+* the MSI internal controller is not unnecessarily acquired;
+* the MSI controller mode is not changed;
+* HidHide is not modified by the addon;
+* normal MSI Center M behavior remains available;
+* normal ClawTweaks controller behavior remains available.
+
+The addon should avoid persistent system-wide controller modifications whenever possible.
+
+---
+
+# State Priority
+
+External controller detection has the highest priority.
+
+Conceptually:
+
+```text
+External physical controller present?
+    YES
+    → PASSIVE / VETO
+
+    NO
     ↓
-Addon normalized input
+
+Steam session active?
+    NO
+    → PASSIVE
+
+    YES
     ↓
-Virtual Steam Controller
-    ↓
-Steam
-    ↓
-Steam Input
-    ↓
+
+Steam Controller routing active
+```
+
+During Steam routing:
+
+```text
+Xbox Game Bar foreground?
+    YES
+    → Steam Controller stays connected but neutral
+    → temporary Xbox 360 output receives live input
+
+    NO
+    → temporary Xbox 360 output off
+    → Steam Controller receives live input
+```
+
+External-controller veto always overrides every other state.
+
+---
+
+# Steam Session Detection
+
+Steam session lifetime is determined from:
+
+```text
+HKCU\Software\Valve\Steam
+RunningAppID
+```
+
+Interpretation:
+
+```text
+RunningAppID == 0
+→ Steam session inactive
+
+RunningAppID != 0
+→ Steam session active
+```
+
+This state is used for both:
+
+* normal Steam games;
+* Non-Steam Shortcuts launched through Steam.
+
+The addon must not use foreground process identity as the Steam-session lifetime.
+
+For example:
+
+```text
 Game
+→ Alt-Tab
+→ Explorer
+→ Discord
+→ Browser
+→ Steam
+→ Game
 ```
 
-Steam Input is responsible for:
+must remain one continuous Steam routing session.
 
-* Per-game layouts.
-* Button remapping.
-* Keyboard/mouse mapping.
-* Macros.
-* Turbo.
-* Long press.
-* Double press.
-* Action Sets / Action Layers.
-* Radial menus.
-* Other Steam Input functionality.
+The Steam override ends only when `RunningAppID` returns to `0`, unless an external-controller veto occurs first.
 
-Do not duplicate these functions inside the addon.
+Registry monitoring should be event-driven where practical.
 
 ---
 
-## 11. Xbox Game Bar Exception
+# External Controller Veto
 
-Xbox Game Bar / ClawTweaks navigation currently requires XInput.
+If any external physical game controller is present, the addon must remain completely passive.
 
-During an active Steam session, the virtual Steam Controller should remain enumerated for the entire game session.
+Examples include:
 
-Do NOT disconnect/reconnect the Steam Controller every time Game Bar opens.
+* Xbox controllers;
+* DualSense;
+* DualShock;
+* 8BitDo controllers;
+* other external USB/Bluetooth gamepads.
 
-When Xbox Game Bar becomes foreground:
+The addon must not acquire those controllers or alter their behavior.
+
+External-controller detection should use Windows device information rather than XInput slot counting.
+
+Preferred basis:
+
+* PnP;
+* SetupAPI;
+* device instance identity;
+* physical device/container identity;
+* `DEVPKEY_Device_ContainerId` or equivalent container-level information where useful.
+
+XInput slot occupancy alone must not be treated as authoritative physical-controller detection.
+
+## Devices excluded from the veto
+
+The following must not be mistaken for external physical controllers:
+
+* MSI Claw internal controller interfaces;
+* addon-owned VIIPER devices;
+* ClawTweaks-owned virtual controllers;
+* Handheld Companion virtual controllers;
+* USB/IP virtual devices;
+* ViGEm virtual devices.
+
+This distinction is critical because a virtual controller may appear in Windows as a normal USB controller.
+
+---
+
+# Addon-Owned Virtual Device Tracking
+
+VIIPER uses USB/IP and may expose devices that resemble physical USB devices to Windows.
+
+Therefore the addon must **not rely only on a generic “virtual device” flag**.
+
+Addon-created virtual controllers should be explicitly tracked.
+
+Preferred strategy:
 
 ```text
-Virtual Steam Controller
-→ remains connected
-→ receives neutral input reports
+Before virtual-device creation
+→ snapshot relevant controller/device identities
 
-Temporary Xbox 360 virtual controller
-→ created/enabled
-→ receives live MSI Claw input
+Create VIIPER device
+
+Wait for enumeration
+
+After creation
+→ compare device state
+→ identify newly created addon-owned device
+→ record its path / instance / container identity
 ```
 
-This allows Game Bar and ClawTweaks UI navigation while preventing the background Steam game from reacting to the same controller inputs.
+Tracked addon-owned virtual devices are always excluded from external-controller veto detection.
 
-When Game Bar leaves foreground:
+Useful identities may include:
+
+* device path;
+* PnP instance ID;
+* container ID;
+* VID/PID;
+* parent/child device relationships.
+
+VID/PID alone should not be considered sufficient identity.
+
+---
+
+# External Controller Hotplug
+
+If an external physical controller appears while Steam routing is active:
+
+```text
+1. Stop addon routing
+2. Remove addon virtual outputs
+3. Restore native MSI/ClawTweaks state
+4. Set ExternalControllerVeto
+```
+
+The veto remains latched until the current Steam session ends.
+
+Example:
+
+```text
+Steam session starts
+→ addon active
+
+Xbox controller connected
+→ addon disengages
+
+Xbox controller disconnected
+→ addon remains passive
+
+RunningAppID becomes 0
+→ veto cleared
+
+Next Steam session
+→ normal eligibility evaluation again
+```
+
+This avoids repeated virtual-controller hotplug and Steam Input device rebinding during one game session.
+
+---
+
+# MSI Claw Physical Input
+
+The preferred physical input source is **DirectInput**.
+
+Known MSI controller interfaces:
+
+```text
+VID 0x0DB0
+
+PID 0x1901 → XInput
+PID 0x1902 → DirectInput
+PID 0x1903 → testing / other mode
+```
+
+Known rear-button mapping:
+
+```text
+M1 → DirectInput Buttons[15]
+M2 → DirectInput Buttons[16]
+```
+
+M1 and M2 must be treated as independent physical inputs.
+
+They must not be reconstructed from the XInput interface because XInput cannot expose both rear buttons independently.
+
+---
+
+# Normalized Controller State
+
+Physical input should be translated into an addon-owned normalized state before being passed to virtual outputs.
+
+Conceptually:
+
+```text
+ControllerState
+```
+
+should contain at least:
+
+```text
+A
+B
+X
+Y
+
+D-Pad Up
+D-Pad Down
+D-Pad Left
+D-Pad Right
+
+LB
+RB
+LT
+RT
+
+Left Stick X/Y
+Right Stick X/Y
+
+L3
+R3
+
+Start
+Select
+
+M1
+M2
+```
+
+Physical-device reading and virtual-controller report formatting should remain separate responsibilities.
+
+This allows the input source and virtual output implementations to evolve independently.
+
+---
+
+# Stock MSI Center M Behavior
+
+When the addon is passive, MSI Center M and the internal controller must remain untouched.
+
+When a Steam session becomes eligible:
+
+```text
+1. Snapshot current native/controller state
+2. Switch to DirectInput only if required
+3. Wait for PID_1902
+4. Acquire only the internal MSI Claw DirectInput device
+5. Apply only hiding necessary for routing
+6. Create the virtual Steam Controller
+7. Begin routing
+```
+
+On exit:
+
+```text
+1. Remove temporary Xbox 360 output if present
+2. Remove addon Steam Controller
+3. Release DirectInput
+4. Restore addon-owned HidHide changes
+5. Restore the exact previous MSI controller state
+```
+
+The addon must never assume that the original controller mode was XInput.
+
+The original state must be observed and restored.
+
+---
+
+# ClawTweaks Compatibility
+
+ClawTweaks may already perform:
+
+* controller virtualization;
+* DirectInput handling;
+* HidHide configuration;
+* USB/IP / VIIPER output.
+
+The addon must coexist with that environment without relying on private ClawTweaks internals.
+
+Rules:
+
+* do not require ClawTweaks modification;
+* do not require private ClawTweaks IPC;
+* do not steal a ClawTweaks-owned virtual controller;
+* do not mutate a ClawTweaks-owned virtual controller;
+* do not assume ViGEmBus exists;
+* do not assume a standalone `viiper.exe` exists.
+
+During addon Steam routing:
+
+```text
+Claw physical input
+→ addon
+→ Steam Controller
+→ Steam Input
+```
+
+ClawTweaks button mappings/macros should not also reach the game.
+
+Duplicate controller output must be prevented.
+
+When addon routing ends, normal ClawTweaks controller behavior must be restored.
+
+---
+
+# Virtual Output
+
+The primary v1 output is:
+
+```text
+Classic Steam Controller
+
+VID: 0x28DE
+PID: 0x1102
+```
+
+The newer Steam Controller 2026 / Triton protocol is intentionally not the initial target.
+
+The Classic Steam Controller is preferred because its two grip inputs map naturally to:
+
+```text
+M1 → Left Grip
+M2 → Right Grip
+```
+
+The addon should use VIIPER / usbip-win2 for virtual output.
+
+Preferred implementation:
+
+```text
+embedded libVIIPER.dll
+```
+
+Do not make the following hard requirements:
+
+* ViGEmBus;
+* standalone `viiper.exe`.
+
+---
+
+# Virtual Output Architecture
+
+The addon may need two independent virtual devices:
+
+```text
+VirtualOutputManager
+│
+├─ SteamControllerOutput
+│    └─ persistent for the eligible Steam session
+│
+└─ Xbox360CompanionOutput
+     └─ temporary while Xbox Game Bar is foreground
+```
+
+The Steam Controller and Xbox 360 output must have independent lifecycles.
+
+The implementation should not assume a single active virtual target.
+
+---
+
+# Steam Controller Lifetime
+
+Once created for an eligible Steam session, the Classic Steam Controller should remain enumerated until:
+
+* the Steam session ends; or
+* an external-controller veto forces complete disengagement.
+
+Normal foreground changes must not recreate it.
+
+Xbox Game Bar must not recreate it.
+
+The goal is to minimize:
+
+* Steam Input hotplug events;
+* configuration rebinding;
+* player-slot changes;
+* device-lost events.
+
+---
+
+# Xbox Game Bar Routing
+
+Xbox Game Bar and controller-oriented ClawTweaks UI navigation require an XInput-compatible controller.
+
+However, persistent Steam Controller hotplug should be avoided.
+
+Therefore Game Bar uses a special routing mode.
+
+## Game Bar foreground
+
+```text
+Classic Steam Controller
+→ stays enumerated
+→ receives neutral reports
+
+Temporary Xbox 360 controller
+→ enabled/created
+→ receives live Claw input
+```
+
+The Steam game therefore receives no live controller input while the user navigates Game Bar.
+
+## Game Bar exit
 
 ```text
 Temporary Xbox 360 controller
-→ removed
+→ removed/disabled
 
-Virtual Steam Controller
-→ remains connected
-→ resumes receiving live controller reports
+Same Classic Steam Controller
+→ live reports resume
 ```
 
-The Steam Controller should remain the same enumerated device throughout the Steam session to avoid hotplug, Steam Input rebinding, player-slot and device-lost issues.
+The Steam Controller must not be disconnected and recreated during this transition.
 
 ---
 
-## 12. Game Bar Detection
+# Game Bar Detection
 
-Do not require modifications to ClawTweaks.
+The addon should detect Xbox Game Bar independently of ClawTweaks.
 
-The addon must be able to detect Xbox Game Bar independently.
-
-Prefer event-driven foreground monitoring such as:
+Preferred mechanism:
 
 ```text
 SetWinEventHook(EVENT_SYSTEM_FOREGROUND)
 ```
 
-Resolve the foreground HWND to its owning process/package and identify Xbox Game Bar.
-
-Normal foreground changes such as:
+Then:
 
 ```text
-Explorer
-Edge
-Discord
-Steam Client
+foreground HWND
+→ owning PID
+→ process/package identity
+→ Game Bar classification
 ```
 
-must have no effect on the Steam Controller state.
+Only Xbox Game Bar causes the special XInput routing state.
 
-Only Xbox Game Bar is a special routing state.
+Ordinary foreground applications such as Explorer, browsers, Discord, Steam Client, etc. must not affect controller routing.
 
 ---
 
-## 13. VIIPER Architecture
+# HidHide Coordination
 
-Prefer embedded `libVIIPER.dll`.
+HidHide may already be configured by another application.
 
-Do not require a visible standalone `viiper.exe`.
-
-VIIPER is responsible for virtual USB controller creation through usbip-win2.
-
-The addon may need to create two VIIPER devices during Game Bar use:
-
-```text
-Persistent:
-Classic Steam Controller
-
-Temporary:
-Xbox 360 controller
-```
-
-The implementation should therefore not blindly copy HHC's single-target `VirtualManager` design.
-
-Use a small addon-specific VIIPER host/output manager capable of independently controlling both virtual outputs.
-
----
-
-## 14. HidHide Rules
-
-HidHide may already be installed and configured by ClawTweaks or another application.
-
-Never take exclusive ownership of the complete HidHide configuration.
+The addon must never assume exclusive ownership of its configuration.
 
 Rules:
 
-* Add only entries required by this application.
-* Track exactly which entries this application added.
-* Remove/restore only those entries.
-* Never replace the user's complete HidHide device/application list.
-* Whitelist the addon itself where required to access a hidden MSI physical controller.
-* Preserve existing ClawTweaks/HHC/HidHide configuration.
+* read existing state before changing anything;
+* add only entries required by this addon;
+* record exactly what the addon added or changed;
+* remove only addon-owned changes;
+* preserve unrelated application/device entries;
+* whitelist the addon executable when required to access a hidden MSI controller;
+* preserve ClawTweaks/HHC HidHide configuration.
+
+Replacing the complete HidHide configuration is forbidden.
+
+Where a supported HidHide version provides process/session-scoped hiding, it may be used as an additional safety mechanism.
+
+It must not be assumed to exist on every installed HidHide version.
 
 ---
 
-## 15. Crash Recovery
+# Recovery
 
-Controller state restoration is mandatory.
+All native-state changes must be reversible.
 
-Before entering Steam override mode, write a recovery journal containing the state this application changed.
+Before entering controller override mode, persist a recovery journal.
 
-Example:
+The journal should contain enough information to restore at least:
 
 ```text
-OverrideActive
-Original MSI controller mode
-HidHide changes made by this app
-Virtual output state
+override active state
+original MSI controller mode/state
+HidHide changes made by this addon
+addon virtual outputs created
+other addon-owned routing changes
 ```
 
-On normal Steam-session exit:
+On clean exit:
 
-* Restore everything.
-* Mark the journal clean.
+```text
+restore native state
+→ remove addon changes
+→ clear recovery journal
+```
 
-On addon startup:
+On application startup:
 
-* If an incomplete previous override is detected, recovery must run before normal controller routing begins.
+```text
+recovery journal incomplete?
+    YES
+    → recover before normal routing/UI
 
-The addon must never leave the MSI internal controller permanently hidden or stuck in DirectInput mode after a crash.
+    NO
+    → continue normally
+```
+
+Crash recovery takes priority over normal controller initialization.
+
+The addon must not leave the internal controller:
+
+* hidden;
+* stuck in DirectInput mode;
+* unavailable to MSI Center M;
+* unavailable to ClawTweaks
+
+after a crash.
 
 ---
 
-## 16. Dependencies
+# Dependency Philosophy
 
-For ClawTweaks systems, some dependencies may already exist.
-
-For MSI Center M-only systems, the addon installer must be able to check/install required dependencies.
-
-Expected components:
+Possible routing dependencies include:
 
 ```text
 libVIIPER
@@ -487,46 +700,27 @@ HidHide
 DirectInput support/library
 ```
 
-Do not require ViGEmBus.
+ViGEmBus is not a required dependency.
 
-Installed drivers alone must not alter normal controller behavior while the addon is passive.
+ClawTweaks systems may already provide some compatible components, but the addon must not rely on ClawTweaks being installed.
 
----
+Dependency detection should distinguish between:
 
-## 17. Licensing / Source Reuse
+* installed;
+* usable;
+* missing;
+* incompatible;
+* repair/reboot required
 
-Project license:
+where relevant.
 
-```text
-GPL-3.0-or-later
-```
-
-`libVIIPER` embedded use is compatible with choosing GPL for the application.
-
-Handheld Companion is useful as a protocol and architecture reference, particularly for:
-
-* MSI Claw DirectInput handling.
-* M1/M2 button identification.
-* MSI controller mode switching.
-* Steam Controller VIIPER output behavior.
-
-However, HHC is licensed under CC BY-NC-SA 4.0.
-
-Therefore:
-
-* Do not blindly copy HHC source files into this project.
-* Prefer independent implementations based on documented behavior, hardware observations, public protocols and VIIPER interfaces.
-* Clearly retain any required third-party notices/licenses for redistributed binaries or libraries.
-
-ClawTweaks source should likewise be treated as a compatibility reference, not as a required source dependency.
+Installed drivers must not alter normal controller behavior while the addon is passive.
 
 ---
 
-## 18. Architecture Direction
+# Architecture
 
-Keep the application small.
-
-Suggested components:
+Expected high-level components:
 
 ```text
 SteamInputAddonforClaw
@@ -535,9 +729,12 @@ SteamInputAddonforClaw
 │    └─ RunningAppID monitoring
 │
 ├─ ExternalControllerDetector
+│    └─ PnP / SetupAPI physical-controller veto
 │
 ├─ MsiClawInputSource
 │    └─ PID_1902 DirectInput
+│
+├─ MsiControllerModeManager
 │
 ├─ ControllerState
 │
@@ -549,109 +746,337 @@ SteamInputAddonforClaw
 │
 ├─ HidHideCoordinator
 │
-├─ MsiControllerModeManager
-│
 ├─ EnvironmentDetector
-│    ├─ CenterMEnvironment
-│    └─ ClawTweaksEnvironment
+│    ├─ Stock Center M
+│    └─ ClawTweaks-compatible environment
 │
 └─ RecoveryManager
 ```
 
-Avoid adding:
+Component boundaries should remain narrow.
 
-* Game database.
-* Per-game addon profiles.
-* Mapping editor.
-* Macro editor.
-* Action-set editor.
-
-Those are intentionally delegated to Steam Input.
+Controller reading, state normalization, environment modification, virtual output, Steam-session detection and recovery should not be unnecessarily coupled.
 
 ---
 
-## 19. Primary State Machine
+# Primary State Model
 
 Conceptually:
 
-```csharp
-if (ExternalControllerVeto)
-{
-    RestoreNativeState();
-    return;
-}
+```text
+                 ┌─────────────────────────────┐
+                 │ External controller present │
+                 └──────────────┬──────────────┘
+                                │ YES
+                                ▼
+                         PASSIVE / VETO
+                                │
+                                │ until Steam session ends
+                                │
+                                ▼
 
-if (!SteamSessionActive)
-{
-    RestoreNativeState();
-    return;
-}
-
-EnsureSteamOverrideActive();
-
-if (GameBarForeground)
-{
-    NeutralizeSteamController();
-    EnsureXbox360Companion();
-}
-else
-{
-    RemoveXbox360Companion();
-    ResumeSteamController();
-}
+External controller absent
+        │
+        ▼
+RunningAppID == 0
+        │
+        ├─ YES → PASSIVE
+        │
+        └─ NO
+             ▼
+      Steam override active
+             │
+             ▼
+   Game Bar foreground?
+        │
+        ├─ NO
+        │    Steam Controller = LIVE
+        │    Xbox360 = OFF
+        │
+        └─ YES
+             Steam Controller = NEUTRAL
+             Xbox360 = LIVE
 ```
 
-State interpretation:
+---
+
+# Safety Invariants
+
+The following are architectural invariants.
+
+## Passive invariant
+
+When intervention is unnecessary, the machine should behave as though the addon were not installed.
+
+## External-controller invariant
+
+The addon never takes control while a separate physical controller is present.
+
+## Restore invariant
+
+Every system/controller state changed by the addon must have a defined restoration path.
+
+## Ownership invariant
+
+The addon modifies only resources it owns or changes it explicitly tracks.
+
+## Steam Input invariant
+
+Game-level remapping behavior belongs to Steam Input, not this application.
+
+## Hotplug invariant
+
+Persistent virtual-controller hotplug during one Steam session should be minimized.
+
+## ClawTweaks invariant
+
+ClawTweaks must not require modification for compatibility.
+
+---
+
+# Validation Targets
+
+The architecture should be proven through small, isolated PoCs before substantial UI work.
+
+Required validation areas:
+
+1. MSI Claw PID_1902 DirectInput acquisition.
+2. Correct standard controller input.
+3. Independent M1/M2 input.
+4. M1 = `Buttons[15]`.
+5. M2 = `Buttons[16]`.
+6. Classic Steam Controller `28DE:1102` creation through VIIPER.
+7. Steam recognition as a Steam Controller.
+8. M1/M2 exposed as independent Steam Input grips.
+9. Steam Input remapping working in a normal Steam title.
+10. Same behavior for a Non-Steam Shortcut launched through Steam.
+11. Steam Controller remaining stable across Alt-Tab.
+12. Persistent Steam Controller plus temporary Xbox360 Game Bar routing.
+13. No background-game controller input while Game Bar is foreground.
+14. Return from Game Bar without Steam Controller re-enumeration.
+15. Clean MSI Center M restoration.
+16. Clean ClawTweaks restoration.
+17. External physical-controller detection.
+18. External-controller hotplug veto.
+19. Addon-owned VIIPER output correctly excluded from that veto.
+20. Crash recovery restoring controller/HidHide state.
+
+These are validation requirements, not reasons to expand the product scope.
+
+---
+
+# Reference Implementations
+
+Reference projects are used to understand hardware behavior, protocols and established Windows controller-handling patterns.
+
+They are **not architectural templates to copy wholesale**.
+
+## Handheld Companion
+
+Repository:
+
+`Valkirie/HandheldCompanion`
+
+Primary reference areas:
+
+* MSI Claw hardware support;
+* DirectInput handling;
+* MSI Claw VID/PID behavior;
+* M1/M2 identification;
+* MSI controller-mode switching;
+* Classic Steam Controller behavior;
+* Steam Controller virtual report/protocol handling.
+
+Reference priority:
 
 ```text
-PASSIVE
-- Addon behaves as uninstalled.
+Claw hardware behavior
+M1/M2
+mode switching
+Classic Steam Controller
+→ HHC
+```
 
-STEAM
-- Built-in Claw input routed to Classic Steam Controller.
-- Steam Input owns game mappings/macros.
+The addon should extract only the minimum hardware/protocol knowledge required for its own narrow architecture.
 
-STEAM + GAME BAR
-- Steam Controller stays connected but neutral.
-- Temporary Xbox 360 output handles Game Bar navigation.
+---
 
-EXTERNAL CONTROLLER VETO
-- Addon fully disengages for the rest of the current Steam session.
+# DS4Windows Reference
+
+Repository:
+
+`hbashton/DS4Windows`
+
+Primary reference areas:
+
+* VIIPER runtime lifecycle;
+* usbip-win2 integration;
+* virtual-controller creation/removal;
+* hotplug handling;
+* reconnect/error handling;
+* HidHide integration;
+* physical/virtual controller separation;
+* addon-owned virtual-device tracking patterns.
+
+One particularly important design lesson is that VIIPER/USB-IP output may look like physical USB hardware to Windows.
+
+Therefore the addon must explicitly track its own virtual output rather than assuming Windows can always classify it as virtual.
+
+Reference priority:
+
+```text
+VIIPER lifecycle
+usbip-win2
+HidHide
+own virtual-device exclusion
+hotplug patterns
+→ hbashton/DS4Windows
 ```
 
 ---
 
-## 20. Initial Proof-of-Concept Priorities
+# Windows Platform References
 
-Before building substantial UI, verify these in order:
+For external-controller detection, the primary source of truth should remain Windows device APIs.
 
-1. Read MSI Claw PID_1902 through DirectInput.
-2. Confirm all standard controls work.
-3. Confirm M1 = Button 15 and M2 = Button 16 on supported Claw hardware.
-4. Create a Classic Steam Controller through VIIPER.
-5. Confirm Steam recognizes it as a Steam Controller.
-6. Confirm M1/M2 appear as independent Steam Input grip buttons.
-7. Confirm Steam Input mappings work inside Steam games.
-8. Confirm the same behavior for Non-Steam shortcuts launched through Steam.
-9. Keep the Steam Controller connected while temporarily creating an Xbox 360 VIIPER device.
-10. Verify Xbox Game Bar/ClawTweaks can be navigated through the temporary XInput device.
-11. Verify returning from Game Bar resumes the same Steam Controller without re-enumeration.
-12. Verify Steam session exit restores Center M/ClawTweaks native behavior.
-13. Verify connecting an external physical controller disengages the addon cleanly.
-14. Verify crash recovery restores the native controller state.
+Preferred areas:
 
-UI and updater work should come after the controller-routing PoC is proven.
+```text
+PnP
+SetupAPI
+Configuration Manager APIs
+Device Instance ID
+Device Container ID
+device relationship information
+```
+
+DS4Windows patterns may help with implementation, but external-controller classification should be built around Windows device identity rather than application-specific VID/PID lists alone.
 
 ---
 
-## 21. Development Decision Rule
+# Reference Priority Summary
 
-When evaluating implementation choices, prefer the solution that:
+```text
+MSI Claw DirectInput / PID / M1 / M2
+→ Handheld Companion
 
-1. Changes the native MSI/ClawTweaks state the least.
-2. Is completely reversible.
-3. Does not require modifying ClawTweaks.
-4. Does not duplicate Steam Input functionality.
-5. Does not interfere with external controllers.
-6. Leaves the machine behaving normally whenever Steam override is not required.
-7. Minimizes virtual-controller hotplug during an active Steam session.
+MSI controller-mode switching
+→ Handheld Companion
+
+Classic Steam Controller
+→ Handheld Companion + public Steam Controller protocol information
+
+VIIPER runtime / lifecycle
+→ hbashton/DS4Windows
+
+usbip-win2
+→ hbashton/DS4Windows
+
+HidHide coordination
+→ hbashton/DS4Windows
+
+Addon-owned virtual-device exclusion
+→ hbashton/DS4Windows
+
+External physical-controller detection
+→ Windows PnP/SetupAPI + DS4Windows patterns
+```
+
+---
+
+# Third-Party Source Policy
+
+Do not copy complete reference-project architecture into this addon.
+
+Prefer:
+
+```text
+observe behavior
+→ identify minimum required mechanism
+→ implement addon-specific version
+```
+
+Direct third-party code reuse should only occur where it clearly reduces risk or avoids unnecessary reimplementation.
+
+When third-party source code is directly incorporated:
+
+* preserve required copyright notices;
+* preserve required license notices;
+* document the source;
+* ensure license compatibility.
+
+Hardware/protocol observations should be independently implemented where practical.
+
+---
+
+# License
+
+Steam Input Addon for Claw is licensed under:
+
+```text
+GPL-3.0-or-later
+```
+
+Redistributed third-party components retain their own licenses.
+
+Reference projects may have different licensing terms. Using a project as an implementation or protocol reference does not automatically permit copying its source.
+
+Third-party code must be reviewed individually before direct reuse.
+
+---
+
+# Development Principles
+
+Routing correctness and restoration safety take priority over UI.
+
+Development should proceed in small, independently reviewable steps.
+
+Each functional change should include appropriate automated tests where possible.
+
+Before merging:
+
+```text
+existing relevant tests
+→ PASS
+
+new tests
+→ PASS
+
+dotnet build
+→ PASS
+
+GitHub Actions CI
+→ PASS
+```
+
+Work is performed on task-specific branches.
+
+Do not commit feature work directly to `main`.
+
+Each PR should document:
+
+* changes;
+* test results;
+* limitations;
+* required manual tests.
+
+Do not combine unrelated future functionality into the same PR.
+
+PRs are reviewed before merge.
+
+---
+
+# Decision Rules
+
+When multiple implementations are possible, prefer the one that:
+
+1. changes MSI/ClawTweaks native state the least;
+2. is completely reversible;
+3. does not require ClawTweaks modification;
+4. delegates mapping/macros to Steam Input;
+5. never interferes with external physical controllers;
+6. behaves like an uninstalled addon when intervention is unnecessary;
+7. minimizes virtual-controller hotplug during an active Steam session;
+8. clearly distinguishes addon-owned state from third-party state;
+9. has a deterministic crash-recovery path;
+10. keeps the addon narrow rather than becoming a general controller manager.
