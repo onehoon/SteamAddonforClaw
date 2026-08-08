@@ -82,15 +82,15 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
             return new ControllerEnvironment(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Indeterminate);
         }
 
-        var installed = KnownExecutablePaths.Any(File.Exists);
-        var processRunning = _clawTweaksRuntimeDetector.IsRunning();
-        if (!installed && !processRunning)
-        {
-            return new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled);
-        }
-
         try
         {
+            var installed = KnownExecutablePaths.Any(File.Exists);
+            var processRunning = _clawTweaksRuntimeDetector.IsRunning();
+            if (!installed && !processRunning)
+            {
+                return new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled);
+            }
+
             var virtualTopologyPresent = _deviceEnumerator.EnumeratePresentDevices()
                 .Any(new ControllerDeviceClassifier().IsClawTweaksVirtualControllerCandidate);
 

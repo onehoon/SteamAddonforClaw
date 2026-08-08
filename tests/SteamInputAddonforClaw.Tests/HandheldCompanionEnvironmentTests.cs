@@ -82,6 +82,17 @@ public sealed class HandheldCompanionEnvironmentTests
         Assert.Equal(ControllerEnvironmentMode.ClawTweaks, environment.Mode);
     }
 
+    [Fact]
+    public void Detect_WhenClawTweaksRuntimeInspectionFails_ReturnsIndeterminate()
+    {
+        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([]), new FakeRuntimeDetector(false), new ThrowingClawTweaksRuntimeDetector());
+
+        var environment = detector.Detect();
+
+        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
+        Assert.Equal(ClawTweaksState.Indeterminate, environment.ClawTweaksState);
+    }
+
     private static ClawTweaksEnvironmentDetector CreateDetector(bool running) => new(new FakeEnumerator([]), new FakeRuntimeDetector(running));
 
     private sealed class FakeRuntimeDetector(bool running) : IHandheldCompanionRuntimeDetector
@@ -92,6 +103,11 @@ public sealed class HandheldCompanionEnvironmentTests
     private sealed class FakeClawTweaksRuntimeDetector(bool running) : IClawTweaksRuntimeDetector
     {
         public bool IsRunning() => running;
+    }
+
+    private sealed class ThrowingClawTweaksRuntimeDetector : IClawTweaksRuntimeDetector
+    {
+        public bool IsRunning() => throw new InvalidOperationException();
     }
 
     private sealed class FakeEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
