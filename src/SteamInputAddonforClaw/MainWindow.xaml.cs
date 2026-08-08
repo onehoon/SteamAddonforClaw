@@ -2,6 +2,7 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
@@ -22,6 +23,7 @@ public sealed partial class MainWindow : Window
     private readonly Func<IDirectInputDeviceEnumerator> _directInputEnumeratorFactory;
     private MsiClawInputSource? _msiClawInputSource;
     private bool _isLoadingStartupSettings;
+    private MainNavigationPage _currentPage;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -82,7 +84,7 @@ public sealed partial class MainWindow : Window
 
     private void DeveloperMenuBackButton_Click(object sender, RoutedEventArgs args)
     {
-        MainNavigationView.SelectedItem = MainNavigationView.SettingsItem;
+        ReturnToSettings();
     }
 
     private void StartM1M2TestButton_Click(object sender, RoutedEventArgs args)
@@ -169,10 +171,28 @@ public sealed partial class MainWindow : Window
 
     private void ShowPage(MainNavigationPage page)
     {
+        _currentPage = page;
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
+    {
+        if (_currentPage != MainNavigationPage.DeveloperMenu ||
+            !args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed)
+        {
+            return;
+        }
+
+        ReturnToSettings();
+        args.Handled = true;
+    }
+
+    private void ReturnToSettings()
+    {
+        ShowPage(MainNavigationPage.Settings);
     }
 
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)

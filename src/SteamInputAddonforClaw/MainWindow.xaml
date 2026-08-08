@@ -7,6 +7,7 @@
         x:Name="MainNavigationView"
         PaneDisplayMode="Left"
         Loaded="MainNavigationView_Loaded"
+        PointerPressed="MainNavigationView_PointerPressed"
         SelectionChanged="MainNavigationView_SelectionChanged">
         <NavigationView.MenuItems>
             <NavigationViewItem
