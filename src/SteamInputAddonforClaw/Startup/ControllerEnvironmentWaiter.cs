@@ -85,8 +85,9 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
     private (string Snapshot, bool Ready) CreateRelevantTopologySnapshot(ControllerEnvironmentMode mode)
     {
         var devices = _deviceEnumerator.EnumeratePresentDevices();
+        var topology = new ControllerTopologySnapshot(devices);
         var relevantDevices = mode == ControllerEnvironmentMode.ClawTweaks
-            ? devices.Where(_classifier.IsClawTweaksVirtualControllerCandidate).ToArray()
+            ? devices.Where(device => _classifier.IsClawTweaksVirtualControllerCandidate(device, topology)).ToArray()
             : devices.Where(_classifier.IsRelevantTopologyDevice).ToArray();
         var snapshot = string.Join('\n', relevantDevices
             .Select(device => string.Join('|',

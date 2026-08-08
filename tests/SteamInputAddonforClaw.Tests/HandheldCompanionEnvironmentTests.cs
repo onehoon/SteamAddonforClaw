@@ -118,6 +118,17 @@ public sealed class HandheldCompanionEnvironmentTests
         Assert.Equal(ClawTweaksState.Indeterminate, environment.ClawTweaksState);
     }
 
+    [Fact]
+    public void Detect_WhenPackageIsInstalledWithoutRuntimeOrTopology_UsesStockCenterM()
+    {
+        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(false), new FakeInstallationProbe(true));
+
+        var environment = detector.Detect();
+
+        Assert.Equal(ControllerEnvironmentMode.StockCenterM, environment.Mode);
+        Assert.Equal(ClawTweaksState.InstalledInactive, environment.ClawTweaksState);
+    }
+
     private static ClawTweaksEnvironmentDetector CreateDetector(bool running) => new(new FakeEnumerator([]), new FakeRuntimeDetector(running));
 
     private sealed class FakeRuntimeDetector(bool running) : IHandheldCompanionRuntimeDetector

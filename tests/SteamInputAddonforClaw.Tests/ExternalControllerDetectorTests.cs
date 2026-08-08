@@ -141,6 +141,19 @@ public sealed class ExternalControllerDetectorTests
     }
 
     [Fact]
+    public void Detect_WhenClawTweaksVirtualXboxAndPhysicalControllerExist_ReturnsExternalPresent()
+    {
+        var usbIpRoot = new ControllerDeviceInfo("ROOT\\USB\\0000", Guid.Empty, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "USB", null, "usbip2_ude", null, null, true);
+        var virtualXbox = GameController(0x045E, 0x028E, ancestorInstanceIds: ["ROOT\\USB\\0000"]);
+        var physicalController = GameController(0x054C, 0x0CE6, ancestorInstanceIds: ["USB\\ROOT_HUB30\\1"]);
+
+        var assessment = Detect([virtualXbox, usbIpRoot, physicalController]);
+
+        Assert.Equal(ExternalControllerAssessmentStatus.ExternalPresent, assessment.Status);
+        Assert.Equal(1, assessment.DetectedExternalControllerCount);
+    }
+
+    [Fact]
     public void Detect_WhenDevicesUseSentinelContainerId_DoesNotMergeUnrelatedControllers()
     {
         var sentinel = new Guid("00000000-0000-0000-ffff-ffffffffffff");
