@@ -87,8 +87,8 @@ public sealed class ControllerDeviceClassifier
 
     private static bool ContainsUnverifiedVirtualIdentity(ControllerDeviceInfo device)
     {
-        var identity = GetIdentityText(device);
-        return identity.Contains("ROOT\\", StringComparison.OrdinalIgnoreCase) || identity.Contains("VIRTUAL", StringComparison.OrdinalIgnoreCase);
+        return device.InstanceId.StartsWith("ROOT\\", StringComparison.OrdinalIgnoreCase)
+            || device.InstanceId.Contains("VIRTUAL", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetIdentityText(ControllerDeviceInfo device)

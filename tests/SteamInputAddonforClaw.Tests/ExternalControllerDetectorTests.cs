@@ -109,11 +109,31 @@ public sealed class ExternalControllerDetectorTests
                 ancestorInstanceIds:
                 [
                     "USB\\VID_045E&PID_028E\\NORMAL_USB_PARENT",
-                    "ROOT\\USBIP_WIN2\\UDE"
+                    "ROOT\\USBIP_WIN2\\UDE",
+                    "HTREE\\ROOT\\0"
                 ])
         ]);
 
         Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
+    }
+
+    [Fact]
+    public void Detect_WhenPhysicalXboxHasGenericRootAncestors_ReturnsExternalPresent()
+    {
+        var assessment = Detect(
+        [
+            GameController(
+                0x045E,
+                0x0B13,
+                ancestorInstanceIds:
+                [
+                    "USB\\ROOT_HUB30\\NORMAL_USB_HUB",
+                    "PCI\\VEN_1234&DEV_5678",
+                    "HTREE\\ROOT\\0"
+                ])
+        ]);
+
+        Assert.Equal(ExternalControllerAssessmentStatus.ExternalPresent, assessment.Status);
     }
 
     [Fact]
