@@ -43,7 +43,7 @@ public sealed class SettingsStoreTests : IDisposable
         var configuration = WindowsTaskSchedulerStartupManager.CreateTaskConfiguration(@"C:\Custom Install\SteamInputAddonforClaw.exe", "DOMAIN\\User");
 
         Assert.Equal("DOMAIN\\User", configuration.UserId);
-        Assert.Equal(TimeSpan.FromMinutes(3), configuration.Delay);
+        Assert.Equal("PT3M", configuration.Delay);
     }
 
     [Fact]
