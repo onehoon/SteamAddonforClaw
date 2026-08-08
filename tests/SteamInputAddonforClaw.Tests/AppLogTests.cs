@@ -41,7 +41,7 @@ public sealed class AppLogTests : IDisposable
         Assert.Contains("[T", log);
         Assert.Contains("[L=", log);
         Assert.Contains("[Test]", log);
-        Assert.Contains("Field=value with spaces", log);
+        Assert.Contains("Field=\"value with spaces\"", log);
         Assert.Contains("InvalidOperationException", log);
     }
 

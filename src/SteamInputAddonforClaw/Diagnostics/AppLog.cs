@@ -60,5 +60,10 @@ internal static class AppLog
         }
     }
 
-    private static string Format(object? value) => value is null ? "null" : value.ToString()!.Replace("\r", " ").Replace("\n", " ");
+    private static string Format(object? value)
+    {
+        if (value is null) return "null";
+        var text = value.ToString()!.Replace("\r", " ").Replace("\n", " ");
+        return text.IndexOfAny([' ', '=']) >= 0 ? $"\"{text.Replace("\"", "\\\"")}\"" : text;
+    }
 }
