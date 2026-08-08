@@ -223,10 +223,15 @@ public sealed class MsiClawInputSourceTests
         var device = new FakeDevice(State(), State(), State(), State(15), State(15));
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var states = new List<ControllerState>();
-        source.StateChanged += (_, state) => states.Add(state);
+        var changedStateObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.StateChanged += (_, state) =>
+        {
+            states.Add(state);
+            if (state == new ControllerState(true, false)) changedStateObserved.TrySetResult();
+        };
 
         Assert.True(source.Start().Started);
-        await Task.Delay(50);
+        await changedStateObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
         await source.StopAsync();
 
         Assert.Equal([new ControllerState(false, false), new ControllerState(true, false)], states);
@@ -239,9 +244,14 @@ public sealed class MsiClawInputSourceTests
         var device = new FakeDevice(reads);
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var summaryTask = ObserveSummary(source);
+        var expectedReadsObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        device.ReadPerformed += readCount =>
+        {
+            if (readCount >= reads.Length) expectedReadsObserved.TrySetResult();
+        };
 
         Assert.True(source.Start().Started);
-        await Task.Delay(50);
+        await expectedReadsObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
         await source.StopAsync();
         var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
 
@@ -375,6 +385,7 @@ public sealed class MsiClawInputSourceTests
         public Exception? AcquireException { get; init; }
         public Exception? UnacquireException { get; init; }
         public Exception? DisposeException { get; init; }
+        public event Action<int>? ReadPerformed;
         public void Acquire()
         {
             AcquireCount++;
@@ -394,6 +405,7 @@ public sealed class MsiClawInputSourceTests
                 if (next is Exception exception) throw exception;
                 _last = (DirectInputState)next;
             }
+            ReadPerformed?.Invoke(ReadCount);
             return _last;
         }
         public void Dispose()
