@@ -134,11 +134,14 @@ public partial class App : Application
 
     private void OnMainWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
-        if (ApplicationLifecyclePolicy.OnWindowClose(_isExplicitExit) == ApplicationCloseAction.HideWindow)
+        if (ApplicationLifecyclePolicy.OnWindowClose(_isExplicitExit) == ApplicationCloseAction.HideWindow && _systemTrayIcon is not null)
         {
             args.Cancel = true;
             _mainWindow?.AppWindow.Hide();
+            return;
         }
+
+        _isExplicitExit = true;
     }
 
     private void ShowMainWindow()

@@ -14,6 +14,7 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint WM_APP = 0x8000;
     private const uint WM_LBUTTONDBLCLK = 0x0203;
     private const uint WM_RBUTTONUP = 0x0205;
+    private const uint WM_CONTEXTMENU = 0x007B;
     private const uint WM_NULL = 0;
     private const uint TPM_RETURNCMD = 0x0100;
     private const uint MF_STRING = 0;
@@ -61,7 +62,9 @@ internal sealed class SystemTrayIcon : IDisposable
         var data = CreateNotifyIconData();
         if (!Shell_NotifyIconW(NIM_ADD, ref data)) return false;
         data.uVersion = NOTIFYICON_VERSION_4;
-        return Shell_NotifyIconW(NIM_SETVERSION, ref data);
+        if (Shell_NotifyIconW(NIM_SETVERSION, ref data)) return true;
+        Shell_NotifyIconW(NIM_DELETE, ref data);
+        return false;
     }
 
     private IntPtr WindowProcedure(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, UIntPtr id, UIntPtr referenceData)
@@ -77,7 +80,7 @@ internal sealed class SystemTrayIcon : IDisposable
             {
                 _open();
             }
-            else if (notification == WM_RBUTTONUP)
+            else if (notification == WM_RBUTTONUP || notification == WM_CONTEXTMENU)
             {
                 ShowMenu();
             }
