@@ -43,6 +43,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE."
 }
 
+& (Join-Path $PSScriptRoot 'verify-publish-assets.ps1') -PublishDirectory $publishDirectory
+
 $vpkArguments = @(
     'vpk', '--version', '1.2.0', 'pack',
     '--packId', 'SteamInputAddonforClaw',
