@@ -86,7 +86,7 @@ The addon should remain a small routing layer between the MSI Claw controller an
 
 # Supported Environments
 
-The target environments are:
+The target routing environments are:
 
 1. **Stock MSI Center M**
 2. **MSI Center M + ClawTweaks**
@@ -103,6 +103,8 @@ The addon must also preserve unrelated ClawTweaks features such as:
 * performance controls;
 * other non-controller functionality.
 
+**Handheld Companion (HHC) is not a third addon routing mode.** When HHC controller management is actively managing the Claw controller, this addon remains completely passive because HHC already owns controller virtualization/routing. Merely having HHC installed is not a veto; an installed but inactive HHC environment does not block the normal Stock Center M or ClawTweaks paths.
+
 ---
 
 # Core Behavioral Rule
@@ -113,6 +115,8 @@ The addon may intervene only when:
 Steam session active
 AND
 no external physical controller
+AND
+HHC controller management is not active
 ```
 
 Anything else means:
@@ -130,7 +134,8 @@ In PASSIVE state:
 * the MSI controller mode is not changed;
 * HidHide is not modified by the addon;
 * normal MSI Center M behavior remains available;
-* normal ClawTweaks controller behavior remains available.
+* normal ClawTweaks controller behavior remains available;
+* normal HHC controller behavior remains available.
 
 The addon should avoid persistent system-wide controller modifications whenever possible.
 
@@ -146,6 +151,13 @@ Conceptually:
 External physical controller present?
     YES
     → PASSIVE / VETO
+
+    NO
+    ↓
+
+HHC controller management active?
+    YES
+    → PASSIVE / HHC-MANAGED
 
     NO
     ↓
@@ -173,7 +185,7 @@ Xbox Game Bar foreground?
     → Steam Controller receives live input
 ```
 
-External-controller veto always overrides every other state.
+External-controller veto always overrides every other state. An active HHC controller-management environment also prevents addon routing, but it is classified separately from an external physical-controller veto.
 
 ---
 
@@ -217,7 +229,7 @@ Game
 
 must remain one continuous Steam routing session.
 
-The Steam override ends only when `RunningAppID` returns to `0`, unless an external-controller veto occurs first.
+The Steam override ends only when `RunningAppID` returns to `0`, unless an external-controller veto or another higher-priority pass-through condition occurs first.
 
 Registry monitoring should be event-driven where practical.
 
@@ -261,6 +273,8 @@ The following must not be mistaken for external physical controllers:
 * ViGEm virtual devices.
 
 This distinction is critical because a virtual controller may appear in Windows as a normal USB controller.
+
+HHC virtual outputs are excluded from the **external physical-controller** detector even though active HHC controller management independently causes the addon to remain passive.
 
 ---
 
@@ -481,6 +495,45 @@ When addon routing ends, normal ClawTweaks controller behavior must be restored.
 
 ---
 
+# Handheld Companion Coexistence
+
+Handheld Companion (HHC) is treated as an **owner/veto environment**, not as another compatibility-routing mode.
+
+When HHC controller management is active:
+
+```text
+HHC manages the controller
+→ addon PASSIVE
+```
+
+The addon must not compete with HHC for controller ownership or create a second virtual output.
+
+In an HHC-managed state:
+
+* do not acquire the MSI Claw controller;
+* do not change MSI controller mode;
+* do not change HidHide configuration;
+* do not create addon VIIPER devices;
+* do not create an addon Steam Controller;
+* do not mutate or steal HHC-owned virtual devices.
+
+HHC being **installed but inactive** is not sufficient to veto addon routing. Detection should determine whether HHC controller management is actually active using public OS-visible evidence where practical, such as process/device/topology identity. The addon must not depend on private HHC IPC.
+
+HHC-owned virtual controllers must remain excluded from external physical-controller detection.
+
+If HHC controller management becomes active while addon Steam routing is already active:
+
+```text
+1. Disengage addon routing
+2. Remove addon virtual outputs
+3. Restore native state and addon-owned HidHide changes
+4. Latch HHC-managed veto for the current Steam session
+```
+
+If HHC is subsequently stopped during the same Steam session, the addon must **not** reactivate until `RunningAppID` returns to `0`. This avoids controller ownership oscillation and Steam Input hotplug/rebinding during a game session.
+
+---
+
 # Virtual Output
 
 The primary v1 output is:
@@ -540,8 +593,9 @@ The implementation should not assume a single active virtual target.
 
 Once created for an eligible Steam session, the Classic Steam Controller should remain enumerated until:
 
-* the Steam session ends; or
-* an external-controller veto forces complete disengagement.
+* the Steam session ends;
+* an external-controller veto forces complete disengagement; or
+* HHC controller management becomes active and forces pass-through.
 
 Normal foreground changes must not recreate it.
 
@@ -683,7 +737,8 @@ The addon must not leave the internal controller:
 * hidden;
 * stuck in DirectInput mode;
 * unavailable to MSI Center M;
-* unavailable to ClawTweaks
+* unavailable to ClawTweaks;
+* unavailable to HHC
 
 after a crash.
 
@@ -748,7 +803,8 @@ SteamInputAddonforClaw
 │
 ├─ EnvironmentDetector
 │    ├─ Stock Center M
-│    └─ ClawTweaks-compatible environment
+│    ├─ ClawTweaks-compatible environment
+│    └─ HHC-managed pass-through environment
 │
 └─ RecoveryManager
 ```
@@ -778,6 +834,12 @@ Conceptually:
 External controller absent
         │
         ▼
+HHC controller management active?
+        │
+        ├─ YES → PASSIVE / HHC-MANAGED
+        │
+        └─ NO
+             ▼
 RunningAppID == 0
         │
         ├─ YES → PASSIVE
@@ -811,6 +873,10 @@ When intervention is unnecessary, the machine should behave as though the addon 
 ## External-controller invariant
 
 The addon never takes control while a separate physical controller is present.
+
+## HHC ownership invariant
+
+When HHC controller management is active, the addon yields controller ownership completely and remains passive.
 
 ## Restore invariant
 
@@ -859,7 +925,9 @@ Required validation areas:
 17. External physical-controller detection.
 18. External-controller hotplug veto.
 19. Addon-owned VIIPER output correctly excluded from that veto.
-20. Crash recovery restoring controller/HidHide state.
+20. HHC active controller management causing complete addon pass-through without classifying HHC virtual output as an external physical controller.
+21. HHC activation during an active Steam session causing clean disengagement and a session-scoped HHC veto latch.
+22. Crash recovery restoring controller/HidHide state.
 
 These are validation requirements, not reasons to expand the product scope.
 
@@ -896,6 +964,8 @@ mode switching
 Classic Steam Controller
 → HHC
 ```
+
+HHC is also treated as a controller-owner environment at runtime: when HHC controller management is active, this addon does not attempt to reproduce or override HHC's controller virtualization.
 
 The addon should extract only the minimum hardware/protocol knowledge required for its own narrow architecture.
 
@@ -1075,8 +1145,9 @@ When multiple implementations are possible, prefer the one that:
 3. does not require ClawTweaks modification;
 4. delegates mapping/macros to Steam Input;
 5. never interferes with external physical controllers;
-6. behaves like an uninstalled addon when intervention is unnecessary;
-7. minimizes virtual-controller hotplug during an active Steam session;
-8. clearly distinguishes addon-owned state from third-party state;
-9. has a deterministic crash-recovery path;
-10. keeps the addon narrow rather than becoming a general controller manager.
+6. yields controller ownership completely when HHC controller management is active;
+7. behaves like an uninstalled addon when intervention is unnecessary;
+8. minimizes virtual-controller hotplug during an active Steam session;
+9. clearly distinguishes addon-owned state from third-party state;
+10. has a deterministic crash-recovery path;
+11. keeps the addon narrow rather than becoming a general controller manager.
