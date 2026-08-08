@@ -33,17 +33,22 @@ internal sealed class StartupCoordinator
         AppLog.Info("Startup", "Update gate completed.", ("Result", updateResult), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         if (updateResult == UpdateGateResult.RestartScheduled)
         {
+            AppLog.Info("Startup", "Runtime startup aborted because update restart was scheduled.", ("Action", "Exit"));
             return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
         }
 
         var deadline = DateTimeOffset.UtcNow + _clawTweaksStartingTimeout;
+        var environmentStopwatch = Stopwatch.StartNew();
+        var attempts = 0;
         AppLog.Info("Environment", "Initial environment detection started.");
         var environment = _environmentDetector.Detect();
         AppLog.Info("Environment", "Environment detection completed.", ("Mode", environment.Mode), ("ClawTweaksState", environment.ClawTweaksState));
         while (environment.ClawTweaksState == ClawTweaksState.Starting)
         {
+            attempts++;
             if (DateTimeOffset.UtcNow >= deadline)
             {
+                AppLog.Warn("ClawTweaks", "ClawTweaks startup stabilization timed out.", null, ("Attempts", attempts), ("ElapsedMs", environmentStopwatch.ElapsedMilliseconds), ("FinalState", environment.ClawTweaksState), ("Action", "Passive"), ("Reason", "TopologyNotReady"));
                 return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
             }
 
@@ -53,15 +58,18 @@ internal sealed class StartupCoordinator
         }
         if (environment.Mode == ControllerEnvironmentMode.Indeterminate)
         {
+            AppLog.Warn("Environment", "Environment decision is indeterminate.", null, ("Action", "Passive"), ("Reason", "EnvironmentDetectionIndeterminate"));
             return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate);
         }
         if (environment.Mode == ControllerEnvironmentMode.HHCManaged)
         {
+            AppLog.Info("Environment", "Environment owned by Handheld Companion.", ("Action", "Passive"), ("Reason", "HandheldCompanionOwnsController"));
             return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate);
         }
+        var readinessStopwatch = Stopwatch.StartNew();
         AppLog.Info("Environment", "Controller environment readiness wait started.", ("Mode", environment.Mode));
         var readiness = await _environmentWaiter.WaitUntilStableAsync(environment.Mode, cancellationToken).ConfigureAwait(false);
-        AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+        AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
         return new StartupResult(true, environment.Mode, readiness);
     }
 }

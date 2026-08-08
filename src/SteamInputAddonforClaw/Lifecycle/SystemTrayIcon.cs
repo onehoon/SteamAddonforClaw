@@ -41,6 +41,7 @@ internal sealed class SystemTrayIcon : IDisposable
         _subclassProc = WindowProcedure;
         if (!SetWindowSubclass(_windowHandle, _subclassProc, (UIntPtr)1, UIntPtr.Zero))
         {
+            AppLog.Error("Tray", "SetWindowSubclass failed.", new InvalidOperationException("SetWindowSubclass returned false."), ("Operation", "SetWindowSubclass"));
             throw new InvalidOperationException("Could not subclass the application window.");
         }
         AppLog.Debug("Tray", "SetWindowSubclass completed.", ("Success", true));
@@ -69,10 +70,15 @@ internal sealed class SystemTrayIcon : IDisposable
     private bool AddIcon()
     {
         var data = CreateNotifyIconData();
-        if (!Shell_NotifyIconW(NIM_ADD, ref data)) return false;
+        if (!Shell_NotifyIconW(NIM_ADD, ref data))
+        {
+            AppLog.Error("Tray", "Tray icon registration failed.", new InvalidOperationException("Shell_NotifyIcon NIM_ADD returned false."), ("Operation", "NIM_ADD"), ("Success", false));
+            return false;
+        }
         AppLog.Debug("Tray", "Shell_NotifyIcon NIM_ADD completed.", ("Success", true));
         data.uVersion = NOTIFYICON_VERSION_4;
         if (Shell_NotifyIconW(NIM_SETVERSION, ref data)) { AppLog.Debug("Tray", "Shell_NotifyIcon NIM_SETVERSION completed.", ("Version", NOTIFYICON_VERSION_4), ("Success", true)); return true; }
+        AppLog.Error("Tray", "Tray icon version registration failed.", new InvalidOperationException("Shell_NotifyIcon NIM_SETVERSION returned false."), ("Operation", "NIM_SETVERSION"), ("Version", NOTIFYICON_VERSION_4), ("Fallback", "NIM_DELETE"));
         Shell_NotifyIconW(NIM_DELETE, ref data);
         return false;
     }

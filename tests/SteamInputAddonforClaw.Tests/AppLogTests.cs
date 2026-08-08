@@ -99,6 +99,27 @@ public sealed class AppLogTests : IDisposable
         Assert.False(File.Exists(oldPath));
     }
 
+    [Fact]
+    public void LaunchId_IsConsistentAcrossEntries()
+    {
+        Directory.CreateDirectory(_directory);
+        AppLog.DirectoryOverride = _directory;
+        AppLog.Info("Test", "first");
+        AppLog.Info("Test", "second");
+        var launchIds = File.ReadAllLines(Directory.EnumerateFiles(_directory).Single()).Select(line => line.Split(' ').Single(part => part.StartsWith("[L="))).Distinct();
+        Assert.Single(launchIds);
+    }
+
+    [Fact]
+    public void LoggingFailure_IsNonFatal()
+    {
+        var file = Path.GetTempFileName();
+        AppLog.DirectoryOverride = file;
+        AppLog.Info("Test", "must not throw");
+        Assert.True(File.Exists(file));
+        File.Delete(file);
+    }
+
     public void Dispose()
     {
         AppLog.DirectoryOverride = null;

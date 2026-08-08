@@ -89,10 +89,12 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
         try
         {
             var installed = KnownExecutablePaths.Any(File.Exists);
+            foreach (var path in KnownExecutablePaths) AppLog.Trace("ClawTweaks", "ClawTweaks installation probe.", ("Path", path), ("Exists", File.Exists(path)));
             var processRunning = _clawTweaksRuntimeDetector.IsRunning();
             AppLog.Debug("ClawTweaks", "ClawTweaks process inspection completed.", ("Installed", installed), ("Running", processRunning));
             if (!installed && !processRunning)
             {
+                AppLog.Info("Environment", "Environment decision.", ("Mode", ControllerEnvironmentMode.StockCenterM), ("ClawTweaksState", ClawTweaksState.NotInstalled), ("Reason", "ClawTweaksAbsent"));
                 return new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled);
             }
 
@@ -106,13 +108,19 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
             }
 
             return processRunning
-                ? new ControllerEnvironment(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Starting)
-                : new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.InstalledInactive);
+                ? LogDecision(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Starting, "ProcessRunningButRoutingTopologyMissing")
+                : LogDecision(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.InstalledInactive, "InstalledButInactive");
         }
         catch (Exception exception)
         {
             AppLog.Warn("Environment", "ClawTweaks environment detection failed.", exception, ("Action", "Passive"), ("Reason", "ProbeOrTopologyException"));
             return new ControllerEnvironment(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Indeterminate);
         }
+    }
+
+    private static ControllerEnvironment LogDecision(ControllerEnvironmentMode mode, ClawTweaksState state, string reason)
+    {
+        AppLog.Info("Environment", "Environment decision.", ("Mode", mode), ("ClawTweaksState", state), ("Reason", reason));
+        return new ControllerEnvironment(mode, state);
     }
 }

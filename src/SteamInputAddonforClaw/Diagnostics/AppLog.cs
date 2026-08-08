@@ -55,6 +55,7 @@ internal static class AppLog
         foreach (var file in retained)
         {
             if (total <= MaximumLogDirectoryBytes) break;
+            if (file.Name.Equals($"SteamInputAddonforClaw-{today:yyyy-MM-dd}.log", StringComparison.OrdinalIgnoreCase)) continue;
             total -= file.Length;
             file.Delete();
         }

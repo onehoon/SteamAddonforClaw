@@ -26,10 +26,22 @@ public sealed class ExternalControllerDetector
                 .GroupBy(GetLogicalControllerKey)
                 .Select(group => new
                 {
+                    Key = group.Key,
                     Devices = group.ToArray(),
                     Classifications = group.Select(_classifier.Classify).ToArray()
                 })
                 .ToArray();
+
+            foreach (var group in groups)
+            {
+                AppLog.Trace("ExternalController", "Logical controller group.", ("LogicalGroupKey", group.Key), ("InterfaceCount", group.Devices.Length));
+                for (var index = 0; index < group.Devices.Length; index++)
+                {
+                    var device = group.Devices[index];
+                    var classification = group.Classifications[index];
+                    AppLog.Trace("PnP", "Controller interface classified.", ("LogicalGroupKey", group.Key), ("InstanceId", device.InstanceId), ("ParentInstanceId", device.ParentInstanceId), ("ContainerId", device.ContainerId), ("VID", device.VendorId), ("PID", device.ProductId), ("EnumeratorName", device.EnumeratorName), ("Service", device.Service), ("Classification", classification), ("Reason", GetClassificationReason(classification)));
+                }
+            }
 
             var externalControllers = groups
                 .Where(group => group.Classifications.Contains(ControllerDeviceClassification.ExternalPhysical))
@@ -69,4 +81,14 @@ public sealed class ExternalControllerDetector
 
         return $"instance:{device.InstanceId}";
     }
+
+    private static string GetClassificationReason(ControllerDeviceClassification classification) => classification switch
+    {
+        ControllerDeviceClassification.InternalClaw => "KnownMsiClawVidPid",
+        ControllerDeviceClassification.AddonOwnedVirtual => "IdentityExclusionSource",
+        ControllerDeviceClassification.KnownVirtual => "KnownVirtualIdentity",
+        ControllerDeviceClassification.Indeterminate => "UnverifiedVirtualIdentity",
+        ControllerDeviceClassification.ExternalPhysical => "PhysicalGameControllerWithoutExclusion",
+        _ => "NotGameControllerCandidate"
+    };
 }
