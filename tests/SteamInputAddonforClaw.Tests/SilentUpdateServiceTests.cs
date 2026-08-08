@@ -41,23 +41,57 @@ public sealed class SilentUpdateServiceTests
         Assert.Equal(1, client.ApplyCount);
     }
 
+    [Fact]
+    public async Task CheckDownloadAndScheduleAsync_WhenCancelledDuringCheck_DoesNotDownloadOrApply()
+    {
+        var client = new FakeUpdateClient(isInstalled: true, updateAvailable: true) { CheckCompletion = new TaskCompletionSource<bool>() };
+        using var cancellationTokenSource = new CancellationTokenSource();
+        var operation = new SilentUpdateService(client).CheckDownloadAndScheduleAsync(cancellationTokenSource.Token);
+
+        cancellationTokenSource.Cancel();
+        client.CheckCompletion.SetResult(true);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => operation);
+        Assert.Equal(0, client.DownloadCount);
+        Assert.Equal(0, client.ApplyCount);
+    }
+
+    [Fact]
+    public async Task CheckDownloadAndScheduleAsync_WhenCancelledDuringDownload_DoesNotApply()
+    {
+        var client = new FakeUpdateClient(isInstalled: true, updateAvailable: true) { DownloadCompletion = new TaskCompletionSource() };
+        using var cancellationTokenSource = new CancellationTokenSource();
+        var operation = new SilentUpdateService(client).CheckDownloadAndScheduleAsync(cancellationTokenSource.Token);
+        await client.DownloadStarted.Task;
+
+        cancellationTokenSource.Cancel();
+        client.DownloadCompletion.SetResult();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => operation);
+        Assert.Equal(0, client.ApplyCount);
+    }
+
     private sealed class FakeUpdateClient(bool isInstalled, bool updateAvailable = false) : IUpdateClient
     {
         public bool IsInstalled { get; } = isInstalled;
         public int CheckCount { get; private set; }
         public int DownloadCount { get; private set; }
         public int ApplyCount { get; private set; }
+        public TaskCompletionSource<bool>? CheckCompletion { get; init; }
+        public TaskCompletionSource? DownloadCompletion { get; init; }
+        public TaskCompletionSource DownloadStarted { get; } = new();
 
         public Task<bool> CheckForUpdatesAsync(CancellationToken cancellationToken)
         {
             CheckCount++;
-            return Task.FromResult(updateAvailable);
+            return CheckCompletion?.Task ?? Task.FromResult(updateAvailable);
         }
 
         public Task DownloadUpdatesAsync(CancellationToken cancellationToken)
         {
             DownloadCount++;
-            return Task.CompletedTask;
+            DownloadStarted.TrySetResult();
+            return DownloadCompletion?.Task ?? Task.CompletedTask;
         }
 
         public void WaitExitThenApplyUpdates()

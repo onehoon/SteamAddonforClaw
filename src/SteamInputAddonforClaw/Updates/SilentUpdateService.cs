@@ -23,6 +23,7 @@ internal sealed class SilentUpdateService
             return false;
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         await _updateClient.DownloadUpdatesAsync(cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         _updateClient.WaitExitThenApplyUpdates();
