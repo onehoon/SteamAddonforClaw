@@ -76,7 +76,7 @@ public sealed class MsiClawInputSource : IAsyncDisposable
             var selection = SelectDevice(enumerator, nextSession);
             if (selection.Status != MsiClawInputStartStatus.Started)
             {
-                enumerator.Dispose();
+                TryDisposeEnumerator(enumerator, nextSession);
                 return new MsiClawInputStartResult(selection.Status, selection.Message);
             }
 
@@ -87,7 +87,7 @@ public sealed class MsiClawInputSource : IAsyncDisposable
             catch (Exception exception)
             {
                 AppLog.Warn("DirectInput", "DirectInput device creation failed.", exception, ("Reason", "CreateDeviceFailed"), ("Action", "AbortDiagnostic"), ("NoChangesMade", true));
-                enumerator.Dispose();
+                TryDisposeEnumerator(enumerator, nextSession);
                 return new MsiClawInputStartResult(MsiClawInputStartStatus.CreateDeviceFailed, "DirectInput device creation failed. No controller settings were changed.");
             }
 
@@ -334,16 +334,7 @@ public sealed class MsiClawInputSource : IAsyncDisposable
             AppLog.Error("DirectInput", "Device cleanup failed.", exception, ("TestSession", session.Id), ("Operation", "Dispose"));
         }
 
-        try
-        {
-            session.Enumerator.Dispose();
-            AppLog.Info("DirectInput", "DirectInput enumerator disposed.", ("TestSession", session.Id));
-        }
-        catch (Exception exception)
-        {
-            cleanupSucceeded = false;
-            AppLog.Error("DirectInput", "Device cleanup failed.", exception, ("TestSession", session.Id), ("Operation", "EnumeratorDispose"));
-        }
+        cleanupSucceeded &= TryDisposeEnumerator(session.Enumerator, session.Id);
 
         return cleanupSucceeded;
     }
@@ -352,6 +343,21 @@ public sealed class MsiClawInputSource : IAsyncDisposable
     {
         CleanupSession(session);
         session.Cancellation.Dispose();
+    }
+
+    private static bool TryDisposeEnumerator(IDirectInputDeviceEnumerator enumerator, int testSession)
+    {
+        try
+        {
+            enumerator.Dispose();
+            AppLog.Info("DirectInput", "DirectInput enumerator disposed.", ("TestSession", testSession));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("DirectInput", "DirectInput enumerator cleanup failed.", exception, ("TestSession", testSession), ("Operation", "EnumeratorDispose"));
+            return false;
+        }
     }
 
     private static void LogStateChange(int session, ControllerState previous, ControllerState current)

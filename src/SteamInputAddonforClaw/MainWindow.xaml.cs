@@ -29,6 +29,8 @@ public sealed partial class MainWindow : Window
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
 
         InitializeComponent();
+        Title = FormatWindowTitle(GetDisplayVersion());
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         ApplyDefaultWindowSize();
         var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _directInputEnumeratorFactory = () => new VorticeDirectInputDeviceEnumerator(windowHandle);
@@ -72,6 +74,9 @@ public sealed partial class MainWindow : Window
         M1M2TestStatusText.Text = $"Status: {result.Message}";
         if (result.Started)
         {
+            M1TestStatusText.Text = "M1: Waiting";
+            M2TestStatusText.Text = "M2: Waiting";
+            IndependentTestStatusText.Text = "Independent: Waiting";
             StartM1M2TestButton.IsEnabled = false;
             StopM1M2TestButton.IsEnabled = true;
         }
@@ -202,6 +207,8 @@ public sealed partial class MainWindow : Window
     {
         return Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.1.0";
     }
+
+    internal static string FormatWindowTitle(string version) => $"Steam Input Addon for Claw v{version}";
 
     private enum MainNavigationPage
     {

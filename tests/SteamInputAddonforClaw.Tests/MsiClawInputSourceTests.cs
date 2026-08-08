@@ -23,6 +23,18 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
+    public void Start_WhenPid1902IsMissingAndEnumeratorCleanupFails_PreservesTheNotFoundResult()
+    {
+        var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1901)]) { DisposeException = new InvalidOperationException("Dispose failed") };
+        var source = new MsiClawInputSource(enumerator);
+
+        var result = source.Start();
+
+        Assert.Equal(MsiClawInputStartStatus.Pid1902NotFound, result.Status);
+        Assert.Equal(1, enumerator.DisposeCount);
+    }
+
+    [Fact]
     public void Start_SelectsOnlyPid1902_WhenOtherControllersAlsoExist()
     {
         var selected = Device(0x0DB0, 0x1902);
@@ -83,6 +95,22 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
+    public void Start_WhenEnumerationAndEnumeratorCleanupFail_PreservesTheEnumerationFailureResult()
+    {
+        var enumerator = new FakeEnumerator([])
+        {
+            EnumerationException = new InvalidOperationException("Enumeration failed"),
+            DisposeException = new InvalidOperationException("Dispose failed")
+        };
+        var source = new MsiClawInputSource(enumerator);
+
+        var result = source.Start();
+
+        Assert.Equal(MsiClawInputStartStatus.EnumerationFailed, result.Status);
+        Assert.Equal(1, enumerator.DisposeCount);
+    }
+
+    [Fact]
     public void Start_WhenDeviceCreationFails_ReturnsCreateDeviceFailed()
     {
         var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902)]) { CreateException = new InvalidOperationException("Create failed") };
@@ -90,6 +118,22 @@ public sealed class MsiClawInputSourceTests
 
         Assert.Equal(MsiClawInputStartStatus.CreateDeviceFailed, source.Start().Status);
         Assert.True(enumerator.Disposed);
+    }
+
+    [Fact]
+    public void Start_WhenDeviceCreationAndEnumeratorCleanupFail_PreservesTheCreationFailureResult()
+    {
+        var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902)])
+        {
+            CreateException = new InvalidOperationException("Create failed"),
+            DisposeException = new InvalidOperationException("Dispose failed")
+        };
+        var source = new MsiClawInputSource(enumerator);
+
+        var result = source.Start();
+
+        Assert.Equal(MsiClawInputStartStatus.CreateDeviceFailed, result.Status);
+        Assert.Equal(1, enumerator.DisposeCount);
     }
 
     [Fact]
@@ -298,8 +342,10 @@ public sealed class MsiClawInputSourceTests
     {
         public int CreateCount { get; private set; }
         public bool Disposed { get; private set; }
+        public int DisposeCount { get; private set; }
         public Exception? EnumerationException { get; init; }
         public Exception? CreateException { get; init; }
+        public Exception? DisposeException { get; init; }
         public DirectInputDeviceDescriptor? CreatedDescriptor { get; private set; }
         public FakeDevice? Device { get; } = device;
         public IReadOnlyList<DirectInputDeviceDescriptor> EnumerateGameControllers() => EnumerationException is null ? devices : throw EnumerationException;
@@ -310,7 +356,12 @@ public sealed class MsiClawInputSourceTests
             if (CreateException is not null) throw CreateException;
             return Device ?? new FakeDevice(State());
         }
-        public void Dispose() => Disposed = true;
+        public void Dispose()
+        {
+            DisposeCount++;
+            Disposed = true;
+            if (DisposeException is not null) throw DisposeException;
+        }
     }
 
     private sealed class FakeDevice(params object[] reads) : IDirectInputDevice
