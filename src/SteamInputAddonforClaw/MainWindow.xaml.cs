@@ -25,6 +25,8 @@ public sealed partial class MainWindow : Window
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
 
         InitializeComponent();
+        Title = FormatWindowTitle(GetDisplayVersion());
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         ApplyDefaultWindowSize();
         VersionText.Text = $"Version {GetDisplayVersion()}";
         LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
@@ -130,6 +132,8 @@ public sealed partial class MainWindow : Window
     {
         return Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.1.0";
     }
+
+    internal static string FormatWindowTitle(string version) => $"Steam Input Addon for Claw v{version}";
 
     private enum MainNavigationPage
     {
