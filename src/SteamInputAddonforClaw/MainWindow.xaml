@@ -51,17 +51,74 @@
             <StackPanel
                 x:Name="SettingsContent"
                 Padding="32"
-                Spacing="12"
+                Spacing="16"
                 Visibility="Collapsed">
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Settings" />
-                <CheckBox
-                    x:Name="LaunchAtWindowsStartupCheckBox"
-                    Click="LaunchAtWindowsStartupCheckBox_Click"
-                    Content="Launch at Windows startup" />
-                <TextBlock x:Name="StartupSettingsStatusText" TextWrapping="Wrap" />
-                <Rectangle Height="1" Fill="{ThemeResource ControlStrongFillColorDefaultBrush}" Margin="0,16,0,4" />
-                <TextBlock FontSize="20" FontWeight="SemiBold" Text="Developer Diagnostics" />
-                <TextBlock FontWeight="SemiBold" Text="M1/M2 DirectInput Test" />
+
+                <Border
+                    Padding="18,16"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <SymbolIcon VerticalAlignment="Center" Symbol="Play" />
+                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Launch at Windows startup" />
+                            <TextBlock Opacity="0.7" Text="Start the addon three minutes after you sign in to Windows." TextWrapping="Wrap" />
+                            <TextBlock x:Name="StartupSettingsStatusText" Opacity="0.7" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ToggleSwitch
+                            x:Name="LaunchAtWindowsStartupToggleSwitch"
+                            Grid.Column="2"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="LaunchAtWindowsStartupToggleSwitch_Toggled"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+
+                <Button
+                    Click="DeveloperMenuButton_Click"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Stretch"
+                    Padding="18,16">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <SymbolIcon VerticalAlignment="Center" Symbol="Help" />
+                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Developer Menu" />
+                            <TextBlock Opacity="0.7" Text="Developer-only diagnostics. General users should not use this menu." TextWrapping="Wrap" />
+                        </StackPanel>
+                        <SymbolIcon Grid.Column="2" Opacity="0.7" Symbol="Forward" VerticalAlignment="Center" />
+                    </Grid>
+                </Button>
+            </StackPanel>
+
+            <StackPanel
+                x:Name="DeveloperMenuContent"
+                Padding="32"
+                Spacing="12"
+                Visibility="Collapsed">
+                <Button
+                    Click="DeveloperMenuBackButton_Click"
+                    Content="Back to Settings"
+                    HorizontalAlignment="Left" />
+                <TextBlock FontSize="24" FontWeight="SemiBold" Text="Developer Menu" />
+                <TextBlock
+                    Opacity="0.7"
+                    Text="These diagnostics are for developers only. General users should not use this menu."
+                    TextWrapping="Wrap" />
+                <TextBlock FontSize="20" FontWeight="SemiBold" Text="M1/M2 DirectInput Test" />
                 <TextBlock Text="Tests the existing PID_1902 DirectInput device only. No controller mode changes are made." TextWrapping="Wrap" />
                 <TextBlock x:Name="M1M2TestStatusText" Text="Status: Idle" />
                 <TextBlock x:Name="M1TestStatusText" Text="M1: Waiting" />

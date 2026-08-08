@@ -21,6 +21,7 @@ public sealed partial class MainWindow : Window
     private readonly StartupSettingsCoordinator _startupSettings;
     private readonly Func<IDirectInputDeviceEnumerator> _directInputEnumeratorFactory;
     private MsiClawInputSource? _msiClawInputSource;
+    private bool _isLoadingStartupSettings;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -36,7 +37,9 @@ public sealed partial class MainWindow : Window
         _directInputEnumeratorFactory = () => new VorticeDirectInputDeviceEnumerator(windowHandle);
         Closed += OnWindowClosed;
         VersionText.Text = $"Version {GetDisplayVersion()}";
-        LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
+        _isLoadingStartupSettings = true;
+        LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
+        _isLoadingStartupSettings = false;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
         MainNavigationView.SelectedItem = StatusNavigationItem;
     }
@@ -60,11 +63,26 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private void LaunchAtWindowsStartupCheckBox_Click(object sender, RoutedEventArgs args)
+    private void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
-        var launchAtWindowsStartup = LaunchAtWindowsStartupCheckBox.IsChecked == true;
+        if (_isLoadingStartupSettings)
+        {
+            return;
+        }
+
+        var launchAtWindowsStartup = LaunchAtWindowsStartupToggleSwitch.IsOn;
         var result = _startupSettings.ChangeLaunchAtWindowsStartup(launchAtWindowsStartup);
         StartupSettingsStatusText.Text = result.Message;
+    }
+
+    private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)
+    {
+        ShowPage(MainNavigationPage.DeveloperMenu);
+    }
+
+    private void DeveloperMenuBackButton_Click(object sender, RoutedEventArgs args)
+    {
+        MainNavigationView.SelectedItem = MainNavigationView.SettingsItem;
     }
 
     private void StartM1M2TestButton_Click(object sender, RoutedEventArgs args)
@@ -146,9 +164,15 @@ public sealed partial class MainWindow : Window
                 _ => MainNavigationPage.Status
             };
 
+        ShowPage(page);
+    }
+
+    private void ShowPage(MainNavigationPage page)
+    {
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
+        DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
@@ -214,6 +238,7 @@ public sealed partial class MainWindow : Window
     {
         Status,
         HowToUse,
-        Settings
+        Settings,
+        DeveloperMenu
     }
 }
