@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Startup;
 
@@ -72,13 +73,16 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
     {
         try
         {
+            AppLog.Debug("HHC", "HHC process lookup started.", ("ProcessName", "HandheldCompanion"));
             if (_handheldCompanionRuntimeDetector.IsRunning())
             {
+                AppLog.Info("HHC", "Environment owned by Handheld Companion.", ("Action", "Passive"));
                 return new ControllerEnvironment(ControllerEnvironmentMode.HHCManaged, ClawTweaksState.NotInstalled);
             }
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            AppLog.Warn("HHC", "HHC runtime inspection failed.", exception, ("Action", "Passive"), ("Reason", "ProcessEnumerationException"));
             return new ControllerEnvironment(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Indeterminate);
         }
 
@@ -86,6 +90,7 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
         {
             var installed = KnownExecutablePaths.Any(File.Exists);
             var processRunning = _clawTweaksRuntimeDetector.IsRunning();
+            AppLog.Debug("ClawTweaks", "ClawTweaks process inspection completed.", ("Installed", installed), ("Running", processRunning));
             if (!installed && !processRunning)
             {
                 return new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled);
@@ -96,6 +101,7 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
 
             if (processRunning && virtualTopologyPresent)
             {
+                AppLog.Info("Environment", "Environment decision.", ("Mode", ControllerEnvironmentMode.ClawTweaks), ("Reason", "ProcessAndVirtualTopologyPresent"));
                 return new ControllerEnvironment(ControllerEnvironmentMode.ClawTweaks, ClawTweaksState.Active);
             }
 
@@ -103,8 +109,9 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
                 ? new ControllerEnvironment(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Starting)
                 : new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.InstalledInactive);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            AppLog.Warn("Environment", "ClawTweaks environment detection failed.", exception, ("Action", "Passive"), ("Reason", "ProbeOrTopologyException"));
             return new ControllerEnvironment(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Indeterminate);
         }
     }
