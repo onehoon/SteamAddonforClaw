@@ -85,7 +85,7 @@ public partial class App : Application
 
         _steamSessionWatcher.Start();
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);
-        _systemTrayIcon = new SystemTrayIcon(ShowMainWindow, ExitApplication);
+        _systemTrayIcon = new SystemTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(_mainWindow), ShowMainWindow, ExitApplication);
         if (_showMainWindow)
         {
             _mainWindow.Activate();
