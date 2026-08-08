@@ -1,11 +1,16 @@
+using Microsoft.UI;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Foundation;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Windowing;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using Windows.Foundation;
+using WinRT.Interop;
 
 namespace SteamInputAddonforClaw;
 
@@ -20,14 +25,10 @@ public sealed partial class MainWindow : Window
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
 
         InitializeComponent();
+        ApplyDefaultWindowSize();
         VersionText.Text = $"Version {GetDisplayVersion()}";
         LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
-        if (MainNavigationView.SettingsItem is NavigationViewItem settingsItem)
-        {
-            settingsItem.Content = "Settings";
-        }
-
         MainNavigationView.SelectedItem = StatusNavigationItem;
     }
 
@@ -75,6 +76,8 @@ public sealed partial class MainWindow : Window
 
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
     {
+        SetEnglishSettingsItemContent();
+
         var navigationItems = MainNavigationView.MenuItems
             .OfType<NavigationViewItem>()
             .Append(MainNavigationView.SettingsItem)
@@ -87,11 +90,41 @@ public sealed partial class MainWindow : Window
         MainNavigationView.OpenPaneLength = openPaneLength;
     }
 
+    private void SetEnglishSettingsItemContent()
+    {
+        if (MainNavigationView.SettingsItem is NavigationViewItem settingsItem)
+        {
+            settingsItem.Content = "Settings";
+        }
+    }
+
     private static double MeasureDesiredWidth(NavigationViewItem item)
     {
         item.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         return item.DesiredSize.Width;
     }
+
+    private void ApplyDefaultWindowSize()
+    {
+        var windowHandle = WindowNative.GetWindowHandle(this);
+        var dpi = GetDpiForWindow(windowHandle);
+        var windowId = Win32Interop.GetWindowIdFromWindow(windowHandle);
+        var displayArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Nearest);
+        var workArea = displayArea?.WorkArea;
+        var size = DpiAwareWindowSize.Calculate(dpi, workArea?.Width ?? 0, workArea?.Height ?? 0);
+
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(size.Width, size.Height));
+
+        if (workArea is not null)
+        {
+            AppWindow.Move(new Windows.Graphics.PointInt32(
+                workArea.Value.X + (workArea.Value.Width - size.Width) / 2,
+                workArea.Value.Y + (workArea.Value.Height - size.Height) / 2));
+        }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr windowHandle);
 
     private static string GetDisplayVersion()
     {
