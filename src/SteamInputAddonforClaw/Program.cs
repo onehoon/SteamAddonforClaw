@@ -34,7 +34,7 @@ public static class Program
         }
         catch (Exception exception)
         {
-            AppLog.Error("Fatal startup exception.", exception);
+            AppLog.Fatal("Startup", "Fatal startup exception.", exception);
             throw;
         }
     }

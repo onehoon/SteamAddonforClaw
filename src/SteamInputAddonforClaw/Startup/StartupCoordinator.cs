@@ -1,5 +1,8 @@
 namespace SteamInputAddonforClaw.Startup;
 
+using System.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics;
+
 internal sealed class StartupCoordinator
 {
     private readonly IUpdateGate _updateGate;
@@ -24,13 +27,19 @@ internal sealed class StartupCoordinator
 
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
     {
-        if (await _updateGate.RunAsync(cancellationToken).ConfigureAwait(false) == UpdateGateResult.RestartScheduled)
+        var stopwatch = Stopwatch.StartNew();
+        AppLog.Info("Startup", "Startup update gate entered.");
+        var updateResult = await _updateGate.RunAsync(cancellationToken).ConfigureAwait(false);
+        AppLog.Info("Startup", "Update gate completed.", ("Result", updateResult), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+        if (updateResult == UpdateGateResult.RestartScheduled)
         {
             return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
         }
 
         var deadline = DateTimeOffset.UtcNow + _clawTweaksStartingTimeout;
+        AppLog.Info("Environment", "Initial environment detection started.");
         var environment = _environmentDetector.Detect();
+        AppLog.Info("Environment", "Environment detection completed.", ("Mode", environment.Mode), ("ClawTweaksState", environment.ClawTweaksState));
         while (environment.ClawTweaksState == ClawTweaksState.Starting)
         {
             if (DateTimeOffset.UtcNow >= deadline)
@@ -38,6 +47,7 @@ internal sealed class StartupCoordinator
                 return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
             }
 
+            AppLog.Trace("ClawTweaks", "ClawTweaks startup wait.", ("RemainingMs", (deadline - DateTimeOffset.UtcNow).TotalMilliseconds));
             await Task.Delay(_clawTweaksStartingCheckInterval, cancellationToken).ConfigureAwait(false);
             environment = _environmentDetector.Detect();
         }
@@ -49,7 +59,9 @@ internal sealed class StartupCoordinator
         {
             return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate);
         }
+        AppLog.Info("Environment", "Controller environment readiness wait started.", ("Mode", environment.Mode));
         var readiness = await _environmentWaiter.WaitUntilStableAsync(environment.Mode, cancellationToken).ConfigureAwait(false);
+        AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         return new StartupResult(true, environment.Mode, readiness);
     }
 }
