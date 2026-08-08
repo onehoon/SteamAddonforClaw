@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Lifecycle;
 
@@ -30,16 +31,19 @@ internal sealed class SystemTrayIcon : IDisposable
 
     public SystemTrayIcon(IntPtr windowHandle, Action open, Action exit)
     {
+        AppLog.Info("Tray", "Tray initialization started.", ("HWND", $"0x{windowHandle:X}"));
         _windowHandle = windowHandle;
         _open = open;
         _exit = exit;
         _icon = ExtractIconW(IntPtr.Zero, Environment.ProcessPath!, 0);
+        AppLog.Debug("Tray", "ExtractIconW completed.", ("Success", _icon != IntPtr.Zero));
         _taskbarCreatedMessage = RegisterWindowMessageW("TaskbarCreated");
         _subclassProc = WindowProcedure;
         if (!SetWindowSubclass(_windowHandle, _subclassProc, (UIntPtr)1, UIntPtr.Zero))
         {
             throw new InvalidOperationException("Could not subclass the application window.");
         }
+        AppLog.Debug("Tray", "SetWindowSubclass completed.", ("Success", true));
 
         IsAvailable = AddIcon();
         if (!IsAvailable)
@@ -51,6 +55,7 @@ internal sealed class SystemTrayIcon : IDisposable
 
     public void Dispose()
     {
+        AppLog.Info("Tray", "Tray disposal started.");
         var data = CreateNotifyIconData();
         Shell_NotifyIconW(NIM_DELETE, ref data);
         RemoveWindowSubclass(_windowHandle, _subclassProc, (UIntPtr)1);
@@ -58,14 +63,16 @@ internal sealed class SystemTrayIcon : IDisposable
         {
             DestroyIcon(_icon);
         }
+        AppLog.Info("Tray", "Tray disposal completed.");
     }
 
     private bool AddIcon()
     {
         var data = CreateNotifyIconData();
         if (!Shell_NotifyIconW(NIM_ADD, ref data)) return false;
+        AppLog.Debug("Tray", "Shell_NotifyIcon NIM_ADD completed.", ("Success", true));
         data.uVersion = NOTIFYICON_VERSION_4;
-        if (Shell_NotifyIconW(NIM_SETVERSION, ref data)) return true;
+        if (Shell_NotifyIconW(NIM_SETVERSION, ref data)) { AppLog.Debug("Tray", "Shell_NotifyIcon NIM_SETVERSION completed.", ("Version", NOTIFYICON_VERSION_4), ("Success", true)); return true; }
         Shell_NotifyIconW(NIM_DELETE, ref data);
         return false;
     }
@@ -74,9 +81,11 @@ internal sealed class SystemTrayIcon : IDisposable
     {
         if (message == _taskbarCreatedMessage)
         {
+            AppLog.Warn("Tray", "TaskbarCreated received. Attempting tray re-registration.");
             IsAvailable = AddIcon();
             if (!IsAvailable)
             {
+                AppLog.Error("Tray", "Tray re-registration failed.", new InvalidOperationException("Shell_NotifyIcon failed."), ("Action", "ShowMainWindow"));
                 _open();
             }
         }
@@ -85,10 +94,12 @@ internal sealed class SystemTrayIcon : IDisposable
             var notification = (uint)((ulong)lParam.ToInt64() & 0xffff);
             if (notification == WM_LBUTTONDBLCLK)
             {
+                AppLog.Info("Tray", "Tray left double click.");
                 _open();
             }
             else if (notification == WM_RBUTTONUP || notification == WM_CONTEXTMENU)
             {
+                AppLog.Info("Tray", "Tray context menu requested.");
                 ShowMenu();
             }
         }

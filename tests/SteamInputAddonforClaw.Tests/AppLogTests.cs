@@ -3,6 +3,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("AppLog")]
 public sealed class AppLogTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -64,3 +65,6 @@ public sealed class AppLogTests : IDisposable
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 }
+
+[CollectionDefinition("AppLog", DisableParallelization = true)]
+public sealed class AppLogCollection;
