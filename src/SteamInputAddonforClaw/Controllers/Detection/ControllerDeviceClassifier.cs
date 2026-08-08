@@ -68,6 +68,13 @@ public sealed class ControllerDeviceClassifier
         return ControllerDeviceClassification.ExternalPhysical;
     }
 
+    public bool IsRelevantTopologyDevice(ControllerDeviceInfo device)
+    {
+        return IsGameControllerCandidate(device)
+            || IsInternalClaw(device)
+            || ContainsKnownVirtualIdentity(device);
+    }
+
     private static bool IsGameControllerCandidate(ControllerDeviceInfo device)
     {
         var evidence = string.Join('\n', device.HardwareIds.Concat(device.CompatibleIds).Append(device.EnumeratorName ?? string.Empty));

@@ -1,9 +1,10 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
-using SteamInputAddonforClaw.Updates;
+using SteamInputAddonforClaw.Startup;
 
 namespace SteamInputAddonforClaw;
 
@@ -12,8 +13,8 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private SteamRunningAppIdRegistrySource? _runningAppIdSource;
     private SteamSessionWatcher? _steamSessionWatcher;
-    private readonly CancellationTokenSource _updateCancellationTokenSource = new();
-    private bool _isClosing;
+    private readonly CancellationTokenSource _startupCancellationTokenSource = new();
+    private DispatcherQueue? _dispatcherQueue;
 
     public App()
     {
@@ -21,6 +22,34 @@ public partial class App : Application
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _ = StartAsync();
+    }
+
+    private async Task StartAsync()
+    {
+        var classifier = new ControllerDeviceClassifier();
+        var coordinator = new StartupCoordinator(
+            new SilentUpdateGate(),
+            new ControllerEnvironmentWaiter(new WindowsControllerDeviceEnumerator(), classifier));
+
+        try
+        {
+            if (!await coordinator.CanStartRuntimeAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false))
+            {
+                _dispatcherQueue?.TryEnqueue(ExitAfterScheduledUpdate);
+                return;
+            }
+
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier));
+        }
+        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
+        {
+        }
+    }
+
+    private void StartNormalRuntime(ControllerDeviceClassifier classifier)
     {
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
         _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
@@ -37,14 +66,13 @@ public partial class App : Application
 
         var controllerDetector = new ExternalControllerDetector(
             new WindowsControllerDeviceEnumerator(),
-            new ControllerDeviceClassifier());
+            classifier);
         _mainWindow.UpdateExternalControllerAssessment(controllerDetector.Detect());
 
         _steamSessionWatcher.Start();
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);
         _mainWindow.Activate();
 
-        _ = CheckForUpdatesInBackgroundAsync();
     }
 
     private void OnSteamSessionStateChanged(object? sender, EventArgs e)
@@ -57,8 +85,7 @@ public partial class App : Application
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
-        _isClosing = true;
-        _updateCancellationTokenSource.Cancel();
+        _startupCancellationTokenSource.Cancel();
 
         if (_steamSessionWatcher is not null)
         {
@@ -71,31 +98,9 @@ public partial class App : Application
         _runningAppIdSource = null;
     }
 
-    private async Task CheckForUpdatesInBackgroundAsync()
+    private void ExitAfterScheduledUpdate()
     {
-        try
-        {
-            var updateScheduled = await new SilentUpdateService(new VelopackUpdateClient())
-                .CheckDownloadAndScheduleAsync(_updateCancellationTokenSource.Token)
-                .ConfigureAwait(false);
-
-            if (updateScheduled && !_isClosing)
-            {
-                _mainWindow?.DispatcherQueue.TryEnqueue(() =>
-                {
-                    if (!_isClosing)
-                    {
-                        _mainWindow?.Close();
-                    }
-                });
-            }
-        }
-        catch (OperationCanceledException) when (_updateCancellationTokenSource.IsCancellationRequested)
-        {
-        }
-        catch (Exception)
-        {
-            // Update failures are intentionally ignored so the running version remains usable.
-        }
+        _startupCancellationTokenSource.Cancel();
+        Exit();
     }
 }
