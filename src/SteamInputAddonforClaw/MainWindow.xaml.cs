@@ -9,23 +9,17 @@ namespace SteamInputAddonforClaw;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly SettingsStore _settingsStore;
-    private readonly StartupRegistration _startupRegistration;
-    private AppSettings _settings;
+    private readonly StartupSettingsCoordinator _startupSettings;
 
     public MainWindow(
-        AppSettings settings,
-        SettingsStore settingsStore,
-        StartupRegistration startupRegistration,
+        StartupSettingsCoordinator startupSettings,
         string startupRegistrationMessage)
     {
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
-        _startupRegistration = startupRegistration ?? throw new ArgumentNullException(nameof(startupRegistration));
+        _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
 
         InitializeComponent();
         VersionText.Text = $"Version {GetDisplayVersion()}";
-        LaunchAtWindowsStartupCheckBox.IsChecked = _settings.LaunchAtWindowsStartup;
+        LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
     }
 
@@ -51,10 +45,7 @@ public sealed partial class MainWindow : Window
     private void LaunchAtWindowsStartupCheckBox_Click(object sender, RoutedEventArgs args)
     {
         var launchAtWindowsStartup = LaunchAtWindowsStartupCheckBox.IsChecked == true;
-        _settings = _settings with { LaunchAtWindowsStartup = launchAtWindowsStartup };
-        _settingsStore.Save(_settings);
-
-        var result = _startupRegistration.Synchronize(launchAtWindowsStartup);
+        var result = _startupSettings.ChangeLaunchAtWindowsStartup(launchAtWindowsStartup);
         StartupSettingsStatusText.Text = result.Message;
     }
 

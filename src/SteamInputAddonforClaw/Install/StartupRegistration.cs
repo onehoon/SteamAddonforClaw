@@ -1,14 +1,21 @@
+using System.Diagnostics;
 using Microsoft.Win32;
 
 namespace SteamInputAddonforClaw.Install;
 
-public sealed class StartupRegistration
+public interface IWindowsStartupManager
 {
+    StartupRegistrationResult Synchronize(bool enabled);
+}
+
+public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
+{
+    private const string TaskName = "Steam Input Addon for Claw";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "SteamInputAddonforClaw";
     private readonly Func<string> _stableExecutablePathProvider;
 
-    public StartupRegistration(Func<string>? stableExecutablePathProvider = null)
+    public WindowsTaskSchedulerStartupManager(Func<string>? stableExecutablePathProvider = null)
     {
         _stableExecutablePathProvider = stableExecutablePathProvider ?? (() => VelopackAppPaths.StableExecutablePath);
     }
@@ -23,14 +30,24 @@ public sealed class StartupRegistration
 
         try
         {
-            using var runKey = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
+            RemoveLegacyRunValue();
             if (enabled)
             {
-                runKey.SetValue(ValueName, BuildRunValue(stableExecutablePath), RegistryValueKind.String);
+                var result = RunSchtasks($"/Create /TN \"{TaskName}\" /TR {BuildRunValue(stableExecutablePath)} /SC ONLOGON /DELAY 0003:00 /RL LIMITED /F");
+                if (result.ExitCode != 0)
+                {
+                    return StartupRegistrationResult.Failed(result.Error);
+                }
+
                 return StartupRegistrationResult.Enabled();
             }
 
-            runKey.DeleteValue(ValueName, throwOnMissingValue: false);
+            var deleteResult = RunSchtasks($"/Delete /TN \"{TaskName}\" /F");
+            if (deleteResult.ExitCode != 0 && !deleteResult.Error.Contains("cannot find", StringComparison.OrdinalIgnoreCase))
+            {
+                return StartupRegistrationResult.Failed(deleteResult.Error);
+            }
+
             return StartupRegistrationResult.Disabled();
         }
         catch (UnauthorizedAccessException exception)
@@ -44,6 +61,28 @@ public sealed class StartupRegistration
     }
 
     internal static string BuildRunValue(string stableExecutablePath) => $"\"{stableExecutablePath}\"";
+
+    internal static string BuildCreateArguments(string stableExecutablePath) =>
+        $"/Create /TN \"{TaskName}\" /TR {BuildRunValue(stableExecutablePath)} /SC ONLOGON /DELAY 0003:00 /RL LIMITED /F";
+
+    private static void RemoveLegacyRunValue()
+    {
+        using var runKey = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
+        runKey?.DeleteValue(ValueName, throwOnMissingValue: false);
+    }
+
+    private static (int ExitCode, string Error) RunSchtasks(string arguments)
+    {
+        using var process = Process.Start(new ProcessStartInfo("schtasks.exe", arguments)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true
+        }) ?? throw new InvalidOperationException("Unable to start schtasks.exe.");
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return (process.ExitCode, error);
+    }
 }
 
 public sealed record StartupRegistrationResult(bool Success, string Message)

@@ -31,9 +31,42 @@ public sealed class SettingsStoreTests : IDisposable
     [Fact]
     public void BuildRunValue_QuotesStableExecutablePath()
     {
-        var value = StartupRegistration.BuildRunValue(@"C:\Custom Install\SteamInputAddonforClaw.exe");
+        var value = WindowsTaskSchedulerStartupManager.BuildRunValue(@"C:\Custom Install\SteamInputAddonforClaw.exe");
 
         Assert.Equal("\"C:\\Custom Install\\SteamInputAddonforClaw.exe\"", value);
+    }
+
+    [Fact]
+    public void BuildCreateArguments_UsesLogonTriggerAndThreeMinuteDelay()
+    {
+        var arguments = WindowsTaskSchedulerStartupManager.BuildCreateArguments(@"C:\Custom Install\SteamInputAddonforClaw.exe");
+
+        Assert.Contains("/SC ONLOGON", arguments);
+        Assert.Contains("/DELAY 0003:00", arguments);
+        Assert.DoesNotContain("current\\", arguments, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChangeLaunchAtWindowsStartup_WhenEnabled_CallsStartupManagerAndPersistsSetting()
+    {
+        var manager = new FakeStartupManager();
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(false), new SettingsStore(Path.Combine(_testDirectory, "settings.json")), manager);
+
+        coordinator.ChangeLaunchAtWindowsStartup(true);
+
+        Assert.True(coordinator.Settings.LaunchAtWindowsStartup);
+        Assert.Equal([true], manager.Requests);
+    }
+
+    [Fact]
+    public void Repair_WhenStartupIsEnabled_RequestsTaskRepair()
+    {
+        var manager = new FakeStartupManager();
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(true), new SettingsStore(Path.Combine(_testDirectory, "settings.json")), manager);
+
+        coordinator.Repair();
+
+        Assert.Equal([true], manager.Requests);
     }
 
     public void Dispose()
@@ -41,6 +74,17 @@ public sealed class SettingsStoreTests : IDisposable
         if (Directory.Exists(_testDirectory))
         {
             Directory.Delete(_testDirectory, recursive: true);
+        }
+    }
+
+    private sealed class FakeStartupManager : IWindowsStartupManager
+    {
+        public List<bool> Requests { get; } = [];
+
+        public StartupRegistrationResult Synchronize(bool enabled)
+        {
+            Requests.Add(enabled);
+            return StartupRegistrationResult.Enabled();
         }
     }
 }

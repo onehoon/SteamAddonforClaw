@@ -25,10 +25,11 @@ public partial class App : Application
 
         var settingsStore = new SettingsStore(VelopackAppPaths.SettingsPath);
         var settings = settingsStore.Load();
-        var startupRegistration = new StartupRegistration();
-        var startupRegistrationResult = startupRegistration.Synchronize(settings.LaunchAtWindowsStartup);
+        var startupRegistration = new WindowsTaskSchedulerStartupManager();
+        var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
+        var startupRegistrationResult = startupSettings.Repair();
 
-        _mainWindow = new MainWindow(settings, settingsStore, startupRegistration, startupRegistrationResult.Message);
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message);
         _mainWindow.Closed += OnMainWindowClosed;
 
         var controllerDetector = new ExternalControllerDetector(
