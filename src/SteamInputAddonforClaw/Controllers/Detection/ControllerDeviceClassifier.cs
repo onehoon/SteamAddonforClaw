@@ -10,6 +10,10 @@ public enum ControllerDeviceClassification
     Indeterminate
 }
 
+internal sealed record ControllerClassificationResult(
+    ControllerDeviceClassification Classification,
+    string Reason);
+
 public sealed class ControllerDeviceClassifier
 {
     private static readonly ushort[] ClawProductIds = [0x1901, 0x1902, 0x1903];
@@ -20,15 +24,6 @@ public sealed class ControllerDeviceClassifier
         "HID_DEVICE_UP:0001_U:0005",
         "XUSB",
         "XINPUT"
-    ];
-    private static readonly string[] KnownVirtualTokens =
-    [
-        "VIIPER",
-        "USBIP",
-        "USB/IP",
-        "VIGEM",
-        "HANDHELDCOMPANION",
-        "CLAWTWEAKS"
     ];
     private static readonly string[] ClawTweaksRoutingTokens =
     [
@@ -46,33 +41,47 @@ public sealed class ControllerDeviceClassifier
     }
 
     public ControllerDeviceClassification Classify(ControllerDeviceInfo device)
+        => ClassifyDetailed(device).Classification;
+
+    internal ControllerClassificationResult ClassifyDetailed(ControllerDeviceInfo device)
     {
-        if (!device.Present || !IsGameControllerCandidate(device))
+        if (!device.Present)
         {
-            return ControllerDeviceClassification.NotController;
+            return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "DeviceNotPresent");
+        }
+
+        if (!IsGameControllerCandidate(device))
+        {
+            return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "NotGameControllerCandidate");
         }
 
         if (IsInternalClaw(device))
         {
-            return ControllerDeviceClassification.InternalClaw;
+            return new ControllerClassificationResult(ControllerDeviceClassification.InternalClaw, "KnownMsiClawVidPid");
         }
 
         if (_identityExclusionSource.IsExcluded(device))
         {
-            return ControllerDeviceClassification.AddonOwnedVirtual;
+            return new ControllerClassificationResult(ControllerDeviceClassification.AddonOwnedVirtual, "IdentityExclusionSource");
         }
 
-        if (ContainsKnownVirtualIdentity(device))
+        var knownVirtualReason = GetKnownVirtualReason(device);
+        if (knownVirtualReason is not null)
         {
-            return ControllerDeviceClassification.KnownVirtual;
+            return new ControllerClassificationResult(ControllerDeviceClassification.KnownVirtual, knownVirtualReason);
         }
 
-        if (ContainsUnverifiedVirtualIdentity(device))
+        if (device.InstanceId.StartsWith("ROOT\\", StringComparison.OrdinalIgnoreCase))
         {
-            return ControllerDeviceClassification.Indeterminate;
+            return new ControllerClassificationResult(ControllerDeviceClassification.Indeterminate, "UnverifiedRootVirtualIdentity");
         }
 
-        return ControllerDeviceClassification.ExternalPhysical;
+        if (device.InstanceId.Contains("VIRTUAL", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ControllerClassificationResult(ControllerDeviceClassification.Indeterminate, "UnverifiedVirtualInstanceIdentity");
+        }
+
+        return new ControllerClassificationResult(ControllerDeviceClassification.ExternalPhysical, "PhysicalGameControllerWithoutExclusion");
     }
 
     public bool IsRelevantTopologyDevice(ControllerDeviceInfo device)
@@ -100,8 +109,7 @@ public sealed class ControllerDeviceClassifier
 
     private static bool ContainsKnownVirtualIdentity(ControllerDeviceInfo device)
     {
-        var identity = GetIdentityText(device);
-        return KnownVirtualTokens.Any(token => identity.Contains(token, StringComparison.OrdinalIgnoreCase));
+        return GetKnownVirtualReason(device) is not null;
     }
 
     private static bool ContainsClawTweaksRoutingIdentity(ControllerDeviceInfo device)
@@ -110,10 +118,34 @@ public sealed class ControllerDeviceClassifier
         return ClawTweaksRoutingTokens.Any(token => identity.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool ContainsUnverifiedVirtualIdentity(ControllerDeviceInfo device)
+    private static string? GetKnownVirtualReason(ControllerDeviceInfo device)
     {
-        return device.InstanceId.StartsWith("ROOT\\", StringComparison.OrdinalIgnoreCase)
-            || device.InstanceId.Contains("VIRTUAL", StringComparison.OrdinalIgnoreCase);
+        var identity = GetIdentityText(device);
+
+        if (identity.Contains("VIIPER", StringComparison.OrdinalIgnoreCase))
+        {
+            return "KnownVirtualViiper";
+        }
+
+        if (identity.Contains("USBIP", StringComparison.OrdinalIgnoreCase)
+            || identity.Contains("USB/IP", StringComparison.OrdinalIgnoreCase))
+        {
+            return "KnownVirtualUsbIp";
+        }
+
+        if (identity.Contains("VIGEM", StringComparison.OrdinalIgnoreCase))
+        {
+            return "KnownVirtualViGEm";
+        }
+
+        if (identity.Contains("HANDHELDCOMPANION", StringComparison.OrdinalIgnoreCase))
+        {
+            return "KnownVirtualHandheldCompanion";
+        }
+
+        return identity.Contains("CLAWTWEAKS", StringComparison.OrdinalIgnoreCase)
+            ? "KnownVirtualClawTweaks"
+            : null;
     }
 
     private static string GetIdentityText(ControllerDeviceInfo device)
