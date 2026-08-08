@@ -2,7 +2,9 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
@@ -21,6 +23,8 @@ public sealed partial class MainWindow : Window
     private readonly StartupSettingsCoordinator _startupSettings;
     private readonly Func<IDirectInputDeviceEnumerator> _directInputEnumeratorFactory;
     private MsiClawInputSource? _msiClawInputSource;
+    private bool _isLoadingStartupSettings;
+    private readonly MainNavigationState _navigationState = new();
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -36,7 +40,9 @@ public sealed partial class MainWindow : Window
         _directInputEnumeratorFactory = () => new VorticeDirectInputDeviceEnumerator(windowHandle);
         Closed += OnWindowClosed;
         VersionText.Text = $"Version {GetDisplayVersion()}";
-        LaunchAtWindowsStartupCheckBox.IsChecked = _startupSettings.Settings.LaunchAtWindowsStartup;
+        _isLoadingStartupSettings = true;
+        LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
+        _isLoadingStartupSettings = false;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
         MainNavigationView.SelectedItem = StatusNavigationItem;
     }
@@ -60,11 +66,30 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private void LaunchAtWindowsStartupCheckBox_Click(object sender, RoutedEventArgs args)
+    private void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
-        var launchAtWindowsStartup = LaunchAtWindowsStartupCheckBox.IsChecked == true;
+        if (_isLoadingStartupSettings)
+        {
+            return;
+        }
+
+        var launchAtWindowsStartup = LaunchAtWindowsStartupToggleSwitch.IsOn;
         var result = _startupSettings.ChangeLaunchAtWindowsStartup(launchAtWindowsStartup);
         StartupSettingsStatusText.Text = result.Message;
+    }
+
+    private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)
+    {
+        var previousPage = _navigationState.CurrentPage;
+        ShowPage(_navigationState.OpenDeveloperMenu());
+        AppLog.Info("Window", "Developer menu opened.",
+            ("PreviousPage", previousPage),
+            ("CurrentPage", _navigationState.CurrentPage));
+    }
+
+    private void DeveloperMenuBackButton_Click(object sender, RoutedEventArgs args)
+    {
+        ReturnToSettings("BackButton");
     }
 
     private void StartM1M2TestButton_Click(object sender, RoutedEventArgs args)
@@ -138,17 +163,37 @@ public sealed partial class MainWindow : Window
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         var selectedTag = (args.SelectedItem as NavigationViewItem)?.Tag as string;
-        var page = args.IsSettingsSelected
-            ? MainNavigationPage.Settings
-            : selectedTag switch
-            {
-                "HowToUse" => MainNavigationPage.HowToUse,
-                _ => MainNavigationPage.Status
-            };
+        ShowPage(_navigationState.SelectNavigationItem(args.IsSettingsSelected, selectedTag));
+    }
 
+    private void ShowPage(MainNavigationPage page)
+    {
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
+        DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
+    {
+        if (_navigationState.CurrentPage != MainNavigationPage.DeveloperMenu ||
+            !args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed)
+        {
+            return;
+        }
+
+        ReturnToSettings("MouseBackButton");
+        args.Handled = true;
+    }
+
+    private void ReturnToSettings(string reason)
+    {
+        var previousPage = _navigationState.CurrentPage;
+        ShowPage(_navigationState.ReturnToSettings());
+        AppLog.Info("Window", "Developer menu closed.",
+            ("PreviousPage", previousPage),
+            ("CurrentPage", _navigationState.CurrentPage),
+            ("Reason", reason));
     }
 
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
@@ -210,10 +255,4 @@ public sealed partial class MainWindow : Window
 
     internal static string FormatWindowTitle(string version) => $"Steam Input Addon for Claw v{version}";
 
-    private enum MainNavigationPage
-    {
-        Status,
-        HowToUse,
-        Settings
-    }
 }
