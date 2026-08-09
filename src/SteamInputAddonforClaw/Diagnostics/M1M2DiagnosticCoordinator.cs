@@ -43,9 +43,9 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
             ("MsiDirectInputTargetCount", msiInstanceIds.Count), ("MsiPid1902Hidden", msiIsHidden),
             ("ExecutablePath", _executablePath), ("AlreadyAllowed", inspection.ApplicationWhitelist.Contains(_executablePath)));
 
-        if (inspection.Status is HidHideInspectionStatus.NotInstalled or HidHideInspectionStatus.Disabled)
+        if (inspection.Status == HidHideInspectionStatus.Disabled)
             return _inputSource.Start();
-        if (inspection.Status is HidHideInspectionStatus.ConfigurationUnavailable or HidHideInspectionStatus.InverseWhitelist)
+        if (inspection.Status is HidHideInspectionStatus.NotInstalled or HidHideInspectionStatus.ConfigurationUnavailable or HidHideInspectionStatus.InverseWhitelist)
             return new(MsiClawInputStartStatus.InitializationFailed, $"HidHide access is unavailable ({inspection.Status}). No controller settings were changed.");
         if (!msiIsHidden)
             return _inputSource.Start();

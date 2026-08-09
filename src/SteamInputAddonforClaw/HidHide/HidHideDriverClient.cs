@@ -1,34 +1,47 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Text;
 using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.HidHide;
 
-// HidHide exposes this documented control device and IOCTL ABI for runtime clients.
-internal sealed class HidHideDriverClient : IHidHideClient
+internal interface IHidHideNativeApi
 {
-    private const string ControlDevicePath = @"\\.\HidHide";
+    IHidHideControlDevice Open(uint desiredAccess);
+}
+
+internal interface IHidHideControlDevice : IDisposable
+{
+    bool DeviceIoControl(uint controlCode, byte[]? input, byte[]? output, out uint bytesReturned, out int errorCode);
+}
+
+internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, IHidHidePathConverter? pathConverter = null) : IHidHideClient
+{
+    internal const uint GenericRead = 0x80000000;
     private const uint DeviceType = 32769;
-    private const uint MethodBuffered = 0;
     private const uint FileReadData = 0x0001;
-    private const int ErrorInsufficientBuffer = 122;
-    private const int ErrorFileNotFound = 2;
+    private readonly IHidHideNativeApi _nativeApi = nativeApi ?? new HidHideNativeApi();
+    private readonly IHidHidePathConverter _pathConverter = pathConverter ?? new HidHidePathConverter();
 
     public HidHideInspection Inspect()
     {
         try
         {
-            using var device = Open();
+            using var device = _nativeApi.Open(GenericRead);
             var active = ReadBoolean(device, Ioctl(2052));
             var inverse = ReadBoolean(device, Ioctl(2054));
-            var whitelist = ReadMultiString(device, Ioctl(2048));
+            var rawWhitelist = ReadMultiString(device, Ioctl(2048));
             var blacklist = ReadMultiString(device, Ioctl(2050));
+            var normalizedWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var fullImageName in rawWhitelist)
+            {
+                try { normalizedWhitelist.Add(_pathConverter.ToDosPath(fullImageName)); }
+                catch (Exception exception) { AppLog.Warn("HidHide", "A HidHide whitelist entry could not be normalized.", exception, ("Action", "PreserveRawEntry")); }
+            }
             var status = !active ? HidHideInspectionStatus.Disabled : inverse ? HidHideInspectionStatus.InverseWhitelist : HidHideInspectionStatus.Available;
-            return new(status, new HashSet<string>(whitelist.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase), blacklist);
+            return new(status, normalizedWhitelist, blacklist, rawWhitelist);
         }
-        catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorFileNotFound)
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 2)
         {
             return new(HidHideInspectionStatus.NotInstalled, new HashSet<string>(StringComparer.OrdinalIgnoreCase), Reason: exception.Message);
         }
@@ -46,10 +59,14 @@ internal sealed class HidHideDriverClient : IHidHideClient
     {
         try
         {
-            using var device = Open();
-            var entries = new HashSet<string>(ReadMultiString(device, Ioctl(2048)).Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
-            var changed = add ? entries.Add(Path.GetFullPath(executablePath)) : entries.Remove(Path.GetFullPath(executablePath));
+            var fullImageName = _pathConverter.ToFullImageName(executablePath);
+            using var device = _nativeApi.Open(GenericRead);
+            var entries = ReadMultiString(device, Ioctl(2048));
+            var changed = add
+                ? !entries.Contains(fullImageName, StringComparer.OrdinalIgnoreCase)
+                : entries.RemoveAll(entry => string.Equals(entry, fullImageName, StringComparison.OrdinalIgnoreCase)) > 0;
             if (!changed) return true;
+            if (add) entries.Add(fullImageName);
             WriteMultiString(device, Ioctl(2049), entries);
             return true;
         }
@@ -60,47 +77,77 @@ internal sealed class HidHideDriverClient : IHidHideClient
         }
     }
 
-    private static SafeFileHandle Open()
-    {
-        var handle = CreateFile(ControlDevicePath, FileReadData, FileShare.Read | FileShare.Write | FileShare.Delete, IntPtr.Zero, FileMode.Open, FileAttributes.Normal, IntPtr.Zero);
-        if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
-        return handle;
-    }
-
-    private static bool ReadBoolean(SafeFileHandle device, uint controlCode)
+    internal static bool ReadBoolean(IHidHideControlDevice device, uint controlCode)
     {
         var buffer = new byte[1];
-        Invoke(device, controlCode, null, buffer);
+        Invoke(device, controlCode, null, buffer, out var returned);
+        if (returned != 1) throw new InvalidDataException("The HidHide boolean response length is invalid.");
         return buffer[0] != 0;
     }
 
-    private static string[] ReadMultiString(SafeFileHandle device, uint controlCode)
+    internal static List<string> ReadMultiString(IHidHideControlDevice device, uint controlCode)
     {
-        if (DeviceIoControl(device, controlCode, null, 0, null, 0, out var bytesNeeded, IntPtr.Zero) || Marshal.GetLastWin32Error() != ErrorInsufficientBuffer)
-            throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (!device.DeviceIoControl(controlCode, null, null, out var bytesNeeded, out var errorCode))
+            throw new Win32Exception(errorCode);
+        if (bytesNeeded == 0 || (bytesNeeded & 1) != 0) throw new InvalidDataException("The HidHide MULTI_SZ size is invalid.");
         var buffer = new byte[bytesNeeded];
-        Invoke(device, controlCode, null, buffer);
-        return Encoding.Unicode.GetString(buffer).Split('\0', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        Invoke(device, controlCode, null, buffer, out var returned);
+        if (returned == 0 || returned > bytesNeeded || (returned & 1) != 0) throw new InvalidDataException("The HidHide MULTI_SZ response length is invalid.");
+        return DeserializeMultiString(buffer.AsSpan(0, (int)returned));
     }
 
-    private static void WriteMultiString(SafeFileHandle device, uint controlCode, IEnumerable<string> entries)
+    internal static void WriteMultiString(IHidHideControlDevice device, uint controlCode, IEnumerable<string> entries)
     {
-        var buffer = Encoding.Unicode.GetBytes(string.Join('\0', entries.OrderBy(entry => entry, StringComparer.OrdinalIgnoreCase)) + "\0\0");
-        Invoke(device, controlCode, buffer, null);
+        var buffer = SerializeMultiString(entries);
+        Invoke(device, controlCode, buffer, null, out _);
     }
 
-    private static void Invoke(SafeFileHandle device, uint controlCode, byte[]? input, byte[]? output)
+    internal static byte[] SerializeMultiString(IEnumerable<string> entries)
+        => System.Text.Encoding.Unicode.GetBytes(string.Join('\0', entries) + "\0\0");
+
+    internal static List<string> DeserializeMultiString(ReadOnlySpan<byte> bytes)
     {
-        if (!DeviceIoControl(device, controlCode, input, (uint)(input?.Length ?? 0), output, (uint)(output?.Length ?? 0), out _, IntPtr.Zero))
-            throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (bytes.Length < 4 || (bytes.Length & 1) != 0 || bytes[^1] != 0 || bytes[^2] != 0 || bytes[^3] != 0 || bytes[^4] != 0)
+            throw new InvalidDataException("The HidHide MULTI_SZ is not double-NUL terminated.");
+        var values = new System.Text.UnicodeEncoding(false, false, true).GetString(bytes).Split('\0');
+        if (values.Length == 3 && values.All(string.IsNullOrEmpty)) return [];
+        if (values.Length < 2 || values[^1] != string.Empty || values[^2] != string.Empty || values[..^2].Any(string.IsNullOrEmpty))
+            throw new InvalidDataException("The HidHide MULTI_SZ is malformed.");
+        return values[..^2].ToList();
     }
 
-    private static uint Ioctl(uint function) => (DeviceType << 16) | (FileReadData << 14) | (function << 2) | MethodBuffered;
+    private static void Invoke(IHidHideControlDevice device, uint controlCode, byte[]? input, byte[]? output, out uint bytesReturned)
+    {
+        if (!device.DeviceIoControl(controlCode, input, output, out bytesReturned, out var errorCode)) throw new Win32Exception(errorCode);
+    }
+
+    private static uint Ioctl(uint function) => (DeviceType << 16) | (FileReadData << 14) | (function << 2);
+}
+
+internal sealed class HidHideNativeApi : IHidHideNativeApi
+{
+    public IHidHideControlDevice Open(uint desiredAccess)
+    {
+        var handle = CreateFile(@"\\.\HidHide", desiredAccess, FileShare.Read | FileShare.Write | FileShare.Delete, IntPtr.Zero, FileMode.Open, FileAttributes.Normal, IntPtr.Zero);
+        if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+        return new HidHideControlDevice(handle);
+    }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, FileShare shareMode, IntPtr securityAttributes, FileMode creationDisposition, FileAttributes flagsAndAttributes, IntPtr templateFile);
+    private static extern SafeFileHandle CreateFile(string name, uint access, FileShare share, IntPtr security, FileMode disposition, FileAttributes flags, IntPtr template);
+}
+
+internal sealed class HidHideControlDevice(SafeFileHandle handle) : IHidHideControlDevice
+{
+    public bool DeviceIoControl(uint controlCode, byte[]? input, byte[]? output, out uint bytesReturned, out int errorCode)
+    {
+        var result = NativeDeviceIoControl(handle, controlCode, input, (uint)(input?.Length ?? 0), output, (uint)(output?.Length ?? 0), out bytesReturned, IntPtr.Zero);
+        errorCode = result ? 0 : Marshal.GetLastWin32Error();
+        return result;
+    }
+    public void Dispose() => handle.Dispose();
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DeviceIoControl(SafeFileHandle device, uint controlCode, byte[]? inputBuffer, uint inputBufferSize, byte[]? outputBuffer, uint outputBufferSize, out uint bytesReturned, IntPtr overlapped);
+    private static extern bool NativeDeviceIoControl(SafeFileHandle device, uint code, byte[]? input, uint inputLength, byte[]? output, uint outputLength, out uint bytesReturned, IntPtr overlapped);
 }

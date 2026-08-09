@@ -6,6 +6,7 @@ internal sealed record HidHideInspection(
     HidHideInspectionStatus Status,
     IReadOnlySet<string> ApplicationWhitelist,
     IReadOnlyList<string>? HiddenDeviceEntries = null,
+    IReadOnlyList<string>? RawApplicationWhitelist = null,
     string? Reason = null)
 {
     public bool IsUsable => Status == HidHideInspectionStatus.Available;

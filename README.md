@@ -689,6 +689,12 @@ Rules:
 
 Replacing the complete HidHide configuration is forbidden.
 
+HidHide is a required prerequisite for supported addon routing. The installer provides it for Stock MSI Center M; in a ClawTweaks environment the addon reuses the existing compatible installation. A missing HidHide installation after setup is a broken prerequisite: the addon remains PASSIVE and performs no routing mutation.
+
+The v1 compatibility baseline is the official HidHide 1.5.230 release. The addon uses its persistent configuration API with recovery journaling; newer process/session blacklist APIs are not required by v1.
+
+Installing HidHide alone must not hide the MSI Claw controller. While the addon is PASSIVE, it owns no HidHide device hiding or whitelist lease, keeps the physical controller normally exposed, and preserves all ClawTweaks/HHC HidHide configuration.
+
 Where a supported HidHide version provides process/session-scoped hiding, it may be used as an additional safety mechanism.
 
 It must not be assumed to exist on every installed HidHide version.

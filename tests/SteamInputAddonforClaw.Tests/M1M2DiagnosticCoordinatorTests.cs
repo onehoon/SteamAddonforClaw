@@ -27,13 +27,25 @@ public sealed class M1M2DiagnosticCoordinatorTests
         Assert.Equal(0, hidHide.RemoveCount);
     }
 
-    [Theory]
-    [InlineData((int)HidHideInspectionStatus.NotInstalled)]
-    [InlineData((int)HidHideInspectionStatus.Disabled)]
-    public async Task HidHideUnavailableOrDisabled_StartsDirectInputWithoutMutation(int statusValue)
+    [Fact]
+    public async Task HidHideNotInstalled_RemainsPassiveWithoutMutation()
     {
         var store = new MemoryStore();
-        var hidHide = new FakeHidHide { Status = (HidHideInspectionStatus)statusValue };
+        var hidHide = new FakeHidHide { Status = HidHideInspectionStatus.NotInstalled };
+        var input = new FakeInput();
+        await using var coordinator = Create(input, hidHide, store);
+
+        Assert.False(coordinator.Start().Started);
+        Assert.Equal(0, input.StartCount);
+        Assert.Equal(0, store.WriteCount);
+        Assert.Equal(0, hidHide.AddCount);
+    }
+
+    [Fact]
+    public async Task HidHideDisabled_StartsDirectInputWithoutMutation()
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide { Status = HidHideInspectionStatus.Disabled };
         var input = new FakeInput();
         await using var coordinator = Create(input, hidHide, store);
 
