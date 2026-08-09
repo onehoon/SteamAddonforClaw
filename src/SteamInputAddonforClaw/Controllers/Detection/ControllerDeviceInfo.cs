@@ -13,4 +13,5 @@ public sealed record ControllerDeviceInfo(
     string? Service,
     ushort? VendorId,
     ushort? ProductId,
-    bool Present);
+    bool Present,
+    string? FriendlyName = null);
