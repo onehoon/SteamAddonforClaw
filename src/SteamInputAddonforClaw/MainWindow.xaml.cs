@@ -287,7 +287,15 @@ public sealed partial class MainWindow : Window
     }
 
     private static void Replace(ObservableCollection<StatusCardViewModel> destination, IEnumerable<StatusCardViewModel> source) { destination.Clear(); foreach (var item in source) destination.Add(item); }
-    private static string FormatSoftwareStatus(ControllerSoftwareStatus item) => item.Runtime == SoftwareRuntimeStatus.Running ? "Running" : item.Installation == SoftwareInstallationStatus.Installed ? "Installed / Not running" : item.Installation == SoftwareInstallationStatus.NotInstalled ? "Not installed" : "Indeterminate";
+    internal static string FormatSoftwareStatus(ControllerSoftwareStatus item) => item.Runtime switch
+    {
+        SoftwareRuntimeStatus.Running => "Running",
+        SoftwareRuntimeStatus.Starting => "Starting",
+        SoftwareRuntimeStatus.Indeterminate => "Indeterminate",
+        _ when item.Installation == SoftwareInstallationStatus.Installed => "Installed / Not running",
+        _ when item.Installation == SoftwareInstallationStatus.NotInstalled => "Not installed",
+        _ => "Indeterminate"
+    };
     private static string FormatAddonStatus(AddonOperationalStatus status) => status switch { AddonOperationalStatus.WaitingForSteam => "Waiting for Steam", AddonOperationalStatus.SetupRequired => "Setup required", AddonOperationalStatus.RecoveryRequired => "Recovery required", _ => status.ToString() };
 
     private static ISystemStatusProvider CreateDefaultSystemStatusProvider()

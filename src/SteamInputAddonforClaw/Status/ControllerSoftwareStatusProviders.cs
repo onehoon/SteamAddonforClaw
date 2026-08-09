@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Windows.Management.Deployment;
 using SteamInputAddonforClaw.Startup;
 
@@ -37,20 +36,20 @@ internal sealed class HandheldCompanionSoftwareStatusProvider(IHandheldCompanion
 internal sealed class MsiCenterMSoftwareStatusProvider : IControllerSoftwareStatusProvider
 {
     private readonly IApplicationInstallationProbe _installationProbe;
-    private readonly Func<bool> _isRunning;
-    public MsiCenterMSoftwareStatusProvider(IApplicationInstallationProbe? installationProbe = null, Func<bool>? isRunning = null)
+    private readonly IMsiCenterMRuntimeDetector _runtimeDetector;
+    public MsiCenterMSoftwareStatusProvider(IApplicationInstallationProbe? installationProbe = null, IMsiCenterMRuntimeDetector? runtimeDetector = null)
     {
         _installationProbe = installationProbe ?? new MsiCenterMInstallationProbe();
-        _isRunning = isRunning ?? (() => MsiCenterMIdentity.ProcessNames.Any(name => Process.GetProcessesByName(name).Length > 0));
+        _runtimeDetector = runtimeDetector ?? new MsiCenterMRuntimeDetector();
     }
     public ControllerSoftwareStatus Capture()
     {
         try
         {
             var installed = _installationProbe.Detect().Installed;
-            var running = _isRunning();
-            return new(ControllerSoftwareKind.MsiCenterM, "MSI Center M", (installed || running) ? SoftwareInstallationStatus.Installed : SoftwareInstallationStatus.NotInstalled,
-                running ? SoftwareRuntimeStatus.Running : SoftwareRuntimeStatus.NotRunning, running ? "MsiCenterMRunning" : installed ? "MsiCenterMInstalled" : "MsiCenterMNotInstalled");
+            var runtime = _runtimeDetector.Detect();
+            return new(ControllerSoftwareKind.MsiCenterM, "MSI Center M", (installed || runtime.Status == SoftwareRuntimeStatus.Running) ? SoftwareInstallationStatus.Installed : SoftwareInstallationStatus.NotInstalled,
+                runtime.Status, runtime.Reason);
         }
         catch { return new(ControllerSoftwareKind.MsiCenterM, "MSI Center M", SoftwareInstallationStatus.Indeterminate, SoftwareRuntimeStatus.Indeterminate, "MsiCenterMInspectionFailed"); }
     }
@@ -119,7 +118,13 @@ internal sealed class HandheldCompanionInstallationProbe : UninstallRegistration
 internal static class MsiCenterMIdentity
 {
     internal static readonly string[] InstallationDisplayNames = ["MSI Center M", "MSI Center M SDK"];
-    internal static readonly string[] ProcessNames = ["MSI Center M", "MSI.CentralServer", "Center_M_Server"];
+    internal const string FoundationServiceName = "MSI Foundation Service";
+    internal const string ServerProcessName = "MSI_Center_M_Server";
+    internal const string ControlModeProcessName = "MSI_Center_M_Server_ControlMode";
+    internal const string DesktopUiProcessName = "MSI Center M";
+    internal const string QuickSettingsPackageName = "9426MICRO-STARINTERNATION.MSIQuickSettings";
+    internal const string QuickSettingsWidgetProcessName = "Gamebar_Widget";
+    internal const string QuickSettingsWidgetFileName = "Gamebar_Widget.exe";
 }
 
 internal sealed class MsiCenterMInstallationProbe : UninstallRegistrationInstallationProbe

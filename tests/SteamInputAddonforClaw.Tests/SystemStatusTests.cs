@@ -193,18 +193,62 @@ public sealed class SystemStatusTests
         Assert.Equal(SoftwareRuntimeStatus.Running, status.Runtime);
     }
 
-    [Theory]
-    [InlineData(true, false, (int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.NotRunning)]
-    [InlineData(false, true, (int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.Running)]
-    [InlineData(false, false, (int)SoftwareInstallationStatus.NotInstalled, (int)SoftwareRuntimeStatus.NotRunning)]
-    public void MsiCenterM_InstallationAndRuntimeAreIndependent(bool installed, bool running, int expectedInstallationValue, int expectedRuntimeValue)
+    [Fact]
+    public void MsiCenterM_BootBaselineWithoutDesktopUi_IsOperational()
     {
-        var expectedInstallation = (SoftwareInstallationStatus)expectedInstallationValue;
-        var expectedRuntime = (SoftwareRuntimeStatus)expectedRuntimeValue;
-        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(installed), () => running).Capture();
+        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(true, true, true, true, true, false))).Detect();
 
-        Assert.Equal(expectedInstallation, status.Installation);
-        Assert.Equal(expectedRuntime, status.Runtime);
+        Assert.Equal(SoftwareRuntimeStatus.Running, assessment.Status);
+        Assert.Equal("MsiCenterMOperational", assessment.Reason);
+    }
+
+    [Fact]
+    public void MsiCenterM_DesktopUiDoesNotAffectOperationalAssessment()
+    {
+        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(true, true, true, true, true, true))).Detect();
+
+        Assert.Equal(SoftwareRuntimeStatus.Running, assessment.Status);
+        Assert.Equal("MsiCenterMOperational", assessment.Reason);
+    }
+
+    [Fact]
+    public void MsiCenterM_DesktopUiOnly_IsNotRunning()
+    {
+        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(false, false, false, true, false, true))).Detect();
+
+        Assert.Equal(SoftwareRuntimeStatus.NotRunning, assessment.Status);
+        Assert.Equal("MsiCenterMNotRunning", assessment.Reason);
+    }
+
+    [Fact]
+    public void MsiCenterM_UsesExactStockBackendIdentities()
+    {
+        Assert.Equal("MSI_Center_M_Server", MsiCenterMIdentity.ServerProcessName);
+        Assert.Equal("MSI_Center_M_Server_ControlMode", MsiCenterMIdentity.ControlModeProcessName);
+        Assert.NotEqual("Center_M_Server", MsiCenterMIdentity.ServerProcessName);
+    }
+
+    [Theory]
+    [InlineData(false, true, true, true, true, "MsiCenterMFoundationServiceNotReady")]
+    [InlineData(true, false, true, true, true, "MsiCenterMBackendNotReady")]
+    [InlineData(true, true, false, true, true, "MsiCenterMControlModeNotReady")]
+    [InlineData(true, true, true, false, true, "MsiCenterMQuickSettingsNotReady")]
+    [InlineData(true, true, true, true, false, "MsiCenterMWidgetNotReady")]
+    public void MsiCenterM_PartialStack_IsStarting(bool foundation, bool server, bool controlMode, bool package, bool widget, string reason)
+    {
+        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(foundation, server, controlMode, package, widget, false))).Detect();
+
+        Assert.Equal(SoftwareRuntimeStatus.Starting, assessment.Status);
+        Assert.Equal(reason, assessment.Reason);
+    }
+
+    [Fact]
+    public void MsiCenterM_RuntimeInspectionFailure_IsIndeterminate()
+    {
+        var assessment = new MsiCenterMRuntimeDetector(new ThrowingMsiRuntimeSignals()).Detect();
+
+        Assert.Equal(SoftwareRuntimeStatus.Indeterminate, assessment.Status);
+        Assert.Equal("MsiCenterMInspectionFailed", assessment.Reason);
     }
 
     [Theory]
@@ -222,22 +266,37 @@ public sealed class SystemStatusTests
     }
 
     [Fact]
-    public void MsiCenterM_InstalledButNotRunning_ReportsInstalledReason()
+    public void MsiCenterM_InstalledButNotRunning_PreservesInstallation()
     {
-        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(true), () => false).Capture();
+        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(true), new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(false, false, false, true, false, false)))).Capture();
         Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
         Assert.Equal(SoftwareRuntimeStatus.NotRunning, status.Runtime);
-        Assert.Equal("MsiCenterMInstalled", status.Reason);
+        Assert.Equal("MsiCenterMNotRunning", status.Reason);
     }
 
     [Fact]
-    public void MsiCenterM_InstalledAndRunning_ReportsRunningReason()
+    public void MsiCenterM_RunningPromotesInstallation()
     {
-        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(true), () => true).Capture();
+        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(false), new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(true, true, true, true, true, false)))).Capture();
         Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
         Assert.Equal(SoftwareRuntimeStatus.Running, status.Runtime);
-        Assert.Equal("MsiCenterMRunning", status.Reason);
+        Assert.Equal("MsiCenterMOperational", status.Reason);
     }
+
+    [Theory]
+    [InlineData((int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.Starting, "Starting")]
+    [InlineData((int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.NotRunning, "Installed / Not running")]
+    public void SoftwareStatusFormatting_PreservesStarting(int installationValue, int runtimeValue, string expected) =>
+        Assert.Equal(expected, MainWindow.FormatSoftwareStatus(Software(ControllerSoftwareKind.MsiCenterM, (SoftwareInstallationStatus)installationValue, (SoftwareRuntimeStatus)runtimeValue)));
+
+    [Theory]
+    [InlineData(@"C:\Packages\MSIQuickSettings_1.0", @"C:\Packages\MSIQuickSettings_1.0\Gamebar_Widget.exe", true)]
+    [InlineData("C:\\Packages\\MSIQuickSettings_1.0\\", @"C:\Packages\MSIQuickSettings_1.0\Gamebar_Widget.exe", true)]
+    [InlineData(@"C:\Packages\MSIQuickSettings", @"C:\Packages\MSIQuickSettings_evil\Gamebar_Widget.exe", false)]
+    [InlineData(@"C:\Packages\MSIQuickSettings_1.0", @"C:\Packages\AnotherPackage\Gamebar_Widget.exe", false)]
+    [InlineData(@"C:\Packages\MSIQuickSettings_1.0", @"C:\Packages\MSIQuickSettings_1.0\Gamebar_Widget_Backup.exe", false)]
+    public void QuickSettingsWidgetOwnership_RequiresPackageChildBoundaryAndExactFilename(string root, string executable, bool expected) =>
+        Assert.Equal(expected, WindowsMsiCenterMRuntimeSignalSource.IsPackageOwnedWidget(root, executable));
 
     private static ControllerSoftwareStatus[] SoftwareStates() => [Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)];
     private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareInstallationStatus installation, SoftwareRuntimeStatus runtime) => new(kind, kind.ToString(), installation, runtime, "test");
@@ -248,6 +307,8 @@ public sealed class SystemStatusTests
     private sealed class FakePrerequisiteInspector(RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector { public RuntimePrerequisiteAssessment Inspect() => assessment; }
     private sealed class FakeHhcRuntime(bool running) : SteamInputAddonforClaw.Startup.IHandheldCompanionRuntimeDetector { public bool IsRunning() => running; }
     private sealed class FakeInstallationProbe(bool installed) : IApplicationInstallationProbe { public ApplicationInstallationInfo Detect() => new(installed, "test"); }
+    private sealed class FakeMsiRuntimeSignals(MsiCenterMRuntimeSignals signals) : IMsiCenterMRuntimeSignalSource { public MsiCenterMRuntimeSignals Capture() => signals; }
+    private sealed class ThrowingMsiRuntimeSignals : IMsiCenterMRuntimeSignalSource { public MsiCenterMRuntimeSignals Capture() => throw new InvalidOperationException(); }
     private sealed class TestUninstallProbe(IUninstallRegistrationSource source) : UninstallRegistrationInstallationProbe(MsiCenterMIdentity.InstallationDisplayNames, [], source) { }
     private sealed class FakeUninstallRegistrationSource(IReadOnlyList<InstalledApplicationRegistration> registrations) : IUninstallRegistrationSource { public IReadOnlyList<InstalledApplicationRegistration> Enumerate() => registrations; }
 }
