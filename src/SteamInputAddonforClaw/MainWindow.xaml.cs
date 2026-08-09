@@ -75,13 +75,12 @@ public sealed partial class MainWindow : Window
         var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _directInputEnumeratorFactory = () => new VorticeDirectInputDeviceEnumerator(windowHandle);
         Closed += OnWindowClosed;
-        VersionText.Text = $"Version {GetDisplayVersion()}";
         _isLoadingStartupSettings = true;
         LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
         _isLoadingStartupSettings = false;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
-        ControllerSoftwareList.ItemsSource = _softwareCards;
-        RoutingComponentsList.ItemsSource = _componentCards;
+        ControllerSoftwareRepeater.ItemsSource = _softwareCards;
+        RoutingComponentsRepeater.ItemsSource = _componentCards;
         ExternalControllersList.ItemsSource = _externalControllerCards;
         RuntimeStatusList.ItemsSource = _runtimeCards;
         MainNavigationView.SelectedItem = StatusNavigationItem;

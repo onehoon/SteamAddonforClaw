@@ -30,17 +30,17 @@
                 <StackPanel Spacing="12">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <StackPanel Spacing="2"><TextBlock FontSize="24" FontWeight="SemiBold" Text="Status" /><TextBlock x:Name="VersionText" Opacity="0.7" /></StackPanel>
+                        <TextBlock FontSize="24" FontWeight="SemiBold" Text="Status" />
                         <Button x:Name="RefreshStatusButton" Grid.Column="1" Click="RefreshStatusButton_Click" Content="↻ Refresh" VerticalAlignment="Center" />
                     </Grid>
                     <TextBlock FontSize="20" FontWeight="SemiBold" Text="Device Information" />
                     <Border Padding="18,16" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                        <StackPanel Spacing="4"><TextBlock x:Name="DeviceManufacturerText" FontSize="20" FontWeight="SemiBold" /><TextBlock x:Name="DeviceModelText" FontSize="18" /><TextBlock x:Name="DeviceGpuText" Opacity="0.7" TextWrapping="Wrap" /></StackPanel>
+                        <StackPanel Spacing="4"><StackPanel Orientation="Horizontal" Spacing="8"><TextBlock x:Name="DeviceManufacturerText" FontSize="20" FontWeight="SemiBold" /><TextBlock x:Name="DeviceModelText" FontSize="20" FontWeight="SemiBold" /></StackPanel><TextBlock x:Name="DeviceGpuText" Opacity="0.7" TextWrapping="Wrap" /></StackPanel>
                     </Border>
                     <TextBlock Margin="0,12,0,0" FontSize="20" FontWeight="SemiBold" Text="Controller Software" />
-                    <ListView x:Name="ControllerSoftwareList" IsItemClickEnabled="False" SelectionMode="None"><ListView.ItemTemplate><DataTemplate><Border Margin="0,0,0,8" Padding="18,16" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Spacing="3"><TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Name}"/><TextBlock Opacity="0.7" Text="{Binding Secondary}" TextWrapping="Wrap"/></StackPanel><Border Grid.Column="1" Padding="8,3" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="12" VerticalAlignment="Top"><TextBlock FontWeight="SemiBold" Text="{Binding Status}"/></Border></Grid></Border></DataTemplate></ListView.ItemTemplate></ListView>
+                    <ItemsRepeater x:Name="ControllerSoftwareRepeater"><ItemsRepeater.Layout><UniformGridLayout Orientation="Horizontal" MaximumRowsOrColumns="3" MinItemWidth="240" MinColumnSpacing="8" MinRowSpacing="8" /></ItemsRepeater.Layout><ItemsRepeater.ItemTemplate><DataTemplate><Border Padding="18,16" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Name}" VerticalAlignment="Center"/><Border Grid.Column="1" Padding="8,3" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="12" VerticalAlignment="Center"><TextBlock FontWeight="SemiBold" Text="{Binding Status}"/></Border></Grid></Border></DataTemplate></ItemsRepeater.ItemTemplate></ItemsRepeater>
                     <TextBlock Margin="0,12,0,0" FontSize="20" FontWeight="SemiBold" Text="Routing Components" />
-                    <ListView x:Name="RoutingComponentsList" SelectionMode="None"><ListView.ItemTemplate><DataTemplate><Border Margin="0,0,0,8" Padding="18,16" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Spacing="3"><TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Name}"/><TextBlock Opacity="0.7" Text="{Binding Secondary}" TextWrapping="Wrap"/></StackPanel><Border Grid.Column="1" Padding="8,3" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="12" VerticalAlignment="Top"><TextBlock FontWeight="SemiBold" Text="{Binding Status}"/></Border></Grid></Border></DataTemplate></ListView.ItemTemplate></ListView>
+                    <ItemsRepeater x:Name="RoutingComponentsRepeater"><ItemsRepeater.Layout><UniformGridLayout Orientation="Horizontal" MaximumRowsOrColumns="3" MinItemWidth="240" MinColumnSpacing="8" MinRowSpacing="8" /></ItemsRepeater.Layout><ItemsRepeater.ItemTemplate><DataTemplate><Border Padding="18,16" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Name}" VerticalAlignment="Center"/><Border Grid.Column="1" Padding="8,3" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="12" VerticalAlignment="Center"><TextBlock FontWeight="SemiBold" Text="{Binding Status}"/></Border></Grid></Border></DataTemplate></ItemsRepeater.ItemTemplate></ItemsRepeater>
                     <TextBlock Margin="0,12,0,0" FontSize="20" FontWeight="SemiBold" Text="External Controllers" />
                     <ListView x:Name="ExternalControllersList" SelectionMode="None"><ListView.ItemTemplate><DataTemplate><Border Margin="0,0,0,8" Padding="18,16" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Spacing="3"><TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Name}"/><TextBlock Opacity="0.7" Text="{Binding Secondary}" TextWrapping="Wrap"/></StackPanel><Border Grid.Column="1" Padding="8,3" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="12" VerticalAlignment="Top"><TextBlock FontWeight="SemiBold" Text="{Binding Status}"/></Border></Grid></Border></DataTemplate></ListView.ItemTemplate></ListView>
                     <TextBlock Margin="0,12,0,0" FontSize="20" FontWeight="SemiBold" Text="Runtime" />
@@ -77,7 +77,6 @@
                         <SymbolIcon VerticalAlignment="Center" Symbol="Play" />
                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                             <TextBlock FontSize="18" FontWeight="SemiBold" Text="Launch at Windows startup" />
-                            <TextBlock Opacity="0.7" Text="Start the addon three minutes after you sign in to Windows." TextWrapping="Wrap" />
                             <TextBlock x:Name="StartupSettingsStatusText" Opacity="0.7" TextWrapping="Wrap" />
                         </StackPanel>
                         <ToggleSwitch
@@ -111,19 +110,6 @@
                     </Grid>
                 </Button>
 
-                <Border
-                    Padding="18,16"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="8">
-                    <StackPanel Spacing="10">
-                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Environment Discovery" />
-                        <TextBlock Opacity="0.7" Text="Generate a read-only system report for controller software detection development." TextWrapping="Wrap" />
-                        <Button x:Name="GenerateEnvironmentDiscoveryReportButton" Click="GenerateEnvironmentDiscoveryReportButton_Click" Content="Generate Report" HorizontalAlignment="Left" />
-                        <TextBlock x:Name="EnvironmentDiscoveryReportStatusText" Opacity="0.7" TextWrapping="Wrap" />
-                        <Button x:Name="OpenEnvironmentDiscoveryFolderButton" Click="OpenEnvironmentDiscoveryFolderButton_Click" Content="Open Folder" HorizontalAlignment="Left" IsEnabled="False" Visibility="Collapsed" />
-                    </StackPanel>
-                </Border>
             </StackPanel>
 
             <StackPanel
@@ -140,14 +126,27 @@
                     Opacity="0.7"
                     Text="These diagnostics are for developers only. General users should not use this menu."
                     TextWrapping="Wrap" />
-                <TextBlock FontSize="20" FontWeight="SemiBold" Text="M1/M2 DirectInput Test" />
-                <TextBlock Text="Tests the existing PID_1902 DirectInput device only. No controller mode changes are made." TextWrapping="Wrap" />
-                <TextBlock x:Name="M1M2TestStatusText" Text="Status: Idle" />
-                <TextBlock x:Name="M1TestStatusText" Text="M1: Waiting" />
-                <TextBlock x:Name="M2TestStatusText" Text="M2: Waiting" />
-                <TextBlock x:Name="IndependentTestStatusText" Text="Independent: Waiting" />
-                <Button x:Name="StartM1M2TestButton" Click="StartM1M2TestButton_Click" Content="Start M1/M2 Test" />
-                <Button x:Name="StopM1M2TestButton" Click="StopM1M2TestButton_Click" Content="Stop Test" IsEnabled="False" />
+                <Border Padding="18,16" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                    <StackPanel Spacing="10">
+                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="M1/M2 DirectInput Test" />
+                        <TextBlock Text="Tests the existing PID_1902 DirectInput device only. No controller mode changes are made." TextWrapping="Wrap" />
+                        <TextBlock x:Name="M1M2TestStatusText" Text="Status: Idle" />
+                        <TextBlock x:Name="M1TestStatusText" Text="M1: Waiting" />
+                        <TextBlock x:Name="M2TestStatusText" Text="M2: Waiting" />
+                        <TextBlock x:Name="IndependentTestStatusText" Text="Independent: Waiting" />
+                        <Button x:Name="StartM1M2TestButton" Click="StartM1M2TestButton_Click" Content="Start M1/M2 Test" />
+                        <Button x:Name="StopM1M2TestButton" Click="StopM1M2TestButton_Click" Content="Stop Test" IsEnabled="False" />
+                    </StackPanel>
+                </Border>
+                <Border Padding="18,16" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                    <StackPanel Spacing="10">
+                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="Environment Discovery" />
+                        <TextBlock Opacity="0.7" Text="Generate a read-only system report for controller software detection development." TextWrapping="Wrap" />
+                        <Button x:Name="GenerateEnvironmentDiscoveryReportButton" Click="GenerateEnvironmentDiscoveryReportButton_Click" Content="Generate Report" HorizontalAlignment="Left" />
+                        <TextBlock x:Name="EnvironmentDiscoveryReportStatusText" Opacity="0.7" TextWrapping="Wrap" />
+                        <Button x:Name="OpenEnvironmentDiscoveryFolderButton" Click="OpenEnvironmentDiscoveryFolderButton_Click" Content="Open Folder" HorizontalAlignment="Left" IsEnabled="False" Visibility="Collapsed" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </Grid>
     </NavigationView>
