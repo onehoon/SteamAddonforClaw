@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Recovery;
+using SteamInputAddonforClaw.HidHide;
 
 namespace SteamInputAddonforClaw;
 
@@ -21,6 +22,7 @@ public partial class App : Application
     private DispatcherQueue? _dispatcherQueue;
     private bool _showMainWindow;
     private SystemTrayIcon? _systemTrayIcon;
+    private RecoveryManager? _recoveryManager;
     private bool _isExplicitExit;
     private readonly SingleInstanceGate _singleInstanceGate;
 
@@ -49,11 +51,12 @@ public partial class App : Application
         AppLog.Info("Startup coordination started.");
         var classifier = new ControllerDeviceClassifier();
         var deviceEnumerator = new WindowsControllerDeviceEnumerator();
+        _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), new HidHideCliClient());
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(deviceEnumerator),
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
-            recoveryManager: new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath)));
+            recoveryManager: _recoveryManager);
 
         try
         {
@@ -91,7 +94,7 @@ public partial class App : Application
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
         var startupRegistrationResult = startupSettings.Repair();
 
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message);
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 

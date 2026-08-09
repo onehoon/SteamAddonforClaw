@@ -63,3 +63,11 @@ public enum MsiClawInputStopReason
     ReadStateFailed,
     InvalidButtonLayout
 }
+
+internal interface IMsiClawInputDiagnostic : IAsyncDisposable
+{
+    event EventHandler<MsiClawInputTestSummary>? TestCompleted;
+    bool IsRunning { get; }
+    MsiClawInputStartResult Start();
+    Task StopAsync();
+}

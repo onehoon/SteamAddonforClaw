@@ -10,6 +10,8 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Recovery;
+using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Windowing;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -22,15 +24,26 @@ public sealed partial class MainWindow : Window
 {
     private readonly StartupSettingsCoordinator _startupSettings;
     private readonly Func<IDirectInputDeviceEnumerator> _directInputEnumeratorFactory;
+    private readonly RecoveryManager _recoveryManager;
     private MsiClawInputSource? _msiClawInputSource;
+    private M1M2DiagnosticCoordinator? _m1M2DiagnosticCoordinator;
     private bool _isLoadingStartupSettings;
     private readonly MainNavigationState _navigationState = new();
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
         string startupRegistrationMessage)
+        : this(startupSettings, startupRegistrationMessage, null)
+    {
+    }
+
+    internal MainWindow(
+        StartupSettingsCoordinator startupSettings,
+        string startupRegistrationMessage,
+        RecoveryManager? recoveryManager)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
+        _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), new HidHideCliClient());
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -94,8 +107,8 @@ public sealed partial class MainWindow : Window
 
     private void StartM1M2TestButton_Click(object sender, RoutedEventArgs args)
     {
-        _msiClawInputSource ??= CreateMsiClawInputSource();
-        var result = _msiClawInputSource.Start();
+        _m1M2DiagnosticCoordinator ??= CreateM1M2DiagnosticCoordinator();
+        var result = _m1M2DiagnosticCoordinator.Start();
         M1M2TestStatusText.Text = $"Status: {result.Message}";
         if (result.Started)
         {
@@ -109,9 +122,9 @@ public sealed partial class MainWindow : Window
 
     private async void StopM1M2TestButton_Click(object sender, RoutedEventArgs args)
     {
-        if (_msiClawInputSource is not null)
+        if (_m1M2DiagnosticCoordinator is not null)
         {
-            await _msiClawInputSource.StopAsync();
+            await _m1M2DiagnosticCoordinator.StopAsync();
         }
     }
 
@@ -142,12 +155,13 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        if (_msiClawInputSource is not null)
+        if (_m1M2DiagnosticCoordinator is not null)
         {
-            _msiClawInputSource.StateChanged -= OnMsiClawInputStateChanged;
-            _msiClawInputSource.IndependentVerified -= OnMsiClawInputIndependentVerified;
-            _msiClawInputSource.TestCompleted -= OnMsiClawInputTestCompleted;
-            _msiClawInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            var source = _msiClawInputSource!;
+            source.StateChanged -= OnMsiClawInputStateChanged;
+            source.IndependentVerified -= OnMsiClawInputIndependentVerified;
+            source.TestCompleted -= OnMsiClawInputTestCompleted;
+            _m1M2DiagnosticCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 
@@ -158,6 +172,13 @@ public sealed partial class MainWindow : Window
         source.IndependentVerified += OnMsiClawInputIndependentVerified;
         source.TestCompleted += OnMsiClawInputTestCompleted;
         return source;
+    }
+
+    private M1M2DiagnosticCoordinator CreateM1M2DiagnosticCoordinator()
+    {
+        _msiClawInputSource ??= CreateMsiClawInputSource();
+        var executablePath = Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable.");
+        return new M1M2DiagnosticCoordinator(_msiClawInputSource, new HidHideCliClient(), _recoveryManager, executablePath);
     }
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)

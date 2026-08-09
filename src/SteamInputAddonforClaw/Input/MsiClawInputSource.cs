@@ -4,7 +4,7 @@ using SteamInputAddonforClaw.Input.DirectInput;
 
 namespace SteamInputAddonforClaw.Input;
 
-public sealed class MsiClawInputSource : IAsyncDisposable
+public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
 {
     private const ushort MsiVendorId = 0x0DB0;
     private const ushort DirectInputProductId = 0x1902;
