@@ -1,4 +1,6 @@
 using System.Text;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.HidHide;
 using Xunit;
 
@@ -8,6 +10,17 @@ public sealed class HidHideDriverClientTests
 {
     private const string AddonDos = @"C:\Apps\SteamInputAddonforClaw.exe";
     private const string AddonNt = @"\Device\HarddiskVolume3\Apps\SteamInputAddonforClaw.exe";
+
+    [Fact]
+    public void NativeDeviceIoControl_BindsToKernel32DeviceIoControlExport()
+    {
+        var method = typeof(HidHideControlDevice).GetMethod("NativeDeviceIoControl", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var import = method.GetCustomAttribute<DllImportAttribute>();
+
+        Assert.NotNull(import);
+        Assert.Equal("kernel32.dll", import.Value, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal("DeviceIoControl", import.EntryPoint);
+    }
 
     [Fact]
     public void Inspect_UsesGenericReadAndSuccessfulTwoPassQueries()

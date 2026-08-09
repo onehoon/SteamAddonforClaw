@@ -147,7 +147,7 @@ internal sealed class HidHideControlDevice(SafeFileHandle handle) : IHidHideCont
     }
     public void Dispose() => handle.Dispose();
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", EntryPoint = "DeviceIoControl", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool NativeDeviceIoControl(SafeFileHandle device, uint code, byte[]? input, uint inputLength, byte[]? output, uint outputLength, out uint bytesReturned, IntPtr overlapped);
 }
