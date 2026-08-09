@@ -51,7 +51,7 @@ internal sealed class EnvironmentDiscoveryReportWriter
         }
         text.AppendLine($"ControllerEnvironmentMode: {current.Environment.Mode}");
         text.AppendLine($"ClawTweaksState: {current.Environment.ClawTweaksState}");
-        text.AppendLine($"EnvironmentReadiness: {current.Readiness}");
+        text.AppendLine($"EnvironmentReadiness: {current.EnvironmentReadiness}");
     }
 
     private static void WriteProcesses(StringBuilder text, DiscoverySection<ProcessDiscoveryInfo> section)

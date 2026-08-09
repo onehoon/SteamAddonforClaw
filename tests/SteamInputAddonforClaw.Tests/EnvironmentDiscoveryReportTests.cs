@@ -37,6 +37,47 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
     }
 
     [Fact]
+    public void ExecutableExtraction_RemovesArgumentsAndSanitizesUserProfileAnywhere()
+    {
+        var executable = WindowsEnvironmentDiscoverySnapshotSource.ExtractExecutablePath(
+            "\"C:\\Users\\TestUser\\AppData\\Local\\Example\\app.exe\" --secret foo",
+            "C:\\Users\\TestUser");
+
+        Assert.Equal("%USERPROFILE%\\AppData\\Local\\Example\\app.exe", executable);
+        Assert.DoesNotContain("TestUser", executable, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("--secret", executable, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("foo", executable, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Writer_DoesNotExposeStartupArgumentsOrUserName()
+    {
+        var executable = WindowsEnvironmentDiscoverySnapshotSource.ExtractExecutablePath(
+            "\"C:\\Users\\TestUser\\AppData\\Local\\Example\\app.exe\" --secret foo",
+            "C:\\Users\\TestUser");
+        var snapshot = Snapshot(processes: []) with
+        {
+            StartupRegistrations = new DiscoverySection<StartupRegistrationDiscoveryInfo>([new("HKCU\\Run", "Example", executable)])
+        };
+
+        var report = new EnvironmentDiscoveryReportWriter().Write(snapshot);
+
+        Assert.Contains("%USERPROFILE%\\AppData\\Local\\Example\\app.exe", report);
+        Assert.DoesNotContain("TestUser", report, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("--secret", report, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("foo", report, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Writer_RecordsEnvironmentReadinessAsNotEvaluated()
+    {
+        var report = new EnvironmentDiscoveryReportWriter().Write(Snapshot(processes: []));
+
+        Assert.Contains("EnvironmentReadiness: NotEvaluated", report);
+        Assert.DoesNotContain("EnvironmentReadiness: Stable", report);
+    }
+
+    [Fact]
     public async Task Generator_WritesNewReportForTimestampCollision()
     {
         var timestamp = new DateTimeOffset(2026, 8, 9, 17, 30, 12, TimeSpan.Zero);
@@ -61,7 +102,7 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
         new SystemDiscoveryInfo("Windows 11", "26100", "x64", "MSI", "Claw", ["Intel Arc"], "1.0.0"),
         new DiscoverySection<CurrentDetectionDiscoveryInfo>([new CurrentDetectionDiscoveryInfo(
             [new ControllerSoftwareStatus(ControllerSoftwareKind.MsiCenterM, "MSI Center M", SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running, "Running")],
-            new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled), ControllerEnvironmentReadiness.Stable)]),
+            new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled), "NotEvaluated")]),
         new DiscoverySection<ProcessDiscoveryInfo>(processes),
         new DiscoverySection<ServiceDiscoveryInfo>([new("svc", "Service", "Running", "Automatic", "C:\\svc.exe")]),
         new DiscoverySection<InstalledApplicationDiscoveryInfo>(installed ?? []),

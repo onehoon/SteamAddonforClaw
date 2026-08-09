@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -86,8 +88,7 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
             new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
         }.Select(provider => provider.Capture()).ToArray();
         var environment = new ClawTweaksEnvironmentDetector(devices).Detect();
-        var readiness = environment.Mode == ControllerEnvironmentMode.Indeterminate ? ControllerEnvironmentReadiness.Indeterminate : ControllerEnvironmentReadiness.Stable;
-        return new CurrentDetectionDiscoveryInfo(software, environment, readiness);
+        return new CurrentDetectionDiscoveryInfo(software, environment, "NotEvaluated");
     }
 
     private static IReadOnlyList<ProcessDiscoveryInfo> CaptureProcesses() => Process.GetProcesses()
@@ -117,28 +118,38 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
         {
             using var service = services.OpenSubKey(name);
             var start = service?.GetValue("Start") as int?;
-            return new ServiceDiscoveryInfo(name, Value(service, "DisplayName"), states.TryGetValue(name, out var state) ? state : "Unknown", StartType(start), SanitizePath(Value(service, "ImagePath")));
+            return new ServiceDiscoveryInfo(name, Value(service, "DisplayName"), states.TryGetValue(name, out var state) ? state : "Unknown", StartType(start), ExtractExecutablePath(Value(service, "ImagePath")));
         }).ToArray();
     }
 
     private static Dictionary<string, string> CaptureServiceStates()
     {
-        using var process = Process.Start(new ProcessStartInfo("sc.exe", "query state= all") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true }) ?? throw new InvalidOperationException("Unable to query service state.");
-        var lines = process.StandardOutput.ReadToEnd().Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
-        process.WaitForExit();
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        string? name = null;
-        foreach (var line in lines)
+        var manager = OpenSCManagerW(null, null, ScManagerEnumerateService);
+        if (manager == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to open the Service Control Manager.");
+        try
         {
-            var trimmed = line.Trim();
-            if (trimmed.StartsWith("SERVICE_NAME:", StringComparison.OrdinalIgnoreCase)) name = trimmed[13..].Trim();
-            else if (name is not null && trimmed.StartsWith("STATE", StringComparison.OrdinalIgnoreCase))
+            var initialResumeHandle = 0u;
+            if (!EnumServicesStatusExW(manager, ScEnumProcessInfo, ServiceWin32, ServiceStateAll, IntPtr.Zero, 0, out var requiredBytes, out _, ref initialResumeHandle, null)
+                && Marshal.GetLastWin32Error() != 234)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to size Windows service enumeration.");
+            if (requiredBytes == 0) return result;
+            var buffer = Marshal.AllocHGlobal((int)requiredBytes);
+            try
             {
-                var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                result[name] = parts.LastOrDefault() ?? "Unknown";
-                name = null;
+                var resumeHandle = 0u;
+                if (!EnumServicesStatusExW(manager, ScEnumProcessInfo, ServiceWin32, ServiceStateAll, buffer, requiredBytes, out _, out var returned, ref resumeHandle, null))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to enumerate Windows services.");
+                var itemSize = Marshal.SizeOf<EnumServiceStatusProcess>();
+                for (var index = 0; index < returned; index++)
+                {
+                    var item = Marshal.PtrToStructure<EnumServiceStatusProcess>(buffer + (index * itemSize));
+                    result[Marshal.PtrToStringUni(item.ServiceName) ?? "<Unavailable>"] = ServiceStatus(item.Status.CurrentState);
+                }
             }
+            finally { Marshal.FreeHGlobal(buffer); }
         }
+        finally { CloseServiceHandle(manager); }
         return result;
     }
 
@@ -184,7 +195,7 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
         {
             using var key = root.OpenSubKey($@"SOFTWARE\Microsoft\Windows\CurrentVersion\{keyName}");
             if (key is null) continue;
-            foreach (var valueName in key.GetValueNames()) items.Add(new StartupRegistrationDiscoveryInfo($"{source}\\{keyName}", valueName, SanitizePath(key.GetValue(valueName)?.ToString())));
+            foreach (var valueName in key.GetValueNames()) items.Add(new StartupRegistrationDiscoveryInfo($"{source}\\{keyName}", valueName, ExtractExecutablePath(key.GetValue(valueName)?.ToString())));
         }
     }
 
@@ -206,13 +217,24 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
 
     private static void AddTasks(dynamic folder, List<ScheduledTaskDiscoveryInfo> results)
     {
-        foreach (dynamic task in folder.GetTasks(1))
+        string folderPath;
+        try { folderPath = folder.Path; }
+        catch { folderPath = "<Unavailable>"; }
+        try
         {
-            var executable = "<Unavailable>";
-            try { executable = string.Join(" | ", ((IEnumerable<dynamic>)task.Definition.Actions).Select(action => (string?)action.Path ?? "<Unavailable>")); } catch { }
-            results.Add(new ScheduledTaskDiscoveryInfo((string)task.Path, (string)task.Name, ((bool)task.Enabled).ToString(), task.State.ToString(), SanitizePath(executable)));
+            foreach (dynamic task in folder.GetTasks(1))
+            {
+                var executable = "<Unavailable>";
+                try { executable = string.Join(" | ", ((IEnumerable<dynamic>)task.Definition.Actions).Select(action => (string?)action.Path ?? "<Unavailable>")); } catch { }
+                results.Add(new ScheduledTaskDiscoveryInfo((string)task.Path, (string)task.Name, ((bool)task.Enabled).ToString(), task.State.ToString(), SanitizePath(executable)));
+            }
         }
-        foreach (dynamic child in folder.GetFolders(0)) AddTasks(child, results);
+        catch (Exception exception) { results.Add(new ScheduledTaskDiscoveryInfo(folderPath, "<FolderInspectionFailed>", "<Unavailable>", "<Unavailable>", $"<InspectionFailed: {exception.GetType().Name}>")); }
+        try
+        {
+            foreach (dynamic child in folder.GetFolders(0)) AddTasks(child, results);
+        }
+        catch (Exception exception) { results.Add(new ScheduledTaskDiscoveryInfo(folderPath, "<SubfolderInspectionFailed>", "<Unavailable>", "<Unavailable>", $"<InspectionFailed: {exception.GetType().Name}>")); }
     }
 
     private static DiscoverySection<T> Section<T>(Func<IReadOnlyList<T>> capture)
@@ -224,10 +246,71 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
     private static string AppVersion() => typeof(WindowsEnvironmentDiscoverySnapshotSource).Assembly.GetName().Version?.ToString() ?? "Unknown";
     private static string Value(RegistryKey? key, string name) => key?.GetValue(name)?.ToString() ?? "<Unavailable>";
     private static string StartType(int? value) => value switch { 0 => "Boot", 1 => "System", 2 => "Automatic", 3 => "Manual", 4 => "Disabled", _ => "Unknown" };
-    private static string SanitizePath(string? value)
+    internal static string ExtractExecutablePath(string? value, string? profileRoot = null)
     {
         if (string.IsNullOrWhiteSpace(value)) return "<Unavailable>";
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).TrimEnd('\\');
-        return value.StartsWith(profile, StringComparison.OrdinalIgnoreCase) ? "%USERPROFILE%" + value[profile.Length..] : value;
+        var command = value.Trim();
+        if (command.StartsWith('"'))
+        {
+            var closingQuote = command.IndexOf('"', 1);
+            return SanitizePath(closingQuote > 0 ? command[1..closingQuote] : command, profileRoot);
+        }
+
+        var executableEnd = new[] { ".exe", ".com", ".bat", ".cmd" }
+            .Select(extension => command.IndexOf(extension, StringComparison.OrdinalIgnoreCase))
+            .Where(index => index >= 0)
+            .Select(index => index + 4)
+            .DefaultIfEmpty(command.IndexOf(' '))
+            .First();
+        return SanitizePath(executableEnd > 0 ? command[..executableEnd] : command, profileRoot);
     }
+
+    internal static string SanitizePath(string? value, string? profileRoot = null)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "<Unavailable>";
+        var profile = (profileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)).TrimEnd('\\');
+        return string.IsNullOrWhiteSpace(profile) ? value : value.Replace(profile, "%USERPROFILE%", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private const uint ScManagerEnumerateService = 0x0004;
+    private const int ScEnumProcessInfo = 0;
+    private const uint ServiceWin32 = 0x00000030;
+    private const uint ServiceStateAll = 0x00000003;
+    private static string ServiceStatus(uint status) => status switch
+    {
+        1 => "Stopped", 2 => "StartPending", 3 => "StopPending", 4 => "Running", 5 => "ContinuePending", 6 => "PausePending", 7 => "Paused", _ => "Unknown"
+    };
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct EnumServiceStatusProcess
+    {
+        public IntPtr ServiceName;
+        public IntPtr DisplayName;
+        public ServiceStatusProcess Status;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ServiceStatusProcess
+    {
+        public uint ServiceType;
+        public uint CurrentState;
+        public uint ControlsAccepted;
+        public uint Win32ExitCode;
+        public uint ServiceSpecificExitCode;
+        public uint CheckPoint;
+        public uint WaitHint;
+        public uint ProcessId;
+        public uint ServiceFlags;
+    }
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenSCManagerW(string? machineName, string? databaseName, uint desiredAccess);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumServicesStatusExW(IntPtr serviceManager, int infoLevel, uint serviceType, uint serviceState, IntPtr services, uint bufferSize, out uint bytesNeeded, out uint servicesReturned, ref uint resumeHandle, string? groupName);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseServiceHandle(IntPtr serviceHandle);
 }
