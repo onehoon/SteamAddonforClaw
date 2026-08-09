@@ -5,7 +5,14 @@ public sealed record DirectInputDeviceDescriptor(
     Guid ProductGuid,
     string ProductName,
     ushort VendorId,
-    ushort ProductId);
+    ushort ProductId,
+    string? DevicePath = null,
+    string? PnpInstanceId = null,
+    string? PhysicalIdentity = null,
+    ushort? UsagePage = null,
+    ushort? Usage = null,
+    int? ButtonCount = null,
+    int? AxisCount = null);
 
 public sealed record DirectInputState(IReadOnlyList<bool> Buttons);
 

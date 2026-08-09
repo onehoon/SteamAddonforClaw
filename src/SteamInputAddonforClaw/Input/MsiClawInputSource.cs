@@ -170,21 +170,25 @@ public sealed class MsiClawInputSource : IAsyncDisposable
         foreach (var candidate in candidates)
         {
             var matches = candidate.VendorId == MsiVendorId && candidate.ProductId == DirectInputProductId;
-            AppLog.Trace("MsiInput", matches ? "DirectInput device candidate." : "DirectInput device ignored.", ("TestSession", testSession), ("InstanceGuid", candidate.InstanceGuid), ("ProductGuid", candidate.ProductGuid), ("ProductName", candidate.ProductName), ("VID", $"0x{candidate.VendorId:X4}"), ("PID", $"0x{candidate.ProductId:X4}"), ("Reason", matches ? "KnownMsiClawDirectInput" : "NotMsiClawPid1902"));
+            AppLog.Trace("MsiInput", matches ? "DirectInput device candidate." : "DirectInput device ignored.", ("TestSession", testSession), ("InstanceGuid", candidate.InstanceGuid), ("ProductGuid", candidate.ProductGuid), ("ProductName", candidate.ProductName), ("VID", $"0x{candidate.VendorId:X4}"), ("PID", $"0x{candidate.ProductId:X4}"), ("DevicePath", candidate.DevicePath), ("PnpInstanceId", candidate.PnpInstanceId), ("PhysicalIdentity", candidate.PhysicalIdentity), ("UsagePage", candidate.UsagePage), ("Usage", candidate.Usage), ("ButtonCount", candidate.ButtonCount), ("AxisCount", candidate.AxisCount), ("Reason", matches ? "KnownMsiClawDirectInput" : "NotMsiClawPid1902"));
         }
 
         var selectedCandidates = candidates.Where(candidate => candidate.VendorId == MsiVendorId && candidate.ProductId == DirectInputProductId).ToArray();
-        return selectedCandidates.Length switch
-        {
-            0 => NoCandidate(testSession),
-            1 => Select(selectedCandidates[0], testSession),
-            _ => MultipleCandidates(selectedCandidates.Length, testSession)
-        };
+        if (selectedCandidates.Length == 0) return NoCandidate(testSession);
+        if (selectedCandidates.Any(candidate => !HasVerifiedIdentity(candidate))) return Indeterminate(selectedCandidates.Length, testSession, "PhysicalIdentityUnverified");
+        if (selectedCandidates.Any(candidate => candidate.ButtonCount is null or < RequiredButtonCount)) return Indeterminate(selectedCandidates.Length, testSession, "InsufficientButtonCount");
+        var identities = selectedCandidates.Select(candidate => candidate.PhysicalIdentity!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (identities.Length != 1) return Indeterminate(selectedCandidates.Length, testSession, "MultiplePhysicalIdentities");
+
+        return Select(selectedCandidates.OrderBy(candidate => candidate.InstanceGuid).First(), testSession, selectedCandidates.Length == 1 ? "VerifiedMsiPhysicalRoot" : "VerifiedMsiPhysicalRootAlias");
     }
 
-    private static SelectionResult Select(DirectInputDeviceDescriptor descriptor, int testSession)
+    private static bool HasVerifiedIdentity(DirectInputDeviceDescriptor descriptor) =>
+        !string.IsNullOrWhiteSpace(descriptor.DevicePath) && !string.IsNullOrWhiteSpace(descriptor.PnpInstanceId) && !string.IsNullOrWhiteSpace(descriptor.PhysicalIdentity) && descriptor.UsagePage == 0x0001 && descriptor.Usage == 0x0005;
+
+    private static SelectionResult Select(DirectInputDeviceDescriptor descriptor, int testSession, string reason)
     {
-        AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.", ("TestSession", testSession), ("VID", "0x0DB0"), ("PID", "0x1902"), ("InstanceGuid", descriptor.InstanceGuid), ("Reason", "KnownMsiClawDirectInput"));
+        AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.", ("TestSession", testSession), ("VID", "0x0DB0"), ("PID", "0x1902"), ("InstanceGuid", descriptor.InstanceGuid), ("PhysicalIdentity", descriptor.PhysicalIdentity), ("SelectionReason", reason));
         return new SelectionResult(MsiClawInputStartStatus.Started, "M1/M2 DirectInput test is running.", descriptor);
     }
 
@@ -194,10 +198,10 @@ public sealed class MsiClawInputSource : IAsyncDisposable
         return new SelectionResult(MsiClawInputStartStatus.Pid1902NotFound, "DirectInput PID_1902 device not found. No changes were made.", null);
     }
 
-    private static SelectionResult MultipleCandidates(int candidateCount, int testSession)
+    private static SelectionResult Indeterminate(int candidateCount, int testSession, string reason)
     {
-        AppLog.Warn("MsiInput", "Multiple MSI Claw DirectInput candidates were found.", null, ("TestSession", testSession), ("CandidateCount", candidateCount), ("Reason", "MultiplePid1902Candidates"), ("Action", "DoNotAcquire"));
-        return new SelectionResult(MsiClawInputStartStatus.Indeterminate, "Multiple MSI Claw PID_1902 DirectInput devices were found. No changes were made.", null);
+        AppLog.Warn("MsiInput", "MSI Claw DirectInput candidate selection is indeterminate.", null, ("TestSession", testSession), ("CandidateCount", candidateCount), ("Reason", reason), ("Action", "DoNotAcquire"));
+        return new SelectionResult(MsiClawInputStartStatus.Indeterminate, "MSI Claw PID_1902 DirectInput identity could not be verified. No changes were made.", null);
     }
 
     private async Task PollAsync(InputSession session)
