@@ -13,7 +13,10 @@ internal sealed class SystemStatusProvider(
     Func<ExternalControllerAssessment> externalControllerProvider,
     Func<bool> recoverySafeProvider) : ISystemStatusProvider
 {
-    public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
+    public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) =>
+        Task.Run(() => CaptureCore(cancellationToken), cancellationToken);
+
+    private SystemStatusSnapshot CaptureCore(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var device = deviceInformationProvider.Capture();
@@ -23,7 +26,7 @@ internal sealed class SystemStatusProvider(
         var external = TryExternalControllerAssessment();
         var addon = AddonStatusEvaluator.Evaluate(software, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId), external, TryRecoverySafety());
         AppLog.Info("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
-        return Task.FromResult(new SystemStatusSnapshot(device, software, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId), external, addon));
+        return new SystemStatusSnapshot(device, software, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId), external, addon);
     }
 
     private SteamSessionState TrySteamState() { try { return steamStateProvider(); } catch { return SteamSessionState.FromRunningAppId(0); } }

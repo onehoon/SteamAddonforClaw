@@ -72,10 +72,44 @@ public sealed class SystemStatusTests
         Assert.Equal(AddonOperationalStatus.SetupRequired, snapshot.Addon.Status);
     }
 
+    [Fact]
+    public void HandheldCompanion_InstalledButStoppedIsPreserved()
+    {
+        var status = new HandheldCompanionSoftwareStatusProvider(new FakeHhcRuntime(false), new FakeInstallationProbe(true)).Capture();
+
+        Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
+        Assert.Equal(SoftwareRuntimeStatus.NotRunning, status.Runtime);
+    }
+
+    [Fact]
+    public void HandheldCompanion_RunningPromotesInstalledWhenTheInstallationProbeIsAbsent()
+    {
+        var status = new HandheldCompanionSoftwareStatusProvider(new FakeHhcRuntime(true), new FakeInstallationProbe(false)).Capture();
+
+        Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
+        Assert.Equal(SoftwareRuntimeStatus.Running, status.Runtime);
+    }
+
+    [Theory]
+    [InlineData(true, false, (int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.NotRunning)]
+    [InlineData(false, true, (int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.Running)]
+    [InlineData(false, false, (int)SoftwareInstallationStatus.NotInstalled, (int)SoftwareRuntimeStatus.NotRunning)]
+    public void MsiCenterM_InstallationAndRuntimeAreIndependent(bool installed, bool running, int expectedInstallationValue, int expectedRuntimeValue)
+    {
+        var expectedInstallation = (SoftwareInstallationStatus)expectedInstallationValue;
+        var expectedRuntime = (SoftwareRuntimeStatus)expectedRuntimeValue;
+        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(installed), () => running).Capture();
+
+        Assert.Equal(expectedInstallation, status.Installation);
+        Assert.Equal(expectedRuntime, status.Runtime);
+    }
+
     private static ControllerSoftwareStatus[] SoftwareStates() => [Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)];
     private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareInstallationStatus installation, SoftwareRuntimeStatus runtime) => new(kind, kind.ToString(), installation, runtime, "test");
     private static RuntimePrerequisiteAssessment Prerequisites(PrerequisiteStatus status) => new(new(PrerequisiteKind.HidHide, status, "test"), new(PrerequisiteKind.UsbIpWin2, status, "test"), new(PrerequisiteKind.Viiper, status, "test"));
     private sealed class FakeDeviceProvider : IDeviceInformationProvider { public DeviceStatusSnapshot Capture() => new("MSI", "Claw", ["Intel Arc"]); }
     private sealed class FakeSoftwareProvider(ControllerSoftwareStatus status) : IControllerSoftwareStatusProvider { public ControllerSoftwareStatus Capture() => status; }
     private sealed class FakePrerequisiteInspector(RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector { public RuntimePrerequisiteAssessment Inspect() => assessment; }
+    private sealed class FakeHhcRuntime(bool running) : SteamInputAddonforClaw.Startup.IHandheldCompanionRuntimeDetector { public bool IsRunning() => running; }
+    private sealed class FakeInstallationProbe(bool installed) : IApplicationInstallationProbe { public ApplicationInstallationInfo Detect() => new(installed, "test"); }
 }
