@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Status;
 
@@ -19,6 +20,7 @@ internal sealed record SystemStatusSnapshot(
     RuntimePrerequisiteAssessment Prerequisites,
     SteamStatusSnapshot Steam,
     ExternalControllerAssessment ExternalController,
+    RoutingDecision RoutingDecision,
     AddonStatusSnapshot Addon);
 
 internal interface IDeviceInformationProvider { DeviceStatusSnapshot Capture(); }

@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Status;
 
@@ -11,8 +12,10 @@ internal sealed class SystemStatusProvider(
     IRuntimePrerequisiteInspector prerequisiteInspector,
     Func<SteamSessionState> steamStateProvider,
     Func<ExternalControllerAssessment> externalControllerProvider,
-    Func<bool> recoverySafeProvider) : ISystemStatusProvider
+    Func<bool> recoverySafeProvider,
+    IRoutingSessionStateMachine? routingSessionStateMachine = null) : ISystemStatusProvider
 {
+    private readonly IRoutingSessionStateMachine _routingSessionStateMachine = routingSessionStateMachine ?? new RoutingSessionStateMachine();
     public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) =>
         Task.Run(() => CaptureCore(cancellationToken), cancellationToken);
 
@@ -24,9 +27,11 @@ internal sealed class SystemStatusProvider(
         var prerequisites = prerequisiteInspector.Inspect();
         var steam = TrySteamState();
         var external = TryExternalControllerAssessment();
-        var addon = AddonStatusEvaluator.Evaluate(software, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId), external, TryRecoverySafety());
+        var recoverySafe = TryRecoverySafety();
+        var decision = _routingSessionStateMachine.Evaluate(new RoutingPolicyInput(steam, external, software, prerequisites, recoverySafe));
+        var addon = AddonStatusEvaluator.Map(decision);
         AppLog.Info("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
-        return new SystemStatusSnapshot(device, software, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId), external, addon);
+        return new SystemStatusSnapshot(device, software, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId), external, decision, addon);
     }
 
     private SteamSessionState TrySteamState() { try { return steamStateProvider(); } catch { return SteamSessionState.FromRunningAppId(0); } }
