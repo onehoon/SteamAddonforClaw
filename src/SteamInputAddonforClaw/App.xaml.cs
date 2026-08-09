@@ -113,6 +113,15 @@ public partial class App : Application
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
         var startupRegistrationResult = startupSettings.Repair();
 
+        if (recoverySafe)
+        {
+            _steamSessionWatcher.Start();
+        }
+        else
+        {
+            AppLog.Warn("Recovery", "Steam/controller routing remains stopped because recovery is unsafe.", null, ("Action", "Passive"));
+        }
+
         var controllerDetector = new ExternalControllerDetector(
             new WindowsControllerDeviceEnumerator(),
             classifier);
@@ -144,15 +153,6 @@ public partial class App : Application
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
-        if (recoverySafe)
-        {
-            _steamSessionWatcher.Start();
-        }
-        else
-        {
-            AppLog.Warn("Recovery", "Steam/controller routing remains stopped because recovery is unsafe.", null, ("Action", "Passive"));
-        }
-        _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);
         try
         {
             _systemTrayIcon = new SystemTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(_mainWindow), ShowMainWindow, RestartApplication, ExitApplication);
