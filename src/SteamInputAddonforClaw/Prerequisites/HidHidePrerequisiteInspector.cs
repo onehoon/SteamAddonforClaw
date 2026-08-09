@@ -11,6 +11,8 @@ internal sealed class HidHidePrerequisiteInspector(IHidHideClient hidHideClient,
             var inspection = hidHideClient.Inspect();
             var package = (packageProbe ?? new WindowsHidHidePackageProbe()).Inspect();
             var version = package.InspectionSucceeded ? package.Version : null;
+            if (inspection.Status == HidHideInspectionStatus.NotInstalled && package.InspectionSucceeded && package.Installed)
+                return new(PrerequisiteKind.HidHide, PrerequisiteStatus.Present, "HidHidePackagePresentControlDeviceMissing", version);
             return inspection.Status switch
             {
                 HidHideInspectionStatus.Available => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideAvailable", version),

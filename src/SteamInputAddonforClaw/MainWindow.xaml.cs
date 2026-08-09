@@ -289,14 +289,27 @@ public sealed partial class MainWindow : Window
             new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
             new("Steam Input Addon", FormatAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason)
         ]);
+        var receipt = _hidHideProvisioner.GetReceiptStatus();
+        var retryableReceipt = receipt.Receipt is null or { State: HidHideProvisioningReceiptState.AttemptCancelled };
         var canInstall = snapshot.Addon.Status == AddonOperationalStatus.SetupRequired
             && snapshot.Compatibility.AllowsMutation
             && snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.Clear
             && !snapshot.Steam.IsActive
-            && snapshot.Prerequisites.HidHide.Status == PrerequisiteStatus.Missing;
-        HidHideProvisioningPanel.Visibility = canInstall ? Visibility.Visible : Visibility.Collapsed;
+            && snapshot.Prerequisites.HidHide.Status == PrerequisiteStatus.Missing
+            && !receipt.IsCorrupt
+            && retryableReceipt;
+        var receiptMessage = receipt.IsCorrupt ? "HidHide provisioning state could not be verified. Installation is blocked."
+            : receipt.Receipt?.State switch
+            {
+                HidHideProvisioningReceiptState.InstallStarted => "A previous HidHide installation attempt is being reconciled. Installation is blocked.",
+                HidHideProvisioningReceiptState.InstalledPendingReboot => "Restart Windows to complete HidHide setup.",
+                HidHideProvisioningReceiptState.AttemptFailed => "A previous HidHide installation attempt requires manual verification before retrying.",
+                _ => string.Empty
+            };
+        HidHideProvisioningPanel.Visibility = canInstall || !string.IsNullOrEmpty(receiptMessage) ? Visibility.Visible : Visibility.Collapsed;
         InstallHidHideButton.IsEnabled = canInstall;
-        if (!canInstall) HidHideProvisioningStatusText.Text = string.Empty;
+        if (!string.IsNullOrEmpty(receiptMessage)) HidHideProvisioningStatusText.Text = receiptMessage;
+        else if (!canInstall) HidHideProvisioningStatusText.Text = string.Empty;
     }
 
     private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)

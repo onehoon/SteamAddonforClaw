@@ -51,6 +51,15 @@ public sealed class HidHideProvisionerTests
     }
 
     [Fact]
+    public async Task ExistingPackageWithMissingControlDevice_IsNotReinstalled()
+    {
+        var runner = new FakeRunner();
+        var result = await Create(runner, package: new(true, "1.5.230.0", true)).ProvisionAsync(Context(), CancellationToken.None);
+        Assert.Equal(HidHideProvisioningResultKind.Blocked, result.Kind);
+        Assert.Equal(0, runner.Calls);
+    }
+
+    [Fact]
     public async Task ReceiptSaveFailure_BlocksBeforeProcessLaunch()
     {
         var runner = new FakeRunner();
@@ -79,7 +88,7 @@ public sealed class HidHideProvisionerTests
     {
         var store = new FakeStore();
         var runner = new FakeRunner { Result = new(ElevatedProcessResultKind.Completed, 0) };
-        var result = await Create(runner, store, HidHideInspectionStatus.Available, new(true, "1.5.230.0", true)).ProvisionAsync(Context(), CancellationToken.None);
+        var result = await Create(runner, store, HidHideInspectionStatus.Available, packageProbe: new SequencedPackageProbe(new(false, null, true), new(true, "1.5.230.0", true))).ProvisionAsync(Context(), CancellationToken.None);
         Assert.Equal(HidHideProvisioningResultKind.Installed, result.Kind);
         Assert.Equal(HidHideProvisioningReceiptState.Provisioned, store.Receipt?.State);
         Assert.Equal("1.5.230.0", store.Receipt?.ObservedInstalledVersion);
@@ -133,6 +142,38 @@ public sealed class HidHideProvisionerTests
     }
 
     [Fact]
+    public void InstallStartedAndStillMissing_RemainsPendingForLaterReconciliation()
+    {
+        var receipt = Receipt(HidHideProvisioningReceiptState.InstallStarted);
+        var store = new FakeStore { Receipt = receipt };
+        Create(new FakeRunner(), store).Reconcile();
+        Assert.Equal(HidHideProvisioningReceiptState.InstallStarted, store.Receipt?.State);
+    }
+
+    [Fact]
+    public void HistoricalReceiptVersion_IsValidAndReconcilesAgainstItsOwnVersion()
+    {
+        var receipt = Receipt(HidHideProvisioningReceiptState.InstallStarted) with { InstallerVersion = "1.4.999.0" };
+        var store = new FakeStore { Receipt = receipt };
+        Create(new FakeRunner(), store, HidHideInspectionStatus.Available, new(true, "1.4.999.0", true)).Reconcile();
+        Assert.Equal(HidHideProvisioningReceiptState.Provisioned, store.Receipt?.State);
+    }
+
+    [Fact]
+    public async Task LiveSafetyState_IsRecheckedImmediatelyBeforeProcessStart()
+    {
+        var allowed = Context();
+        var blocked = allowed with { ExternalController = new(ExternalControllerAssessmentStatus.ExternalPresent, 1, []) };
+        var safety = new FakeSafetyProvider(allowed, blocked);
+        var store = new FakeStore();
+        var runner = new FakeRunner();
+        var result = await Create(runner, store, safety: safety).ProvisionAsync(allowed, CancellationToken.None);
+        Assert.Equal(HidHideProvisioningResultKind.Blocked, result.Kind);
+        Assert.Equal(0, runner.Calls);
+        Assert.Equal(HidHideProvisioningReceiptState.AttemptCancelled, store.Receipt?.State);
+    }
+
+    [Fact]
     public async Task MissingInstallerHash_BlocksBeforeElevation()
     {
         var runner = new FakeRunner();
@@ -141,10 +182,10 @@ public sealed class HidHideProvisionerTests
         Assert.Equal(0, runner.Calls);
     }
 
-    private static HidHideProvisioner Create(FakeRunner runner, FakeStore? store = null, HidHideInspectionStatus inspection = HidHideInspectionStatus.NotInstalled, HidHidePackageState? package = null, Func<string, bool>? integrity = null) => new(
+    private static HidHideProvisioner Create(FakeRunner runner, FakeStore? store = null, HidHideInspectionStatus inspection = HidHideInspectionStatus.NotInstalled, HidHidePackageState? package = null, Func<string, bool>? integrity = null, IHidHideProvisioningSafetyStateProvider? safety = null, IHidHidePackageProbe? packageProbe = null) => new(
         new HidHidePrerequisiteInspector(new FakeHidHide(inspection)),
-        new FakePackageProbe(package ?? new(false, null, true)),
-        store ?? new FakeStore(), runner, () => "test-installer.exe", integrity ?? (_ => true));
+        packageProbe ?? new FakePackageProbe(package ?? new(false, null, true)),
+        store ?? new FakeStore(), runner, () => "test-installer.exe", integrity ?? (_ => true), safety);
 
     private static HidHideProvisioningContext Context(ControllerEnvironmentCompatibilityStatus compatibility = ControllerEnvironmentCompatibilityStatus.Supported) => new(
         new(compatibility, compatibility == ControllerEnvironmentCompatibilityStatus.Supported ? ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported : ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion),
@@ -161,6 +202,11 @@ public sealed class HidHideProvisionerTests
         public bool RemoveApplication(string executablePath) => true;
     }
     private sealed class FakePackageProbe(HidHidePackageState state) : IHidHidePackageProbe { public HidHidePackageState Inspect() => state; }
+    private sealed class SequencedPackageProbe(params HidHidePackageState[] states) : IHidHidePackageProbe
+    {
+        private int _index;
+        public HidHidePackageState Inspect() => states[Math.Min(_index++, states.Length - 1)];
+    }
     private sealed class FakeStore : IHidHideProvisioningReceiptStore
     {
         public HidHideProvisioningReceipt? Receipt;
@@ -181,5 +227,10 @@ public sealed class HidHideProvisionerTests
         {
             Calls++; Started.TrySetResult(); OnRun?.Invoke(); if (OnRunAsync is not null) await OnRunAsync(); return Result;
         }
+    }
+    private sealed class FakeSafetyProvider(params HidHideProvisioningContext[] contexts) : IHidHideProvisioningSafetyStateProvider
+    {
+        private int _index;
+        public Task<HidHideProvisioningContext> CaptureAsync(CancellationToken cancellationToken) => Task.FromResult(contexts[Math.Min(_index++, contexts.Length - 1)]);
     }
 }
