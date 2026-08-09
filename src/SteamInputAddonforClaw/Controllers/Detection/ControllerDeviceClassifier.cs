@@ -18,6 +18,8 @@ internal sealed record ControllerClassificationResult(
 public sealed class ControllerDeviceClassifier
 {
     private static readonly ushort[] ClawProductIds = [0x1901, 0x1902, 0x1903];
+    private const ushort SteamControllerVendorId = 0x28DE;
+    private const ushort SteamControllerProductId = 0x1304;
     private static readonly string[] GameControllerTokens =
     [
         "HID_DEVICE_SYSTEM_GAME",
@@ -55,6 +57,24 @@ public sealed class ControllerDeviceClassifier
         if (!device.Present)
         {
             return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "DeviceNotPresent");
+        }
+
+        if (IsSteamController1304HidCollection(device))
+        {
+            if (_identityExclusionSource.IsExcluded(device))
+            {
+                return new ControllerClassificationResult(ControllerDeviceClassification.AddonOwnedVirtual, "IdentityExclusionSource");
+            }
+
+            var steamControllerKnownVirtual = GetKnownVirtualEvidence(device, topology);
+            if (steamControllerKnownVirtual is not null)
+            {
+                return new ControllerClassificationResult(ControllerDeviceClassification.KnownVirtual, steamControllerKnownVirtual.Value.Reason, steamControllerKnownVirtual.Value.Device);
+            }
+
+            return HasVerifiedSteamController1304PhysicalRoot(device, topology)
+                ? new ControllerClassificationResult(ControllerDeviceClassification.ExternalPhysical, "VerifiedSteamController1304PhysicalTopology")
+                : new ControllerClassificationResult(ControllerDeviceClassification.Indeterminate, "SteamController1304PhysicalRootUnverified");
         }
 
         if (!IsGameControllerCandidate(device))
@@ -120,6 +140,31 @@ public sealed class ControllerDeviceClassifier
     private static bool IsInternalClaw(ControllerDeviceInfo device)
     {
         return device.VendorId == 0x0DB0 && device.ProductId is ushort productId && ClawProductIds.Contains(productId);
+    }
+
+    private static bool IsSteamController1304HidCollection(ControllerDeviceInfo device)
+    {
+        return device.VendorId == SteamControllerVendorId
+            && device.ProductId == SteamControllerProductId
+            && device.EnumeratorName?.Equals("HID", StringComparison.OrdinalIgnoreCase) == true
+            && device.InstanceId.StartsWith("HID\\VID_28DE&PID_1304&MI_", StringComparison.OrdinalIgnoreCase)
+            && device.InstanceId.Contains("&COL", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasVerifiedSteamController1304PhysicalRoot(ControllerDeviceInfo device, ControllerTopologySnapshot? topology)
+    {
+        if (topology is null)
+        {
+            return false;
+        }
+
+        return topology.ResolveAncestors(device).Any(ancestor =>
+            ancestor.Present
+            && ancestor.VendorId == SteamControllerVendorId
+            && ancestor.ProductId == SteamControllerProductId
+            && ancestor.EnumeratorName?.Equals("USB", StringComparison.OrdinalIgnoreCase) == true
+            && ancestor.Service?.Equals("usbccgp", StringComparison.OrdinalIgnoreCase) == true
+            && ancestor.InstanceId.StartsWith("USB\\VID_28DE&PID_1304\\", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool ContainsKnownVirtualIdentity(ControllerDeviceInfo device)

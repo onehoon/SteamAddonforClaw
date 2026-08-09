@@ -65,6 +65,70 @@ public sealed class ExternalControllerDetectorTests
     }
 
     [Fact]
+    public void Detect_WhenSteamController1304HasVerifiedPhysicalTopology_ReturnsExternalPresent()
+    {
+        var root = SteamController1304Root();
+        var collection = SteamController1304HidCollection([root.InstanceId, "USB\\ROOT_HUB30\\1"]);
+
+        var assessment = Detect([collection, root]);
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(collection, new ControllerTopologySnapshot([collection, root]));
+
+        Assert.Equal(ExternalControllerAssessmentStatus.ExternalPresent, assessment.Status);
+        Assert.Equal(1, assessment.DetectedExternalControllerCount);
+        Assert.Equal(ControllerDeviceClassification.ExternalPhysical, result.Classification);
+        Assert.Equal("VerifiedSteamController1304PhysicalTopology", result.Reason);
+    }
+
+    [Fact]
+    public void Detect_WhenSteamController1304PhysicalRootCannotBeVerified_ReturnsIndeterminate()
+    {
+        var collection = SteamController1304HidCollection(["USB\\ROOT_HUB30\\1"]);
+
+        var assessment = Detect([collection]);
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(collection, new ControllerTopologySnapshot([collection]));
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Indeterminate, assessment.Status);
+        Assert.Equal(ControllerDeviceClassification.Indeterminate, result.Classification);
+        Assert.Equal("SteamController1304PhysicalRootUnverified", result.Reason);
+    }
+
+    [Fact]
+    public void Detect_WhenSteamController1304HasUsbIpAncestor_ReturnsClear()
+    {
+        var root = SteamController1304Root();
+        var usbIpRoot = new ControllerDeviceInfo("ROOT\\USB\\0000", Guid.NewGuid(), null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "USB", null, "usbip2_ude", null, null, true);
+        var collection = SteamController1304HidCollection([root.InstanceId, usbIpRoot.InstanceId]);
+
+        var assessment = Detect([collection, root, usbIpRoot]);
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(collection, new ControllerTopologySnapshot([collection, root, usbIpRoot]));
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
+        Assert.Equal(ControllerDeviceClassification.KnownVirtual, result.Classification);
+        Assert.Equal("KnownVirtualUsbIpAncestor", result.Reason);
+    }
+
+    [Fact]
+    public void Detect_WhenValveDeviceDoesNotHaveSteamController1304Identity_ReturnsClear()
+    {
+        var valveHid = new ControllerDeviceInfo(
+            "HID\\VID_28DE&PID_1102&MI_02&COL01\\1",
+            Guid.NewGuid(),
+            null,
+            [],
+            "HID",
+            ["HID\\VID_28DE&PID_1102"],
+            [],
+            "HIDClass",
+            null,
+            null,
+            0x28DE,
+            0x1102,
+            true);
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, Detect([valveHid]).Status);
+    }
+
+    [Fact]
     public void Detect_WhenExternalControllerHasMultipleInterfacesInOneContainer_DeduplicatesIt()
     {
         var containerId = Guid.NewGuid();
@@ -284,6 +348,42 @@ public sealed class ExternalControllerDetectorTests
             null,
             vendorId,
             productId,
+            true);
+    }
+
+    private static ControllerDeviceInfo SteamController1304Root()
+    {
+        return new ControllerDeviceInfo(
+            "USB\\VID_28DE&PID_1304\\STEAM_CONTROLLER",
+            Guid.NewGuid(),
+            "USB\\ROOT_HUB30\\1",
+            ["USB\\ROOT_HUB30\\1"],
+            "USB",
+            ["USB\\VID_28DE&PID_1304"],
+            [],
+            "USB",
+            null,
+            "usbccgp",
+            0x28DE,
+            0x1304,
+            true);
+    }
+
+    private static ControllerDeviceInfo SteamController1304HidCollection(IReadOnlyList<string> ancestorInstanceIds)
+    {
+        return new ControllerDeviceInfo(
+            "HID\\VID_28DE&PID_1304&MI_02&COL03\\STEAM_CONTROLLER",
+            Guid.NewGuid(),
+            ancestorInstanceIds.FirstOrDefault(),
+            ancestorInstanceIds,
+            "HID",
+            ["HID\\VID_28DE&PID_1304&MI_02&COL03"],
+            [],
+            "HIDClass",
+            null,
+            null,
+            0x28DE,
+            0x1304,
             true);
     }
 
