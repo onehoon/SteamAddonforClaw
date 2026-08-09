@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Startup;
+using SteamInputAddonforClaw.Routing;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -34,12 +35,26 @@ public sealed class SystemStatusTests
         Assert.Equal([ControllerSoftwareKind.MsiCenterM, ControllerSoftwareKind.ClawTweaks, ControllerSoftwareKind.HandheldCompanion], sorted.Select(item => item.Kind));
     }
 
-    [Fact]
-    public void AddonStatus_ExternalControllerVetoHasHighestPriority()
+    [Theory]
+    [InlineData((int)RoutingDecisionKind.Eligible, (int)AddonOperationalStatus.Ready)]
+    [InlineData((int)RoutingDecisionKind.VetoedForSession, (int)AddonOperationalStatus.Passive)]
+    [InlineData((int)RoutingDecisionKind.WaitingForSteam, (int)AddonOperationalStatus.WaitingForSteam)]
+    [InlineData((int)RoutingDecisionKind.SetupRequired, (int)AddonOperationalStatus.SetupRequired)]
+    [InlineData((int)RoutingDecisionKind.Indeterminate, (int)AddonOperationalStatus.Indeterminate)]
+    public void AddonStatus_MapsCanonicalRoutingDecision(int kindValue, int expectedValue)
     {
-        var status = AddonStatusEvaluator.Evaluate(SoftwareStates(), Prerequisites(PrerequisiteStatus.Missing), new(false, 0), new(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device("Xbox Wireless Controller", 0x045E, 0x0B13)]), recoverySafe: false);
+        var status = AddonStatusEvaluator.Map(new((RoutingDecisionKind)kindValue, RoutingDecisionReason.Eligible), new(ExternalControllerAssessmentStatus.Clear, 0, []));
 
-        Assert.Equal(AddonOperationalStatus.Passive, status.Status);
+        Assert.Equal((AddonOperationalStatus)expectedValue, status.Status);
+    }
+
+    [Fact]
+    public void AddonStatus_ExternalControllerPresentationUsesFriendlyName()
+    {
+        var assessment = new ExternalControllerAssessment(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device("Xbox Wireless Controller", 0x045E, 0x0B13)]);
+
+        var status = AddonStatusEvaluator.Map(new(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerPresent), assessment);
+
         Assert.Equal("External physical controller detected: Xbox Wireless Controller.", status.Reason);
     }
 
@@ -107,54 +122,6 @@ public sealed class SystemStatusTests
         Assert.Equal("Indeterminate", card.Status);
     }
 
-    [Theory]
-    [InlineData((int)ControllerSoftwareKind.HandheldCompanion, "Handheld Companion is running.")]
-    [InlineData((int)ControllerSoftwareKind.ClawTweaks, "ClawTweaks is running.")]
-    public void AddonStatus_RunningControllerSoftwareIsPassive(int runningKindValue, string reason)
-    {
-        var runningKind = (ControllerSoftwareKind)runningKindValue;
-        var software = SoftwareStates().Select(status => status.Kind == runningKind ? status with { Runtime = SoftwareRuntimeStatus.Running } : status).ToArray();
-        var status = AddonStatusEvaluator.Evaluate(software, Prerequisites(PrerequisiteStatus.Ready), new(true, 1), new(ExternalControllerAssessmentStatus.Clear, 0, []), recoverySafe: true);
-
-        Assert.Equal(AddonOperationalStatus.Passive, status.Status);
-        Assert.Equal(reason, status.Reason);
-    }
-
-    [Fact]
-    public void AddonStatus_MissingPrerequisiteRequiresSetup()
-    {
-        var status = AddonStatusEvaluator.Evaluate(SoftwareStates(), Prerequisites(PrerequisiteStatus.Missing), new(false, 0), new(ExternalControllerAssessmentStatus.Clear, 0, []), recoverySafe: true);
-
-        Assert.Equal(AddonOperationalStatus.SetupRequired, status.Status);
-    }
-
-    [Fact]
-    public void AddonStatus_IndeterminateHandheldCompanionFailsClosed()
-    {
-        var software = SoftwareStates().Select(status => status.Kind == ControllerSoftwareKind.HandheldCompanion ? status with { Installation = SoftwareInstallationStatus.Indeterminate, Runtime = SoftwareRuntimeStatus.Indeterminate } : status).ToArray();
-        var status = AddonStatusEvaluator.Evaluate(software, Prerequisites(PrerequisiteStatus.Ready), new(true, 1), new(ExternalControllerAssessmentStatus.Clear, 0, []), recoverySafe: true);
-
-        Assert.Equal(AddonOperationalStatus.Indeterminate, status.Status);
-        Assert.Equal("Handheld Companion state is not stable.", status.Reason);
-    }
-
-    [Fact]
-    public void AddonStatus_StartingHandheldCompanionFailsClosed()
-    {
-        var software = SoftwareStates().Select(status => status.Kind == ControllerSoftwareKind.HandheldCompanion ? status with { Runtime = SoftwareRuntimeStatus.Starting } : status).ToArray();
-        var status = AddonStatusEvaluator.Evaluate(software, Prerequisites(PrerequisiteStatus.Ready), new(true, 1), new(ExternalControllerAssessmentStatus.Clear, 0, []), recoverySafe: true);
-
-        Assert.Equal(AddonOperationalStatus.Indeterminate, status.Status);
-    }
-
-    [Fact]
-    public void AddonStatus_ReadyPrerequisitesAndInactiveSteamWaitsForSteam()
-    {
-        var status = AddonStatusEvaluator.Evaluate(SoftwareStates(), Prerequisites(PrerequisiteStatus.Ready), new(false, 0), new(ExternalControllerAssessmentStatus.Clear, 0, []), recoverySafe: true);
-
-        Assert.Equal(AddonOperationalStatus.WaitingForSteam, status.Status);
-    }
-
     [Fact]
     public async Task SystemStatusProvider_ReusesPrerequisiteAssessmentAndBuildsOneSnapshot()
     {
@@ -165,6 +132,7 @@ public sealed class SystemStatusTests
 
         Assert.Same(prerequisites, snapshot.Prerequisites);
         Assert.Equal([ControllerSoftwareKind.MsiCenterM, ControllerSoftwareKind.ClawTweaks, ControllerSoftwareKind.HandheldCompanion], snapshot.ControllerSoftware.Select(item => item.Kind));
+        Assert.Equal(RoutingDecisionKind.SetupRequired, snapshot.RoutingDecision.Kind);
         Assert.Equal(AddonOperationalStatus.SetupRequired, snapshot.Addon.Status);
     }
 
@@ -192,6 +160,7 @@ public sealed class SystemStatusTests
 
         Assert.Equal(1, calls);
         Assert.Equal(ExternalControllerAssessmentStatus.Clear, snapshot.ExternalController.Status);
+        Assert.Equal(RoutingDecisionKind.Eligible, snapshot.RoutingDecision.Kind);
         Assert.Equal(AddonOperationalStatus.Ready, snapshot.Addon.Status);
     }
 

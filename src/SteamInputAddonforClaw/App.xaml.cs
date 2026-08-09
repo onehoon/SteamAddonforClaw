@@ -14,6 +14,7 @@ using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw;
 
@@ -29,6 +30,7 @@ public partial class App : Application
     private RecoveryManager? _recoveryManager;
     private bool _isExplicitExit;
     private readonly SingleInstanceGate _singleInstanceGate;
+    private readonly RoutingSessionStateMachine _routingSessionStateMachine = new();
 
     public App()
         : this(arguments: null, Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized."))
@@ -116,6 +118,7 @@ public partial class App : Application
         if (recoverySafe)
         {
             _steamSessionWatcher.Start();
+            _routingSessionStateMachine.ObserveSteamSessionState(_steamSessionWatcher.State);
         }
         else
         {
@@ -148,7 +151,8 @@ public partial class App : Application
                 new ViiperRuntimeInspector()),
             () => _steamSessionWatcher?.State ?? SteamSessionState.FromRunningAppId(0),
             CaptureExternalControllerAssessment,
-            () => recoverySafe);
+            () => recoverySafe,
+            _routingSessionStateMachine);
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
@@ -174,6 +178,7 @@ public partial class App : Application
     {
         if (sender is SteamSessionWatcher watcher)
         {
+            _routingSessionStateMachine.ObserveSteamSessionState(watcher.State);
             _mainWindow?.UpdateSteamSessionState(watcher.State);
         }
     }
