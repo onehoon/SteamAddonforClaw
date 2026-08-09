@@ -311,7 +311,10 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
             return false;
         }
 
-        state = new ControllerState(new AuxiliaryButtonState([input.Buttons[MsiClawHardware.M1DirectInputButtonIndex], input.Buttons[MsiClawHardware.M2DirectInputButtonIndex]]));
+        Span<bool> auxiliary = stackalloc bool[MsiClawControls.Catalog.Count];
+        auxiliary[M1AuxiliaryIndex] = input.Buttons[MsiClawHardware.M1DirectInputButtonIndex];
+        auxiliary[M2AuxiliaryIndex] = input.Buttons[MsiClawHardware.M2DirectInputButtonIndex];
+        state = new ControllerState(new AuxiliaryButtonState(auxiliary));
         return true;
     }
 

@@ -284,6 +284,10 @@ public sealed class MsiClawInputSourceTests
         Assert.Equal(
             [new ControllerState(new AuxiliaryButtonState([false, false])), new ControllerState(new AuxiliaryButtonState([true, false]))],
             states);
+        var controls = new MsiClawDeviceAdapter().AuxiliaryControls;
+        Assert.All(states, state => Assert.Equal(controls.Count, state.Auxiliary.Count));
+        Assert.True(states[1].Auxiliary[controls.GetIndex(new SteamInputAddonforClaw.Devices.Abstractions.AuxiliaryControlId("msi.claw.m1"))]);
+        Assert.False(states[1].Auxiliary[controls.GetIndex(new SteamInputAddonforClaw.Devices.Abstractions.AuxiliaryControlId("msi.claw.m2"))]);
     }
 
     [Theory]
