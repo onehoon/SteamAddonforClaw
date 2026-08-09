@@ -29,7 +29,15 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store) : IRecoveryMa
     public RecoveryResult BeginRecoverySession(MsiControllerSnapshotResult snapshotResult)
     {
         if (!snapshotResult.AllowsMutation || snapshotResult.Snapshot is not { } snapshot || snapshot.Mode == MsiControllerNativeMode.Indeterminate)
+        {
+            AppLog.Warn("Recovery", "Recovery session authorization denied.", null,
+                ("SnapshotStatus", snapshotResult.Status),
+                ("AllowsMutation", snapshotResult.AllowsMutation),
+                ("Mode", snapshotResult.Snapshot?.Mode),
+                ("Reason", snapshotResult.Reason),
+                ("Action", "Passive"));
             return new(RecoveryStatus.Failure, "Only a successful, mutation-authorizing snapshot result can start recovery.");
+        }
         var journal = new RecoveryJournal(CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, snapshot, new());
         try
         {
