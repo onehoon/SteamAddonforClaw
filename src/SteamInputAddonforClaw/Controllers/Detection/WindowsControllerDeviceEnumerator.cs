@@ -12,6 +12,7 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
     private const uint SpdrpService = 0x00000004;
     private const uint SpdrpClass = 0x00000007;
     private const uint SpdrpClassGuid = 0x00000008;
+    private const uint SpdrpFriendlyName = 0x0000000C;
     private const uint SpdrpEnumeratorName = 0x00000016;
     private const int CrSuccess = 0;
     private const uint DevpropTypeGuid = 0x0000000D;
@@ -64,7 +65,8 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
                     GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpService),
                     vendorProductId.VendorId,
                     vendorProductId.ProductId,
-                    Present: true));
+                    Present: true,
+                    FriendlyName: GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpFriendlyName)));
             }
 
             return devices;

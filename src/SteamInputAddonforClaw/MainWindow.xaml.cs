@@ -18,6 +18,10 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using Windows.Foundation;
 using WinRT.Interop;
+using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Prerequisites;
+using System.Collections.ObjectModel;
+using SteamInputAddonforClaw.Startup;
 
 namespace SteamInputAddonforClaw;
 
@@ -30,6 +34,11 @@ public sealed partial class MainWindow : Window
     private M1M2DiagnosticCoordinator? _m1M2DiagnosticCoordinator;
     private bool _isLoadingStartupSettings;
     private readonly MainNavigationState _navigationState = new();
+    private readonly ISystemStatusProvider _systemStatusProvider;
+    private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
+    private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
+    private readonly ObservableCollection<StatusCardViewModel> _runtimeCards = [];
+    private int _isRefreshingStatus;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -41,10 +50,12 @@ public sealed partial class MainWindow : Window
     internal MainWindow(
         StartupSettingsCoordinator startupSettings,
         string startupRegistrationMessage,
-        RecoveryManager? recoveryManager)
+        RecoveryManager? recoveryManager,
+        ISystemStatusProvider? systemStatusProvider = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
+        _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -58,26 +69,24 @@ public sealed partial class MainWindow : Window
         LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
         _isLoadingStartupSettings = false;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
+        ControllerSoftwareList.ItemsSource = _softwareCards;
+        RoutingComponentsList.ItemsSource = _componentCards;
+        RuntimeStatusList.ItemsSource = _runtimeCards;
         MainNavigationView.SelectedItem = StatusNavigationItem;
+        _ = RefreshSystemStatusAsync();
     }
 
     public void UpdateSteamSessionState(SteamSessionState state)
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            StatusText.Text = state.IsActive ? "Steam session active" : "Steam inactive";
-            RunningAppIdText.Text = $"RunningAppID: {state.RunningAppId}";
+            _ = RefreshSystemStatusAsync();
         });
     }
 
     public void UpdateExternalControllerAssessment(ExternalControllerAssessment assessment)
     {
-        ExternalControllerText.Text = assessment.Status switch
-        {
-            ExternalControllerAssessmentStatus.Clear => "External controller: None",
-            ExternalControllerAssessmentStatus.ExternalPresent => "External controller: Detected",
-            _ => "External controller: Indeterminate"
-        };
+        _ = RefreshSystemStatusAsync();
     }
 
     private void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
@@ -197,6 +206,52 @@ public sealed partial class MainWindow : Window
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
+        if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
+    }
+
+    private async void RefreshStatusButton_Click(object sender, RoutedEventArgs args) => await RefreshSystemStatusAsync();
+
+    private async Task RefreshSystemStatusAsync()
+    {
+        if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0) return;
+        RefreshStatusButton.IsEnabled = false;
+        try { RenderSystemStatus(await _systemStatusProvider.CaptureAsync()); }
+        catch (Exception exception) { AppLog.Warn("Status", "System status refresh failed.", exception, ("Reason", "SnapshotCaptureFailed")); }
+        finally { RefreshStatusButton.IsEnabled = true; Volatile.Write(ref _isRefreshingStatus, 0); }
+    }
+
+    private void RenderSystemStatus(SystemStatusSnapshot snapshot)
+    {
+        DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
+        DeviceModelText.Text = snapshot.Device.Model;
+        DeviceGpuText.Text = $"GPU: {string.Join(Environment.NewLine, snapshot.Device.GpuModels)}";
+        Replace(_softwareCards, snapshot.ControllerSoftware.Select(item => new StatusCardViewModel(item.DisplayName, FormatSoftwareStatus(item), item.Reason)));
+        Replace(_componentCards,
+        [
+            new("HidHide", snapshot.Prerequisites.HidHide.Status.ToString(), snapshot.Prerequisites.HidHide.Reason),
+            new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
+            new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
+        ]);
+        Replace(_runtimeCards,
+        [
+            new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
+            new("External Controller", snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.Clear ? "None" : snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.ExternalPresent ? "External detected" : "Indeterminate", snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.ExternalPresent ? $"{snapshot.ExternalController.DetectedExternalControllerCount} external physical controller(s) detected." : "Read-only PnP assessment."),
+            new("Steam Input Addon", FormatAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason)
+        ]);
+    }
+
+    private static void Replace(ObservableCollection<StatusCardViewModel> destination, IEnumerable<StatusCardViewModel> source) { destination.Clear(); foreach (var item in source) destination.Add(item); }
+    private static string FormatSoftwareStatus(ControllerSoftwareStatus item) => item.Runtime == SoftwareRuntimeStatus.Running ? "Running" : item.Installation == SoftwareInstallationStatus.Installed ? "Installed / Not running" : item.Installation == SoftwareInstallationStatus.NotInstalled ? "Not installed" : "Indeterminate";
+    private static string FormatAddonStatus(AddonOperationalStatus status) => status switch { AddonOperationalStatus.WaitingForSteam => "Waiting for Steam", AddonOperationalStatus.SetupRequired => "Setup required", AddonOperationalStatus.RecoveryRequired => "Recovery required", _ => status.ToString() };
+
+    private static ISystemStatusProvider CreateDefaultSystemStatusProvider()
+    {
+        var devices = new WindowsControllerDeviceEnumerator();
+        var classifier = new ControllerDeviceClassifier();
+        return new SystemStatusProvider(new WindowsDeviceInformationProvider(devices),
+        [new MsiCenterMSoftwareStatusProvider(), new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()), new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())],
+        new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices)), new ViiperRuntimeInspector()),
+        () => SteamSessionState.FromRunningAppId(0), () => new ExternalControllerDetector(devices, classifier).Detect(), () => true);
     }
 
     private void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)

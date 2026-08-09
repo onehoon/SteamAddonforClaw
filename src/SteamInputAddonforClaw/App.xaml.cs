@@ -13,6 +13,7 @@ using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw;
 
@@ -112,7 +113,21 @@ public partial class App : Application
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
         var startupRegistrationResult = startupSettings.Repair();
 
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager);
+        var statusProvider = new SystemStatusProvider(
+            new WindowsDeviceInformationProvider(new WindowsControllerDeviceEnumerator()),
+            [
+                new MsiCenterMSoftwareStatusProvider(),
+                new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
+                new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
+            ],
+            new RuntimePrerequisiteInspector(
+                new HidHidePrerequisiteInspector(new HidHideDriverClient()),
+                new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())),
+                new ViiperRuntimeInspector()),
+            () => _steamSessionWatcher?.State ?? SteamSessionState.FromRunningAppId(0),
+            () => new ExternalControllerDetector(new WindowsControllerDeviceEnumerator(), classifier).Detect(),
+            () => recoverySafe);
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
