@@ -295,7 +295,7 @@ public sealed partial class MainWindow : Window
     {
         var devices = new WindowsControllerDeviceEnumerator();
         var classifier = new ControllerDeviceClassifier();
-        return new SystemStatusProvider(new WindowsDeviceInformationProvider(devices),
+        return new SystemStatusProvider(new WindowsDeviceInformationProvider(),
         [new MsiCenterMSoftwareStatusProvider(), new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()), new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())],
         new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices)), new ViiperRuntimeInspector()),
         () => SteamSessionState.FromRunningAppId(0), () => new ExternalControllerDetector(devices, classifier).Detect(), () => true);

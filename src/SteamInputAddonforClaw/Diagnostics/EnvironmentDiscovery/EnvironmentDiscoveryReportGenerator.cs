@@ -63,7 +63,7 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
     public EnvironmentDiscoverySnapshot Capture(DateTimeOffset capturedAt)
     {
         var devices = new WindowsControllerDeviceEnumerator();
-        var deviceInfo = new WindowsDeviceInformationProvider(devices).Capture();
+        var deviceInfo = new WindowsDeviceInformationProvider().Capture();
         return new EnvironmentDiscoverySnapshot(
             capturedAt,
             new SystemDiscoveryInfo(Environment.OSVersion.VersionString, Environment.OSVersion.Version.Build.ToString(), Environment.Is64BitOperatingSystem ? "x64" : "x86", deviceInfo.Manufacturer, deviceInfo.Model, deviceInfo.GpuModels, AppVersion()),
