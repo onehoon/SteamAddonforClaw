@@ -179,6 +179,8 @@ public sealed class MsiClawInputSource : IAsyncDisposable
         if (selectedCandidates.Any(candidate => candidate.ButtonCount is null or < RequiredButtonCount)) return Indeterminate(selectedCandidates.Length, testSession, "InsufficientButtonCount");
         var identities = selectedCandidates.Select(candidate => candidate.PhysicalIdentity!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (identities.Length != 1) return Indeterminate(selectedCandidates.Length, testSession, "MultiplePhysicalIdentities");
+        var pnpInstanceIds = selectedCandidates.Select(candidate => candidate.PnpInstanceId!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (pnpInstanceIds.Length != 1) return Indeterminate(selectedCandidates.Length, testSession, "MultiplePnpInstanceIdentities");
 
         return Select(selectedCandidates.OrderBy(candidate => candidate.InstanceGuid).First(), testSession, selectedCandidates.Length == 1 ? "VerifiedMsiPhysicalRoot" : "VerifiedMsiPhysicalRootAlias");
     }
@@ -188,7 +190,7 @@ public sealed class MsiClawInputSource : IAsyncDisposable
 
     private static SelectionResult Select(DirectInputDeviceDescriptor descriptor, int testSession, string reason)
     {
-        AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.", ("TestSession", testSession), ("VID", "0x0DB0"), ("PID", "0x1902"), ("InstanceGuid", descriptor.InstanceGuid), ("PhysicalIdentity", descriptor.PhysicalIdentity), ("SelectionReason", reason));
+        AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.", ("TestSession", testSession), ("VID", "0x0DB0"), ("PID", "0x1902"), ("InstanceGuid", descriptor.InstanceGuid), ("PnpInstanceId", descriptor.PnpInstanceId), ("PhysicalIdentity", descriptor.PhysicalIdentity), ("SelectionReason", reason));
         return new SelectionResult(MsiClawInputStartStatus.Started, "M1/M2 DirectInput test is running.", descriptor);
     }
 

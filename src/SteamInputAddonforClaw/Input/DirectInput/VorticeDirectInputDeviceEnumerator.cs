@@ -5,6 +5,9 @@ namespace SteamInputAddonforClaw.Input.DirectInput;
 
 public sealed class VorticeDirectInputDeviceEnumerator : IDirectInputDeviceEnumerator
 {
+    internal static DeviceType EnumeratedDeviceType => DeviceType.Gamepad;
+    internal static DeviceEnumerationFlags EnumeratedDeviceFlags => DeviceEnumerationFlags.AllDevices;
+
     private readonly IntPtr _windowHandle;
     private readonly IDirectInput8 _directInput;
     private readonly DirectInputDeviceTopologyResolver _topologyResolver;
@@ -23,7 +26,7 @@ public sealed class VorticeDirectInputDeviceEnumerator : IDirectInputDeviceEnume
 
     public IReadOnlyList<DirectInputDeviceDescriptor> EnumerateGameControllers()
     {
-        return _directInput.GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AttachedOnly)
+        return _directInput.GetDevices(EnumeratedDeviceType, EnumeratedDeviceFlags)
             .Select(CreateDescriptor)
             .ToArray();
     }
