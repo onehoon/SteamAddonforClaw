@@ -100,7 +100,7 @@ internal static class ProvisioningStorageSecurity
         var materialized = rules.ToArray();
         if (!Allows(materialized, System, FileSystemRights.FullControl) || !Allows(materialized, Administrators, FileSystemRights.FullControl) || !Allows(materialized, Users, FileSystemRights.ReadAndExecute))
             return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStorageAclIncomplete");
-        var prohibited = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.Delete |
+        var prohibited = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles |
             FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
         if (materialized.Any(rule => rule.AccessControlType == AccessControlType.Allow && IsBroadPrincipal((SecurityIdentifier)rule.IdentityReference) && (rule.FileSystemRights & prohibited) != 0))
             return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStorageAclUnsafe");

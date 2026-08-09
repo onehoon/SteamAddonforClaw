@@ -61,6 +61,7 @@ public sealed class FirstTimeSetupPolicyTests
     [InlineData((int)ElevatedProcessResultKind.Completed, 0, (int)ElevatedPrerequisiteSetup.ResultKind.Installed)]
     [InlineData((int)ElevatedProcessResultKind.Completed, 3010, (int)ElevatedPrerequisiteSetup.ResultKind.RebootRequired)]
     [InlineData((int)ElevatedProcessResultKind.Completed, 2, (int)ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress)]
+    [InlineData((int)ElevatedProcessResultKind.Completed, 3, (int)ElevatedPrerequisiteSetup.ResultKind.Blocked)]
     [InlineData((int)ElevatedProcessResultKind.CancelledBeforeStart, 0, (int)ElevatedPrerequisiteSetup.ResultKind.Cancelled)]
     public void ElevatedSetupExitCodes_AreTranslatedByTheSetupContract(int processKind, int exitCode, int expected)
         => Assert.Equal((ElevatedPrerequisiteSetup.ResultKind)expected, ElevatedPrerequisiteSetup.TranslateExitCode(new((ElevatedProcessResultKind)processKind, exitCode)));
@@ -71,7 +72,54 @@ public sealed class FirstTimeSetupPolicyTests
     [InlineData(true, (int)PrerequisiteStatus.Unusable, false, (int)PrerequisiteComponentAction.Blocked)]
     [InlineData(true, (int)PrerequisiteStatus.Unusable, true, (int)PrerequisiteComponentAction.RestartRequired)]
     public void ExistingPackageNeverSelectsReinstallation(bool packageInstalled, int prerequisiteStatus, bool pendingReboot, int expected)
-        => Assert.Equal((PrerequisiteComponentAction)expected, PrerequisiteSetupExecutionPolicy.SelectAction(packageInstalled, (PrerequisiteStatus)prerequisiteStatus, pendingReboot));
+        => Assert.Equal((PrerequisiteComponentAction)expected, PrerequisiteSetupExecutionPolicy.SelectAction(packageInstalled, (PrerequisiteStatus)prerequisiteStatus, pendingReboot, unresolvedInstallStarted: false));
+
+    [Fact]
+    public void UnresolvedInstallStarted_BlocksAnotherInstaller() => Assert.Equal(PrerequisiteComponentAction.Blocked, PrerequisiteSetupExecutionPolicy.SelectAction(false, PrerequisiteStatus.Missing, false, unresolvedInstallStarted: true));
+
+    [Fact]
+    public void HidHideInstallStartedAndMissing_RemainsBlockedUntilResolved() => Assert.Equal(PrerequisiteComponentAction.Blocked, PrerequisiteSetupExecutionPolicy.SelectAction(false, PrerequisiteStatus.Missing, false, unresolvedInstallStarted: true));
+
+    [Fact]
+    public void UsbIpInstallStartedAndMissing_RemainsBlockedUntilResolved() => Assert.Equal(PrerequisiteComponentAction.Blocked, PrerequisiteSetupExecutionPolicy.SelectAction(false, PrerequisiteStatus.Missing, false, unresolvedInstallStarted: true));
+
+    [Fact]
+    public void ExitZeroWithoutInstalledPackage_IsFailedInsteadOfPendingReboot()
+    {
+        var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(0, true, false, null, "1.5.230.0", PrerequisiteStatus.Missing);
+
+        Assert.False(outcome.IsProvisioned);
+        Assert.False(outcome.RequiresRestart);
+    }
+
+    [Fact]
+    public void ExitZeroWithInstalledPackageAndReadyPrerequisite_IsProvisioned()
+    {
+        var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(0, true, true, "1.5.230.0", "1.5.230.0", PrerequisiteStatus.Ready);
+
+        Assert.True(outcome.IsProvisioned);
+        Assert.False(outcome.RequiresRestart);
+    }
+
+    [Fact]
+    public void SetupCompleteWithViiperUnavailable_DoesNotPresentSetupRequired()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready));
+        var prerequisites = new RuntimePrerequisiteAssessment(
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "Ready"),
+            new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Ready"),
+            new(PrerequisiteKind.Viiper, PrerequisiteStatus.Missing, "Missing"));
+
+        var presentation = FirstTimeSetupPresentation.GetAddonPresentation(
+            setup,
+            prerequisites,
+            new(AddonOperationalStatus.SetupRequired, "VIIPER is required for controller routing."));
+
+        Assert.Equal(FirstTimeSetupStatus.Complete, setup.Status);
+        Assert.False(prerequisites.IsRoutingReady);
+        Assert.Equal("Setup complete", presentation.Status);
+        Assert.Equal("Routing runtime is not available in this build.", presentation.Reason);
+    }
 
     private static FirstTimeSetupInput Input(PrerequisiteStatus hidHide, PrerequisiteStatus usbIp) => new(
         new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported), true,

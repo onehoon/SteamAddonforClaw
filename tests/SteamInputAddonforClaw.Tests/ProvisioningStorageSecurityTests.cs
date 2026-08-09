@@ -22,6 +22,14 @@ public sealed class ProvisioningStorageSecurityTests
     }
 
     [Fact]
+    public void UserDeleteSubdirectoriesAndFilesAcl_IsRejected()
+    {
+        var rules = ExpectedRules().Append(new FileSystemAccessRule(Users, FileSystemRights.DeleteSubdirectoriesAndFiles, AccessControlType.Allow));
+
+        Assert.Equal(ProvisioningStorageStatus.Unsafe, ProvisioningStorageSecurity.AssessAcl(Administrators, rules).Status);
+    }
+
+    [Fact]
     public void UnexpectedOwner_IsRejected() => Assert.Equal(ProvisioningStorageStatus.Unsafe, ProvisioningStorageSecurity.AssessAcl(Users, ExpectedRules()).Status);
 
     [Fact]

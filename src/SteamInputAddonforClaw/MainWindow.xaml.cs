@@ -285,11 +285,6 @@ public sealed partial class MainWindow : Window
             new("VIIPER", "Not available in this build", "Planned routing runtime")
         ]);
         Replace(_externalControllerCards, ExternalControllerStatusCardFactory.Create(snapshot.ExternalController));
-        Replace(_runtimeCards,
-        [
-            new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
-            new("Steam Input Addon", FormatAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason)
-        ]);
         var receipt = _hidHideReceiptStore.Load();
         var usbReceipt = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath).Load();
         var storage = ProvisioningStorageSecurity.Inspect(VelopackAppPaths.ProvisioningStateDirectory);
@@ -303,12 +298,18 @@ public sealed partial class MainWindow : Window
             : usbReceipt.Receipt is not null ? ToComponentProvisioningState(usbReceipt.Receipt.State)
             : ComponentProvisioningState.None;
         var setup = FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
-            snapshot.Compatibility, snapshot.Addon.Status != AddonOperationalStatus.RecoveryRequired, snapshot.ExternalController, snapshot.Steam.IsActive ? SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId) : SteamSessionState.FromRunningAppId(0),
+            snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController, snapshot.Steam.IsActive ? SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId) : SteamSessionState.FromRunningAppId(0),
             snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2,
             new(hidHideState, usbIpState)));
         var canInstall = setup.CanInstallRequiredComponents;
         var receiptMessage = setup.Status == FirstTimeSetupStatus.Complete ? "Setup complete. Routing runtime is not available in this build."
             : FormatFirstTimeSetupMessage(setup);
+        var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
+        Replace(_runtimeCards,
+        [
+            new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
+            new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
+        ]);
         SetupHidHideText.Text = $"HidHide: {snapshot.Prerequisites.HidHide.Status}";
         SetupUsbIpText.Text = $"usbip-win2: {snapshot.Prerequisites.UsbIpWin2.Status}";
         InstallRequiredComponentsButton.IsEnabled = canInstall;

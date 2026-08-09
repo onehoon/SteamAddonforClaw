@@ -145,6 +145,29 @@ public sealed class SystemStatusTests
         Assert.Equal([ControllerSoftwareKind.MsiCenterM, ControllerSoftwareKind.ClawTweaks, ControllerSoftwareKind.HandheldCompanion], snapshot.ControllerSoftware.Select(item => item.Kind));
         Assert.Equal(RoutingDecisionKind.SetupRequired, snapshot.RoutingDecision.Kind);
         Assert.Equal(AddonOperationalStatus.SetupRequired, snapshot.Addon.Status);
+        Assert.True(snapshot.RecoverySafe);
+    }
+
+    [Fact]
+    public async Task SystemStatusProvider_PreservesActualRecoverySafetyInsteadOfInferringPresentationStatus()
+    {
+        var provider = new SystemStatusProvider(
+            new FakeDeviceProvider(),
+            [
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)),
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))
+            ],
+            new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
+            () => SteamSessionState.FromRunningAppId(1),
+            () => new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []),
+            () => false);
+
+        var snapshot = await provider.CaptureAsync();
+
+        Assert.False(snapshot.RecoverySafe);
+        Assert.Equal(RoutingDecisionKind.Indeterminate, snapshot.RoutingDecision.Kind);
+        Assert.Equal(AddonOperationalStatus.Indeterminate, snapshot.Addon.Status);
     }
 
     [Fact]
