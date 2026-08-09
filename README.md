@@ -1,7 +1,7 @@
 # Steam Input Addon for Claw
 
 > [!WARNING]
-> This project is under active development and is not functional yet. Do not install or use it on a daily-use device.
+> This project is under active development and is not functional yet. Do not install or use it yet.
 
 A lightweight Steam Input bridge for MSI Claw handheld PCs.
 

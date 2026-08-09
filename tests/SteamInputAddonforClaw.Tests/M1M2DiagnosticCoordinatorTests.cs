@@ -157,6 +157,25 @@ public sealed class M1M2DiagnosticCoordinatorTests
     }
 
     [Fact]
+    public async Task Verification_WhenHidHideBecomesInverseWhitelist_ReleasesLeaseAndDoesNotStartDirectInput()
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide { Hidden = true, Status = HidHideInspectionStatus.InverseWhitelist };
+        hidHide.InspectionStatuses.Enqueue(HidHideInspectionStatus.Available);
+        hidHide.InspectionStatuses.Enqueue(HidHideInspectionStatus.InverseWhitelist);
+        var input = new FakeInput();
+        await using var coordinator = Create(input, hidHide, store);
+
+        var result = coordinator.Start();
+
+        Assert.False(result.Started);
+        Assert.Equal(0, input.StartCount);
+        Assert.Equal(1, hidHide.RemoveCount);
+        Assert.DoesNotContain(AddonPath, hidHide.Entries, StringComparer.OrdinalIgnoreCase);
+        Assert.False(store.Exists());
+    }
+
+    [Fact]
     public async Task VerificationFailure_RetryRecognizesJournalOwnedLeaseAndCleansItUp()
     {
         var store = new MemoryStore();

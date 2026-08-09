@@ -52,6 +52,7 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
 
         if (!inspection.ApplicationWhitelist.Contains(_executablePath))
         {
+            HidHideInspection? leaseVerification = null;
             var journal = _recoveryManager.BeginHidHideWhitelistLease(_executablePath);
             if (journal.Status != RecoveryStatus.Success)
                 return new(MsiClawInputStartStatus.InitializationFailed, "HidHide recovery journal could not be persisted. No controller settings were changed.");
@@ -69,6 +70,7 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
                 if (postFailureInspection.IsConfigurationReadable && postFailureInspection.ApplicationWhitelist.Contains(_executablePath))
                 {
                     _ownsWhitelistLease = true;
+                    leaseVerification = postFailureInspection;
                     AppLog.Warn("HidHide", "HidHide whitelist command reported failure after the lease was persisted.", null, ("ExecutablePath", _executablePath), ("Action", "ContinueWithVerifiedLease"));
                 }
                 else
@@ -86,7 +88,17 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
                     return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist access could not be verified. Recovery remains pending.");
                 }
                 _ownsWhitelistLease = true;
+                leaseVerification = verification;
                 AppLog.Info("HidHide", "HidHide whitelist lease acquired.", ("ExecutablePath", _executablePath));
+            }
+            if (_ownsWhitelistLease && leaseVerification is not null && !leaseVerification.CanAcquireWhitelistLease)
+            {
+                AppLog.Warn("HidHide", "HidHide whitelist lease is no longer eligible for input access.", null,
+                    ("Status", leaseVerification.Status), ("ExecutablePath", _executablePath), ("Action", "ReleaseLease"));
+                ReleaseLease();
+                return leaseVerification.Status == HidHideInspectionStatus.Disabled
+                    ? _inputSource.Start()
+                    : new(MsiClawInputStartStatus.InitializationFailed, $"HidHide access lease is unavailable ({leaseVerification.Status}). No controller settings were changed.");
             }
         }
         else _ownsWhitelistLease = _recoveryManager.OwnsHidHideWhitelistLease(_executablePath);
