@@ -1,5 +1,8 @@
 # Steam Input Addon for Claw
 
+> [!WARNING]
+> This project is under active development and is not functional yet. Do not install or use it yet.
+
 A lightweight Steam Input bridge for MSI Claw handheld PCs.
 
 The project exposes the MSI Claw built-in controller to Steam as a **Classic Steam Controller**, allowing the rear M1/M2 buttons to appear as independent Steam Controller grip buttons.
@@ -688,6 +691,12 @@ Rules:
 * preserve ClawTweaks/HHC HidHide configuration.
 
 Replacing the complete HidHide configuration is forbidden.
+
+HidHide is a required prerequisite for supported addon routing. The installer provides it for Stock MSI Center M; in a ClawTweaks environment the addon reuses the existing compatible installation. A missing HidHide installation after setup is a broken prerequisite: the addon remains PASSIVE and performs no routing mutation.
+
+The v1 compatibility baseline is the official HidHide 1.5.230 release. The addon uses its persistent configuration API with recovery journaling; newer process/session blacklist APIs are not required by v1.
+
+Installing HidHide alone must not hide the MSI Claw controller. While the addon is PASSIVE, it owns no HidHide device hiding or whitelist lease. In Stock MSI Center M environments the physical controller remains normally exposed; existing ClawTweaks/HHC HidHide configuration and controller exposure state are left unchanged.
 
 Where a supported HidHide version provides process/session-scoped hiding, it may be used as an additional safety mechanism.
 
