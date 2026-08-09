@@ -42,6 +42,18 @@ public sealed class SilentUpdateServiceTests
     }
 
     [Fact]
+    public async Task CheckDownloadAndScheduleAsync_WhenRestartArgumentsAreProvided_PreservesThemForTheUpdatedApp()
+    {
+        var client = new FakeUpdateClient(isInstalled: true, updateAvailable: true);
+
+        var scheduled = await new SilentUpdateService(client).CheckDownloadAndScheduleAsync(CancellationToken.None, ["--background"]);
+
+        Assert.True(scheduled);
+        var restartArguments = Assert.IsType<string[]>(client.RestartArguments);
+        Assert.Equal(["--background"], restartArguments);
+    }
+
+    [Fact]
     public async Task CheckDownloadAndScheduleAsync_WhenCancelledDuringCheck_DoesNotDownloadOrApply()
     {
         var client = new FakeUpdateClient(isInstalled: true, updateAvailable: true) { CheckCompletion = new TaskCompletionSource<bool>() };
@@ -77,6 +89,7 @@ public sealed class SilentUpdateServiceTests
         public int CheckCount { get; private set; }
         public int DownloadCount { get; private set; }
         public int ApplyCount { get; private set; }
+        public string[]? RestartArguments { get; private set; }
         public TaskCompletionSource<bool>? CheckCompletion { get; init; }
         public TaskCompletionSource? DownloadCompletion { get; init; }
         public TaskCompletionSource DownloadStarted { get; } = new();
@@ -94,9 +107,10 @@ public sealed class SilentUpdateServiceTests
             return DownloadCompletion?.Task ?? Task.CompletedTask;
         }
 
-        public void WaitExitThenApplyUpdates()
+        public void WaitExitThenApplyUpdates(string[]? restartArguments)
         {
             ApplyCount++;
+            RestartArguments = restartArguments;
         }
     }
 }

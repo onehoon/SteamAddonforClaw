@@ -24,6 +24,6 @@ internal sealed class VelopackUpdateClient : IUpdateClient
         return _updateManager.DownloadUpdatesAsync(_availableUpdate ?? throw new InvalidOperationException("No update is available to download."));
     }
 
-    public void WaitExitThenApplyUpdates() =>
-        _updateManager.WaitExitThenApplyUpdates((_availableUpdate ?? throw new InvalidOperationException("No update is available to apply.")).TargetFullRelease, silent: true, restart: true, restartArgs: null);
+    public void WaitExitThenApplyUpdates(string[]? restartArguments) =>
+        _updateManager.WaitExitThenApplyUpdates((_availableUpdate ?? throw new InvalidOperationException("No update is available to apply.")).TargetFullRelease, silent: true, restart: true, restartArgs: restartArguments);
 }
