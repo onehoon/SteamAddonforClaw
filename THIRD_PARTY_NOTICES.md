@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This file lists third-party software distributed with, linked by, or referenced during development of Steam Input Addon for Claw. A project listed in the References section does not have its source code incorporated into this project.
+This file lists third-party software distributed with, linked by, or referenced during development of Steam Input Addon for Claw. It is not an exhaustive inventory of all files in a final self-contained distribution; release packaging requires a separate, package-specific license review. A project listed in the References section does not have its source code incorporated into this project.
 
 ## Distributed / Linked Components
 
@@ -31,7 +31,7 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 - Project: VIIPER
 - Upstream: https://github.com/Valkirie/VIIPER
 - Original project: https://github.com/Alia5/VIIPER
-- Copyright: Peter R. (as identified by the upstream project)
+- Copyright: Peter Repukat (as identified by the upstream project)
 - License: GPL-3.0-or-later
 
 VIIPER is intended to provide the virtual USB controller backend. It is not included in the current development build and this repository does not currently distribute `libVIIPER.dll` or `viiper.exe`.
@@ -52,12 +52,16 @@ No Handheld Companion source code is copied, translated, or ported into this pro
 ### hbashton/DS4Windows
 
 - Upstream: https://github.com/hbashton/DS4Windows
-- License: GPL-3.0
+- License: GPL-3.0-or-later
 
 Used as a technical reference for VIIPER lifecycle, usbip-win2 interaction, HidHide coordination, controller hotplug, and physical/virtual controller separation patterns.
 
 No DS4Windows source code is currently incorporated. Any direct reuse requires a separate license review and preservation of the applicable copyright and license notices.
 
 ### ClawTweaks
+
+- Upstream: https://github.com/enterTheVoidCode/ClawTweaks
+- Copyright: 2025 enterTheVoidCode and ClawTweaks contributors
+- License: GNU AGPL v3
 
 ClawTweaks is a compatibility reference only. It is not a runtime dependency: this project does not import its source, depend on private IPC or internals, modify ClawTweaks, or steal or mutate ClawTweaks-owned virtual devices.

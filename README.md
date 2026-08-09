@@ -1004,7 +1004,7 @@ HHC source is not copied, translated, or ported into this project. Hardware and 
 
 Repository:
 
-[`hbashton/DS4Windows`](https://github.com/hbashton/DS4Windows) (`GPL-3.0`)
+[`hbashton/DS4Windows`](https://github.com/hbashton/DS4Windows) (`GPL-3.0-or-later`)
 
 Primary reference areas:
 
@@ -1087,7 +1087,7 @@ External physical-controller detection
 
 # ClawTweaks Compatibility Reference
 
-ClawTweaks is an optional compatibility target, not a runtime dependency. This project does not use ClawTweaks source code, require its private IPC or internals, modify ClawTweaks, or take ownership of ClawTweaks-owned virtual devices. The two projects are independently implemented and should coexist without either project being presented as a derivative of the other.
+[enterTheVoidCode/ClawTweaks](https://github.com/enterTheVoidCode/ClawTweaks) is licensed upstream under GNU AGPL v3. It is an optional compatibility target, not a runtime dependency. This project does not use ClawTweaks source code, require its private IPC or internals, modify ClawTweaks, or take ownership of ClawTweaks-owned virtual devices. The two projects are independently implemented and should coexist without either project being presented as a derivative of the other.
 
 # Third-Party Source Policy
 
