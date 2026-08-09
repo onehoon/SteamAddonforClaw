@@ -38,6 +38,8 @@ public sealed partial class MainWindow : Window
     private readonly MainNavigationState _navigationState = new();
     private readonly ISystemStatusProvider _systemStatusProvider;
     private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
+    private readonly IHidHideProvisioner _hidHideProvisioner;
+    private SystemStatusSnapshot? _latestSystemStatus;
     private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _externalControllerCards = [];
@@ -58,11 +60,13 @@ public sealed partial class MainWindow : Window
         string startupRegistrationMessage,
         RecoveryManager? recoveryManager,
         ISystemStatusProvider? systemStatusProvider = null,
-        IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null)
+        IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
+        IHidHideProvisioner? hidHideProvisioner = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
+        _hidHideProvisioner = hidHideProvisioner ?? CreateDefaultHidHideProvisioner(_systemStatusProvider);
         _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
             new WindowsEnvironmentDiscoverySnapshotSource(),
             new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
@@ -268,6 +272,7 @@ public sealed partial class MainWindow : Window
 
     private void RenderSystemStatus(SystemStatusSnapshot snapshot)
     {
+        _latestSystemStatus = snapshot;
         DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
         DeviceModelText.Text = snapshot.Device.Model;
         DeviceGpuText.Text = $"GPU: {string.Join(Environment.NewLine, snapshot.Device.GpuModels)}";
@@ -284,6 +289,45 @@ public sealed partial class MainWindow : Window
             new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
             new("Steam Input Addon", FormatAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason)
         ]);
+        var receipt = _hidHideProvisioner.GetReceiptStatus();
+        var retryableReceipt = receipt.Receipt is null or { State: HidHideProvisioningReceiptState.AttemptCancelled };
+        var canInstall = snapshot.Addon.Status == AddonOperationalStatus.SetupRequired
+            && snapshot.Compatibility.AllowsMutation
+            && snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.Clear
+            && !snapshot.Steam.IsActive
+            && snapshot.Prerequisites.HidHide.Status == PrerequisiteStatus.Missing
+            && !receipt.IsCorrupt
+            && retryableReceipt;
+        var receiptMessage = receipt.IsCorrupt ? "HidHide provisioning state could not be verified. Installation is blocked."
+            : receipt.Receipt?.State switch
+            {
+                HidHideProvisioningReceiptState.InstallStarted => "A previous HidHide installation attempt is being reconciled. Installation is blocked.",
+                HidHideProvisioningReceiptState.InstalledPendingReboot => "Restart Windows to complete HidHide setup.",
+                HidHideProvisioningReceiptState.AttemptFailed => "A previous HidHide installation attempt requires manual verification before retrying.",
+                _ => string.Empty
+            };
+        HidHideProvisioningPanel.Visibility = canInstall || !string.IsNullOrEmpty(receiptMessage) ? Visibility.Visible : Visibility.Collapsed;
+        InstallHidHideButton.IsEnabled = canInstall;
+        if (!string.IsNullOrEmpty(receiptMessage)) HidHideProvisioningStatusText.Text = receiptMessage;
+        else if (!canInstall) HidHideProvisioningStatusText.Text = string.Empty;
+    }
+
+    private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)
+    {
+        InstallHidHideButton.IsEnabled = false;
+        HidHideProvisioningStatusText.Text = "Installing HidHide...";
+        try
+        {
+            var result = await _hidHideProvisioner.ProvisionAsync(CancellationToken.None);
+            HidHideProvisioningStatusText.Text = result.Kind switch
+            {
+                HidHideProvisioningResultKind.Installed => "HidHide was installed.",
+                HidHideProvisioningResultKind.RebootRequired => "HidHide was installed. Restart Windows to complete the setup.",
+                HidHideProvisioningResultKind.Cancelled => "HidHide installation was cancelled.",
+                _ => result.Reason
+            };
+        }
+        finally { await RefreshSystemStatusAsync(); }
     }
 
     private static void Replace(ObservableCollection<StatusCardViewModel> destination, IEnumerable<StatusCardViewModel> source) { destination.Clear(); foreach (var item in source) destination.Add(item); }
@@ -307,6 +351,15 @@ public sealed partial class MainWindow : Window
         new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices)), new ViiperRuntimeInspector()),
         () => SteamSessionState.FromRunningAppId(0), () => new ExternalControllerDetector(devices, classifier).Detect(), () => true);
     }
+
+    private static IHidHideProvisioner CreateDefaultHidHideProvisioner(ISystemStatusProvider systemStatusProvider) => new HidHideProvisioner(
+        new HidHidePrerequisiteInspector(new HidHideDriverClient()),
+        new WindowsHidHidePackageProbe(),
+        new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath),
+        new ElevatedProcessRunner(),
+        installerPathProvider: null,
+        installerIntegrityValidator: null,
+        safetyStateProvider: new SystemStatusHidHideProvisioningSafetyStateProvider(systemStatusProvider));
 
     private void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
     {

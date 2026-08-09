@@ -2,21 +2,25 @@ using SteamInputAddonforClaw.HidHide;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
-internal sealed class HidHidePrerequisiteInspector(IHidHideClient hidHideClient)
+internal sealed class HidHidePrerequisiteInspector(IHidHideClient hidHideClient, IHidHidePackageProbe? packageProbe = null)
 {
     public PrerequisiteAssessment Inspect()
     {
         try
         {
             var inspection = hidHideClient.Inspect();
+            var package = (packageProbe ?? new WindowsHidHidePackageProbe()).Inspect();
+            var version = package.InspectionSucceeded ? package.Version : null;
+            if (inspection.Status == HidHideInspectionStatus.NotInstalled && package.InspectionSucceeded && package.Installed)
+                return new(PrerequisiteKind.HidHide, PrerequisiteStatus.Present, "HidHidePackagePresentControlDeviceMissing", version);
             return inspection.Status switch
             {
-                HidHideInspectionStatus.Available => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideAvailable"),
-                HidHideInspectionStatus.NotInstalled => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "HidHideControlDeviceMissing"),
-                HidHideInspectionStatus.Disabled => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideDisabled"),
-                HidHideInspectionStatus.InverseWhitelist => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideInverseWhitelist"),
-                HidHideInspectionStatus.ConfigurationUnavailable => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Indeterminate, "HidHideConfigurationUnavailable"),
-                _ => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Indeterminate, "HidHideInspectionUnknown")
+                HidHideInspectionStatus.Available => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideAvailable", version),
+                HidHideInspectionStatus.NotInstalled => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "HidHideControlDeviceMissing", version),
+                HidHideInspectionStatus.Disabled => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideDisabled", version),
+                HidHideInspectionStatus.InverseWhitelist => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideInverseWhitelist", version),
+                HidHideInspectionStatus.ConfigurationUnavailable => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Indeterminate, "HidHideConfigurationUnavailable", version),
+                _ => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Indeterminate, "HidHideInspectionUnknown", version)
             };
         }
         catch

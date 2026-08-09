@@ -16,7 +16,8 @@ $requiredAssets = @(
     'App.xbf',
     'MainWindow.xbf',
     'SteamInputAddonforClaw.pri',
-    'Assets\AppIcon.ico'
+    'Assets\AppIcon.ico',
+    'Dependencies\HidHide\HidHide_1.5.230_x64.exe'
 )
 
 $missingAssets = foreach ($asset in $requiredAssets) {
@@ -24,6 +25,12 @@ $missingAssets = foreach ($asset in $requiredAssets) {
     if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
         $asset
     }
+}
+
+$hidHideInstaller = Join-Path $PublishDirectory 'Dependencies\HidHide\HidHide_1.5.230_x64.exe'
+$expectedHidHideSha256 = 'F4BBBCB82E6258641B887C74BC81C4C5F66E4AA811808DFC304347687B7605F6'
+if ((Get-FileHash -LiteralPath $hidHideInstaller -Algorithm SHA256).Hash -ne $expectedHidHideSha256) {
+    throw 'Published HidHide installer SHA-256 does not match the bundled metadata.'
 }
 
 if ($missingAssets) {

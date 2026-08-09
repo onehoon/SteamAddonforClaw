@@ -24,6 +24,13 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 - License: MIT
 - Upstream: https://github.com/amerkoleci/Vortice.Windows
 
+### HidHide
+
+- Version: 1.5.230
+- License: MIT
+- Upstream: https://github.com/nefarius/HidHide
+- Distribution: Official unmodified `HidHide_1.5.230_x64.exe` installer bundled for explicit first-time provisioning.
+
 ## Planned Components
 
 ### VIIPER

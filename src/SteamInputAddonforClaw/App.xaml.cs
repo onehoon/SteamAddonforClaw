@@ -153,7 +153,16 @@ public partial class App : Application
             CaptureExternalControllerAssessment,
             () => recoverySafe,
             routingSessionStateMachine: _routingSessionStateMachine);
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider);
+        var hidHideProvisioner = new HidHideProvisioner(
+            new HidHidePrerequisiteInspector(new HidHideDriverClient()),
+            new WindowsHidHidePackageProbe(),
+            new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath),
+            new ElevatedProcessRunner(),
+            installerPathProvider: null,
+            installerIntegrityValidator: null,
+            safetyStateProvider: new SystemStatusHidHideProvisioningSafetyStateProvider(statusProvider));
+        hidHideProvisioner.Reconcile();
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, hidHideProvisioner: hidHideProvisioner);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
