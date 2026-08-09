@@ -233,10 +233,10 @@ internal sealed class HidHideProvisioner(
         var prerequisite = prerequisiteInspector.Inspect();
         var package = packageProbe.Inspect();
         AppLog.Info("HidHideProvisioning", "HidHide installer validation completed.", ("Action", "ValidationCompleted"), ("PrerequisiteStatus", prerequisite.Status), ("ObservedVersion", package.Version));
-        if (prerequisite.Status == PrerequisiteStatus.Ready && package.Installed && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
+        if (package.InspectionSucceeded && prerequisite.Status == PrerequisiteStatus.Ready && package.Installed && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
             && receipt.State is HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.InstalledPendingReboot)
             SaveTransition(receipt, HidHideProvisioningReceiptState.Provisioned, package.Version);
-        else if (receipt.State == HidHideProvisioningReceiptState.InstallStarted && package.Installed
+        else if (package.InspectionSucceeded && receipt.State == HidHideProvisioningReceiptState.InstallStarted && package.Installed
             && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
             && prerequisite.Status != PrerequisiteStatus.Ready)
             SaveTransition(receipt, HidHideProvisioningReceiptState.InstalledPendingReboot, package.Version);

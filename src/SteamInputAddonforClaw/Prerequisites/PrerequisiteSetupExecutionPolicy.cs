@@ -8,7 +8,7 @@ internal static class PrerequisiteSetupExecutionPolicy
     public static PrerequisiteComponentAction SelectAction(bool packageInstalled, PrerequisiteStatus prerequisiteStatus, bool addonReceiptPendingReboot, bool unresolvedInstallStarted)
     {
         if (unresolvedInstallStarted) return PrerequisiteComponentAction.Blocked;
-        if (!packageInstalled) return PrerequisiteComponentAction.Install;
+        if (!packageInstalled) return addonReceiptPendingReboot ? PrerequisiteComponentAction.Blocked : PrerequisiteComponentAction.Install;
         if (prerequisiteStatus == PrerequisiteStatus.Ready) return PrerequisiteComponentAction.AlreadyReady;
         return addonReceiptPendingReboot ? PrerequisiteComponentAction.RestartRequired : PrerequisiteComponentAction.Blocked;
     }

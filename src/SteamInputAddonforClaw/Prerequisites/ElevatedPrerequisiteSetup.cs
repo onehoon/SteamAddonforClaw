@@ -9,7 +9,6 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 
 namespace SteamInputAddonforClaw.Prerequisites;
@@ -181,15 +180,14 @@ internal static class ElevatedPrerequisiteSetup
         var loaded = store.Load();
         if (loaded.IsCorrupt) throw new InvalidDataException("The HidHide provisioning receipt is corrupt.");
         if (loaded.Receipt is not { State: HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.InstalledPendingReboot } receipt) return;
-        if (!package.Installed)
+        var decision = ProvisioningReconciliationPolicy.Evaluate(package.InspectionSucceeded, package.Installed, package.Version, receipt.InstallerVersion, prerequisite.Status, receipt.State == HidHideProvisioningReceiptState.InstallStarted);
+        if (decision.Action == ProvisioningReconciliationAction.Preserve)
         {
-            AppLog.Warn("PrerequisiteSetup", "HidHide InstallStarted receipt remains unresolved because the package is still missing.", null, ("AttemptId", receipt.AttemptId), ("Reason", "InstallStartedPackageMissing"));
+            AppLog.Warn("PrerequisiteSetup", "HidHide receipt remains unresolved after reconciliation.", null, ("AttemptId", receipt.AttemptId), ("Reason", decision.Reason), ("ExpectedVersion", receipt.InstallerVersion), ("ObservedVersion", package.Version));
             return;
         }
-        var state = package.Installed && prerequisite.Status == PrerequisiteStatus.Ready
-            ? HidHideProvisioningReceiptState.Provisioned
-            : package.Installed ? HidHideProvisioningReceiptState.InstalledPendingReboot : HidHideProvisioningReceiptState.AttemptFailed;
-        store.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = state == HidHideProvisioningReceiptState.AttemptFailed ? "HidHidePackageNotDetectedDuringReconciliation" : null });
+        var state = decision.Action == ProvisioningReconciliationAction.Provisioned ? HidHideProvisioningReceiptState.Provisioned : HidHideProvisioningReceiptState.InstalledPendingReboot;
+        store.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = null });
         AppLog.Info("PrerequisiteSetup", "HidHide receipt reconciled.", ("AttemptId", receipt.AttemptId), ("PreviousState", receipt.State), ("State", state), ("PackageInstalled", package.Installed), ("PackageVersion", package.Version), ("PrerequisiteStatus", prerequisite.Status));
     }
 
@@ -198,15 +196,14 @@ internal static class ElevatedPrerequisiteSetup
         var loaded = store.Load();
         if (loaded.IsCorrupt) throw new InvalidDataException("The usbip-win2 provisioning receipt is corrupt.");
         if (loaded.Receipt is not { State: UsbIpWin2ProvisioningReceiptState.InstallStarted or UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot } receipt) return;
-        if (!package.Installed)
+        var decision = ProvisioningReconciliationPolicy.Evaluate(package.InspectionSucceeded, package.Installed, package.Version, receipt.InstallerVersion, prerequisite.Status, receipt.State == UsbIpWin2ProvisioningReceiptState.InstallStarted);
+        if (decision.Action == ProvisioningReconciliationAction.Preserve)
         {
-            AppLog.Warn("PrerequisiteSetup", "usbip-win2 InstallStarted receipt remains unresolved because the package is still missing.", null, ("AttemptId", receipt.AttemptId), ("Reason", "InstallStartedPackageMissing"));
+            AppLog.Warn("PrerequisiteSetup", "usbip-win2 receipt remains unresolved after reconciliation.", null, ("AttemptId", receipt.AttemptId), ("Reason", decision.Reason), ("ExpectedVersion", receipt.InstallerVersion), ("ObservedVersion", package.Version));
             return;
         }
-        var state = package.Installed && prerequisite.Status == PrerequisiteStatus.Ready
-            ? UsbIpWin2ProvisioningReceiptState.Provisioned
-            : package.Installed ? UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot : UsbIpWin2ProvisioningReceiptState.AttemptFailed;
-        store.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = state == UsbIpWin2ProvisioningReceiptState.AttemptFailed ? "UsbIpWin2PackageNotDetectedDuringReconciliation" : null });
+        var state = decision.Action == ProvisioningReconciliationAction.Provisioned ? UsbIpWin2ProvisioningReceiptState.Provisioned : UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot;
+        store.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = null });
         AppLog.Info("PrerequisiteSetup", "usbip-win2 receipt reconciled.", ("AttemptId", receipt.AttemptId), ("PreviousState", receipt.State), ("State", state), ("PackageInstalled", package.Installed), ("PackageVersion", package.Version), ("PrerequisiteStatus", prerequisite.Status));
     }
 
@@ -229,7 +226,8 @@ internal static class ElevatedPrerequisiteSetup
             };
             var compatibility = new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate(software.Select(provider => provider.Capture()).ToArray());
             if (!compatibility.AllowsMutation) return (false, "Compatibility" + compatibility.Reason);
-            if (new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath).Exists()) return (false, "RecoveryJournalPresent");
+            var recoverySafety = new MachineRecoverySafetyInspector().Inspect();
+            if (!AllowsRecoverySafeProvisioning(recoverySafety)) return (false, recoverySafety.Reason);
             var external = DetectExternalControllers(new WindowsControllerDeviceEnumerator());
             if (external.Status != ExternalControllerAssessmentStatus.Clear) return (false, "ExternalController" + external.Status);
             using var runningAppId = new SteamRunningAppIdRegistrySource();
@@ -250,4 +248,6 @@ internal static class ElevatedPrerequisiteSetup
             devices,
             new ControllerDeviceClassifier(msiAdapter.InternalControllerMatcher)).Detect();
     }
+
+    internal static bool AllowsRecoverySafeProvisioning(RecoverySafetyAssessment assessment) => assessment.Status == RecoverySafetyStatus.Safe;
 }

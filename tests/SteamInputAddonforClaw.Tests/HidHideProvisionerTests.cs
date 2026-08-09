@@ -180,6 +180,17 @@ public sealed class HidHideProvisionerTests
     }
 
     [Fact]
+    public void InspectionFailure_DoesNotPromoteAnUnresolvedReceipt()
+    {
+        var receipt = Receipt(HidHideProvisioningReceiptState.InstallStarted);
+        var store = new FakeStore { Receipt = receipt };
+
+        Create(new FakeRunner(), store, HidHideInspectionStatus.Available, new(true, "1.5.230.0", false)).Reconcile();
+
+        Assert.Same(receipt, store.Receipt);
+    }
+
+    [Fact]
     public async Task LiveSafetyState_IsRecheckedImmediatelyBeforeProcessStart()
     {
         var allowed = Context();

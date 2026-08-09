@@ -84,6 +84,9 @@ public sealed class FirstTimeSetupPolicyTests
     public void UsbIpInstallStartedAndMissing_RemainsBlockedUntilResolved() => Assert.Equal(PrerequisiteComponentAction.Blocked, PrerequisiteSetupExecutionPolicy.SelectAction(false, PrerequisiteStatus.Missing, false, unresolvedInstallStarted: true));
 
     [Fact]
+    public void PendingRebootReceiptAndMissingPackage_BlocksReinstallUntilReconciled() => Assert.Equal(PrerequisiteComponentAction.Blocked, PrerequisiteSetupExecutionPolicy.SelectAction(false, PrerequisiteStatus.Missing, addonReceiptPendingReboot: true, unresolvedInstallStarted: false));
+
+    [Fact]
     public void ExitZeroWithoutInstalledPackage_IsFailedInsteadOfPendingReboot()
     {
         var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(0, true, false, null, "1.5.230.0", PrerequisiteStatus.Missing);
@@ -119,6 +122,21 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.False(prerequisites.IsRoutingReady);
         Assert.Equal("Setup complete", presentation.Status);
         Assert.Equal("Routing runtime is not available in this build.", presentation.Reason);
+    }
+
+    [Theory]
+    [InlineData(true, true, "1.5.230.0", "1.5.230.0", (int)PrerequisiteStatus.Ready, true, (int)ProvisioningReconciliationAction.Provisioned)]
+    [InlineData(true, true, "0.9.7.7", "0.9.7.7", (int)PrerequisiteStatus.Ready, false, (int)ProvisioningReconciliationAction.Provisioned)]
+    [InlineData(true, true, "0.9.7.5", "0.9.7.7", (int)PrerequisiteStatus.Ready, true, (int)ProvisioningReconciliationAction.Preserve)]
+    [InlineData(true, true, "0.9.7.9", "0.9.7.7", (int)PrerequisiteStatus.Ready, false, (int)ProvisioningReconciliationAction.Preserve)]
+    [InlineData(false, true, "1.5.230.0", "1.5.230.0", (int)PrerequisiteStatus.Ready, true, (int)ProvisioningReconciliationAction.Preserve)]
+    [InlineData(true, true, "1.5.230.0", "1.5.230.0", (int)PrerequisiteStatus.Unusable, true, (int)ProvisioningReconciliationAction.PendingReboot)]
+    [InlineData(true, true, "0.9.7.7", "0.9.7.7", (int)PrerequisiteStatus.Unusable, false, (int)ProvisioningReconciliationAction.Preserve)]
+    public void Reconciliation_RequiresExactReceiptVersionAndSuccessfulInspection(bool inspectionSucceeded, bool installed, string observedVersion, string expectedVersion, int prerequisiteStatus, bool installStarted, int expectedAction)
+    {
+        var result = ProvisioningReconciliationPolicy.Evaluate(inspectionSucceeded, installed, observedVersion, expectedVersion, (PrerequisiteStatus)prerequisiteStatus, installStarted);
+
+        Assert.Equal((ProvisioningReconciliationAction)expectedAction, result.Action);
     }
 
     private static FirstTimeSetupInput Input(PrerequisiteStatus hidHide, PrerequisiteStatus usbIp) => new(
