@@ -52,10 +52,27 @@ public sealed class HidHideDriverClientTests
         Assert.Throws<InvalidDataException>(() => HidHideDriverClient.ReadMultiString(device, 1));
     }
 
-    [Fact]
-    public void DeserializeMultiString_RequiresFinalDoubleNul()
+    [Theory]
+    [InlineData("A\0B\0\0", "A", "B")]
+    [InlineData("A\0B\0\0\0", "A", "B")]
+    [InlineData("A\0\0B\0\0", "A", "B")]
+    [InlineData("\0")]
+    [InlineData("\0\0")]
+    public void DeserializeMultiString_AcceptsHidHideCompatibleTerminations(string multiString, params string[] expected)
     {
-        Assert.Throws<InvalidDataException>(() => HidHideDriverClient.DeserializeMultiString(Encoding.Unicode.GetBytes("A\0")));
+        Assert.Equal(expected, HidHideDriverClient.DeserializeMultiString(Encoding.Unicode.GetBytes(multiString)));
+    }
+
+    [Fact]
+    public void DeserializeMultiString_WithoutTerminalNulFailsClosed()
+    {
+        Assert.Throws<InvalidDataException>(() => HidHideDriverClient.DeserializeMultiString(Encoding.Unicode.GetBytes("A\0B")));
+    }
+
+    [Fact]
+    public void DeserializeMultiString_OddByteLengthFailsClosed()
+    {
+        Assert.Throws<InvalidDataException>(() => HidHideDriverClient.DeserializeMultiString([0, 0, 0]));
     }
 
     [Fact]
@@ -65,10 +82,10 @@ public sealed class HidHideDriverClientTests
     }
 
     [Fact]
-    public void SerializeMultiString_UsesFinalDoubleNulIncludingEmptyList()
+    public void SerializeMultiString_UsesHidHideCompatibleTerminations()
     {
         Assert.Equal("A\0B\0\0", Encoding.Unicode.GetString(HidHideDriverClient.SerializeMultiString(["A", "B"])));
-        Assert.Empty(HidHideDriverClient.DeserializeMultiString(HidHideDriverClient.SerializeMultiString([])));
+        Assert.Equal("\0", Encoding.Unicode.GetString(HidHideDriverClient.SerializeMultiString([])));
     }
 
     [Fact]
