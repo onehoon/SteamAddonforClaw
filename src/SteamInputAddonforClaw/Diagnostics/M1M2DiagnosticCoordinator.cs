@@ -95,7 +95,8 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
             {
                 AppLog.Warn("HidHide", "HidHide whitelist lease is no longer eligible for input access.", null,
                     ("Status", leaseVerification.Status), ("ExecutablePath", _executablePath), ("Action", "ReleaseLease"));
-                ReleaseLease();
+                if (!ReleaseLease())
+                    return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist lease could not be released. Recovery remains pending.");
                 return leaseVerification.Status == HidHideInspectionStatus.Disabled
                     ? _inputSource.Start()
                     : new(MsiClawInputStartStatus.InitializationFailed, $"HidHide access lease is unavailable ({leaseVerification.Status}). No controller settings were changed.");
@@ -138,30 +139,31 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
         }
     }
 
-    private void ReleaseLease()
+    private bool ReleaseLease()
     {
         lock (_leaseSync)
         {
-            if (!_ownsWhitelistLease) return;
+            if (!_ownsWhitelistLease) return true;
             if (!_hidHideClient.RemoveApplication(_executablePath))
             {
                 AppLog.Error("HidHide", "HidHide whitelist lease cleanup failed.", new InvalidOperationException("HidHide whitelist removal failed."), ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
-                return;
+                return false;
             }
             var verification = _hidHideClient.Inspect();
             if (!verification.IsConfigurationReadable || verification.ApplicationWhitelist.Contains(_executablePath))
             {
                 AppLog.Error("HidHide", "HidHide whitelist lease cleanup could not be verified.", new InvalidOperationException("HidHide whitelist removal verification failed."), ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
-                return;
+                return false;
             }
             var completed = _recoveryManager.CompleteRecoverySession();
             if (completed.Status != RecoveryStatus.Success)
             {
                 AppLog.Error("HidHide", "HidHide whitelist lease journal cleanup failed.", new InvalidOperationException(completed.Reason), ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
-                return;
+                return false;
             }
             _ownsWhitelistLease = false;
             AppLog.Info("HidHide", "HidHide whitelist lease released.", ("ExecutablePath", _executablePath), ("JournalDeleted", true));
+            return true;
         }
     }
 }
