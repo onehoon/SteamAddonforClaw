@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;

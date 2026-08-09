@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Startup;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -7,7 +8,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ControllerEnvironmentWaiterTests
 {
     [Fact]
-    public async Task WaitUntilStableAsync_WhenInternalClawIsAbsent_ReturnsIndeterminate()
+    public async Task WaitUntilStableAsync_WhenInternalHandheldIsAbsent_ReturnsIndeterminate()
     {
         var waiter = CreateWaiter([], requiredStableSnapshots: 3, timeout: TimeSpan.FromMilliseconds(20));
 
@@ -17,7 +18,7 @@ public sealed class ControllerEnvironmentWaiterTests
     }
 
     [Fact]
-    public async Task WaitUntilStableAsync_WhenInternalClawTopologyIsStable_ReturnsStable()
+    public async Task WaitUntilStableAsync_WhenInternalHandheldTopologyIsStable_ReturnsStable()
     {
         var claw = new ControllerDeviceInfo(
             "HID\\VID_0DB0&PID_1902",
@@ -41,7 +42,7 @@ public sealed class ControllerEnvironmentWaiterTests
     }
 
     [Fact]
-    public async Task WaitUntilStableAsync_WhenClawTweaksVirtualTopologyIsStable_DoesNotRequireInternalClaw()
+    public async Task WaitUntilStableAsync_WhenClawTweaksVirtualTopologyIsStable_DoesNotRequireInternalHandheld()
     {
         var virtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
         var waiter = CreateWaiter([virtualController], 3, TimeSpan.FromSeconds(1));
@@ -81,7 +82,7 @@ public sealed class ControllerEnvironmentWaiterTests
     {
         return new ControllerEnvironmentWaiter(
             new FakeEnumerator(devices),
-            new ControllerDeviceClassifier(),
+            new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
             requiredStableSnapshots,
             TimeSpan.Zero,
             timeout);

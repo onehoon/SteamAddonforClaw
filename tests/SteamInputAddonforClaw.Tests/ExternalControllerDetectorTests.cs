@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -300,11 +301,11 @@ public sealed class ExternalControllerDetectorTests
     }
 
     [Fact]
-    public void ClassifyDetailed_WhenInternalClawExists_ReportsMsiClawReason()
+    public void ClassifyDetailed_WhenInternalHandheldExists_ReportsMsiClawReason()
     {
-        var result = new ControllerDeviceClassifier().ClassifyDetailed(GameController(0x0DB0, 0x1902));
+        var result = new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()).ClassifyDetailed(GameController(0x0DB0, 0x1902));
 
-        Assert.Equal(ControllerDeviceClassification.InternalClaw, result.Classification);
+        Assert.Equal(ControllerDeviceClassification.InternalHandheld, result.Classification);
         Assert.Equal("KnownMsiClawVidPid", result.Reason);
     }
 
@@ -339,7 +340,7 @@ public sealed class ExternalControllerDetectorTests
 
     private static ExternalControllerAssessment Detect(IReadOnlyList<ControllerDeviceInfo> devices, IControllerIdentityExclusionSource? exclusionSource = null)
     {
-        return new ExternalControllerDetector(new FakeEnumerator(devices), new ControllerDeviceClassifier(exclusionSource)).Detect();
+        return new ExternalControllerDetector(new FakeEnumerator(devices), new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher(), exclusionSource)).Detect();
     }
 
     private static ControllerDeviceInfo GameController(

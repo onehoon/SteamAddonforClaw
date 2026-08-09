@@ -10,6 +10,7 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Windowing;
@@ -181,11 +182,8 @@ public sealed partial class MainWindow : Window
         return new M1M2DiagnosticCoordinator(_msiClawInputSource, new HidHideDriverClient(), _recoveryManager, executablePath, ResolveMsiDirectInputHidInstanceIds);
     }
 
-    private static IReadOnlyList<string> ResolveMsiDirectInputHidInstanceIds() => new WindowsControllerDeviceEnumerator().EnumeratePresentDevices()
-        .Where(device => device.Present && device.VendorId == 0x0DB0 && device.ProductId == 0x1902 &&
-            device.InstanceId.StartsWith("HID\\VID_0DB0&PID_1902&MI_00&COL01\\", StringComparison.OrdinalIgnoreCase))
-        .Select(device => device.InstanceId)
-        .ToArray();
+    private static IReadOnlyList<string> ResolveMsiDirectInputHidInstanceIds() =>
+        MsiClawHardware.ResolveDirectInputHidInstanceIds(new WindowsControllerDeviceEnumerator().EnumeratePresentDevices());
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {

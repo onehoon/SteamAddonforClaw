@@ -47,6 +47,13 @@ public sealed class HandheldDeviceRegistryTests
     {
         public HandheldDeviceDescriptor Descriptor { get; } = new(new HandheldDeviceId("test.device"), "Test", "Device", "Test Device");
         public AuxiliaryControlCatalog AuxiliaryControls { get; } = new([]);
+        public IInternalControllerMatcher InternalControllerMatcher { get; } = new NoMatchInternalControllerMatcher();
         public DeviceProbeResult Probe(DeviceProbeContext context) => probe(context);
+    }
+
+    private sealed class NoMatchInternalControllerMatcher : IInternalControllerMatcher
+    {
+        public InternalControllerMatchResult Match(InternalControllerMatchContext context) =>
+            new(InternalControllerMatchStatus.NoMatch, "Not applicable.");
     }
 }

@@ -97,7 +97,7 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
             .OrderBy(identity => identity, StringComparer.OrdinalIgnoreCase));
         var ready = mode switch
         {
-            ControllerEnvironmentMode.StockCenterM => devices.Any(device => _classifier.Classify(device) == ControllerDeviceClassification.InternalClaw),
+            ControllerEnvironmentMode.StockCenterM => devices.Any(device => _classifier.Classify(device) == ControllerDeviceClassification.InternalHandheld),
             ControllerEnvironmentMode.ClawTweaks => relevantDevices.Length > 0,
             _ => false
         };

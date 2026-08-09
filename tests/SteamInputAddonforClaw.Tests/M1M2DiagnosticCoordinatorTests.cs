@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Controllers;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Recovery;
 using Xunit;
 
