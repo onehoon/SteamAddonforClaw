@@ -38,7 +38,7 @@ public sealed partial class MainWindow : Window
     private readonly MainNavigationState _navigationState = new();
     private readonly ISystemStatusProvider _systemStatusProvider;
     private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
-    private readonly IHidHideProvisioner _hidHideProvisioner;
+    private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
     private SystemStatusSnapshot? _latestSystemStatus;
     private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
@@ -61,12 +61,12 @@ public sealed partial class MainWindow : Window
         RecoveryManager? recoveryManager,
         ISystemStatusProvider? systemStatusProvider = null,
         IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
-        IHidHideProvisioner? hidHideProvisioner = null)
+        IHidHideProvisioningReceiptStore? hidHideReceiptStore = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
-        _hidHideProvisioner = hidHideProvisioner ?? CreateDefaultHidHideProvisioner(_systemStatusProvider);
+        _hidHideReceiptStore = hidHideReceiptStore ?? new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
         _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
             new WindowsEnvironmentDiscoverySnapshotSource(),
             new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
@@ -290,7 +290,7 @@ public sealed partial class MainWindow : Window
             new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
             new("Steam Input Addon", FormatAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason)
         ]);
-        var receipt = _hidHideProvisioner.GetReceiptStatus();
+        var receipt = _hidHideReceiptStore.Load();
         var usbReceipt = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath).Load();
         var storage = ProvisioningStorageSecurity.Inspect(VelopackAppPaths.ProvisioningStateDirectory);
         var hidHideState = receipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
@@ -330,6 +330,7 @@ public sealed partial class MainWindow : Window
                 ElevatedPrerequisiteSetup.ResultKind.Installed => "Required components were installed.",
                 ElevatedPrerequisiteSetup.ResultKind.RebootRequired => "Restart Windows to complete component setup.",
                 ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress => "Another setup operation is already in progress.",
+                ElevatedPrerequisiteSetup.ResultKind.Blocked => "A required component is installed but not ready. Restart Windows or verify its installation before retrying.",
                 ElevatedPrerequisiteSetup.ResultKind.Cancelled => "Installation was cancelled.",
                 _ => result.Reason ?? "Required component installation failed."
             };
@@ -396,15 +397,6 @@ public sealed partial class MainWindow : Window
         new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices)), new ViiperRuntimeInspector()),
         () => SteamSessionState.FromRunningAppId(0), () => new ExternalControllerDetector(devices, classifier).Detect(), () => true);
     }
-
-    private static IHidHideProvisioner CreateDefaultHidHideProvisioner(ISystemStatusProvider systemStatusProvider) => new HidHideProvisioner(
-        new HidHidePrerequisiteInspector(new HidHideDriverClient()),
-        new WindowsHidHidePackageProbe(),
-        new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath),
-        new ElevatedProcessRunner(),
-        installerPathProvider: null,
-        installerIntegrityValidator: null,
-        safetyStateProvider: new SystemStatusHidHideProvisioningSafetyStateProvider(systemStatusProvider));
 
     private void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
     {
