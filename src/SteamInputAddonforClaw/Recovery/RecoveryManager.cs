@@ -1,5 +1,7 @@
 using System.Diagnostics;
-using SteamInputAddonforClaw.Controllers;
+using System.Text.Json;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 
@@ -8,12 +10,12 @@ namespace SteamInputAddonforClaw.Recovery;
 internal interface IRecoveryManager
 {
     bool HasIncompleteRecovery { get; }
-    RecoveryResult RecoverIncompleteSession();
+    Task<RecoveryResult> RecoverIncompleteSessionAsync(CancellationToken cancellationToken);
 }
 
-internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClient? hidHideClient = null) : IRecoveryManager
+internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDeviceRegistry? deviceRegistry = null, IHidHideClient? hidHideClient = null) : IRecoveryManager
 {
-    internal const int CurrentSchemaVersion = 1;
+    internal const int CurrentSchemaVersion = 2;
     public bool HasIncompleteRecovery
     {
         get
@@ -27,8 +29,12 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
         }
     }
 
-    public RecoveryResult BeginRecoverySession(MsiControllerSnapshotResult snapshotResult)
-        => BeginRecoverySession(snapshotResult, new RecoveryMutationState());
+    public RecoveryResult BeginDeviceNativeStateMutation(NativeStateCaptureResult captureResult)
+    {
+        if (!captureResult.AllowsMutation || captureResult.Snapshot is null)
+            return new(RecoveryStatus.Failure, "Only a successful, mutation-authorizing native-state snapshot can start recovery.");
+        return BeginRecoverySession(captureResult.Snapshot, new RecoveryMutationState(DeviceNativeStateChanged: true));
+    }
 
     public RecoveryResult BeginHidHideWhitelistLease(string executablePath)
     {
@@ -38,7 +44,7 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
             CurrentSchemaVersion,
             Guid.NewGuid(),
             DateTimeOffset.UtcNow,
-            new MsiControllerSnapshot(MsiControllerNativeMode.Indeterminate, null, null, null, null, DateTimeOffset.UtcNow),
+            null,
             new(ExecutableWhitelistAdditions: [Path.GetFullPath(executablePath)]));
         try
         {
@@ -61,18 +67,8 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
             string.Equals(journal.Mutations.ExecutableWhitelistAdditions!.Single(), Path.GetFullPath(executablePath), StringComparison.OrdinalIgnoreCase);
     }
 
-    private RecoveryResult BeginRecoverySession(MsiControllerSnapshotResult snapshotResult, RecoveryMutationState mutations)
+    private RecoveryResult BeginRecoverySession(DeviceNativeStateSnapshot snapshot, RecoveryMutationState mutations)
     {
-        if (!snapshotResult.AllowsMutation || snapshotResult.Snapshot is not { } snapshot || snapshot.Mode == MsiControllerNativeMode.Indeterminate)
-        {
-            AppLog.Warn("Recovery", "Recovery session authorization denied.", null,
-                ("SnapshotStatus", snapshotResult.Status),
-                ("AllowsMutation", snapshotResult.AllowsMutation),
-                ("Mode", snapshotResult.Snapshot?.Mode),
-                ("Reason", snapshotResult.Reason),
-                ("Action", "Passive"));
-            return new(RecoveryStatus.Failure, "Only a successful, mutation-authorizing snapshot result can start recovery.");
-        }
         var journal = new RecoveryJournal(CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, snapshot, mutations);
         try
         {
@@ -92,12 +88,20 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
         try
         {
             if (!store.Exists()) return new(RecoveryStatus.NoRecoveryNeeded, "Recovery journal does not exist.");
-            var journal = store.Read();
-            if (journal.SchemaVersion != CurrentSchemaVersion)
-                return new(RecoveryStatus.Failure, $"Unsupported recovery schema {journal.SchemaVersion}.", journal);
-            if (journal.RecoverySessionId == Guid.Empty || journal.OriginalControllerState is null || journal.Mutations is null)
-                return new(RecoveryStatus.Failure, "Recovery journal is missing required state.", journal);
-            return new(RecoveryStatus.Success, "Recovery journal loaded.", journal);
+            var json = store.ReadText();
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("SchemaVersion", out var schemaElement) || !schemaElement.TryGetInt32(out var schema))
+                return new(RecoveryStatus.Failure, "Recovery journal schema is missing.");
+            if (schema == CurrentSchemaVersion)
+            {
+                var journal = JsonSerializer.Deserialize<RecoveryJournal>(json) ?? throw new InvalidDataException("The recovery journal contains no recovery state.");
+                if (journal.RecoverySessionId == Guid.Empty || journal.Mutations is null ||
+                    (journal.Mutations.DeviceNativeStateChanged && journal.OriginalDeviceState is null))
+                    return new(RecoveryStatus.Failure, "Recovery journal is missing required state.", journal);
+                return new(RecoveryStatus.Success, "Recovery journal loaded.", journal);
+            }
+            if (schema == 1) return TranslateLegacyV1(json);
+            return new(RecoveryStatus.Failure, $"Unsupported recovery schema {schema}.");
         }
         catch (Exception exception)
         {
@@ -106,7 +110,7 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
         }
     }
 
-    public RecoveryResult RecoverIncompleteSession()
+    public async Task<RecoveryResult> RecoverIncompleteSessionAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         AppLog.Info("Recovery", "Recovery check started.", ("JournalPath", store.JournalPath));
@@ -115,12 +119,17 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
         if (loaded.Status == RecoveryStatus.Failure) return LogFailure(loaded, stopwatch);
         var journal = loaded.Journal!;
         AppLog.Info("Recovery", "Incomplete recovery journal detected.", ("SessionId", journal.RecoverySessionId), ("SchemaVersion", journal.SchemaVersion),
-            ("OriginalMode", journal.OriginalControllerState.Mode), ("RecordedMutations", journal.Mutations.HasRecordedMutations));
-        if (journal.Mutations.HasRecordedMutations)
+            ("DeviceId", journal.OriginalDeviceState?.DeviceId), ("RecordedMutations", journal.Mutations.HasRecordedMutations));
+        if (journal.Mutations.DeviceNativeStateChanged)
         {
-            if (!CanRecoverHidHideWhitelistLease(journal))
-                return LogFailure(new(RecoveryStatus.Failure, "This version cannot restore the recorded mutation state.", journal), stopwatch);
-
+            if (!CanRecoverOnlyNativeState(journal))
+                return LogFailure(new(RecoveryStatus.Failure, "This version cannot restore the recorded mutation combination.", journal), stopwatch);
+            var recovered = await RecoverNativeStateAsync(journal, cancellationToken).ConfigureAwait(false);
+            if (recovered.Status != RecoveryStatus.Success) return LogFailure(recovered, stopwatch);
+        }
+        else if (journal.Mutations.HasRecordedMutations)
+        {
+            if (!CanRecoverHidHideWhitelistLease(journal)) return LogFailure(new(RecoveryStatus.Failure, "This version cannot restore the recorded mutation state.", journal), stopwatch);
             var recovered = RecoverHidHideWhitelistLease(journal);
             if (recovered.Status != RecoveryStatus.Success) return LogFailure(recovered, stopwatch);
         }
@@ -131,9 +140,40 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
     }
 
     private static bool CanRecoverHidHideWhitelistLease(RecoveryJournal journal) =>
-        !journal.Mutations.ControllerModeChanged && !journal.Mutations.TemporaryXbox360OutputCreated &&
+        !journal.Mutations.DeviceNativeStateChanged && !journal.Mutations.TemporaryXbox360OutputCreated &&
         journal.Mutations.HidHideDeviceAdditions is not { Count: > 0 } && journal.Mutations.AddonOwnedVirtualDevices is not { Count: > 0 } &&
         journal.Mutations.ExecutableWhitelistAdditions is { Count: 1 };
+
+    private static bool CanRecoverOnlyNativeState(RecoveryJournal journal) =>
+        journal.OriginalDeviceState is not null && !journal.Mutations.TemporaryXbox360OutputCreated &&
+        journal.Mutations.HidHideDeviceAdditions is not { Count: > 0 } && journal.Mutations.ExecutableWhitelistAdditions is not { Count: > 0 } &&
+        journal.Mutations.AddonOwnedVirtualDevices is not { Count: > 0 };
+
+    private async Task<RecoveryResult> RecoverNativeStateAsync(RecoveryJournal journal, CancellationToken cancellationToken)
+    {
+        var snapshot = journal.OriginalDeviceState!;
+        if (deviceRegistry is null || !deviceRegistry.TryGetById(snapshot.DeviceId, out var adapter))
+            return new(RecoveryStatus.Failure, "The journaled handheld device adapter is unavailable.", journal);
+        if (adapter.NativeState is null || adapter.NativeState.DeviceId != snapshot.DeviceId)
+            return new(RecoveryStatus.Failure, "The journaled handheld device native-state manager is unavailable.", journal);
+        var restored = await adapter.NativeState.RestoreSnapshotAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        return restored.Restored
+            ? new(RecoveryStatus.Success, restored.Reason, journal)
+            : new(RecoveryStatus.Failure, $"Native-state recovery failed: {restored.Reason}", journal);
+    }
+
+    private static RecoveryResult TranslateLegacyV1(string json)
+    {
+        var legacy = JsonSerializer.Deserialize<LegacyRecoveryJournalV1>(json) ?? throw new InvalidDataException("The legacy recovery journal contains no state.");
+        var mutations = legacy.Mutations ?? throw new InvalidDataException("The legacy recovery journal mutations are missing.");
+        var unsupported = mutations.ControllerModeChanged || mutations.TemporaryXbox360OutputCreated ||
+            mutations.HidHideDeviceAdditions is { Count: > 0 } || mutations.AddonOwnedVirtualDevices is { Count: > 0 };
+        if (legacy.RecoverySessionId == Guid.Empty || unsupported || mutations.ExecutableWhitelistAdditions is { Count: > 1 })
+            return new(RecoveryStatus.Failure, "Legacy recovery journal cannot be restored safely.");
+        var journal = new RecoveryJournal(CurrentSchemaVersion, legacy.RecoverySessionId, legacy.CreatedAt, null,
+            new(ExecutableWhitelistAdditions: mutations.ExecutableWhitelistAdditions));
+        return new(RecoveryStatus.Success, "Recoverable legacy recovery journal loaded.", journal);
+    }
 
     private RecoveryResult RecoverHidHideWhitelistLease(RecoveryJournal journal)
     {

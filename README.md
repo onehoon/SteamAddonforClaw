@@ -85,6 +85,12 @@ This project is **not** intended to become:
 
 The addon should remain a small routing layer between the MSI Claw controller and Steam Input.
 
+## Native-state recovery
+
+Native controller state is owned by the active handheld-device adapter. Recovery persists a device-neutral snapshot envelope with a stable device ID and an opaque device-specific payload, then selects the restoring adapter from that journaled ID rather than re-detecting the current handheld. The recovery core never interprets device-specific payloads.
+
+MSI Claw native-state restoration currently verifies an already-restored state only; active controller mode switching and restoration remain a later hardware PoC.
+
 ---
 
 # Supported Environments
