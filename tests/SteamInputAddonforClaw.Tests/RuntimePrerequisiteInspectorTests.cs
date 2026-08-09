@@ -46,6 +46,7 @@ public sealed class RuntimePrerequisiteInspectorTests
     [InlineData(true, true, true, (int)PrerequisiteStatus.Ready)]
     [InlineData(true, false, false, (int)PrerequisiteStatus.Unusable)]
     [InlineData(true, true, false, (int)PrerequisiteStatus.Unusable)]
+    [InlineData(false, true, true, (int)PrerequisiteStatus.Unusable)]
     public void UsbIpWin2Probe_MapsPresenceAndUsability(bool serviceInstalled, bool devicePresent, bool driverUsable, int expectedValue)
     {
         var expected = (PrerequisiteStatus)expectedValue;

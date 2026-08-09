@@ -79,8 +79,11 @@ public partial class App : Application
                 new ViiperRuntimeInspector()).Inspect();
             AppLog.Info("Prerequisite", "Prerequisite assessment completed.",
                 ("HidHide", prerequisiteAssessment.HidHide.Status),
+                ("HidHideReason", prerequisiteAssessment.HidHide.Reason),
                 ("UsbIpWin2", prerequisiteAssessment.UsbIpWin2.Status),
+                ("UsbIpWin2Reason", prerequisiteAssessment.UsbIpWin2.Reason),
                 ("Viiper", prerequisiteAssessment.Viiper.Status),
+                ("ViiperReason", prerequisiteAssessment.Viiper.Reason),
                 ("RoutingReady", prerequisiteAssessment.IsRoutingReady));
 
             _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));

@@ -22,7 +22,7 @@ internal sealed class UsbIpWin2PrerequisiteInspector(IUsbIpWin2DeviceProbe devic
             var result = deviceProbe.Probe();
             if (!result.ServiceInstalled && !result.DevicePresent)
                 return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "UsbIpWin2DeviceMissing");
-            if (result.DevicePresent && result.DriverUsable)
+            if (result.ServiceInstalled && result.DevicePresent && result.DriverUsable)
                 return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "UsbIpWin2DeviceReady");
             return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Unusable, "UsbIpWin2DeviceUnavailable");
         }
