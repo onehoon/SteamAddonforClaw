@@ -296,7 +296,7 @@ public sealed partial class MainWindow : Window
         _ when item.Installation == SoftwareInstallationStatus.NotInstalled => "Not installed",
         _ => "Indeterminate"
     };
-    private static string FormatAddonStatus(AddonOperationalStatus status) => status switch { AddonOperationalStatus.WaitingForSteam => "Waiting for Steam", AddonOperationalStatus.SetupRequired => "Setup required", AddonOperationalStatus.RecoveryRequired => "Recovery required", _ => status.ToString() };
+    private static string FormatAddonStatus(AddonOperationalStatus status) => status switch { AddonOperationalStatus.WaitingForSteam => "Waiting for Steam", AddonOperationalStatus.SetupRequired => "Setup required", AddonOperationalStatus.RecoveryRequired => "Recovery required", AddonOperationalStatus.Unsupported => "Unsupported", _ => status.ToString() };
 
     private static ISystemStatusProvider CreateDefaultSystemStatusProvider()
     {

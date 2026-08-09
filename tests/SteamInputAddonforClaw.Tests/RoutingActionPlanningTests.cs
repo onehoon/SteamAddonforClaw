@@ -29,8 +29,7 @@ public sealed class RoutingActionPlannerTests
     [InlineData((int)RoutingDecisionKind.VetoedForSession, (int)RoutingDecisionReason.ExternalControllerPresent, (int)RoutingActionReason.ExternalControllerVeto)]
     [InlineData((int)RoutingDecisionKind.SetupRequired, (int)RoutingDecisionReason.PrerequisitesNotReady, (int)RoutingActionReason.SetupRequired)]
     [InlineData((int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.RecoveryUnsafe, (int)RoutingActionReason.RecoveryUnsafe)]
-    [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.HandheldCompanionRunning, (int)RoutingActionReason.ControllerSoftwareVeto)]
-    [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ClawTweaksRunning, (int)RoutingActionReason.ControllerSoftwareVeto)]
+    [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ControllerEnvironmentUnsupported, (int)RoutingActionReason.ControllerEnvironmentUnsupported)]
     public void ActiveNonEligible_PlansFailSafeExit(int kindValue, int decisionReasonValue, int actionReasonValue)
     {
         var plan = RoutingActionPlanner.Plan(

@@ -54,7 +54,7 @@ public sealed class SystemStatusTests
     [InlineData((int)RoutingDecisionKind.Indeterminate, (int)AddonOperationalStatus.Indeterminate)]
     public void AddonStatus_MapsCanonicalRoutingDecision(int kindValue, int expectedValue)
     {
-        var status = AddonStatusEvaluator.Map(new((RoutingDecisionKind)kindValue, RoutingDecisionReason.Eligible), new(ExternalControllerAssessmentStatus.Clear, 0, []));
+        var status = AddonStatusEvaluator.Map(new((RoutingDecisionKind)kindValue, RoutingDecisionReason.Eligible), new(ExternalControllerAssessmentStatus.Clear, 0, []), Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
 
         Assert.Equal((AddonOperationalStatus)expectedValue, status.Status);
     }
@@ -64,7 +64,7 @@ public sealed class SystemStatusTests
     {
         var assessment = new ExternalControllerAssessment(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device("Xbox Wireless Controller", 0x045E, 0x0B13)]);
 
-        var status = AddonStatusEvaluator.Map(new(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerPresent), assessment);
+        var status = AddonStatusEvaluator.Map(new(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerPresent), assessment, Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
 
         Assert.Equal("External physical controller detected: Xbox Wireless Controller.", status.Reason);
     }
@@ -173,6 +173,29 @@ public sealed class SystemStatusTests
         Assert.Equal(ExternalControllerAssessmentStatus.Clear, snapshot.ExternalController.Status);
         Assert.Equal(RoutingDecisionKind.Eligible, snapshot.RoutingDecision.Kind);
         Assert.Equal(AddonOperationalStatus.Ready, snapshot.Addon.Status);
+    }
+
+    [Fact]
+    public async Task SystemStatusProvider_UnsupportedControllerEnvironmentRemainsPassive()
+    {
+        var provider = new SystemStatusProvider(
+            new FakeDeviceProvider(),
+            [
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning)),
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))
+            ],
+            new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
+            () => SteamSessionState.FromRunningAppId(1),
+            () => new(ExternalControllerAssessmentStatus.Clear, 0, []),
+            () => true);
+
+        var snapshot = await provider.CaptureAsync();
+
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, snapshot.Compatibility.Status);
+        Assert.Equal(ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion, snapshot.Compatibility.Reason);
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Passive, RoutingDecisionReason.ControllerEnvironmentUnsupported), snapshot.RoutingDecision);
+        Assert.Equal(AddonOperationalStatus.Unsupported, snapshot.Addon.Status);
     }
 
     [Fact]
@@ -301,6 +324,7 @@ public sealed class SystemStatusTests
     private static ControllerSoftwareStatus[] SoftwareStates() => [Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)];
     private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareInstallationStatus installation, SoftwareRuntimeStatus runtime) => new(kind, kind.ToString(), installation, runtime, "test");
     private static RuntimePrerequisiteAssessment Prerequisites(PrerequisiteStatus status) => new(new(PrerequisiteKind.HidHide, status, "test"), new(PrerequisiteKind.UsbIpWin2, status, "test"), new(PrerequisiteKind.Viiper, status, "test"));
+    private static ControllerEnvironmentCompatibilityAssessment Compatibility(ControllerEnvironmentCompatibilityStatus status) => new(status, status == ControllerEnvironmentCompatibilityStatus.Supported ? ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported : ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate);
     private static ControllerDeviceInfo Device(string? friendlyName, ushort? vendorId, ushort? productId) => new("USB\\test", null, null, [], "USB", [], [], "HIDClass", null, null, vendorId, productId, true, friendlyName);
     private sealed class FakeDeviceProvider : IDeviceInformationProvider { public DeviceStatusSnapshot Capture() => new("MSI", "Claw", ["Intel Arc"]); }
     private sealed class FakeSoftwareProvider(ControllerSoftwareStatus status) : IControllerSoftwareStatusProvider { public ControllerSoftwareStatus Capture() => status; }
