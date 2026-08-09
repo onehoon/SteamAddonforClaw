@@ -29,7 +29,7 @@ internal sealed class SystemStatusProvider(
         var external = TryExternalControllerAssessment();
         var recoverySafe = TryRecoverySafety();
         var decision = _routingSessionStateMachine.Evaluate(new RoutingPolicyInput(steam, external, software, prerequisites, recoverySafe));
-        var addon = AddonStatusEvaluator.Map(decision);
+        var addon = AddonStatusEvaluator.Map(decision, external);
         AppLog.Info("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
         return new SystemStatusSnapshot(device, software, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId), external, decision, addon);
     }

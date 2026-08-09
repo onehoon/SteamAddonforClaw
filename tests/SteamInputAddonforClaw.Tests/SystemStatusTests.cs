@@ -43,9 +43,19 @@ public sealed class SystemStatusTests
     [InlineData((int)RoutingDecisionKind.Indeterminate, (int)AddonOperationalStatus.Indeterminate)]
     public void AddonStatus_MapsCanonicalRoutingDecision(int kindValue, int expectedValue)
     {
-        var status = AddonStatusEvaluator.Map(new((RoutingDecisionKind)kindValue, RoutingDecisionReason.Eligible));
+        var status = AddonStatusEvaluator.Map(new((RoutingDecisionKind)kindValue, RoutingDecisionReason.Eligible), new(ExternalControllerAssessmentStatus.Clear, 0, []));
 
         Assert.Equal((AddonOperationalStatus)expectedValue, status.Status);
+    }
+
+    [Fact]
+    public void AddonStatus_ExternalControllerPresentationUsesFriendlyName()
+    {
+        var assessment = new ExternalControllerAssessment(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device("Xbox Wireless Controller", 0x045E, 0x0B13)]);
+
+        var status = AddonStatusEvaluator.Map(new(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerPresent), assessment);
+
+        Assert.Equal("External physical controller detected: Xbox Wireless Controller.", status.Reason);
     }
 
     [Fact]

@@ -1,10 +1,11 @@
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Controllers.Detection;
 
 namespace SteamInputAddonforClaw.Status;
 
 internal static class AddonStatusEvaluator
 {
-    public static AddonStatusSnapshot Map(RoutingDecision decision) => new(
+    public static AddonStatusSnapshot Map(RoutingDecision decision, ExternalControllerAssessment externalController) => new(
         decision.Kind switch
         {
             RoutingDecisionKind.Eligible => AddonOperationalStatus.Ready,
@@ -15,7 +16,7 @@ internal static class AddonStatusEvaluator
         },
         decision.Reason switch
         {
-            RoutingDecisionReason.ExternalControllerPresent => "External physical controller detected.",
+            RoutingDecisionReason.ExternalControllerPresent => FormatExternalControllerReason(externalController),
             RoutingDecisionReason.ExternalControllerSessionLatched => "External controller veto remains active for this Steam session.",
             RoutingDecisionReason.ExternalControllerIndeterminate => "External controller state is indeterminate.",
             RoutingDecisionReason.RecoveryUnsafe => "Recovery state is not safe.",
@@ -27,4 +28,12 @@ internal static class AddonStatusEvaluator
             RoutingDecisionReason.SteamInactive => "Waiting for a Steam session.",
             _ => "Routing prerequisites are satisfied."
         });
+
+    private static string FormatExternalControllerReason(ExternalControllerAssessment assessment)
+    {
+        var name = ExternalControllerStatusCardFactory.GetFirstControllerName(assessment);
+        return assessment.ExternalControllers.Count > 1
+            ? $"External physical controllers detected: {name} and {assessment.ExternalControllers.Count - 1} more."
+            : $"External physical controller detected: {name}.";
+    }
 }

@@ -48,6 +48,17 @@ public sealed class RoutingEligibilityPolicyTests
     }
 
     [Fact]
+    public void ObservedSteamSessionEnd_ResetsLatchEvenWhenNoInactiveSnapshotIsEvaluated()
+    {
+        var machine = new RoutingSessionStateMachine();
+        machine.Evaluate(Input(appId: 100, external: External(ExternalControllerAssessmentStatus.ExternalPresent)));
+
+        machine.ObserveSteamSessionState(SteamSessionState.FromRunningAppId(0));
+
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible), machine.Evaluate(Input(appId: 200)));
+    }
+
+    [Fact]
     public void ExternalControllerBeforeSteam_IsPassiveButDoesNotLatch()
     {
         var machine = new RoutingSessionStateMachine();
