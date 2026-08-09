@@ -12,7 +12,7 @@ internal sealed class SilentUpdateService
         _updateClient = updateClient ?? throw new ArgumentNullException(nameof(updateClient));
     }
 
-    public async Task<bool> CheckDownloadAndScheduleAsync(CancellationToken cancellationToken)
+    public async Task<bool> CheckDownloadAndScheduleAsync(CancellationToken cancellationToken, string[]? restartArguments = null)
     {
         if (!_updateClient.IsInstalled)
         {
@@ -30,7 +30,7 @@ internal sealed class SilentUpdateService
         await _updateClient.DownloadUpdatesAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("Update download completed; scheduling silent apply.");
         cancellationToken.ThrowIfCancellationRequested();
-        _updateClient.WaitExitThenApplyUpdates();
+        _updateClient.WaitExitThenApplyUpdates(restartArguments);
         return true;
     }
 }

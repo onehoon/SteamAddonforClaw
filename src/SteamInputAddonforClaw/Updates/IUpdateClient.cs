@@ -8,5 +8,5 @@ internal interface IUpdateClient
 
     Task DownloadUpdatesAsync(CancellationToken cancellationToken);
 
-    void WaitExitThenApplyUpdates();
+    void WaitExitThenApplyUpdates(string[]? restartArguments);
 }

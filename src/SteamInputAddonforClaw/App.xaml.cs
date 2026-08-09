@@ -49,7 +49,7 @@ public partial class App : Application
         var classifier = new ControllerDeviceClassifier();
         var deviceEnumerator = new WindowsControllerDeviceEnumerator();
         var coordinator = new StartupCoordinator(
-            new SilentUpdateGate(),
+            new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(deviceEnumerator),
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier));
 
