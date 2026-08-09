@@ -53,6 +53,14 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
         }
     }
 
+    public bool OwnsHidHideWhitelistLease(string executablePath)
+    {
+        var loaded = LoadJournal();
+        return loaded.Status == RecoveryStatus.Success && loaded.Journal is { } journal &&
+            CanRecoverHidHideWhitelistLease(journal) &&
+            string.Equals(journal.Mutations.ExecutableWhitelistAdditions!.Single(), Path.GetFullPath(executablePath), StringComparison.OrdinalIgnoreCase);
+    }
+
     private RecoveryResult BeginRecoverySession(MsiControllerSnapshotResult snapshotResult, RecoveryMutationState mutations)
     {
         if (!snapshotResult.AllowsMutation || snapshotResult.Snapshot is not { } snapshot || snapshot.Mode == MsiControllerNativeMode.Indeterminate)

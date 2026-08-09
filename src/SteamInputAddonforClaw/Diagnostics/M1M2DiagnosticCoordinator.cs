@@ -11,6 +11,7 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
     private readonly IHidHideClient _hidHideClient;
     private readonly RecoveryManager _recoveryManager;
     private readonly string _executablePath;
+    private readonly Func<IReadOnlyList<string>> _msiDirectInputHidInstanceIds;
     private readonly Lock _leaseSync = new();
     private bool _ownsWhitelistLease;
 
@@ -18,12 +19,14 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
         IMsiClawInputDiagnostic inputSource,
         IHidHideClient hidHideClient,
         RecoveryManager recoveryManager,
-        string executablePath)
+        string executablePath,
+        Func<IReadOnlyList<string>> msiDirectInputHidInstanceIds)
     {
         _inputSource = inputSource;
         _hidHideClient = hidHideClient;
         _recoveryManager = recoveryManager;
         _executablePath = Path.GetFullPath(executablePath);
+        _msiDirectInputHidInstanceIds = msiDirectInputHidInstanceIds;
         _inputSource.TestCompleted += OnTestCompleted;
     }
 
@@ -32,13 +35,20 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
         if (_inputSource.IsRunning) return _inputSource.Start();
 
         var inspection = _hidHideClient.Inspect();
+        var msiInstanceIds = ResolveMsiDirectInputHidInstanceIds();
+        var msiIsHidden = msiInstanceIds.Any(instanceId => inspection.HiddenDeviceEntries?.Contains(instanceId, StringComparer.OrdinalIgnoreCase) == true);
         AppLog.Info("HidHide", "HidHide diagnostic inspection completed.",
             ("Status", inspection.Status), ("WhitelistCount", inspection.ApplicationWhitelist.Count),
             ("HiddenDeviceCount", inspection.HiddenDeviceEntries?.Count ?? 0),
-            ("MsiPid1902Hidden", inspection.HiddenDeviceEntries?.Any(entry => entry.Contains("VID_0DB0&PID_1902", StringComparison.OrdinalIgnoreCase)) == true),
+            ("MsiDirectInputTargetCount", msiInstanceIds.Count), ("MsiPid1902Hidden", msiIsHidden),
             ("ExecutablePath", _executablePath), ("AlreadyAllowed", inspection.ApplicationWhitelist.Contains(_executablePath)));
-        if (!inspection.IsUsable)
+
+        if (inspection.Status is HidHideInspectionStatus.NotInstalled or HidHideInspectionStatus.Disabled)
+            return _inputSource.Start();
+        if (inspection.Status is HidHideInspectionStatus.ConfigurationUnavailable or HidHideInspectionStatus.InverseWhitelist)
             return new(MsiClawInputStartStatus.InitializationFailed, $"HidHide access is unavailable ({inspection.Status}). No controller settings were changed.");
+        if (!msiIsHidden)
+            return _inputSource.Start();
 
         if (!inspection.ApplicationWhitelist.Contains(_executablePath))
         {
@@ -49,20 +59,37 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
             AppLog.Info("HidHide", "HidHide whitelist lease journal persisted.", ("ExecutablePath", _executablePath), ("SessionId", journal.Journal!.RecoverySessionId));
             if (!_hidHideClient.AddApplication(_executablePath))
             {
-                var cleanup = _recoveryManager.CompleteRecoverySession();
-                AppLog.Warn("HidHide", "HidHide whitelist addition failed.", null, ("ExecutablePath", _executablePath), ("JournalCleared", cleanup.Status == RecoveryStatus.Success), ("Action", "DoNotAcquire"));
-                return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist access could not be granted. No controller settings were changed.");
+                var postFailureInspection = _hidHideClient.Inspect();
+                if (postFailureInspection.IsUsable && !postFailureInspection.ApplicationWhitelist.Contains(_executablePath))
+                {
+                    var cleanup = _recoveryManager.CompleteRecoverySession();
+                    AppLog.Warn("HidHide", "HidHide whitelist addition failed without a persisted entry.", null, ("ExecutablePath", _executablePath), ("JournalCleared", cleanup.Status == RecoveryStatus.Success), ("Action", "DoNotAcquire"));
+                    return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist access could not be granted. No controller settings were changed.");
+                }
+                if (postFailureInspection.IsUsable && postFailureInspection.ApplicationWhitelist.Contains(_executablePath))
+                {
+                    _ownsWhitelistLease = true;
+                    AppLog.Warn("HidHide", "HidHide whitelist command reported failure after the lease was persisted.", null, ("ExecutablePath", _executablePath), ("Action", "ContinueWithVerifiedLease"));
+                }
+                else
+                {
+                    AppLog.Warn("HidHide", "HidHide whitelist addition outcome is unknown.", null, ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
+                    return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist access could not be verified. Recovery remains pending.");
+                }
             }
-
-            var verification = _hidHideClient.Inspect();
-            if (!verification.IsUsable || !verification.ApplicationWhitelist.Contains(_executablePath))
+            if (!_ownsWhitelistLease)
             {
-                AppLog.Warn("HidHide", "HidHide whitelist addition could not be verified.", null, ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
-                return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist access could not be verified. Recovery remains pending.");
+                var verification = _hidHideClient.Inspect();
+                if (!verification.IsUsable || !verification.ApplicationWhitelist.Contains(_executablePath))
+                {
+                    AppLog.Warn("HidHide", "HidHide whitelist addition could not be verified.", null, ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
+                    return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist access could not be verified. Recovery remains pending.");
+                }
+                _ownsWhitelistLease = true;
+                AppLog.Info("HidHide", "HidHide whitelist lease acquired.", ("ExecutablePath", _executablePath));
             }
-            _ownsWhitelistLease = true;
-            AppLog.Info("HidHide", "HidHide whitelist lease acquired.", ("ExecutablePath", _executablePath));
         }
+        else _ownsWhitelistLease = _recoveryManager.OwnsHidHideWhitelistLease(_executablePath);
 
         var result = _inputSource.Start();
         if (!result.Started)
@@ -88,6 +115,16 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
     }
 
     private void OnTestCompleted(object? sender, MsiClawInputTestSummary summary) => ReleaseLease();
+
+    private IReadOnlyList<string> ResolveMsiDirectInputHidInstanceIds()
+    {
+        try { return _msiDirectInputHidInstanceIds(); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("HidHide", "MSI DirectInput HidHide target resolution failed.", exception, ("Action", "DoNotMutate"));
+            return [];
+        }
+    }
 
     private void ReleaseLease()
     {

@@ -17,10 +17,3 @@ internal interface IHidHideClient
     bool AddApplication(string executablePath);
     bool RemoveApplication(string executablePath);
 }
-
-internal interface IHidHideCommandRunner
-{
-    HidHideCommandResult Run(string executablePath, params string[] arguments);
-}
-
-internal sealed record HidHideCommandResult(int ExitCode, string StandardOutput, string StandardError);

@@ -43,7 +43,7 @@ public sealed partial class MainWindow : Window
         RecoveryManager? recoveryManager)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
-        _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), new HidHideCliClient());
+        _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), new HidHideDriverClient());
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -178,8 +178,14 @@ public sealed partial class MainWindow : Window
     {
         _msiClawInputSource ??= CreateMsiClawInputSource();
         var executablePath = Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable.");
-        return new M1M2DiagnosticCoordinator(_msiClawInputSource, new HidHideCliClient(), _recoveryManager, executablePath);
+        return new M1M2DiagnosticCoordinator(_msiClawInputSource, new HidHideDriverClient(), _recoveryManager, executablePath, ResolveMsiDirectInputHidInstanceIds);
     }
+
+    private static IReadOnlyList<string> ResolveMsiDirectInputHidInstanceIds() => new WindowsControllerDeviceEnumerator().EnumeratePresentDevices()
+        .Where(device => device.Present && device.VendorId == 0x0DB0 && device.ProductId == 0x1902 &&
+            device.InstanceId.StartsWith("HID\\VID_0DB0&PID_1902&MI_00&COL01\\", StringComparison.OrdinalIgnoreCase))
+        .Select(device => device.InstanceId)
+        .ToArray();
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {

@@ -51,7 +51,7 @@ public partial class App : Application
         AppLog.Info("Startup coordination started.");
         var classifier = new ControllerDeviceClassifier();
         var deviceEnumerator = new WindowsControllerDeviceEnumerator();
-        _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), new HidHideCliClient());
+        _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), new HidHideDriverClient());
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(deviceEnumerator),

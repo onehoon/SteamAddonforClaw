@@ -15,7 +15,7 @@ public sealed class M1M2DiagnosticCoordinatorTests
     public async Task ExistingWhitelistEntry_DoesNotWriteOrRemoveAnything()
     {
         var store = new MemoryStore();
-        var hidHide = new FakeHidHide(AddonPath);
+        var hidHide = new FakeHidHide(AddonPath) { Hidden = true };
         var input = new FakeInput();
         await using var coordinator = Create(input, hidHide, store);
 
@@ -27,12 +27,41 @@ public sealed class M1M2DiagnosticCoordinatorTests
         Assert.Equal(0, hidHide.RemoveCount);
     }
 
+    [Theory]
+    [InlineData((int)HidHideInspectionStatus.NotInstalled)]
+    [InlineData((int)HidHideInspectionStatus.Disabled)]
+    public async Task HidHideUnavailableOrDisabled_StartsDirectInputWithoutMutation(int statusValue)
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide { Status = (HidHideInspectionStatus)statusValue };
+        var input = new FakeInput();
+        await using var coordinator = Create(input, hidHide, store);
+
+        Assert.True(coordinator.Start().Started);
+        Assert.Equal(1, input.StartCount);
+        Assert.Equal(0, store.WriteCount);
+        Assert.Equal(0, hidHide.AddCount);
+    }
+
+    [Fact]
+    public async Task ActiveHidHide_WhenMsiDeviceIsNotHidden_StartsDirectInputWithoutMutation()
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide();
+        var input = new FakeInput();
+        await using var coordinator = Create(input, hidHide, store);
+
+        Assert.True(coordinator.Start().Started);
+        Assert.Equal(0, store.WriteCount);
+        Assert.Equal(0, hidHide.AddCount);
+    }
+
     [Fact]
     public async Task AbsentWhitelistEntry_PersistsThenAddsThenStartsAndCleansUp()
     {
         var events = new List<string>();
         var store = new MemoryStore(events);
-        var hidHide = new FakeHidHide(events);
+        var hidHide = new FakeHidHide(events) { Hidden = true };
         var input = new FakeInput(events);
         await using var coordinator = Create(input, hidHide, store);
 
@@ -47,7 +76,7 @@ public sealed class M1M2DiagnosticCoordinatorTests
     public async Task JournalWriteFailure_DoesNotAddOrAcquire()
     {
         var store = new MemoryStore { ThrowOnWrite = true };
-        var hidHide = new FakeHidHide();
+        var hidHide = new FakeHidHide { Hidden = true };
         var input = new FakeInput();
         await using var coordinator = Create(input, hidHide, store);
 
@@ -60,7 +89,7 @@ public sealed class M1M2DiagnosticCoordinatorTests
     public async Task AddFailure_ClearsPendingJournalAndDoesNotStartDiagnostic()
     {
         var store = new MemoryStore();
-        var hidHide = new FakeHidHide { AddSucceeds = false };
+        var hidHide = new FakeHidHide { Hidden = true, AddSucceeds = false };
         var input = new FakeInput();
         await using var coordinator = Create(input, hidHide, store);
 
@@ -70,10 +99,25 @@ public sealed class M1M2DiagnosticCoordinatorTests
     }
 
     [Fact]
+    public async Task AmbiguousAddFailure_WithPersistedEntryPreservesAndUsesTheLease()
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide { Hidden = true, AddSucceeds = false, AddChangesBeforeFailure = true };
+        var input = new FakeInput();
+        await using var coordinator = Create(input, hidHide, store);
+
+        Assert.True(coordinator.Start().Started);
+        await coordinator.StopAsync();
+
+        Assert.False(store.Exists());
+        Assert.Equal(1, hidHide.RemoveCount);
+    }
+
+    [Fact]
     public async Task RemoveFailure_PreservesJournalForStartupRecovery()
     {
         var store = new MemoryStore();
-        var hidHide = new FakeHidHide { RemoveSucceeds = false };
+        var hidHide = new FakeHidHide { Hidden = true, RemoveSucceeds = false };
         var input = new FakeInput();
         await using var coordinator = Create(input, hidHide, store);
 
@@ -81,6 +125,26 @@ public sealed class M1M2DiagnosticCoordinatorTests
         await coordinator.StopAsync();
 
         Assert.True(store.Exists());
+    }
+
+    [Fact]
+    public async Task VerificationFailure_RetryRecognizesJournalOwnedLeaseAndCleansItUp()
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide { Hidden = true };
+        hidHide.InspectionStatuses.Enqueue(HidHideInspectionStatus.Available);
+        hidHide.InspectionStatuses.Enqueue(HidHideInspectionStatus.ConfigurationUnavailable);
+        hidHide.InspectionStatuses.Enqueue(HidHideInspectionStatus.Available);
+        var input = new FakeInput();
+        await using var coordinator = Create(input, hidHide, store);
+
+        Assert.False(coordinator.Start().Started);
+        Assert.True(store.Exists());
+        Assert.True(coordinator.Start().Started);
+        await coordinator.StopAsync();
+
+        Assert.False(store.Exists());
+        Assert.Equal(1, hidHide.RemoveCount);
     }
 
     [Fact]
@@ -113,7 +177,7 @@ public sealed class M1M2DiagnosticCoordinatorTests
     }
 
     private static M1M2DiagnosticCoordinator Create(FakeInput input, FakeHidHide hidHide, MemoryStore store) =>
-        new(input, hidHide, new RecoveryManager(store, hidHide), AddonPath);
+        new(input, hidHide, new RecoveryManager(store, hidHide), AddonPath, () => ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST"]);
 
     private sealed class FakeInput(List<string>? events = null) : IMsiClawInputDiagnostic
     {
@@ -132,10 +196,14 @@ public sealed class M1M2DiagnosticCoordinatorTests
         public int AddCount { get; private set; }
         public int RemoveCount { get; private set; }
         public bool AddSucceeds { get; init; } = true;
+        public bool AddChangesBeforeFailure { get; init; }
         public bool RemoveSucceeds { get; init; } = true;
+        public bool Hidden { get; init; }
+        public HidHideInspectionStatus Status { get; init; } = HidHideInspectionStatus.Available;
+        public Queue<HidHideInspectionStatus> InspectionStatuses { get; } = new();
         public FakeHidHide(List<string> events) : this() => _events = events;
-        public HidHideInspection Inspect() => new(HidHideInspectionStatus.Available, Entries);
-        public bool AddApplication(string executablePath) { AddCount++; _events?.Add("Add"); if (!AddSucceeds) return false; Entries.Add(executablePath); return true; }
+        public HidHideInspection Inspect() => new(InspectionStatuses.TryDequeue(out var status) ? status : Status, Entries, Hidden ? ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST"] : []);
+        public bool AddApplication(string executablePath) { AddCount++; _events?.Add("Add"); if (!AddSucceeds) { if (AddChangesBeforeFailure) Entries.Add(executablePath); return false; } Entries.Add(executablePath); return true; }
         public bool RemoveApplication(string executablePath) { RemoveCount++; _events?.Add("Remove"); if (!RemoveSucceeds) return false; Entries.Remove(executablePath); return true; }
     }
 
