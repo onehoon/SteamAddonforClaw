@@ -14,12 +14,14 @@ internal sealed class RoutingSessionStateMachine : IRoutingSessionStateMachine
 {
     private readonly Lock _sync = new();
     private bool _externalControllerVetoLatched;
+    private SteamSessionState? _observedSteamState;
     private RoutingDecision? _previousDecision;
 
     public void ObserveSteamSessionState(SteamSessionState state)
     {
         lock (_sync)
         {
+            _observedSteamState = state;
             if (!state.IsActive) ResetExternalControllerVetoLatch();
         }
     }
@@ -28,8 +30,14 @@ internal sealed class RoutingSessionStateMachine : IRoutingSessionStateMachine
     {
         lock (_sync)
         {
-            if (!input.Steam.IsActive) ResetExternalControllerVetoLatch();
-            if (input.Steam.IsActive && input.ExternalController.Status == ExternalControllerAssessmentStatus.ExternalPresent && !_externalControllerVetoLatched)
+            var isCurrentSteamSnapshot = _observedSteamState is null
+                || input.Steam.RunningAppId == _observedSteamState.RunningAppId;
+
+            if (isCurrentSteamSnapshot && !input.Steam.IsActive) ResetExternalControllerVetoLatch();
+            if (isCurrentSteamSnapshot
+                && input.Steam.IsActive
+                && input.ExternalController.Status == ExternalControllerAssessmentStatus.ExternalPresent
+                && !_externalControllerVetoLatched)
             {
                 _externalControllerVetoLatched = true;
                 AppLog.Info("Routing", "External controller session veto latched.", ("RunningAppID", input.Steam.RunningAppId));

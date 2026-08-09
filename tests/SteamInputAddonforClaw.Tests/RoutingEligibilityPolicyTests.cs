@@ -59,6 +59,21 @@ public sealed class RoutingEligibilityPolicyTests
     }
 
     [Fact]
+    public void StaleSnapshotAfterObservedSteamSessionEnd_DoesNotRelatchExternalControllerVeto()
+    {
+        var machine = new RoutingSessionStateMachine();
+        machine.ObserveSteamSessionState(SteamSessionState.FromRunningAppId(100));
+        machine.Evaluate(Input(appId: 100, external: External(ExternalControllerAssessmentStatus.ExternalPresent)));
+        var staleSnapshot = Input(appId: 100, external: External(ExternalControllerAssessmentStatus.ExternalPresent));
+
+        machine.ObserveSteamSessionState(SteamSessionState.FromRunningAppId(0));
+        machine.Evaluate(staleSnapshot);
+        machine.ObserveSteamSessionState(SteamSessionState.FromRunningAppId(200));
+
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible), machine.Evaluate(Input(appId: 200)));
+    }
+
+    [Fact]
     public void ExternalControllerBeforeSteam_IsPassiveButDoesNotLatch()
     {
         var machine = new RoutingSessionStateMachine();
