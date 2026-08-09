@@ -13,6 +13,7 @@ internal static class AppLog
     private static readonly string DefaultDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "logs");
     internal static string? DirectoryOverride { get; set; }
     internal static AppLogLevel MinimumLevelOverride { get; set; } = AppLogLevel.Trace;
+    internal static string DirectoryPath => DirectoryOverride ?? DefaultDirectory;
 
     public static void Trace(string category, string message, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Trace, category, message, null, fields);
     public static void Debug(string category, string message, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Debug, category, message, null, fields);
@@ -31,7 +32,7 @@ internal static class AppLog
             lock (Sync)
             {
                 var now = DateTimeOffset.Now;
-                var directory = DirectoryOverride ?? DefaultDirectory;
+                var directory = DirectoryPath;
                 Directory.CreateDirectory(directory);
                 Prune(directory, now.Date);
                 var structured = string.Join(' ', fields.Select(field => $"{field.Key}={Format(field.Value)}"));

@@ -21,7 +21,9 @@ using WinRT.Interop;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Prerequisites;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using SteamInputAddonforClaw.Startup;
+using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 
 namespace SteamInputAddonforClaw;
 
@@ -35,11 +37,14 @@ public sealed partial class MainWindow : Window
     private bool _isLoadingStartupSettings;
     private readonly MainNavigationState _navigationState = new();
     private readonly ISystemStatusProvider _systemStatusProvider;
+    private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
     private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _externalControllerCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _runtimeCards = [];
     private int _isRefreshingStatus;
+    private int _isGeneratingEnvironmentDiscoveryReport;
+    private string? _environmentDiscoveryDirectory;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -52,11 +57,16 @@ public sealed partial class MainWindow : Window
         StartupSettingsCoordinator startupSettings,
         string startupRegistrationMessage,
         RecoveryManager? recoveryManager,
-        ISystemStatusProvider? systemStatusProvider = null)
+        ISystemStatusProvider? systemStatusProvider = null,
+        IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
+        _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
+            new WindowsEnvironmentDiscoverySnapshotSource(),
+            new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
+            new EnvironmentDiscoveryReportWriter());
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -105,6 +115,46 @@ public sealed partial class MainWindow : Window
         AppLog.Info("Window", "Developer menu opened.",
             ("PreviousPage", previousPage),
             ("CurrentPage", _navigationState.CurrentPage));
+    }
+
+    private async void GenerateEnvironmentDiscoveryReportButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (Interlocked.Exchange(ref _isGeneratingEnvironmentDiscoveryReport, 1) != 0) return;
+        GenerateEnvironmentDiscoveryReportButton.IsEnabled = false;
+        OpenEnvironmentDiscoveryFolderButton.IsEnabled = false;
+        OpenEnvironmentDiscoveryFolderButton.Visibility = Visibility.Collapsed;
+        EnvironmentDiscoveryReportStatusText.Text = "Generating...";
+        try
+        {
+            var result = await _environmentDiscoveryReportGenerator.GenerateAsync();
+            _environmentDiscoveryDirectory = result.DirectoryPath;
+            EnvironmentDiscoveryReportStatusText.Text = $"Report generated successfully.{Environment.NewLine}{result.ReportFileName}";
+            OpenEnvironmentDiscoveryFolderButton.Visibility = Visibility.Visible;
+            OpenEnvironmentDiscoveryFolderButton.IsEnabled = true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("EnvironmentDiscovery", "Environment discovery report generation failed.", exception, ("Reason", exception.GetType().Name));
+            EnvironmentDiscoveryReportStatusText.Text = "Report generation failed.\r\nSee the application log for details.";
+        }
+        finally
+        {
+            GenerateEnvironmentDiscoveryReportButton.IsEnabled = true;
+            Volatile.Write(ref _isGeneratingEnvironmentDiscoveryReport, 0);
+        }
+    }
+
+    private void OpenEnvironmentDiscoveryFolderButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (string.IsNullOrWhiteSpace(_environmentDiscoveryDirectory)) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_environmentDiscoveryDirectory}\"") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("EnvironmentDiscovery", "Environment discovery folder could not be opened.", exception);
+        }
     }
 
     private void DeveloperMenuBackButton_Click(object sender, RoutedEventArgs args)
