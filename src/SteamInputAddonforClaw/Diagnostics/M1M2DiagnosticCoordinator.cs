@@ -1,6 +1,6 @@
 using SteamInputAddonforClaw.HidHide;
-using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Recovery;
 
 namespace SteamInputAddonforClaw.Diagnostics;

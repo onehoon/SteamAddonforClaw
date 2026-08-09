@@ -1,18 +1,14 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
 
-namespace SteamInputAddonforClaw.Input;
+namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
 {
-    private const ushort MsiVendorId = 0x0DB0;
-    private const ushort DirectInputProductId = 0x1902;
-    private const int M1ButtonIndex = 15;
-    private const int M2ButtonIndex = 16;
-    private const int RequiredButtonCount = M2ButtonIndex + 1;
-    private const int M1AuxiliaryIndex = 0;
-    private const int M2AuxiliaryIndex = 1;
+    private static readonly int M1AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M1);
+    private static readonly int M2AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M2);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(8);
     private readonly Func<IDirectInputDeviceEnumerator> _enumeratorFactory;
     private readonly Lock _sync = new();
@@ -113,7 +109,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
 
             _currentSession = session;
             session.PollingTask = PollAsync(session);
-            AppLog.Info("Diagnostics", "M1/M2 input diagnostic started.", ("TestSession", session.Id), ("VID", "0x0DB0"), ("PID", "0x1902"), ("InstanceGuid", selection.Descriptor!.InstanceGuid));
+            AppLog.Info("Diagnostics", "M1/M2 input diagnostic started.", ("TestSession", session.Id), ("VID", MsiClawHardware.FormatVendorId()), ("PID", MsiClawHardware.FormatDirectInputProductId()), ("InstanceGuid", selection.Descriptor!.InstanceGuid));
             return new MsiClawInputStartResult(MsiClawInputStartStatus.Started, "M1/M2 DirectInput test is running.");
         }
     }
@@ -174,14 +170,14 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
         AppLog.Debug("MsiInput", "DirectInput enumeration completed.", ("TestSession", testSession), ("DeviceCount", candidates.Count), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         foreach (var candidate in candidates)
         {
-            var matches = candidate.VendorId == MsiVendorId && candidate.ProductId == DirectInputProductId;
+            var matches = MsiClawHardware.IsDirectInputController(candidate.VendorId, candidate.ProductId);
             AppLog.Trace("MsiInput", matches ? "DirectInput device candidate." : "DirectInput device ignored.", ("TestSession", testSession), ("InstanceGuid", candidate.InstanceGuid), ("ProductGuid", candidate.ProductGuid), ("ProductName", candidate.ProductName), ("VID", $"0x{candidate.VendorId:X4}"), ("PID", $"0x{candidate.ProductId:X4}"), ("DevicePath", candidate.DevicePath), ("PnpInstanceId", candidate.PnpInstanceId), ("PhysicalIdentity", candidate.PhysicalIdentity), ("UsagePage", candidate.UsagePage), ("Usage", candidate.Usage), ("ButtonCount", candidate.ButtonCount), ("AxisCount", candidate.AxisCount), ("MatchReason", matches ? "KnownMsiClawDirectInput" : "NotMsiClawPid1902"), ("SelectionReason", candidate.TopologyReason));
         }
 
-        var selectedCandidates = candidates.Where(candidate => candidate.VendorId == MsiVendorId && candidate.ProductId == DirectInputProductId).ToArray();
+        var selectedCandidates = candidates.Where(candidate => MsiClawHardware.IsDirectInputController(candidate.VendorId, candidate.ProductId)).ToArray();
         if (selectedCandidates.Length == 0) return NoCandidate(testSession);
         if (selectedCandidates.Any(candidate => !HasVerifiedIdentity(candidate))) return Indeterminate(selectedCandidates.Length, testSession, string.Join(',', selectedCandidates.Select(candidate => candidate.TopologyReason ?? "PhysicalIdentityUnverified").Distinct()));
-        if (selectedCandidates.Any(candidate => candidate.ButtonCount is null or < RequiredButtonCount)) return Indeterminate(selectedCandidates.Length, testSession, "InsufficientButtonCount");
+        if (selectedCandidates.Any(candidate => candidate.ButtonCount is null or < MsiClawHardware.RequiredDirectInputButtonCount)) return Indeterminate(selectedCandidates.Length, testSession, "InsufficientButtonCount");
         var identities = selectedCandidates.Select(candidate => candidate.PhysicalIdentity!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (identities.Length != 1) return Indeterminate(selectedCandidates.Length, testSession, "MultiplePhysicalIdentities");
         var pnpInstanceIds = selectedCandidates.Select(candidate => candidate.PnpInstanceId!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -195,7 +191,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
 
     private static SelectionResult Select(DirectInputDeviceDescriptor descriptor, int testSession, string reason)
     {
-        AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.", ("TestSession", testSession), ("VID", "0x0DB0"), ("PID", "0x1902"), ("InstanceGuid", descriptor.InstanceGuid), ("PnpInstanceId", descriptor.PnpInstanceId), ("PhysicalIdentity", descriptor.PhysicalIdentity), ("SelectionReason", reason));
+        AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.", ("TestSession", testSession), ("VID", MsiClawHardware.FormatVendorId()), ("PID", MsiClawHardware.FormatDirectInputProductId()), ("InstanceGuid", descriptor.InstanceGuid), ("PnpInstanceId", descriptor.PnpInstanceId), ("PhysicalIdentity", descriptor.PhysicalIdentity), ("SelectionReason", reason));
         return new SelectionResult(MsiClawInputStartStatus.Started, "M1/M2 DirectInput test is running.", descriptor);
     }
 
@@ -245,7 +241,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
                 if (!TryMapState(input, out var current))
                 {
                     stopReason = MsiClawInputStopReason.InvalidButtonLayout;
-                    AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", RequiredButtonCount), ("Action", "StopDiagnostic"), ("Reason", "InsufficientButtonCount"));
+                    AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", "InsufficientButtonCount"));
                     break;
                 }
 
@@ -266,13 +262,13 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
                 if (IsM1Pressed(current) && !m1Observed)
                 {
                     m1Observed = true;
-                    AppLog.Info("Diagnostics", "M1 input verified.", ("TestSession", session.Id), ("ButtonIndex", M1ButtonIndex));
+                    AppLog.Info("Diagnostics", "M1 input verified.", ("TestSession", session.Id), ("ButtonIndex", MsiClawHardware.M1DirectInputButtonIndex));
                 }
 
                 if (IsM2Pressed(current) && !m2Observed)
                 {
                     m2Observed = true;
-                    AppLog.Info("Diagnostics", "M2 input verified.", ("TestSession", session.Id), ("ButtonIndex", M2ButtonIndex));
+                    AppLog.Info("Diagnostics", "M2 input verified.", ("TestSession", session.Id), ("ButtonIndex", MsiClawHardware.M2DirectInputButtonIndex));
                 }
 
                 if (IsM1Pressed(current) && !IsM2Pressed(current)) m1OnlyObserved = true;
@@ -280,7 +276,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
                 if (!independent && m1OnlyObserved && m2OnlyObserved)
                 {
                     independent = true;
-                    AppLog.Info("Diagnostics", "Independent M1/M2 input verified.", ("TestSession", session.Id), ("M1OnlyObserved", true), ("M2OnlyObserved", true), ("M1ButtonIndex", M1ButtonIndex), ("M2ButtonIndex", M2ButtonIndex));
+                    AppLog.Info("Diagnostics", "Independent M1/M2 input verified.", ("TestSession", session.Id), ("M1OnlyObserved", true), ("M2OnlyObserved", true), ("M1ButtonIndex", MsiClawHardware.M1DirectInputButtonIndex), ("M2ButtonIndex", MsiClawHardware.M2DirectInputButtonIndex));
                     IndependentVerified?.Invoke(this, EventArgs.Empty);
                 }
 
@@ -309,13 +305,16 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
 
     private static bool TryMapState(DirectInputState input, out ControllerState state)
     {
-        if (input.Buttons.Count < RequiredButtonCount)
+        if (input.Buttons.Count < MsiClawHardware.RequiredDirectInputButtonCount)
         {
             state = default;
             return false;
         }
 
-        state = new ControllerState(new AuxiliaryButtonState([input.Buttons[M1ButtonIndex], input.Buttons[M2ButtonIndex]]));
+        Span<bool> auxiliary = stackalloc bool[MsiClawControls.Catalog.Count];
+        auxiliary[M1AuxiliaryIndex] = input.Buttons[MsiClawHardware.M1DirectInputButtonIndex];
+        auxiliary[M2AuxiliaryIndex] = input.Buttons[MsiClawHardware.M2DirectInputButtonIndex];
+        state = new ControllerState(new AuxiliaryButtonState(auxiliary));
         return true;
     }
 
@@ -375,11 +374,11 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
     {
         if (IsM1Pressed(previous) != IsM1Pressed(current))
         {
-            AppLog.Trace("MsiInput", "M1 state changed.", ("TestSession", session), ("ButtonIndex", M1ButtonIndex), ("Previous", IsM1Pressed(previous)), ("Current", IsM1Pressed(current)));
+            AppLog.Trace("MsiInput", "M1 state changed.", ("TestSession", session), ("ButtonIndex", MsiClawHardware.M1DirectInputButtonIndex), ("Previous", IsM1Pressed(previous)), ("Current", IsM1Pressed(current)));
         }
         if (IsM2Pressed(previous) != IsM2Pressed(current))
         {
-            AppLog.Trace("MsiInput", "M2 state changed.", ("TestSession", session), ("ButtonIndex", M2ButtonIndex), ("Previous", IsM2Pressed(previous)), ("Current", IsM2Pressed(current)));
+            AppLog.Trace("MsiInput", "M2 state changed.", ("TestSession", session), ("ButtonIndex", MsiClawHardware.M2DirectInputButtonIndex), ("Previous", IsM2Pressed(previous)), ("Current", IsM2Pressed(current)));
         }
         AppLog.Trace("MsiInput", "ControllerState changed.", ("TestSession", session), ("M1", $"{IsM1Pressed(previous)}->{IsM1Pressed(current)}"), ("M2", $"{IsM2Pressed(previous)}->{IsM2Pressed(current)}"));
     }

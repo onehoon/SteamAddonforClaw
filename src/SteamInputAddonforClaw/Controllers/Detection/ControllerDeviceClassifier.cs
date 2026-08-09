@@ -1,9 +1,11 @@
 namespace SteamInputAddonforClaw.Controllers.Detection;
 
+using SteamInputAddonforClaw.Devices.Abstractions;
+
 public enum ControllerDeviceClassification
 {
     NotController,
-    InternalClaw,
+    InternalHandheld,
     AddonOwnedVirtual,
     KnownVirtual,
     ExternalPhysical,
@@ -17,7 +19,6 @@ internal sealed record ControllerClassificationResult(
 
 public sealed class ControllerDeviceClassifier
 {
-    private static readonly ushort[] ClawProductIds = [0x1901, 0x1902, 0x1903];
     private const ushort SteamControllerVendorId = 0x28DE;
     private const ushort SteamControllerProductId = 0x1304;
     private static readonly string[] GameControllerTokens =
@@ -37,9 +38,16 @@ public sealed class ControllerDeviceClassifier
     ];
 
     private readonly IControllerIdentityExclusionSource _identityExclusionSource;
+    private readonly IInternalControllerMatcher? _internalControllerMatcher;
 
     public ControllerDeviceClassifier(IControllerIdentityExclusionSource? identityExclusionSource = null)
     {
+        _identityExclusionSource = identityExclusionSource ?? EmptyControllerIdentityExclusionSource.Instance;
+    }
+
+    public ControllerDeviceClassifier(IInternalControllerMatcher internalControllerMatcher, IControllerIdentityExclusionSource? identityExclusionSource = null)
+    {
+        _internalControllerMatcher = internalControllerMatcher ?? throw new ArgumentNullException(nameof(internalControllerMatcher));
         _identityExclusionSource = identityExclusionSource ?? EmptyControllerIdentityExclusionSource.Instance;
     }
 
@@ -82,9 +90,15 @@ public sealed class ControllerDeviceClassifier
             return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "NotGameControllerCandidate");
         }
 
-        if (IsInternalClaw(device))
+        var internalMatch = MatchInternalController(device, topology);
+        if (internalMatch.Status == InternalControllerMatchStatus.Indeterminate)
         {
-            return new ControllerClassificationResult(ControllerDeviceClassification.InternalClaw, "KnownMsiClawVidPid");
+            return new ControllerClassificationResult(ControllerDeviceClassification.Indeterminate, internalMatch.Reason);
+        }
+
+        if (internalMatch.Status == InternalControllerMatchStatus.Match)
+        {
+            return new ControllerClassificationResult(ControllerDeviceClassification.InternalHandheld, internalMatch.Reason);
         }
 
         if (_identityExclusionSource.IsExcluded(device))
@@ -114,7 +128,7 @@ public sealed class ControllerDeviceClassifier
     public bool IsRelevantTopologyDevice(ControllerDeviceInfo device)
     {
         return IsGameControllerCandidate(device)
-            || IsInternalClaw(device)
+            || MatchInternalController(device, topology: null).Status is InternalControllerMatchStatus.Match or InternalControllerMatchStatus.Indeterminate
             || ContainsKnownVirtualIdentity(device);
     }
 
@@ -137,9 +151,21 @@ public sealed class ControllerDeviceClassifier
         return GameControllerTokens.Any(token => evidence.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool IsInternalClaw(ControllerDeviceInfo device)
+    private InternalControllerMatchResult MatchInternalController(ControllerDeviceInfo device, ControllerTopologySnapshot? topology)
     {
-        return device.VendorId == 0x0DB0 && device.ProductId is ushort productId && ClawProductIds.Contains(productId);
+        if (_internalControllerMatcher is null)
+        {
+            return new(InternalControllerMatchStatus.NoMatch, "NoInternalControllerMatcher");
+        }
+
+        try
+        {
+            return _internalControllerMatcher.Match(new InternalControllerMatchContext(device, topology?.ResolveAncestors(device) ?? []));
+        }
+        catch (Exception exception)
+        {
+            return new(InternalControllerMatchStatus.Indeterminate, $"InternalControllerMatcherFailed:{exception.GetType().Name}");
+        }
     }
 
     private static bool IsSteamController1304HidCollection(ControllerDeviceInfo device)

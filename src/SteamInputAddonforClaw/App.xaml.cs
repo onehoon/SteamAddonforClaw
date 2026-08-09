@@ -10,6 +10,7 @@ using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 
 namespace SteamInputAddonforClaw;
 
@@ -49,7 +50,8 @@ public partial class App : Application
     private async Task StartAsync()
     {
         AppLog.Info("Startup coordination started.");
-        var classifier = new ControllerDeviceClassifier();
+        var msiClawAdapter = new MsiClawDeviceAdapter();
+        var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher);
         var deviceEnumerator = new WindowsControllerDeviceEnumerator();
         _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), new HidHideDriverClient());
         var coordinator = new StartupCoordinator(

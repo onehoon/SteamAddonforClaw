@@ -19,13 +19,17 @@ public sealed class DeviceProbeContext
 
 public sealed record DeviceProbePnpDevice
 {
-    public DeviceProbePnpDevice(string instanceId, IEnumerable<string>? hardwareIds = null)
+    public DeviceProbePnpDevice(string instanceId, IEnumerable<string>? hardwareIds = null, ushort? vendorId = null, ushort? productId = null)
     {
         if (string.IsNullOrWhiteSpace(instanceId)) throw new ArgumentException("A PnP instance ID is required.", nameof(instanceId));
         InstanceId = instanceId;
         HardwareIds = (hardwareIds ?? []).ToArray();
+        VendorId = vendorId;
+        ProductId = productId;
     }
 
     public string InstanceId { get; }
     public IReadOnlyList<string> HardwareIds { get; }
+    public ushort? VendorId { get; }
+    public ushort? ProductId { get; }
 }
