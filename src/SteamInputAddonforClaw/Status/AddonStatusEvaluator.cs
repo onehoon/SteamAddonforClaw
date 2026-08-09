@@ -12,6 +12,8 @@ internal static class AddonStatusEvaluator
         if (externalController.Status == ExternalControllerAssessmentStatus.Indeterminate) return new(AddonOperationalStatus.Indeterminate, "External controller state is indeterminate.");
         var hhc = software.First(status => status.Kind == ControllerSoftwareKind.HandheldCompanion);
         if (hhc.Runtime == SoftwareRuntimeStatus.Running) return new(AddonOperationalStatus.Passive, "Handheld Companion is running.");
+        if (hhc.Runtime is SoftwareRuntimeStatus.Starting or SoftwareRuntimeStatus.Indeterminate)
+            return new(AddonOperationalStatus.Indeterminate, "Handheld Companion state is not stable.");
         var clawTweaks = software.First(status => status.Kind == ControllerSoftwareKind.ClawTweaks);
         if (clawTweaks.Runtime == SoftwareRuntimeStatus.Running) return new(AddonOperationalStatus.Passive, "ClawTweaks is running.");
         if (clawTweaks.Runtime is SoftwareRuntimeStatus.Starting or SoftwareRuntimeStatus.Indeterminate) return new(AddonOperationalStatus.Indeterminate, "ClawTweaks state is not stable.");

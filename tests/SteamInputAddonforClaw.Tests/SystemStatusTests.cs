@@ -52,6 +52,16 @@ public sealed class SystemStatusTests
     }
 
     [Fact]
+    public void AddonStatus_IndeterminateHandheldCompanionFailsClosed()
+    {
+        var software = SoftwareStates().Select(status => status.Kind == ControllerSoftwareKind.HandheldCompanion ? status with { Installation = SoftwareInstallationStatus.Indeterminate, Runtime = SoftwareRuntimeStatus.Indeterminate } : status).ToArray();
+        var status = AddonStatusEvaluator.Evaluate(software, Prerequisites(PrerequisiteStatus.Ready), new(true, 1), new(ExternalControllerAssessmentStatus.Clear, 0, []), recoverySafe: true);
+
+        Assert.Equal(AddonOperationalStatus.Indeterminate, status.Status);
+        Assert.Equal("Handheld Companion state is not stable.", status.Reason);
+    }
+
+    [Fact]
     public void AddonStatus_ReadyPrerequisitesAndInactiveSteamWaitsForSteam()
     {
         var status = AddonStatusEvaluator.Evaluate(SoftwareStates(), Prerequisites(PrerequisiteStatus.Ready), new(false, 0), new(ExternalControllerAssessmentStatus.Clear, 0, []), recoverySafe: true);
