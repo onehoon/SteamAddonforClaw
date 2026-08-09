@@ -60,11 +60,6 @@ public partial class App : Application
         var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
         _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient());
-        var hidHideProvisioner = new HidHideProvisioner(
-            new HidHidePrerequisiteInspector(new HidHideDriverClient()),
-            new WindowsHidHidePackageProbe(),
-            new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath),
-            new ElevatedProcessRunner());
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(deviceEnumerator),
@@ -80,8 +75,6 @@ public partial class App : Application
                 _dispatcherQueue?.TryEnqueue(ExitAfterScheduledUpdate);
                 return;
             }
-
-            hidHideProvisioner.Reconcile();
 
             var prerequisiteAssessment = new RuntimePrerequisiteInspector(
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
@@ -165,7 +158,10 @@ public partial class App : Application
             new WindowsHidHidePackageProbe(),
             new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath),
             new ElevatedProcessRunner(),
+            installerPathProvider: null,
+            installerIntegrityValidator: null,
             safetyStateProvider: new SystemStatusHidHideProvisioningSafetyStateProvider(statusProvider));
+        hidHideProvisioner.Reconcile();
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, hidHideProvisioner: hidHideProvisioner);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;

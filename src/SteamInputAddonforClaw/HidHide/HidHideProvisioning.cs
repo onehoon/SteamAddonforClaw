@@ -114,7 +114,7 @@ internal sealed record HidHideProvisioningResult(HidHideProvisioningResultKind K
 internal sealed record HidHideProvisioningContext(ControllerEnvironmentCompatibilityAssessment Compatibility, ExternalControllerAssessment ExternalController, SteamSessionState Steam, PrerequisiteAssessment HidHide, bool SetupAllowed);
 internal interface IHidHideProvisioner
 {
-    Task<HidHideProvisioningResult> ProvisionAsync(HidHideProvisioningContext context, CancellationToken cancellationToken);
+    Task<HidHideProvisioningResult> ProvisionAsync(CancellationToken cancellationToken);
     void Reconcile();
     HidHideReceiptLoadResult GetReceiptStatus();
 }
@@ -138,21 +138,21 @@ internal sealed class HidHideProvisioner(
     IHidHidePackageProbe packageProbe,
     IHidHideProvisioningReceiptStore receiptStore,
     IElevatedProcessRunner processRunner,
-    Func<string>? installerPathProvider = null,
-    Func<string, bool>? installerIntegrityValidator = null,
-    IHidHideProvisioningSafetyStateProvider? safetyStateProvider = null) : IHidHideProvisioner
+    Func<string>? installerPathProvider,
+    Func<string, bool>? installerIntegrityValidator,
+    IHidHideProvisioningSafetyStateProvider safetyStateProvider) : IHidHideProvisioner
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Func<string> _installerPathProvider = installerPathProvider ?? (() => HidHidePackageMetadata.InstallerPath);
     private readonly Func<string, bool> _installerIntegrityValidator = installerIntegrityValidator ?? VerifyInstaller;
-    private readonly IHidHideProvisioningSafetyStateProvider? _safetyStateProvider = safetyStateProvider;
+    private readonly IHidHideProvisioningSafetyStateProvider _safetyStateProvider = safetyStateProvider ?? throw new ArgumentNullException(nameof(safetyStateProvider));
 
-    public async Task<HidHideProvisioningResult> ProvisionAsync(HidHideProvisioningContext context, CancellationToken cancellationToken)
+    public async Task<HidHideProvisioningResult> ProvisionAsync(CancellationToken cancellationToken)
     {
         if (!await _gate.WaitAsync(0, CancellationToken.None).ConfigureAwait(false)) return new(HidHideProvisioningResultKind.AlreadyInProgress, "ProvisioningAlreadyInProgress");
         try
         {
-            context = await CaptureLiveSafetyStateAsync(context, cancellationToken).ConfigureAwait(false);
+            var context = await _safetyStateProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
             var existing = receiptStore.Load();
             if (existing.IsCorrupt) return new(HidHideProvisioningResultKind.Blocked, "ProvisioningReceiptCorrupt");
             if (context.HidHide.Status == PrerequisiteStatus.Ready) return new(HidHideProvisioningResultKind.AlreadyReady, "HidHideAlreadyReady");
@@ -174,7 +174,7 @@ internal sealed class HidHideProvisioner(
                 SaveTransition(started, HidHideProvisioningReceiptState.AttemptCancelled, null);
                 return new(HidHideProvisioningResultKind.Cancelled, "ProvisioningCancelledBeforeStart");
             }
-            try { context = await CaptureLiveSafetyStateAsync(context, cancellationToken).ConfigureAwait(false); }
+            try { context = await _safetyStateProvider.CaptureAsync(cancellationToken).ConfigureAwait(false); }
             catch (OperationCanceledException)
             {
                 SaveTransition(started, HidHideProvisioningReceiptState.AttemptCancelled, null);
@@ -231,6 +231,10 @@ internal sealed class HidHideProvisioner(
         if (prerequisite.Status == PrerequisiteStatus.Ready && package.Installed && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
             && receipt.State is HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.InstalledPendingReboot)
             SaveTransition(receipt, HidHideProvisioningReceiptState.Provisioned, package.Version);
+        else if (receipt.State == HidHideProvisioningReceiptState.InstallStarted && package.Installed
+            && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
+            && prerequisite.Status != PrerequisiteStatus.Ready)
+            SaveTransition(receipt, HidHideProvisioningReceiptState.InstalledPendingReboot, package.Version);
         AppLog.Info("HidHideProvisioning", "HidHide provisioning receipt reconciled.", ("Action", "ReceiptReconciled"), ("PreviousState", receipt.State));
     }
 
@@ -258,7 +262,4 @@ internal sealed class HidHideProvisioner(
         && string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))), HidHidePackageMetadata.InstallerSha256, StringComparison.OrdinalIgnoreCase);
     private static HidHideProvisioningReceipt NewReceipt(HidHideProvisioningReceiptState state) => new(HidHideProvisioningReceipt.CurrentSchemaVersion, state, Guid.NewGuid(), HidHidePackageMetadata.BundledVersion.ToString(), HidHidePackageMetadata.InstallerSha256, PrerequisiteStatus.Missing, DateTimeOffset.UtcNow, null, null);
     private void SaveTransition(HidHideProvisioningReceipt receipt, HidHideProvisioningReceiptState state, string? observedVersion) => receiptStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = observedVersion });
-    private async Task<HidHideProvisioningContext> CaptureLiveSafetyStateAsync(HidHideProvisioningContext fallback, CancellationToken cancellationToken) => _safetyStateProvider is null
-        ? fallback
-        : await _safetyStateProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
 }

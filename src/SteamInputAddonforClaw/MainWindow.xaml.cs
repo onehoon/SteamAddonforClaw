@@ -66,7 +66,7 @@ public sealed partial class MainWindow : Window
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
-        _hidHideProvisioner = hidHideProvisioner ?? CreateDefaultHidHideProvisioner();
+        _hidHideProvisioner = hidHideProvisioner ?? CreateDefaultHidHideProvisioner(_systemStatusProvider);
         _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
             new WindowsEnvironmentDiscoverySnapshotSource(),
             new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
@@ -314,18 +314,11 @@ public sealed partial class MainWindow : Window
 
     private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)
     {
-        var snapshot = _latestSystemStatus;
-        if (snapshot is null) return;
         InstallHidHideButton.IsEnabled = false;
         HidHideProvisioningStatusText.Text = "Installing HidHide...";
         try
         {
-            var result = await _hidHideProvisioner.ProvisionAsync(new(
-                snapshot.Compatibility,
-                snapshot.ExternalController,
-                SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId),
-                snapshot.Prerequisites.HidHide,
-                snapshot.Addon.Status == AddonOperationalStatus.SetupRequired), CancellationToken.None);
+            var result = await _hidHideProvisioner.ProvisionAsync(CancellationToken.None);
             HidHideProvisioningStatusText.Text = result.Kind switch
             {
                 HidHideProvisioningResultKind.Installed => "HidHide was installed.",
@@ -359,11 +352,14 @@ public sealed partial class MainWindow : Window
         () => SteamSessionState.FromRunningAppId(0), () => new ExternalControllerDetector(devices, classifier).Detect(), () => true);
     }
 
-    private static IHidHideProvisioner CreateDefaultHidHideProvisioner() => new HidHideProvisioner(
+    private static IHidHideProvisioner CreateDefaultHidHideProvisioner(ISystemStatusProvider systemStatusProvider) => new HidHideProvisioner(
         new HidHidePrerequisiteInspector(new HidHideDriverClient()),
         new WindowsHidHidePackageProbe(),
         new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath),
-        new ElevatedProcessRunner());
+        new ElevatedProcessRunner(),
+        installerPathProvider: null,
+        installerIntegrityValidator: null,
+        safetyStateProvider: new SystemStatusHidHideProvisioningSafetyStateProvider(systemStatusProvider));
 
     private void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
     {
