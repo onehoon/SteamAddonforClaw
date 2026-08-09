@@ -60,6 +60,11 @@ public partial class App : Application
         var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
         _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient());
+        var hidHideProvisioner = new HidHideProvisioner(
+            new HidHidePrerequisiteInspector(new HidHideDriverClient()),
+            new WindowsHidHidePackageProbe(),
+            new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath),
+            new ElevatedProcessRunner());
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(deviceEnumerator),
@@ -76,6 +81,8 @@ public partial class App : Application
                 return;
             }
 
+            hidHideProvisioner.Reconcile();
+
             var prerequisiteAssessment = new RuntimePrerequisiteInspector(
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(deviceEnumerator)),
@@ -89,7 +96,7 @@ public partial class App : Application
                 ("ViiperReason", prerequisiteAssessment.Viiper.Reason),
                 ("RoutingReady", prerequisiteAssessment.IsRoutingReady));
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe, hidHideProvisioner));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
@@ -101,7 +108,7 @@ public partial class App : Application
         }
     }
 
-    private void StartNormalRuntime(ControllerDeviceClassifier classifier, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
+    private void StartNormalRuntime(ControllerDeviceClassifier classifier, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe, IHidHideProvisioner hidHideProvisioner)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         ClawTweaksCompatibilitySnapshotLogger.LogAtStartup(new WindowsControllerDeviceEnumerator());
@@ -153,7 +160,7 @@ public partial class App : Application
             CaptureExternalControllerAssessment,
             () => recoverySafe,
             routingSessionStateMachine: _routingSessionStateMachine);
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider);
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, hidHideProvisioner: hidHideProvisioner);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 

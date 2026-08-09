@@ -7,6 +7,9 @@ internal static class VelopackAppPaths
     internal static string RecoveryJournalPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "SteamInputAddonforClaw", "recovery.json");
+    internal static string HidHideProvisioningReceiptPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "SteamInputAddonforClaw", "hidhide-provisioning.json");
     private const string ExecutableName = "SteamInputAddonforClaw.exe";
 
     public static string RootAppDirectory => string.IsNullOrWhiteSpace(VelopackLocator.Current.RootAppDir)

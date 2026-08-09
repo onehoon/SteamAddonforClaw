@@ -739,7 +739,7 @@ Rules:
 
 Replacing the complete HidHide configuration is forbidden.
 
-HidHide is a required prerequisite for supported addon routing. The installer provides it for Stock MSI Center M; in a ClawTweaks environment the addon reuses the existing compatible installation. A missing HidHide installation after setup is a broken prerequisite: the addon remains PASSIVE and performs no routing mutation.
+HidHide is a required prerequisite for supported addon routing. In the Current MVP, a missing HidHide installation in an otherwise supported Stock MSI Center M environment is shown as **Setup required**: routing and automatic mutation remain disabled until the user explicitly starts first-time provisioning. ClawTweaks HidHide reuse is planned future compatibility behavior only.
 
 The v1 compatibility baseline is the official HidHide 1.5.230 release. The addon uses its persistent configuration API with recovery journaling; newer process/session blacklist APIs are not required by v1.
 
@@ -748,6 +748,12 @@ Installing HidHide alone must not hide the MSI Claw controller. While the addon 
 Where a supported HidHide version provides process/session-scoped hiding, it may be used as an additional safety mechanism.
 
 It must not be assumed to exist on every installed HidHide version.
+
+## HidHide provisioning provenance
+
+If HidHide was already present before the addon, the addon must never treat it as addon-provisioned. When the addon starts an explicit first-time install from a confirmed Missing state, it writes a durable provisioning receipt before starting the installer. This receipt is separate from crash-recovery data and records installer version and hash for future uninstall-safety decisions.
+
+Future uninstall cleanup may remove HidHide only when the receipt and current system state prove that removal is safe. If another consumer may depend on HidHide, the configuration has changed, or provenance is uncertain, HidHide must be preserved.
 
 ---
 
