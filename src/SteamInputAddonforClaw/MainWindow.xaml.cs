@@ -132,8 +132,8 @@ public sealed partial class MainWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (state.M1) M1TestStatusText.Text = "M1: OK";
-            if (state.M2) M2TestStatusText.Text = "M2: OK";
+            if (MsiClawInputSource.IsM1Pressed(state)) M1TestStatusText.Text = "M1: OK";
+            if (MsiClawInputSource.IsM2Pressed(state)) M2TestStatusText.Text = "M2: OK";
         });
     }
 

@@ -822,6 +822,8 @@ Component boundaries should remain narrow.
 
 Controller reading, state normalization, environment modification, virtual output, Steam-session detection and recovery should not be unnecessarily coupled.
 
+Device-specific hardware handling is isolated behind a handheld-device adapter boundary. Normalized controller state supports a variable number of device-specific auxiliary controls; their physical names and count must not be hard-coded into the routing core. MSI Claw is the first supported device implementation.
+
 ---
 
 # Primary State Model
