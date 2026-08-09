@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
@@ -16,6 +17,15 @@ public sealed class HidHideProvisionerTests
         var installer = Path.Combine(AppContext.BaseDirectory, "Dependencies", "HidHide", HidHidePackageMetadata.InstallerFileName);
         Assert.True(File.Exists(installer));
         Assert.Equal(HidHidePackageMetadata.InstallerSha256, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(installer))));
+    }
+
+    [Fact]
+    public void ProvisioningReceiptPath_IsMachineLocalAndOutsideVelopackRoot()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        Assert.StartsWith(localAppData, VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SteamInputAddonforClaw\\hidhide-provisioning.json", VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SteamInputAddonforClaw-State", VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
