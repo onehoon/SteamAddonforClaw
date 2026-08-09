@@ -44,7 +44,7 @@ public sealed partial class MainWindow : Window
         RecoveryManager? recoveryManager)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
-        _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), new HidHideDriverClient());
+        _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());

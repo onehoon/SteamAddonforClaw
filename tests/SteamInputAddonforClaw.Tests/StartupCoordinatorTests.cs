@@ -150,10 +150,10 @@ public sealed class StartupCoordinatorTests
     private sealed class FakeRecoveryManager(List<string> events, RecoveryStatus status) : IRecoveryManager
     {
         public bool HasIncompleteRecovery => status != RecoveryStatus.NoRecoveryNeeded;
-        public RecoveryResult RecoverIncompleteSession()
+        public Task<RecoveryResult> RecoverIncompleteSessionAsync(CancellationToken cancellationToken)
         {
             events.Add("Recovery");
-            return new(status, status == RecoveryStatus.Failure ? "unsafe" : "safe");
+            return Task.FromResult(new RecoveryResult(status, status == RecoveryStatus.Failure ? "unsafe" : "safe"));
         }
     }
 

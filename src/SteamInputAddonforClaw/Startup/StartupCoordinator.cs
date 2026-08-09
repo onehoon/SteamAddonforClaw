@@ -34,7 +34,7 @@ internal sealed class StartupCoordinator
         var stopwatch = Stopwatch.StartNew();
         if (_recoveryManager is not null)
         {
-            var recoveryResult = _recoveryManager.RecoverIncompleteSession();
+            var recoveryResult = await _recoveryManager.RecoverIncompleteSessionAsync(cancellationToken).ConfigureAwait(false);
             if (!recoveryResult.IsSafeToContinue)
             {
                 AppLog.Warn("Startup", "Normal routing blocked by incomplete recovery.", null, ("Action", "Passive"), ("Reason", recoveryResult.Reason));

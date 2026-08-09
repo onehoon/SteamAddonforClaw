@@ -6,7 +6,7 @@ internal interface IRecoveryJournalStore
 {
     string JournalPath { get; }
     bool Exists();
-    RecoveryJournal Read();
+    string ReadText();
     void WriteNew(RecoveryJournal journal);
     void Delete();
 }
@@ -16,8 +16,7 @@ internal sealed class RecoveryJournalStore(string journalPath) : IRecoveryJourna
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     public string JournalPath { get; } = journalPath;
     public bool Exists() => File.Exists(JournalPath);
-    public RecoveryJournal Read() => JsonSerializer.Deserialize<RecoveryJournal>(File.ReadAllText(JournalPath), JsonOptions)
-        ?? throw new InvalidDataException("The recovery journal contains no recovery state.");
+    public string ReadText() => File.ReadAllText(JournalPath);
 
     public void WriteNew(RecoveryJournal journal)
     {

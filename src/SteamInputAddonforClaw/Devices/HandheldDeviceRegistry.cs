@@ -18,6 +18,13 @@ public sealed class HandheldDeviceRegistry
         ArgumentNullException.ThrowIfNull(adapters);
         _adapters = adapters.ToArray();
         if (_adapters.Any(adapter => adapter is null)) throw new ArgumentException("Device adapters cannot contain null entries.", nameof(adapters));
+        if (_adapters.GroupBy(adapter => adapter.Descriptor.Id).Any(group => group.Count() > 1)) throw new ArgumentException("Device adapter IDs must be unique.", nameof(adapters));
+    }
+
+    public bool TryGetById(HandheldDeviceId deviceId, out IHandheldDeviceAdapter adapter)
+    {
+        adapter = _adapters.SingleOrDefault(candidate => candidate.Descriptor.Id == deviceId)!;
+        return adapter is not null;
     }
 
     public HandheldDeviceResolution Resolve(DeviceProbeContext context)

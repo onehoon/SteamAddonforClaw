@@ -36,6 +36,17 @@ public sealed class HandheldDeviceRegistryTests
     public void Resolve_WhenProbeThrows_ReturnsIndeterminate() =>
         Assert.Equal(HandheldDeviceResolutionStatus.Indeterminate, Resolve(new FakeAdapter(_ => throw new InvalidOperationException())).Status);
 
+    [Fact]
+    public void TryGetById_ReturnsExactAdapter_AndDuplicateIdsAreRejected()
+    {
+        var adapter = Match();
+        var registry = new HandheldDeviceRegistry([adapter]);
+        Assert.True(registry.TryGetById(adapter.Descriptor.Id, out var found));
+        Assert.Same(adapter, found);
+        Assert.False(registry.TryGetById(new HandheldDeviceId("unknown.device"), out _));
+        Assert.Throws<ArgumentException>(() => new HandheldDeviceRegistry([adapter, new FakeAdapter(_ => new(DeviceProbeStatus.NoMatch, "x"), adapter.Descriptor.Id)]));
+    }
+
     private static HandheldDeviceResolution Resolve(params IHandheldDeviceAdapter[] adapters) =>
         new HandheldDeviceRegistry(adapters).Resolve(new DeviceProbeContext());
 
@@ -43,11 +54,12 @@ public sealed class HandheldDeviceRegistryTests
     private static FakeAdapter NoMatch() => new(_ => new DeviceProbeResult(DeviceProbeStatus.NoMatch, "No match."));
     private static FakeAdapter Indeterminate() => new(_ => new DeviceProbeResult(DeviceProbeStatus.Indeterminate, "Indeterminate."));
 
-    private sealed class FakeAdapter(Func<DeviceProbeContext, DeviceProbeResult> probe) : IHandheldDeviceAdapter
+    private sealed class FakeAdapter(Func<DeviceProbeContext, DeviceProbeResult> probe, HandheldDeviceId? id = null) : IHandheldDeviceAdapter
     {
-        public HandheldDeviceDescriptor Descriptor { get; } = new(new HandheldDeviceId("test.device"), "Test", "Device", "Test Device");
+        public HandheldDeviceDescriptor Descriptor { get; } = new(id ?? new HandheldDeviceId($"test.{Guid.NewGuid():N}"), "Test", "Device", "Test Device");
         public AuxiliaryControlCatalog AuxiliaryControls { get; } = new([]);
         public IInternalControllerMatcher InternalControllerMatcher { get; } = new NoMatchInternalControllerMatcher();
+        public INativeControllerStateManager? NativeState => null;
         public DeviceProbeResult Probe(DeviceProbeContext context) => probe(context);
     }
 
