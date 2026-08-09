@@ -15,7 +15,7 @@ internal sealed class WindowsDeviceInformationProvider(IControllerDeviceEnumerat
             var gpus = deviceEnumerator.EnumeratePresentDevices()
                 .Where(device => string.Equals(device.ClassName, "Display", StringComparison.OrdinalIgnoreCase))
                 .Select(device => device.FriendlyName)
-                .Where(name => !string.IsNullOrWhiteSpace(name) && !IsSoftwareAdapter(name!))
+                .Where(name => !string.IsNullOrWhiteSpace(name) && IsSupportedGpuName(name!))
                 .Cast<string>()
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -27,7 +27,7 @@ internal sealed class WindowsDeviceInformationProvider(IControllerDeviceEnumerat
         }
     }
 
-    private static bool IsSoftwareAdapter(string name) => name.Contains("Microsoft Basic Display", StringComparison.OrdinalIgnoreCase)
-        || name.Contains("Remote Display", StringComparison.OrdinalIgnoreCase)
-        || name.Contains("Software Adapter", StringComparison.OrdinalIgnoreCase);
+    internal static bool IsSupportedGpuName(string name) => name.Contains("Intel", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("AMD", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase);
 }

@@ -8,6 +8,18 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class SystemStatusTests
 {
+    [Theory]
+    [InlineData("Intel(R) Arc(TM) 140V GPU", true)]
+    [InlineData("AMD Radeon RX 7900 XT", true)]
+    [InlineData("NVIDIA GeForce RTX 5090", true)]
+    [InlineData("Microsoft Basic Display Adapter", false)]
+    [InlineData("Remote Display Adapter", false)]
+    [InlineData("Virtual Display Adapter", false)]
+    public void DeviceInformation_OnlyRecognizedGpuManufacturersAreShown(string name, bool expected)
+    {
+        Assert.Equal(expected, WindowsDeviceInformationProvider.IsSupportedGpuName(name));
+    }
+
     [Fact]
     public void SoftwareSorting_RanksRunningThenInstalledThenNotInstalledWithStableKindOrder()
     {
