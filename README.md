@@ -1,5 +1,8 @@
 # Steam Input Addon for Claw
 
+> [!WARNING]
+> This project is under active development and is not functional yet. Do not install or use it on a daily-use device.
+
 A lightweight Steam Input bridge for MSI Claw handheld PCs.
 
 The project exposes the MSI Claw built-in controller to Steam as a **Classic Steam Controller**, allowing the rear M1/M2 buttons to appear as independent Steam Controller grip buttons.
