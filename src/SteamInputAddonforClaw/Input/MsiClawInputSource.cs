@@ -11,6 +11,8 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
     private const int M1ButtonIndex = 15;
     private const int M2ButtonIndex = 16;
     private const int RequiredButtonCount = M2ButtonIndex + 1;
+    private const int M1AuxiliaryIndex = 0;
+    private const int M2AuxiliaryIndex = 1;
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(8);
     private readonly Func<IDirectInputDeviceEnumerator> _enumeratorFactory;
     private readonly Lock _sync = new();
@@ -31,6 +33,9 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
     public event EventHandler<ControllerState>? StateChanged;
     public event EventHandler? IndependentVerified;
     public event EventHandler<MsiClawInputTestSummary>? TestCompleted;
+
+    internal static bool IsM1Pressed(ControllerState state) => state.Auxiliary[M1AuxiliaryIndex];
+    internal static bool IsM2Pressed(ControllerState state) => state.Auxiliary[M2AuxiliaryIndex];
 
     public bool IsRunning
     {
@@ -209,7 +214,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
     private async Task PollAsync(InputSession session)
     {
         var stopwatch = Stopwatch.StartNew();
-        var previous = new ControllerState(false, false);
+        var previous = new ControllerState(new AuxiliaryButtonState([false, false]));
         var hasPrevious = false;
         var m1Observed = false;
         var m2Observed = false;
@@ -246,7 +251,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
 
                 if (!hasPrevious)
                 {
-                    AppLog.Trace("MsiInput", "Initial ControllerState.", ("TestSession", session.Id), ("M1", current.M1), ("M2", current.M2));
+                    AppLog.Trace("MsiInput", "Initial ControllerState.", ("TestSession", session.Id), ("M1", IsM1Pressed(current)), ("M2", IsM2Pressed(current)));
                     StateChanged?.Invoke(this, current);
                     previous = current;
                     hasPrevious = true;
@@ -258,20 +263,20 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
                     previous = current;
                 }
 
-                if (current.M1 && !m1Observed)
+                if (IsM1Pressed(current) && !m1Observed)
                 {
                     m1Observed = true;
                     AppLog.Info("Diagnostics", "M1 input verified.", ("TestSession", session.Id), ("ButtonIndex", M1ButtonIndex));
                 }
 
-                if (current.M2 && !m2Observed)
+                if (IsM2Pressed(current) && !m2Observed)
                 {
                     m2Observed = true;
                     AppLog.Info("Diagnostics", "M2 input verified.", ("TestSession", session.Id), ("ButtonIndex", M2ButtonIndex));
                 }
 
-                if (current.M1 && !current.M2) m1OnlyObserved = true;
-                if (!current.M1 && current.M2) m2OnlyObserved = true;
+                if (IsM1Pressed(current) && !IsM2Pressed(current)) m1OnlyObserved = true;
+                if (!IsM1Pressed(current) && IsM2Pressed(current)) m2OnlyObserved = true;
                 if (!independent && m1OnlyObserved && m2OnlyObserved)
                 {
                     independent = true;
@@ -310,7 +315,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
             return false;
         }
 
-        state = new ControllerState(input.Buttons[M1ButtonIndex], input.Buttons[M2ButtonIndex]);
+        state = new ControllerState(new AuxiliaryButtonState([input.Buttons[M1ButtonIndex], input.Buttons[M2ButtonIndex]]));
         return true;
     }
 
@@ -368,15 +373,15 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
 
     private static void LogStateChange(int session, ControllerState previous, ControllerState current)
     {
-        if (previous.M1 != current.M1)
+        if (IsM1Pressed(previous) != IsM1Pressed(current))
         {
-            AppLog.Trace("MsiInput", "M1 state changed.", ("TestSession", session), ("ButtonIndex", M1ButtonIndex), ("Previous", previous.M1), ("Current", current.M1));
+            AppLog.Trace("MsiInput", "M1 state changed.", ("TestSession", session), ("ButtonIndex", M1ButtonIndex), ("Previous", IsM1Pressed(previous)), ("Current", IsM1Pressed(current)));
         }
-        if (previous.M2 != current.M2)
+        if (IsM2Pressed(previous) != IsM2Pressed(current))
         {
-            AppLog.Trace("MsiInput", "M2 state changed.", ("TestSession", session), ("ButtonIndex", M2ButtonIndex), ("Previous", previous.M2), ("Current", current.M2));
+            AppLog.Trace("MsiInput", "M2 state changed.", ("TestSession", session), ("ButtonIndex", M2ButtonIndex), ("Previous", IsM2Pressed(previous)), ("Current", IsM2Pressed(current)));
         }
-        AppLog.Trace("MsiInput", "ControllerState changed.", ("TestSession", session), ("M1", $"{previous.M1}->{current.M1}"), ("M2", $"{previous.M2}->{current.M2}"));
+        AppLog.Trace("MsiInput", "ControllerState changed.", ("TestSession", session), ("M1", $"{IsM1Pressed(previous)}->{IsM1Pressed(current)}"), ("M2", $"{IsM2Pressed(previous)}->{IsM2Pressed(current)}"));
     }
 
     private sealed class InputSession(int id, IDirectInputDeviceEnumerator enumerator, IDirectInputDevice device, CancellationTokenSource cancellation)
