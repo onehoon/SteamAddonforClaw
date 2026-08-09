@@ -944,17 +944,33 @@ These are validation requirements, not reasons to expand the product scope.
 
 ---
 
-# Reference Implementations
+# Third-Party Components
 
-Reference projects are used to understand hardware behavior, protocols and established Windows controller-handling patterns.
+The project currently links the direct NuGet dependencies declared in `src/SteamInputAddonforClaw/SteamInputAddonforClaw.csproj`:
 
-They are **not architectural templates to copy wholesale**.
+| Component | License | Upstream |
+| --- | --- | --- |
+| Microsoft.WindowsAppSDK | Microsoft Software License Terms | [microsoft/WindowsAppSDK](https://github.com/microsoft/WindowsAppSDK) |
+| Velopack | MIT | [velopack/velopack](https://github.com/velopack/velopack) |
+| Vortice.DirectInput | MIT | [amerkoleci/Vortice.Windows](https://github.com/amerkoleci/Vortice.Windows) |
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the current component and reference inventory. Each distributed component retains its own license.
+
+## VIIPER (planned)
+
+[Valkirie/VIIPER](https://github.com/Valkirie/VIIPER), originally from [Alia5/VIIPER](https://github.com/Alia5/VIIPER), is the planned virtual-controller backend. Its source is licensed under `GPL-3.0-or-later`.
+
+The intended integration is an embedded `libVIIPER.dll`; a standalone `viiper.exe` is not a required dependency. VIIPER is not necessarily included in current development builds, and no VIIPER binary is currently distributed with this project. If this project distributes a modified VIIPER build, the corresponding modified source will be made available under the applicable GPL terms.
+
+# Reference Projects
+
+Reference projects are used to understand hardware behavior, protocols, and established Windows controller-handling patterns. They are not dependencies or architectural templates to copy wholesale.
 
 ## Handheld Companion
 
 Repository:
 
-`Valkirie/HandheldCompanion`
+[`Valkirie/HandheldCompanion`](https://github.com/Valkirie/HandheldCompanion) (`CC-BY-NC-SA-4.0`)
 
 Primary reference areas:
 
@@ -980,13 +996,15 @@ HHC is also treated as a controller-owner environment at runtime: when HHC contr
 
 The addon should extract only the minimum hardware/protocol knowledge required for its own narrow architecture.
 
+HHC source is not copied, translated, or ported into this project. Hardware and protocol behavior is independently implemented. Any proposed direct reuse requires a separate license-compatibility review and preservation of the applicable copyright and license notices.
+
 ---
 
 # DS4Windows Reference
 
 Repository:
 
-`hbashton/DS4Windows`
+[`hbashton/DS4Windows`](https://github.com/hbashton/DS4Windows) (`GPL-3.0-or-later`)
 
 Primary reference areas:
 
@@ -1002,6 +1020,8 @@ Primary reference areas:
 One particularly important design lesson is that VIIPER/USB-IP output may look like physical USB hardware to Windows.
 
 Therefore the addon must explicitly track its own virtual output rather than assuming Windows can always classify it as virtual.
+
+Only the necessary lifecycle and device-separation patterns are used as a technical reference; DS4Windows architecture is not copied. Any direct source reuse must be separately reviewed and include its required copyright and license notices.
 
 Reference priority:
 
@@ -1065,6 +1085,10 @@ External physical-controller detection
 
 ---
 
+# ClawTweaks Compatibility Reference
+
+[enterTheVoidCode/ClawTweaks](https://github.com/enterTheVoidCode/ClawTweaks) is licensed upstream under GNU AGPL v3. It is an optional compatibility target, not a runtime dependency. This project does not use ClawTweaks source code, require its private IPC or internals, modify ClawTweaks, or take ownership of ClawTweaks-owned virtual devices. The two projects are independently implemented and should coexist without either project being presented as a derivative of the other.
+
 # Third-Party Source Policy
 
 Do not copy complete reference-project architecture into this addon.
@@ -1092,11 +1116,9 @@ Hardware/protocol observations should be independently implemented where practic
 
 # License
 
-Steam Input Addon for Claw is licensed under:
+Steam Input Addon for Claw is licensed under the GNU General Public License version 3 or, at your option, any later version (`GPL-3.0-or-later`).
 
-```text
-GPL-3.0-or-later
-```
+This is an unofficial project and is not affiliated with or endorsed by MSI or Valve.
 
 Redistributed third-party components retain their own licenses.
 
