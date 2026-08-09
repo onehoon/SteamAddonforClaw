@@ -108,6 +108,21 @@ public sealed class ExternalControllerDetectorTests
     }
 
     [Fact]
+    public void Detect_WhenSteamController1304IsAddonOwned_ReturnsClear()
+    {
+        var root = SteamController1304Root();
+        var collection = SteamController1304HidCollection([root.InstanceId, "USB\\ROOT_HUB30\\1"]);
+        var exclusionSource = new ExclusionSource(collection.InstanceId);
+
+        var assessment = Detect([collection, root], exclusionSource);
+        var result = new ControllerDeviceClassifier(exclusionSource).ClassifyDetailed(collection, new ControllerTopologySnapshot([collection, root]));
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
+        Assert.Equal(ControllerDeviceClassification.AddonOwnedVirtual, result.Classification);
+        Assert.Equal("IdentityExclusionSource", result.Reason);
+    }
+
+    [Fact]
     public void Detect_WhenValveDeviceDoesNotHaveSteamController1304Identity_ReturnsClear()
     {
         var valveHid = new ControllerDeviceInfo(
