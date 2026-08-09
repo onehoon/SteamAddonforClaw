@@ -12,7 +12,8 @@ public sealed record DirectInputDeviceDescriptor(
     ushort? UsagePage = null,
     ushort? Usage = null,
     int? ButtonCount = null,
-    int? AxisCount = null);
+    int? AxisCount = null,
+    string? TopologyReason = null);
 
 public sealed record DirectInputState(IReadOnlyList<bool> Buttons);
 

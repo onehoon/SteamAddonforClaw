@@ -170,12 +170,12 @@ public sealed class MsiClawInputSource : IAsyncDisposable
         foreach (var candidate in candidates)
         {
             var matches = candidate.VendorId == MsiVendorId && candidate.ProductId == DirectInputProductId;
-            AppLog.Trace("MsiInput", matches ? "DirectInput device candidate." : "DirectInput device ignored.", ("TestSession", testSession), ("InstanceGuid", candidate.InstanceGuid), ("ProductGuid", candidate.ProductGuid), ("ProductName", candidate.ProductName), ("VID", $"0x{candidate.VendorId:X4}"), ("PID", $"0x{candidate.ProductId:X4}"), ("DevicePath", candidate.DevicePath), ("PnpInstanceId", candidate.PnpInstanceId), ("PhysicalIdentity", candidate.PhysicalIdentity), ("UsagePage", candidate.UsagePage), ("Usage", candidate.Usage), ("ButtonCount", candidate.ButtonCount), ("AxisCount", candidate.AxisCount), ("Reason", matches ? "KnownMsiClawDirectInput" : "NotMsiClawPid1902"));
+            AppLog.Trace("MsiInput", matches ? "DirectInput device candidate." : "DirectInput device ignored.", ("TestSession", testSession), ("InstanceGuid", candidate.InstanceGuid), ("ProductGuid", candidate.ProductGuid), ("ProductName", candidate.ProductName), ("VID", $"0x{candidate.VendorId:X4}"), ("PID", $"0x{candidate.ProductId:X4}"), ("DevicePath", candidate.DevicePath), ("PnpInstanceId", candidate.PnpInstanceId), ("PhysicalIdentity", candidate.PhysicalIdentity), ("UsagePage", candidate.UsagePage), ("Usage", candidate.Usage), ("ButtonCount", candidate.ButtonCount), ("AxisCount", candidate.AxisCount), ("MatchReason", matches ? "KnownMsiClawDirectInput" : "NotMsiClawPid1902"), ("SelectionReason", candidate.TopologyReason));
         }
 
         var selectedCandidates = candidates.Where(candidate => candidate.VendorId == MsiVendorId && candidate.ProductId == DirectInputProductId).ToArray();
         if (selectedCandidates.Length == 0) return NoCandidate(testSession);
-        if (selectedCandidates.Any(candidate => !HasVerifiedIdentity(candidate))) return Indeterminate(selectedCandidates.Length, testSession, "PhysicalIdentityUnverified");
+        if (selectedCandidates.Any(candidate => !HasVerifiedIdentity(candidate))) return Indeterminate(selectedCandidates.Length, testSession, string.Join(',', selectedCandidates.Select(candidate => candidate.TopologyReason ?? "PhysicalIdentityUnverified").Distinct()));
         if (selectedCandidates.Any(candidate => candidate.ButtonCount is null or < RequiredButtonCount)) return Indeterminate(selectedCandidates.Length, testSession, "InsufficientButtonCount");
         var identities = selectedCandidates.Select(candidate => candidate.PhysicalIdentity!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (identities.Length != 1) return Indeterminate(selectedCandidates.Length, testSession, "MultiplePhysicalIdentities");

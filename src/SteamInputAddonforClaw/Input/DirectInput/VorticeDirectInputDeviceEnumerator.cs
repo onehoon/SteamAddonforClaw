@@ -48,7 +48,7 @@ public sealed class VorticeDirectInputDeviceEnumerator : IDirectInputDeviceEnume
 
         var topology = _topologyResolver.Resolve(devicePath);
         return new DirectInputDeviceDescriptor(device.InstanceGuid, device.ProductGuid, device.ProductName, GetVendorId(device.ProductGuid), GetProductId(device.ProductGuid),
-            devicePath, topology.PnpInstanceId, topology.PhysicalIdentity, topology.UsagePage, topology.Usage, buttonCount, axisCount);
+            devicePath, topology.PnpInstanceId, topology.PhysicalIdentity, topology.UsagePage, topology.Usage, buttonCount, axisCount, topology.SelectionReason);
     }
 
     public IDirectInputDevice CreateDevice(DirectInputDeviceDescriptor descriptor)
