@@ -12,6 +12,7 @@ using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Prerequisites;
 
 namespace SteamInputAddonforClaw;
 
@@ -71,6 +72,16 @@ public partial class App : Application
                 _dispatcherQueue?.TryEnqueue(ExitAfterScheduledUpdate);
                 return;
             }
+
+            var prerequisiteAssessment = new RuntimePrerequisiteInspector(
+                new HidHidePrerequisiteInspector(new HidHideDriverClient()),
+                new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(deviceEnumerator)),
+                new ViiperRuntimeInspector()).Inspect();
+            AppLog.Info("Prerequisite", "Prerequisite assessment completed.",
+                ("HidHide", prerequisiteAssessment.HidHide.Status),
+                ("UsbIpWin2", prerequisiteAssessment.UsbIpWin2.Status),
+                ("Viiper", prerequisiteAssessment.Viiper.Status),
+                ("RoutingReady", prerequisiteAssessment.IsRoutingReady));
 
             _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
