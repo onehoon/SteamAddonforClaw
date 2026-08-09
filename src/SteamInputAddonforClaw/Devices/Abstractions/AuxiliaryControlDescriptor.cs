@@ -7,6 +7,7 @@ public sealed record AuxiliaryControlDescriptor
 {
     public AuxiliaryControlDescriptor(AuxiliaryControlId id, string displayName, ControlSurface surface, ControlSide side, int? ordinal = null)
     {
+        if (!id.IsValid) throw new ArgumentException("A valid auxiliary control ID is required.", nameof(id));
         if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("An auxiliary control display name is required.", nameof(displayName));
         if (ordinal is <= 0) throw new ArgumentOutOfRangeException(nameof(ordinal), "An ordinal must be positive when specified.");
 

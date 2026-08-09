@@ -6,6 +6,15 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class AuxiliaryControlCatalogTests
 {
     [Fact]
+    public void DefaultDeviceAndControlIds_AreInvalidAndRejectedByDescriptors()
+    {
+        Assert.False(default(HandheldDeviceId).IsValid);
+        Assert.False(default(AuxiliaryControlId).IsValid);
+        Assert.Throws<ArgumentException>(() => new HandheldDeviceDescriptor(default, "Test", "Device", "Test Device"));
+        Assert.Throws<ArgumentException>(() => new AuxiliaryControlDescriptor(default, "Control", ControlSurface.Unknown, ControlSide.Unknown));
+    }
+
+    [Fact]
     public void EmptyCatalog_IsValid()
     {
         var catalog = new AuxiliaryControlCatalog([]);

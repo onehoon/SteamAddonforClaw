@@ -4,9 +4,8 @@ public readonly struct AuxiliaryButtonState : IEquatable<AuxiliaryButtonState>
 {
     private readonly bool[]? _pressed;
 
-    public AuxiliaryButtonState(IReadOnlyList<bool> pressed)
+    public AuxiliaryButtonState(ReadOnlySpan<bool> pressed)
     {
-        ArgumentNullException.ThrowIfNull(pressed);
         _pressed = pressed.ToArray();
     }
 
