@@ -103,17 +103,24 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
     }
 
     internal static byte[] SerializeMultiString(IEnumerable<string> entries)
-        => System.Text.Encoding.Unicode.GetBytes(string.Join('\0', entries) + "\0\0");
+    {
+        var values = entries.ToArray();
+        var multiString = values.Length == 0
+            ? "\0"
+            : string.Join('\0', values) + "\0\0";
+        return System.Text.Encoding.Unicode.GetBytes(multiString);
+    }
 
     internal static List<string> DeserializeMultiString(ReadOnlySpan<byte> bytes)
     {
-        if (bytes.Length < 4 || (bytes.Length & 1) != 0 || bytes[^1] != 0 || bytes[^2] != 0 || bytes[^3] != 0 || bytes[^4] != 0)
-            throw new InvalidDataException("The HidHide MULTI_SZ is not double-NUL terminated.");
-        var values = new System.Text.UnicodeEncoding(false, false, true).GetString(bytes).Split('\0');
-        if (values.Length == 3 && values.All(string.IsNullOrEmpty)) return [];
-        if (values.Length < 2 || values[^1] != string.Empty || values[^2] != string.Empty || values[..^2].Any(string.IsNullOrEmpty))
-            throw new InvalidDataException("The HidHide MULTI_SZ is malformed.");
-        return values[..^2].ToList();
+        if (bytes.Length < 2 || (bytes.Length & 1) != 0)
+            throw new InvalidDataException("The HidHide MULTI_SZ length is invalid.");
+
+        var text = new System.Text.UnicodeEncoding(false, false, true).GetString(bytes);
+        if (text[^1] != '\0')
+            throw new InvalidDataException("The HidHide MULTI_SZ is not NUL terminated.");
+
+        return text.Split('\0', StringSplitOptions.RemoveEmptyEntries).ToList();
     }
 
     private static void Invoke(IHidHideControlDevice device, uint controlCode, byte[]? input, byte[]? output, out uint bytesReturned)
