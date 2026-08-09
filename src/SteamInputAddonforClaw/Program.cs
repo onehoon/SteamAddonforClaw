@@ -5,6 +5,7 @@ using WinRT;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Lifecycle;
 using System.Runtime.InteropServices;
+using SteamInputAddonforClaw.Prerequisites;
 
 namespace SteamInputAddonforClaw;
 
@@ -22,6 +23,11 @@ public static class Program
             AppLog.Info("Velopack", "Velopack bootstrap starting.");
             VelopackApp.Build().Run();
             AppLog.Info("Velopack", "Velopack bootstrap completed.");
+            if (args.Contains(ElevatedPrerequisiteSetup.Argument, StringComparer.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = ElevatedPrerequisiteSetup.Run();
+                return;
+            }
 
             var restartDeadline = DateTimeOffset.UtcNow.AddSeconds(10);
             var restartAttempt = 0;

@@ -17,7 +17,8 @@ $requiredAssets = @(
     'MainWindow.xbf',
     'SteamInputAddonforClaw.pri',
     'Assets\AppIcon.ico',
-    'Dependencies\HidHide\HidHide_1.5.230_x64.exe'
+    'Dependencies\HidHide\HidHide_1.5.230_x64.exe',
+    'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe'
 )
 
 $missingAssets = foreach ($asset in $requiredAssets) {
@@ -31,6 +32,12 @@ $hidHideInstaller = Join-Path $PublishDirectory 'Dependencies\HidHide\HidHide_1.
 $expectedHidHideSha256 = 'F4BBBCB82E6258641B887C74BC81C4C5F66E4AA811808DFC304347687B7605F6'
 if ((Get-FileHash -LiteralPath $hidHideInstaller -Algorithm SHA256).Hash -ne $expectedHidHideSha256) {
     throw 'Published HidHide installer SHA-256 does not match the bundled metadata.'
+}
+
+$usbIpInstaller = Join-Path $PublishDirectory 'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe'
+$expectedUsbIpSha256 = '51620FA5F9F8BE5932BC9D786DEEE557CE06D5407A99CAB490DCFAC71F185FEA'
+if ((Get-FileHash -LiteralPath $usbIpInstaller -Algorithm SHA256).Hash -ne $expectedUsbIpSha256) {
+    throw 'Published USB/IP installer SHA-256 does not match the bundled metadata.'
 }
 
 if ($missingAssets) {

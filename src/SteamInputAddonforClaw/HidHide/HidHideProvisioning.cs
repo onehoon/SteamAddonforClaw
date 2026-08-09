@@ -58,6 +58,10 @@ internal sealed class HidHideProvisioningReceiptStore(string path) : IHidHidePro
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     public HidHideReceiptLoadResult Load()
     {
+        var directory = Path.GetDirectoryName(path);
+        if (directory is null) return new(null, true);
+        var security = ProvisioningStorageSecurity.Inspect(directory);
+        if (security.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate) return new(null, true);
         if (!File.Exists(path)) return new(null, false);
         try
         {
@@ -71,7 +75,8 @@ internal sealed class HidHideProvisioningReceiptStore(string path) : IHidHidePro
     {
         if (!receipt.IsValid) throw new InvalidDataException("The HidHide provisioning receipt is invalid.");
         var directory = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("The provisioning receipt directory is unavailable.");
-        Directory.CreateDirectory(directory);
+        var security = ProvisioningStorageSecurity.Inspect(directory);
+        if (security.Status != ProvisioningStorageStatus.Trusted) throw new InvalidOperationException("The provisioning receipt storage is not trusted.");
         var temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {

@@ -739,7 +739,7 @@ Rules:
 
 Replacing the complete HidHide configuration is forbidden.
 
-HidHide is a required prerequisite for supported addon routing. In the Current MVP, a missing HidHide installation in an otherwise supported Stock MSI Center M environment is shown as **Setup required**: routing and automatic mutation remain disabled until the user explicitly starts first-time provisioning. ClawTweaks HidHide reuse is planned future compatibility behavior only.
+HidHide and usbip-win2 are required prerequisites for supported addon routing. In the Current MVP, missing components in an otherwise supported Stock MSI Center M environment are shown as **Setup required**. The user starts one explicit **Install Required Components** action; one elevated helper validates the bundled installers, records durable machine-wide receipts, and installs HidHide followed by usbip-win2. Routing and automatic mutation remain disabled until setup is complete. A reboot-required installer result is shown as **Restart Windows** rather than being treated as a completed install. ClawTweaks HidHide reuse is planned future compatibility behavior only.
 
 The v1 compatibility baseline is the official HidHide 1.5.230 release. The addon uses its persistent configuration API with recovery journaling; newer process/session blacklist APIs are not required by v1.
 
@@ -751,7 +751,7 @@ It must not be assumed to exist on every installed HidHide version.
 
 ## HidHide provisioning provenance
 
-If HidHide was already present before the addon, the addon must never treat it as addon-provisioned. When the addon starts an explicit first-time install from a confirmed Missing state, it writes a durable provisioning receipt before starting the installer. This receipt is separate from crash-recovery data and records installer version and hash for future uninstall-safety decisions.
+If HidHide or usbip-win2 was already present before the addon, the addon must never treat it as addon-provisioned. When the elevated helper starts an explicit first-time install from a confirmed Missing state, it writes a durable provisioning receipt before starting each installer. Receipts are stored under ProgramData in an ACL-validated, non-roaming directory separate from the Velopack root and crash-recovery data; they record installer version and hash for future uninstall-safety decisions. A legacy per-user HidHide receipt is never trusted as uninstall provenance and blocks automatic HidHide installation when HidHide is missing.
 
 Future uninstall cleanup may remove HidHide only when the receipt and current system state prove that removal is safe. If another consumer may depend on HidHide, the configuration has changed, or provenance is uncertain, HidHide must be preserved.
 

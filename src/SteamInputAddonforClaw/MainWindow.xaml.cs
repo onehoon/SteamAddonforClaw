@@ -281,7 +281,7 @@ public sealed partial class MainWindow : Window
         [
             new("HidHide", snapshot.Prerequisites.HidHide.Status.ToString(), snapshot.Prerequisites.HidHide.Reason),
             new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
-            new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
+            new("VIIPER", "Not available in this build", "Planned routing runtime")
         ]);
         Replace(_externalControllerCards, ExternalControllerStatusCardFactory.Create(snapshot.ExternalController));
         Replace(_runtimeCards,
@@ -290,41 +290,44 @@ public sealed partial class MainWindow : Window
             new("Steam Input Addon", FormatAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason)
         ]);
         var receipt = _hidHideProvisioner.GetReceiptStatus();
-        var retryableReceipt = receipt.Receipt is null or { State: HidHideProvisioningReceiptState.AttemptCancelled };
-        var canInstall = snapshot.Addon.Status == AddonOperationalStatus.SetupRequired
-            && snapshot.Compatibility.AllowsMutation
-            && snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.Clear
-            && !snapshot.Steam.IsActive
-            && snapshot.Prerequisites.HidHide.Status == PrerequisiteStatus.Missing
-            && !receipt.IsCorrupt
-            && retryableReceipt;
-        var receiptMessage = receipt.IsCorrupt ? "HidHide provisioning state could not be verified. Installation is blocked."
-            : receipt.Receipt?.State switch
-            {
-                HidHideProvisioningReceiptState.InstallStarted => "A previous HidHide installation attempt is being reconciled. Installation is blocked.",
-                HidHideProvisioningReceiptState.InstalledPendingReboot => "Restart Windows to complete HidHide setup.",
-                HidHideProvisioningReceiptState.AttemptFailed => "A previous HidHide installation attempt requires manual verification before retrying.",
-                _ => string.Empty
-            };
-        HidHideProvisioningPanel.Visibility = canInstall || !string.IsNullOrEmpty(receiptMessage) ? Visibility.Visible : Visibility.Collapsed;
+        var usbReceipt = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath).Load();
+        var storage = ProvisioningStorageSecurity.Inspect(VelopackAppPaths.ProvisioningStateDirectory);
+        var hidHideState = receipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
+            ? ComponentProvisioningState.Corrupt
+            : receipt.Receipt is not null ? ToComponentProvisioningState(receipt.Receipt.State)
+            : File.Exists(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath) ? ComponentProvisioningState.Legacy
+            : ComponentProvisioningState.None;
+        var usbIpState = usbReceipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
+            ? ComponentProvisioningState.Corrupt
+            : usbReceipt.Receipt is not null ? ToComponentProvisioningState(usbReceipt.Receipt.State)
+            : ComponentProvisioningState.None;
+        var setup = FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
+            snapshot.Compatibility, snapshot.Addon.Status != AddonOperationalStatus.RecoveryRequired, snapshot.ExternalController, snapshot.Steam.IsActive ? SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId) : SteamSessionState.FromRunningAppId(0),
+            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2,
+            new(hidHideState, usbIpState)));
+        var canInstall = setup.CanInstallRequiredComponents;
+        var receiptMessage = setup.Status == FirstTimeSetupStatus.Complete ? "Setup complete. Routing runtime is not available in this build."
+            : FormatFirstTimeSetupMessage(setup);
+        HidHideProvisioningPanel.Visibility = setup.Status != FirstTimeSetupStatus.Complete || !string.IsNullOrEmpty(receiptMessage) ? Visibility.Visible : Visibility.Collapsed;
         InstallHidHideButton.IsEnabled = canInstall;
-        if (!string.IsNullOrEmpty(receiptMessage)) HidHideProvisioningStatusText.Text = receiptMessage;
-        else if (!canInstall) HidHideProvisioningStatusText.Text = string.Empty;
+        HidHideProvisioningStatusText.Text = receiptMessage;
     }
 
     private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)
     {
         InstallHidHideButton.IsEnabled = false;
-        HidHideProvisioningStatusText.Text = "Installing HidHide...";
+        HidHideProvisioningStatusText.Text = "Installing required components...";
         try
         {
-            var result = await _hidHideProvisioner.ProvisionAsync(CancellationToken.None);
+            var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
+            var result = await new ElevatedProcessRunner().RunAsync(executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
             HidHideProvisioningStatusText.Text = result.Kind switch
             {
-                HidHideProvisioningResultKind.Installed => "HidHide was installed.",
-                HidHideProvisioningResultKind.RebootRequired => "HidHide was installed. Restart Windows to complete the setup.",
-                HidHideProvisioningResultKind.Cancelled => "HidHide installation was cancelled.",
-                _ => result.Reason
+                ElevatedProcessResultKind.Completed when result.ExitCode == 0 => "Required components were installed.",
+                ElevatedProcessResultKind.Completed when result.ExitCode == 3010 => "Restart Windows to complete component setup.",
+                ElevatedProcessResultKind.Completed when result.ExitCode == 2 => "Another setup operation is already in progress.",
+                ElevatedProcessResultKind.CancelledBeforeStart => "Installation was cancelled.",
+                _ => result.Reason ?? "Required component installation failed."
             };
         }
         finally { await RefreshSystemStatusAsync(); }
@@ -341,6 +344,38 @@ public sealed partial class MainWindow : Window
         _ => "Indeterminate"
     };
     private static string FormatAddonStatus(AddonOperationalStatus status) => status switch { AddonOperationalStatus.WaitingForSteam => "Waiting for Steam", AddonOperationalStatus.SetupRequired => "Setup required", AddonOperationalStatus.RecoveryRequired => "Recovery required", AddonOperationalStatus.Unsupported => "Unsupported", _ => status.ToString() };
+    private static ComponentProvisioningState ToComponentProvisioningState(HidHideProvisioningReceiptState state) => state switch
+    {
+        HidHideProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned,
+        HidHideProvisioningReceiptState.InstallStarted => ComponentProvisioningState.InstallStarted,
+        HidHideProvisioningReceiptState.InstalledPendingReboot => ComponentProvisioningState.PendingReboot,
+        HidHideProvisioningReceiptState.AttemptFailed => ComponentProvisioningState.AttemptFailed,
+        HidHideProvisioningReceiptState.AttemptCancelled => ComponentProvisioningState.AttemptCancelled,
+        _ => ComponentProvisioningState.Indeterminate
+    };
+    private static ComponentProvisioningState ToComponentProvisioningState(UsbIpWin2ProvisioningReceiptState state) => state switch
+    {
+        UsbIpWin2ProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned,
+        UsbIpWin2ProvisioningReceiptState.InstallStarted => ComponentProvisioningState.InstallStarted,
+        UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot => ComponentProvisioningState.PendingReboot,
+        UsbIpWin2ProvisioningReceiptState.AttemptFailed => ComponentProvisioningState.AttemptFailed,
+        UsbIpWin2ProvisioningReceiptState.AttemptCancelled => ComponentProvisioningState.AttemptCancelled,
+        _ => ComponentProvisioningState.Indeterminate
+    };
+    private static string FormatFirstTimeSetupMessage(FirstTimeSetupAssessment assessment) => assessment.Reason switch
+    {
+        FirstTimeSetupReason.MissingComponents => "HidHide and usbip-win2 are required for controller routing.",
+        FirstTimeSetupReason.PendingReboot => "Restart Windows to complete component setup.",
+        FirstTimeSetupReason.LegacyHidHideMissing => "A legacy HidHide installation record needs manual verification before setup can continue.",
+        FirstTimeSetupReason.ProvisioningUncertain => "Provisioning state could not be verified. Installation is blocked.",
+        FirstTimeSetupReason.RecoveryUnsafe => "Recovery must complete before required components can be installed.",
+        FirstTimeSetupReason.ExternalController => "Disconnect external controllers before installing required components.",
+        FirstTimeSetupReason.ExternalControllerIndeterminate => "External-controller state could not be verified. Installation is blocked.",
+        FirstTimeSetupReason.CompatibilityUnsupported => "This controller software environment is not supported for routing.",
+        FirstTimeSetupReason.CompatibilityIndeterminate => "Controller software state could not be verified. Installation is blocked.",
+        FirstTimeSetupReason.SteamActive => "Exit the active Steam session before installing required components.",
+        _ => string.Empty
+    };
 
     private static ISystemStatusProvider CreateDefaultSystemStatusProvider()
     {

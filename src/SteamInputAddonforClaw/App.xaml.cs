@@ -161,7 +161,6 @@ public partial class App : Application
             installerPathProvider: null,
             installerIntegrityValidator: null,
             safetyStateProvider: new SystemStatusHidHideProvisioningSafetyStateProvider(statusProvider));
-        hidHideProvisioner.Reconcile();
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, hidHideProvisioner: hidHideProvisioner);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;

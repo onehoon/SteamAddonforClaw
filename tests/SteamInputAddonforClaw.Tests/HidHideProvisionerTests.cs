@@ -20,12 +20,12 @@ public sealed class HidHideProvisionerTests
     }
 
     [Fact]
-    public void ProvisioningReceiptPath_IsMachineLocalAndOutsideVelopackRoot()
+    public void ProvisioningReceiptPath_IsMachineWideAndOutsideVelopackRoot()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        Assert.StartsWith(localAppData, VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
+        var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        Assert.StartsWith(programData, VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("SteamInputAddonforClaw\\hidhide-provisioning.json", VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("SteamInputAddonforClaw-State", VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SteamInputAddonforClaw\\provisioning", VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
