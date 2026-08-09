@@ -7,16 +7,16 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class MsiControllerModeManagerTests
 {
     [Theory]
-    [InlineData(0x1901, MsiControllerNativeMode.XInput)]
-    [InlineData(0x1902, MsiControllerNativeMode.DirectInput)]
-    [InlineData(0x1903, MsiControllerNativeMode.Other)]
-    public void CaptureSnapshot_KnownIdentity_ReturnsExactMode(int productId, MsiControllerNativeMode expected)
+    [InlineData(0x1901, (int)MsiControllerNativeMode.XInput)]
+    [InlineData(0x1902, (int)MsiControllerNativeMode.DirectInput)]
+    [InlineData(0x1903, (int)MsiControllerNativeMode.Other)]
+    public void CaptureSnapshot_KnownIdentity_ReturnsExactMode(int productId, int expectedMode)
     {
         var container = Guid.NewGuid();
         var result = new MsiControllerModeManager(new Enumerator([Device((ushort)productId, "MSI\\DEVICE", container)])).CaptureSnapshot();
         Assert.Equal(MsiControllerSnapshotStatus.Success, result.Status);
         Assert.True(result.AllowsMutation);
-        Assert.Equal(expected, result.Snapshot!.Mode);
+        Assert.Equal((MsiControllerNativeMode)expectedMode, result.Snapshot!.Mode);
         Assert.Equal("MSI\\DEVICE", result.Snapshot.InstanceId);
         Assert.Equal("MSI\\PARENT", result.Snapshot.ParentInstanceId);
         Assert.Equal(container, result.Snapshot.ContainerId);
