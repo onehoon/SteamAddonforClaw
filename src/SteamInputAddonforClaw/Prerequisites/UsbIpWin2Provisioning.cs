@@ -26,7 +26,7 @@ internal sealed class WindowsUsbIpWin2PackageProbe : IUsbIpWin2PackageProbe
 }
 
 internal enum UsbIpWin2ProvisioningReceiptState { InstallStarted, Provisioned, InstalledPendingReboot, AttemptFailed, AttemptCancelled }
-internal sealed record UsbIpWin2ProvisioningReceipt(int SchemaVersion, UsbIpWin2ProvisioningReceiptState State, Guid AttemptId, string InstallerVersion, string InstallerSha256, PrerequisiteStatus PreProvisioningStatus, DateTimeOffset StartedAtUtc, DateTimeOffset? CompletedAtUtc, string? ObservedInstalledVersion)
+internal sealed record UsbIpWin2ProvisioningReceipt(int SchemaVersion, UsbIpWin2ProvisioningReceiptState State, Guid AttemptId, string InstallerVersion, string InstallerSha256, PrerequisiteStatus PreProvisioningStatus, DateTimeOffset StartedAtUtc, DateTimeOffset? CompletedAtUtc, string? ObservedInstalledVersion, string? FailureReason = null, int? InstallerExitCode = null)
 {
     public const int CurrentSchemaVersion = 1;
     public bool IsValid => SchemaVersion == CurrentSchemaVersion && AttemptId != Guid.Empty && PreProvisioningStatus == PrerequisiteStatus.Missing && Version.TryParse(InstallerVersion, out _) && InstallerSha256.Length == 64 && InstallerSha256.All(Uri.IsHexDigit);
