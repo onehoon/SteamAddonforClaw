@@ -74,6 +74,19 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
+    public void Start_WhenPid1902CandidatesSharePhysicalIdentityButHaveDifferentPnpInstances_DoesNotCreateOrAcquireAnyDevice()
+    {
+        var first = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_ROOT", pnpInstanceId: "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST");
+        var second = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_ROOT", pnpInstanceId: "HID\\VID_0DB0&PID_1902&MI_00&COL02\\TEST");
+        var enumerator = new FakeEnumerator([first, second]);
+
+        var result = new MsiClawInputSource(enumerator).Start();
+
+        Assert.Equal(MsiClawInputStartStatus.Indeterminate, result.Status);
+        Assert.Equal(0, enumerator.CreateCount);
+    }
+
+    [Fact]
     public void Start_WhenPid1902CandidateHasNoVerifiedPhysicalIdentity_DoesNotCreateOrAcquireAnyDevice()
     {
         var descriptor = Device(0x0DB0, 0x1902, physicalIdentity: null);
@@ -373,8 +386,8 @@ public sealed class MsiClawInputSourceTests
         return completion.Task;
     }
 
-    private static DirectInputDeviceDescriptor Device(ushort vendorId, ushort productId, string? physicalIdentity = "USB\\MSI_ROOT", int? buttonCount = 17) =>
-        new(Guid.NewGuid(), Guid.NewGuid(), "Test", vendorId, productId, "\\\\?\\hid#vid_0db0&pid_1902&mi_00&col01#test#{00000000-0000-0000-0000-000000000000}", "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST", physicalIdentity, 0x0001, 0x0005, buttonCount, 6);
+    private static DirectInputDeviceDescriptor Device(ushort vendorId, ushort productId, string? physicalIdentity = "USB\\MSI_ROOT", int? buttonCount = 17, string? pnpInstanceId = null) =>
+        new(Guid.NewGuid(), Guid.NewGuid(), "Test", vendorId, productId, "\\\\?\\hid#vid_0db0&pid_1902&mi_00&col01#test#{00000000-0000-0000-0000-000000000000}", pnpInstanceId ?? "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST", physicalIdentity, 0x0001, 0x0005, buttonCount, 6);
     private static DirectInputState State(params int[] pressedButtons)
     {
         var buttons = new bool[17];
