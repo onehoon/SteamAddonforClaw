@@ -139,7 +139,7 @@ public partial class App : Application
         }
 
         var statusProvider = new SystemStatusProvider(
-            new WindowsDeviceInformationProvider(new WindowsControllerDeviceEnumerator()),
+            new WindowsDeviceInformationProvider(),
             [
                 new MsiCenterMSoftwareStatusProvider(),
                 new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),

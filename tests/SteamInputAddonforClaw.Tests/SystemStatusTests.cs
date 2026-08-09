@@ -22,6 +22,17 @@ public sealed class SystemStatusTests
         Assert.Equal(expected, WindowsDeviceInformationProvider.IsSupportedGpuName(name));
     }
 
+    [Theory]
+    [InlineData("NVIDIA GeForce RTX 4070 SUPER", "PCI\\VEN_10DE&DEV_2783", true)]
+    [InlineData("NVIDIA GeForce RTX 4070 SUPER", "", true)]
+    [InlineData("SudoMaker Virtual Display Adapter", "ROOT\\DISPLAY\\0000", false)]
+    [InlineData("NVIDIA Virtual Display Adapter", "ROOT\\DISPLAY\\0000", false)]
+    [InlineData("Microsoft Basic Display Adapter", "PCI\\VEN_1414", false)]
+    public void DeviceInformation_OnlyPhysicalVendorGpuWmiEntriesAreShown(string name, string pnpDeviceId, bool expected)
+    {
+        Assert.Equal(expected, WindowsDeviceInformationProvider.IsPhysicalGpu(name, pnpDeviceId));
+    }
+
     [Fact]
     public void SoftwareSorting_RanksRunningThenInstalledThenNotInstalledWithStableKindOrder()
     {
