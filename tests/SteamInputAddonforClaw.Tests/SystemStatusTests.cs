@@ -207,6 +207,38 @@ public sealed class SystemStatusTests
         Assert.Equal(expectedRuntime, status.Runtime);
     }
 
+    [Theory]
+    [InlineData("HKLM64", "MSI Center M", true)]
+    [InlineData("HKLM32", "MSI Center M SDK", true)]
+    [InlineData("HKCU", "MSI Center M", true)]
+    [InlineData("HKLM32", "msi center m sdk", true)]
+    [InlineData("HKLM32", "MSI Center", false)]
+    [InlineData("HKLM32", "MSI Foundation Service", false)]
+    [InlineData("HKLM32", "MSI Center SDK", false)]
+    public void UninstallRegistrationProbe_UsesKnownNamesWithCaseInsensitiveExactMatch(string source, string displayName, bool expectedInstalled)
+    {
+        var probe = new TestUninstallProbe(new FakeUninstallRegistrationSource([new(source, displayName)]));
+        Assert.Equal(expectedInstalled, probe.Detect().Installed);
+    }
+
+    [Fact]
+    public void MsiCenterM_InstalledButNotRunning_ReportsInstalledReason()
+    {
+        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(true), () => false).Capture();
+        Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
+        Assert.Equal(SoftwareRuntimeStatus.NotRunning, status.Runtime);
+        Assert.Equal("MsiCenterMInstalled", status.Reason);
+    }
+
+    [Fact]
+    public void MsiCenterM_InstalledAndRunning_ReportsRunningReason()
+    {
+        var status = new MsiCenterMSoftwareStatusProvider(new FakeInstallationProbe(true), () => true).Capture();
+        Assert.Equal(SoftwareInstallationStatus.Installed, status.Installation);
+        Assert.Equal(SoftwareRuntimeStatus.Running, status.Runtime);
+        Assert.Equal("MsiCenterMRunning", status.Reason);
+    }
+
     private static ControllerSoftwareStatus[] SoftwareStates() => [Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)];
     private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareInstallationStatus installation, SoftwareRuntimeStatus runtime) => new(kind, kind.ToString(), installation, runtime, "test");
     private static RuntimePrerequisiteAssessment Prerequisites(PrerequisiteStatus status) => new(new(PrerequisiteKind.HidHide, status, "test"), new(PrerequisiteKind.UsbIpWin2, status, "test"), new(PrerequisiteKind.Viiper, status, "test"));
@@ -216,4 +248,6 @@ public sealed class SystemStatusTests
     private sealed class FakePrerequisiteInspector(RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector { public RuntimePrerequisiteAssessment Inspect() => assessment; }
     private sealed class FakeHhcRuntime(bool running) : SteamInputAddonforClaw.Startup.IHandheldCompanionRuntimeDetector { public bool IsRunning() => running; }
     private sealed class FakeInstallationProbe(bool installed) : IApplicationInstallationProbe { public ApplicationInstallationInfo Detect() => new(installed, "test"); }
+    private sealed class TestUninstallProbe(IUninstallRegistrationSource source) : UninstallRegistrationInstallationProbe(MsiCenterMIdentity.InstallationDisplayNames, [], source) { }
+    private sealed class FakeUninstallRegistrationSource(IReadOnlyList<InstalledApplicationRegistration> registrations) : IUninstallRegistrationSource { public IReadOnlyList<InstalledApplicationRegistration> Enumerate() => registrations; }
 }

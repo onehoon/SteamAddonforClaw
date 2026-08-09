@@ -59,42 +59,72 @@ internal sealed class MsiCenterMSoftwareStatusProvider : IControllerSoftwareStat
 internal sealed record ApplicationInstallationInfo(bool Installed, string Reason);
 internal interface IApplicationInstallationProbe { ApplicationInstallationInfo Detect(); }
 
-internal abstract class UninstallRegistrationInstallationProbe(string displayName, IReadOnlyList<string> knownExecutablePaths) : IApplicationInstallationProbe
+internal sealed record InstalledApplicationRegistration(string Source, string? DisplayName);
+
+internal interface IUninstallRegistrationSource
 {
-    public ApplicationInstallationInfo Detect()
+    IReadOnlyList<InstalledApplicationRegistration> Enumerate();
+}
+
+internal sealed class WindowsUninstallRegistrationSource : IUninstallRegistrationSource
+{
+    public IReadOnlyList<InstalledApplicationRegistration> Enumerate()
     {
-        foreach (var root in new[] { Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64), Microsoft.Win32.Registry.CurrentUser })
-        {
-            using (root)
-            using (var uninstall = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"))
-            {
-                if (uninstall is not null && uninstall.GetSubKeyNames().Any(key => HasDisplayName(uninstall, key))) return new(true, "UninstallRegistration");
-            }
-        }
-        return knownExecutablePaths.Any(File.Exists) ? new(true, "KnownInstallPath") : new(false, "NotInstalled");
+        var registrations = new List<InstalledApplicationRegistration>();
+        AddRegistrations(registrations, Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64, "HKLM64");
+        AddRegistrations(registrations, Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry32, "HKLM32");
+        AddRegistrations(registrations, Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default, "HKCU");
+        return registrations;
     }
 
-    private bool HasDisplayName(Microsoft.Win32.RegistryKey uninstall, string key)
+    private static void AddRegistrations(List<InstalledApplicationRegistration> registrations, Microsoft.Win32.RegistryHive hive, Microsoft.Win32.RegistryView view, string source)
     {
-        using var entry = uninstall.OpenSubKey(key);
-        return string.Equals(entry?.GetValue("DisplayName") as string, displayName, StringComparison.OrdinalIgnoreCase);
+        using var root = Microsoft.Win32.RegistryKey.OpenBaseKey(hive, view);
+        using var uninstall = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
+        if (uninstall is null) return;
+        foreach (var keyName in uninstall.GetSubKeyNames())
+        {
+            using var entry = uninstall.OpenSubKey(keyName);
+            registrations.Add(new InstalledApplicationRegistration(source, entry?.GetValue("DisplayName") as string));
+        }
+    }
+}
+
+internal abstract class UninstallRegistrationInstallationProbe : IApplicationInstallationProbe
+{
+    private readonly IReadOnlyList<string> _displayNames;
+    private readonly IReadOnlyList<string> _knownExecutablePaths;
+    private readonly IUninstallRegistrationSource _source;
+
+    protected UninstallRegistrationInstallationProbe(IReadOnlyList<string> displayNames, IReadOnlyList<string> knownExecutablePaths, IUninstallRegistrationSource? source = null)
+    {
+        _displayNames = displayNames ?? throw new ArgumentNullException(nameof(displayNames));
+        _knownExecutablePaths = knownExecutablePaths ?? throw new ArgumentNullException(nameof(knownExecutablePaths));
+        _source = source ?? new WindowsUninstallRegistrationSource();
+    }
+
+    public ApplicationInstallationInfo Detect()
+    {
+        if (_source.Enumerate().Any(registration => registration.DisplayName is not null && _displayNames.Contains(registration.DisplayName, StringComparer.OrdinalIgnoreCase)))
+            return new(true, "UninstallRegistration");
+        return _knownExecutablePaths.Any(File.Exists) ? new(true, "KnownInstallPath") : new(false, "NotInstalled");
     }
 }
 
 internal sealed class HandheldCompanionInstallationProbe : UninstallRegistrationInstallationProbe
 {
-    public HandheldCompanionInstallationProbe() : base("Handheld Companion", [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HandheldCompanion", "HandheldCompanion.exe"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HandheldCompanion", "HandheldCompanion.exe")]) { }
+    public HandheldCompanionInstallationProbe() : base(["Handheld Companion"], [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HandheldCompanion", "HandheldCompanion.exe"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HandheldCompanion", "HandheldCompanion.exe")]) { }
 }
 
 internal static class MsiCenterMIdentity
 {
-    internal const string DisplayName = "MSI Center M";
+    internal static readonly string[] InstallationDisplayNames = ["MSI Center M", "MSI Center M SDK"];
     internal static readonly string[] ProcessNames = ["MSI Center M", "MSI.CentralServer", "Center_M_Server"];
 }
 
 internal sealed class MsiCenterMInstallationProbe : UninstallRegistrationInstallationProbe
 {
-    public MsiCenterMInstallationProbe() : base(MsiCenterMIdentity.DisplayName, []) { }
+    public MsiCenterMInstallationProbe() : base(MsiCenterMIdentity.InstallationDisplayNames, []) { }
 }
 
 internal static class ControllerSoftwareStatusSorter
