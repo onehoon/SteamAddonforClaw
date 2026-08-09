@@ -49,6 +49,48 @@ public sealed class MsiControllerModeManagerTests
     }
 
     [Fact]
+    public void CaptureSnapshot_SameModeForMultipleLogicalDevices_IsIndeterminate()
+    {
+        var result = new MsiControllerModeManager(new Enumerator(
+        [
+            Device(0x1902, "MSI\\FIRST", Guid.NewGuid()),
+            Device(0x1902, "MSI\\SECOND", Guid.NewGuid())
+        ])).CaptureSnapshot();
+
+        Assert.Equal(MsiControllerSnapshotStatus.Indeterminate, result.Status);
+        Assert.False(result.AllowsMutation);
+    }
+
+    [Theory]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    [InlineData("00000000-0000-0000-ffff-ffffffffffff")]
+    public void CaptureSnapshot_UnusableContainerId_UsesParentIdentity(string containerId)
+    {
+        var container = Guid.Parse(containerId);
+        var result = new MsiControllerModeManager(new Enumerator(
+        [
+            Device(0x1902, "MSI\\FIRST", container, parentInstanceId: "MSI\\PARENT_A"),
+            Device(0x1902, "MSI\\SECOND", container, parentInstanceId: "MSI\\PARENT_B")
+        ])).CaptureSnapshot();
+
+        Assert.Equal(MsiControllerSnapshotStatus.Indeterminate, result.Status);
+        Assert.False(result.AllowsMutation);
+    }
+
+    [Fact]
+    public void CaptureSnapshot_WithoutUsableContainerOrParent_UsesInstanceIdentity()
+    {
+        var result = new MsiControllerModeManager(new Enumerator(
+        [
+            Device(0x1902, "MSI\\FIRST", Guid.Empty, parentInstanceId: null),
+            Device(0x1902, "MSI\\SECOND", Guid.Empty, parentInstanceId: null)
+        ])).CaptureSnapshot();
+
+        Assert.Equal(MsiControllerSnapshotStatus.Indeterminate, result.Status);
+        Assert.False(result.AllowsMutation);
+    }
+
+    [Fact]
     public void CaptureSnapshot_UnrelatedDevicesAreIgnored()
     {
         var result = new MsiControllerModeManager(new Enumerator([Device(0x028E, vendorId: 0x045E), Device(0x1903)])).CaptureSnapshot();
@@ -63,8 +105,8 @@ public sealed class MsiControllerModeManagerTests
         Assert.False(result.AllowsMutation);
     }
 
-    private static ControllerDeviceInfo Device(ushort productId, string instanceId = "MSI\\DEVICE", Guid? container = null, ushort vendorId = 0x0DB0) =>
-        new(instanceId, container, "MSI\\PARENT", ["MSI\\PARENT"], "USB", [$"USB\\VID_{vendorId:X4}&PID_{productId:X4}"], [], "HIDClass", null, null, vendorId, productId, true);
+    private static ControllerDeviceInfo Device(ushort productId, string instanceId = "MSI\\DEVICE", Guid? container = null, ushort vendorId = 0x0DB0, string? parentInstanceId = "MSI\\PARENT") =>
+        new(instanceId, container, parentInstanceId, parentInstanceId is null ? [] : [parentInstanceId], "USB", [$"USB\\VID_{vendorId:X4}&PID_{productId:X4}"], [], "HIDClass", null, null, vendorId, productId, true);
 
     private sealed class Enumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
     { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices; }

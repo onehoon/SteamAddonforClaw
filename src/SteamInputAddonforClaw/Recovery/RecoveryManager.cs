@@ -26,10 +26,10 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store) : IRecoveryMa
         }
     }
 
-    public RecoveryResult BeginRecoverySession(MsiControllerSnapshot snapshot)
+    public RecoveryResult BeginRecoverySession(MsiControllerSnapshotResult snapshotResult)
     {
-        if (snapshot.Mode == MsiControllerNativeMode.Indeterminate)
-            return new(RecoveryStatus.Failure, "An indeterminate snapshot cannot authorize mutation.");
+        if (!snapshotResult.AllowsMutation || snapshotResult.Snapshot is not { } snapshot || snapshot.Mode == MsiControllerNativeMode.Indeterminate)
+            return new(RecoveryStatus.Failure, "Only a successful, mutation-authorizing snapshot result can start recovery.");
         var journal = new RecoveryJournal(CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, snapshot, new());
         try
         {

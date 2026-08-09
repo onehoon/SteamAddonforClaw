@@ -60,27 +60,30 @@ internal sealed class MsiControllerModeManager(IControllerDeviceEnumerator devic
             return new(MsiControllerSnapshotStatus.DeviceNotFound, null, "No known MSI Claw controller identity is present.");
         }
 
-        // A container is the strongest logical-device identity. Parent/root identity prevents
+        // A container is the strongest logical-device identity. Parent identity prevents
         // multiple interfaces for the same physical controller from being counted twice.
         var logicalCandidates = candidates
             .GroupBy(LogicalIdentity, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderBy(device => device.InstanceId, StringComparer.OrdinalIgnoreCase).ToList())
             .ToList();
-        var modes = logicalCandidates.SelectMany(group => group.Select(device => ModeFor(device.ProductId))).Distinct().ToList();
-        if (modes.Count != 1)
+        if (logicalCandidates.Count != 1)
+        {
+            AppLog.Warn("ControllerMode", "MSI controller state is ambiguous.", null,
+                ("CandidateCount", candidates.Count), ("LogicalCandidateCount", logicalCandidates.Count), ("Action", "Passive"), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+            return new(MsiControllerSnapshotStatus.Indeterminate, null, "Multiple logical MSI controller candidates are present.");
+        }
+
+        var selectedLogicalCandidate = logicalCandidates.Single();
+        var modes = selectedLogicalCandidate.Select(device => ModeFor(device.ProductId)).Distinct().ToList();
+        var distinctProducts = selectedLogicalCandidate.Select(device => device.ProductId).Distinct().ToList();
+        if (modes.Count != 1 || distinctProducts.Count != 1)
         {
             AppLog.Warn("ControllerMode", "MSI controller state is ambiguous.", null,
                 ("CandidateCount", candidates.Count), ("Modes", string.Join(',', modes)), ("Action", "Passive"), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
-            return new(MsiControllerSnapshotStatus.Indeterminate, null, "Conflicting MSI controller mode candidates are present.");
-        }
-
-        var distinctProducts = candidates.Select(device => device.ProductId).Distinct().ToList();
-        if (distinctProducts.Count != 1)
-        {
             return new(MsiControllerSnapshotStatus.Indeterminate, null, "MSI interfaces do not identify one exact restorable state.");
         }
 
-        var selected = candidates.OrderBy(device => device.InstanceId, StringComparer.OrdinalIgnoreCase).First();
+        var selected = selectedLogicalCandidate.First();
         var snapshot = new MsiControllerSnapshot(modes[0], selected.InstanceId, selected.ParentInstanceId, selected.ContainerId, selected.ProductId, DateTimeOffset.UtcNow);
         AppLog.Info("ControllerMode", "MSI controller snapshot completed.", ("Status", MsiControllerSnapshotStatus.Success),
             ("Mode", snapshot.Mode), ("InstanceId", snapshot.InstanceId), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
@@ -95,9 +98,17 @@ internal sealed class MsiControllerModeManager(IControllerDeviceEnumerator devic
         _ => MsiControllerNativeMode.Indeterminate
     };
 
-    private static string LogicalIdentity(ControllerDeviceInfo device) => device.ContainerId is { } containerId
-        ? $"container:{containerId:D}"
-        : device.AncestorInstanceIds.LastOrDefault() is { Length: > 0 } root
-            ? $"root:{root}"
-            : device.ParentInstanceId is { Length: > 0 } parent ? $"parent:{parent}" : $"instance:{device.InstanceId}";
+    private static string LogicalIdentity(ControllerDeviceInfo device)
+    {
+        if (device.ContainerId is Guid containerId && IsUsableContainerId(containerId))
+            return $"container:{containerId:D}";
+
+        if (!string.IsNullOrWhiteSpace(device.ParentInstanceId))
+            return $"parent:{device.ParentInstanceId}";
+
+        return $"instance:{device.InstanceId}";
+    }
+
+    private static bool IsUsableContainerId(Guid containerId)
+        => containerId != Guid.Empty && containerId != new Guid("00000000-0000-0000-ffff-ffffffffffff");
 }
