@@ -138,7 +138,8 @@ internal sealed class HidHideProvisioner(
             if (existing.IsCorrupt) return new(HidHideProvisioningResultKind.Blocked, "ProvisioningReceiptCorrupt");
             if (context.HidHide.Status == PrerequisiteStatus.Ready) return new(HidHideProvisioningResultKind.AlreadyReady, "HidHideAlreadyReady");
             if (!AllowsInstall(context)) return new(HidHideProvisioningResultKind.Blocked, "ProvisioningSafetyGateBlocked");
-            if (existing.Receipt is { State: HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.InstalledPendingReboot }) return new(HidHideProvisioningResultKind.Blocked, "ProvisioningReceiptRequiresReconciliation");
+            if (existing.Receipt is not null and not { State: HidHideProvisioningReceiptState.AttemptCancelled })
+                return new(HidHideProvisioningResultKind.Blocked, "ProvisioningReceiptRequiresReconciliation");
             cancellationToken.ThrowIfCancellationRequested();
             var installer = _installerPathProvider();
             if (!_installerIntegrityValidator(installer)) return new(HidHideProvisioningResultKind.Failed, "InstallerIntegrityValidationFailed");

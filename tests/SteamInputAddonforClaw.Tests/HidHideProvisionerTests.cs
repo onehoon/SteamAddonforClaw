@@ -97,6 +97,17 @@ public sealed class HidHideProvisionerTests
     }
 
     [Fact]
+    public async Task ExistingProvisionedReceiptWithMissingDriver_DoesNotReinstall()
+    {
+        var store = new FakeStore { Receipt = Receipt(HidHideProvisioningReceiptState.Provisioned) };
+        var runner = new FakeRunner();
+        var result = await Create(runner, store).ProvisionAsync(Context(), CancellationToken.None);
+        Assert.Equal(HidHideProvisioningResultKind.Blocked, result.Kind);
+        Assert.Equal(0, runner.Calls);
+        Assert.Equal(0, store.SaveCalls);
+    }
+
+    [Fact]
     public async Task ConcurrentCalls_LaunchOnlyOneInstaller()
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
