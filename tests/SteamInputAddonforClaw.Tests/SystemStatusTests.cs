@@ -36,10 +36,47 @@ public sealed class SystemStatusTests
     [Fact]
     public void AddonStatus_ExternalControllerVetoHasHighestPriority()
     {
-        var status = AddonStatusEvaluator.Evaluate(SoftwareStates(), Prerequisites(PrerequisiteStatus.Missing), new(false, 0), new(ExternalControllerAssessmentStatus.ExternalPresent, 1, []), recoverySafe: false);
+        var status = AddonStatusEvaluator.Evaluate(SoftwareStates(), Prerequisites(PrerequisiteStatus.Missing), new(false, 0), new(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device("Xbox Wireless Controller", 0x045E, 0x0B13)]), recoverySafe: false);
 
         Assert.Equal(AddonOperationalStatus.Passive, status.Status);
-        Assert.Equal("External physical controller detected.", status.Reason);
+        Assert.Equal("External physical controller detected: Xbox Wireless Controller.", status.Reason);
+    }
+
+    [Fact]
+    public void ExternalControllerCards_ClearProducesOneClearCard()
+    {
+        var cards = ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.Clear, 0, []));
+
+        var card = Assert.Single(cards);
+        Assert.Equal("No External Controller", card.Name);
+        Assert.Equal("Clear", card.Status);
+    }
+
+    [Fact]
+    public void ExternalControllerCards_UseFriendlyNameAndListEveryController()
+    {
+        var cards = ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.ExternalPresent, 2, [Device("Wireless Controller", 0x054C, 0x09CC), Device("Xbox Wireless Controller", 0x045E, 0x0B13)]));
+
+        Assert.Equal(2, cards.Count);
+        Assert.Equal(["Wireless Controller", "Xbox Wireless Controller"], cards.Select(card => card.Name));
+        Assert.Equal("VID 045E · PID 0B13", cards[1].Secondary);
+    }
+
+    [Fact]
+    public void ExternalControllerCards_UseVidPidFallbackWhenFriendlyNameIsMissing()
+    {
+        var card = Assert.Single(ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device(null, 0x1234, 0x5678)])));
+
+        Assert.Equal("Controller (VID 1234 / PID 5678)", card.Name);
+        Assert.Equal("Connected", card.Status);
+    }
+
+    [Fact]
+    public void ExternalControllerCards_IndeterminateDoesNotReportClear()
+    {
+        var card = Assert.Single(ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.Indeterminate, 0, [])));
+
+        Assert.Equal("Indeterminate", card.Status);
     }
 
     [Theory]
@@ -71,6 +108,15 @@ public sealed class SystemStatusTests
 
         Assert.Equal(AddonOperationalStatus.Indeterminate, status.Status);
         Assert.Equal("Handheld Companion state is not stable.", status.Reason);
+    }
+
+    [Fact]
+    public void AddonStatus_StartingHandheldCompanionFailsClosed()
+    {
+        var software = SoftwareStates().Select(status => status.Kind == ControllerSoftwareKind.HandheldCompanion ? status with { Runtime = SoftwareRuntimeStatus.Starting } : status).ToArray();
+        var status = AddonStatusEvaluator.Evaluate(software, Prerequisites(PrerequisiteStatus.Ready), new(true, 1), new(ExternalControllerAssessmentStatus.Clear, 0, []), recoverySafe: true);
+
+        Assert.Equal(AddonOperationalStatus.Indeterminate, status.Status);
     }
 
     [Fact]
@@ -129,6 +175,7 @@ public sealed class SystemStatusTests
     private static ControllerSoftwareStatus[] SoftwareStates() => [Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning), Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)];
     private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareInstallationStatus installation, SoftwareRuntimeStatus runtime) => new(kind, kind.ToString(), installation, runtime, "test");
     private static RuntimePrerequisiteAssessment Prerequisites(PrerequisiteStatus status) => new(new(PrerequisiteKind.HidHide, status, "test"), new(PrerequisiteKind.UsbIpWin2, status, "test"), new(PrerequisiteKind.Viiper, status, "test"));
+    private static ControllerDeviceInfo Device(string? friendlyName, ushort? vendorId, ushort? productId) => new("USB\\test", null, null, [], "USB", [], [], "HIDClass", null, null, vendorId, productId, true, friendlyName);
     private sealed class FakeDeviceProvider : IDeviceInformationProvider { public DeviceStatusSnapshot Capture() => new("MSI", "Claw", ["Intel Arc"]); }
     private sealed class FakeSoftwareProvider(ControllerSoftwareStatus status) : IControllerSoftwareStatusProvider { public ControllerSoftwareStatus Capture() => status; }
     private sealed class FakePrerequisiteInspector(RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector { public RuntimePrerequisiteAssessment Inspect() => assessment; }

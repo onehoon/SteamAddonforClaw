@@ -7,7 +7,14 @@ internal static class AddonStatusEvaluator
 {
     public static AddonStatusSnapshot Evaluate(IReadOnlyList<ControllerSoftwareStatus> software, RuntimePrerequisiteAssessment prerequisites, SteamStatusSnapshot steam, ExternalControllerAssessment externalController, bool recoverySafe)
     {
-        if (externalController.Status == ExternalControllerAssessmentStatus.ExternalPresent) return new(AddonOperationalStatus.Passive, "External physical controller detected.");
+        if (externalController.Status == ExternalControllerAssessmentStatus.ExternalPresent)
+        {
+            var firstName = ExternalControllerStatusCardFactory.GetFirstControllerName(externalController);
+            var reason = externalController.ExternalControllers.Count > 1
+                ? $"External physical controllers detected: {firstName} and {externalController.ExternalControllers.Count - 1} more."
+                : $"External physical controller detected: {firstName}.";
+            return new(AddonOperationalStatus.Passive, reason);
+        }
         if (!recoverySafe) return new(AddonOperationalStatus.RecoveryRequired, "Recovery is required before routing can continue.");
         if (externalController.Status == ExternalControllerAssessmentStatus.Indeterminate) return new(AddonOperationalStatus.Indeterminate, "External controller state is indeterminate.");
         var hhc = software.First(status => status.Kind == ControllerSoftwareKind.HandheldCompanion);

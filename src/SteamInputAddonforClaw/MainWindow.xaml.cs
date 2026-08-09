@@ -37,6 +37,7 @@ public sealed partial class MainWindow : Window
     private readonly ISystemStatusProvider _systemStatusProvider;
     private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
+    private readonly ObservableCollection<StatusCardViewModel> _externalControllerCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _runtimeCards = [];
     private int _isRefreshingStatus;
 
@@ -71,6 +72,7 @@ public sealed partial class MainWindow : Window
         StartupSettingsStatusText.Text = startupRegistrationMessage;
         ControllerSoftwareList.ItemsSource = _softwareCards;
         RoutingComponentsList.ItemsSource = _componentCards;
+        ExternalControllersList.ItemsSource = _externalControllerCards;
         RuntimeStatusList.ItemsSource = _runtimeCards;
         MainNavigationView.SelectedItem = StatusNavigationItem;
         _ = RefreshSystemStatusAsync();
@@ -232,10 +234,10 @@ public sealed partial class MainWindow : Window
             new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
             new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
         ]);
+        Replace(_externalControllerCards, ExternalControllerStatusCardFactory.Create(snapshot.ExternalController));
         Replace(_runtimeCards,
         [
             new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
-            new("External Controller", snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.Clear ? "None" : snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.ExternalPresent ? "External detected" : "Indeterminate", snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.ExternalPresent ? $"{snapshot.ExternalController.DetectedExternalControllerCount} external physical controller(s) detected." : "Read-only PnP assessment."),
             new("Steam Input Addon", FormatAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason)
         ]);
     }
