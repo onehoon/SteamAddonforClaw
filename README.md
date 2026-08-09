@@ -95,12 +95,15 @@ MSI Claw native-state restoration currently verifies an already-restored state o
 
 # Supported Environments
 
-The target routing environments are:
+## Current MVP
 
-1. **Stock MSI Center M**
-2. **MSI Center M + ClawTweaks**
+The current MVP supports **Stock MSI Center M only**. It requires MSI Center M to be installed and operational, with neither ClawTweaks nor Handheld Companion installed. Other controller-management environments are shown as unsupported and the addon remains passive.
 
-ClawTweaks support is compatibility behavior only.
+## Planned Compatibility
+
+**MSI Center M + ClawTweaks** remains a planned compatibility target, not a currently supported environment.
+
+ClawTweaks support is planned compatibility behavior only.
 
 ClawTweaks is **not a runtime dependency** and the addon must not require modifications to ClawTweaks.
 
@@ -112,7 +115,9 @@ The addon must also preserve unrelated ClawTweaks features such as:
 * performance controls;
 * other non-controller functionality.
 
-**Handheld Companion (HHC) is not a third addon routing mode.** When HHC controller management is actively managing the Claw controller, this addon remains completely passive because HHC already owns controller virtualization/routing. Merely having HHC installed is not a veto; an installed but inactive HHC environment does not block the normal Stock Center M or ClawTweaks paths.
+**Handheld Companion (HHC) is not a third addon routing mode.** It is unsupported by the current MVP when installed. Future coexistence work may permit an installed but inactive HHC environment while keeping the addon passive whenever HHC actively manages the controller.
+
+Unless a section is explicitly labeled **Current MVP**, later ClawTweaks and HHC interaction details describe planned work and are not enabled by the current version.
 
 ---
 
@@ -121,18 +126,18 @@ The addon must also preserve unrelated ClawTweaks features such as:
 The addon may intervene only when:
 
 ```text
+External physical controller absent
+AND
+recovery state safe
+AND
+current controller environment supported
+AND
+routing prerequisites ready
+AND
 Steam session active
-AND
-no external physical controller
-AND
-HHC controller management is not active
 ```
 
-Anything else means:
-
-```text
-PASSIVE
-```
+Any non-eligible outcome prevents routing and mutation. The operational UI distinguishes the reason as **Passive**, **Unsupported**, **Indeterminate**, **Setup required**, or **Waiting for Steam**; these are not all the same user-visible state.
 
 PASSIVE should behave as closely as possible to the addon not being installed.
 
@@ -164,21 +169,52 @@ External physical controller present?
     NO
     ↓
 
-HHC controller management active?
+External-controller veto latched for this Steam session?
     YES
-    → PASSIVE / HHC-MANAGED
+    → PASSIVE / VETO
 
     NO
+    ↓
+
+Recovery safe?
+    NO
+    → INDETERMINATE
+
+    YES
+    ↓
+
+External controller assessment indeterminate?
+    YES
+    → INDETERMINATE
+
+    NO
+    ↓
+
+Controller environment compatibility?
+    Unsupported
+    → UNSUPPORTED
+
+    Indeterminate
+    → INDETERMINATE
+
+    Supported
+    ↓
+
+Routing prerequisites ready?
+    NO
+    → SETUP REQUIRED
+
+    YES
     ↓
 
 Steam session active?
     NO
-    → PASSIVE
+    → WAITING FOR STEAM
 
     YES
     ↓
 
-Steam Controller routing active
+Eligible for Steam Controller routing
 ```
 
 During Steam routing:
@@ -194,7 +230,7 @@ Xbox Game Bar foreground?
     → Steam Controller receives live input
 ```
 
-External-controller veto always overrides every other state. An active HHC controller-management environment also prevents addon routing, but it is classified separately from an external physical-controller veto.
+External-controller veto always overrides every other state. Current-MVP controller-environment incompatibility is reported as Unsupported and does not create an external-controller veto latch.
 
 ---
 
@@ -467,7 +503,9 @@ The original state must be observed and restored.
 
 ---
 
-# ClawTweaks Compatibility
+# Planned ClawTweaks Compatibility
+
+> This section describes a future compatibility target. ClawTweaks is unsupported by the current MVP when installed.
 
 ClawTweaks may already perform:
 
@@ -504,7 +542,9 @@ When addon routing ends, normal ClawTweaks controller behavior must be restored.
 
 ---
 
-# Handheld Companion Coexistence
+# Future Handheld Companion Coexistence
+
+> This section describes a future coexistence target. Handheld Companion is unsupported by the current MVP when installed.
 
 Handheld Companion (HHC) is treated as an **owner/veto environment**, not as another compatibility-routing mode.
 
@@ -603,8 +643,9 @@ The implementation should not assume a single active virtual target.
 Once created for an eligible Steam session, the Classic Steam Controller should remain enumerated until:
 
 * the Steam session ends;
-* an external-controller veto forces complete disengagement; or
-* HHC controller management becomes active and forces pass-through.
+* an external-controller veto forces complete disengagement.
+
+Planned future HHC coexistence may add an HHC-management transition that forces pass-through. That is not part of the Current MVP lifecycle because an installed HHC environment is currently unsupported.
 
 Normal foreground changes must not recreate it.
 

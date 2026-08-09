@@ -9,15 +9,14 @@ internal enum RoutingDecisionKind { Passive, WaitingForSteam, Eligible, SetupReq
 internal enum RoutingDecisionReason
 {
     SteamInactive, ExternalControllerPresent, ExternalControllerSessionLatched, ExternalControllerIndeterminate,
-    RecoveryUnsafe, HandheldCompanionRunning, HandheldCompanionIndeterminate,
-    ClawTweaksRunning, ClawTweaksIndeterminate, PrerequisitesNotReady, Eligible
+    RecoveryUnsafe, ControllerEnvironmentUnsupported, ControllerEnvironmentIndeterminate, PrerequisitesNotReady, Eligible
 }
 
 internal sealed record RoutingDecision(RoutingDecisionKind Kind, RoutingDecisionReason Reason);
 internal sealed record RoutingPolicyInput(
     SteamSessionState Steam,
     ExternalControllerAssessment ExternalController,
-    IReadOnlyList<ControllerSoftwareStatus> ControllerSoftware,
+    ControllerEnvironmentCompatibilityAssessment Compatibility,
     RuntimePrerequisiteAssessment Prerequisites,
     bool RecoverySafe);
 
@@ -34,17 +33,10 @@ internal static class RoutingEligibilityPolicy
         if (input.ExternalController.Status == ExternalControllerAssessmentStatus.Indeterminate)
             return new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.ExternalControllerIndeterminate);
 
-        var hhc = input.ControllerSoftware.First(item => item.Kind == ControllerSoftwareKind.HandheldCompanion);
-        if (hhc.Runtime == SoftwareRuntimeStatus.Running)
-            return new(RoutingDecisionKind.Passive, RoutingDecisionReason.HandheldCompanionRunning);
-        if (hhc.Runtime is SoftwareRuntimeStatus.Starting or SoftwareRuntimeStatus.Indeterminate)
-            return new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.HandheldCompanionIndeterminate);
-
-        var clawTweaks = input.ControllerSoftware.First(item => item.Kind == ControllerSoftwareKind.ClawTweaks);
-        if (clawTweaks.Runtime == SoftwareRuntimeStatus.Running)
-            return new(RoutingDecisionKind.Passive, RoutingDecisionReason.ClawTweaksRunning);
-        if (clawTweaks.Runtime is SoftwareRuntimeStatus.Starting or SoftwareRuntimeStatus.Indeterminate)
-            return new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.ClawTweaksIndeterminate);
+        if (input.Compatibility.Status == ControllerEnvironmentCompatibilityStatus.Unsupported)
+            return new(RoutingDecisionKind.Passive, RoutingDecisionReason.ControllerEnvironmentUnsupported);
+        if (input.Compatibility.Status == ControllerEnvironmentCompatibilityStatus.Indeterminate)
+            return new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.ControllerEnvironmentIndeterminate);
         if (!input.Prerequisites.IsRoutingReady)
             return new(RoutingDecisionKind.SetupRequired, RoutingDecisionReason.PrerequisitesNotReady);
         return input.Steam.IsActive

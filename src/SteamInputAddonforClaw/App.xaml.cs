@@ -152,7 +152,7 @@ public partial class App : Application
             () => _steamSessionWatcher?.State ?? SteamSessionState.FromRunningAppId(0),
             CaptureExternalControllerAssessment,
             () => recoverySafe,
-            _routingSessionStateMachine);
+            routingSessionStateMachine: _routingSessionStateMachine);
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;

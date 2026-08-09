@@ -14,7 +14,7 @@ internal enum RoutingActionReason
     SteamSessionEnded,
     SetupRequired,
     RecoveryUnsafe,
-    ControllerSoftwareVeto,
+    ControllerEnvironmentUnsupported,
     IndeterminateState
 }
 
@@ -54,7 +54,7 @@ internal static class RoutingActionPlanner
         RoutingDecisionKind.SetupRequired => RoutingActionReason.SetupRequired,
         RoutingDecisionKind.Indeterminate when decision.Reason == RoutingDecisionReason.RecoveryUnsafe => RoutingActionReason.RecoveryUnsafe,
         RoutingDecisionKind.Indeterminate => RoutingActionReason.IndeterminateState,
-        RoutingDecisionKind.Passive when decision.Reason is RoutingDecisionReason.HandheldCompanionRunning or RoutingDecisionReason.ClawTweaksRunning => RoutingActionReason.ControllerSoftwareVeto,
+        RoutingDecisionKind.Passive when decision.Reason == RoutingDecisionReason.ControllerEnvironmentUnsupported => RoutingActionReason.ControllerEnvironmentUnsupported,
         RoutingDecisionKind.Passive when decision.Reason == RoutingDecisionReason.ExternalControllerPresent => RoutingActionReason.ExternalControllerVeto,
         _ => RoutingActionReason.RoutingNoLongerEligible
     };

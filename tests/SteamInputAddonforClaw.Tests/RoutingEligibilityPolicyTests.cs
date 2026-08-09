@@ -91,9 +91,9 @@ public sealed class RoutingEligibilityPolicyTests
     }
 
     [Theory]
-    [InlineData((int)SoftwareRuntimeStatus.Running, (int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.HandheldCompanionRunning)]
-    [InlineData((int)SoftwareRuntimeStatus.Starting, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.HandheldCompanionIndeterminate)]
-    [InlineData((int)SoftwareRuntimeStatus.Indeterminate, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.HandheldCompanionIndeterminate)]
+    [InlineData((int)SoftwareRuntimeStatus.Running, (int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ControllerEnvironmentUnsupported)]
+    [InlineData((int)SoftwareRuntimeStatus.Starting, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ControllerEnvironmentIndeterminate)]
+    [InlineData((int)SoftwareRuntimeStatus.Indeterminate, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ControllerEnvironmentIndeterminate)]
     public void HandheldCompanion_UsesFailClosedPolicy(int runtimeValue, int kindValue, int reasonValue)
     {
         var decision = new RoutingSessionStateMachine().Evaluate(Input(hhc: (SoftwareRuntimeStatus)runtimeValue));
@@ -102,9 +102,9 @@ public sealed class RoutingEligibilityPolicyTests
     }
 
     [Theory]
-    [InlineData((int)SoftwareRuntimeStatus.Running, (int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ClawTweaksRunning)]
-    [InlineData((int)SoftwareRuntimeStatus.Starting, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ClawTweaksIndeterminate)]
-    [InlineData((int)SoftwareRuntimeStatus.Indeterminate, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ClawTweaksIndeterminate)]
+    [InlineData((int)SoftwareRuntimeStatus.Running, (int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ControllerEnvironmentUnsupported)]
+    [InlineData((int)SoftwareRuntimeStatus.Starting, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ControllerEnvironmentIndeterminate)]
+    [InlineData((int)SoftwareRuntimeStatus.Indeterminate, (int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.ControllerEnvironmentIndeterminate)]
     public void ClawTweaks_UsesFailClosedPolicy(int runtimeValue, int kindValue, int reasonValue)
     {
         var decision = new RoutingSessionStateMachine().Evaluate(Input(clawTweaks: (SoftwareRuntimeStatus)runtimeValue));
@@ -144,11 +144,11 @@ public sealed class RoutingEligibilityPolicyTests
         RuntimePrerequisiteAssessment? prerequisites = null) => new(
             SteamSessionState.FromRunningAppId(appId),
             external ?? External(ExternalControllerAssessmentStatus.Clear),
-            [Software(ControllerSoftwareKind.MsiCenterM), Software(ControllerSoftwareKind.ClawTweaks, clawTweaks), Software(ControllerSoftwareKind.HandheldCompanion, hhc)],
+            new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate([Software(ControllerSoftwareKind.MsiCenterM, SoftwareRuntimeStatus.Running, SoftwareInstallationStatus.Installed), Software(ControllerSoftwareKind.ClawTweaks, clawTweaks), Software(ControllerSoftwareKind.HandheldCompanion, hhc)]),
             prerequisites ?? Prerequisites(PrerequisiteKind.HidHide, prerequisiteStatus),
             recoverySafe);
 
-    private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareRuntimeStatus runtime = SoftwareRuntimeStatus.NotRunning) => new(kind, kind.ToString(), SoftwareInstallationStatus.Installed, runtime, "test");
+    private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareRuntimeStatus runtime = SoftwareRuntimeStatus.NotRunning, SoftwareInstallationStatus installation = SoftwareInstallationStatus.NotInstalled) => new(kind, kind.ToString(), installation, runtime, "test");
     private static ExternalControllerAssessment External(ExternalControllerAssessmentStatus status) => new(status, status == ExternalControllerAssessmentStatus.ExternalPresent ? 1 : 0, []);
     private static RuntimePrerequisiteAssessment Prerequisites(PrerequisiteKind changedKind, PrerequisiteStatus changedStatus) => new(
         new(PrerequisiteKind.HidHide, changedKind == PrerequisiteKind.HidHide ? changedStatus : PrerequisiteStatus.Ready, "test"),
