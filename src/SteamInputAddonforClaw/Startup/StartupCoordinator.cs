@@ -2,6 +2,7 @@ namespace SteamInputAddonforClaw.Startup;
 
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Recovery;
 
 internal sealed class StartupCoordinator
 {
@@ -10,24 +11,36 @@ internal sealed class StartupCoordinator
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
     private readonly TimeSpan _clawTweaksStartingTimeout;
     private readonly TimeSpan _clawTweaksStartingCheckInterval;
+    private readonly IRecoveryManager? _recoveryManager;
 
     public StartupCoordinator(
         IUpdateGate updateGate,
         IControllerEnvironmentDetector environmentDetector,
         IControllerEnvironmentWaiter environmentWaiter,
         TimeSpan? clawTweaksStartingTimeout = null,
-        TimeSpan? clawTweaksStartingCheckInterval = null)
+        TimeSpan? clawTweaksStartingCheckInterval = null,
+        IRecoveryManager? recoveryManager = null)
     {
         _updateGate = updateGate;
         _environmentDetector = environmentDetector;
         _environmentWaiter = environmentWaiter;
         _clawTweaksStartingTimeout = clawTweaksStartingTimeout ?? TimeSpan.FromSeconds(5);
         _clawTweaksStartingCheckInterval = clawTweaksStartingCheckInterval ?? TimeSpan.FromMilliseconds(350);
+        _recoveryManager = recoveryManager;
     }
 
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
+        if (_recoveryManager is not null)
+        {
+            var recoveryResult = _recoveryManager.RecoverIncompleteSession();
+            if (!recoveryResult.IsSafeToContinue)
+            {
+                AppLog.Warn("Startup", "Normal routing blocked by incomplete recovery.", null, ("Action", "Passive"), ("Reason", recoveryResult.Reason));
+                return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: false);
+            }
+        }
         AppLog.Info("Startup", "Startup update gate entered.");
         var updateResult = await _updateGate.RunAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("Startup", "Update gate completed.", ("Result", updateResult), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
@@ -74,4 +87,4 @@ internal sealed class StartupCoordinator
     }
 }
 
-internal sealed record StartupResult(bool ShouldStartRuntime, ControllerEnvironmentMode EnvironmentMode, ControllerEnvironmentReadiness EnvironmentReadiness);
+internal sealed record StartupResult(bool ShouldStartRuntime, ControllerEnvironmentMode EnvironmentMode, ControllerEnvironmentReadiness EnvironmentReadiness, bool RecoverySafe = true);

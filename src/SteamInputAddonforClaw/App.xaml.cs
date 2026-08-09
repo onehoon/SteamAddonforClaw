@@ -8,6 +8,7 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
+using SteamInputAddonforClaw.Recovery;
 
 namespace SteamInputAddonforClaw;
 
@@ -51,7 +52,8 @@ public partial class App : Application
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(deviceEnumerator),
-            new ControllerEnvironmentWaiter(deviceEnumerator, classifier));
+            new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
+            recoveryManager: new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath)));
 
         try
         {
@@ -63,7 +65,7 @@ public partial class App : Application
                 return;
             }
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
@@ -75,7 +77,7 @@ public partial class App : Application
         }
     }
 
-    private void StartNormalRuntime(ControllerDeviceClassifier classifier, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness)
+    private void StartNormalRuntime(ControllerDeviceClassifier classifier, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         ClawTweaksCompatibilitySnapshotLogger.LogAtStartup(new WindowsControllerDeviceEnumerator());
@@ -104,7 +106,14 @@ public partial class App : Application
                 ? new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, [])
                 : externalAssessment);
 
-        _steamSessionWatcher.Start();
+        if (recoverySafe)
+        {
+            _steamSessionWatcher.Start();
+        }
+        else
+        {
+            AppLog.Warn("Recovery", "Steam/controller routing remains stopped because recovery is unsafe.", null, ("Action", "Passive"));
+        }
         _mainWindow.UpdateSteamSessionState(_steamSessionWatcher.State);
         try
         {
