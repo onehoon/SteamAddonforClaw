@@ -7,15 +7,36 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using SteamInputAddonforClaw.Recovery;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
 internal static class ElevatedPrerequisiteSetup
 {
     internal const string Argument = "--elevated-prerequisite-setup";
+    internal enum ResultKind { Ready, Installed, RebootRequired, Cancelled, Blocked, Failed, AlreadyInProgress }
+    internal static ResultKind TranslateExitCode(ElevatedProcessResult result) => result.Kind switch
+    {
+        ElevatedProcessResultKind.CancelledBeforeStart => ResultKind.Cancelled,
+        ElevatedProcessResultKind.Completed when result.ExitCode == 0 => ResultKind.Installed,
+        ElevatedProcessResultKind.Completed when result.ExitCode == 3010 => ResultKind.RebootRequired,
+        ElevatedProcessResultKind.Completed when result.ExitCode == 2 => ResultKind.AlreadyInProgress,
+        _ => ResultKind.Failed
+    };
     public static int Run()
     {
-        using var mutex = new Mutex(false, @"Global\SteamInputAddonforClaw.PrerequisiteSetup", out var created);
+        Mutex mutex;
+        bool created;
+        try { mutex = CreateSetupMutex(out created); }
+        catch (Exception exception)
+        {
+            AppLog.Error("PrerequisiteSetup", "Prerequisite setup mutex could not be opened safely.", exception, ("Reason", "SetupMutexUnavailable"));
+            return 1;
+        }
+        using (mutex)
+        {
         if (!created)
         {
             AppLog.Warn("PrerequisiteSetup", "Prerequisite setup was blocked because another helper is active.", null, ("Reason", "SetupMutexAlreadyHeld"));
@@ -96,6 +117,17 @@ internal static class ElevatedPrerequisiteSetup
             AppLog.Error("PrerequisiteSetup", "Elevated prerequisite setup failed unexpectedly.", exception);
             return 1;
         }
+        }
+    }
+
+    private static Mutex CreateSetupMutex(out bool created)
+    {
+        var security = new MutexSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new MutexAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), MutexRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new MutexAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), MutexRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new MutexAccessRule(new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null), MutexRights.Synchronize | MutexRights.Modify, AccessControlType.Allow));
+        return MutexAcl.Create(false, @"Global\SteamInputAddonforClaw.PrerequisiteSetup", out created, security);
     }
 
     private static int RunChild(string component, string path, string arguments, string expectedHash)
@@ -165,6 +197,7 @@ internal static class ElevatedPrerequisiteSetup
             };
             var compatibility = new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate(software.Select(provider => provider.Capture()).ToArray());
             if (!compatibility.AllowsMutation) return (false, "Compatibility" + compatibility.Reason);
+            if (new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath).Exists()) return (false, "RecoveryJournalPresent");
             var devices = new WindowsControllerDeviceEnumerator();
             var external = new ExternalControllerDetector(devices, new ControllerDeviceClassifier()).Detect();
             if (external.Status != ExternalControllerAssessmentStatus.Clear) return (false, "ExternalController" + external.Status);

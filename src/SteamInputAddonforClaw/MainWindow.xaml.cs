@@ -253,10 +253,11 @@ public sealed partial class MainWindow : Window
     private void ShowPage(MainNavigationPage page)
     {
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
+        SetupContent.Visibility = page == MainNavigationPage.Setup ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
-        if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
+        if (page is MainNavigationPage.Status or MainNavigationPage.Setup) _ = RefreshSystemStatusAsync();
     }
 
     private async void RefreshStatusButton_Click(object sender, RoutedEventArgs args) => await RefreshSystemStatusAsync();
@@ -308,29 +309,38 @@ public sealed partial class MainWindow : Window
         var canInstall = setup.CanInstallRequiredComponents;
         var receiptMessage = setup.Status == FirstTimeSetupStatus.Complete ? "Setup complete. Routing runtime is not available in this build."
             : FormatFirstTimeSetupMessage(setup);
-        HidHideProvisioningPanel.Visibility = setup.Status != FirstTimeSetupStatus.Complete || !string.IsNullOrEmpty(receiptMessage) ? Visibility.Visible : Visibility.Collapsed;
-        InstallHidHideButton.IsEnabled = canInstall;
-        HidHideProvisioningStatusText.Text = receiptMessage;
+        SetupHidHideText.Text = $"HidHide: {snapshot.Prerequisites.HidHide.Status}";
+        SetupUsbIpText.Text = $"usbip-win2: {snapshot.Prerequisites.UsbIpWin2.Status}";
+        InstallRequiredComponentsButton.IsEnabled = canInstall;
+        SetupStatusText.Text = receiptMessage;
+        if (setup.Status != FirstTimeSetupStatus.Complete && _navigationState.CurrentPage == MainNavigationPage.Status)
+            ShowPage(_navigationState.OpenSetup());
     }
 
     private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)
     {
-        InstallHidHideButton.IsEnabled = false;
-        HidHideProvisioningStatusText.Text = "Installing required components...";
+        InstallRequiredComponentsButton.IsEnabled = false;
+        SetupStatusText.Text = "Installing required components...";
         try
         {
             var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
             var result = await new ElevatedProcessRunner().RunAsync(executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
-            HidHideProvisioningStatusText.Text = result.Kind switch
+            SetupStatusText.Text = ElevatedPrerequisiteSetup.TranslateExitCode(result) switch
             {
-                ElevatedProcessResultKind.Completed when result.ExitCode == 0 => "Required components were installed.",
-                ElevatedProcessResultKind.Completed when result.ExitCode == 3010 => "Restart Windows to complete component setup.",
-                ElevatedProcessResultKind.Completed when result.ExitCode == 2 => "Another setup operation is already in progress.",
-                ElevatedProcessResultKind.CancelledBeforeStart => "Installation was cancelled.",
+                ElevatedPrerequisiteSetup.ResultKind.Installed => "Required components were installed.",
+                ElevatedPrerequisiteSetup.ResultKind.RebootRequired => "Restart Windows to complete component setup.",
+                ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress => "Another setup operation is already in progress.",
+                ElevatedPrerequisiteSetup.ResultKind.Cancelled => "Installation was cancelled.",
                 _ => result.Reason ?? "Required component installation failed."
             };
         }
         finally { await RefreshSystemStatusAsync(); }
+    }
+
+    private void ShowStatusButton_Click(object sender, RoutedEventArgs args)
+    {
+        MainNavigationView.SelectedItem = StatusNavigationItem;
+        ShowPage(_navigationState.SelectNavigationItem(false, "Status"));
     }
 
     private static void Replace(ObservableCollection<StatusCardViewModel> destination, IEnumerable<StatusCardViewModel> source) { destination.Clear(); foreach (var item in source) destination.Add(item); }

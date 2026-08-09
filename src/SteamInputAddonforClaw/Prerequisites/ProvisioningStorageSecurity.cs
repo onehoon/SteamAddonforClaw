@@ -11,27 +11,34 @@ internal sealed record ProvisioningStorageAssessment(ProvisioningStorageStatus S
 
 internal static class ProvisioningStorageSecurity
 {
+    private static readonly SecurityIdentifier Administrators = new(WellKnownSidType.BuiltinAdministratorsSid, null);
+    private static readonly SecurityIdentifier System = new(WellKnownSidType.LocalSystemSid, null);
+    private static readonly SecurityIdentifier Users = new(WellKnownSidType.BuiltinUsersSid, null);
+    private static readonly SecurityIdentifier Everyone = new(WellKnownSidType.WorldSid, null);
+    private static readonly SecurityIdentifier AuthenticatedUsers = new(WellKnownSidType.AuthenticatedUserSid, null);
+
     public static ProvisioningStorageAssessment EnsureTrustedStorage(string directory)
     {
-        var existing = Inspect(directory);
-        if (existing.Status != ProvisioningStorageStatus.Missing) return existing;
+        var assessment = Inspect(directory);
+        if (assessment.Status != ProvisioningStorageStatus.Missing) return assessment;
 
         try
         {
-            Directory.CreateDirectory(directory);
-            var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-            var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-            var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-            var security = new DirectorySecurity();
-            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-            security.SetOwner(administrators);
-            security.AddAccessRule(new FileSystemAccessRule(system, FileSystemRights.FullControl,
-                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-            security.AddAccessRule(new FileSystemAccessRule(administrators, FileSystemRights.FullControl,
-                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-            security.AddAccessRule(new FileSystemAccessRule(users, FileSystemRights.ReadAndExecute,
-                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-            new DirectoryInfo(directory).SetAccessControl(security);
+            foreach (var segment in GetOwnedPathSegments(directory))
+            {
+                if (Directory.Exists(segment))
+                {
+                    var existing = AssessExistingDirectory(segment);
+                    if (existing.Status != ProvisioningStorageStatus.Trusted) return existing;
+                    continue;
+                }
+
+                Directory.CreateDirectory(segment);
+                new DirectoryInfo(segment).SetAccessControl(CreateExpectedSecurity());
+                var created = AssessExistingDirectory(segment);
+                if (created.Status != ProvisioningStorageStatus.Trusted) return created;
+            }
+
             return Inspect(directory);
         }
         catch
@@ -44,29 +51,76 @@ internal static class ProvisioningStorageSecurity
     {
         try
         {
-            if (!Directory.Exists(directory)) return new(ProvisioningStorageStatus.Missing, "ProvisioningStorageMissing");
-            var cursor = new DirectoryInfo(directory);
-            while (cursor is not null && !string.Equals(cursor.FullName, Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), StringComparison.OrdinalIgnoreCase))
+            foreach (var segment in GetOwnedPathSegments(directory))
             {
-                if ((cursor.Attributes & FileAttributes.ReparsePoint) != 0) return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStorageReparsePoint");
-                cursor = cursor.Parent;
+                if (!Directory.Exists(segment)) return new(ProvisioningStorageStatus.Missing, "ProvisioningStorageMissing");
+                var assessment = AssessExistingDirectory(segment);
+                if (assessment.Status != ProvisioningStorageStatus.Trusted) return assessment;
             }
-            var security = new DirectoryInfo(directory).GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
-            var owner = security.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
-            var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-            var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-            if (owner is null || (!owner.Equals(administrators) && !owner.Equals(system))) return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStorageOwnerUnsafe");
-            foreach (FileSystemAccessRule rule in security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
-            {
-                var sid = (SecurityIdentifier)rule.IdentityReference;
-                var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-                var everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
-                var authenticated = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
-                var write = (rule.FileSystemRights & (FileSystemRights.Write | FileSystemRights.Modify | FileSystemRights.FullControl | FileSystemRights.Delete | FileSystemRights.CreateFiles)) != 0;
-                if (rule.AccessControlType == AccessControlType.Allow && write && (sid.Equals(users) || sid.Equals(everyone) || sid.Equals(authenticated))) return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStorageAclUnsafe");
-            }
+
             return new(ProvisioningStorageStatus.Trusted, "ProvisioningStorageTrusted");
         }
-        catch { return new(ProvisioningStorageStatus.Indeterminate, "ProvisioningStorageInspectionFailed"); }
+        catch (ArgumentException)
+        {
+            return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStoragePathOutsideProgramData");
+        }
+        catch
+        {
+            return new(ProvisioningStorageStatus.Indeterminate, "ProvisioningStorageInspectionFailed");
+        }
     }
+
+    private static IEnumerable<string> GetOwnedPathSegments(string directory)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)));
+        var target = Path.GetFullPath(directory);
+        var prefix = root + Path.DirectorySeparatorChar;
+        if (!target.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Provisioning storage must be under ProgramData.", nameof(directory));
+        var current = root;
+        foreach (var part in target[prefix.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, part);
+            yield return current;
+        }
+    }
+
+    private static ProvisioningStorageAssessment AssessExistingDirectory(string directory)
+    {
+        var info = new DirectoryInfo(directory);
+        if ((info.Attributes & FileAttributes.ReparsePoint) != 0) return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStorageReparsePoint");
+        var security = info.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
+        var owner = security.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        var rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
+        return AssessAcl(owner, rules);
+    }
+
+    internal static ProvisioningStorageAssessment AssessAcl(SecurityIdentifier? owner, IEnumerable<FileSystemAccessRule> rules)
+    {
+        if (owner is null || (!owner.Equals(Administrators) && !owner.Equals(System))) return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStorageOwnerUnsafe");
+        var materialized = rules.ToArray();
+        if (!Allows(materialized, System, FileSystemRights.FullControl) || !Allows(materialized, Administrators, FileSystemRights.FullControl) || !Allows(materialized, Users, FileSystemRights.ReadAndExecute))
+            return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStorageAclIncomplete");
+        var prohibited = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.Delete |
+            FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+        if (materialized.Any(rule => rule.AccessControlType == AccessControlType.Allow && IsBroadPrincipal((SecurityIdentifier)rule.IdentityReference) && (rule.FileSystemRights & prohibited) != 0))
+            return new(ProvisioningStorageStatus.Unsafe, "ProvisioningStorageAclUnsafe");
+        return new(ProvisioningStorageStatus.Trusted, "ProvisioningStorageTrusted");
+    }
+
+    private static DirectorySecurity CreateExpectedSecurity()
+    {
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(Administrators);
+        var inheritance = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+        security.AddAccessRule(new FileSystemAccessRule(System, FileSystemRights.FullControl, inheritance, PropagationFlags.None, AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(Administrators, FileSystemRights.FullControl, inheritance, PropagationFlags.None, AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(Users, FileSystemRights.ReadAndExecute, inheritance, PropagationFlags.None, AccessControlType.Allow));
+        return security;
+    }
+
+    private static bool Allows(IEnumerable<FileSystemAccessRule> rules, SecurityIdentifier principal, FileSystemRights required) =>
+        rules.Any(rule => rule.AccessControlType == AccessControlType.Allow && ((SecurityIdentifier)rule.IdentityReference).Equals(principal) && (rule.FileSystemRights & required) == required);
+
+    private static bool IsBroadPrincipal(SecurityIdentifier principal) => principal.Equals(Users) || principal.Equals(Everyone) || principal.Equals(AuthenticatedUsers);
 }

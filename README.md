@@ -741,6 +741,8 @@ Replacing the complete HidHide configuration is forbidden.
 
 HidHide and usbip-win2 are required prerequisites for supported addon routing. In the Current MVP, missing components in an otherwise supported Stock MSI Center M environment are shown as **Setup required**. The user starts one explicit **Install Required Components** action; one elevated helper validates the bundled installers, records durable machine-wide receipts, and installs HidHide followed by usbip-win2. Routing and automatic mutation remain disabled until setup is complete. A reboot-required installer result is shown as **Restart Windows** rather than being treated as a completed install. ClawTweaks HidHide reuse is planned future compatibility behavior only.
 
+The pinned usbip-win2 baseline is official x64 release **0.9.7.7**. Version 0.9.7.8 is deliberately excluded from bundled and runtime-download candidates. The setup page warns that USB devices can briefly disconnect while usbip-win2 installs; the helper uses `/NORESTART` and reports restart-required rather than restarting Windows itself.
+
 The v1 compatibility baseline is the official HidHide 1.5.230 release. The addon uses its persistent configuration API with recovery journaling; newer process/session blacklist APIs are not required by v1.
 
 Installing HidHide alone must not hide the MSI Claw controller. While the addon is PASSIVE, it owns no HidHide device hiding or whitelist lease. In Stock MSI Center M environments the physical controller remains normally exposed; existing ClawTweaks/HHC HidHide configuration and controller exposure state are left unchanged.
@@ -754,6 +756,8 @@ It must not be assumed to exist on every installed HidHide version.
 If HidHide or usbip-win2 was already present before the addon, the addon must never treat it as addon-provisioned. When the elevated helper starts an explicit first-time install from a confirmed Missing state, it writes a durable provisioning receipt before starting each installer. Receipts are stored under ProgramData in an ACL-validated, non-roaming directory separate from the Velopack root and crash-recovery data; they record installer version and hash for future uninstall-safety decisions. A legacy per-user HidHide receipt is never trusted as uninstall provenance and blocks automatic HidHide installation when HidHide is missing.
 
 Future uninstall cleanup may remove HidHide only when the receipt and current system state prove that removal is safe. If another consumer may depend on HidHide, the configuration has changed, or provenance is uncertain, HidHide must be preserved.
+
+The same conservative rule applies to usbip-win2. A receipt only records that this addon initiated a pinned installer from a missing state; it does not establish exclusive ownership. Future removal must preserve usbip-win2 whenever another consumer, a version change, configuration change, or provenance uncertainty is present. This PR does not implement package removal.
 
 ---
 
