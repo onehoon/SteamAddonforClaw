@@ -60,13 +60,13 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
             if (!_hidHideClient.AddApplication(_executablePath))
             {
                 var postFailureInspection = _hidHideClient.Inspect();
-                if (postFailureInspection.IsUsable && !postFailureInspection.ApplicationWhitelist.Contains(_executablePath))
+                if (postFailureInspection.IsConfigurationReadable && !postFailureInspection.ApplicationWhitelist.Contains(_executablePath))
                 {
                     var cleanup = _recoveryManager.CompleteRecoverySession();
                     AppLog.Warn("HidHide", "HidHide whitelist addition failed without a persisted entry.", null, ("ExecutablePath", _executablePath), ("JournalCleared", cleanup.Status == RecoveryStatus.Success), ("Action", "DoNotAcquire"));
                     return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist access could not be granted. No controller settings were changed.");
                 }
-                if (postFailureInspection.IsUsable && postFailureInspection.ApplicationWhitelist.Contains(_executablePath))
+                if (postFailureInspection.IsConfigurationReadable && postFailureInspection.ApplicationWhitelist.Contains(_executablePath))
                 {
                     _ownsWhitelistLease = true;
                     AppLog.Warn("HidHide", "HidHide whitelist command reported failure after the lease was persisted.", null, ("ExecutablePath", _executablePath), ("Action", "ContinueWithVerifiedLease"));
@@ -80,7 +80,7 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
             if (!_ownsWhitelistLease)
             {
                 var verification = _hidHideClient.Inspect();
-                if (!verification.IsUsable || !verification.ApplicationWhitelist.Contains(_executablePath))
+                if (!verification.IsConfigurationReadable || !verification.ApplicationWhitelist.Contains(_executablePath))
                 {
                     AppLog.Warn("HidHide", "HidHide whitelist addition could not be verified.", null, ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
                     return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist access could not be verified. Recovery remains pending.");
@@ -137,7 +137,7 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
                 return;
             }
             var verification = _hidHideClient.Inspect();
-            if (!verification.IsUsable || verification.ApplicationWhitelist.Contains(_executablePath))
+            if (!verification.IsConfigurationReadable || verification.ApplicationWhitelist.Contains(_executablePath))
             {
                 AppLog.Error("HidHide", "HidHide whitelist lease cleanup could not be verified.", new InvalidOperationException("HidHide whitelist removal verification failed."), ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
                 return;

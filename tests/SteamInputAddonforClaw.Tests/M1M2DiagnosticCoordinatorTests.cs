@@ -140,6 +140,23 @@ public sealed class M1M2DiagnosticCoordinatorTests
     }
 
     [Fact]
+    public async Task Cleanup_WhenHidHideBecomesDisabledAfterLease_RemovesEntryAndDeletesJournal()
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide { Hidden = true, Status = HidHideInspectionStatus.Disabled };
+        hidHide.InspectionStatuses.Enqueue(HidHideInspectionStatus.Available);
+        hidHide.InspectionStatuses.Enqueue(HidHideInspectionStatus.Available);
+        var input = new FakeInput();
+        await using var coordinator = Create(input, hidHide, store);
+
+        Assert.True(coordinator.Start().Started);
+        await coordinator.StopAsync();
+
+        Assert.False(store.Exists());
+        Assert.DoesNotContain(AddonPath, hidHide.Entries, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task VerificationFailure_RetryRecognizesJournalOwnedLeaseAndCleansItUp()
     {
         var store = new MemoryStore();
@@ -186,6 +203,37 @@ public sealed class M1M2DiagnosticCoordinatorTests
 
         Assert.Equal(RecoveryStatus.Success, manager.RecoverIncompleteSession().Status);
         Assert.False(store.Exists());
+    }
+
+    [Theory]
+    [InlineData((int)HidHideInspectionStatus.Disabled)]
+    [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
+    public void CrashRecovery_WhenConfigurationIsReadable_RemovesExactEntryAndDeletesJournal(int statusValue)
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide(@"C:\Apps\ClawTweaks.exe") { Status = (HidHideInspectionStatus)statusValue };
+        var manager = new RecoveryManager(store, hidHide);
+        Assert.Equal(RecoveryStatus.Success, manager.BeginHidHideWhitelistLease(AddonPath).Status);
+        Assert.True(hidHide.AddApplication(AddonPath));
+
+        Assert.Equal(RecoveryStatus.Success, manager.RecoverIncompleteSession().Status);
+        Assert.DoesNotContain(AddonPath, hidHide.Entries, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(@"C:\Apps\ClawTweaks.exe", hidHide.Entries, StringComparer.OrdinalIgnoreCase);
+        Assert.False(store.Exists());
+    }
+
+    [Fact]
+    public void CrashRecovery_WhenConfigurationUnavailable_PreservesJournalWithoutMutation()
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide(AddonPath) { Status = HidHideInspectionStatus.ConfigurationUnavailable };
+        var manager = new RecoveryManager(store, hidHide);
+        Assert.Equal(RecoveryStatus.Success, manager.BeginHidHideWhitelistLease(AddonPath).Status);
+
+        Assert.Equal(RecoveryStatus.Failure, manager.RecoverIncompleteSession().Status);
+        Assert.Contains(AddonPath, hidHide.Entries, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(0, hidHide.RemoveCount);
+        Assert.True(store.Exists());
     }
 
     private static M1M2DiagnosticCoordinator Create(FakeInput input, FakeHidHide hidHide, MemoryStore store) =>

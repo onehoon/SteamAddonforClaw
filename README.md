@@ -693,7 +693,7 @@ HidHide is a required prerequisite for supported addon routing. The installer pr
 
 The v1 compatibility baseline is the official HidHide 1.5.230 release. The addon uses its persistent configuration API with recovery journaling; newer process/session blacklist APIs are not required by v1.
 
-Installing HidHide alone must not hide the MSI Claw controller. While the addon is PASSIVE, it owns no HidHide device hiding or whitelist lease, keeps the physical controller normally exposed, and preserves all ClawTweaks/HHC HidHide configuration.
+Installing HidHide alone must not hide the MSI Claw controller. While the addon is PASSIVE, it owns no HidHide device hiding or whitelist lease. In Stock MSI Center M environments the physical controller remains normally exposed; existing ClawTweaks/HHC HidHide configuration and controller exposure state are left unchanged.
 
 Where a supported HidHide version provides process/session-scoped hiding, it may be used as an additional safety mechanism.
 

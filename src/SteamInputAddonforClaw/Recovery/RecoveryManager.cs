@@ -143,7 +143,7 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
         var executablePath = journal.Mutations.ExecutableWhitelistAdditions!.Single();
         var inspection = hidHideClient.Inspect();
         AppLog.Info("HidHide", "HidHide recovery inspection completed.", ("Status", inspection.Status), ("ExecutablePath", executablePath));
-        if (!inspection.IsUsable)
+        if (!inspection.IsConfigurationReadable)
             return new(RecoveryStatus.Failure, $"HidHide recovery inspection is unsafe: {inspection.Status}.", journal);
 
         if (!inspection.ApplicationWhitelist.Contains(executablePath))
@@ -156,7 +156,7 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, IHidHideClien
             return new(RecoveryStatus.Failure, "Recorded HidHide whitelist entry could not be removed.", journal);
 
         var verification = hidHideClient.Inspect();
-        if (!verification.IsUsable || verification.ApplicationWhitelist.Contains(executablePath))
+        if (!verification.IsConfigurationReadable || verification.ApplicationWhitelist.Contains(executablePath))
             return new(RecoveryStatus.Failure, "Recorded HidHide whitelist entry removal could not be verified.", journal);
 
         AppLog.Info("HidHide", "Recorded HidHide whitelist lease removed.", ("ExecutablePath", executablePath));

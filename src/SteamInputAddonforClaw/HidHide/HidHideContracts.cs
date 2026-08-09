@@ -9,7 +9,8 @@ internal sealed record HidHideInspection(
     IReadOnlyList<string>? RawApplicationWhitelist = null,
     string? Reason = null)
 {
-    public bool IsUsable => Status == HidHideInspectionStatus.Available;
+    public bool CanAcquireWhitelistLease => Status == HidHideInspectionStatus.Available;
+    public bool IsConfigurationReadable => Status is HidHideInspectionStatus.Available or HidHideInspectionStatus.Disabled or HidHideInspectionStatus.InverseWhitelist;
 }
 
 internal interface IHidHideClient
