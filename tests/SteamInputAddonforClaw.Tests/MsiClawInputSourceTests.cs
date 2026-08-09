@@ -48,14 +48,47 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
-    public void Start_WhenMultiplePid1902CandidatesExist_DoesNotCreateOrAcquireAnyDevice()
+    public void Start_WhenPid1902CandidatesHaveDifferentPhysicalIdentities_DoesNotCreateOrAcquireAnyDevice()
     {
-        var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902), Device(0x0DB0, 0x1902)]);
+        var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_A"), Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_B")]);
         var source = new MsiClawInputSource(enumerator);
 
         var result = source.Start();
 
         Assert.Equal(MsiClawInputStartStatus.Indeterminate, result.Status);
+        Assert.Equal(0, enumerator.CreateCount);
+    }
+
+    [Fact]
+    public void Start_WhenPid1902CandidatesAreAliasesOfOnePhysicalRoot_SelectsOneDevice()
+    {
+        var first = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_ROOT");
+        var second = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_ROOT");
+        var enumerator = new FakeEnumerator([first, second], new FakeDevice(State()));
+
+        var result = new MsiClawInputSource(enumerator).Start();
+
+        Assert.True(result.Started);
+        Assert.Equal(1, enumerator.CreateCount);
+        Assert.Contains(enumerator.CreatedDescriptor, new[] { first, second });
+    }
+
+    [Fact]
+    public void Start_WhenPid1902CandidateHasNoVerifiedPhysicalIdentity_DoesNotCreateOrAcquireAnyDevice()
+    {
+        var descriptor = Device(0x0DB0, 0x1902, physicalIdentity: null);
+        var enumerator = new FakeEnumerator([descriptor]);
+
+        Assert.Equal(MsiClawInputStartStatus.Indeterminate, new MsiClawInputSource(enumerator).Start().Status);
+        Assert.Equal(0, enumerator.CreateCount);
+    }
+
+    [Fact]
+    public void Start_WhenSelectedDeviceReportsTooFewButtons_DoesNotCreateOrAcquireAnyDevice()
+    {
+        var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1902, buttonCount: 16)]);
+
+        Assert.Equal(MsiClawInputStartStatus.Indeterminate, new MsiClawInputSource(enumerator).Start().Status);
         Assert.Equal(0, enumerator.CreateCount);
     }
 
@@ -340,7 +373,8 @@ public sealed class MsiClawInputSourceTests
         return completion.Task;
     }
 
-    private static DirectInputDeviceDescriptor Device(ushort vendorId, ushort productId) => new(Guid.NewGuid(), Guid.NewGuid(), "Test", vendorId, productId);
+    private static DirectInputDeviceDescriptor Device(ushort vendorId, ushort productId, string? physicalIdentity = "USB\\MSI_ROOT", int? buttonCount = 17) =>
+        new(Guid.NewGuid(), Guid.NewGuid(), "Test", vendorId, productId, "\\\\?\\hid#vid_0db0&pid_1902&mi_00&col01#test#{00000000-0000-0000-0000-000000000000}", "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST", physicalIdentity, 0x0001, 0x0005, buttonCount, 6);
     private static DirectInputState State(params int[] pressedButtons)
     {
         var buttons = new bool[17];
