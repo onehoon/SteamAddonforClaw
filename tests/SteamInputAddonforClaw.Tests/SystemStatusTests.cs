@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Startup;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -40,6 +41,33 @@ public sealed class SystemStatusTests
 
         Assert.Equal(AddonOperationalStatus.Passive, status.Status);
         Assert.Equal("External physical controller detected: Xbox Wireless Controller.", status.Reason);
+    }
+
+    [Fact]
+    public void ExternalControllerAssessment_HhcManagedEnvironmentFailsClosed()
+    {
+        var result = ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(
+            new(ExternalControllerAssessmentStatus.Clear, 0, []),
+            ControllerEnvironmentMode.HHCManaged,
+            ControllerEnvironmentReadiness.Stable);
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Indeterminate, result.Status);
+    }
+
+    [Fact]
+    public void ExternalControllerAssessment_ExternalControllerRemainsVetoInUnstableEnvironment()
+    {
+        var assessment = new ExternalControllerAssessment(
+            ExternalControllerAssessmentStatus.ExternalPresent,
+            1,
+            [Device("Xbox Wireless Controller", 0x045E, 0x0B13)]);
+
+        var result = ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(
+            assessment,
+            ControllerEnvironmentMode.HHCManaged,
+            ControllerEnvironmentReadiness.Indeterminate);
+
+        Assert.Same(assessment, result);
     }
 
     [Fact]
@@ -138,6 +166,33 @@ public sealed class SystemStatusTests
         Assert.Same(prerequisites, snapshot.Prerequisites);
         Assert.Equal([ControllerSoftwareKind.MsiCenterM, ControllerSoftwareKind.ClawTweaks, ControllerSoftwareKind.HandheldCompanion], snapshot.ControllerSoftware.Select(item => item.Kind));
         Assert.Equal(AddonOperationalStatus.SetupRequired, snapshot.Addon.Status);
+    }
+
+    [Fact]
+    public async Task SystemStatusProvider_CapturesExternalControllerAssessmentOncePerSnapshot()
+    {
+        var calls = 0;
+        var provider = new SystemStatusProvider(
+            new FakeDeviceProvider(),
+            [
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)),
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))
+            ],
+            new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
+            () => SteamSessionState.FromRunningAppId(1),
+            () =>
+            {
+                calls++;
+                return new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []);
+            },
+            () => true);
+
+        var snapshot = await provider.CaptureAsync();
+
+        Assert.Equal(1, calls);
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, snapshot.ExternalController.Status);
+        Assert.Equal(AddonOperationalStatus.Ready, snapshot.Addon.Status);
     }
 
     [Fact]

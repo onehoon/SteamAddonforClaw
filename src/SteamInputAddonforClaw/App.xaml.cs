@@ -113,6 +113,19 @@ public partial class App : Application
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
         var startupRegistrationResult = startupSettings.Repair();
 
+        var controllerDetector = new ExternalControllerDetector(
+            new WindowsControllerDeviceEnumerator(),
+            classifier);
+
+        ExternalControllerAssessment CaptureExternalControllerAssessment()
+        {
+            var assessment = controllerDetector.Detect();
+            return ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(
+                assessment,
+                environmentMode,
+                environmentReadiness);
+        }
+
         var statusProvider = new SystemStatusProvider(
             new WindowsDeviceInformationProvider(new WindowsControllerDeviceEnumerator()),
             [
@@ -125,22 +138,11 @@ public partial class App : Application
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())),
                 new ViiperRuntimeInspector()),
             () => _steamSessionWatcher?.State ?? SteamSessionState.FromRunningAppId(0),
-            () => new ExternalControllerDetector(new WindowsControllerDeviceEnumerator(), classifier).Detect(),
+            CaptureExternalControllerAssessment,
             () => recoverySafe);
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
-
-        var controllerDetector = new ExternalControllerDetector(
-            new WindowsControllerDeviceEnumerator(),
-            classifier);
-        var externalAssessment = controllerDetector.Detect();
-        AppLog.Info($"External controller assessment: {externalAssessment.Status}.");
-        _mainWindow.UpdateExternalControllerAssessment(externalAssessment.Status == ExternalControllerAssessmentStatus.ExternalPresent
-            ? externalAssessment
-            : environmentMode == ControllerEnvironmentMode.HHCManaged || environmentReadiness != ControllerEnvironmentReadiness.Stable
-                ? new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, [])
-                : externalAssessment);
 
         if (recoverySafe)
         {

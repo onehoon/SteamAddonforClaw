@@ -86,11 +86,6 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    public void UpdateExternalControllerAssessment(ExternalControllerAssessment assessment)
-    {
-        _ = RefreshSystemStatusAsync();
-    }
-
     private void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
         if (_isLoadingStartupSettings)
