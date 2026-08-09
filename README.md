@@ -137,11 +137,7 @@ AND
 Steam session active
 ```
 
-Anything else means:
-
-```text
-PASSIVE
-```
+Any non-eligible outcome prevents routing and mutation. The operational UI distinguishes the reason as **Passive**, **Unsupported**, **Indeterminate**, **Setup required**, or **Waiting for Steam**; these are not all the same user-visible state.
 
 PASSIVE should behave as closely as possible to the addon not being installed.
 
@@ -173,21 +169,52 @@ External physical controller present?
     NO
     ↓
 
-HHC controller management active?
+External-controller veto latched for this Steam session?
     YES
-    → PASSIVE / HHC-MANAGED
+    → PASSIVE / VETO
 
     NO
+    ↓
+
+Recovery safe?
+    NO
+    → INDETERMINATE
+
+    YES
+    ↓
+
+External controller assessment indeterminate?
+    YES
+    → INDETERMINATE
+
+    NO
+    ↓
+
+Controller environment compatibility?
+    Unsupported
+    → UNSUPPORTED
+
+    Indeterminate
+    → INDETERMINATE
+
+    Supported
+    ↓
+
+Routing prerequisites ready?
+    NO
+    → SETUP REQUIRED
+
+    YES
     ↓
 
 Steam session active?
     NO
-    → PASSIVE
+    → WAITING FOR STEAM
 
     YES
     ↓
 
-Steam Controller routing active
+Eligible for Steam Controller routing
 ```
 
 During Steam routing:
@@ -616,8 +643,9 @@ The implementation should not assume a single active virtual target.
 Once created for an eligible Steam session, the Classic Steam Controller should remain enumerated until:
 
 * the Steam session ends;
-* an external-controller veto forces complete disengagement; or
-* HHC controller management becomes active and forces pass-through.
+* an external-controller veto forces complete disengagement.
+
+Planned future HHC coexistence may add an HHC-management transition that forces pass-through. That is not part of the Current MVP lifecycle because an installed HHC environment is currently unsupported.
 
 Normal foreground changes must not recreate it.
 

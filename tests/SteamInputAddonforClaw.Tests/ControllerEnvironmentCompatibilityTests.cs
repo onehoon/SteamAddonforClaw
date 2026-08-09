@@ -61,6 +61,19 @@ public sealed class ControllerEnvironmentCompatibilityTests
     }
 
     [Fact]
+    public void UnexpectedSoftwareEntry_IsIndeterminate()
+    {
+        var statuses = Software();
+        statuses.Add(Status((ControllerSoftwareKind)999, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running));
+
+        var assessment = _policy.Evaluate(statuses);
+
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Indeterminate, assessment.Status);
+        Assert.Equal(ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate, assessment.Reason);
+        Assert.False(assessment.AllowsMutation);
+    }
+
+    [Fact]
     public void UnsupportedCompatibility_MakesRoutingPassiveWithoutExternalLatch()
     {
         var compatibility = new ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus.Unsupported, ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion);

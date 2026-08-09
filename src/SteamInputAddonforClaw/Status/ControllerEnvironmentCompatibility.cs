@@ -25,7 +25,7 @@ internal sealed record ControllerSoftwareSnapshot(ControllerSoftwareStatus MsiCe
     public static bool TryCreate(IReadOnlyList<ControllerSoftwareStatus> statuses, out ControllerSoftwareSnapshot? snapshot)
     {
         snapshot = null;
-        if (statuses is null) return false;
+        if (statuses is null || statuses.Count != 3) return false;
         var grouped = statuses.GroupBy(status => status.Kind).ToDictionary(group => group.Key, group => group.ToArray());
         if (!grouped.TryGetValue(ControllerSoftwareKind.MsiCenterM, out var centerM) || centerM.Length != 1
             || !grouped.TryGetValue(ControllerSoftwareKind.ClawTweaks, out var clawTweaks) || clawTweaks.Length != 1
