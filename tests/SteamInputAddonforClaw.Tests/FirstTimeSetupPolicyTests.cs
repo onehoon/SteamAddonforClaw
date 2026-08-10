@@ -120,13 +120,13 @@ public sealed class FirstTimeSetupPolicyTests
     }
 
     [Fact]
-    public void ExitZeroWithInstalledControlDeviceAndDisabledConfiguration_IsInstallationSuccess()
+    public void ExitZeroWithInstalledPackageAndDisabledConfiguration_IsInstallationSuccess()
     {
-        var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(0, true, false, null, "1.5.230.0", PrerequisiteStatus.Unusable, allowControlDeviceEvidence: true);
+        var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(0, true, true, "1.5.230.0", "1.5.230.0", PrerequisiteStatus.Unusable);
 
         Assert.True(outcome.IsProvisioned);
         Assert.False(outcome.RequiresRestart);
-        Assert.Equal("InstalledControlDeviceNotRuntimeReady", outcome.Reason);
+        Assert.Equal("Provisioned", outcome.Reason);
     }
 
     [Fact]
@@ -151,10 +151,10 @@ public sealed class FirstTimeSetupPolicyTests
     public void HidHidePostInstallEvidence_StopsWhenControlBecomesDisabled()
     {
         var elapsed = 100000L;
-        var prerequisitePoll = 0;
+        var packagePoll = 0;
         var result = ElevatedPrerequisiteSetup.WaitForHidHidePostInstallEvidence(
-            () => new HidHidePackageState(false, null, true),
-            () => new(PrerequisiteKind.HidHide, prerequisitePoll++ == 0 ? PrerequisiteStatus.Missing : PrerequisiteStatus.Unusable, "HidHideDisabled"),
+            () => packagePoll++ == 0 ? new HidHidePackageState(false, null, true) : new HidHidePackageState(true, "1.5.230.0", true),
+            () => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideDisabled"),
             () => elapsed,
             milliseconds => elapsed += milliseconds,
             "1.5.230.0",
@@ -162,7 +162,7 @@ public sealed class FirstTimeSetupPolicyTests
 
         Assert.Equal(PrerequisiteStatus.Unusable, result.Prerequisite.Status);
         Assert.Equal("HidHideDisabled", result.Prerequisite.Reason);
-        Assert.Equal(2, prerequisitePoll);
+        Assert.Equal(2, packagePoll);
     }
 
     [Fact]
@@ -185,6 +185,49 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.Equal(115000, elapsed);
         Assert.Equal(PrerequisiteStatus.Missing, result.Prerequisite.Status);
         Assert.Equal(31, polls);
+    }
+
+    [Theory]
+    [InlineData((int)PrerequisiteStatus.Missing, (int)ComponentInstallationStatus.Missing)]
+    [InlineData((int)PrerequisiteStatus.Unusable, (int)ComponentInstallationStatus.ExistingUnverified)]
+    [InlineData((int)PrerequisiteStatus.Ready, (int)ComponentInstallationStatus.ExistingUnverified)]
+    [InlineData((int)PrerequisiteStatus.Indeterminate, (int)ComponentInstallationStatus.ExistingUnverified)]
+    public void MissingPackage_IsNotAutomaticallyReinstallableWhenRuntimeEvidenceExists(int runtimeStatus, int expected)
+    {
+        var assessment = ComponentInstallationAssessmentPolicy.AssessHidHide(
+            new HidHidePackageState(false, null, true),
+            new(PrerequisiteKind.HidHide, (PrerequisiteStatus)runtimeStatus, "test"),
+            "1.5.230.0");
+
+        Assert.Equal((ComponentInstallationStatus)expected, assessment.Status);
+    }
+
+    [Fact]
+    public void ExactPackageWithDisabledRuntime_IsInstalledButNotRoutingReady()
+    {
+        var assessment = ComponentInstallationAssessmentPolicy.AssessHidHide(
+            new HidHidePackageState(true, "1.5.230.0", true),
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideDisabled"),
+            "1.5.230.0");
+
+        Assert.Equal(ComponentInstallationStatus.Installed, assessment.Status);
+    }
+
+    [Fact]
+    public void UsbIpPostInstallEvidence_WaitsForExpectedPackage()
+    {
+        var elapsed = 100000L;
+        var polls = 0;
+        var result = ElevatedPrerequisiteSetup.WaitForUsbIpPostInstallEvidence(
+            () => polls++ == 0 ? new UsbIpWin2PackageState(false, null, true) : new UsbIpWin2PackageState(true, "0.9.7.7", true),
+            () => new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Unusable, "UsbIpWin2DeviceUnavailable"),
+            () => elapsed,
+            milliseconds => elapsed += milliseconds,
+            "0.9.7.7",
+            0);
+
+        Assert.Equal(ComponentInstallationStatus.Installed, ComponentInstallationAssessmentPolicy.AssessUsbIp(result.Package, result.Prerequisite, "0.9.7.7").Status);
+        Assert.Equal(2, polls);
     }
 
     [Fact]
@@ -238,5 +281,10 @@ public sealed class FirstTimeSetupPolicyTests
         new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test"),
         new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported), true,
         new(ExternalControllerAssessmentStatus.Clear, 0, []), SteamSessionState.FromRunningAppId(0),
-        new(PrerequisiteKind.HidHide, hidHide, "test"), new(PrerequisiteKind.UsbIpWin2, usbIp, "test"), new(ComponentProvisioningState.None, ComponentProvisioningState.None));
+        new(PrerequisiteKind.HidHide, hidHide, "test"), new(PrerequisiteKind.UsbIpWin2, usbIp, "test"),
+        Installation(hidHide, PrerequisiteKind.HidHide), Installation(usbIp, PrerequisiteKind.UsbIpWin2),
+        new(ComponentProvisioningState.None, ComponentProvisioningState.None));
+
+    private static ComponentInstallationAssessment Installation(PrerequisiteStatus status, PrerequisiteKind kind) =>
+        new(kind, status is PrerequisiteStatus.Ready or PrerequisiteStatus.Unusable ? ComponentInstallationStatus.Installed : status == PrerequisiteStatus.Missing ? ComponentInstallationStatus.Missing : ComponentInstallationStatus.ExistingUnverified, "test");
 }

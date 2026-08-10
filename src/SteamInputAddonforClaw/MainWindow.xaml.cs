@@ -311,6 +311,8 @@ public sealed partial class MainWindow : Window
     {
         var receipt = _hidHideReceiptStore.Load();
         var usbReceipt = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath).Load();
+        var hidPackage = new WindowsHidHidePackageProbe().Inspect();
+        var usbPackage = new WindowsUsbIpWin2PackageProbe().Inspect();
         var storage = ProvisioningStorageSecurity.Inspect(VelopackAppPaths.ProvisioningStateDirectory);
         var hidHideState = receipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
             ? ComponentProvisioningState.Corrupt
@@ -321,10 +323,12 @@ public sealed partial class MainWindow : Window
             ? ComponentProvisioningState.Corrupt
             : usbReceipt.Receipt is not null ? ToComponentProvisioningState(usbReceipt.Receipt.State)
             : ComponentProvisioningState.None;
+        var hidInstallation = ComponentInstallationAssessmentPolicy.AssessHidHide(hidPackage, snapshot.Prerequisites.HidHide, HidHidePackageMetadata.BundledVersion.ToString());
+        var usbInstallation = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
         return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
             snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController,
             SteamSessionState.FromRunningAppId(snapshot.Steam.IsActive ? snapshot.Steam.RunningAppId : 0),
-            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, new(hidHideState, usbIpState)));
+            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstallation, usbInstallation, new(hidHideState, usbIpState)));
     }
 
     private async Task RunPrerequisiteSetupAsync()
