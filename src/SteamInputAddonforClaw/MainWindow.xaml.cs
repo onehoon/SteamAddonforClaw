@@ -130,6 +130,7 @@ public sealed partial class MainWindow : Window
             _developerTestModeState?.SetEnabled(TestModeToggleSwitch.IsOn);
     }
 
+
     private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)
     {
         var previousPage = _navigationState.CurrentPage;

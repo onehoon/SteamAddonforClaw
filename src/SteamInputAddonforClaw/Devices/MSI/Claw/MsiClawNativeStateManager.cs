@@ -8,10 +8,14 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal enum MsiClawNativeMode { XInput, DirectInput, Other }
 
-internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator deviceEnumerator) : INativeControllerStateManager
+internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator deviceEnumerator, IMsiClawModeController? modeController = null) : INativeControllerStateManager
 {
     internal const int SnapshotFormatVersion = 1;
     public HandheldDeviceId DeviceId { get; } = new("msi.claw");
+    internal Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity identity, CancellationToken cancellationToken) =>
+        modeController is null
+            ? Task.FromResult(new MsiClawModeTransitionResult(MsiClawModeTransitionStatus.UnsupportedDevice, MsiClawNativeMode.Other, target, null, null, false, false, false, false, 0, "ModeControllerUnavailable"))
+            : modeController.SwitchModeAsync(target, identity, cancellationToken);
 
     public NativeStateCaptureResult CaptureSnapshot()
     {
@@ -39,32 +43,45 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
             return new(NativeStateCaptureStatus.Indeterminate, null, "MSI interfaces do not identify one exact restorable state.");
 
         var selected = selectedLogicalCandidate.First();
-        var payload = new MsiClawNativeStatePayload(mode, selected.InstanceId, selected.ParentInstanceId, selected.ContainerId, selected.ProductId);
+        var identity = MsiClawPhysicalIdentity.From(selected);
+        var payload = new MsiClawNativeStatePayload(mode, selected.InstanceId, selected.ParentInstanceId, selected.ContainerId, selected.ProductId, identity.Confidence);
         var snapshot = new DeviceNativeStateSnapshot(DeviceId, SnapshotFormatVersion, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(payload));
         AppLog.Info("NativeState", "MSI Claw native state snapshot completed.", ("Mode", mode), ("InstanceId", selected.InstanceId), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         return new(NativeStateCaptureStatus.Success, snapshot, "Snapshot captured.");
     }
 
-    public Task<NativeStateRestoreResult> RestoreSnapshotAsync(DeviceNativeStateSnapshot snapshot, CancellationToken cancellationToken)
+    public async Task<NativeStateRestoreResult> RestoreSnapshotAsync(DeviceNativeStateSnapshot snapshot, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (snapshot is null || snapshot.DeviceId != DeviceId)
-            return Task.FromResult(new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "SnapshotDeviceIdMismatch"));
+            return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "SnapshotDeviceIdMismatch");
         if (snapshot.FormatVersion != SnapshotFormatVersion)
-            return Task.FromResult(new NativeStateRestoreResult(NativeStateRestoreStatus.Unsupported, "UnsupportedSnapshotFormatVersion"));
+            return new NativeStateRestoreResult(NativeStateRestoreStatus.Unsupported, "UnsupportedSnapshotFormatVersion");
         MsiClawNativeStatePayload? original;
         try { original = snapshot.Payload.Deserialize<MsiClawNativeStatePayload>(); }
-        catch (JsonException) { return Task.FromResult(new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "MalformedSnapshotPayload")); }
+        catch (JsonException) { return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "MalformedSnapshotPayload"); }
         if (original is null || original.ProductId is null)
-            return Task.FromResult(new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "MalformedSnapshotPayload"));
+            return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "MalformedSnapshotPayload");
 
         var current = CaptureSnapshot();
         if (!current.AllowsMutation || current.Snapshot is null)
-            return Task.FromResult(new NativeStateRestoreResult(current.Status == NativeStateCaptureStatus.Indeterminate ? NativeStateRestoreStatus.Indeterminate : NativeStateRestoreStatus.Failed, current.Reason));
+            return new NativeStateRestoreResult(current.Status == NativeStateCaptureStatus.Indeterminate ? NativeStateRestoreStatus.Indeterminate : NativeStateRestoreStatus.Failed, current.Reason);
         var currentPayload = current.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
+        if (currentPayload is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "MalformedCurrentPayload");
         if (currentPayload == original)
-            return Task.FromResult(new NativeStateRestoreResult(NativeStateRestoreStatus.Success, "AlreadyOriginalState"));
-        return Task.FromResult(new NativeStateRestoreResult(NativeStateRestoreStatus.Unsupported, "NativeModeRestoreNotImplemented"));
+            return new NativeStateRestoreResult(NativeStateRestoreStatus.Success, "AlreadyOriginalState");
+        if (modeController is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Unsupported, "ModeControllerUnavailable");
+        var expected = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
+        var currentIdentity = new MsiClawPhysicalIdentity(currentPayload.ContainerId, currentPayload.ParentInstanceId, currentPayload.InstanceId ?? string.Empty, MsiClawHardware.VendorId, currentPayload.ProductId, currentPayload.IdentityConfidence);
+        if (expected.Confidence != MsiClawIdentityConfidence.Strong || !expected.StronglyMatches(currentIdentity)) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "PhysicalIdentityMismatch");
+        var result = await modeController.SwitchModeAsync(original.Mode, expected, cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded) return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, result.Reason);
+        var restored = CaptureSnapshot();
+        if (!restored.AllowsMutation || restored.Snapshot is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "RestoredStateCouldNotBeVerified");
+        var restoredPayload = restored.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
+        return restoredPayload is not null && restoredPayload.Mode == original.Mode && restoredPayload.ProductId == original.ProductId && restoredPayload.ContainerId == original.ContainerId
+            ? new NativeStateRestoreResult(NativeStateRestoreStatus.Success, "NativeStateRestoredAndVerified")
+            : new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "RestoredStateMismatch");
     }
 
     private static MsiClawNativeMode? ModeFor(ushort? productId) => productId switch

@@ -66,7 +66,9 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
                     vendorProductId.VendorId,
                     vendorProductId.ProductId,
                     Present: true,
-                    FriendlyName: GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpFriendlyName)));
+                    FriendlyName: GetRegistryString(deviceInfoSet, ref deviceInfo, SpdrpFriendlyName),
+                    UsagePage: ParseUsage(hardwareIds.Concat(compatibleIds)).Page,
+                    Usage: ParseUsage(hardwareIds.Concat(compatibleIds)).Usage));
             }
 
             return devices;
@@ -75,6 +77,22 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         {
             SetupDiDestroyDeviceInfoList(deviceInfoSet);
         }
+    }
+
+    private static (ushort? Page, ushort? Usage) ParseUsage(IEnumerable<string> identifiers)
+    {
+        foreach (var identifier in identifiers)
+        {
+            var marker = identifier.IndexOf("UP:", StringComparison.OrdinalIgnoreCase);
+            if (marker < 0) marker = identifier.IndexOf("UP_", StringComparison.OrdinalIgnoreCase);
+            var usageMarker = identifier.IndexOf("_U:", StringComparison.OrdinalIgnoreCase);
+            if (usageMarker < 0) usageMarker = identifier.IndexOf("_U_", StringComparison.OrdinalIgnoreCase);
+            if (marker < 0 || usageMarker < 0) continue;
+            var pageText = identifier[(marker + 3)..].Split('_', StringSplitOptions.RemoveEmptyEntries)[0];
+            var usageText = identifier[(usageMarker + 3)..].Split('_', StringSplitOptions.RemoveEmptyEntries)[0];
+            if (ushort.TryParse(pageText, System.Globalization.NumberStyles.HexNumber, null, out var page) && ushort.TryParse(usageText, System.Globalization.NumberStyles.HexNumber, null, out var usage)) return (page, usage);
+        }
+        return (null, null);
     }
 
     private static string GetDeviceInstanceId(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfo)

@@ -9,6 +9,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly IReadOnlyList<IPowerTransitionParticipant> _participants;
     private readonly RecoverySafetyState _recovery;
     private readonly Func<CancellationToken, Task<bool>> _recover;
+    private readonly Func<CancellationToken, Task<bool>>? _afterRecovery;
     private readonly SemaphoreSlim _serial = new(1, 1);
     private readonly Channel<QueuedNotification> _notifications = Channel.CreateUnbounded<QueuedNotification>(new() { SingleReader = true, SingleWriter = false });
     private readonly CancellationTokenSource _shutdown = new();
@@ -18,9 +19,9 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
-    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants)
+    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null)
     {
-        (_gate, _recovery, _recover, _participants) = (gate, recovery, recover, participants.ToArray());
+        (_gate, _recovery, _recover, _participants, _afterRecovery) = (gate, recovery, recover, participants.ToArray(), afterRecovery);
         _reader = Task.Run(ProcessNotificationsAsync);
     }
     internal long NextSequence() => Interlocked.Increment(ref _sequence);
@@ -108,6 +109,17 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                     _recovery.Set(safe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
                     State = safe ? PowerTransitionState.Awake : PowerTransitionState.Unsafe;
                 })) return;
+            if (safe && _afterRecovery is not null)
+            {
+                try { safe &= await _afterRecovery(cancellationToken).ConfigureAwait(false); }
+                catch (Exception e) { AppLog.Error("Power.Recovery", "Post-recovery session reconciliation failed.", e, ("Cycle", cycleForResume), ("Epoch", recoveryEpoch)); safe = false; }
+                if (!safe)
+                {
+                    _gate.Close();
+                    _recovery.Set(RecoverySafety.Unsafe);
+                    State = PowerTransitionState.Unsafe;
+                }
+            }
             AppLog.Info("Power.Recovery", "Resume reconciliation completed.", ("Cycle", cycleForResume), ("Epoch", _gate.Epoch), ("Outcome", safe ? "Succeeded" : "Failed"), ("PowerGateOpened", _gate.IsOpen), ("FinalPowerState", State), ("ResumeObservedUtc", observation.ObservedUtc), ("ResumeDispatchDelayMs", (resumeStartedUtc - observation.ObservedUtc).TotalMilliseconds), ("RecoveryElapsedMs", recoveryElapsedMs), ("OwnershipReconcileElapsedMs", ownershipReconcileElapsedMs), ("ResumeToGateReadyMs", (DateTimeOffset.UtcNow - observation.ObservedUtc).TotalMilliseconds));
         }
         finally { _serial.Release(); }

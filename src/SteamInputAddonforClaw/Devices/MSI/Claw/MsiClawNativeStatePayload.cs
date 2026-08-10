@@ -5,4 +5,5 @@ internal sealed record MsiClawNativeStatePayload(
     string? InstanceId,
     string? ParentInstanceId,
     Guid? ContainerId,
-    ushort? ProductId);
+    ushort? ProductId,
+    MsiClawIdentityConfidence IdentityConfidence = MsiClawIdentityConfidence.Indeterminate);
