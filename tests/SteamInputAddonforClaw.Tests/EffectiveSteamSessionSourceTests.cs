@@ -139,6 +139,33 @@ public sealed class EffectiveSteamSessionSourceTests
         Assert.Equal(1, called);
     }
 
+    [Fact]
+    public void ReentrantDispose_StopsRemainingSubscribers()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        var testMode = new DeveloperTestModeState();
+        var effective = new EffectiveSteamSessionSource(watcher, testMode);
+        watcher.Start();
+        var first = 0;
+        var second = 0;
+
+        effective.StateChanged += (_, _) =>
+        {
+            first++;
+            effective.Dispose();
+        };
+        effective.StateChanged += (_, _) => second++;
+
+        testMode.SetEnabled(true);
+
+        Assert.Equal(1, first);
+        Assert.Equal(0, second);
+
+        testMode.SetEnabled(false);
+        Assert.Equal(0, second);
+    }
+
     private sealed class FakeRunningAppIdSource(uint appId) : IRunningAppIdSource
     {
         private uint _appId = appId;

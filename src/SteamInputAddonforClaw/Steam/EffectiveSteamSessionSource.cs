@@ -73,6 +73,11 @@ public sealed class EffectiveSteamSessionSource : IDisposable
                     ("CurrentSource", transition.Current.Source));
                 foreach (var handler in StateChanged?.GetInvocationList().OfType<EventHandler<SteamSessionStateChangedEventArgs>>() ?? [])
                 {
+                    lock (_sync)
+                    {
+                        if (_disposed) return;
+                    }
+
                     try { handler(this, transition); }
                     catch (Exception exception) { Diagnostics.AppLog.Warn("Steam.Effective", "Effective state subscriber failed.", exception); }
                 }
