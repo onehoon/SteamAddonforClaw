@@ -17,13 +17,14 @@ public sealed class AddonOwnedVirtualDeviceTrackerTests
     }
 
     [Fact]
-    public void Invalidation_removes_stale_ownership()
+    public void Uncertain_ownership_removes_the_exclusion_and_latches_failure()
     {
         var tracker = new AddonOwnedVirtualDeviceTracker();
         var device = Device("USB\\VID_28DE&PID_1102\\OWNED");
         tracker.Publish(device);
-        tracker.InvalidateAll();
+        tracker.MarkOwnershipUncertain();
         Assert.False(tracker.IsExcluded(device));
+        Assert.True(tracker.HasUncertainOwnership);
     }
 
     private static ControllerDeviceInfo Device(string instanceId) => new(instanceId, null, null, [], "HID", ["HID_DEVICE_UP:0001_U:0005"], [], "HIDClass", null, null, 0x28DE, 0x1102, true);

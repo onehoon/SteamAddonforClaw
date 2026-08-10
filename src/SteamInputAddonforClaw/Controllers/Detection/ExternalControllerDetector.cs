@@ -18,6 +18,11 @@ public sealed class ExternalControllerDetector
     {
         try
         {
+            if (_classifier.HasUncertainIdentityOwnership)
+            {
+                AppLog.Warn("ExternalController", "Addon-owned virtual-device ownership is uncertain.", null, ("Action", "Passive"));
+                return new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, []);
+            }
             AppLog.Info("ExternalController", "External controller detection started.");
             var stopwatch = Stopwatch.StartNew();
             var devices = _deviceEnumerator.EnumeratePresentDevices();
