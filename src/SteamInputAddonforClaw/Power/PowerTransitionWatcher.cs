@@ -41,6 +41,7 @@ internal sealed class PowerTransitionWatcher : IDisposable
             if (applied)
             {
                 if (signal is PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend) Volatile.Write(ref _phase, 2);
+                _coordinator.InvalidateForBarrier();
                 try { _cancelLifecycle(); } catch { _gate.Close(); }
             }
         }

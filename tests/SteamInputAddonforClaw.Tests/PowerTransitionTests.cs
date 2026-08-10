@@ -79,8 +79,8 @@ public sealed class PowerTransitionTests
         var coordinator = new PowerTransitionCoordinator(gate, recovery, _ => pendingRecovery.Task, []);
         var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
         Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(1)));
-        gate.EnterNewCycleBarrier(out _, out var newEpoch); pendingRecovery.SetResult(true); await resume;
-        Assert.False(gate.IsOpen); Assert.Equal(newEpoch, gate.Epoch); Assert.NotEqual(PowerTransitionState.Awake, coordinator.State);
+        gate.EnterNewCycleBarrier(out _, out var newEpoch); coordinator.InvalidateForBarrier(); pendingRecovery.SetResult(true); await resume;
+        Assert.False(gate.IsOpen); Assert.Equal(newEpoch, gate.Epoch); Assert.NotEqual(RecoverySafety.Safe, recovery.Current); Assert.NotEqual(PowerTransitionState.Awake, coordinator.State);
     }
 
     [Fact]

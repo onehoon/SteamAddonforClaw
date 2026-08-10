@@ -42,5 +42,15 @@ internal sealed class PowerMutationGate
             return true;
         }
     }
+    internal bool TryCommitRecovery(long expectedEpoch, Action commitState)
+    {
+        lock (_sync)
+        {
+            if (_epoch != expectedEpoch) return false;
+            commitState();
+            _open = true;
+            return true;
+        }
+    }
     internal void Close() { lock (_sync) _open = false; }
 }
