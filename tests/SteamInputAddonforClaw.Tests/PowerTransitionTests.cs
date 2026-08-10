@@ -84,6 +84,18 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public async Task Stale_failed_resume_cannot_overwrite_a_new_suspend_barrier_state()
+    {
+        var gate = new PowerMutationGate(true); var recovery = new RecoverySafetyState(RecoverySafety.Safe);
+        var pendingRecovery = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var coordinator = new PowerTransitionCoordinator(gate, recovery, _ => pendingRecovery.Task, []);
+        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(1)));
+        gate.EnterNewCycleBarrier(out _, out var newEpoch); coordinator.InvalidateForBarrier(); pendingRecovery.SetResult(false); await resume;
+        Assert.Equal(newEpoch, gate.Epoch); Assert.False(gate.IsOpen); Assert.Equal(RecoverySafety.Indeterminate, recovery.Current); Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
+    }
+
+    [Fact]
     public async Task Duplicate_suspend_does_not_advance_epoch_or_quiesce_twice()
     {
         var gate = new PowerMutationGate(true); var source = new FakeSource(true); var participant = new CountingParticipant();

@@ -94,11 +94,11 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             }
             catch (Exception e) { AppLog.Error("Power.Recovery", "Resume reconciliation failed.", e, ("Cycle", cycleForResume), ("Epoch", _gate.Epoch)); safe = false; }
             if (_gate.Epoch != recoveryEpoch) return;
-            if (safe)
-            {
-                if (!_gate.TryCommitRecovery(recoveryEpoch, () => { _recovery.Set(RecoverySafety.Safe); State = PowerTransitionState.Awake; })) return;
-            }
-            else { _recovery.Set(RecoverySafety.Unsafe); State = PowerTransitionState.Unsafe; _gate.Close(); }
+            if (!_gate.TryCommitRecovery(recoveryEpoch, safe, () =>
+                {
+                    _recovery.Set(safe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
+                    State = safe ? PowerTransitionState.Awake : PowerTransitionState.Unsafe;
+                })) return;
             AppLog.Info("Power.Recovery", "Resume reconciliation completed.", ("Cycle", cycleForResume), ("Epoch", _gate.Epoch), ("Outcome", safe ? "Succeeded" : "Failed"), ("PowerGateOpened", _gate.IsOpen), ("FinalPowerState", State));
         }
         finally { _serial.Release(); }
