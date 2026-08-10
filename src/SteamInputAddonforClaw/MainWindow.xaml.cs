@@ -361,7 +361,6 @@ public sealed partial class MainWindow : Window
         if (Content.XamlRoot is null)
         {
             _setupPromptPendingActivation = true;
-            DispatcherQueue.TryEnqueue(() => _ = PromptForPrerequisiteSetupAsync());
             return;
         }
         _setupPromptPendingActivation = false;
@@ -430,7 +429,9 @@ public sealed partial class MainWindow : Window
         try
         {
             var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
-            var result = await _prerequisiteSetupRunner.RunAsync(executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
+            var result = await PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(
+                currentSetup, _prerequisiteSetupRunner, executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
+            if (result is null) return;
             var resultKind = ElevatedPrerequisiteSetup.TranslateExitCode(result);
             AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", resultKind));
             if (resultKind == ElevatedPrerequisiteSetup.ResultKind.RebootRequired)
@@ -537,6 +538,8 @@ public sealed partial class MainWindow : Window
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
     {
         SetEnglishSettingsItemContent();
+        if (_setupPromptPendingActivation && _windowActivatedForUser)
+            _ = PromptForPrerequisiteSetupAsync();
 
         var navigationItems = MainNavigationView.MenuItems
             .OfType<NavigationViewItem>()
