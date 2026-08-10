@@ -54,7 +54,11 @@ internal sealed class MsiClawModeController(
             cancellationToken.ThrowIfCancellationRequested();
             var current = deviceEnumerator.EnumeratePresentDevices().Where(d => d.Present && MsiClawPhysicalIdentity.From(d).StronglyMatches(expectedIdentity)).ToArray();
             oldGone = !current.Any(d => d.ProductId == oldPid);
-            var targets = current.Where(d => d.ProductId == targetPid).ToArray(); targetSeen = targets.Length == 1; observed = targetSeen ? MsiClawPhysicalIdentity.From(targets[0]) : null;
+            var targets = current.Where(d => d.ProductId == targetPid).ToArray();
+            var expectedUsagePage = target == MsiClawNativeMode.XInput ? (ushort)0xFFA0 : (ushort)0xFFF0;
+            var expectedUsage = target == MsiClawNativeMode.XInput ? (ushort)0x0001 : (ushort)0x0040;
+            targetSeen = targets.Any(d => d.UsagePage == expectedUsagePage && d.Usage == expectedUsage);
+            observed = targetSeen ? MsiClawPhysicalIdentity.From(targets[0]) : null;
             if (oldGone && targetSeen && expectedIdentity.StronglyMatches(observed!)) return Result(MsiClawModeTransitionStatus.Succeeded, target, expectedIdentity, started, "Native mode transition verified.", fromMode, oldPid, true, true, true);
             await Task.Delay(_pollInterval, cancellationToken).ConfigureAwait(false);
         }

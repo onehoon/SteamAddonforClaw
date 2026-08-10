@@ -115,6 +115,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                 catch (Exception e) { AppLog.Error("Power.Recovery", "Post-recovery session reconciliation failed.", e, ("Cycle", cycleForResume), ("Epoch", recoveryEpoch)); safe = false; }
                 if (!safe)
                 {
+                    _gate.Close();
                     _recovery.Set(RecoverySafety.Unsafe);
                     State = PowerTransitionState.Unsafe;
                 }

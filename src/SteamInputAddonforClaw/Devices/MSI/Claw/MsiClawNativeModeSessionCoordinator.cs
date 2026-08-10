@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using System.Text.Json;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -15,6 +16,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private DeviceNativeStateSnapshot? _snapshot;
     private bool _active;
     private readonly Func<bool>? _mutationAllowed;
+    private CancellationTokenSource? _safetyMonitor;
 
     internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, Func<bool>? mutationAllowed = null)
     { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _mutationAllowed = mutationAllowed; }
@@ -33,6 +35,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         // RecoveryManager may have restored the original snapshot. Force the next effective
         // session observation to perform a fresh capture and transition.
         _active = false;
+        _safetyMonitor?.Cancel();
         return Task.FromResult(true);
     }
 
@@ -45,6 +48,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         try
         {
             if (!state.IsActive) return true;
+            if (_mutationAllowed is not null && !_mutationAllowed()) return true;
             _active = false;
         }
         finally { _gate.Release(); }
@@ -74,6 +78,8 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
             var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
             if (!result.Succeeded || !_powerGate.IsCurrent(token)) return;
             _snapshot = captured.Snapshot; _active = true;
+            _safetyMonitor = new CancellationTokenSource();
+            _ = MonitorSafetyAsync(_safetyMonitor.Token);
         }
         finally { _gate.Release(); }
     }
@@ -88,11 +94,29 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
             var restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false);
             if (!restored.Restored || !_powerGate.IsCurrent(token)) return;
             var completed = _recovery.CompleteRecoverySession();
-            if (completed.Status == RecoveryStatus.Success) { _snapshot = null; _active = false; }
+            if (completed.Status == RecoveryStatus.Success) { _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false; }
         }
         finally { _gate.Release(); }
     }
 
     public async ValueTask DisposeAsync()
-    { try { await StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { } _gate.Dispose(); }
+    { try { await StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { } _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _gate.Dispose(); }
+
+    private async Task MonitorSafetyAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+                if (_mutationAllowed is not null && !_mutationAllowed())
+                {
+                    AppLog.Warn("NativeMode", "External controller appeared during MSI native override; restoring original mode.", null);
+                    await StopAsync(cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
 }
