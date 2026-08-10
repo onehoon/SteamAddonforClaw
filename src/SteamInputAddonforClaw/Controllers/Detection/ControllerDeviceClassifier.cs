@@ -82,6 +82,11 @@ public sealed class ControllerDeviceClassifier
                 return new ControllerClassificationResult(ControllerDeviceClassification.KnownVirtual, steamControllerKnownVirtual.Value.Reason, steamControllerKnownVirtual.Value.Device);
             }
 
+            if (!IsGameControllerCandidate(device))
+            {
+                return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "SteamController1304CollectionIsNotControllerCapable");
+            }
+
             return HasVerifiedSteamController1304PhysicalRoot(device, topology)
                 ? new ControllerClassificationResult(ControllerDeviceClassification.ExternalPhysical, "VerifiedSteamController1304PhysicalTopology")
                 : new ControllerClassificationResult(ControllerDeviceClassification.Indeterminate, "SteamController1304PhysicalRootUnverified");

@@ -136,7 +136,7 @@ public sealed class SystemStatusTests
         var card = Assert.Single(ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device(null, 0x1234, 0x5678)])));
 
         Assert.Equal("Controller (VID 1234 / PID 5678)", card.Name);
-        Assert.Equal("Connected", card.Status);
+        Assert.Equal("Detected", card.Status);
     }
 
     [Fact]

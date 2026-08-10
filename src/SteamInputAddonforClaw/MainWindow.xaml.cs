@@ -305,7 +305,7 @@ public sealed partial class MainWindow : Window
         [
             new("HidHide", snapshot.Prerequisites.HidHide.Status.ToString(), snapshot.Prerequisites.HidHide.Reason),
             new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
-            new("VIIPER", "Not available in this build", "Planned routing runtime")
+            new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
         ]);
         Replace(_externalControllerCards, ExternalControllerStatusCardFactory.Create(snapshot.ExternalController));
         var receipt = _hidHideReceiptStore.Load();
