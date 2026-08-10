@@ -7,7 +7,9 @@ public sealed class MsiClawDeviceAdapter : IHandheldDeviceAdapter
 {
     public MsiClawDeviceAdapter(IControllerDeviceEnumerator? deviceEnumerator = null)
     {
-        NativeState = new MsiClawNativeStateManager(deviceEnumerator ?? new WindowsControllerDeviceEnumerator());
+        var devices = deviceEnumerator ?? new WindowsControllerDeviceEnumerator();
+        var modeController = new MsiClawModeController(devices, new MsiClawControlHidResolver(), new WindowsMsiClawModeWriter());
+        NativeState = new MsiClawNativeStateManager(devices, modeController);
     }
     public HandheldDeviceDescriptor Descriptor { get; } = new(new HandheldDeviceId("msi.claw"), "MSI", "Claw", "MSI Claw");
     public AuxiliaryControlCatalog AuxiliaryControls => MsiClawControls.Catalog;

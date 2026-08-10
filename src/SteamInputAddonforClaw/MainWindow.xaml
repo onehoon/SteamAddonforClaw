@@ -160,6 +160,14 @@
                 </Border>
                 <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
                     <StackPanel Spacing="10">
+                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="Native Mode Transition Test" />
+                        <TextBlock Text="Developer-only test. Switches the MSI Claw native mode and verifies exact restoration. No Steam routing is created." TextWrapping="Wrap" />
+                        <TextBlock x:Name="NativeModeTransitionStatusText" Text="Status: Idle" TextWrapping="Wrap" />
+                        <Button x:Name="RunNativeModeTransitionButton" Click="RunNativeModeTransitionButton_Click" Content="Run Transition Test" HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+                <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                    <StackPanel Spacing="10">
                         <TextBlock FontSize="20" FontWeight="SemiBold" Text="M1/M2 DirectInput Test" />
                         <TextBlock Text="Tests the existing PID_1902 DirectInput device only. No controller mode changes are made." TextWrapping="Wrap" />
                         <TextBlock x:Name="M1M2TestStatusText" Text="Status: Idle" />

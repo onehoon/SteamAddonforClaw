@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window
     private int _isGeneratingEnvironmentDiscoveryReport;
     private string? _environmentDiscoveryDirectory;
     private readonly ViiperSteamControllerPocCoordinator? _viiperSteamControllerPocCoordinator;
+    private readonly MsiClawNativeModeDiagnosticCoordinator? _msiClawNativeModeDiagnosticCoordinator;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -69,7 +70,8 @@ public sealed partial class MainWindow : Window
         IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
         IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
         ViiperSteamControllerPocCoordinator? viiperSteamControllerPocCoordinator = null,
-        DeveloperTestModeState? developerTestModeState = null)
+        DeveloperTestModeState? developerTestModeState = null,
+        MsiClawNativeModeDiagnosticCoordinator? msiClawNativeModeDiagnosticCoordinator = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
@@ -81,6 +83,7 @@ public sealed partial class MainWindow : Window
             new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
             new EnvironmentDiscoveryReportWriter());
         _viiperSteamControllerPocCoordinator = viiperSteamControllerPocCoordinator;
+        _msiClawNativeModeDiagnosticCoordinator = msiClawNativeModeDiagnosticCoordinator;
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -128,6 +131,23 @@ public sealed partial class MainWindow : Window
     {
         if (!_isInitializingTestMode)
             _developerTestModeState?.SetEnabled(TestModeToggleSwitch.IsOn);
+    }
+
+    private async void RunNativeModeTransitionButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_msiClawNativeModeDiagnosticCoordinator is null) { NativeModeTransitionStatusText.Text = "Status: Native mode diagnostic is unavailable."; return; }
+        RunNativeModeTransitionButton.IsEnabled = false;
+        NativeModeTransitionStatusText.Text = "Status: Switching and restoring...";
+        try
+        {
+            var result = await _msiClawNativeModeDiagnosticCoordinator.RunAsync();
+            NativeModeTransitionStatusText.Text = $"Status: {result.Status} ({result.ElapsedMs} ms)\r\n{result.Reason}";
+        }
+        catch (Exception exception)
+        {
+            NativeModeTransitionStatusText.Text = $"Status: Failed\r\n{exception.Message}";
+        }
+        finally { RunNativeModeTransitionButton.IsEnabled = true; }
     }
 
     private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)

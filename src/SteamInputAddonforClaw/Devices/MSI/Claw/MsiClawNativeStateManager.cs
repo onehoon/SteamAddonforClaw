@@ -12,6 +12,10 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
 {
     internal const int SnapshotFormatVersion = 1;
     public HandheldDeviceId DeviceId { get; } = new("msi.claw");
+    internal Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity identity, CancellationToken cancellationToken) =>
+        modeController is null
+            ? Task.FromResult(new MsiClawModeTransitionResult(MsiClawModeTransitionStatus.UnsupportedDevice, MsiClawNativeMode.Other, target, null, null, false, false, false, false, 0, "ModeControllerUnavailable"))
+            : modeController.SwitchModeAsync(target, identity, cancellationToken);
 
     public NativeStateCaptureResult CaptureSnapshot()
     {

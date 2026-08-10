@@ -98,7 +98,7 @@ public partial class App : Application
                 ("ViiperReason", prerequisiteAssessment.Viiper.Reason),
                 ("RoutingReady", prerequisiteAssessment.IsRoutingReady));
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, addonOwnedVirtualDeviceTracker, deviceRegistry, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, addonOwnedVirtualDeviceTracker, deviceRegistry, msiClawAdapter, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
@@ -110,7 +110,7 @@ public partial class App : Application
         }
     }
 
-    private void StartNormalRuntime(ControllerDeviceClassifier classifier, AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
+    private void StartNormalRuntime(ControllerDeviceClassifier classifier, AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         ClawTweaksCompatibilitySnapshotLogger.LogAtStartup(new WindowsControllerDeviceEnumerator());
@@ -179,7 +179,9 @@ public partial class App : Application
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator, _viiperPoc.CancelLifecycle);
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: _viiperPoc, developerTestModeState: _developerTestModeState);
+        var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
+        var nativeDiagnostic = nativeState is null ? null : new MsiClawNativeModeDiagnosticCoordinator(nativeState, _recoveryManager!, powerGate);
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: _viiperPoc, developerTestModeState: _developerTestModeState, msiClawNativeModeDiagnosticCoordinator: nativeDiagnostic);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
