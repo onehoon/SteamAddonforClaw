@@ -48,14 +48,15 @@ public sealed class PowerTransitionTests
     [Theory]
     [InlineData(18u, 7u)]
     [InlineData(7u, 18u)]
-    public void Watcher_resume_pair_reconciles_once_and_leaves_gate_open(uint firstResume, uint secondResume)
+    public async Task Watcher_resume_pair_reconciles_once_and_leaves_gate_open(uint firstResume, uint secondResume)
     {
         var gate = new PowerMutationGate(true); var calls = 0; var source = new FakeSource(true);
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), _ => { Interlocked.Increment(ref calls); return Task.FromResult(true); }, []);
         using var watcher = new PowerTransitionWatcher(source, gate, coordinator, () => { }); Assert.True(watcher.Start());
-        source.Raise(4); Assert.True(SpinWait.SpinUntil(() => coordinator.State is PowerTransitionState.Suspended or PowerTransitionState.Unsafe, TimeSpan.FromSeconds(1)));
-        source.Raise(firstResume); Assert.True(SpinWait.SpinUntil(() => gate.IsOpen, TimeSpan.FromSeconds(1))); source.Raise(secondResume);
-        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref calls) == 1, TimeSpan.FromSeconds(1))); Assert.True(gate.IsOpen); Assert.Equal(PowerTransitionState.Awake, coordinator.State);
+        await watcher.ObserveAsync(4);
+        await watcher.ObserveAsync(firstResume);
+        await watcher.ObserveAsync(secondResume);
+        Assert.Equal(1, calls); Assert.True(gate.IsOpen); Assert.Equal(PowerTransitionState.Awake, coordinator.State);
     }
 
     [Fact]

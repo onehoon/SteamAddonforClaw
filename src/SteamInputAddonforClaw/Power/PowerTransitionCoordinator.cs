@@ -10,7 +10,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly RecoverySafetyState _recovery;
     private readonly Func<CancellationToken, Task<bool>> _recover;
     private readonly SemaphoreSlim _serial = new(1, 1);
-    private readonly Channel<PowerNotificationObservation> _notifications = Channel.CreateUnbounded<PowerNotificationObservation>(new() { SingleReader = true, SingleWriter = false });
+    private readonly Channel<QueuedNotification> _notifications = Channel.CreateUnbounded<QueuedNotification>(new() { SingleReader = true, SingleWriter = false });
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Task _reader;
     private long _cycle;
@@ -24,12 +24,25 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
         _reader = Task.Run(ProcessNotificationsAsync);
     }
     internal long NextSequence() => Interlocked.Increment(ref _sequence);
-    internal void Enqueue(PowerNotificationObservation observation) => _notifications.Writer.TryWrite(observation);
+    internal Task Enqueue(PowerNotificationObservation observation)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_notifications.Writer.TryWrite(new(observation, completion))) completion.TrySetCanceled();
+        return completion.Task;
+    }
     private async Task ProcessNotificationsAsync()
     {
-        try { await foreach (var observation in _notifications.Reader.ReadAllAsync(_shutdown.Token).ConfigureAwait(false)) await HandleAsync(observation, _shutdown.Token).ConfigureAwait(false); }
+        try
+        {
+            await foreach (var queued in _notifications.Reader.ReadAllAsync(_shutdown.Token).ConfigureAwait(false))
+            {
+                try { await HandleAsync(queued.Observation, _shutdown.Token).ConfigureAwait(false); queued.Completion.TrySetResult(); }
+                catch (Exception exception) { queued.Completion.TrySetException(exception); }
+            }
+        }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { }
     }
+    private sealed record QueuedNotification(PowerNotificationObservation Observation, TaskCompletionSource Completion);
     internal async Task HandleAsync(PowerNotificationObservation observation, CancellationToken cancellationToken = default)
     {
         if (Volatile.Read(ref _disposed) != 0) return;

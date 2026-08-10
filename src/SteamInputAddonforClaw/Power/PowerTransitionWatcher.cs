@@ -23,9 +23,10 @@ internal sealed class PowerTransitionWatcher : IDisposable
         if (_source.TryRegister(out _)) return true;
         _source.Notification -= OnNotification; _gate.Close(); return false;
     }
-    private void OnNotification(uint rawCode)
+    private void OnNotification(uint rawCode) => _ = ObserveAsync(rawCode);
+    internal Task ObserveAsync(uint rawCode)
     {
-        if (Volatile.Read(ref _disposed) != 0) return;
+        if (Volatile.Read(ref _disposed) != 0) return Task.CompletedTask;
         var signal = Map(rawCode);
         var before = _gate.Epoch;
         var newSuspend = signal == PowerSignal.Suspend && Interlocked.Exchange(ref _phase, 1) != 1;
@@ -44,7 +45,7 @@ internal sealed class PowerTransitionWatcher : IDisposable
             }
         }
         var observation = new PowerNotificationObservation(rawCode, signal, DateTimeOffset.UtcNow, _coordinator.NextSequence(), Environment.CurrentManagedThreadId, before, _gate.Epoch, applied);
-        _coordinator.Enqueue(observation);
+        return _coordinator.Enqueue(observation);
     }
     internal static PowerSignal Map(uint rawCode) => rawCode switch { 4 => PowerSignal.Suspend, 18 => PowerSignal.ResumeAutomatic, 7 => PowerSignal.ResumeSuspend, _ => PowerSignal.Unknown };
     public void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) != 0) return; _source.Notification -= OnNotification; _source.Dispose(); }
