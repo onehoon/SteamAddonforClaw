@@ -61,62 +61,83 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
                 return false;
             }
             _decisionGeneration = generation;
+            if (decision.Kind == RoutingDecisionKind.WaitingForSteam && decision.Reason == RoutingDecisionReason.SteamInactive)
+                _vetoLatched = false;
+
+            if (decision.Kind == RoutingDecisionKind.Eligible)
+            {
+                await StartCoreLockedAsync(cancellationToken).ConfigureAwait(false);
+                return _active;
+            }
+
+            return await StopCoreLockedAsync(cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
-        if (decision.Kind == RoutingDecisionKind.Eligible)
-        {
-            await StartAsync(cancellationToken).ConfigureAwait(false);
-            return _active;
-        }
-        return await StopForDecisionAsync(decision, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<bool> StopForDecisionAsync(RoutingDecision decision, CancellationToken cancellationToken)
-    {
-        if (decision.Kind == RoutingDecisionKind.WaitingForSteam && decision.Reason == RoutingDecisionReason.SteamInactive)
-            _vetoLatched = false;
-        return await StopAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task StartAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_active) return;
-            if (_vetoLatched) return;
-            if (_mutationAllowed is not null && !_mutationAllowed()) return;
-            if (!_powerGate.TryAcquire(out var token)) return;
-            var captured = _nativeState.CaptureSnapshot();
-            if (!captured.AllowsMutation || captured.Snapshot is null) return;
-            var original = captured.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
-            if (original is null || original.Mode != MsiClawNativeMode.XInput) return;
-            if (!_powerGate.IsCurrent(token)) return;
-            var journal = _recovery.BeginDeviceNativeStateMutation(captured);
-            if (journal.Status != RecoveryStatus.Success) return;
-            var identity = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
-            var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
-            if (!result.Succeeded || !_powerGate.IsCurrent(token)) return;
-            _snapshot = captured.Snapshot; _active = true;
-            _safetyMonitor = new CancellationTokenSource();
-            _ = MonitorSafetyAsync(_safetyMonitor.Token);
-        }
+        try { await StartCoreLockedAsync(cancellationToken).ConfigureAwait(false); }
         finally { _gate.Release(); }
     }
 
     private async Task<bool> StopAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await StopCoreLockedAsync(cancellationToken).ConfigureAwait(false); }
+        finally { _gate.Release(); }
+    }
+
+    private async Task StartCoreLockedAsync(CancellationToken cancellationToken)
+    {
+        if (_active || _vetoLatched) return;
+        if (_mutationAllowed is not null && !_mutationAllowed()) return;
+        if (!_powerGate.TryAcquire(out var token)) return;
+        var captured = _nativeState.CaptureSnapshot();
+        if (!captured.AllowsMutation || captured.Snapshot is null) return;
+        var original = captured.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
+        if (original is null || original.Mode != MsiClawNativeMode.XInput) return;
+        if (!_powerGate.IsCurrent(token)) return;
+        var journal = _recovery.BeginDeviceNativeStateMutation(captured);
+        if (journal.Status != RecoveryStatus.Success) return;
+        var identity = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
+        var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded || !_powerGate.IsCurrent(token)) return;
+        _snapshot = captured.Snapshot; _active = true;
+        _safetyMonitor = new CancellationTokenSource();
+        _ = MonitorSafetyAsync(_safetyMonitor.Token);
+    }
+
+    private async Task<bool> StopCoreLockedAsync(CancellationToken cancellationToken)
+    {
+        if (!_active || _snapshot is null) return true;
+        if (!_powerGate.TryAcquire(out var token)) { MarkRecoveryUnsafe("PowerGateAcquireFailedDuringRestore"); return false; }
+        var restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false);
+        if (!restored.Restored || !_powerGate.IsCurrent(token)) { MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
+        var completed = _recovery.CompleteRecoverySession();
+        if (completed.Status != RecoveryStatus.Success) { MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
+        _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false;
+        return true;
+    }
+
+    internal async Task FailClosedAsync(string reason, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_active || _snapshot is null) return true;
-            if (!_powerGate.TryAcquire(out var token)) { MarkRecoveryUnsafe("PowerGateAcquireFailedDuringRestore"); return false; }
-            var restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false);
-            if (!restored.Restored || !_powerGate.IsCurrent(token)) { MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
-            var completed = _recovery.CompleteRecoverySession();
-            if (completed.Status != RecoveryStatus.Success) { MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
-            _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false;
-            return true;
+            _decisionGeneration++;
+            bool restored;
+            try { restored = await StopCoreLockedAsync(cancellationToken).ConfigureAwait(false); }
+            catch
+            {
+                MarkRecoveryUnsafe(reason);
+                throw;
+            }
+            if (!restored)
+                MarkRecoveryUnsafe(reason);
+            else
+                _powerGate.Close();
         }
         finally { _gate.Release(); }
     }

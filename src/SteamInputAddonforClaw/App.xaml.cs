@@ -240,7 +240,13 @@ public partial class App : Application
             await _msiClawNativeModeSession.ObserveRoutingDecisionAsync(snapshot.RoutingDecision, generation, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (Exception exception) { AppLog.Warn("NativeMode", "Canonical routing reconciliation failed.", exception); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("NativeMode", "Canonical routing reconciliation failed; native routing is being failed closed.", exception);
+            try { await _msiClawNativeModeSession.FailClosedAsync("CanonicalRoutingReconciliationFailed", cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (Exception failClosedException) { AppLog.Error("NativeMode", "Failed to fail closed after canonical routing reconciliation error.", failClosedException); }
+        }
     }
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
