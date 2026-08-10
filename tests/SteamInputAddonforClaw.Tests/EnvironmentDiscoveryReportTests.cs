@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
+using SteamInputAddonforClaw.Diagnostics.SteamController1304;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
@@ -97,6 +98,23 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
     }
 
+    [Fact]
+    public void Writer_IncludesSteamController1304DiagnosticSection()
+    {
+        var snapshot = Snapshot([]) with
+        {
+            SteamController1304 = new DiscoverySection<SteamController1304DiagnosticSnapshot>([
+                new([new SteamController1304DeviceSnapshot(
+                    "USB\\VID_28DE&PID_1304\\root", null, null, "USB", "usbccgp", "USB", [], [], null, null, true)], [])])
+        };
+
+        var report = new EnvironmentDiscoveryReportWriter().Write(snapshot);
+
+        Assert.Contains("=== STEAM CONTROLLER 28DE:1304 DIAGNOSTIC ===", report);
+        Assert.Contains("LogicalDeviceCount: 1", report);
+        Assert.Contains("VID_28DE&PID_1304", report);
+    }
+
     private static EnvironmentDiscoverySnapshot Snapshot(IReadOnlyList<ProcessDiscoveryInfo> processes, IReadOnlyList<InstalledApplicationDiscoveryInfo>? installed = null) => new(
         new DateTimeOffset(2026, 8, 9, 17, 30, 12, TimeSpan.Zero),
         new SystemDiscoveryInfo("Windows 11", "26100", "x64", "MSI", "Claw", ["Intel Arc"], "1.0.0"),
@@ -110,6 +128,7 @@ public sealed class EnvironmentDiscoveryReportTests : IDisposable
         new DiscoverySection<StartupRegistrationDiscoveryInfo>([new("HKCU\\Run", "Startup", "C:\\Startup.exe")]),
         new DiscoverySection<ScheduledTaskDiscoveryInfo>([new("\\", "Task", "True", "Ready", "C:\\Task.exe")]),
         new DiscoverySection<ControllerDeviceInfo>([]),
+        new DiscoverySection<SteamController1304DiagnosticSnapshot>([new([], [])]),
         new DiscoverySection<ExternalControllerAssessment>([new(ExternalControllerAssessmentStatus.Clear, 0, [])]),
         new DiscoverySection<RuntimePrerequisiteAssessment>([new(new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "Missing"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Missing, "Missing"))]));
 

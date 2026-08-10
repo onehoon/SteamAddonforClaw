@@ -1,6 +1,7 @@
 using System.Text;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Diagnostics.SteamController1304;
 
 namespace SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 
@@ -25,6 +26,7 @@ internal sealed class EnvironmentDiscoveryReportWriter
         WriteStartup(text, snapshot.StartupRegistrations);
         WriteTasks(text, snapshot.ScheduledTasks);
         WriteDevices(text, snapshot.Devices);
+        WriteSteamController1304(text, snapshot.SteamController1304);
         WriteExternalControllers(text, snapshot.ExternalControllers);
         WritePrerequisites(text, snapshot.Prerequisites);
         WriteKeywordMatches(text, snapshot);
@@ -119,6 +121,22 @@ internal sealed class EnvironmentDiscoveryReportWriter
         text.AppendLine($"ExternalControllerCount={assessment.DetectedExternalControllerCount}");
         foreach (var device in assessment.ExternalControllers.OrderBy(value => value.FriendlyName, StringComparer.OrdinalIgnoreCase))
             text.AppendLine($"FriendlyName={Safe(device.FriendlyName)}; VID={FormatHex(device.VendorId)}; PID={FormatHex(device.ProductId)}; InstanceId={Safe(device.InstanceId)}; ContainerId={device.ContainerId}");
+    }
+
+    private static void WriteSteamController1304(StringBuilder text, DiscoverySection<SteamController1304DiagnosticSnapshot> section)
+    {
+        Header(text, "STEAM CONTROLLER 28DE:1304 DIAGNOSTIC");
+        if (Failure(text, section)) return;
+        var snapshot = section.Items.Single();
+        Field(text, "CaptureFailure", snapshot.Failure ?? "None");
+        text.AppendLine($"LogicalDeviceCount: {snapshot.Devices.Select(device => device.ContainerId).Distinct().Count()}");
+        foreach (var device in snapshot.Devices.OrderBy(device => device.InstanceId, StringComparer.OrdinalIgnoreCase))
+        {
+            text.AppendLine($"InstanceId={Safe(device.InstanceId)}; ParentInstanceId={Safe(device.ParentInstanceId)}; ContainerId={device.ContainerId}; Class={Safe(device.ClassName)}; Service={Safe(device.Service)}; Enumerator={Safe(device.EnumeratorName)}; UsagePage={FormatHex(device.UsagePage)}; Usage={FormatHex(device.Usage)}; Present={device.Present}; HardwareIds={Safe(string.Join('|', device.HardwareIds))}; CompatibleIds={Safe(string.Join('|', device.CompatibleIds))}");
+        }
+        text.AppendLine($"RawInputMatchCount: {snapshot.RawInputDevices.Count}");
+        foreach (var raw in snapshot.RawInputDevices.OrderBy(item => item.DeviceName, StringComparer.OrdinalIgnoreCase))
+            text.AppendLine($"RawInput: Type={raw.Type}; VID={FormatHex(raw.VendorId)}; PID={FormatHex(raw.ProductId)}; UsagePage={FormatHex(raw.UsagePage)}; Usage={FormatHex(raw.Usage)}; DeviceName={Safe(raw.DeviceName)}");
     }
 
     private static void WritePrerequisites(StringBuilder text, DiscoverySection<RuntimePrerequisiteAssessment> section)

@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Diagnostics.SteamController1304;
 
 namespace SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 
@@ -25,6 +26,7 @@ internal sealed record EnvironmentDiscoverySnapshot(
     DiscoverySection<StartupRegistrationDiscoveryInfo> StartupRegistrations,
     DiscoverySection<ScheduledTaskDiscoveryInfo> ScheduledTasks,
     DiscoverySection<ControllerDeviceInfo> Devices,
+    DiscoverySection<SteamController1304DiagnosticSnapshot> SteamController1304,
     DiscoverySection<ExternalControllerAssessment> ExternalControllers,
     DiscoverySection<RuntimePrerequisiteAssessment> Prerequisites);
 
