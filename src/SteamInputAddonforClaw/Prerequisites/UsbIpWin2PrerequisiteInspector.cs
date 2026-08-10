@@ -3,7 +3,7 @@ using SteamInputAddonforClaw.Controllers.Detection;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
-internal sealed record UsbIpWin2ProbeResult(bool ServiceInstalled, bool DevicePresent, bool DriverUsable, bool FilterInstalled = true);
+internal sealed record UsbIpWin2ProbeResult(bool ServiceInstalled, bool DevicePresent, bool DriverUsable, bool FilterInstalled = false);
 
 internal interface IUsbIpWin2DeviceProbe
 {
@@ -21,7 +21,7 @@ internal sealed class UsbIpWin2PrerequisiteInspector(IUsbIpWin2DeviceProbe devic
         try
         {
             var result = deviceProbe.Probe();
-            if (!result.ServiceInstalled && !result.DevicePresent)
+            if (!result.ServiceInstalled && !result.DevicePresent && !result.FilterInstalled)
                 return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "UsbIpWin2DeviceMissing");
             if (result.ServiceInstalled && result.DevicePresent && result.DriverUsable && result.FilterInstalled)
                 return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "UsbIpWin2DeviceReady");

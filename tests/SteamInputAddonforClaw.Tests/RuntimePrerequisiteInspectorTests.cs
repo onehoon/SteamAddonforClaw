@@ -50,15 +50,15 @@ public sealed class RuntimePrerequisiteInspectorTests
     }
 
     [Theory]
-    [InlineData(false, false, false, (int)PrerequisiteStatus.Missing)]
-    [InlineData(true, true, true, (int)PrerequisiteStatus.Ready)]
-    [InlineData(true, false, false, (int)PrerequisiteStatus.Unusable)]
-    [InlineData(true, true, false, (int)PrerequisiteStatus.Unusable)]
-    [InlineData(false, true, true, (int)PrerequisiteStatus.Unusable)]
-    public void UsbIpWin2Probe_MapsPresenceAndUsability(bool serviceInstalled, bool devicePresent, bool driverUsable, int expectedValue)
+    [InlineData(false, false, false, false, (int)PrerequisiteStatus.Missing)]
+    [InlineData(true, true, true, true, (int)PrerequisiteStatus.Ready)]
+    [InlineData(true, false, false, false, (int)PrerequisiteStatus.Unusable)]
+    [InlineData(true, true, false, true, (int)PrerequisiteStatus.Unusable)]
+    [InlineData(false, true, true, true, (int)PrerequisiteStatus.Unusable)]
+    public void UsbIpWin2Probe_MapsPresenceAndUsability(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled, int expectedValue)
     {
         var expected = (PrerequisiteStatus)expectedValue;
-        var assessment = new UsbIpWin2PrerequisiteInspector(new FakeUsbIpProbe(serviceInstalled, devicePresent, driverUsable)).Inspect();
+        var assessment = new UsbIpWin2PrerequisiteInspector(new FakeUsbIpProbe(serviceInstalled, devicePresent, driverUsable, filterInstalled)).Inspect();
 
         Assert.Equal(expected, assessment.Status);
     }
@@ -67,6 +67,14 @@ public sealed class RuntimePrerequisiteInspectorTests
     public void UsbIpWin2Probe_MissingFilterServiceIsUnusable()
     {
         var assessment = new UsbIpWin2PrerequisiteInspector(new FakeUsbIpProbe(true, true, true, filterInstalled: false)).Inspect();
+
+        Assert.Equal(PrerequisiteStatus.Unusable, assessment.Status);
+    }
+
+    [Fact]
+    public void UsbIpWin2Probe_FilterOnlyResidualIsUnusable()
+    {
+        var assessment = new UsbIpWin2PrerequisiteInspector(new FakeUsbIpProbe(false, false, false, filterInstalled: true)).Inspect();
 
         Assert.Equal(PrerequisiteStatus.Unusable, assessment.Status);
     }
@@ -146,7 +154,7 @@ public sealed class RuntimePrerequisiteInspectorTests
         public bool RemoveApplication(string executablePath) => throw new NotSupportedException();
     }
 
-    private sealed class FakeUsbIpProbe(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled = true) : IUsbIpWin2DeviceProbe
+    private sealed class FakeUsbIpProbe(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled = false) : IUsbIpWin2DeviceProbe
     {
         public UsbIpWin2ProbeResult Probe() => new(serviceInstalled, devicePresent, driverUsable, filterInstalled);
     }
