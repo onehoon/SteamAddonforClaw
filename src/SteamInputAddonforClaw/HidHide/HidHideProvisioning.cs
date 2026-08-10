@@ -38,7 +38,7 @@ internal sealed class WindowsHidHidePackageProbe : IHidHidePackageProbe
 }
 
 internal enum HidHideProvisioningReceiptState { InstallStarted, Provisioned, InstalledPendingReboot, AttemptFailed, AttemptCancelled }
-internal sealed record HidHideProvisioningReceipt(int SchemaVersion, HidHideProvisioningReceiptState State, Guid AttemptId, string InstallerVersion, string InstallerSha256, PrerequisiteStatus PreProvisioningStatus, DateTimeOffset StartedAtUtc, DateTimeOffset? CompletedAtUtc, string? ObservedInstalledVersion)
+internal sealed record HidHideProvisioningReceipt(int SchemaVersion, HidHideProvisioningReceiptState State, Guid AttemptId, string InstallerVersion, string InstallerSha256, PrerequisiteStatus PreProvisioningStatus, DateTimeOffset StartedAtUtc, DateTimeOffset? CompletedAtUtc, string? ObservedInstalledVersion, string? FailureReason = null, int? InstallerExitCode = null)
 {
     public const int CurrentSchemaVersion = 1;
     public bool IsValid => SchemaVersion == CurrentSchemaVersion && AttemptId != Guid.Empty && PreProvisioningStatus == PrerequisiteStatus.Missing
@@ -58,6 +58,10 @@ internal sealed class HidHideProvisioningReceiptStore(string path) : IHidHidePro
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     public HidHideReceiptLoadResult Load()
     {
+        var directory = Path.GetDirectoryName(path);
+        if (directory is null) return new(null, true);
+        var security = ProvisioningStorageSecurity.Inspect(directory);
+        if (security.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate) return new(null, true);
         if (!File.Exists(path)) return new(null, false);
         try
         {
@@ -71,7 +75,8 @@ internal sealed class HidHideProvisioningReceiptStore(string path) : IHidHidePro
     {
         if (!receipt.IsValid) throw new InvalidDataException("The HidHide provisioning receipt is invalid.");
         var directory = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("The provisioning receipt directory is unavailable.");
-        Directory.CreateDirectory(directory);
+        var security = ProvisioningStorageSecurity.Inspect(directory);
+        if (security.Status != ProvisioningStorageStatus.Trusted) throw new InvalidOperationException("The provisioning receipt storage is not trusted.");
         var temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
@@ -228,10 +233,10 @@ internal sealed class HidHideProvisioner(
         var prerequisite = prerequisiteInspector.Inspect();
         var package = packageProbe.Inspect();
         AppLog.Info("HidHideProvisioning", "HidHide installer validation completed.", ("Action", "ValidationCompleted"), ("PrerequisiteStatus", prerequisite.Status), ("ObservedVersion", package.Version));
-        if (prerequisite.Status == PrerequisiteStatus.Ready && package.Installed && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
+        if (package.InspectionSucceeded && prerequisite.Status == PrerequisiteStatus.Ready && package.Installed && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
             && receipt.State is HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.InstalledPendingReboot)
             SaveTransition(receipt, HidHideProvisioningReceiptState.Provisioned, package.Version);
-        else if (receipt.State == HidHideProvisioningReceiptState.InstallStarted && package.Installed
+        else if (package.InspectionSucceeded && receipt.State == HidHideProvisioningReceiptState.InstallStarted && package.Installed
             && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
             && prerequisite.Status != PrerequisiteStatus.Ready)
             SaveTransition(receipt, HidHideProvisioningReceiptState.InstalledPendingReboot, package.Version);

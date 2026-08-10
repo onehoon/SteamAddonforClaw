@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Prerequisites;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -12,6 +13,24 @@ public sealed class ExternalControllerDetectorTests
         var assessment = Detect([]);
 
         Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
+    }
+
+    [Fact]
+    public void ElevatedSetupDetector_WhenOnlyMsiClawInternalControllerExists_ReturnsClear()
+    {
+        var assessment = ElevatedPrerequisiteSetup.DetectExternalControllers(
+            new FakeEnumerator([GameController(0x0DB0, 0x1902)]));
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
+    }
+
+    [Fact]
+    public void ElevatedSetupDetector_WhenMsiClawAndExternalXboxExist_ReturnsExternalPresent()
+    {
+        var assessment = ElevatedPrerequisiteSetup.DetectExternalControllers(
+            new FakeEnumerator([GameController(0x0DB0, 0x1901), GameController(0x045E, 0x0B13)]));
+
+        Assert.Equal(ExternalControllerAssessmentStatus.ExternalPresent, assessment.Status);
     }
 
     [Theory]

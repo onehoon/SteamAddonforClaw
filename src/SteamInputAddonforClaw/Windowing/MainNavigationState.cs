@@ -3,6 +3,7 @@ namespace SteamInputAddonforClaw.Windowing;
 internal enum MainNavigationPage
 {
     Status,
+    Setup,
     HowToUse,
     Settings,
     DeveloperMenu
@@ -28,6 +29,12 @@ internal sealed class MainNavigationState
     internal MainNavigationPage OpenDeveloperMenu()
     {
         CurrentPage = MainNavigationPage.DeveloperMenu;
+        return CurrentPage;
+    }
+
+    internal MainNavigationPage OpenSetup()
+    {
+        CurrentPage = MainNavigationPage.Setup;
         return CurrentPage;
     }
 

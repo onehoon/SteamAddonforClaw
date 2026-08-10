@@ -34,7 +34,7 @@ internal sealed class SystemStatusProvider(
         var decision = _routingSessionStateMachine.Evaluate(new RoutingPolicyInput(steam, external, compatibility, prerequisites, recoverySafe));
         var addon = AddonStatusEvaluator.Map(decision, external, compatibility);
         AppLog.Info("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
-        return new SystemStatusSnapshot(device, software, compatibility, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId), external, decision, addon);
+        return new SystemStatusSnapshot(device, software, compatibility, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId), external, decision, addon, recoverySafe);
     }
 
     private SteamSessionState TrySteamState() { try { return steamStateProvider(); } catch { return SteamSessionState.FromRunningAppId(0); } }

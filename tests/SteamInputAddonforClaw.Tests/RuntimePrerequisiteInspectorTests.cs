@@ -56,6 +56,14 @@ public sealed class RuntimePrerequisiteInspectorTests
     }
 
     [Fact]
+    public void UsbIpWin2Probe_MissingFilterServiceIsUnusable()
+    {
+        var assessment = new UsbIpWin2PrerequisiteInspector(new FakeUsbIpProbe(true, true, true, filterInstalled: false)).Inspect();
+
+        Assert.Equal(PrerequisiteStatus.Unusable, assessment.Status);
+    }
+
+    [Fact]
     public void UsbIpWin2Probe_ExceptionIsIndeterminate()
     {
         var assessment = new UsbIpWin2PrerequisiteInspector(new ThrowingUsbIpProbe()).Inspect();
@@ -130,9 +138,9 @@ public sealed class RuntimePrerequisiteInspectorTests
         public bool RemoveApplication(string executablePath) => throw new NotSupportedException();
     }
 
-    private sealed class FakeUsbIpProbe(bool serviceInstalled, bool devicePresent, bool driverUsable) : IUsbIpWin2DeviceProbe
+    private sealed class FakeUsbIpProbe(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled = true) : IUsbIpWin2DeviceProbe
     {
-        public UsbIpWin2ProbeResult Probe() => new(serviceInstalled, devicePresent, driverUsable);
+        public UsbIpWin2ProbeResult Probe() => new(serviceInstalled, devicePresent, driverUsable, filterInstalled);
     }
 
     private sealed class ThrowingUsbIpProbe : IUsbIpWin2DeviceProbe

@@ -20,12 +20,12 @@ public sealed class HidHideProvisionerTests
     }
 
     [Fact]
-    public void ProvisioningReceiptPath_IsMachineLocalAndOutsideVelopackRoot()
+    public void ProvisioningReceiptPath_IsMachineWideAndOutsideVelopackRoot()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        Assert.StartsWith(localAppData, VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
+        var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        Assert.StartsWith(programData, VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("SteamInputAddonforClaw\\hidhide-provisioning.json", VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("SteamInputAddonforClaw-State", VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SteamInputAddonforClaw\\provisioning", VelopackAppPaths.HidHideProvisioningReceiptPath, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -177,6 +177,17 @@ public sealed class HidHideProvisionerTests
         var store = new FakeStore { Receipt = receipt };
         Create(new FakeRunner(), store, HidHideInspectionStatus.Available, new(true, "1.4.999.0", true)).Reconcile();
         Assert.Equal(HidHideProvisioningReceiptState.Provisioned, store.Receipt?.State);
+    }
+
+    [Fact]
+    public void InspectionFailure_DoesNotPromoteAnUnresolvedReceipt()
+    {
+        var receipt = Receipt(HidHideProvisioningReceiptState.InstallStarted);
+        var store = new FakeStore { Receipt = receipt };
+
+        Create(new FakeRunner(), store, HidHideInspectionStatus.Available, new(true, "1.5.230.0", false)).Reconcile();
+
+        Assert.Same(receipt, store.Receipt);
     }
 
     [Fact]

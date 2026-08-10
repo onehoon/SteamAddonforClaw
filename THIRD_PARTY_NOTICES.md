@@ -72,3 +72,10 @@ No DS4Windows source code is currently incorporated. Any direct reuse requires a
 - License: GNU AGPL v3
 
 ClawTweaks is a compatibility reference only. It is not a runtime dependency: this project does not import its source, depend on private IPC or internals, modify ClawTweaks, or steal or mutate ClawTweaks-owned virtual devices.
+
+## usbip-win2
+
+- Version: 0.9.7.7
+- License: BSD-2-Clause
+- Upstream: https://github.com/vadimgrn/usbip-win2
+- Distribution: official unmodified x64 GitHub release installer

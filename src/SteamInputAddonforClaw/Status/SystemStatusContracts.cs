@@ -22,7 +22,8 @@ internal sealed record SystemStatusSnapshot(
     SteamStatusSnapshot Steam,
     ExternalControllerAssessment ExternalController,
     RoutingDecision RoutingDecision,
-    AddonStatusSnapshot Addon);
+    AddonStatusSnapshot Addon,
+    bool RecoverySafe = true);
 
 internal interface IDeviceInformationProvider { DeviceStatusSnapshot Capture(); }
 internal interface ISystemStatusProvider { Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default); }
