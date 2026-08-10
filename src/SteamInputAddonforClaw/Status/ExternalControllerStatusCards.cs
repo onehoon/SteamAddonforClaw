@@ -31,7 +31,7 @@ internal static class ExternalControllerStatusCardFactory
                 .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(item => item.Device.VendorId)
                 .ThenBy(item => item.Device.ProductId)
-                .Select(item => new StatusCardViewModel(item.Name, "Connected", FormatDetails(item.Device)))
+                .Select(item => new StatusCardViewModel(item.Name, "Detected", FormatDetails(item.Device)))
                 .ToArray()
         };
     }

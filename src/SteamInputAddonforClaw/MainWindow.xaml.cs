@@ -305,7 +305,7 @@ public sealed partial class MainWindow : Window
         [
             new("HidHide", snapshot.Prerequisites.HidHide.Status.ToString(), snapshot.Prerequisites.HidHide.Reason),
             new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
-            new("VIIPER", "Not available in this build", "Planned routing runtime")
+            new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
         ]);
         Replace(_externalControllerCards, ExternalControllerStatusCardFactory.Create(snapshot.ExternalController));
         var receipt = _hidHideReceiptStore.Load();
@@ -344,6 +344,14 @@ public sealed partial class MainWindow : Window
     private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)
     {
         var current = await _systemStatusProvider.CaptureAsync();
+        AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
+            ("HidHideStatus", current.Prerequisites.HidHide.Status),
+            ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
+            ("CompatibilityStatus", current.Compatibility.Status),
+            ("CompatibilityReason", current.Compatibility.Reason),
+            ("ExternalControllerStatus", current.ExternalController.Status),
+            ("SteamActive", current.Steam.IsActive),
+            ("RecoverySafe", current.RecoverySafe));
         if (current.HardwareCompatibility.Status != HardwareCompatibilityStatus.Supported)
         {
             RenderSystemStatus(current);

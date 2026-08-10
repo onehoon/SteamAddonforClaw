@@ -100,6 +100,19 @@ public sealed class ExternalControllerDetectorTests
     }
 
     [Fact]
+    public void Detect_WhenSteamController1304OnlyExposesMouseCollection_ReturnsClear()
+    {
+        var root = SteamController1304Root();
+        var mouse = SteamController1304HidCollection([root.InstanceId, "USB\\ROOT_HUB30\\1"], "HID_DEVICE_SYSTEM_MOUSE", 0x0002);
+        var assessment = Detect([mouse, root]);
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(mouse, new ControllerTopologySnapshot([mouse, root]));
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
+        Assert.Equal(ControllerDeviceClassification.NotController, result.Classification);
+        Assert.Equal("SteamController1304CollectionIsNotControllerCapable", result.Reason);
+    }
+
+    [Fact]
     public void Detect_WhenSteamController1304PhysicalRootCannotBeVerified_ReturnsIndeterminate()
     {
         var collection = SteamController1304HidCollection(["USB\\ROOT_HUB30\\1"]);
@@ -404,7 +417,7 @@ public sealed class ExternalControllerDetectorTests
             true);
     }
 
-    private static ControllerDeviceInfo SteamController1304HidCollection(IReadOnlyList<string> ancestorInstanceIds)
+    private static ControllerDeviceInfo SteamController1304HidCollection(IReadOnlyList<string> ancestorInstanceIds, string evidence = "HID_DEVICE_UP:0001_U:0004", ushort usage = 0x0004)
     {
         return new ControllerDeviceInfo(
             "HID\\VID_28DE&PID_1304&MI_02&COL03\\STEAM_CONTROLLER",
@@ -412,14 +425,16 @@ public sealed class ExternalControllerDetectorTests
             ancestorInstanceIds.FirstOrDefault(),
             ancestorInstanceIds,
             "HID",
-            ["HID\\VID_28DE&PID_1304&MI_02&COL03"],
+            ["HID\\VID_28DE&PID_1304&MI_02&COL03", evidence],
             [],
             "HIDClass",
             null,
             null,
             0x28DE,
             0x1304,
-            true);
+            true,
+            UsagePage: 0x0001,
+            Usage: usage);
     }
 
     private sealed class FakeEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator

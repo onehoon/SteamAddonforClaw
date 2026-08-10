@@ -136,7 +136,7 @@ public sealed class SystemStatusTests
         var card = Assert.Single(ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device(null, 0x1234, 0x5678)])));
 
         Assert.Equal("Controller (VID 1234 / PID 5678)", card.Name);
-        Assert.Equal("Connected", card.Status);
+        Assert.Equal("Detected", card.Status);
     }
 
     [Fact]
@@ -269,6 +269,16 @@ public sealed class SystemStatusTests
     }
 
     [Fact]
+    public void MsiCenterM_BackendOperationalWithoutQuickSettingsWidget_IsOperational()
+    {
+        var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(true, true, true, true, false, false))).Detect();
+
+        Assert.Equal(SoftwareRuntimeStatus.Running, assessment.Status);
+        Assert.Equal("MsiCenterMOperational", assessment.Reason);
+        Assert.False(assessment.QuickSettingsWidgetRunning);
+    }
+
+    [Fact]
     public void MsiCenterM_DesktopUiDoesNotAffectOperationalAssessment()
     {
         var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(true, true, true, true, true, true))).Detect();
@@ -299,7 +309,6 @@ public sealed class SystemStatusTests
     [InlineData(true, false, true, true, true, "MsiCenterMBackendNotReady")]
     [InlineData(true, true, false, true, true, "MsiCenterMControlModeNotReady")]
     [InlineData(true, true, true, false, true, "MsiCenterMQuickSettingsNotReady")]
-    [InlineData(true, true, true, true, false, "MsiCenterMWidgetNotReady")]
     public void MsiCenterM_PartialStack_IsStarting(bool foundation, bool server, bool controlMode, bool package, bool widget, string reason)
     {
         var assessment = new MsiCenterMRuntimeDetector(new FakeMsiRuntimeSignals(new(foundation, server, controlMode, package, widget, false))).Detect();
