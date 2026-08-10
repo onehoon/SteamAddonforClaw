@@ -16,7 +16,10 @@ internal static class FirstTimeSetupPolicy
 {
     public static FirstTimeSetupAssessment Evaluate(FirstTimeSetupInput input)
     {
-        var componentsReady = input.HidHide.Status == PrerequisiteStatus.Ready && input.UsbIpWin2.Status == PrerequisiteStatus.Ready;
+        // HidHide can be installed while its runtime configuration is not ready. That state
+        // must not trigger a repeated installer prompt; routing readiness is evaluated later.
+        var hidHideInstalled = input.HidHide.Status is PrerequisiteStatus.Ready or PrerequisiteStatus.Unusable;
+        var componentsReady = hidHideInstalled && input.UsbIpWin2.Status == PrerequisiteStatus.Ready;
         if (input.HardwareCompatibility.Status == HardwareCompatibilityStatus.Unsupported)
             return new(FirstTimeSetupStatus.NotApplicable, FirstTimeSetupReason.HardwareUnsupported, false);
         if (input.HardwareCompatibility.Status == HardwareCompatibilityStatus.Indeterminate)

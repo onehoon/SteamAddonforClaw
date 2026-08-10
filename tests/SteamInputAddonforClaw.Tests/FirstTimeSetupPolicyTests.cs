@@ -122,11 +122,69 @@ public sealed class FirstTimeSetupPolicyTests
     [Fact]
     public void ExitZeroWithInstalledControlDeviceAndDisabledConfiguration_IsInstallationSuccess()
     {
-        var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(0, true, false, null, "1.5.230.0", PrerequisiteStatus.Unusable);
+        var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(0, true, false, null, "1.5.230.0", PrerequisiteStatus.Unusable, allowControlDeviceEvidence: true);
 
         Assert.True(outcome.IsProvisioned);
         Assert.False(outcome.RequiresRestart);
         Assert.Equal("InstalledControlDeviceNotRuntimeReady", outcome.Reason);
+    }
+
+    [Fact]
+    public void UsbIpWithoutInstalledPackageAndUnusablePrerequisite_IsNotProvisioned()
+    {
+        var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(0, true, false, null, "1.5.230.0", PrerequisiteStatus.Unusable);
+
+        Assert.False(outcome.IsProvisioned);
+        Assert.Equal("PostInstallPackageMissing", outcome.Reason);
+    }
+
+    [Fact]
+    public void InstalledButRuntimeUnreadyHidHideAndReadyUsbIp_CompletesSetup()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Unusable, PrerequisiteStatus.Ready));
+
+        Assert.Equal(FirstTimeSetupStatus.Complete, setup.Status);
+        Assert.False(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void HidHidePostInstallEvidence_StopsWhenControlBecomesDisabled()
+    {
+        var elapsed = 100000L;
+        var prerequisitePoll = 0;
+        var result = ElevatedPrerequisiteSetup.WaitForHidHidePostInstallEvidence(
+            () => new HidHidePackageState(false, null, true),
+            () => new(PrerequisiteKind.HidHide, prerequisitePoll++ == 0 ? PrerequisiteStatus.Missing : PrerequisiteStatus.Unusable, "HidHideDisabled"),
+            () => elapsed,
+            milliseconds => elapsed += milliseconds,
+            "1.5.230.0",
+            0);
+
+        Assert.Equal(PrerequisiteStatus.Unusable, result.Prerequisite.Status);
+        Assert.Equal("HidHideDisabled", result.Prerequisite.Reason);
+        Assert.Equal(2, prerequisitePoll);
+    }
+
+    [Fact]
+    public void HidHidePostInstallEvidence_IsBoundedWhenNoEvidenceAppears()
+    {
+        var elapsed = 100000L;
+        var polls = 0;
+        var result = ElevatedPrerequisiteSetup.WaitForHidHidePostInstallEvidence(
+            () => new HidHidePackageState(false, null, true),
+            () =>
+            {
+                polls++;
+                return new PrerequisiteAssessment(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing");
+            },
+            () => elapsed,
+            milliseconds => elapsed += milliseconds,
+            "1.5.230.0",
+            0);
+
+        Assert.Equal(115000, elapsed);
+        Assert.Equal(PrerequisiteStatus.Missing, result.Prerequisite.Status);
+        Assert.Equal(31, polls);
     }
 
     [Fact]
