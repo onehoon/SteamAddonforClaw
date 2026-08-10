@@ -18,9 +18,10 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private readonly Func<bool>? _mutationAllowed;
     private CancellationTokenSource? _safetyMonitor;
     private bool _vetoLatched;
+    private readonly Action<string>? _markRecoveryUnsafe;
 
-    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, Func<bool>? mutationAllowed = null)
-    { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _mutationAllowed = mutationAllowed; }
+    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, Func<bool>? mutationAllowed = null, Action<string>? markRecoveryUnsafe = null)
+    { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _mutationAllowed = mutationAllowed; _markRecoveryUnsafe = markRecoveryUnsafe; }
 
     public string Name => "MsiClawNativeModeSession";
 
@@ -94,11 +95,11 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         try
         {
             if (!_active || _snapshot is null) return true;
-            if (!_powerGate.TryAcquire(out var token)) return false;
+            if (!_powerGate.TryAcquire(out var token)) { MarkRecoveryUnsafe("PowerGateAcquireFailedDuringRestore"); return false; }
             var restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false);
-            if (!restored.Restored || !_powerGate.IsCurrent(token)) { _powerGate.Close(); return false; }
+            if (!restored.Restored || !_powerGate.IsCurrent(token)) { MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
             var completed = _recovery.CompleteRecoverySession();
-            if (completed.Status != RecoveryStatus.Success) { _powerGate.Close(); return false; }
+            if (completed.Status != RecoveryStatus.Success) { MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
             _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false;
             return true;
         }
@@ -126,5 +127,11 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    private void MarkRecoveryUnsafe(string reason)
+    {
+        _powerGate.Close();
+        _markRecoveryUnsafe?.Invoke(reason);
     }
 }
