@@ -16,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot 'src\SteamInputAddonforClaw\SteamInputAddonforClaw.csproj'
+$iconPath = Join-Path $repositoryRoot 'src\SteamInputAddonforClaw\Assets\AppIcon.ico'
 $artifactsDirectory = Join-Path $repositoryRoot 'artifacts'
 $publishDirectory = Join-Path $artifactsDirectory 'publish'
 $releasesDirectory = Join-Path $artifactsDirectory 'Releases'
@@ -30,6 +31,10 @@ if (-not $PreserveReleases -and (Test-Path -LiteralPath $releasesDirectory)) {
 
 if (-not (Test-Path -LiteralPath $releasesDirectory)) {
     New-Item -ItemType Directory -Path $releasesDirectory -Force | Out-Null
+}
+
+if (-not (Test-Path -LiteralPath $iconPath)) {
+    throw "Application icon was not found: $iconPath"
 }
 
 dotnet publish $projectPath `
@@ -52,6 +57,7 @@ $vpkArguments = @(
     '--packVersion', $Version,
     '--packDir', $publishDirectory,
     '--mainExe', 'SteamInputAddonforClaw.exe',
+    '--icon', $iconPath,
     '--outputDir', $releasesDirectory
 )
 
