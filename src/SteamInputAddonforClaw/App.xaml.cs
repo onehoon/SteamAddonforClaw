@@ -38,7 +38,6 @@ public partial class App : Application
     private EffectiveSteamSessionSource? _effectiveSteamSessionSource;
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
-    private ViiperSteamControllerPocCoordinator? _viiperPoc;
     private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
 
     public App()
@@ -170,7 +169,6 @@ public partial class App : Application
             CaptureExternalControllerAssessment,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             routingSessionStateMachine: _routingSessionStateMachine);
-        _viiperPoc = new ViiperSteamControllerPocCoordinator(statusProvider, new WindowsControllerDeviceEnumerator(), addonOwnedVirtualDeviceTracker, Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll"), powerGate: powerGate);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         _msiClawNativeModeSession = nativeState is null ? null : new MsiClawNativeModeSessionCoordinator(
             nativeState,
@@ -183,8 +181,8 @@ public partial class App : Application
                 AppLog.Error("Recovery", "MSI native mode recovery became unsafe.", new InvalidOperationException(reason), ("Reason", reason));
             });
         var powerParticipants = _msiClawNativeModeSession is null
-            ? new IPowerTransitionParticipant[] { _viiperPoc }
-            : new IPowerTransitionParticipant[] { _viiperPoc, _msiClawNativeModeSession };
+            ? Array.Empty<IPowerTransitionParticipant>()
+            : new IPowerTransitionParticipant[] { _msiClawNativeModeSession };
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, async token =>
         {
             if (_recoveryManager is null) return false;
@@ -195,11 +193,11 @@ public partial class App : Application
             if (_msiClawNativeModeSession is null || _effectiveSteamSessionSource is null) return true;
             return await _msiClawNativeModeSession.ReconcileEffectiveSessionAsync(_effectiveSteamSessionSource.State, token).ConfigureAwait(false);
         });
-        _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator, _viiperPoc.CancelLifecycle);
+        _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator, static () => { });
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
         if (_msiClawNativeModeSession is not null) _ = _msiClawNativeModeSession.ObserveAsync(_effectiveSteamSessionSource.State);
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: _viiperPoc, developerTestModeState: _developerTestModeState);
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, developerTestModeState: _developerTestModeState);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
@@ -256,8 +254,6 @@ public partial class App : Application
         _powerWatcher = null;
         if (_powerCoordinator is not null) _powerCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _powerCoordinator = null;
-        if (_viiperPoc is not null) _viiperPoc.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _viiperPoc = null;
         if (_msiClawNativeModeSession is not null) _msiClawNativeModeSession.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _msiClawNativeModeSession = null;
         AppLog.Info("Runtime cleanup completed.");
