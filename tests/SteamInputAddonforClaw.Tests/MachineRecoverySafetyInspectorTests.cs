@@ -32,7 +32,7 @@ public sealed class MachineRecoverySafetyInspectorTests
     {
         var profile = ExistingProfilePath();
         var probe = new FakeJournalProbe([]);
-        var inspector = new MachineRecoverySafetyInspector(new FakeProfileSource([profile, profile + Path.DirectorySeparatorChar]), probe);
+        var inspector = new MachineRecoverySafetyInspector(new FakeProfileSource([profile, profile + Path.DirectorySeparatorChar]), probe, new FixedProfileDirectoryProbe(ProfileDirectoryStatus.Present));
 
         var result = inspector.Inspect();
 
@@ -61,14 +61,31 @@ public sealed class MachineRecoverySafetyInspectorTests
     [Fact]
     public void JournalInspectionFailure_IsIndeterminateAndBlocksProvisioning()
     {
-        var result = new MachineRecoverySafetyInspector(new FakeProfileSource([ExistingProfilePath()]), new ThrowingJournalProbe()).Inspect();
+        var result = new MachineRecoverySafetyInspector(new FakeProfileSource([ExistingProfilePath()]), new ThrowingJournalProbe(), new FixedProfileDirectoryProbe(ProfileDirectoryStatus.Present)).Inspect();
 
         Assert.Equal(RecoverySafetyStatus.Indeterminate, result.Status);
         Assert.False(ElevatedPrerequisiteSetup.AllowsRecoverySafeProvisioning(result));
     }
 
+    [Fact]
+    public void ProfileDirectoryAccessDenied_IsIndeterminateAndBlocksProvisioning()
+    {
+        var result = new MachineRecoverySafetyInspector(new FakeProfileSource([ExistingProfilePath()]), new FakeJournalProbe([]), new FixedProfileDirectoryProbe(ProfileDirectoryStatus.Indeterminate)).Inspect();
+
+        Assert.Equal(RecoverySafetyStatus.Indeterminate, result.Status);
+        Assert.False(ElevatedPrerequisiteSetup.AllowsRecoverySafeProvisioning(result));
+    }
+
+    [Fact]
+    public void GenuinelyAbsentProfile_IsSkipped()
+    {
+        var result = new MachineRecoverySafetyInspector(new FakeProfileSource([ExistingProfilePath()]), new FakeJournalProbe([]), new FixedProfileDirectoryProbe(ProfileDirectoryStatus.Missing)).Inspect();
+
+        Assert.Equal(RecoverySafetyStatus.Safe, result.Status);
+    }
+
     private static RecoverySafetyAssessment Inspect(IReadOnlyList<string> profiles, IReadOnlyList<string> journals) =>
-        new MachineRecoverySafetyInspector(new FakeProfileSource(profiles), new FakeJournalProbe(journals)).Inspect();
+        new MachineRecoverySafetyInspector(new FakeProfileSource(profiles), new FakeJournalProbe(journals), new FixedProfileDirectoryProbe(ProfileDirectoryStatus.Present)).Inspect();
 
     private static string ExistingProfilePath() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
@@ -96,5 +113,10 @@ public sealed class MachineRecoverySafetyInspectorTests
     private sealed class ThrowingJournalProbe : IRecoveryJournalPresenceProbe
     {
         public bool Exists(string journalPath) => throw new UnauthorizedAccessException();
+    }
+
+    private sealed class FixedProfileDirectoryProbe(ProfileDirectoryStatus status) : IProfileDirectoryProbe
+    {
+        public ProfileDirectoryStatus Inspect(string profilePath) => status;
     }
 }

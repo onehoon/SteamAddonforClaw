@@ -21,6 +21,13 @@ internal interface IRecoveryJournalPresenceProbe
     bool Exists(string journalPath);
 }
 
+internal enum ProfileDirectoryStatus { Present, Missing, Indeterminate }
+
+internal interface IProfileDirectoryProbe
+{
+    ProfileDirectoryStatus Inspect(string profilePath);
+}
+
 internal sealed class WindowsProfileListPathSource : IWindowsProfilePathSource
 {
     private const string ProfileListKeyPath = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
@@ -57,13 +64,32 @@ internal sealed class FileRecoveryJournalPresenceProbe : IRecoveryJournalPresenc
     }
 }
 
+internal sealed class FileSystemProfileDirectoryProbe : IProfileDirectoryProbe
+{
+    public ProfileDirectoryStatus Inspect(string profilePath)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(profilePath);
+            return (attributes & FileAttributes.Directory) != 0
+                ? ProfileDirectoryStatus.Present
+                : ProfileDirectoryStatus.Indeterminate;
+        }
+        catch (FileNotFoundException) { return ProfileDirectoryStatus.Missing; }
+        catch (DirectoryNotFoundException) { return ProfileDirectoryStatus.Missing; }
+        catch { return ProfileDirectoryStatus.Indeterminate; }
+    }
+}
+
 internal sealed class MachineRecoverySafetyInspector(
     IWindowsProfilePathSource? profilePathSource = null,
-    IRecoveryJournalPresenceProbe? journalPresenceProbe = null) : IMachineRecoverySafetyInspector
+    IRecoveryJournalPresenceProbe? journalPresenceProbe = null,
+    IProfileDirectoryProbe? profileDirectoryProbe = null) : IMachineRecoverySafetyInspector
 {
     private const string RecoveryJournalRelativePath = "AppData\\Local\\SteamInputAddonforClaw\\recovery.json";
     private readonly IWindowsProfilePathSource _profilePathSource = profilePathSource ?? new WindowsProfileListPathSource();
     private readonly IRecoveryJournalPresenceProbe _journalPresenceProbe = journalPresenceProbe ?? new FileRecoveryJournalPresenceProbe();
+    private readonly IProfileDirectoryProbe _profileDirectoryProbe = profileDirectoryProbe ?? new FileSystemProfileDirectoryProbe();
 
     public RecoverySafetyAssessment Inspect()
     {
@@ -78,11 +104,12 @@ internal sealed class MachineRecoverySafetyInspector(
             try { canonicalProfilePath = CanonicalizeLocalProfilePath(profilePath); }
             catch { return new(RecoverySafetyStatus.Indeterminate, "ProfilePathInspectionFailed"); }
 
-            try
-            {
-                if (!Directory.Exists(canonicalProfilePath)) continue;
-            }
+            ProfileDirectoryStatus profileDirectoryStatus;
+            try { profileDirectoryStatus = _profileDirectoryProbe.Inspect(canonicalProfilePath); }
             catch { return new(RecoverySafetyStatus.Indeterminate, "ProfilePathInspectionFailed"); }
+            if (profileDirectoryStatus == ProfileDirectoryStatus.Missing) continue;
+            if (profileDirectoryStatus != ProfileDirectoryStatus.Present)
+                return new(RecoverySafetyStatus.Indeterminate, "ProfilePathInspectionFailed");
 
             if (!inspectedPaths.Add(canonicalProfilePath)) continue;
 
