@@ -58,11 +58,11 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
             if (_api.Initialize("127.0.0.1:3241") != 0) return Fail("ViiperInitFailed");
             if (_api.CreateBus(BusId) != 0) return Fail("ViiperBusCreateFailed");
             if (_api.AddDevice(BusId, "steamcontroller", VendorId, ProductId, out _deviceId) != 0) return Fail("ViiperDeviceAddFailed");
-            if (_api.SetFeedbackCallback(BusId, _deviceId, feedback => AppLog.Debug("ViiperPoc", "Steam Controller feedback received.", ("Length", feedback.Length))) != 0) return Fail("ViiperFeedbackCallbackFailed");
+            if (_api.SetFeedbackCallback(BusId, _deviceId, feedback => AppLog.Debug("ViiperPoc", "Steam Controller feedback received.", ("Length", feedback.Length))) != 0) return Fail("ViiperFeedbackCallbackFailed", ownershipUncertain: true);
             Send(new ClassicSteamControllerInput(false, false));
 
             _trackedDevice = await WaitForCreatedDeviceAsync(before, cancellationToken).ConfigureAwait(false);
-            if (_trackedDevice is null) return Fail("ViiperDeviceIdentityUnverified");
+            if (_trackedDevice is null) return Fail("ViiperDeviceIdentityUnverified", ownershipUncertain: true);
             _tracker.Publish(_trackedDevice);
             _state = ViiperSteamControllerPocState.Running;
             _runningLifetime = new CancellationTokenSource();
@@ -74,7 +74,7 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Error("ViiperPoc", "Classic Steam Controller PoC start failed.", exception);
-            return Fail("StartException");
+            return Fail("StartException", ownershipUncertain: _deviceId != 0);
         }
         finally { _mutex.Release(); }
     }
@@ -135,6 +135,22 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(4));
         try { while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) Send(CurrentInput()); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            AppLog.Error("ViiperPoc", "VIIPER report pump failed.", exception);
+            _ = Task.Run(HandleReportPumpFailureAsync);
+        }
+    }
+
+    private async Task HandleReportPumpFailureAsync()
+    {
+        await _mutex.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_state == ViiperSteamControllerPocState.Running)
+                Fail("ReportPumpFailure", ownershipUncertain: true);
+        }
+        finally { _mutex.Release(); }
     }
 
     private ClassicSteamControllerInput CurrentInput()
