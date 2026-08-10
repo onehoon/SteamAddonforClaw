@@ -5,16 +5,19 @@ public sealed class DeviceProbeContext
     public DeviceProbeContext(
         IEnumerable<DeviceProbePnpDevice>? presentPnpDevices = null,
         string? systemManufacturer = null,
-        string? systemProductName = null)
+        string? systemProductName = null,
+        string? baseBoardProduct = null)
     {
         PresentPnpDevices = (presentPnpDevices ?? []).ToArray();
         SystemManufacturer = systemManufacturer;
         SystemProductName = systemProductName;
+        BaseBoardProduct = baseBoardProduct;
     }
 
     public IReadOnlyList<DeviceProbePnpDevice> PresentPnpDevices { get; }
     public string? SystemManufacturer { get; }
     public string? SystemProductName { get; }
+    public string? BaseBoardProduct { get; }
 }
 
 public sealed record DeviceProbePnpDevice

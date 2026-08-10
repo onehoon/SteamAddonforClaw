@@ -1,24 +1,21 @@
-using Microsoft.Win32;
 using System.Management;
+using SteamInputAddonforClaw.Devices.Abstractions;
 
 namespace SteamInputAddonforClaw.Status;
 
 internal sealed class WindowsDeviceInformationProvider : IDeviceInformationProvider
 {
-    public DeviceStatusSnapshot Capture()
+    public DeviceStatusSnapshot Capture(DeviceProbeContext context)
     {
-        try
-        {
-            using var bios = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\BIOS");
-            var manufacturer = bios?.GetValue("SystemManufacturer") as string;
-            var model = bios?.GetValue("SystemProductName") as string;
-            var gpus = CaptureGpuModels();
-            return new(string.IsNullOrWhiteSpace(manufacturer) ? "Unknown" : manufacturer, string.IsNullOrWhiteSpace(model) ? "Unknown" : model, gpus.Count == 0 ? ["Unknown"] : gpus);
-        }
-        catch
-        {
-            return new("Unknown", "Unknown", ["Unknown"]);
-        }
+        ArgumentNullException.ThrowIfNull(context);
+        IReadOnlyList<string> gpus;
+        try { gpus = CaptureGpuModels(); }
+        catch { gpus = ["Unknown"]; }
+        return new(
+            string.IsNullOrWhiteSpace(context.SystemManufacturer) ? "Unknown" : context.SystemManufacturer,
+            string.IsNullOrWhiteSpace(context.SystemProductName) ? "Unknown" : context.SystemProductName,
+            string.IsNullOrWhiteSpace(context.BaseBoardProduct) ? "Unknown" : context.BaseBoardProduct,
+            gpus.Count == 0 ? ["Unknown"] : gpus);
     }
 
     internal static bool IsSupportedGpuName(string name) => name.Contains("Intel", StringComparison.OrdinalIgnoreCase)

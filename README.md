@@ -15,6 +15,7 @@ The addon intentionally does not implement its own remapping, macros, profiles, 
 
 * **Platform:** Windows 11 24H2 or later
 * **Device family:** MSI Claw handheld PCs
+* **Current supported model:** MSI Claw 8 EX AI+ CG3EM (`Win32_BaseBoard.Product = MS-1T91`)
 * **Architecture:** x64
 * **Application:** WinUI 3 / .NET 10
 * **Distribution:** Velopack
@@ -99,6 +100,8 @@ MSI Claw native-state restoration currently verifies an already-restored state o
 
 The current MVP supports **Stock MSI Center M only**. It requires MSI Center M to be installed and operational, with neither ClawTweaks nor Handheld Companion installed. Other controller-management environments are shown as unsupported and the addon remains passive.
 
+Hardware support is currently limited to **MSI Claw 8 EX AI+ CG3EM**. Compatibility is determined from the exact `Win32_BaseBoard.Product` value `MS-1T91`; another board model is unsupported, and an unavailable board identity is treated as indeterminate without routing or setup mutation.
+
 ## Planned Compatibility
 
 **MSI Center M + ClawTweaks** remains a planned compatibility target, not a currently supported environment.
@@ -129,6 +132,8 @@ The addon may intervene only when:
 External physical controller absent
 AND
 recovery state safe
+AND
+current handheld model supported
 AND
 current controller environment supported
 AND
@@ -188,6 +193,16 @@ External controller assessment indeterminate?
     → INDETERMINATE
 
     NO
+    ↓
+
+Handheld model compatibility?
+    Unsupported
+    → UNSUPPORTED
+
+    Indeterminate
+    → INDETERMINATE
+
+    Supported
     ↓
 
 Controller environment compatibility?

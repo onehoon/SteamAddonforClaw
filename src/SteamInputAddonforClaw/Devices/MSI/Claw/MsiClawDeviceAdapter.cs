@@ -13,6 +13,7 @@ public sealed class MsiClawDeviceAdapter : IHandheldDeviceAdapter
     public AuxiliaryControlCatalog AuxiliaryControls => MsiClawControls.Catalog;
     public IInternalControllerMatcher InternalControllerMatcher { get; } = new MsiClawInternalControllerMatcher();
     public INativeControllerStateManager? NativeState { get; }
+    public IHandheldDeviceModelResolver? ModelResolver { get; } = new MsiClawDeviceModelResolver();
 
     public DeviceProbeResult Probe(DeviceProbeContext context)
     {

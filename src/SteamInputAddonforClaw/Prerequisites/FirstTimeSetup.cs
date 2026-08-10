@@ -1,14 +1,15 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Devices;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
 internal enum ComponentProvisioningState { None, Provisioned, InstallStarted, PendingReboot, AttemptFailed, AttemptCancelled, Corrupt, Indeterminate, Legacy }
 internal sealed record ProvisioningStateAssessment(ComponentProvisioningState HidHide, ComponentProvisioningState UsbIpWin2);
-internal sealed record FirstTimeSetupInput(ControllerEnvironmentCompatibilityAssessment Compatibility, bool RecoverySafe, ExternalControllerAssessment ExternalController, SteamSessionState Steam, PrerequisiteAssessment HidHide, PrerequisiteAssessment UsbIpWin2, ProvisioningStateAssessment Provisioning);
-internal enum FirstTimeSetupStatus { Complete, Required, RestartRequired, Blocked, Indeterminate }
-internal enum FirstTimeSetupReason { Complete, MissingComponents, PendingReboot, RecoveryUnsafe, ExternalController, ExternalControllerIndeterminate, CompatibilityUnsupported, CompatibilityIndeterminate, SteamActive, ProvisioningUncertain, LegacyHidHideMissing }
+internal sealed record FirstTimeSetupInput(HardwareCompatibilityAssessment HardwareCompatibility, ControllerEnvironmentCompatibilityAssessment Compatibility, bool RecoverySafe, ExternalControllerAssessment ExternalController, SteamSessionState Steam, PrerequisiteAssessment HidHide, PrerequisiteAssessment UsbIpWin2, ProvisioningStateAssessment Provisioning);
+internal enum FirstTimeSetupStatus { Complete, Required, RestartRequired, Blocked, NotApplicable, Indeterminate }
+internal enum FirstTimeSetupReason { Complete, MissingComponents, PendingReboot, RecoveryUnsafe, ExternalController, ExternalControllerIndeterminate, HardwareUnsupported, HardwareIndeterminate, CompatibilityUnsupported, CompatibilityIndeterminate, SteamActive, ProvisioningUncertain, LegacyHidHideMissing }
 internal sealed record FirstTimeSetupAssessment(FirstTimeSetupStatus Status, FirstTimeSetupReason Reason, bool CanInstallRequiredComponents);
 
 internal static class FirstTimeSetupPolicy
@@ -16,6 +17,10 @@ internal static class FirstTimeSetupPolicy
     public static FirstTimeSetupAssessment Evaluate(FirstTimeSetupInput input)
     {
         var componentsReady = input.HidHide.Status == PrerequisiteStatus.Ready && input.UsbIpWin2.Status == PrerequisiteStatus.Ready;
+        if (input.HardwareCompatibility.Status == HardwareCompatibilityStatus.Unsupported)
+            return new(FirstTimeSetupStatus.NotApplicable, FirstTimeSetupReason.HardwareUnsupported, false);
+        if (input.HardwareCompatibility.Status == HardwareCompatibilityStatus.Indeterminate)
+            return new(FirstTimeSetupStatus.Indeterminate, FirstTimeSetupReason.HardwareIndeterminate, false);
         if (input.Provisioning.HidHide is ComponentProvisioningState.Corrupt or ComponentProvisioningState.Indeterminate || input.Provisioning.UsbIpWin2 is ComponentProvisioningState.Corrupt or ComponentProvisioningState.Indeterminate)
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
         if (input.Provisioning.HidHide is ComponentProvisioningState.InstallStarted or ComponentProvisioningState.AttemptFailed || input.Provisioning.UsbIpWin2 is ComponentProvisioningState.InstallStarted or ComponentProvisioningState.AttemptFailed)

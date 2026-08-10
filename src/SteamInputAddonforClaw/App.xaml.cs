@@ -89,7 +89,7 @@ public partial class App : Application
                 ("ViiperReason", prerequisiteAssessment.Viiper.Reason),
                 ("RoutingReady", prerequisiteAssessment.IsRoutingReady));
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, deviceRegistry, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
@@ -101,7 +101,7 @@ public partial class App : Application
         }
     }
 
-    private void StartNormalRuntime(ControllerDeviceClassifier classifier, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
+    private void StartNormalRuntime(ControllerDeviceClassifier classifier, HandheldDeviceRegistry deviceRegistry, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         ClawTweaksCompatibilitySnapshotLogger.LogAtStartup(new WindowsControllerDeviceEnumerator());
@@ -140,6 +140,8 @@ public partial class App : Application
 
         var statusProvider = new SystemStatusProvider(
             new WindowsDeviceInformationProvider(),
+            new WindowsDeviceProbeContextFactory(),
+            new HardwareCompatibilityEvaluator(deviceRegistry),
             [
                 new MsiCenterMSoftwareStatusProvider(),
                 new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),

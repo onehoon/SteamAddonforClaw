@@ -182,6 +182,7 @@ public sealed class RecoveryManagerTests : IDisposable
         public HandheldDeviceDescriptor Descriptor { get; } = new(id, "Test", "Test", "Test");
         public AuxiliaryControlCatalog AuxiliaryControls { get; } = new([]);
         public IInternalControllerMatcher InternalControllerMatcher { get; } = new NeverMatcher();
+        public IHandheldDeviceModelResolver? ModelResolver => null;
         public INativeControllerStateManager? NativeState => native;
         public DeviceProbeResult Probe(DeviceProbeContext context) => new(DeviceProbeStatus.NoMatch, "test");
     }
