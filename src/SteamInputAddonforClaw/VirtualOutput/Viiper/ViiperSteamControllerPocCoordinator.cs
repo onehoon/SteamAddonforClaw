@@ -335,6 +335,7 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(remaining);
         try { if (_reportPump is not null) await _reportPump.WaitAsync(timeout.Token).ConfigureAwait(false); await _nativeOperationLock.WaitAsync(timeout.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) { _tracker.MarkOwnershipUncertain(); AppLog.Warn("ViiperPoc.Power", "VIIPER suspend teardown could not acquire native-operation lock before deadline.", null, ("Cycle", cycle), ("Epoch", epoch), ("ElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds)); return false; }
+        catch (Exception exception) { _tracker.MarkOwnershipUncertain(); AppLog.Error("ViiperPoc.Power", "VIIPER suspend teardown could not stop the report pump or acquire the native-operation lock.", exception, ("Cycle", cycle), ("Epoch", epoch), ("ElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds)); return false; }
         ControllerDeviceInfo? tracked;
         ViiperNativeTeardownResult teardown;
         try
