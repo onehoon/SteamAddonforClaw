@@ -33,5 +33,14 @@ internal sealed class PowerMutationGate
         lock (_sync) { previousEpoch = _epoch; _open = false; epoch = ++_epoch; }
     }
     internal void OpenAfterRecovery() { lock (_sync) _open = true; }
+    internal bool TryOpenAfterRecovery(long expectedEpoch)
+    {
+        lock (_sync)
+        {
+            if (_epoch != expectedEpoch) return false;
+            _open = true;
+            return true;
+        }
+    }
     internal void Close() { lock (_sync) _open = false; }
 }

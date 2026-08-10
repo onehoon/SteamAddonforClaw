@@ -72,6 +72,27 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public async Task Stale_resume_recovery_cannot_reopen_gate_after_a_new_suspend()
+    {
+        var gate = new PowerMutationGate(true); var recovery = new RecoverySafetyState(RecoverySafety.Safe);
+        var pendingRecovery = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var coordinator = new PowerTransitionCoordinator(gate, recovery, _ => pendingRecovery.Task, []);
+        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(1)));
+        gate.EnterNewCycleBarrier(out _, out var newEpoch); pendingRecovery.SetResult(true); await resume;
+        Assert.False(gate.IsOpen); Assert.Equal(newEpoch, gate.Epoch); Assert.NotEqual(PowerTransitionState.Awake, coordinator.State);
+    }
+
+    [Fact]
+    public async Task Duplicate_suspend_does_not_advance_epoch_or_quiesce_twice()
+    {
+        var gate = new PowerMutationGate(true); var source = new FakeSource(true); var participant = new CountingParticipant();
+        var coordinator = Coordinator(gate, participant); using var watcher = new PowerTransitionWatcher(source, gate, coordinator, () => { }); Assert.True(watcher.Start());
+        await watcher.ObserveAsync(4); var epoch = gate.Epoch; await watcher.ObserveAsync(4);
+        Assert.Equal(epoch, gate.Epoch); Assert.Equal(1, participant.QuiesceCount);
+    }
+
+    [Fact]
     public void Verified_absence_only_clears_uncertain_ownership()
     {
         var tracker = new AddonOwnedVirtualDeviceTracker(); var policy = new ViiperVirtualDeviceIdentityPolicy(); tracker.MarkOwnershipUncertain();
@@ -94,6 +115,12 @@ public sealed class PowerTransitionTests
         public string Name => "blocked";
         public TaskCompletionSource Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken) { try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); } catch (OperationCanceledException) { } Completed.TrySetResult(); return false; }
+        public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken) => Task.FromResult(true);
+    }
+    private sealed class CountingParticipant : IPowerTransitionParticipant
+    {
+        public string Name => "counting"; public int QuiesceCount;
+        public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken) { Interlocked.Increment(ref QuiesceCount); return Task.FromResult(true); }
         public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken) => Task.FromResult(true);
     }
 }

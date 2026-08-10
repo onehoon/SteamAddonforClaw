@@ -75,16 +75,24 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             State = PowerTransitionState.Recovering; _recovery.Set(RecoverySafety.Indeterminate);
             var cycleForResume = _cycle == 0 ? Interlocked.Increment(ref _cycle) : _cycle;
             _resumeCycle = cycleForResume;
+            var recoveryEpoch = _gate.Epoch;
             var safe = false;
             try
             {
                 safe = await _recover(cancellationToken).ConfigureAwait(false);
-                foreach (var participant in _participants) safe &= await participant.ReconcileAfterResumeAsync(cycleForResume, _gate.Epoch, cancellationToken).ConfigureAwait(false);
+                if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
+                foreach (var participant in _participants)
+                {
+                    safe &= await participant.ReconcileAfterResumeAsync(cycleForResume, recoveryEpoch, cancellationToken).ConfigureAwait(false);
+                    if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
+                }
             }
             catch (Exception e) { AppLog.Error("Power.Recovery", "Resume reconciliation failed.", e, ("Cycle", cycleForResume), ("Epoch", _gate.Epoch)); safe = false; }
+            if (_gate.Epoch != recoveryEpoch) return;
             _recovery.Set(safe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
             State = safe ? PowerTransitionState.Awake : PowerTransitionState.Unsafe;
-            if (safe) _gate.OpenAfterRecovery(); else _gate.Close();
+            if (safe && !_gate.TryOpenAfterRecovery(recoveryEpoch)) return;
+            if (!safe) _gate.Close();
             AppLog.Info("Power.Recovery", "Resume reconciliation completed.", ("Cycle", cycleForResume), ("Epoch", _gate.Epoch), ("Outcome", safe ? "Succeeded" : "Failed"), ("PowerGateOpened", _gate.IsOpen), ("FinalPowerState", State));
         }
         finally { _serial.Release(); }
