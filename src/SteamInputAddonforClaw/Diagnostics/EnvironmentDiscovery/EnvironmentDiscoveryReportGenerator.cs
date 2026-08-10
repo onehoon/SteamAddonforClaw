@@ -10,6 +10,7 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
 using Windows.Management.Deployment;
+using SteamInputAddonforClaw.Diagnostics.SteamController1304;
 
 namespace SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 
@@ -77,6 +78,7 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
             Section(CaptureStartupRegistrations),
             Section(CaptureScheduledTasks),
             Section(devices.EnumeratePresentDevices),
+            Section(() => (IReadOnlyList<SteamController1304DiagnosticSnapshot>)[new WindowsSteamController1304StateProbe(devices.EnumeratePresentDevices).Capture()]),
             Section(() => (IReadOnlyList<ExternalControllerAssessment>)[new ExternalControllerDetector(devices, new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher())).Detect()]),
             Section(() => (IReadOnlyList<RuntimePrerequisiteAssessment>)[new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices)), new ViiperRuntimeInspector()).Inspect()]));
     }

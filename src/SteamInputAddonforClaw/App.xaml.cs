@@ -145,11 +145,21 @@ public partial class App : Application
 
         ExternalControllerAssessment CaptureExternalControllerAssessment()
         {
-            var assessment = controllerDetector.Detect();
-            return ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(
-                assessment,
+            var rawAssessment = controllerDetector.Detect();
+            var effectiveAssessment = ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(
+                rawAssessment,
                 environmentMode,
                 environmentReadiness);
+            AppLog.Info("ExternalController", "External controller assessment evaluated.",
+                ("RawStatus", rawAssessment.Status),
+                ("EffectiveStatus", effectiveAssessment.Status),
+                ("RawCount", rawAssessment.DetectedExternalControllerCount),
+                ("EffectiveCount", effectiveAssessment.DetectedExternalControllerCount),
+                ("EnvironmentMode", environmentMode),
+                ("EnvironmentReadiness", environmentReadiness),
+                ("Adjusted", rawAssessment.Status != effectiveAssessment.Status),
+                ("Reason", rawAssessment.Status == effectiveAssessment.Status ? "None" : "EnvironmentSafety"));
+            return effectiveAssessment;
         }
 
         var recoverySafetyState = new RecoverySafetyState(recoverySafe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
