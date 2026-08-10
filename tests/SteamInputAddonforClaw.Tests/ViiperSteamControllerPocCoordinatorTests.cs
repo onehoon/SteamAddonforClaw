@@ -204,6 +204,16 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
     }
 
     [Fact]
+    public async Task Suspend_verified_disappearance_removes_tracked_identity()
+    {
+        var device = Device("USB\\VID_28DE&PID_1102\\VIIPER"); var api = new FakeApi(); var tracker = new AddonOwnedVirtualDeviceTracker();
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [device], []), () => api, tracker);
+        Assert.True((await coordinator.StartAsync()).Succeeded); Assert.True(tracker.IsExcluded(device));
+        Assert.True(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 24, 25, CancellationToken.None));
+        Assert.False(tracker.IsExcluded(device)); Assert.False(tracker.HasUncertainOwnership);
+    }
+
+    [Fact]
     public async Task Suspend_pnp_enumeration_failure_marks_ownership_uncertain()
     {
         var device = Device("USB\\VID_28DE&PID_1102\\VIIPER"); var api = new FakeApi(); var tracker = new AddonOwnedVirtualDeviceTracker();
