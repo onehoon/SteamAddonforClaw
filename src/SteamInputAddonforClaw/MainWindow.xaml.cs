@@ -25,6 +25,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw;
 
@@ -48,6 +49,7 @@ public sealed partial class MainWindow : Window
     private int _isRefreshingStatus;
     private int _isGeneratingEnvironmentDiscoveryReport;
     private string? _environmentDiscoveryDirectory;
+    private readonly ViiperSteamControllerPocCoordinator? _viiperSteamControllerPocCoordinator;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -62,7 +64,8 @@ public sealed partial class MainWindow : Window
         RecoveryManager? recoveryManager,
         ISystemStatusProvider? systemStatusProvider = null,
         IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
-        IHidHideProvisioningReceiptStore? hidHideReceiptStore = null)
+        IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
+        ViiperSteamControllerPocCoordinator? viiperSteamControllerPocCoordinator = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
@@ -72,6 +75,7 @@ public sealed partial class MainWindow : Window
             new WindowsEnvironmentDiscoverySnapshotSource(),
             new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
             new EnvironmentDiscoveryReportWriter());
+        _viiperSteamControllerPocCoordinator = viiperSteamControllerPocCoordinator;
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -181,6 +185,41 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void StartViiperSteamControllerPocButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_viiperSteamControllerPocCoordinator is null) { ViiperSteamControllerPocStatusText.Text = "Status: Not available in this runtime."; return; }
+        var result = await _viiperSteamControllerPocCoordinator.StartAsync();
+        UpdateViiperSteamControllerPocControls(result);
+    }
+
+    private async void StopViiperSteamControllerPocButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_viiperSteamControllerPocCoordinator is null) return;
+        UpdateViiperSteamControllerPocControls(await _viiperSteamControllerPocCoordinator.StopAsync());
+    }
+
+    private async void PulseLeftGripButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_viiperSteamControllerPocCoordinator is null) return;
+        UpdateViiperSteamControllerPocControls(await _viiperSteamControllerPocCoordinator.PulseAsync(leftGrip: true, rightGrip: false));
+    }
+
+    private async void PulseRightGripButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (_viiperSteamControllerPocCoordinator is null) return;
+        UpdateViiperSteamControllerPocControls(await _viiperSteamControllerPocCoordinator.PulseAsync(leftGrip: false, rightGrip: true));
+    }
+
+    private void UpdateViiperSteamControllerPocControls(ViiperSteamControllerPocResult result)
+    {
+        ViiperSteamControllerPocStatusText.Text = $"Status: {result.State} ({result.Reason})";
+        var running = result.State == ViiperSteamControllerPocState.Running;
+        StartViiperSteamControllerPocButton.IsEnabled = result.State is ViiperSteamControllerPocState.Stopped;
+        StopViiperSteamControllerPocButton.IsEnabled = running;
+        PulseLeftGripButton.IsEnabled = running;
+        PulseRightGripButton.IsEnabled = running;
+    }
+
     private async void StopM1M2TestButton_Click(object sender, RoutedEventArgs args)
     {
         if (_m1M2DiagnosticCoordinator is not null)
@@ -224,6 +263,7 @@ public sealed partial class MainWindow : Window
             source.TestCompleted -= OnMsiClawInputTestCompleted;
             _m1M2DiagnosticCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
+        _viiperSteamControllerPocCoordinator?.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     private MsiClawInputSource CreateMsiClawInputSource()

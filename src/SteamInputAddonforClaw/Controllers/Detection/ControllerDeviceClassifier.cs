@@ -54,6 +54,8 @@ public sealed class ControllerDeviceClassifier
     public ControllerDeviceClassification Classify(ControllerDeviceInfo device)
         => ClassifyDetailed(device).Classification;
 
+    internal bool HasUncertainIdentityOwnership => _identityExclusionSource.HasUncertainOwnership;
+
     internal ControllerDeviceClassification Classify(ControllerDeviceInfo device, ControllerTopologySnapshot topology)
         => ClassifyDetailed(device, topology).Classification;
 

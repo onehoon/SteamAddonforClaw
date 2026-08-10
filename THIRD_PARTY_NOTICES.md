@@ -31,19 +31,18 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 - Upstream: https://github.com/nefarius/HidHide
 - Distribution: Official unmodified `HidHide_1.5.230_x64.exe` installer bundled for explicit first-time provisioning.
 
-## Planned Components
-
 ### VIIPER
 
 - Project: VIIPER
-- Upstream: https://github.com/Valkirie/VIIPER
-- Original project: https://github.com/Alia5/VIIPER
+- Canonical source: https://github.com/onehoon/VIIPER/tree/steam-input-addon-baseline-1
+- Source archive: https://github.com/onehoon/VIIPER/archive/refs/tags/steam-input-addon-baseline-1.tar.gz
+- Source baseline: `steam-input-addon-baseline-1` -> `209c882009caea4f3baf322b9b6020c1a921feed`
+- Lineage: https://github.com/Valkirie/VIIPER -> https://github.com/Alia5/VIIPER
 - Copyright: Peter Repukat (as identified by the upstream project)
-- License: GPL-3.0-or-later
+- License: GPL-3.0
+- Distribution: `Dependencies/Viiper/libVIIPER.dll`, built directly from the pinned source; build command, toolchain, and SHA-256 are recorded beside the payload in `PROVENANCE.md`.
 
-VIIPER is intended to provide the virtual USB controller backend. It is not included in the current development build and this repository does not currently distribute `libVIIPER.dll` or `viiper.exe`.
-
-If a modified VIIPER build is distributed by this project, the corresponding modified source will be made available under the applicable GPL terms.
+The project does not redistribute Handheld Companion's bundled `libVIIPER.dll` and does not claim byte-for-byte identity with that artifact. HHC is a behavior reference only.
 
 ## References
 
