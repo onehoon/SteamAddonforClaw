@@ -59,6 +59,18 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public void Failed_resume_allows_a_new_suspend_cycle_and_recovery_retry()
+    {
+        var gate = new PowerMutationGate(true); var calls = 0; var source = new FakeSource(true);
+        var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), _ => Task.FromResult(Interlocked.Increment(ref calls) > 1), []);
+        using var watcher = new PowerTransitionWatcher(source, gate, coordinator, () => { }); Assert.True(watcher.Start());
+        source.Raise(4); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Suspended, TimeSpan.FromSeconds(1)));
+        source.Raise(18); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Unsafe, TimeSpan.FromSeconds(1))); var firstEpoch = gate.Epoch;
+        source.Raise(4); Assert.True(SpinWait.SpinUntil(() => gate.Epoch > firstEpoch, TimeSpan.FromSeconds(1)));
+        source.Raise(18); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Awake && gate.IsOpen, TimeSpan.FromSeconds(1))); Assert.Equal(2, calls);
+    }
+
+    [Fact]
     public void Verified_absence_only_clears_uncertain_ownership()
     {
         var tracker = new AddonOwnedVirtualDeviceTracker(); var policy = new ViiperVirtualDeviceIdentityPolicy(); tracker.MarkOwnershipUncertain();

@@ -28,6 +28,10 @@ internal sealed class PowerMutationGate
             _open = false; epoch = ++_epoch; return true;
         }
     }
+    internal void EnterNewCycleBarrier(out long previousEpoch, out long epoch)
+    {
+        lock (_sync) { previousEpoch = _epoch; _open = false; epoch = ++_epoch; }
+    }
     internal void OpenAfterRecovery() { lock (_sync) _open = true; }
     internal void Close() { lock (_sync) _open = false; }
 }

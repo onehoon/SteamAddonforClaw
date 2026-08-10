@@ -13,7 +13,8 @@ internal sealed class PowerTransitionWatcher : IDisposable
     private readonly PowerTransitionCoordinator _coordinator;
     private readonly Action _cancelLifecycle;
     private int _disposed;
-    private int _resumePending;
+    // 0 = awake/unknown, 1 = suspend observed, 2 = first resume observed.
+    private int _phase;
     internal PowerTransitionWatcher(IPowerSuspendResumeNotificationSource source, PowerMutationGate gate, PowerTransitionCoordinator coordinator, Action cancelLifecycle)
         => (_source, _gate, _coordinator, _cancelLifecycle) = (source, gate, coordinator, cancelLifecycle);
     internal bool Start()
@@ -27,18 +28,18 @@ internal sealed class PowerTransitionWatcher : IDisposable
         if (Volatile.Read(ref _disposed) != 0) return;
         var signal = Map(rawCode);
         var before = _gate.Epoch;
-        var firstResumeForSuspend = signal is PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend && Interlocked.CompareExchange(ref _resumePending, 2, 1) == 1;
-        var duplicateResume = signal is PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend && Volatile.Read(ref _resumePending) == 2;
-        var barrier = signal == PowerSignal.Suspend ||
-            (signal is PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend && !firstResumeForSuspend && !duplicateResume && _gate.IsOpen);
+        var newSuspend = signal == PowerSignal.Suspend && Interlocked.Exchange(ref _phase, 1) != 1;
+        var firstResumeForSuspend = signal is PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend && Interlocked.CompareExchange(ref _phase, 2, 1) == 1;
+        var duplicateResume = signal is PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend && Volatile.Read(ref _phase) == 2;
+        var barrier = newSuspend || (signal is PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend && !firstResumeForSuspend && !duplicateResume && _gate.IsOpen);
         var applied = false;
         if (barrier)
         {
-            applied = _gate.TryEnterBarrier(out before, out _);
+            if (newSuspend) { _gate.EnterNewCycleBarrier(out before, out _); applied = true; }
+            else applied = _gate.TryEnterBarrier(out before, out _);
             if (applied)
             {
-                if (signal == PowerSignal.Suspend) Volatile.Write(ref _resumePending, 1);
-                else if (signal is PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend) Volatile.Write(ref _resumePending, 2);
+                if (signal is PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend) Volatile.Write(ref _phase, 2);
                 try { _cancelLifecycle(); } catch { _gate.Close(); }
             }
         }
