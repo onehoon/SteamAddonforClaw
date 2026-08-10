@@ -35,7 +35,6 @@ public sealed class FirstTimeSetupPolicyTests
 
         Assert.Equal((FirstTimeSetupStatus)expectedSetupStatus, result.Status);
         Assert.False(result.CanInstallRequiredComponents);
-        Assert.False(MainWindow.ShouldNavigateToSetup(result));
     }
 
     [Theory]

@@ -51,6 +51,8 @@ public sealed partial class MainWindow : Window
     private int _isRefreshingStatus;
     private int _isGeneratingEnvironmentDiscoveryReport;
     private string? _environmentDiscoveryDirectory;
+    private bool _setupPromptActive;
+    private bool _setupPromptDeclinedForCurrentProcess;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -269,11 +271,10 @@ public sealed partial class MainWindow : Window
     private void ShowPage(MainNavigationPage page)
     {
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
-        SetupContent.Visibility = page == MainNavigationPage.Setup ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
-        if (page is MainNavigationPage.Status or MainNavigationPage.Setup) _ = RefreshSystemStatusAsync();
+        if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
     }
 
     private async void RefreshStatusButton_Click(object sender, RoutedEventArgs args) => await RefreshSystemStatusAsync();
@@ -324,23 +325,45 @@ public sealed partial class MainWindow : Window
             snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2,
             new(hidHideState, usbIpState)));
         var canInstall = setup.CanInstallRequiredComponents;
-        var receiptMessage = setup.Status == FirstTimeSetupStatus.Complete ? "Setup complete. Routing runtime is not available in this build."
-            : FormatFirstTimeSetupMessage(setup);
         var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
         Replace(_runtimeCards,
         [
             new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
             new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
         ]);
-        SetupHidHideText.Text = $"HidHide: {snapshot.Prerequisites.HidHide.Status}";
-        SetupUsbIpText.Text = $"usbip-win2: {snapshot.Prerequisites.UsbIpWin2.Status}";
-        InstallRequiredComponentsButton.IsEnabled = canInstall;
-        SetupStatusText.Text = receiptMessage;
-        if (ShouldNavigateToSetup(setup) && _navigationState.CurrentPage == MainNavigationPage.Status)
-            ShowPage(_navigationState.OpenSetup());
+        if (setup.Status == FirstTimeSetupStatus.Required && canInstall)
+            _ = PromptForPrerequisiteSetupAsync();
     }
 
-    private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)
+    private async Task PromptForPrerequisiteSetupAsync()
+    {
+        if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess) return;
+        _setupPromptActive = true;
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Setup required",
+                Content = "Steam Input Addon for Claw needs a few required components. Install them now?",
+                PrimaryButtonText = "Install",
+                CloseButtonText = "Not now",
+                XamlRoot = Content.XamlRoot
+            };
+            AppLog.Info("PrerequisiteSetupPrompt", "Prerequisite setup prompt shown.", ("Action", "Shown"));
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                _setupPromptDeclinedForCurrentProcess = true;
+                AppLog.Info("PrerequisiteSetupPrompt", "Prerequisite setup prompt declined.", ("Action", "Declined"));
+                return;
+            }
+            AppLog.Info("PrerequisiteSetupPrompt", "Prerequisite setup prompt accepted.", ("Action", "Accepted"));
+            await RunPrerequisiteSetupAsync();
+        }
+        catch (Exception exception) { AppLog.Warn("PrerequisiteSetup", "Prerequisite setup prompt failed.", exception); }
+        finally { _setupPromptActive = false; }
+    }
+
+    private async Task RunPrerequisiteSetupAsync()
     {
         var current = await _systemStatusProvider.CaptureAsync();
         AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
@@ -356,21 +379,25 @@ public sealed partial class MainWindow : Window
             RenderSystemStatus(current);
             return;
         }
-        InstallRequiredComponentsButton.IsEnabled = false;
-        SetupStatusText.Text = "Installing required components...";
         try
         {
             var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
             var result = await new ElevatedProcessRunner().RunAsync(executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
-            SetupStatusText.Text = ElevatedPrerequisiteSetup.TranslateExitCode(result) switch
+            var resultKind = ElevatedPrerequisiteSetup.TranslateExitCode(result);
+            AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", resultKind));
+            if (resultKind == ElevatedPrerequisiteSetup.ResultKind.RebootRequired)
             {
-                ElevatedPrerequisiteSetup.ResultKind.Installed => "Required components were installed.",
-                ElevatedPrerequisiteSetup.ResultKind.RebootRequired => "Restart Windows to complete component setup.",
-                ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress => "Another setup operation is already in progress.",
-                ElevatedPrerequisiteSetup.ResultKind.Blocked => "A required component is installed but not ready. Restart Windows or verify its installation before retrying.",
-                ElevatedPrerequisiteSetup.ResultKind.Cancelled => "Installation was cancelled.",
-                _ => result.Reason ?? "Required component installation failed."
-            };
+                var restartDialog = new ContentDialog
+                {
+                    Title = "Restart required",
+                    Content = "Windows needs to restart to finish setting up Steam Input Addon for Claw.",
+                    PrimaryButtonText = "Restart now",
+                    CloseButtonText = "Later",
+                    XamlRoot = Content.XamlRoot
+                };
+                if (await restartDialog.ShowAsync() == ContentDialogResult.Primary)
+                    Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false });
+            }
         }
         finally { await RefreshSystemStatusAsync(); }
     }
@@ -426,9 +453,6 @@ public sealed partial class MainWindow : Window
         FirstTimeSetupReason.SteamActive => "Exit the active Steam session before installing required components.",
         _ => string.Empty
     };
-
-    internal static bool ShouldNavigateToSetup(FirstTimeSetupAssessment assessment) =>
-        assessment.Status is FirstTimeSetupStatus.Required or FirstTimeSetupStatus.RestartRequired;
 
     private static ISystemStatusProvider CreateDefaultSystemStatusProvider()
     {

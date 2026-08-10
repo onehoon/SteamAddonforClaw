@@ -48,25 +48,6 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <ScrollViewer x:Name="SetupContent" Padding="32" Visibility="Collapsed">
-                <StackPanel Spacing="14">
-                    <TextBlock FontSize="24" FontWeight="SemiBold" Text="Set up Steam Input Addon for Claw" />
-                    <TextBlock Opacity="0.7" Text="Your system needs a few components before Steam controller routing can be enabled." TextWrapping="Wrap" />
-                    <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                        <StackPanel Spacing="8">
-                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Required components" />
-                            <TextBlock x:Name="SetupHidHideText" />
-                            <TextBlock x:Name="SetupUsbIpText" />
-                            <TextBlock Text="VIIPER runtime is not included in this build." Opacity="0.7" TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-                    <TextBlock Text="USB devices may briefly disconnect while the required controller driver is installed. Save work using USB storage or USB audio devices before continuing." Opacity="0.7" TextWrapping="Wrap" />
-                    <TextBlock x:Name="SetupStatusText" Opacity="0.7" TextWrapping="Wrap" />
-                    <Button x:Name="InstallRequiredComponentsButton" HorizontalAlignment="Left" Click="InstallHidHideButton_Click" Content="Install Required Components" />
-                    <Button HorizontalAlignment="Left" Click="ShowStatusButton_Click" Content="View Status" />
-                </StackPanel>
-            </ScrollViewer>
-
             <StackPanel
                 x:Name="HowToUseContent"
                 Padding="32"
