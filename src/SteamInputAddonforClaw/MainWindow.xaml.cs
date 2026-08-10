@@ -54,6 +54,7 @@ public sealed partial class MainWindow : Window
     private bool _setupPromptActive;
     private bool _setupPromptDeclinedForCurrentProcess;
     private bool _windowActivatedForUser;
+    private bool _setupPromptPendingActivation;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -107,7 +108,11 @@ public sealed partial class MainWindow : Window
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
         if (args.WindowActivationState == WindowActivationState.Deactivated) return;
-        if (_windowActivatedForUser) return;
+        if (_windowActivatedForUser)
+        {
+            if (_setupPromptPendingActivation) _ = RefreshSystemStatusAsync();
+            return;
+        }
         _windowActivatedForUser = true;
         _ = RefreshSystemStatusAsync();
     }
@@ -326,13 +331,31 @@ public sealed partial class MainWindow : Window
             new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
             new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
         ]);
-        if (_windowActivatedForUser && setup.Status == FirstTimeSetupStatus.Required && canInstall)
-            _ = PromptForPrerequisiteSetupAsync();
+        if (setup.Status == FirstTimeSetupStatus.Required && canInstall)
+        {
+            if (_windowActivatedForUser)
+                _ = PromptForPrerequisiteSetupAsync();
+            else
+                RequestSetupPromptActivation();
+        }
+    }
+
+    private void RequestSetupPromptActivation()
+    {
+        if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess || _setupPromptPendingActivation) return;
+        _setupPromptPendingActivation = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_windowActivatedForUser) return;
+            AppWindow.Show();
+            Activate();
+        });
     }
 
     private async Task PromptForPrerequisiteSetupAsync()
     {
         if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess) return;
+        _setupPromptPendingActivation = false;
         _setupPromptActive = true;
         try
         {
