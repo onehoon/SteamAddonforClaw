@@ -24,6 +24,6 @@ internal static class MsiClawControllerStateMapper
         return true;
     }
     private static short NormalizeAxis(int value, bool invert = false)
-    { var normalized = (int)Math.Round(value * 65535.0 / 65535.0) - 32768; normalized = Math.Clamp(normalized, short.MinValue, short.MaxValue); if (invert) normalized = Math.Clamp(-normalized, short.MinValue, short.MaxValue); return (short)normalized; }
+    { var raw = Math.Clamp(value, 0, ushort.MaxValue); var normalized = invert ? short.MaxValue - raw : raw + short.MinValue; return (short)Math.Clamp(normalized, short.MinValue, short.MaxValue); }
     private static byte NormalizeByte(int value) => (byte)Math.Clamp((int)Math.Round(value * 255.0 / 65535.0), 0, 255);
 }

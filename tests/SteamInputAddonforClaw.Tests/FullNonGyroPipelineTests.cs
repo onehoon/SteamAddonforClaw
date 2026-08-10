@@ -15,7 +15,7 @@ public sealed class FullNonGyroPipelineTests
         Assert.True(MsiClawControllerStateMapper.TryMap(raw, out var state));
         Assert.True(state.Buttons.A && state.Buttons.LeftBumper && state.Buttons.Start && state.Buttons.LeftStickClick && state.Buttons.RightStickClick);
         Assert.True(state.Buttons.DPadUp && state.Buttons.DPadRight && state.Auxiliary[0] && state.Auxiliary[1]);
-        Assert.Equal(short.MinValue, state.LeftStick.X); Assert.Equal(-32767, state.LeftStick.Y);
+        Assert.Equal(short.MinValue, state.LeftStick.X); Assert.Equal(short.MinValue, state.LeftStick.Y);
         Assert.Equal(byte.MaxValue, state.Triggers.Right);
         var steam = ClassicSteamControllerInputMapper.Map(state); var report = new byte[64]; ClassicSteamControllerReportBuilder.Write(report, 7, steam);
         Assert.Equal(0x80 | 0x08, report[8]); Assert.Equal(0x40 | 0x80 | 0x03, report[9]); Assert.Equal(0x01 | 0x04 | 0x10 | 0x40, report[10]); Assert.Equal(26000, BitConverter.ToInt16(report, 26));
@@ -41,7 +41,7 @@ public sealed class FullNonGyroPipelineTests
     }
 
     [Theory]
-    [InlineData(0, short.MaxValue)] [InlineData(65535, -32767)]
+    [InlineData(0, short.MaxValue)] [InlineData(65535, short.MinValue)]
     public void Inverted_axis_endpoints_are_clamped(int raw, short expected)
     {
         Assert.True(MsiClawControllerStateMapper.TryMap(new DirectInputState(new bool[17], 32768, raw, 32768, 0, 0, 0, [-1]), out var state));
