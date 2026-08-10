@@ -17,6 +17,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private bool _active;
     private readonly Func<bool>? _mutationAllowed;
     private CancellationTokenSource? _safetyMonitor;
+    private bool _vetoLatched;
 
     internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, Func<bool>? mutationAllowed = null)
     { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _mutationAllowed = mutationAllowed; }
@@ -47,7 +48,8 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!state.IsActive) return true;
+            if (!state.IsActive) { _vetoLatched = false; return true; }
+            if (_vetoLatched) return true;
             if (_mutationAllowed is not null && !_mutationAllowed()) return true;
             _active = false;
         }
@@ -57,7 +59,8 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         return _active;
     }
 
-    internal Task ObserveAsync(SteamSessionState state, CancellationToken cancellationToken = default) => state.IsActive ? StartAsync(cancellationToken) : StopAsync(cancellationToken);
+    internal Task ObserveAsync(SteamSessionState state, CancellationToken cancellationToken = default)
+    { if (!state.IsActive) _vetoLatched = false; return state.IsActive ? StartAsync(cancellationToken) : StopAsync(cancellationToken); }
 
     private async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -65,6 +68,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         try
         {
             if (_active) return;
+            if (_vetoLatched) return;
             if (_mutationAllowed is not null && !_mutationAllowed()) return;
             if (!_powerGate.TryAcquire(out var token)) return;
             var captured = _nativeState.CaptureSnapshot();
@@ -84,17 +88,19 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         finally { _gate.Release(); }
     }
 
-    private async Task StopAsync(CancellationToken cancellationToken)
+    private async Task<bool> StopAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_active || _snapshot is null) return;
-            if (!_powerGate.TryAcquire(out var token)) return;
+            if (!_active || _snapshot is null) return true;
+            if (!_powerGate.TryAcquire(out var token)) return false;
             var restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false);
-            if (!restored.Restored || !_powerGate.IsCurrent(token)) return;
+            if (!restored.Restored || !_powerGate.IsCurrent(token)) { _powerGate.Close(); return false; }
             var completed = _recovery.CompleteRecoverySession();
-            if (completed.Status == RecoveryStatus.Success) { _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false; }
+            if (completed.Status != RecoveryStatus.Success) { _powerGate.Close(); return false; }
+            _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false;
+            return true;
         }
         finally { _gate.Release(); }
     }
@@ -111,8 +117,10 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
                 await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
                 if (_mutationAllowed is not null && !_mutationAllowed())
                 {
+                    _vetoLatched = true;
                     AppLog.Warn("NativeMode", "External controller appeared during MSI native override; restoring original mode.", null);
-                    await StopAsync(cancellationToken).ConfigureAwait(false);
+                    var restored = await StopAsync(cancellationToken).ConfigureAwait(false);
+                    if (!restored) AppLog.Error("NativeMode", "MSI native override restore failed after external controller hot-plug.", new InvalidOperationException("RecoveryUnsafe"));
                     return;
                 }
             }
