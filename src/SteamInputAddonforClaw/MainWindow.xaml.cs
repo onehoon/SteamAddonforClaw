@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window
     private string? _environmentDiscoveryDirectory;
     private bool _setupPromptActive;
     private bool _setupPromptDeclinedForCurrentProcess;
+    private bool _windowActivatedForUser;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -87,6 +88,7 @@ public sealed partial class MainWindow : Window
         var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _directInputEnumeratorFactory = () => new VorticeDirectInputDeviceEnumerator(windowHandle);
         Closed += OnWindowClosed;
+        Activated += OnWindowActivated;
         _isLoadingStartupSettings = true;
         LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
         _isLoadingStartupSettings = false;
@@ -99,6 +101,14 @@ public sealed partial class MainWindow : Window
         ExternalControllersList.ItemsSource = _externalControllerCards;
         RuntimeStatusList.ItemsSource = _runtimeCards;
         MainNavigationView.SelectedItem = StatusNavigationItem;
+        _ = RefreshSystemStatusAsync();
+    }
+
+    private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+    {
+        if (args.WindowActivationState == WindowActivationState.Deactivated) return;
+        if (_windowActivatedForUser) return;
+        _windowActivatedForUser = true;
         _ = RefreshSystemStatusAsync();
     }
 
@@ -308,22 +318,7 @@ public sealed partial class MainWindow : Window
             new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
         ]);
         Replace(_externalControllerCards, ExternalControllerStatusCardFactory.Create(snapshot.ExternalController));
-        var receipt = _hidHideReceiptStore.Load();
-        var usbReceipt = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath).Load();
-        var storage = ProvisioningStorageSecurity.Inspect(VelopackAppPaths.ProvisioningStateDirectory);
-        var hidHideState = receipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
-            ? ComponentProvisioningState.Corrupt
-            : receipt.Receipt is not null ? ToComponentProvisioningState(receipt.Receipt.State)
-            : File.Exists(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath) ? ComponentProvisioningState.Legacy
-            : ComponentProvisioningState.None;
-        var usbIpState = usbReceipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
-            ? ComponentProvisioningState.Corrupt
-            : usbReceipt.Receipt is not null ? ToComponentProvisioningState(usbReceipt.Receipt.State)
-            : ComponentProvisioningState.None;
-        var setup = FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
-            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController, snapshot.Steam.IsActive ? SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId) : SteamSessionState.FromRunningAppId(0),
-            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2,
-            new(hidHideState, usbIpState)));
+        var setup = EvaluateFirstTimeSetup(snapshot);
         var canInstall = setup.CanInstallRequiredComponents;
         var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
         Replace(_runtimeCards,
@@ -331,7 +326,7 @@ public sealed partial class MainWindow : Window
             new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
             new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
         ]);
-        if (setup.Status == FirstTimeSetupStatus.Required && canInstall)
+        if (_windowActivatedForUser && setup.Status == FirstTimeSetupStatus.Required && canInstall)
             _ = PromptForPrerequisiteSetupAsync();
     }
 
@@ -363,9 +358,30 @@ public sealed partial class MainWindow : Window
         finally { _setupPromptActive = false; }
     }
 
+    private FirstTimeSetupAssessment EvaluateFirstTimeSetup(SystemStatusSnapshot snapshot)
+    {
+        var receipt = _hidHideReceiptStore.Load();
+        var usbReceipt = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath).Load();
+        var storage = ProvisioningStorageSecurity.Inspect(VelopackAppPaths.ProvisioningStateDirectory);
+        var hidHideState = receipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
+            ? ComponentProvisioningState.Corrupt
+            : receipt.Receipt is not null ? ToComponentProvisioningState(receipt.Receipt.State)
+            : File.Exists(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath) ? ComponentProvisioningState.Legacy
+            : ComponentProvisioningState.None;
+        var usbIpState = usbReceipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
+            ? ComponentProvisioningState.Corrupt
+            : usbReceipt.Receipt is not null ? ToComponentProvisioningState(usbReceipt.Receipt.State)
+            : ComponentProvisioningState.None;
+        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
+            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController,
+            SteamSessionState.FromRunningAppId(snapshot.Steam.IsActive ? snapshot.Steam.RunningAppId : 0),
+            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, new(hidHideState, usbIpState)));
+    }
+
     private async Task RunPrerequisiteSetupAsync()
     {
         var current = await _systemStatusProvider.CaptureAsync();
+        var currentSetup = EvaluateFirstTimeSetup(current);
         AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
             ("HidHideStatus", current.Prerequisites.HidHide.Status),
             ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
@@ -374,7 +390,7 @@ public sealed partial class MainWindow : Window
             ("ExternalControllerStatus", current.ExternalController.Status),
             ("SteamActive", current.Steam.IsActive),
             ("RecoverySafe", current.RecoverySafe));
-        if (current.HardwareCompatibility.Status != HardwareCompatibilityStatus.Supported)
+        if (currentSetup.Status != FirstTimeSetupStatus.Required || !currentSetup.CanInstallRequiredComponents)
         {
             RenderSystemStatus(current);
             return;
@@ -397,6 +413,20 @@ public sealed partial class MainWindow : Window
                 };
                 if (await restartDialog.ShowAsync() == ContentDialogResult.Primary)
                     Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false });
+            }
+            else if (resultKind is ElevatedPrerequisiteSetup.ResultKind.Blocked or ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress ||
+                     resultKind is ElevatedPrerequisiteSetup.ResultKind.Failed)
+            {
+                var message = resultKind == ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress
+                    ? "Another setup operation is already in progress."
+                    : "Setup couldn't be completed. Check Status or the application log for details.";
+                await new ContentDialog
+                {
+                    Title = "Setup unavailable",
+                    Content = message,
+                    CloseButtonText = "OK",
+                    XamlRoot = Content.XamlRoot
+                }.ShowAsync();
             }
         }
         finally { await RefreshSystemStatusAsync(); }
