@@ -87,9 +87,10 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
             if (_state == ViiperSteamControllerPocState.Stopped) return new(true, _state, "AlreadyStopped");
             if (_api is null) return Fail("NativeApiUnavailable");
             _state = ViiperSteamControllerPocState.Stopping;
-            Send(new ClassicSteamControllerInput(false, false));
+            Volatile.Write(ref _syntheticButtons, 0);
             _runningLifetime?.Cancel();
             if (_reportPump is not null) await _reportPump.ConfigureAwait(false);
+            Send(new ClassicSteamControllerInput(false, false));
             if (_api.RemoveDevice(BusId, _deviceId) != 0) return Fail("ViiperDeviceRemoveFailed", ownershipUncertain: true);
             if (_trackedDevice is not null && !await WaitForDisappearanceAsync(_trackedDevice.InstanceId, cancellationToken).ConfigureAwait(false)) return Fail("PnPDisappearanceTimedOut", ownershipUncertain: true);
             if (_trackedDevice is not null) _tracker.Remove(_trackedDevice);
