@@ -92,6 +92,10 @@ Native controller state is owned by the active handheld-device adapter. Recovery
 
 MSI Claw native-state restoration currently verifies an already-restored state only; active controller mode switching and restoration remain a later hardware PoC.
 
+## Power-transition safety
+
+Suspend and hibernate close the addon mutation gate before controller cleanup. In-flight operations are invalidated by a power epoch. Resume performs recovery and fresh environment detection before mutations are allowed again; pre-suspend device handles and virtual-controller state are never trusted or automatically recreated.
+
 ---
 
 # Supported Environments

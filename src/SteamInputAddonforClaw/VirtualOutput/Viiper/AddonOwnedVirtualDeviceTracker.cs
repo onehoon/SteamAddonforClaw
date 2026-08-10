@@ -28,4 +28,12 @@ internal sealed class AddonOwnedVirtualDeviceTracker : IControllerIdentityExclus
         _instanceIds.Clear();
         Volatile.Write(ref _uncertainOwnership, 1);
     }
+
+    internal bool ClearUncertaintyAfterVerifiedAbsence(IEnumerable<ControllerDeviceInfo> present, ViiperVirtualDeviceIdentityPolicy policy)
+    {
+        if (present.Any(policy.IsMatchingCandidate)) return false;
+        _instanceIds.Clear();
+        Volatile.Write(ref _uncertainOwnership, 0);
+        return true;
+    }
 }
