@@ -82,12 +82,14 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             _resumeCycle = cycleForResume;
             var recoveryEpoch = _gate.Epoch;
             var resumeStartedUtc = DateTimeOffset.UtcNow;
-            var recoveryStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var recoveryManagerStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var recoveryElapsedMs = 0d;
             var ownershipReconcileElapsedMs = 0d;
             var safe = false;
             try
             {
                 safe = await _recover(cancellationToken).ConfigureAwait(false);
+                recoveryElapsedMs = recoveryManagerStopwatch.Elapsed.TotalMilliseconds;
                 if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
                 foreach (var participant in _participants)
                 {
@@ -97,14 +99,14 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                     if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
                 }
             }
-            catch (Exception e) { AppLog.Error("Power.Recovery", "Resume reconciliation failed.", e, ("Cycle", cycleForResume), ("Epoch", _gate.Epoch)); safe = false; }
+            catch (Exception e) { recoveryElapsedMs = recoveryManagerStopwatch.Elapsed.TotalMilliseconds; AppLog.Error("Power.Recovery", "Resume reconciliation failed.", e, ("Cycle", cycleForResume), ("Epoch", _gate.Epoch)); safe = false; }
             if (_gate.Epoch != recoveryEpoch) return;
             if (!_gate.TryCommitRecovery(recoveryEpoch, safe, () =>
                 {
                     _recovery.Set(safe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
                     State = safe ? PowerTransitionState.Awake : PowerTransitionState.Unsafe;
                 })) return;
-            AppLog.Info("Power.Recovery", "Resume reconciliation completed.", ("Cycle", cycleForResume), ("Epoch", _gate.Epoch), ("Outcome", safe ? "Succeeded" : "Failed"), ("PowerGateOpened", _gate.IsOpen), ("FinalPowerState", State), ("ResumeObservedUtc", observation.ObservedUtc), ("ResumeDispatchDelayMs", (resumeStartedUtc - observation.ObservedUtc).TotalMilliseconds), ("RecoveryElapsedMs", recoveryStopwatch.Elapsed.TotalMilliseconds), ("OwnershipReconcileElapsedMs", ownershipReconcileElapsedMs), ("ResumeToGateReadyMs", (DateTimeOffset.UtcNow - observation.ObservedUtc).TotalMilliseconds));
+            AppLog.Info("Power.Recovery", "Resume reconciliation completed.", ("Cycle", cycleForResume), ("Epoch", _gate.Epoch), ("Outcome", safe ? "Succeeded" : "Failed"), ("PowerGateOpened", _gate.IsOpen), ("FinalPowerState", State), ("ResumeObservedUtc", observation.ObservedUtc), ("ResumeDispatchDelayMs", (resumeStartedUtc - observation.ObservedUtc).TotalMilliseconds), ("RecoveryElapsedMs", recoveryElapsedMs), ("OwnershipReconcileElapsedMs", ownershipReconcileElapsedMs), ("ResumeToGateReadyMs", (DateTimeOffset.UtcNow - observation.ObservedUtc).TotalMilliseconds));
         }
         finally { _serial.Release(); }
     }
