@@ -15,7 +15,18 @@ public sealed record DirectInputDeviceDescriptor(
     int? AxisCount = null,
     string? TopologyReason = null);
 
-public sealed record DirectInputState(IReadOnlyList<bool> Buttons);
+public sealed record DirectInputState(
+    IReadOnlyList<bool> Buttons,
+    int? X = null,
+    int? Y = null,
+    int? Z = null,
+    int? RotationX = null,
+    int? RotationY = null,
+    int? RotationZ = null,
+    IReadOnlyList<int>? pointOfViewControllers = null)
+{
+    public IReadOnlyList<int> PointOfViewControllers { get; init; } = pointOfViewControllers ?? [-1];
+}
 
 public interface IDirectInputDeviceEnumerator : IDisposable
 {

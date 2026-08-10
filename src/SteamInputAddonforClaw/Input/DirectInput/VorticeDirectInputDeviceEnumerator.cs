@@ -73,7 +73,7 @@ public sealed class VorticeDirectInputDeviceEnumerator : IDirectInputDeviceEnume
         {
             device.Poll();
             var state = device.GetCurrentJoystickState();
-            return new DirectInputState(state.Buttons);
+            return new DirectInputState(state.Buttons, state.X, state.Y, state.Z, state.RotationX, state.RotationY, state.RotationZ, state.PointOfViewControllers);
         }
 
         public void Dispose() => device.Dispose();

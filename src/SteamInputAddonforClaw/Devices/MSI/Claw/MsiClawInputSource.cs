@@ -311,11 +311,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
             return false;
         }
 
-        Span<bool> auxiliary = stackalloc bool[MsiClawControls.Catalog.Count];
-        auxiliary[M1AuxiliaryIndex] = input.Buttons[MsiClawHardware.M1DirectInputButtonIndex];
-        auxiliary[M2AuxiliaryIndex] = input.Buttons[MsiClawHardware.M2DirectInputButtonIndex];
-        state = new ControllerState(new AuxiliaryButtonState(auxiliary));
-        return true;
+        return MsiClawControllerStateMapper.TryMap(input, out state);
     }
 
     private static bool CleanupSession(InputSession session)
