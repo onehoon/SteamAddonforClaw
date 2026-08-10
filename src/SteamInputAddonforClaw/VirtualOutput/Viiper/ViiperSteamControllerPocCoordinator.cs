@@ -38,6 +38,7 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
     private bool _nativeInitialized;
     private bool _busCreated;
     private bool _deviceCreated;
+    private int _disposed;
 
     internal ViiperSteamControllerPocCoordinator(ISystemStatusProvider statusProvider, IControllerDeviceEnumerator deviceEnumerator, AddonOwnedVirtualDeviceTracker tracker, string payloadPath, Func<string, IViiperNativeApi>? nativeLoader = null, PowerMutationGate? powerGate = null, ViiperVirtualDeviceIdentityPolicy? identityPolicy = null)
     {
@@ -299,7 +300,11 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         }
         finally { _nativeOperationLock.Release(); }
         if (!teardown.Success) { _tracker.MarkOwnershipUncertain(); AppLog.Warn("ViiperPoc.Power", "Suspend native teardown completed with failures.", null, ("Cycle", cycle), ("Epoch", epoch), ("ElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds)); return false; }
-        if (tracked is null) { _state = ViiperSteamControllerPocState.Stopped; return true; }
+        if (tracked is null)
+        {
+            if (teardown.HadDevice) { _tracker.MarkOwnershipUncertain(); AppLog.Warn("ViiperPoc.Power", "Suspend teardown could not verify an untracked created device.", null, ("Cycle", cycle), ("Epoch", epoch), ("OwnershipUncertain", true)); return false; }
+            _state = ViiperSteamControllerPocState.Stopped; return true;
+        }
         for (var attempt = 0; attempt < 3; attempt++)
         {
             if (DateTimeOffset.UtcNow >= deadline) break;
@@ -326,5 +331,10 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         try { return Task.FromResult(_tracker.ClearUncertaintyAfterVerifiedAbsence(_deviceEnumerator.EnumeratePresentDevices(), _identityPolicy)); }
         catch { return Task.FromResult(false); }
     }
-    public async ValueTask DisposeAsync() { if (_state is ViiperSteamControllerPocState.Running or ViiperSteamControllerPocState.Starting) await StopAsync(); _lifecycleLock.Dispose(); _nativeOperationLock.Dispose(); }
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (_state is ViiperSteamControllerPocState.Running or ViiperSteamControllerPocState.Starting) await StopAsync().ConfigureAwait(false);
+        _lifecycleCancellation.Dispose();
+    }
 }

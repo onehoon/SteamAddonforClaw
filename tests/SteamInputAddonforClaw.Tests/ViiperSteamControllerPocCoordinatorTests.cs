@@ -123,9 +123,19 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
         var start = coordinator.StartAsync();
         Assert.True(SpinWait.SpinUntil(() => api.AddCount == 1, TimeSpan.FromSeconds(1)));
         gate.TryEnterBarrier(out _, out _); coordinator.CancelLifecycle();
-        Assert.True(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, gate.Epoch, CancellationToken.None));
+        Assert.False(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, gate.Epoch, CancellationToken.None));
         var startResult = await start;
         Assert.Equal("PowerTransitionInvalidated", startResult.Reason); Assert.Equal(1, api.RemoveCount);
+    }
+
+    [Fact]
+    public async Task Suspend_cleanup_continues_after_remove_device_failure()
+    {
+        var device = Device("USB\\VID_28DE&PID_1102\\VIIPER"); var api = new FakeApi { RemoveResult = -1 };
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [device]), () => api);
+        Assert.True((await coordinator.StartAsync()).Succeeded);
+        Assert.False(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 3, 8, CancellationToken.None));
+        Assert.Equal(1, api.RemoveCount); Assert.Equal(1, api.RemoveBusCount); Assert.Equal(1, api.ShutdownCount); Assert.True(api.Disposed);
     }
 
     private static ViiperSteamControllerPocCoordinator Create(HardwareCompatibilityAssessment hardware, IControllerDeviceEnumerator enumerator, Func<IViiperNativeApi> factory, AddonOwnedVirtualDeviceTracker? tracker = null, PowerMutationGate? powerGate = null)
