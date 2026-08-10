@@ -35,7 +35,7 @@
                     </Grid>
                     <TextBlock FontSize="20" FontWeight="SemiBold" Text="Device Information" />
                     <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                        <StackPanel Spacing="4"><Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal" Spacing="8"><TextBlock x:Name="DeviceManufacturerText" FontSize="20" FontWeight="SemiBold" /><TextBlock x:Name="DeviceModelText" FontSize="20" FontWeight="SemiBold" /></StackPanel><TextBlock x:Name="DeviceSupportText" Grid.Column="1" FontWeight="SemiBold" VerticalAlignment="Center" /></Grid><TextBlock x:Name="DeviceBoardText" Opacity="0.7" TextWrapping="Wrap" /><TextBlock x:Name="DeviceGpuText" Opacity="0.7" TextWrapping="Wrap" /></StackPanel>
+                    <StackPanel Spacing="4"><Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal" Spacing="8"><TextBlock x:Name="DeviceManufacturerText" FontSize="20" FontWeight="SemiBold" /><TextBlock x:Name="DeviceModelText" FontSize="20" FontWeight="SemiBold" /></StackPanel><TextBlock x:Name="DeviceSupportText" Grid.Column="1" FontWeight="SemiBold" VerticalAlignment="Center" /></Grid><TextBlock x:Name="DeviceBoardGpuText" Opacity="0.7" TextWrapping="Wrap" /></StackPanel>
                     </Border>
                     <TextBlock Margin="0,12,0,0" FontSize="20" FontWeight="SemiBold" Text="Controller Software" />
                     <ItemsRepeater x:Name="ControllerSoftwareRepeater"><ItemsRepeater.Layout><UniformGridLayout Orientation="Horizontal" MaximumRowsOrColumns="3" MinItemWidth="240" MinColumnSpacing="8" MinRowSpacing="8" ItemsStretch="Fill" /></ItemsRepeater.Layout><ItemsRepeater.ItemTemplate><DataTemplate><Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock FontSize="17" FontWeight="SemiBold" Text="{Binding Name}" VerticalAlignment="Center"/><Border Grid.Column="1" Padding="8,3" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="12" VerticalAlignment="Center"><TextBlock FontSize="13" FontWeight="SemiBold" Text="{Binding Status}"/></Border></Grid></Border></DataTemplate></ItemsRepeater.ItemTemplate></ItemsRepeater>
@@ -134,11 +134,11 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <StackPanel
+            <ScrollViewer
                 x:Name="DeveloperMenuContent"
                 Padding="32"
-                Spacing="12"
                 Visibility="Collapsed">
+                <StackPanel Spacing="12">
                 <Button
                     Click="DeveloperMenuBackButton_Click"
                     Content="Back to Settings"
@@ -148,15 +148,15 @@
                     Opacity="0.7"
                     Text="These diagnostics are for developers only. General users should not use this menu."
                     TextWrapping="Wrap" />
-                <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                    <Grid ColumnSpacing="16">
+                <Border Padding="18,16" HorizontalAlignment="Stretch" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                    <Grid HorizontalAlignment="Stretch" ColumnSpacing="16">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <SymbolIcon VerticalAlignment="Center" Symbol="Repair" />
                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                             <TextBlock FontSize="18" FontWeight="SemiBold" Text="Test Mode" />
                             <TextBlock Opacity="0.7" Text="Treat Steam session as active without launching a game. This setting is not saved and resets when the app restarts." TextWrapping="Wrap" />
                         </StackPanel>
-                        <ToggleSwitch x:Name="TestModeToggleSwitch" Grid.Column="2" HorizontalAlignment="Right" OffContent="" OnContent="" Toggled="TestModeToggleSwitch_Toggled" VerticalAlignment="Center" />
+                        <ToggleSwitch x:Name="TestModeToggleSwitch" Grid.Column="2" Width="48" HorizontalAlignment="Right" OffContent="" OnContent="" Toggled="TestModeToggleSwitch_Toggled" VerticalAlignment="Center" />
                     </Grid>
                 </Border>
                 <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
@@ -180,7 +180,8 @@
                         <Button x:Name="OpenEnvironmentDiscoveryFolderButton" Click="OpenEnvironmentDiscoveryFolderButton_Click" Content="Open Folder" HorizontalAlignment="Left" IsEnabled="False" Visibility="Collapsed" />
                     </StackPanel>
                 </Border>
-            </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
         </Grid>
     </NavigationView>
 </Window>
