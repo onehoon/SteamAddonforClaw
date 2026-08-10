@@ -60,7 +60,7 @@ internal sealed class MsiCenterMRuntimeDetector(IMsiCenterMRuntimeSignalSource? 
 
     internal static MsiCenterMRuntimeAssessment Assess(MsiCenterMRuntimeSignals signals)
     {
-        if (signals.FoundationServiceRunning && signals.ServerRunning && signals.ControlModeRunning && signals.QuickSettingsInstalled && signals.QuickSettingsWidgetRunning)
+        if (signals.FoundationServiceRunning && signals.ServerRunning && signals.ControlModeRunning && signals.QuickSettingsInstalled)
             return From(signals, SoftwareRuntimeStatus.Running, "MsiCenterMOperational");
 
         if (!signals.FoundationServiceRunning && !signals.ServerRunning && !signals.ControlModeRunning && !signals.QuickSettingsWidgetRunning)
@@ -70,7 +70,7 @@ internal sealed class MsiCenterMRuntimeDetector(IMsiCenterMRuntimeSignalSource? 
             : !signals.ServerRunning ? "MsiCenterMBackendNotReady"
             : !signals.ControlModeRunning ? "MsiCenterMControlModeNotReady"
             : !signals.QuickSettingsInstalled ? "MsiCenterMQuickSettingsNotReady"
-            : "MsiCenterMWidgetNotReady";
+            : "MsiCenterMBackendOperationalSignalsIncomplete";
         return From(signals, SoftwareRuntimeStatus.Starting, reason);
     }
 

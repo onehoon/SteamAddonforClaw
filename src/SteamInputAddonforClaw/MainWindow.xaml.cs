@@ -344,6 +344,14 @@ public sealed partial class MainWindow : Window
     private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)
     {
         var current = await _systemStatusProvider.CaptureAsync();
+        AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
+            ("HidHideStatus", current.Prerequisites.HidHide.Status),
+            ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
+            ("CompatibilityStatus", current.Compatibility.Status),
+            ("CompatibilityReason", current.Compatibility.Reason),
+            ("ExternalControllerStatus", current.ExternalController.Status),
+            ("SteamActive", current.Steam.IsActive),
+            ("RecoverySafe", current.RecoverySafe));
         if (current.HardwareCompatibility.Status != HardwareCompatibilityStatus.Supported)
         {
             RenderSystemStatus(current);
