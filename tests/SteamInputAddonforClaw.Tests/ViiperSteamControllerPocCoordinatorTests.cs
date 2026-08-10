@@ -74,15 +74,46 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
         Assert.False((await coordinator.StartAsync()).Succeeded); Assert.True(tracker.HasUncertainOwnership); Assert.True(api.RemoveCount > 0);
     }
 
+    [Theory]
+    [InlineData(false, ExternalControllerAssessmentStatus.Clear)]
+    [InlineData(true, ExternalControllerAssessmentStatus.ExternalPresent)]
+    [InlineData(true, ExternalControllerAssessmentStatus.Indeterminate)]
+    public async Task Active_safety_change_automatically_stops(bool steamActive, ExternalControllerAssessmentStatus external)
+    {
+        var device = Device("USB\\VID_28DE&PID_1102\\VIIPER");
+        var api = new FakeApi();
+        var provider = new MutableSnapshotProvider(Snapshot());
+        var path = Path.GetTempFileName();
+        await using var coordinator = new ViiperSteamControllerPocCoordinator(provider, new SequenceEnumerator([], [device], []), new AddonOwnedVirtualDeviceTracker(), path, _ => api);
+        Assert.True((await coordinator.StartAsync()).Succeeded);
+        provider.Current = Snapshot(steamActive, external);
+        await Task.Delay(400);
+        Assert.Equal(ViiperSteamControllerPocState.Stopped, coordinator.State);
+        Assert.Equal(1, api.RemoveCount);
+    }
+
+    [Fact]
+    public async Task Disappearance_timeout_marks_ownership_uncertain()
+    {
+        var device = Device("USB\\VID_28DE&PID_1102\\VIIPER"); var tracker = new AddonOwnedVirtualDeviceTracker(); var api = new FakeApi();
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [device], [device]), () => api, tracker);
+        Assert.True((await coordinator.StartAsync()).Succeeded); Assert.False((await coordinator.StopAsync()).Succeeded);
+        Assert.True(tracker.HasUncertainOwnership); Assert.Equal(ViiperSteamControllerPocState.Failed, coordinator.State);
+    }
+
     private static ViiperSteamControllerPocCoordinator Create(HardwareCompatibilityAssessment hardware, IControllerDeviceEnumerator enumerator, Func<IViiperNativeApi> factory, AddonOwnedVirtualDeviceTracker? tracker = null)
     {
-        var snapshot = new SystemStatusSnapshot(new("", "", "", []), hardware, [], new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported), new(new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, ""), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, ""), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Present, "")), new(true, 1), new(ExternalControllerAssessmentStatus.Clear, 0, []), new(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible), new(AddonOperationalStatus.Ready, ""), true);
+        var snapshot = Snapshot(hardware);
         var path = Path.GetTempFileName();
         return new ViiperSteamControllerPocCoordinator(new SnapshotProvider(snapshot), enumerator, tracker ?? new AddonOwnedVirtualDeviceTracker(), path, _ => factory());
     }
 
+    private static SystemStatusSnapshot Snapshot(bool steamActive = true, ExternalControllerAssessmentStatus external = ExternalControllerAssessmentStatus.Clear) => Snapshot(new(HardwareCompatibilityStatus.Supported, null, null, "test"), steamActive, external);
+    private static SystemStatusSnapshot Snapshot(HardwareCompatibilityAssessment hardware, bool steamActive = true, ExternalControllerAssessmentStatus external = ExternalControllerAssessmentStatus.Clear) => new(new("", "", "", []), hardware, [], new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported), new(new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, ""), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, ""), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Present, "")), new(steamActive, steamActive ? 1u : 0u), new(external, 0, []), new(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible), new(AddonOperationalStatus.Ready, ""), true);
+
     private static ControllerDeviceInfo Device(string id) => new(id, null, null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", ["HID_DEVICE_UP:0001_U:0005"], [], "HIDClass", null, "usbip2_ude", 0x28DE, 0x1102, true);
     private sealed class SnapshotProvider(SystemStatusSnapshot snapshot) : ISystemStatusProvider { public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) => Task.FromResult(snapshot); }
+    private sealed class MutableSnapshotProvider(SystemStatusSnapshot snapshot) : ISystemStatusProvider { public SystemStatusSnapshot Current = snapshot; public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) => Task.FromResult(Current); }
     private sealed class SequenceEnumerator(params IReadOnlyList<ControllerDeviceInfo>[] snapshots) : IControllerDeviceEnumerator { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => snapshots[Math.Min(_index++, snapshots.Length - 1)]; }
     private sealed class FakeApi : IViiperNativeApi
     {
