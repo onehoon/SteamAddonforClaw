@@ -1,10 +1,26 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class AuxiliaryControlCatalogTests
 {
+    [Fact]
+    public void MsiClawCatalog_UsesCanonicalRearSidesAndOrder()
+    {
+        Assert.Equal(MsiClawControls.M2, MsiClawControls.Catalog[0].Id);
+        Assert.Equal(ControlSide.Left, MsiClawControls.Catalog[0].Side);
+        Assert.Equal(MsiClawControls.M1, MsiClawControls.Catalog[1].Id);
+        Assert.Equal(ControlSide.Right, MsiClawControls.Catalog[1].Side);
+    }
+
+    [Fact]
+    public void MsiClawControls_MapToCanonicalSteamGrips()
+    {
+        Assert.Equal(SteamGripSide.Left, MsiClawSteamInputMapping.GetGrip(MsiClawControls.M2));
+        Assert.Equal(SteamGripSide.Right, MsiClawSteamInputMapping.GetGrip(MsiClawControls.M1));
+    }
     [Fact]
     public void DefaultDeviceAndControlIds_AreInvalidAndRejectedByDescriptors()
     {

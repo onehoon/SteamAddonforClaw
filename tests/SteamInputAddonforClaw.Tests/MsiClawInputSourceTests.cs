@@ -274,7 +274,7 @@ public sealed class MsiClawInputSourceTests
         source.StateChanged += (_, state) =>
         {
             states.Add(state);
-            if (state == new ControllerState(new AuxiliaryButtonState([true, false]))) changedStateObserved.TrySetResult();
+            if (state == new ControllerState(new AuxiliaryButtonState([false, true]))) changedStateObserved.TrySetResult();
         };
 
         Assert.True(source.Start().Started);
@@ -282,7 +282,7 @@ public sealed class MsiClawInputSourceTests
         await source.StopAsync();
 
         Assert.Equal(
-            [new ControllerState(new AuxiliaryButtonState([false, false])), new ControllerState(new AuxiliaryButtonState([true, false]))],
+            [new ControllerState(new AuxiliaryButtonState([false, false])), new ControllerState(new AuxiliaryButtonState([false, true]))],
             states);
         var controls = new MsiClawDeviceAdapter().AuxiliaryControls;
         Assert.All(states, state => Assert.Equal(controls.Count, state.Auxiliary.Count));

@@ -9,7 +9,7 @@ internal static class MsiClawControls
 
     public static AuxiliaryControlCatalog Catalog { get; } = new(
     [
-        new(M1, "M1", ControlSurface.Rear, ControlSide.Left, 1),
-        new(M2, "M2", ControlSurface.Rear, ControlSide.Right, 2)
+        new(M2, "M2", ControlSurface.Rear, ControlSide.Left, 1),
+        new(M1, "M1", ControlSurface.Rear, ControlSide.Right, 2)
     ]);
 }
