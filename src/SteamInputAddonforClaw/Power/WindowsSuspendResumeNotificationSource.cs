@@ -12,14 +12,13 @@ internal sealed class WindowsSuspendResumeNotificationSource : IPowerSuspendResu
     public bool TryRegister(out int nativeError)
     {
         var parameters = new DeviceNotifySubscribeParameters { Callback = Marshal.GetFunctionPointerForDelegate(_callback), Context = 0 };
-        var result = PowerRegisterSuspendResumeNotification(GetCurrentProcess(), DeviceNotifyCallback, ref parameters, out _registration);
-        nativeError = result ? 0 : Marshal.GetLastWin32Error(); return result;
+        var result = PowerRegisterSuspendResumeNotification(DeviceNotifyCallback, ref parameters, out _registration);
+        nativeError = unchecked((int)result); return result == 0;
     }
     private uint OnNativeNotification(nint context, uint type, nint setting) { try { Notification?.Invoke(type); } catch { } return 0; }
-    public void Dispose() { var registration = Interlocked.Exchange(ref _registration, 0); if (registration != 0) PowerUnregisterSuspendResumeNotification(registration); }
+    public void Dispose() { var registration = Interlocked.Exchange(ref _registration, 0); if (registration != 0) _ = PowerUnregisterSuspendResumeNotification(registration); }
     [StructLayout(LayoutKind.Sequential)] private struct DeviceNotifySubscribeParameters { public nint Callback; public nint Context; }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate uint DeviceNotifyCallbackRoutine(nint context, uint type, nint setting);
-    [DllImport("kernel32.dll")] private static extern nint GetCurrentProcess();
-    [DllImport("powrprof.dll", SetLastError = true)] private static extern bool PowerRegisterSuspendResumeNotification(nint recipient, uint flags, ref DeviceNotifySubscribeParameters parameters, out nint registration);
-    [DllImport("powrprof.dll", SetLastError = true)] private static extern bool PowerUnregisterSuspendResumeNotification(nint registration);
+    [DllImport("powrprof.dll", SetLastError = true)] private static extern uint PowerRegisterSuspendResumeNotification(uint flags, ref DeviceNotifySubscribeParameters recipient, out nint registration);
+    [DllImport("powrprof.dll", SetLastError = true)] private static extern uint PowerUnregisterSuspendResumeNotification(nint registration);
 }

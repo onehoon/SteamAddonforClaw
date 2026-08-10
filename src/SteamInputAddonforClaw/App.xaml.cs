@@ -172,7 +172,7 @@ public partial class App : Application
         }, [_viiperPoc]);
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator, _viiperPoc.CancelLifecycle);
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
-        else powerGate.OpenAfterRecovery();
+        else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: _viiperPoc);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;

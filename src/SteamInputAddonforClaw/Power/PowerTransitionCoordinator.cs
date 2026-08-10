@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Diagnostics;
+using System.Threading.Channels;
 
 namespace SteamInputAddonforClaw.Power;
 
@@ -9,14 +10,26 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly RecoverySafetyState _recovery;
     private readonly Func<CancellationToken, Task<bool>> _recover;
     private readonly SemaphoreSlim _serial = new(1, 1);
+    private readonly Channel<PowerNotificationObservation> _notifications = Channel.CreateUnbounded<PowerNotificationObservation>(new() { SingleReader = true, SingleWriter = false });
+    private readonly CancellationTokenSource _shutdown = new();
+    private readonly Task _reader;
     private long _cycle;
     private long _sequence;
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
     internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants)
-        => (_gate, _recovery, _recover, _participants) = (gate, recovery, recover, participants.ToArray());
+    {
+        (_gate, _recovery, _recover, _participants) = (gate, recovery, recover, participants.ToArray());
+        _reader = Task.Run(ProcessNotificationsAsync);
+    }
     internal long NextSequence() => Interlocked.Increment(ref _sequence);
+    internal void Enqueue(PowerNotificationObservation observation) => _notifications.Writer.TryWrite(observation);
+    private async Task ProcessNotificationsAsync()
+    {
+        try { await foreach (var observation in _notifications.Reader.ReadAllAsync(_shutdown.Token).ConfigureAwait(false)) await HandleAsync(observation, _shutdown.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { }
+    }
     internal async Task HandleAsync(PowerNotificationObservation observation, CancellationToken cancellationToken = default)
     {
         if (Volatile.Read(ref _disposed) != 0) return;
@@ -28,7 +41,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             {
                 if (!observation.BarrierApplied) { AppLog.Debug("Power.Coordinator", "Duplicate suspend ignored.", ("Cycle", _cycle), ("Epoch", _gate.Epoch)); return; }
                 var cycle = Interlocked.Increment(ref _cycle); _resumeCycle = -1; State = PowerTransitionState.Quiescing;
-                var deadline = DateTimeOffset.UtcNow.AddMilliseconds(1200);
+                var deadline = observation.ObservedUtc.AddMilliseconds(1200);
                 var success = true;
                 foreach (var participant in _participants)
                 {
@@ -63,5 +76,11 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
         }
         finally { _serial.Release(); }
     }
-    public ValueTask DisposeAsync() { Interlocked.Exchange(ref _disposed, 1); _gate.Close(); _serial.Dispose(); return ValueTask.CompletedTask; }
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _gate.Close(); _notifications.Writer.TryComplete(); _shutdown.Cancel();
+        try { await _reader.ConfigureAwait(false); } catch (OperationCanceledException) { }
+        _shutdown.Dispose(); _serial.Dispose();
+    }
 }

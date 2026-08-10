@@ -66,18 +66,27 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
 
             _state = ViiperSteamControllerPocState.Starting;
             var before = _deviceEnumerator.EnumeratePresentDevices();
+            EnsureCurrent(token);
             _api = _nativeLoader(Path.GetFullPath(_payloadPath));
+            EnsureCurrent(token);
             if (!_api.GetDeviceTypes().Contains("steamcontroller", StringComparer.Ordinal)) return Fail("SteamControllerTypeUnavailable");
+            EnsureCurrent(token);
             if (_api.Initialize("127.0.0.1:3241") != 0) return Fail("ViiperInitFailed");
+            EnsureCurrent(token);
             if (_api.CreateBus(BusId) != 0) return Fail("ViiperBusCreateFailed");
+            EnsureCurrent(token);
             if (_api.AddDevice(BusId, "steamcontroller", VendorId, ProductId, out _deviceId) != 0) return Fail("ViiperDeviceAddFailed");
+            EnsureCurrent(token);
             if (_api.SetFeedbackCallback(BusId, _deviceId, feedback => AppLog.Debug("ViiperPoc", "Steam Controller feedback received.", ("Length", feedback.Length))) != 0) return Fail("ViiperFeedbackCallbackFailed", ownershipUncertain: true);
+            EnsureCurrent(token);
             Send(new ClassicSteamControllerInput(false, false));
 
             _trackedDevice = await WaitForCreatedDeviceAsync(before, operationToken).ConfigureAwait(false);
             EnsureCurrent(token);
             if (_trackedDevice is null) return Fail("ViiperDeviceIdentityUnverified", ownershipUncertain: true);
+            EnsureCurrent(token);
             _tracker.Publish(_trackedDevice);
+            EnsureCurrent(token);
             _state = ViiperSteamControllerPocState.Running;
             _runningLifetime = new CancellationTokenSource();
             _reportPump = RunReportPumpAsync(_runningLifetime.Token);
