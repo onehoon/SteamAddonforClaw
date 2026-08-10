@@ -160,13 +160,17 @@
                     </Grid>
                 </Border>
                 <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                    <StackPanel Spacing="10">
-                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="Environment Discovery" />
-                        <TextBlock Opacity="0.7" Text="Generate a read-only system report for controller software detection development." TextWrapping="Wrap" />
-                        <Button x:Name="GenerateEnvironmentDiscoveryReportButton" Click="GenerateEnvironmentDiscoveryReportButton_Click" Content="Generate Report" HorizontalAlignment="Left" />
-                        <TextBlock x:Name="EnvironmentDiscoveryReportStatusText" Opacity="0.7" TextWrapping="Wrap" />
-                        <Button x:Name="OpenEnvironmentDiscoveryFolderButton" Click="OpenEnvironmentDiscoveryFolderButton_Click" Content="Open Folder" HorizontalAlignment="Left" IsEnabled="False" Visibility="Collapsed" />
-                    </StackPanel>
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <SymbolIcon VerticalAlignment="Top" Symbol="Document" />
+                        <StackPanel Grid.Column="1" Spacing="10">
+                            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Environment Discovery" />
+                            <TextBlock Opacity="0.7" Text="Generate a read-only system report for controller software detection development." TextWrapping="Wrap" />
+                            <Button x:Name="GenerateEnvironmentDiscoveryReportButton" Click="GenerateEnvironmentDiscoveryReportButton_Click" Content="Generate Report" HorizontalAlignment="Left" />
+                            <TextBlock x:Name="EnvironmentDiscoveryReportStatusText" Opacity="0.7" TextWrapping="Wrap" />
+                            <Button x:Name="OpenEnvironmentDiscoveryFolderButton" Click="OpenEnvironmentDiscoveryFolderButton_Click" Content="Open Folder" HorizontalAlignment="Left" IsEnabled="False" Visibility="Collapsed" />
+                        </StackPanel>
+                    </Grid>
                 </Border>
                 </StackPanel>
             </ScrollViewer>
