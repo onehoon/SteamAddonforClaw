@@ -41,6 +41,7 @@ public sealed partial class MainWindow : Window
     private readonly ISystemStatusProvider _systemStatusProvider;
     private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
+    private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
     private readonly DeveloperTestModeState? _developerTestModeState;
     private bool _isInitializingTestMode;
     private SystemStatusSnapshot? _latestSystemStatus;
@@ -70,12 +71,14 @@ public sealed partial class MainWindow : Window
         ISystemStatusProvider? systemStatusProvider = null,
         IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
         IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
-        DeveloperTestModeState? developerTestModeState = null)
+        DeveloperTestModeState? developerTestModeState = null,
+        IElevatedProcessRunner? prerequisiteSetupRunner = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
         _hidHideReceiptStore = hidHideReceiptStore ?? new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
+        _prerequisiteSetupRunner = prerequisiteSetupRunner ?? new ElevatedProcessRunner();
         _developerTestModeState = developerTestModeState;
         _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
             new WindowsEnvironmentDiscoverySnapshotSource(),
@@ -331,7 +334,7 @@ public sealed partial class MainWindow : Window
             new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
             new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
         ]);
-        if (setup.Status == FirstTimeSetupStatus.Required && canInstall)
+        if (PrerequisiteSetupPromptPolicy.IsInstallable(setup))
         {
             if (_windowActivatedForUser)
                 _ = PromptForPrerequisiteSetupAsync();
@@ -355,6 +358,12 @@ public sealed partial class MainWindow : Window
     private async Task PromptForPrerequisiteSetupAsync()
     {
         if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess) return;
+        if (Content.XamlRoot is null)
+        {
+            _setupPromptPendingActivation = true;
+            DispatcherQueue.TryEnqueue(() => _ = PromptForPrerequisiteSetupAsync());
+            return;
+        }
         _setupPromptPendingActivation = false;
         _setupPromptActive = true;
         try
@@ -413,7 +422,7 @@ public sealed partial class MainWindow : Window
             ("ExternalControllerStatus", current.ExternalController.Status),
             ("SteamActive", current.Steam.IsActive),
             ("RecoverySafe", current.RecoverySafe));
-        if (currentSetup.Status != FirstTimeSetupStatus.Required || !currentSetup.CanInstallRequiredComponents)
+        if (!PrerequisiteSetupPromptPolicy.IsInstallable(currentSetup))
         {
             RenderSystemStatus(current);
             return;
@@ -421,7 +430,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
-            var result = await new ElevatedProcessRunner().RunAsync(executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
+            var result = await _prerequisiteSetupRunner.RunAsync(executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
             var resultKind = ElevatedPrerequisiteSetup.TranslateExitCode(result);
             AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", resultKind));
             if (resultKind == ElevatedPrerequisiteSetup.ResultKind.RebootRequired)
@@ -490,23 +499,6 @@ public sealed partial class MainWindow : Window
         UsbIpWin2ProvisioningReceiptState.AttemptCancelled => ComponentProvisioningState.AttemptCancelled,
         _ => ComponentProvisioningState.Indeterminate
     };
-    private static string FormatFirstTimeSetupMessage(FirstTimeSetupAssessment assessment) => assessment.Reason switch
-    {
-        FirstTimeSetupReason.MissingComponents => "HidHide and usbip-win2 are required for controller routing.",
-        FirstTimeSetupReason.PendingReboot => "Restart Windows to complete component setup.",
-        FirstTimeSetupReason.LegacyHidHideMissing => "A legacy HidHide installation record needs manual verification before setup can continue.",
-        FirstTimeSetupReason.ProvisioningUncertain => "Provisioning state could not be verified. Installation is blocked.",
-        FirstTimeSetupReason.RecoveryUnsafe => "Recovery must complete before required components can be installed.",
-        FirstTimeSetupReason.ExternalController => "Disconnect external controllers before installing required components.",
-        FirstTimeSetupReason.ExternalControllerIndeterminate => "External-controller state could not be verified. Installation is blocked.",
-        FirstTimeSetupReason.CompatibilityUnsupported => "This controller software environment is not supported for routing.",
-        FirstTimeSetupReason.CompatibilityIndeterminate => "Controller software state could not be verified. Installation is blocked.",
-        FirstTimeSetupReason.HardwareUnsupported => "This handheld model is not supported by the current version.",
-        FirstTimeSetupReason.HardwareIndeterminate => "Handheld model compatibility could not be verified. Installation is blocked.",
-        FirstTimeSetupReason.SteamActive => "Exit the active Steam session before installing required components.",
-        _ => string.Empty
-    };
-
     private static ISystemStatusProvider CreateDefaultSystemStatusProvider()
     {
         var devices = new WindowsControllerDeviceEnumerator();
