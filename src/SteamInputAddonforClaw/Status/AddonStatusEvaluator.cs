@@ -11,7 +11,7 @@ internal static class AddonStatusEvaluator
             RoutingDecisionKind.Eligible => AddonOperationalStatus.Ready,
             RoutingDecisionKind.WaitingForSteam => AddonOperationalStatus.WaitingForSteam,
             RoutingDecisionKind.SetupRequired => AddonOperationalStatus.SetupRequired,
-            RoutingDecisionKind.Passive when decision.Reason == RoutingDecisionReason.ControllerEnvironmentUnsupported => AddonOperationalStatus.Unsupported,
+            RoutingDecisionKind.Passive when decision.Reason is RoutingDecisionReason.ControllerEnvironmentUnsupported or RoutingDecisionReason.UnsupportedDevice => AddonOperationalStatus.Unsupported,
             RoutingDecisionKind.Passive or RoutingDecisionKind.VetoedForSession => AddonOperationalStatus.Passive,
             _ => AddonOperationalStatus.Indeterminate
         },
@@ -21,6 +21,8 @@ internal static class AddonStatusEvaluator
             RoutingDecisionReason.ExternalControllerSessionLatched => "External controller veto remains active for this Steam session.",
             RoutingDecisionReason.ExternalControllerIndeterminate => "External controller state is indeterminate.",
             RoutingDecisionReason.RecoveryUnsafe => "Recovery state is not safe.",
+            RoutingDecisionReason.UnsupportedDevice => "This handheld model is not supported by the current version.",
+            RoutingDecisionReason.DeviceCompatibilityIndeterminate => "Handheld model compatibility could not be verified.",
             RoutingDecisionReason.ControllerEnvironmentUnsupported or RoutingDecisionReason.ControllerEnvironmentIndeterminate => FormatCompatibilityReason(compatibility),
             RoutingDecisionReason.PrerequisitesNotReady => "Required routing components are not ready.",
             RoutingDecisionReason.SteamInactive => "Waiting for a Steam session.",

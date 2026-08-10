@@ -59,6 +59,7 @@ public sealed class HandheldDeviceRegistryTests
         public HandheldDeviceDescriptor Descriptor { get; } = new(id ?? new HandheldDeviceId($"test.{Guid.NewGuid():N}"), "Test", "Device", "Test Device");
         public AuxiliaryControlCatalog AuxiliaryControls { get; } = new([]);
         public IInternalControllerMatcher InternalControllerMatcher { get; } = new NoMatchInternalControllerMatcher();
+        public IHandheldDeviceModelResolver? ModelResolver => null;
         public INativeControllerStateManager? NativeState => null;
         public DeviceProbeResult Probe(DeviceProbeContext context) => probe(context);
     }

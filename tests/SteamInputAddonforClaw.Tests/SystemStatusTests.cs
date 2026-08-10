@@ -4,6 +4,8 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -67,6 +69,18 @@ public sealed class SystemStatusTests
         var status = AddonStatusEvaluator.Map(new(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerPresent), assessment, Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
 
         Assert.Equal("External physical controller detected: Xbox Wireless Controller.", status.Reason);
+    }
+
+    [Fact]
+    public void AddonStatus_UnsupportedHardwareMapsToUnsupportedPresentation()
+    {
+        var status = AddonStatusEvaluator.Map(
+            new(RoutingDecisionKind.Passive, RoutingDecisionReason.UnsupportedDevice),
+            new(ExternalControllerAssessmentStatus.Clear, 0, []),
+            Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
+
+        Assert.Equal(AddonOperationalStatus.Unsupported, status.Status);
+        Assert.Contains("handheld model", status.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -137,7 +151,7 @@ public sealed class SystemStatusTests
     public async Task SystemStatusProvider_ReusesPrerequisiteAssessmentAndBuildsOneSnapshot()
     {
         var prerequisites = Prerequisites(PrerequisiteStatus.Missing);
-        var provider = new SystemStatusProvider(new FakeDeviceProvider(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))], new FakePrerequisiteInspector(prerequisites), () => SteamSessionState.FromRunningAppId(0), () => new(ExternalControllerAssessmentStatus.Clear, 0, []), () => true);
+        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))], new FakePrerequisiteInspector(prerequisites), () => SteamSessionState.FromRunningAppId(0), () => new(ExternalControllerAssessmentStatus.Clear, 0, []), () => true);
 
         var snapshot = await provider.CaptureAsync();
 
@@ -153,6 +167,8 @@ public sealed class SystemStatusTests
     {
         var provider = new SystemStatusProvider(
             new FakeDeviceProvider(),
+            SupportedProbeFactory(),
+            SupportedHardware(),
             [
                 new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
                 new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)),
@@ -176,6 +192,8 @@ public sealed class SystemStatusTests
         var calls = 0;
         var provider = new SystemStatusProvider(
             new FakeDeviceProvider(),
+            SupportedProbeFactory(),
+            SupportedHardware(),
             [
                 new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
                 new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)),
@@ -203,6 +221,8 @@ public sealed class SystemStatusTests
     {
         var provider = new SystemStatusProvider(
             new FakeDeviceProvider(),
+            SupportedProbeFactory(),
+            SupportedHardware(),
             [
                 new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
                 new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.NotRunning)),
@@ -349,7 +369,11 @@ public sealed class SystemStatusTests
     private static RuntimePrerequisiteAssessment Prerequisites(PrerequisiteStatus status) => new(new(PrerequisiteKind.HidHide, status, "test"), new(PrerequisiteKind.UsbIpWin2, status, "test"), new(PrerequisiteKind.Viiper, status, "test"));
     private static ControllerEnvironmentCompatibilityAssessment Compatibility(ControllerEnvironmentCompatibilityStatus status) => new(status, status == ControllerEnvironmentCompatibilityStatus.Supported ? ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported : ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate);
     private static ControllerDeviceInfo Device(string? friendlyName, ushort? vendorId, ushort? productId) => new("USB\\test", null, null, [], "USB", [], [], "HIDClass", null, null, vendorId, productId, true, friendlyName);
-    private sealed class FakeDeviceProvider : IDeviceInformationProvider { public DeviceStatusSnapshot Capture() => new("MSI", "Claw", ["Intel Arc"]); }
+    private static IWindowsDeviceProbeContextFactory SupportedProbeFactory() => new FakeProbeFactory(new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(baseBoardProduct: "MS-1T91"), "test"));
+    private static IHardwareCompatibilityEvaluator SupportedHardware() => new FakeHardwareEvaluator(new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test"));
+    private sealed class FakeDeviceProvider : IDeviceInformationProvider { public DeviceStatusSnapshot Capture(DeviceProbeContext context) => new("MSI", "Claw", context.BaseBoardProduct ?? "Unknown", ["Intel Arc"]); }
+    private sealed class FakeProbeFactory(DeviceProbeContextCapture capture) : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => capture; }
+    private sealed class FakeHardwareEvaluator(HardwareCompatibilityAssessment assessment) : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture capture) => assessment; }
     private sealed class FakeSoftwareProvider(ControllerSoftwareStatus status) : IControllerSoftwareStatusProvider { public ControllerSoftwareStatus Capture() => status; }
     private sealed class FakePrerequisiteInspector(RuntimePrerequisiteAssessment assessment) : IRuntimePrerequisiteInspector { public RuntimePrerequisiteAssessment Inspect() => assessment; }
     private sealed class FakeHhcRuntime(bool running) : SteamInputAddonforClaw.Startup.IHandheldCompanionRuntimeDetector { public bool IsRunning() => running; }

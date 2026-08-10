@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Startup;
@@ -63,7 +64,8 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
     public EnvironmentDiscoverySnapshot Capture(DateTimeOffset capturedAt)
     {
         var devices = new WindowsControllerDeviceEnumerator();
-        var deviceInfo = new WindowsDeviceInformationProvider().Capture();
+        var deviceProbe = new WindowsDeviceProbeContextFactory().Capture();
+        var deviceInfo = new WindowsDeviceInformationProvider().Capture(deviceProbe.Context);
         return new EnvironmentDiscoverySnapshot(
             capturedAt,
             new SystemDiscoveryInfo(Environment.OSVersion.VersionString, Environment.OSVersion.Version.Build.ToString(), Environment.Is64BitOperatingSystem ? "x64" : "x86", deviceInfo.Manufacturer, deviceInfo.Model, deviceInfo.GpuModels, AppVersion()),

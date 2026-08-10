@@ -11,6 +11,7 @@ using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Windowing;
@@ -276,6 +277,13 @@ public sealed partial class MainWindow : Window
         _latestSystemStatus = snapshot;
         DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
         DeviceModelText.Text = snapshot.Device.Model;
+        DeviceSupportText.Text = snapshot.HardwareCompatibility.Status switch
+        {
+            HardwareCompatibilityStatus.Supported => "Supported",
+            HardwareCompatibilityStatus.Unsupported => "Unsupported",
+            _ => "Compatibility unknown"
+        };
+        DeviceBoardText.Text = $"Board: {snapshot.Device.BaseBoardProduct}";
         DeviceGpuText.Text = $"GPU: {string.Join(Environment.NewLine, snapshot.Device.GpuModels)}";
         Replace(_softwareCards, snapshot.ControllerSoftware.Select(item => new StatusCardViewModel(item.DisplayName, FormatSoftwareStatus(item), item.Reason)));
         Replace(_componentCards,
@@ -298,7 +306,7 @@ public sealed partial class MainWindow : Window
             : usbReceipt.Receipt is not null ? ToComponentProvisioningState(usbReceipt.Receipt.State)
             : ComponentProvisioningState.None;
         var setup = FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
-            snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController, snapshot.Steam.IsActive ? SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId) : SteamSessionState.FromRunningAppId(0),
+            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController, snapshot.Steam.IsActive ? SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId) : SteamSessionState.FromRunningAppId(0),
             snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2,
             new(hidHideState, usbIpState)));
         var canInstall = setup.CanInstallRequiredComponents;
@@ -314,12 +322,18 @@ public sealed partial class MainWindow : Window
         SetupUsbIpText.Text = $"usbip-win2: {snapshot.Prerequisites.UsbIpWin2.Status}";
         InstallRequiredComponentsButton.IsEnabled = canInstall;
         SetupStatusText.Text = receiptMessage;
-        if (setup.Status != FirstTimeSetupStatus.Complete && _navigationState.CurrentPage == MainNavigationPage.Status)
+        if (ShouldNavigateToSetup(setup) && _navigationState.CurrentPage == MainNavigationPage.Status)
             ShowPage(_navigationState.OpenSetup());
     }
 
     private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)
     {
+        var current = await _systemStatusProvider.CaptureAsync();
+        if (current.HardwareCompatibility.Status != HardwareCompatibilityStatus.Supported)
+        {
+            RenderSystemStatus(current);
+            return;
+        }
         InstallRequiredComponentsButton.IsEnabled = false;
         SetupStatusText.Text = "Installing required components...";
         try
@@ -385,15 +399,23 @@ public sealed partial class MainWindow : Window
         FirstTimeSetupReason.ExternalControllerIndeterminate => "External-controller state could not be verified. Installation is blocked.",
         FirstTimeSetupReason.CompatibilityUnsupported => "This controller software environment is not supported for routing.",
         FirstTimeSetupReason.CompatibilityIndeterminate => "Controller software state could not be verified. Installation is blocked.",
+        FirstTimeSetupReason.HardwareUnsupported => "This handheld model is not supported by the current version.",
+        FirstTimeSetupReason.HardwareIndeterminate => "Handheld model compatibility could not be verified. Installation is blocked.",
         FirstTimeSetupReason.SteamActive => "Exit the active Steam session before installing required components.",
         _ => string.Empty
     };
 
+    internal static bool ShouldNavigateToSetup(FirstTimeSetupAssessment assessment) =>
+        assessment.Status is FirstTimeSetupStatus.Required or FirstTimeSetupStatus.RestartRequired;
+
     private static ISystemStatusProvider CreateDefaultSystemStatusProvider()
     {
         var devices = new WindowsControllerDeviceEnumerator();
-        var classifier = new ControllerDeviceClassifier();
+        var adapter = new MsiClawDeviceAdapter(devices);
+        var classifier = new ControllerDeviceClassifier(adapter.InternalControllerMatcher);
         return new SystemStatusProvider(new WindowsDeviceInformationProvider(),
+        new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), devices),
+        new HardwareCompatibilityEvaluator(new HandheldDeviceRegistry([adapter])),
         [new MsiCenterMSoftwareStatusProvider(), new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()), new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())],
         new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices)), new ViiperRuntimeInspector()),
         () => SteamSessionState.FromRunningAppId(0), () => new ExternalControllerDetector(devices, classifier).Detect(), () => true);

@@ -3,6 +3,8 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -134,19 +136,39 @@ public sealed class RoutingEligibilityPolicyTests
         Assert.Equal(new RoutingDecision(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerPresent), machine.Evaluate(Input(recoverySafe: false, external: External(ExternalControllerAssessmentStatus.ExternalPresent))));
     }
 
+    [Fact]
+    public void HardwareCompatibility_RespectsExternalAndRecoveryPriority()
+    {
+        var unsupported = new HardwareCompatibilityAssessment(HardwareCompatibilityStatus.Unsupported, null, null, "test");
+        var indeterminate = new HardwareCompatibilityAssessment(HardwareCompatibilityStatus.Indeterminate, null, null, "test");
+        var machine = new RoutingSessionStateMachine();
+
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerPresent), machine.Evaluate(Input(hardware: unsupported, external: External(ExternalControllerAssessmentStatus.ExternalPresent))));
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerSessionLatched), machine.Evaluate(Input(hardware: unsupported)));
+
+        var recoveryMachine = new RoutingSessionStateMachine();
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.RecoveryUnsafe), recoveryMachine.Evaluate(Input(hardware: unsupported, recoverySafe: false)));
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Passive, RoutingDecisionReason.UnsupportedDevice), new RoutingSessionStateMachine().Evaluate(Input(hardware: unsupported)));
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.DeviceCompatibilityIndeterminate), new RoutingSessionStateMachine().Evaluate(Input(hardware: indeterminate)));
+    }
+
     private static RoutingPolicyInput Input(
         uint appId = 1,
         ExternalControllerAssessment? external = null,
         bool recoverySafe = true,
+        HardwareCompatibilityAssessment? hardware = null,
         SoftwareRuntimeStatus hhc = SoftwareRuntimeStatus.NotRunning,
         SoftwareRuntimeStatus clawTweaks = SoftwareRuntimeStatus.NotRunning,
         PrerequisiteStatus prerequisiteStatus = PrerequisiteStatus.Ready,
         RuntimePrerequisiteAssessment? prerequisites = null) => new(
             SteamSessionState.FromRunningAppId(appId),
             external ?? External(ExternalControllerAssessmentStatus.Clear),
+            hardware ?? SupportedHardware(),
             new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate([Software(ControllerSoftwareKind.MsiCenterM, SoftwareRuntimeStatus.Running, SoftwareInstallationStatus.Installed), Software(ControllerSoftwareKind.ClawTweaks, clawTweaks), Software(ControllerSoftwareKind.HandheldCompanion, hhc)]),
             prerequisites ?? Prerequisites(PrerequisiteKind.HidHide, prerequisiteStatus),
             recoverySafe);
+
+    private static HardwareCompatibilityAssessment SupportedHardware() => new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test");
 
     private static ControllerSoftwareStatus Software(ControllerSoftwareKind kind, SoftwareRuntimeStatus runtime = SoftwareRuntimeStatus.NotRunning, SoftwareInstallationStatus installation = SoftwareInstallationStatus.NotInstalled) => new(kind, kind.ToString(), installation, runtime, "test");
     private static ExternalControllerAssessment External(ExternalControllerAssessmentStatus status) => new(status, status == ExternalControllerAssessmentStatus.ExternalPresent ? 1 : 0, []);

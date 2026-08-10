@@ -4,6 +4,8 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.HidHide;
 using System.Security.Cryptography;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -20,6 +22,21 @@ public sealed class FirstTimeSetupPolicyTests
 
     [Fact]
     public void ReadyInstallableComponents_AreCompleteWhenViiperIsUnavailable() => Assert.Equal(FirstTimeSetupStatus.Complete, FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready)).Status);
+
+    [Theory]
+    [InlineData((int)HardwareCompatibilityStatus.Unsupported, (int)FirstTimeSetupStatus.NotApplicable)]
+    [InlineData((int)HardwareCompatibilityStatus.Indeterminate, (int)FirstTimeSetupStatus.Indeterminate)]
+    public void UnsupportedOrIndeterminateHardware_NeverOffersSetupMutation(int hardwareStatus, int expectedSetupStatus)
+    {
+        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Missing) with
+        {
+            HardwareCompatibility = new((HardwareCompatibilityStatus)hardwareStatus, null, null, "test")
+        });
+
+        Assert.Equal((FirstTimeSetupStatus)expectedSetupStatus, result.Status);
+        Assert.False(result.CanInstallRequiredComponents);
+        Assert.False(MainWindow.ShouldNavigateToSetup(result));
+    }
 
     [Theory]
     [InlineData((int)ExternalControllerAssessmentStatus.ExternalPresent)]
@@ -140,6 +157,7 @@ public sealed class FirstTimeSetupPolicyTests
     }
 
     private static FirstTimeSetupInput Input(PrerequisiteStatus hidHide, PrerequisiteStatus usbIp) => new(
+        new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test"),
         new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported), true,
         new(ExternalControllerAssessmentStatus.Clear, 0, []), SteamSessionState.FromRunningAppId(0),
         new(PrerequisiteKind.HidHide, hidHide, "test"), new(PrerequisiteKind.UsbIpWin2, usbIp, "test"), new(ComponentProvisioningState.None, ComponentProvisioningState.None));

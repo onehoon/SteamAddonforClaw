@@ -3,6 +3,8 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -77,7 +79,7 @@ public sealed class ControllerEnvironmentCompatibilityTests
     public void UnsupportedCompatibility_MakesRoutingPassiveWithoutExternalLatch()
     {
         var compatibility = new ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus.Unsupported, ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion);
-        var input = new RoutingPolicyInput(SteamSessionState.FromRunningAppId(1), new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []), compatibility, ReadyPrerequisites(), true);
+        var input = new RoutingPolicyInput(SteamSessionState.FromRunningAppId(1), new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []), SupportedHardware(), compatibility, ReadyPrerequisites(), true);
         var machine = new RoutingSessionStateMachine();
         Assert.Equal(new RoutingDecision(RoutingDecisionKind.Passive, RoutingDecisionReason.ControllerEnvironmentUnsupported), machine.Evaluate(input));
         var supported = input with { Compatibility = new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported) };
@@ -92,6 +94,8 @@ public sealed class ControllerEnvironmentCompatibilityTests
         Assert.Equal(AddonOperationalStatus.Unsupported, addon.Status);
         Assert.Contains("ClawTweaks is installed", addon.Reason);
     }
+
+    private static HardwareCompatibilityAssessment SupportedHardware() => new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test");
 
     private static List<ControllerSoftwareStatus> Software(ControllerSoftwareStatus? centerM = null, ControllerSoftwareStatus? clawTweaks = null, ControllerSoftwareStatus? handheldCompanion = null) =>
         [centerM ?? Status(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running), clawTweaks ?? Status(ControllerSoftwareKind.ClawTweaks), handheldCompanion ?? Status(ControllerSoftwareKind.HandheldCompanion)];

@@ -10,6 +10,7 @@ using SteamInputAddonforClaw.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Devices;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
@@ -46,7 +47,16 @@ internal static class ElevatedPrerequisiteSetup
         try
         {
             AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup started.", ("PID", Environment.ProcessId), ("ReceiptDirectory", VelopackAppPaths.ProvisioningStateDirectory));
-            var storage = ProvisioningStorageSecurity.EnsureTrustedStorage(VelopackAppPaths.ProvisioningStateDirectory);
+            var devices = new WindowsControllerDeviceEnumerator();
+            var adapter = new MsiClawDeviceAdapter(devices);
+            var preflight = ElevatedHardwareProvisioningPreflight.Evaluate(
+                new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), devices),
+                new HardwareCompatibilityEvaluator(new HandheldDeviceRegistry([adapter])),
+                () => ProvisioningStorageSecurity.EnsureTrustedStorage(VelopackAppPaths.ProvisioningStateDirectory));
+            AppLog.Info("PrerequisiteSetup", "Handheld hardware compatibility evaluated.", ("Status", preflight.Hardware.Status), ("Reason", preflight.Hardware.Reason));
+            if (preflight.Hardware.Status != HardwareCompatibilityStatus.Supported)
+                return 3;
+            var storage = preflight.Storage!;
             AppLog.Info("PrerequisiteSetup", "Provisioning receipt storage assessed.", ("Status", storage.Status), ("Reason", storage.Reason));
             if (storage.Status != ProvisioningStorageStatus.Trusted)
                 return 1;
@@ -218,6 +228,8 @@ internal static class ElevatedPrerequisiteSetup
     {
         try
         {
+            var hardware = CaptureHardwareCompatibility();
+            if (!hardware.AllowsMutation) return (false, "Hardware" + hardware.Status);
             var software = new IControllerSoftwareStatusProvider[]
             {
                 new MsiCenterMSoftwareStatusProvider(),
@@ -250,4 +262,14 @@ internal static class ElevatedPrerequisiteSetup
     }
 
     internal static bool AllowsRecoverySafeProvisioning(RecoverySafetyAssessment assessment) => assessment.Status == RecoverySafetyStatus.Safe;
+
+    internal static HardwareCompatibilityAssessment CaptureHardwareCompatibility(
+        IWindowsDeviceProbeContextFactory? probeContextFactory = null,
+        IHardwareCompatibilityEvaluator? evaluator = null)
+    {
+        var devices = new WindowsControllerDeviceEnumerator();
+        var adapter = new MsiClawDeviceAdapter(devices);
+        return (evaluator ?? new HardwareCompatibilityEvaluator(new HandheldDeviceRegistry([adapter])))
+            .Evaluate((probeContextFactory ?? new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), devices)).Capture());
+    }
 }
