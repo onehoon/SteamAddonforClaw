@@ -7,6 +7,13 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class RuntimePrerequisiteInspectorTests
 {
     [Fact]
+    public void ViiperInspection_Rejects_a_payload_with_an_unexpected_hash()
+    {
+        var assessment = new ViiperRuntimeInspector(new FakePayloadFileSystem(true), "payload\\libVIIPER.dll", new FakePayloadHashProvider("00")).Inspect();
+        Assert.Equal(PrerequisiteStatus.Unusable, assessment.Status);
+        Assert.Equal("ViiperPayloadHashMismatch", assessment.Reason);
+    }
+    [Fact]
     public void UsbIpWin2Inspection_UsesTheUdePnPAndServiceIdentities()
     {
         Assert.Equal(@"ROOT\USBIP_WIN2\UDE", UsbIpWin2PrerequisiteInspector.RootHardwareId);
@@ -156,5 +163,10 @@ public sealed class RuntimePrerequisiteInspectorTests
     private sealed class ThrowingPayloadFileSystem : IRuntimePayloadFileSystem
     {
         public bool FileExists(string path) => throw new IOException();
+    }
+
+    private sealed class FakePayloadHashProvider(string hash) : IRuntimePayloadHashProvider
+    {
+        public string GetSha256(string path) => hash;
     }
 }

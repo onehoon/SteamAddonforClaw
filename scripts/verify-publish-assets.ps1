@@ -18,7 +18,11 @@ $requiredAssets = @(
     'SteamInputAddonforClaw.pri',
     'Assets\AppIcon.ico',
     'Dependencies\HidHide\HidHide_1.5.230_x64.exe',
-    'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe'
+    'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe',
+    'Dependencies\Viiper\libVIIPER.dll',
+    'Dependencies\Viiper\PROVENANCE.md',
+    'Dependencies\Viiper\libVIIPER.h',
+    'Dependencies\Viiper\LICENSE.txt'
 )
 
 $missingAssets = foreach ($asset in $requiredAssets) {
@@ -38,6 +42,12 @@ $usbIpInstaller = Join-Path $PublishDirectory 'Dependencies\UsbIpWin2\USBip-0.9.
 $expectedUsbIpSha256 = '51620FA5F9F8BE5932BC9D786DEEE557CE06D5407A99CAB490DCFAC71F185FEA'
 if ((Get-FileHash -LiteralPath $usbIpInstaller -Algorithm SHA256).Hash -ne $expectedUsbIpSha256) {
     throw 'Published USB/IP installer SHA-256 does not match the bundled metadata.'
+}
+
+$viiperPayload = Join-Path $PublishDirectory 'Dependencies\Viiper\libVIIPER.dll'
+$expectedViiperSha256 = '04FD174EE7DDAA65D17B9C356668A67DBD5CCA3F08CF6051455A863095DD8474'
+if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expectedViiperSha256) {
+    throw 'Published VIIPER payload SHA-256 does not match its recorded provenance.'
 }
 
 if ($missingAssets) {

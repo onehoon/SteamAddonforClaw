@@ -1,0 +1,159 @@
+using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Status;
+
+namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
+
+internal enum ViiperSteamControllerPocState { Stopped, Starting, Running, Stopping, Failed }
+internal sealed record ViiperSteamControllerPocResult(bool Succeeded, ViiperSteamControllerPocState State, string Reason);
+
+internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
+{
+    private const uint BusId = 1;
+    private const ushort VendorId = 0x28DE;
+    private const ushort ProductId = 0x1102;
+    private readonly ISystemStatusProvider _statusProvider;
+    private readonly IControllerDeviceEnumerator _deviceEnumerator;
+    private readonly AddonOwnedVirtualDeviceTracker _tracker;
+    private readonly string _payloadPath;
+    private readonly Func<string, IViiperNativeApi> _nativeLoader;
+    private readonly SemaphoreSlim _mutex = new(1, 1);
+    private readonly byte[] _report = new byte[ClassicSteamControllerReportBuilder.ReportLength];
+    private IViiperNativeApi? _api;
+    private ControllerDeviceInfo? _trackedDevice;
+    private ViiperSteamControllerPocState _state;
+    private uint _deviceId;
+    private uint _frame;
+
+    internal ViiperSteamControllerPocCoordinator(ISystemStatusProvider statusProvider, IControllerDeviceEnumerator deviceEnumerator, AddonOwnedVirtualDeviceTracker tracker, string payloadPath, Func<string, IViiperNativeApi>? nativeLoader = null)
+    {
+        _statusProvider = statusProvider;
+        _deviceEnumerator = deviceEnumerator;
+        _tracker = tracker;
+        _payloadPath = payloadPath;
+        _nativeLoader = nativeLoader ?? ViiperNativeApi.Load;
+    }
+
+    internal ViiperSteamControllerPocState State => _state;
+
+    internal async Task<ViiperSteamControllerPocResult> StartAsync(CancellationToken cancellationToken = default)
+    {
+        await _mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_state == ViiperSteamControllerPocState.Running) return new(true, _state, "AlreadyRunning");
+            if (_state == ViiperSteamControllerPocState.Failed) return new(false, _state, "FailedStateRequiresRestart");
+            var status = await _statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
+            if (!AllowsStart(status)) return new(false, _state, "SafetyGateDenied");
+            if (!File.Exists(_payloadPath)) return new(false, _state, "ViiperPayloadMissing");
+
+            _state = ViiperSteamControllerPocState.Starting;
+            var before = _deviceEnumerator.EnumeratePresentDevices();
+            _api = _nativeLoader(Path.GetFullPath(_payloadPath));
+            if (!_api.GetDeviceTypes().Contains("steamcontroller", StringComparer.Ordinal)) return Fail("SteamControllerTypeUnavailable");
+            if (_api.Initialize("127.0.0.1:3241") != 0) return Fail("ViiperInitFailed");
+            if (_api.CreateBus(BusId) != 0) return Fail("ViiperBusCreateFailed");
+            if (_api.AddDevice(BusId, "steamcontroller", VendorId, ProductId, out _deviceId) != 0) return Fail("ViiperDeviceAddFailed");
+            if (_api.SetFeedbackCallback(BusId, _deviceId, feedback => AppLog.Debug("ViiperPoc", "Steam Controller feedback received.", ("Length", feedback.Length))) != 0) return Fail("ViiperFeedbackCallbackFailed");
+            Send(new ClassicSteamControllerInput(false, false));
+
+            _trackedDevice = await WaitForCreatedDeviceAsync(before, cancellationToken).ConfigureAwait(false);
+            if (_trackedDevice is null) return Fail("ViiperDeviceIdentityUnverified");
+            _tracker.Publish(_trackedDevice);
+            _state = ViiperSteamControllerPocState.Running;
+            AppLog.Info("ViiperPoc", "Classic Steam Controller PoC started.", ("BusId", BusId), ("DeviceId", _deviceId), ("InstanceId", _trackedDevice.InstanceId));
+            return new(true, _state, "Started");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("ViiperPoc", "Classic Steam Controller PoC start failed.", exception);
+            return Fail("StartException");
+        }
+        finally { _mutex.Release(); }
+    }
+
+    internal async Task<ViiperSteamControllerPocResult> StopAsync(CancellationToken cancellationToken = default)
+    {
+        await _mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_state == ViiperSteamControllerPocState.Stopped) return new(true, _state, "AlreadyStopped");
+            if (_api is null) return Fail("NativeApiUnavailable");
+            _state = ViiperSteamControllerPocState.Stopping;
+            Send(new ClassicSteamControllerInput(false, false));
+            if (_api.RemoveDevice(BusId, _deviceId) != 0) return Fail("ViiperDeviceRemoveFailed");
+            if (_trackedDevice is not null && !await WaitForDisappearanceAsync(_trackedDevice.InstanceId, cancellationToken).ConfigureAwait(false)) return Fail("PnPDisappearanceTimedOut");
+            if (_trackedDevice is not null) _tracker.Remove(_trackedDevice);
+            _api.RemoveBus(BusId);
+            _api.Shutdown();
+            _api.Dispose();
+            _api = null;
+            _trackedDevice = null;
+            _deviceId = 0;
+            _state = ViiperSteamControllerPocState.Stopped;
+            AppLog.Info("ViiperPoc", "Classic Steam Controller PoC stopped.");
+            return new(true, _state, "Stopped");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("ViiperPoc", "Classic Steam Controller PoC stop failed.", exception);
+            return Fail("StopException");
+        }
+        finally { _mutex.Release(); }
+    }
+
+    internal async Task<ViiperSteamControllerPocResult> PulseAsync(bool leftGrip, bool rightGrip, CancellationToken cancellationToken = default)
+    {
+        if (_state != ViiperSteamControllerPocState.Running || _api is null) return new(false, _state, "NotRunning");
+        Send(new ClassicSteamControllerInput(leftGrip, rightGrip));
+        await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken).ConfigureAwait(false);
+        Send(new ClassicSteamControllerInput(false, false));
+        return new(true, _state, leftGrip ? "LeftGripPulse" : "RightGripPulse");
+    }
+
+    private void Send(ClassicSteamControllerInput input)
+    {
+        if (_api is null) return;
+        ClassicSteamControllerReportBuilder.Write(_report, _frame++, input);
+        if (_api.SetInput(BusId, _deviceId, _report) != 0) throw new InvalidOperationException($"VIIPER input failed: {_api.GetLastError()}");
+    }
+
+    private async Task<ControllerDeviceInfo?> WaitForCreatedDeviceAsync(IReadOnlyList<ControllerDeviceInfo> before, CancellationToken token)
+    {
+        var known = before.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            var candidates = _deviceEnumerator.EnumeratePresentDevices().Where(device => !known.Contains(device.InstanceId) && device.VendorId == VendorId && device.ProductId == ProductId && HasViiperTopology(device)).ToArray();
+            if (candidates.Length == 1) return candidates[0];
+            if (candidates.Length > 1) return null;
+            await Task.Delay(100, token).ConfigureAwait(false);
+        }
+        return null;
+    }
+
+    private async Task<bool> WaitForDisappearanceAsync(string instanceId, CancellationToken token)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            if (_deviceEnumerator.EnumeratePresentDevices().All(device => !string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase))) return true;
+            await Task.Delay(100, token).ConfigureAwait(false);
+        }
+        return false;
+    }
+
+    private ViiperSteamControllerPocResult Fail(string reason)
+    {
+        _tracker.InvalidateAll();
+        try { if (_api is not null) { if (_deviceId != 0) _api.RemoveDevice(BusId, _deviceId); _api.RemoveBus(BusId); _api.Shutdown(); _api.Dispose(); } } catch { }
+        _api = null;
+        _trackedDevice = null;
+        _deviceId = 0;
+        _state = ViiperSteamControllerPocState.Failed;
+        AppLog.Warn("ViiperPoc", "Classic Steam Controller PoC entered failed state.", null, ("Reason", reason));
+        return new(false, _state, reason);
+    }
+
+    private static bool HasViiperTopology(ControllerDeviceInfo device) => string.Join('\n', device.AncestorInstanceIds.Append(device.InstanceId).Append(device.Service ?? string.Empty)).Contains("USBIP", StringComparison.OrdinalIgnoreCase) || string.Join('\n', device.AncestorInstanceIds.Append(device.InstanceId).Append(device.Service ?? string.Empty)).Contains("VIIPER", StringComparison.OrdinalIgnoreCase);
+    private static bool AllowsStart(SystemStatusSnapshot snapshot) => snapshot.HardwareCompatibility.Status == SteamInputAddonforClaw.Devices.HardwareCompatibilityStatus.Supported && snapshot.Compatibility.AllowsMutation && snapshot.RecoverySafe && snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.Clear && snapshot.Steam.IsActive && snapshot.Prerequisites.HidHide.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Ready && snapshot.Prerequisites.UsbIpWin2.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Ready && snapshot.Prerequisites.Viiper.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Present;
+    public async ValueTask DisposeAsync() { if (_state is ViiperSteamControllerPocState.Running or ViiperSteamControllerPocState.Starting) await StopAsync(); _mutex.Dispose(); }
+}

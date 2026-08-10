@@ -15,6 +15,7 @@ using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw;
 
@@ -57,7 +58,8 @@ public partial class App : Application
         AppLog.Info("Startup coordination started.");
         var deviceEnumerator = new WindowsControllerDeviceEnumerator();
         var msiClawAdapter = new MsiClawDeviceAdapter(deviceEnumerator);
-        var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher);
+        var addonOwnedVirtualDeviceTracker = new AddonOwnedVirtualDeviceTracker();
+        var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher, addonOwnedVirtualDeviceTracker);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
         _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient());
         var coordinator = new StartupCoordinator(
@@ -89,7 +91,7 @@ public partial class App : Application
                 ("ViiperReason", prerequisiteAssessment.Viiper.Reason),
                 ("RoutingReady", prerequisiteAssessment.IsRoutingReady));
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, deviceRegistry, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, addonOwnedVirtualDeviceTracker, deviceRegistry, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
@@ -101,7 +103,7 @@ public partial class App : Application
         }
     }
 
-    private void StartNormalRuntime(ControllerDeviceClassifier classifier, HandheldDeviceRegistry deviceRegistry, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
+    private void StartNormalRuntime(ControllerDeviceClassifier classifier, AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         ClawTweaksCompatibilitySnapshotLogger.LogAtStartup(new WindowsControllerDeviceEnumerator());
@@ -155,7 +157,8 @@ public partial class App : Application
             CaptureExternalControllerAssessment,
             () => recoverySafe,
             routingSessionStateMachine: _routingSessionStateMachine);
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider);
+        var viiperPoc = new ViiperSteamControllerPocCoordinator(statusProvider, new WindowsControllerDeviceEnumerator(), addonOwnedVirtualDeviceTracker, Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll"));
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: viiperPoc);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 

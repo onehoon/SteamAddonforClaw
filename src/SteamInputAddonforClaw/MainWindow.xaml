@@ -161,6 +161,19 @@
                 </Border>
                 <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
                     <StackPanel Spacing="10">
+                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="Classic Steam Controller PoC" />
+                        <TextBlock Opacity="0.7" Text="Developer-only VIIPER lifecycle proof. It creates only a synthetic Classic Steam Controller and never reads or routes physical input." TextWrapping="Wrap" />
+                        <TextBlock x:Name="ViiperSteamControllerPocStatusText" Text="Status: Stopped" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="StartViiperSteamControllerPocButton" Click="StartViiperSteamControllerPocButton_Click" Content="Start" />
+                            <Button x:Name="StopViiperSteamControllerPocButton" Click="StopViiperSteamControllerPocButton_Click" Content="Stop" IsEnabled="False" />
+                            <Button x:Name="PulseLeftGripButton" Click="PulseLeftGripButton_Click" Content="Pulse Left Grip" IsEnabled="False" />
+                            <Button x:Name="PulseRightGripButton" Click="PulseRightGripButton_Click" Content="Pulse Right Grip" IsEnabled="False" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                    <StackPanel Spacing="10">
                         <TextBlock FontSize="20" FontWeight="SemiBold" Text="Environment Discovery" />
                         <TextBlock Opacity="0.7" Text="Generate a read-only system report for controller software detection development." TextWrapping="Wrap" />
                         <Button x:Name="GenerateEnvironmentDiscoveryReportButton" Click="GenerateEnvironmentDiscoveryReportButton_Click" Content="Generate Report" HorizontalAlignment="Left" />

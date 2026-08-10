@@ -1030,11 +1030,13 @@ The project currently links the direct NuGet dependencies declared in `src/Steam
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the current component and reference inventory. Each distributed component retains its own license.
 
-## VIIPER (planned)
+## VIIPER
 
-[Valkirie/VIIPER](https://github.com/Valkirie/VIIPER), originally from [Alia5/VIIPER](https://github.com/Alia5/VIIPER), is the planned virtual-controller backend. Its source is licensed under `GPL-3.0-or-later`.
+The Developer-only Classic Steam Controller lifecycle PoC bundles `libVIIPER.dll` built directly from [onehoon/VIIPER](https://github.com/onehoon/VIIPER) tag `steam-input-addon-baseline-1`. That immutable tag points to the Valkirie baseline `209c882009caea4f3baf322b9b6020c1a921feed`, whose lineage is [Valkirie/VIIPER](https://github.com/Valkirie/VIIPER) and [Alia5/VIIPER](https://github.com/Alia5/VIIPER). VIIPER is GPL-3.0.
 
-The intended integration is an embedded `libVIIPER.dll`; a standalone `viiper.exe` is not a required dependency. VIIPER is not necessarily included in current development builds, and no VIIPER binary is currently distributed with this project. If this project distributes a modified VIIPER build, the corresponding modified source will be made available under the applicable GPL terms.
+The embedded DLL is loaded only through an absolute path using `NativeLibrary.Load` and required C exports. A standalone `viiper.exe` is not required. Handheld Companion's bundled DLL is not redistributed or used as a dependency; HHC remains a behavioral reference only.
+
+The PoC creates synthetic `28DE:1102` input and offers only neutral, Left Grip, and Right Grip reports. It does not read physical controller input, perform routing, change MSI controller mode, or mutate HidHide. Windows PnP identity, Steam recognition, independent grip behavior, repeated lifecycle, and crash cleanup require explicit hardware validation before this runtime can be promoted beyond the developer menu.
 
 # Reference Projects
 
