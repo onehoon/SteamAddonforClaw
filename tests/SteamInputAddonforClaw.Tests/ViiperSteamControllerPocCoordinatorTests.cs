@@ -118,14 +118,14 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
     [Fact]
     public async Task Suspend_quiesce_does_not_wait_for_start_lifecycle_lock()
     {
-        var gate = new PowerMutationGate(true); var api = new FakeApi();
-        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [], []), () => api, powerGate: gate);
+        var gate = new PowerMutationGate(true); var api = new FakeApi(); var tracker = new AddonOwnedVirtualDeviceTracker();
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [], []), () => api, tracker, gate);
         var start = coordinator.StartAsync();
         Assert.True(SpinWait.SpinUntil(() => api.AddCount == 1, TimeSpan.FromSeconds(1)));
         gate.TryEnterBarrier(out _, out _); coordinator.CancelLifecycle();
         Assert.False(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, gate.Epoch, CancellationToken.None));
         var startResult = await start;
-        Assert.Equal("PowerTransitionInvalidated", startResult.Reason); Assert.Equal(1, api.RemoveCount);
+        Assert.Equal("PowerTransitionInvalidated", startResult.Reason); Assert.Equal(1, api.RemoveCount); Assert.True(tracker.HasUncertainOwnership);
     }
 
     [Fact]
@@ -136,6 +136,45 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
         Assert.True((await coordinator.StartAsync()).Succeeded);
         Assert.False(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 3, 8, CancellationToken.None));
         Assert.Equal(1, api.RemoveCount); Assert.Equal(1, api.RemoveBusCount); Assert.Equal(1, api.ShutdownCount); Assert.True(api.Disposed);
+    }
+
+    [Fact]
+    public async Task Already_admitted_native_operation_may_finish_before_suspend_cleanup()
+    {
+        var gate = new PowerMutationGate(true); var api = new FakeApi { BlockAddDevice = true };
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [], []), () => api, powerGate: gate);
+        var start = Task.Run(() => coordinator.StartAsync());
+        Assert.True(api.AddDeviceStarted.Wait(TimeSpan.FromSeconds(1)));
+        gate.TryEnterBarrier(out _, out _); coordinator.CancelLifecycle();
+        var quiesce = coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(2), 7, gate.Epoch, CancellationToken.None);
+        Assert.False(quiesce.IsCompleted);
+        api.AllowAddDevice.Set();
+        Assert.False(await quiesce);
+        Assert.Equal("PowerTransitionInvalidated", (await start).Reason);
+        Assert.Equal(1, api.AddCount); Assert.Equal(1, api.RemoveCount);
+    }
+
+    [Fact]
+    public async Task Suspend_unverified_disappearance_marks_ownership_uncertain()
+    {
+        var device = Device("USB\\VID_28DE&PID_1102\\VIIPER"); var api = new FakeApi(); var tracker = new AddonOwnedVirtualDeviceTracker();
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [device], [device]), () => api, tracker);
+        Assert.True((await coordinator.StartAsync()).Succeeded);
+        Assert.False(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 11, 12, CancellationToken.None));
+        Assert.True(tracker.HasUncertainOwnership);
+    }
+
+    [Fact]
+    public async Task Suspend_during_pulse_leaves_neutral_state()
+    {
+        var device = Device("USB\\VID_28DE&PID_1102\\VIIPER"); var api = new FakeApi(); var gate = new PowerMutationGate(true);
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [device], []), () => api, powerGate: gate);
+        Assert.True((await coordinator.StartAsync()).Succeeded);
+        var pulse = coordinator.PulseAsync(true, false);
+        gate.TryEnterBarrier(out _, out _); coordinator.CancelLifecycle();
+        Assert.Equal("PowerTransitionInvalidated", (await pulse).Reason);
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 13, gate.Epoch, CancellationToken.None);
+        Assert.True(api.Calls.IndexOf("RemoveDevice") > api.Calls.LastIndexOf("SetInput"));
     }
 
     private static ViiperSteamControllerPocCoordinator Create(HardwareCompatibilityAssessment hardware, IControllerDeviceEnumerator enumerator, Func<IViiperNativeApi> factory, AddonOwnedVirtualDeviceTracker? tracker = null, PowerMutationGate? powerGate = null)
@@ -154,9 +193,9 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
     private sealed class SequenceEnumerator(params IReadOnlyList<ControllerDeviceInfo>[] snapshots) : IControllerDeviceEnumerator { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => snapshots[Math.Min(_index++, snapshots.Length - 1)]; }
     private sealed class FakeApi : IViiperNativeApi
     {
-        public int InitializeCount; public int CreateBusCount; public int AddCount; public int FeedbackCount; public int SetInputCount; public int RemoveCount; public int RemoveBusCount; public int ShutdownCount; public bool Disposed; public int FailInputAfter; public int RemoveResult; public int FeedbackResult;
+        public int InitializeCount; public int CreateBusCount; public int AddCount; public int FeedbackCount; public int SetInputCount; public int RemoveCount; public int RemoveBusCount; public int ShutdownCount; public bool Disposed; public int FailInputAfter; public int RemoveResult; public int FeedbackResult; public bool BlockAddDevice; public ManualResetEventSlim AddDeviceStarted { get; } = new(); public ManualResetEventSlim AllowAddDevice { get; } = new();
         public List<string> Calls { get; } = []; public int Initialize(string listenAddress) { Calls.Add("Initialize"); InitializeCount++; return 0; } public void Shutdown() { Calls.Add("Shutdown"); ShutdownCount++; } public int CreateBus(uint id) { Calls.Add("CreateBus"); CreateBusCount++; return 0; } public int RemoveBus(uint id) { Calls.Add("RemoveBus"); RemoveBusCount++; return 0; }
-        public int AddDevice(uint bus, string type, ushort vid, ushort pid, out uint id) { Calls.Add("AddDevice"); AddCount++; Assert.Equal("steamcontroller", type); Assert.Equal((ushort)0x28DE, vid); Assert.Equal((ushort)0x1102, pid); id = 3; return 0; }
+        public int AddDevice(uint bus, string type, ushort vid, ushort pid, out uint id) { Calls.Add("AddDevice"); AddCount++; AddDeviceStarted.Set(); if (BlockAddDevice) AllowAddDevice.Wait(); Assert.Equal("steamcontroller", type); Assert.Equal((ushort)0x28DE, vid); Assert.Equal((ushort)0x1102, pid); id = 3; return 0; }
         public int RemoveDevice(uint bus, uint id) { Calls.Add("RemoveDevice"); RemoveCount++; return RemoveResult; } public int SetInput(uint bus, uint id, byte[] report) { Calls.Add("SetInput"); SetInputCount++; return FailInputAfter > 0 && SetInputCount >= FailInputAfter ? -1 : 0; } public int SetFeedbackCallback(uint bus, uint id, Action<ReadOnlyMemory<byte>> callback) { Calls.Add("Feedback"); FeedbackCount++; return FeedbackResult; }
         public string[] GetDeviceTypes() => ["steamcontroller"]; public string? GetLastError() => null; public void Dispose() { Calls.Add("Dispose"); Disposed = true; }
     }

@@ -73,13 +73,13 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
 
             _state = ViiperSteamControllerPocState.Starting;
             var before = _deviceEnumerator.EnumeratePresentDevices();
-            _api = await ExecuteNativeAsync(token, "Load", () => _nativeLoader(Path.GetFullPath(_payloadPath)), operationToken).ConfigureAwait(false);
-            if (!await ExecuteNativeAsync(token, "GetDeviceTypes", () => _api.GetDeviceTypes().Contains("steamcontroller", StringComparer.Ordinal), operationToken).ConfigureAwait(false)) return await FailAsync("SteamControllerTypeUnavailable").ConfigureAwait(false);
-            if (await ExecuteNativeAsync(token, "Initialize", () => _api.Initialize("127.0.0.1:3241"), operationToken).ConfigureAwait(false) != 0) return await FailAsync("ViiperInitFailed").ConfigureAwait(false); _nativeInitialized = true;
-            if (await ExecuteNativeAsync(token, "CreateBus", () => _api.CreateBus(BusId), operationToken).ConfigureAwait(false) != 0) return await FailAsync("ViiperBusCreateFailed").ConfigureAwait(false); _busCreated = true;
-            var addResult = await ExecuteNativeAsync(token, "AddDevice", () => _api.AddDevice(BusId, "steamcontroller", VendorId, ProductId, out _deviceId), operationToken).ConfigureAwait(false);
-            if (addResult != 0) return await FailAsync("ViiperDeviceAddFailed").ConfigureAwait(false); _deviceCreated = true;
-            if (await ExecuteNativeAsync(token, "SetFeedbackCallback", () => _api.SetFeedbackCallback(BusId, _deviceId, feedback => AppLog.Debug("ViiperPoc", "Steam Controller feedback received.", ("Length", feedback.Length))), operationToken).ConfigureAwait(false) != 0) return await FailAsync("ViiperFeedbackCallbackFailed", ownershipUncertain: true).ConfigureAwait(false);
+            await ExecuteNativeAsync(token, "Load", () => { _api = _nativeLoader(Path.GetFullPath(_payloadPath)); return 0; }, operationToken).ConfigureAwait(false);
+            if (!await ExecuteNativeAsync(token, "GetDeviceTypes", () => _api!.GetDeviceTypes().Contains("steamcontroller", StringComparer.Ordinal), operationToken).ConfigureAwait(false)) return await FailAsync("SteamControllerTypeUnavailable").ConfigureAwait(false);
+            if (await ExecuteNativeAsync(token, "Initialize", () => { var result = _api!.Initialize("127.0.0.1:3241"); if (result == 0) _nativeInitialized = true; return result; }, operationToken).ConfigureAwait(false) != 0) return await FailAsync("ViiperInitFailed").ConfigureAwait(false);
+            if (await ExecuteNativeAsync(token, "CreateBus", () => { var result = _api!.CreateBus(BusId); if (result == 0) _busCreated = true; return result; }, operationToken).ConfigureAwait(false) != 0) return await FailAsync("ViiperBusCreateFailed").ConfigureAwait(false);
+            var addResult = await ExecuteNativeAsync(token, "AddDevice", () => { var result = _api!.AddDevice(BusId, "steamcontroller", VendorId, ProductId, out var deviceId); if (result == 0) { _deviceId = deviceId; _deviceCreated = true; } return result; }, operationToken).ConfigureAwait(false);
+            if (addResult != 0) return await FailAsync("ViiperDeviceAddFailed").ConfigureAwait(false);
+            if (await ExecuteNativeAsync(token, "SetFeedbackCallback", () => _api!.SetFeedbackCallback(BusId, _deviceId, feedback => AppLog.Debug("ViiperPoc", "Steam Controller feedback received.", ("Length", feedback.Length))), operationToken).ConfigureAwait(false) != 0) return await FailAsync("ViiperFeedbackCallbackFailed", ownershipUncertain: true).ConfigureAwait(false);
             await ExecuteNativeAsync(token, "InitialNeutral", () => { Send(new ClassicSteamControllerInput(false, false)); return 0; }, operationToken).ConfigureAwait(false);
 
             _trackedDevice = await WaitForCreatedDeviceAsync(before, operationToken).ConfigureAwait(false);
@@ -102,7 +102,11 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         }
         catch (Exception exception)
         {
-            if (_powerGate is not null && !_powerGate.IsOpen) AppLog.Warn("ViiperPoc.Power", "VIIPER start invalidated by power transition.", null, ("CurrentEpoch", _powerGate.Epoch));
+            if (_powerGate is not null && !_powerGate.IsOpen)
+            {
+                AppLog.Warn("ViiperPoc.Power", "VIIPER start invalidated by power transition.", null, ("CurrentEpoch", _powerGate.Epoch));
+                return new(false, _state, "PowerTransitionInvalidated");
+            }
             AppLog.Error("ViiperPoc", "Classic Steam Controller PoC start failed.", exception);
             return await FailAsync("StartException", ownershipUncertain: _deviceId != 0).ConfigureAwait(false);
         }
@@ -148,8 +152,18 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
     internal async Task<ViiperSteamControllerPocResult> PulseAsync(bool leftGrip, bool rightGrip, CancellationToken cancellationToken = default)
     {
         if (_state != ViiperSteamControllerPocState.Running || _api is null) return new(false, _state, "NotRunning");
+        var powerToken = new PowerMutationToken(0);
+        if (_powerGate is not null && !_powerGate.TryAcquire(out powerToken)) return new(false, _state, "PowerGateClosed");
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifecycleCancellation.Token);
+        EnsureCurrent(powerToken);
         Volatile.Write(ref _syntheticButtons, (leftGrip ? 1 : 0) | (rightGrip ? 2 : 0));
-        await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken).ConfigureAwait(false);
+        try { await Task.Delay(TimeSpan.FromMilliseconds(150), linked.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_powerGate is not null && !_powerGate.IsCurrent(powerToken))
+        {
+            Volatile.Write(ref _syntheticButtons, 0);
+            return new(false, _state, "PowerTransitionInvalidated");
+        }
+        EnsureCurrent(powerToken);
         Volatile.Write(ref _syntheticButtons, 0);
         return new(true, _state, leftGrip ? "LeftGripPulse" : "RightGripPulse");
     }
@@ -265,11 +279,11 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         var neutral = !hadDevice; var removeDevice = !hadDevice; var removeBus = !hadBus; var shutdown = !initialized; var dispose = !hadApi;
         if (api is not null)
         {
-            try { if (hadDevice) { Send(new ClassicSteamControllerInput(false, false)); neutral = true; } } catch { neutral = false; }
-            try { if (hadDevice) removeDevice = api.RemoveDevice(BusId, _deviceId) == 0; } catch { removeDevice = false; }
-            try { if (hadBus) removeBus = api.RemoveBus(BusId) == 0; } catch { removeBus = false; }
-            try { if (initialized) { api.Shutdown(); shutdown = true; } } catch { shutdown = false; }
-            try { api.Dispose(); dispose = true; } catch { dispose = false; }
+            try { if (hadDevice) { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "FinalNeutral"), ("Cycle", cycle), ("Epoch", epoch)); Send(new ClassicSteamControllerInput(false, false)); neutral = true; } } catch { neutral = false; }
+            try { if (hadDevice) { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "RemoveDevice"), ("Cycle", cycle), ("Epoch", epoch), ("DeviceId", _deviceId)); removeDevice = api.RemoveDevice(BusId, _deviceId) == 0; } } catch { removeDevice = false; }
+            try { if (hadBus) { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "RemoveBus"), ("Cycle", cycle), ("Epoch", epoch)); removeBus = api.RemoveBus(BusId) == 0; } } catch { removeBus = false; }
+            try { if (initialized) { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "Shutdown"), ("Cycle", cycle), ("Epoch", epoch)); api.Shutdown(); shutdown = true; } } catch { shutdown = false; }
+            try { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "Dispose"), ("Cycle", cycle), ("Epoch", epoch)); api.Dispose(); dispose = true; } catch { dispose = false; }
         }
         _api = null; _deviceId = 0; _deviceCreated = _busCreated = _nativeInitialized = false;
         var result = new ViiperNativeTeardownResult(neutral && removeDevice && removeBus && shutdown && dispose, hadApi, hadDevice, hadBus, initialized, neutral, removeDevice, removeBus, shutdown, dispose);
