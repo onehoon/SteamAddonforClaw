@@ -84,22 +84,24 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             var resumeStartedUtc = DateTimeOffset.UtcNow;
             var recoveryManagerStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var recoveryElapsedMs = 0d;
+            var recoveryCompleted = false;
             var ownershipReconcileElapsedMs = 0d;
             var safe = false;
             try
             {
                 safe = await _recover(cancellationToken).ConfigureAwait(false);
                 recoveryElapsedMs = recoveryManagerStopwatch.Elapsed.TotalMilliseconds;
+                recoveryCompleted = true;
                 if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
                 foreach (var participant in _participants)
                 {
                     var participantStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-                    safe &= await participant.ReconcileAfterResumeAsync(cycleForResume, recoveryEpoch, cancellationToken).ConfigureAwait(false);
-                    ownershipReconcileElapsedMs += System.Diagnostics.Stopwatch.GetElapsedTime(participantStarted).TotalMilliseconds;
+                    try { safe &= await participant.ReconcileAfterResumeAsync(cycleForResume, recoveryEpoch, cancellationToken).ConfigureAwait(false); }
+                    finally { ownershipReconcileElapsedMs += System.Diagnostics.Stopwatch.GetElapsedTime(participantStarted).TotalMilliseconds; }
                     if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
                 }
             }
-            catch (Exception e) { recoveryElapsedMs = recoveryManagerStopwatch.Elapsed.TotalMilliseconds; AppLog.Error("Power.Recovery", "Resume reconciliation failed.", e, ("Cycle", cycleForResume), ("Epoch", _gate.Epoch)); safe = false; }
+            catch (Exception e) { if (!recoveryCompleted) recoveryElapsedMs = recoveryManagerStopwatch.Elapsed.TotalMilliseconds; AppLog.Error("Power.Recovery", "Resume reconciliation failed.", e, ("Cycle", cycleForResume), ("Epoch", _gate.Epoch)); safe = false; }
             if (_gate.Epoch != recoveryEpoch) return;
             if (!_gate.TryCommitRecovery(recoveryEpoch, safe, () =>
                 {
