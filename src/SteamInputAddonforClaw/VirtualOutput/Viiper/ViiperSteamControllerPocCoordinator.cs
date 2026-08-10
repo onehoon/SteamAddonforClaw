@@ -303,16 +303,22 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         if (api is not null)
         {
             try { if (hadDevice) { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "FinalNeutral"), ("Cycle", cycle), ("Epoch", epoch)); Send(new ClassicSteamControllerInput(false, false)); neutral = true; } } catch { neutral = false; }
+            LogTeardownStep("FinalNeutral", hadDevice, neutral, cycle, epoch);
             try { if (hadDevice) { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "RemoveDevice"), ("Cycle", cycle), ("Epoch", epoch), ("DeviceId", _deviceId)); removeDevice = api.RemoveDevice(BusId, _deviceId) == 0; } } catch { removeDevice = false; }
+            LogTeardownStep("RemoveDevice", hadDevice, removeDevice, cycle, epoch);
             try { if (hadBus) { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "RemoveBus"), ("Cycle", cycle), ("Epoch", epoch)); removeBus = api.RemoveBus(BusId) == 0; } } catch { removeBus = false; }
+            LogTeardownStep("RemoveBus", hadBus, removeBus, cycle, epoch);
             try { if (initialized) { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "Shutdown"), ("Cycle", cycle), ("Epoch", epoch)); api.Shutdown(); shutdown = true; } } catch { shutdown = false; }
+            LogTeardownStep("Shutdown", initialized, shutdown, cycle, epoch);
             try { AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step started.", ("Operation", "Dispose"), ("Cycle", cycle), ("Epoch", epoch)); api.Dispose(); dispose = true; } catch { dispose = false; }
+            LogTeardownStep("Dispose", true, dispose, cycle, epoch);
         }
         _api = null; _deviceId = 0; _deviceCreated = _busCreated = _nativeInitialized = false;
         var result = new ViiperNativeTeardownResult(neutral && removeDevice && removeBus && shutdown && dispose, hadApi, hadDevice, hadBus, initialized, neutral, removeDevice, removeBus, shutdown, dispose);
         AppLog.Info("ViiperPoc.Power", "VIIPER native teardown completed.", ("Reason", reason), ("Cycle", cycle), ("Epoch", epoch), ("FinalNeutralSucceeded", neutral), ("RemoveDeviceSucceeded", removeDevice), ("RemoveBusSucceeded", removeBus), ("ShutdownSucceeded", shutdown), ("DisposeSucceeded", dispose));
         return result;
     }
+    private static void LogTeardownStep(string operation, bool attempted, bool succeeded, long? cycle, long? epoch) => AppLog.Debug("ViiperPoc.Power", "VIIPER native teardown step completed.", ("Operation", operation), ("Cycle", cycle), ("Epoch", epoch), ("Outcome", attempted ? succeeded ? "Succeeded" : "Failed" : "Skipped"));
 
     private static bool AllowsStart(SystemStatusSnapshot snapshot) => snapshot.HardwareCompatibility.Status == SteamInputAddonforClaw.Devices.HardwareCompatibilityStatus.Supported && snapshot.Compatibility.AllowsMutation && snapshot.RecoverySafe && snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.Clear && snapshot.Steam.IsActive && snapshot.Prerequisites.HidHide.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Ready && snapshot.Prerequisites.UsbIpWin2.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Ready && snapshot.Prerequisites.Viiper.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Present;
     internal void CancelLifecycle() { try { _lifecycleCancellation.Cancel(); } catch { } }
