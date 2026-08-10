@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable
+internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IPowerTransitionParticipant
 {
     private readonly MsiClawNativeStateManager _nativeState;
     private readonly RecoveryManager _recovery;
@@ -17,6 +17,40 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable
 
     internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate)
     { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; }
+
+    public string Name => "MsiClawNativeModeSession";
+
+    public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
+    {
+        // Keep the in-memory session intent. Recovery restores the journaled native snapshot,
+        // and the post-resume reconciliation re-enters DirectInput when Test Mode is still on.
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken)
+    {
+        // RecoveryManager may have restored the original snapshot. Force the next effective
+        // session observation to perform a fresh capture and transition.
+        _active = false;
+        return Task.FromResult(true);
+    }
+
+    internal Task<bool> ReconcileEffectiveSessionAsync(SteamSessionState state, CancellationToken cancellationToken = default)
+        => ReconcileEffectiveSessionCoreAsync(state, cancellationToken);
+
+    private async Task<bool> ReconcileEffectiveSessionCoreAsync(SteamSessionState state, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!state.IsActive) return true;
+            _active = false;
+        }
+        finally { _gate.Release(); }
+
+        await StartAsync(cancellationToken).ConfigureAwait(false);
+        return _active;
+    }
 
     internal Task ObserveAsync(SteamSessionState state, CancellationToken cancellationToken = default) => state.IsActive ? StartAsync(cancellationToken) : StopAsync(cancellationToken);
 
