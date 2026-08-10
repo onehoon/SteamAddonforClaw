@@ -71,10 +71,9 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         if (currentPayload == original)
             return new NativeStateRestoreResult(NativeStateRestoreStatus.Success, "AlreadyOriginalState");
         if (modeController is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Unsupported, "ModeControllerUnavailable");
-        var currentDevice = deviceEnumerator.EnumeratePresentDevices().SingleOrDefault(d => d.Present && d.ProductId == currentPayload.ProductId);
-        if (currentDevice is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "CurrentNativeDeviceUnavailable");
         var expected = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
-        if (expected.Confidence != MsiClawIdentityConfidence.Strong || !expected.StronglyMatches(MsiClawPhysicalIdentity.From(currentDevice))) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "PhysicalIdentityMismatch");
+        var currentIdentity = new MsiClawPhysicalIdentity(currentPayload.ContainerId, currentPayload.ParentInstanceId, currentPayload.InstanceId ?? string.Empty, MsiClawHardware.VendorId, currentPayload.ProductId, currentPayload.IdentityConfidence);
+        if (expected.Confidence != MsiClawIdentityConfidence.Strong || !expected.StronglyMatches(currentIdentity)) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "PhysicalIdentityMismatch");
         var result = await modeController.SwitchModeAsync(original.Mode, expected, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, result.Reason);
         var restored = CaptureSnapshot();

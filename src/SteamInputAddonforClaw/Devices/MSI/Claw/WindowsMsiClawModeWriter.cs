@@ -13,7 +13,7 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
     {
         cancellationToken.ThrowIfCancellationRequested();
         var selector = HidDevice.GetDeviceSelector(device.UsagePage, device.Usage, MsiClawHardware.VendorId, device.Device.ProductId ?? 0);
-        var infos = await DeviceInformation.FindAllAsync(selector).AsTask(cancellationToken).ConfigureAwait(false);
+        var infos = await DeviceInformation.FindAllAsync(selector, new[] { "System.Devices.DeviceInstanceId", "System.Devices.ContainerId" }).AsTask(cancellationToken).ConfigureAwait(false);
         var matching = infos.Where(info => MatchesIdentity(info, device.Device)).ToArray();
         if (matching.Length != 1) return false;
         using var hid = await HidDevice.FromIdAsync(matching[0].Id, FileAccessMode.ReadWrite).AsTask(cancellationToken).ConfigureAwait(false);
@@ -33,7 +33,7 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
     {
         var instance = info.Properties.TryGetValue("System.Devices.DeviceInstanceId", out var value) ? value as string : null;
         var container = info.Properties.TryGetValue("System.Devices.ContainerId", out var containerValue) ? containerValue as Guid? : null;
-        return (string.IsNullOrWhiteSpace(instance) || string.Equals(instance, expected.InstanceId, StringComparison.OrdinalIgnoreCase)) &&
-            (container is null || expected.ContainerId is null || container == expected.ContainerId);
+        return !string.IsNullOrWhiteSpace(instance) && string.Equals(instance, expected.InstanceId, StringComparison.OrdinalIgnoreCase) &&
+            container is Guid actualContainer && expected.ContainerId is Guid expectedContainer && actualContainer == expectedContainer;
     }
 }

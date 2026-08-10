@@ -7,7 +7,8 @@ internal enum MsiClawIdentityConfidence { Strong, Weak, Indeterminate }
 internal sealed record MsiClawPhysicalIdentity(Guid? ContainerId, string? ParentInstanceId, string InstanceId, ushort? VendorId, ushort? ProductId, MsiClawIdentityConfidence Confidence)
 {
     internal static MsiClawPhysicalIdentity From(ControllerDeviceInfo device) => new(device.ContainerId, device.ParentInstanceId, device.InstanceId, device.VendorId, device.ProductId,
-        device.ContainerId is not null && !string.IsNullOrWhiteSpace(device.ParentInstanceId) ? MsiClawIdentityConfidence.Strong : MsiClawIdentityConfidence.Weak);
+        IsUsableContainer(device.ContainerId) && !string.IsNullOrWhiteSpace(device.ParentInstanceId) ? MsiClawIdentityConfidence.Strong : MsiClawIdentityConfidence.Indeterminate);
+    private static bool IsUsableContainer(Guid? containerId) => containerId is Guid value && value != Guid.Empty && value != new Guid("00000000-0000-0000-ffff-ffffffffffff");
     internal bool StronglyMatches(MsiClawPhysicalIdentity other) => Confidence == MsiClawIdentityConfidence.Strong && other.Confidence == MsiClawIdentityConfidence.Strong && ContainerId == other.ContainerId && string.Equals(ParentInstanceId, other.ParentInstanceId, StringComparison.OrdinalIgnoreCase) && VendorId == other.VendorId;
 }
 internal sealed record MsiClawModeTransitionResult(MsiClawModeTransitionStatus Status, MsiClawNativeMode FromMode, MsiClawNativeMode TargetMode, ushort? FromPid, ushort? TargetPid, bool WriteSucceeded, bool OldPidDisappeared, bool TargetPidAppeared, bool IdentityVerified, long TotalMs, string Reason)

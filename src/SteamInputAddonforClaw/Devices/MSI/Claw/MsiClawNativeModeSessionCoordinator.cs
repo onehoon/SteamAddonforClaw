@@ -14,9 +14,10 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DeviceNativeStateSnapshot? _snapshot;
     private bool _active;
+    private readonly Func<bool>? _mutationAllowed;
 
-    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate)
-    { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; }
+    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, Func<bool>? mutationAllowed = null)
+    { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _mutationAllowed = mutationAllowed; }
 
     public string Name => "MsiClawNativeModeSession";
 
@@ -60,14 +61,15 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         try
         {
             if (_active) return;
+            if (_mutationAllowed is not null && !_mutationAllowed()) return;
             if (!_powerGate.TryAcquire(out var token)) return;
             var captured = _nativeState.CaptureSnapshot();
             if (!captured.AllowsMutation || captured.Snapshot is null) return;
-            var journal = _recovery.BeginDeviceNativeStateMutation(captured);
-            if (journal.Status != RecoveryStatus.Success) return;
             var original = captured.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
             if (original is null || original.Mode != MsiClawNativeMode.XInput) return;
             if (!_powerGate.IsCurrent(token)) return;
+            var journal = _recovery.BeginDeviceNativeStateMutation(captured);
+            if (journal.Status != RecoveryStatus.Success) return;
             var identity = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
             var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
             if (!result.Succeeded || !_powerGate.IsCurrent(token)) return;

@@ -172,7 +172,11 @@ public partial class App : Application
             routingSessionStateMachine: _routingSessionStateMachine);
         _viiperPoc = new ViiperSteamControllerPocCoordinator(statusProvider, new WindowsControllerDeviceEnumerator(), addonOwnedVirtualDeviceTracker, Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll"), powerGate: powerGate);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
-        _msiClawNativeModeSession = nativeState is null ? null : new MsiClawNativeModeSessionCoordinator(nativeState, _recoveryManager!, powerGate);
+        _msiClawNativeModeSession = nativeState is null ? null : new MsiClawNativeModeSessionCoordinator(
+            nativeState,
+            _recoveryManager!,
+            powerGate,
+            () => CaptureExternalControllerAssessment().Status == ExternalControllerAssessmentStatus.Clear);
         var powerParticipants = _msiClawNativeModeSession is null
             ? new IPowerTransitionParticipant[] { _viiperPoc }
             : new IPowerTransitionParticipant[] { _viiperPoc, _msiClawNativeModeSession };

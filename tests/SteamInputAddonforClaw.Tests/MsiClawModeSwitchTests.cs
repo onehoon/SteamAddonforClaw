@@ -24,7 +24,7 @@ public sealed class MsiClawModeSwitchTests
         var strong = MsiClawPhysicalIdentity.From(Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI"));
         var weak = MsiClawPhysicalIdentity.From(Device(null, null, "HID\\MSI"));
         Assert.Equal(MsiClawIdentityConfidence.Strong, strong.Confidence);
-        Assert.Equal(MsiClawIdentityConfidence.Weak, weak.Confidence);
+        Assert.Equal(MsiClawIdentityConfidence.Indeterminate, weak.Confidence);
         Assert.False(strong.StronglyMatches(weak));
     }
 
