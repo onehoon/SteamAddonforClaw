@@ -109,14 +109,14 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         _ = MonitorSafetyAsync(_safetyMonitor.Token);
     }
 
-    private async Task<bool> StopCoreLockedAsync(CancellationToken cancellationToken)
+    private async Task<bool> StopCoreLockedAsync(CancellationToken cancellationToken, bool reportFailure = true)
     {
         if (!_active || _snapshot is null) return true;
-        if (!_powerGate.TryAcquire(out var token)) { MarkRecoveryUnsafe("PowerGateAcquireFailedDuringRestore"); return false; }
+        if (!_powerGate.TryAcquire(out var token)) { if (reportFailure) MarkRecoveryUnsafe("PowerGateAcquireFailedDuringRestore"); return false; }
         var restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false);
-        if (!restored.Restored || !_powerGate.IsCurrent(token)) { MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
+        if (!restored.Restored || !_powerGate.IsCurrent(token)) { if (reportFailure) MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
         var completed = _recovery.CompleteRecoverySession();
-        if (completed.Status != RecoveryStatus.Success) { MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
+        if (completed.Status != RecoveryStatus.Success) { if (reportFailure) MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
         _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false;
         return true;
     }
@@ -128,16 +128,14 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         {
             _decisionGeneration++;
             bool restored;
-            try { restored = await StopCoreLockedAsync(cancellationToken).ConfigureAwait(false); }
+            try { restored = await StopCoreLockedAsync(cancellationToken, reportFailure: false).ConfigureAwait(false); }
             catch
             {
                 MarkRecoveryUnsafe(reason);
                 throw;
             }
-            if (!restored)
-                MarkRecoveryUnsafe(reason);
-            else
-                _powerGate.Close();
+            _powerGate.Close();
+            MarkRecoveryUnsafe(reason);
         }
         finally { _gate.Release(); }
     }

@@ -59,6 +59,22 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.Contains(MsiClawNativeMode.XInput, modeController.Targets);
     }
 
+    [Fact]
+    public async Task FailClosedWithSuccessfulRestoreClosesGateAndMarksSafetyUnsafe()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var unsafeReasons = new List<string>();
+        var gate = new PowerMutationGate(initiallyOpen: true);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices), gate, unsafeReasons.Add);
+
+        Assert.True(await coordinator.ObserveRoutingDecisionAsync(Eligible(), 1));
+        await coordinator.FailClosedAsync("CanonicalRoutingReconciliationFailed");
+
+        Assert.Equal(MsiClawNativeMode.XInput, devices.Mode);
+        Assert.False(gate.IsOpen);
+        Assert.Equal(["CanonicalRoutingReconciliationFailed"], unsafeReasons);
+    }
+
     private static MsiClawNativeModeSessionCoordinator CreateCoordinator(
         FakeDeviceEnumerator devices,
         FakeModeController modeController,
