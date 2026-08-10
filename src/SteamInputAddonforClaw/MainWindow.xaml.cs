@@ -298,8 +298,7 @@ public sealed partial class MainWindow : Window
             HardwareCompatibilityStatus.Unsupported => "Unsupported",
             _ => "Compatibility unknown"
         };
-        DeviceBoardText.Text = $"Board: {snapshot.Device.BaseBoardProduct}";
-        DeviceGpuText.Text = $"GPU: {string.Join(Environment.NewLine, snapshot.Device.GpuModels)}";
+        DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoardProduct}  GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
         Replace(_softwareCards, snapshot.ControllerSoftware.Select(item => new StatusCardViewModel(item.DisplayName, FormatSoftwareStatus(item), item.Reason)));
         Replace(_componentCards,
         [
