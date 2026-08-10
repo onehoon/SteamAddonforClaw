@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using System.Text.Json;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -18,6 +19,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private readonly Func<bool>? _mutationAllowed;
     private CancellationTokenSource? _safetyMonitor;
     private bool _vetoLatched;
+    private long _decisionGeneration;
     private readonly Action<string>? _markRecoveryUnsafe;
 
     internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, Func<bool>? mutationAllowed = null, Action<string>? markRecoveryUnsafe = null)
@@ -41,27 +43,40 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         return Task.FromResult(true);
     }
 
-    internal Task<bool> ReconcileEffectiveSessionAsync(SteamSessionState state, CancellationToken cancellationToken = default)
-        => ReconcileEffectiveSessionCoreAsync(state, cancellationToken);
+    internal Task<bool> ObserveRoutingDecisionAsync(RoutingDecision decision, long generation, CancellationToken cancellationToken = default)
+        => ObserveRoutingDecisionCoreAsync(decision, generation, cancellationToken);
 
-    private async Task<bool> ReconcileEffectiveSessionCoreAsync(SteamSessionState state, CancellationToken cancellationToken)
+    internal Task<bool> ReconcileRoutingDecisionAsync(RoutingDecision decision, long generation, CancellationToken cancellationToken = default)
+        => ObserveRoutingDecisionCoreAsync(decision, generation, cancellationToken);
+
+    private async Task<bool> ObserveRoutingDecisionCoreAsync(RoutingDecision decision, long generation, CancellationToken cancellationToken)
     {
+        AppLog.Info("NativeMode", "Native routing reconciliation observed.", ("Decision", decision.Kind), ("Reason", decision.Reason), ("Generation", generation), ("Action", decision.Kind == RoutingDecisionKind.Eligible ? "EnterNativeOverride" : "RemainPassiveOrRestore"));
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!state.IsActive) { _vetoLatched = false; return true; }
-            if (_vetoLatched) return true;
-            if (_mutationAllowed is not null && !_mutationAllowed()) return true;
-            _active = false;
+            if (generation < _decisionGeneration)
+            {
+                AppLog.Info("NativeMode", "Stale canonical routing decision discarded.", ("Generation", generation), ("CurrentGeneration", _decisionGeneration));
+                return false;
+            }
+            _decisionGeneration = generation;
         }
         finally { _gate.Release(); }
-
-        await StartAsync(cancellationToken).ConfigureAwait(false);
-        return _active;
+        if (decision.Kind == RoutingDecisionKind.Eligible)
+        {
+            await StartAsync(cancellationToken).ConfigureAwait(false);
+            return _active;
+        }
+        return await StopForDecisionAsync(decision, cancellationToken).ConfigureAwait(false);
     }
 
-    internal Task ObserveAsync(SteamSessionState state, CancellationToken cancellationToken = default)
-    { if (!state.IsActive) _vetoLatched = false; return state.IsActive ? StartAsync(cancellationToken) : StopAsync(cancellationToken); }
+    private async Task<bool> StopForDecisionAsync(RoutingDecision decision, CancellationToken cancellationToken)
+    {
+        if (decision.Kind == RoutingDecisionKind.WaitingForSteam && decision.Reason == RoutingDecisionReason.SteamInactive)
+            _vetoLatched = false;
+        return await StopAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private async Task StartAsync(CancellationToken cancellationToken)
     {

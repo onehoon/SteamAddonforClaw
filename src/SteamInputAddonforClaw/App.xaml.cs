@@ -39,6 +39,8 @@ public partial class App : Application
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
     private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
+    private long _nativeRoutingGeneration;
+    private ISystemStatusProvider? _systemStatusProvider;
 
     public App()
         : this(arguments: null, Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized."))
@@ -169,6 +171,7 @@ public partial class App : Application
             CaptureExternalControllerAssessment,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             routingSessionStateMachine: _routingSessionStateMachine);
+        _systemStatusProvider = statusProvider;
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         _msiClawNativeModeSession = nativeState is null ? null : new MsiClawNativeModeSessionCoordinator(
             nativeState,
@@ -190,13 +193,15 @@ public partial class App : Application
             return result.Status is RecoveryStatus.Success or RecoveryStatus.NoRecoveryNeeded;
         }, powerParticipants, async token =>
         {
-            if (_msiClawNativeModeSession is null || _effectiveSteamSessionSource is null) return true;
-            return await _msiClawNativeModeSession.ReconcileEffectiveSessionAsync(_effectiveSteamSessionSource.State, token).ConfigureAwait(false);
+            if (_msiClawNativeModeSession is null) return true;
+            var generation = Interlocked.Increment(ref _nativeRoutingGeneration);
+            var snapshot = await statusProvider.CaptureAsync(token).ConfigureAwait(false);
+            return await _msiClawNativeModeSession.ReconcileRoutingDecisionAsync(snapshot.RoutingDecision, generation, token).ConfigureAwait(false);
         });
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator, static () => { });
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
-        if (_msiClawNativeModeSession is not null) _ = _msiClawNativeModeSession.ObserveAsync(_effectiveSteamSessionSource.State);
+        _ = ReconcileNativeRoutingAsync();
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, developerTestModeState: _developerTestModeState);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
@@ -222,7 +227,20 @@ public partial class App : Application
     {
         _routingSessionStateMachine.ObserveSteamSessionState(args.Current);
         _mainWindow?.UpdateSteamSessionState(args.Current);
-        if (_msiClawNativeModeSession is not null) _ = _msiClawNativeModeSession.ObserveAsync(args.Current);
+        _ = ReconcileNativeRoutingAsync();
+    }
+
+    private async Task ReconcileNativeRoutingAsync(CancellationToken cancellationToken = default)
+    {
+        if (_msiClawNativeModeSession is null || _systemStatusProvider is not { } statusProvider) return;
+        try
+        {
+            var generation = Interlocked.Increment(ref _nativeRoutingGeneration);
+            var snapshot = await statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
+            await _msiClawNativeModeSession.ObserveRoutingDecisionAsync(snapshot.RoutingDecision, generation, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception) { AppLog.Warn("NativeMode", "Canonical routing reconciliation failed.", exception); }
     }
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
