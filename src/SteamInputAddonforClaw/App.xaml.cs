@@ -17,6 +17,7 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Power;
+using SteamInputAddonforClaw.Developer;
 
 namespace SteamInputAddonforClaw;
 
@@ -33,6 +34,8 @@ public partial class App : Application
     private bool _isExplicitExit;
     private readonly SingleInstanceGate _singleInstanceGate;
     private readonly RoutingSessionStateMachine _routingSessionStateMachine = new();
+    private DeveloperTestModeState? _developerTestModeState;
+    private EffectiveSteamSessionSource? _effectiveSteamSessionSource;
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
     private ViiperSteamControllerPocCoordinator? _viiperPoc;
@@ -113,7 +116,9 @@ public partial class App : Application
         ClawTweaksCompatibilitySnapshotLogger.LogAtStartup(new WindowsControllerDeviceEnumerator());
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
         _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
-        _steamSessionWatcher.StateChanged += OnSteamSessionStateChanged;
+        _developerTestModeState = new DeveloperTestModeState();
+        _effectiveSteamSessionSource = new EffectiveSteamSessionSource(_steamSessionWatcher, _developerTestModeState);
+        _effectiveSteamSessionSource.StateChanged += OnEffectiveSteamSessionStateChanged;
 
         var settingsStore = new SettingsStore(VelopackAppPaths.SettingsPath);
         var settings = settingsStore.Load();
@@ -124,7 +129,8 @@ public partial class App : Application
         if (recoverySafe)
         {
             _steamSessionWatcher.Start();
-            _routingSessionStateMachine.ObserveSteamSessionState(_steamSessionWatcher.State);
+            _effectiveSteamSessionSource.Refresh();
+            _routingSessionStateMachine.ObserveSteamSessionState(_effectiveSteamSessionSource.State);
         }
         else
         {
@@ -159,7 +165,7 @@ public partial class App : Application
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())),
                 new ViiperRuntimeInspector()),
-            () => _steamSessionWatcher?.State ?? SteamSessionState.FromRunningAppId(0),
+            () => _effectiveSteamSessionSource?.State ?? SteamSessionState.FromRunningAppId(0),
             CaptureExternalControllerAssessment,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             routingSessionStateMachine: _routingSessionStateMachine);
@@ -173,7 +179,7 @@ public partial class App : Application
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator, _viiperPoc.CancelLifecycle);
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: _viiperPoc);
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: _viiperPoc, developerTestModeState: _developerTestModeState);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
@@ -194,13 +200,10 @@ public partial class App : Application
 
     }
 
-    private void OnSteamSessionStateChanged(object? sender, EventArgs e)
+    private void OnEffectiveSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args)
     {
-        if (sender is SteamSessionWatcher watcher)
-        {
-            _routingSessionStateMachine.ObserveSteamSessionState(watcher.State);
-            _mainWindow?.UpdateSteamSessionState(watcher.State);
-        }
+        _routingSessionStateMachine.ObserveSteamSessionState(args.Current);
+        _mainWindow?.UpdateSteamSessionState(args.Current);
     }
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
@@ -212,9 +215,14 @@ public partial class App : Application
 
         _startupCancellationTokenSource.Cancel();
 
+        if (_effectiveSteamSessionSource is not null)
+        {
+            _effectiveSteamSessionSource.StateChanged -= OnEffectiveSteamSessionStateChanged;
+            _effectiveSteamSessionSource.Dispose();
+            _effectiveSteamSessionSource = null;
+        }
         if (_steamSessionWatcher is not null)
         {
-            _steamSessionWatcher.StateChanged -= OnSteamSessionStateChanged;
             _steamSessionWatcher.Dispose();
             _steamSessionWatcher = null;
         }

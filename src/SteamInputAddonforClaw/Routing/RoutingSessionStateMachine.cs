@@ -31,7 +31,7 @@ internal sealed class RoutingSessionStateMachine : IRoutingSessionStateMachine
         lock (_sync)
         {
             var isCurrentSteamSnapshot = _observedSteamState is null
-                || input.Steam.RunningAppId == _observedSteamState.RunningAppId;
+                || input.Steam.HasSameIdentity(_observedSteamState);
 
             if (isCurrentSteamSnapshot && !input.Steam.IsActive) ResetExternalControllerVetoLatch();
             if (isCurrentSteamSnapshot

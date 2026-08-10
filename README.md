@@ -46,8 +46,10 @@ For games launched through Steam, including **Non-Steam Shortcuts**, the Claw bu
 Fixed rear-button mapping:
 
 ```text
-Claw M1 → Steam Controller Left Grip
-Claw M2 → Steam Controller Right Grip
+Viewed from the front of the device:
+
+Left rear button  M2 → Steam Controller Left Grip
+Right rear button M1 → Steam Controller Right Grip
 ```
 
 Steam Input is responsible for everything that happens after this physical mapping.
@@ -618,8 +620,8 @@ The newer Steam Controller 2026 / Triton protocol is intentionally not the initi
 The Classic Steam Controller is preferred because its two grip inputs map naturally to:
 
 ```text
-M1 → Left Grip
-M2 → Right Grip
+M2 → Left Grip
+M1 → Right Grip
 ```
 
 The addon should use VIIPER / usbip-win2 for virtual output.

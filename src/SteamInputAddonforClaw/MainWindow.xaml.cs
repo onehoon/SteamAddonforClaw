@@ -25,6 +25,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
+using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw;
@@ -41,6 +42,8 @@ public sealed partial class MainWindow : Window
     private readonly ISystemStatusProvider _systemStatusProvider;
     private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
+    private readonly DeveloperTestModeState? _developerTestModeState;
+    private bool _isInitializingTestMode;
     private SystemStatusSnapshot? _latestSystemStatus;
     private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
@@ -65,12 +68,14 @@ public sealed partial class MainWindow : Window
         ISystemStatusProvider? systemStatusProvider = null,
         IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
         IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
-        ViiperSteamControllerPocCoordinator? viiperSteamControllerPocCoordinator = null)
+        ViiperSteamControllerPocCoordinator? viiperSteamControllerPocCoordinator = null,
+        DeveloperTestModeState? developerTestModeState = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
         _hidHideReceiptStore = hidHideReceiptStore ?? new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
+        _developerTestModeState = developerTestModeState;
         _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
             new WindowsEnvironmentDiscoverySnapshotSource(),
             new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
@@ -87,6 +92,9 @@ public sealed partial class MainWindow : Window
         _isLoadingStartupSettings = true;
         LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
         _isLoadingStartupSettings = false;
+        _isInitializingTestMode = true;
+        TestModeToggleSwitch.IsOn = _developerTestModeState?.IsEnabled == true;
+        _isInitializingTestMode = false;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
         ControllerSoftwareRepeater.ItemsSource = _softwareCards;
         RoutingComponentsRepeater.ItemsSource = _componentCards;
@@ -114,6 +122,12 @@ public sealed partial class MainWindow : Window
         var launchAtWindowsStartup = LaunchAtWindowsStartupToggleSwitch.IsOn;
         var result = _startupSettings.ChangeLaunchAtWindowsStartup(launchAtWindowsStartup);
         StartupSettingsStatusText.Text = result.Message;
+    }
+
+    private void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    {
+        if (!_isInitializingTestMode)
+            _developerTestModeState?.SetEnabled(TestModeToggleSwitch.IsOn);
     }
 
     private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)

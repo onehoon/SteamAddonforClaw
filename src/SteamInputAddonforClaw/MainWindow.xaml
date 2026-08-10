@@ -110,6 +110,18 @@
                     </Grid>
                 </Border>
 
+                <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <SymbolIcon VerticalAlignment="Center" Symbol="Repair" />
+                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Test Mode" />
+                            <TextBlock Opacity="0.7" Text="Treat Steam session as active without launching a game. This setting is not saved and resets when the app restarts." TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ToggleSwitch x:Name="TestModeToggleSwitch" Grid.Column="2" OffContent="" OnContent="" Toggled="TestModeToggleSwitch_Toggled" VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+
                 <Button
                     Click="DeveloperMenuButton_Click"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

@@ -13,9 +13,9 @@ public sealed class MsiClawDeviceAdapterTests
         var adapter = new MsiClawDeviceAdapter();
 
         Assert.Equal("msi.claw", adapter.Descriptor.Id.Value);
-        Assert.Equal(["msi.claw.m1", "msi.claw.m2"], adapter.AuxiliaryControls.Controls.Select(control => control.Id.Value));
-        Assert.Equal(0, adapter.AuxiliaryControls.GetIndex(new AuxiliaryControlId("msi.claw.m1")));
-        Assert.Equal(1, adapter.AuxiliaryControls.GetIndex(new AuxiliaryControlId("msi.claw.m2")));
+        Assert.Equal(["msi.claw.m2", "msi.claw.m1"], adapter.AuxiliaryControls.Controls.Select(control => control.Id.Value));
+        Assert.Equal(1, adapter.AuxiliaryControls.GetIndex(new AuxiliaryControlId("msi.claw.m1")));
+        Assert.Equal(0, adapter.AuxiliaryControls.GetIndex(new AuxiliaryControlId("msi.claw.m2")));
     }
 
     [Theory]
