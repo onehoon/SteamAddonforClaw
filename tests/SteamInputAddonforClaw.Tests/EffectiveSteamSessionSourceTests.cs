@@ -96,6 +96,49 @@ public sealed class EffectiveSteamSessionSourceTests
         Assert.Equal(1, called);
     }
 
+    [Fact]
+    public async Task Dispose_WaitsForInFlightPublicationAndPreventsLaterPublication()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        var testMode = new DeveloperTestModeState();
+        var effective = new EffectiveSteamSessionSource(watcher, testMode);
+        watcher.Start();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var notifications = 0;
+        effective.StateChanged += (_, _) =>
+        {
+            Interlocked.Increment(ref notifications);
+            entered.Set();
+            release.Wait();
+        };
+
+        var enable = Task.Run(() => testMode.SetEnabled(true));
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+        var dispose = Task.Run(effective.Dispose);
+        Assert.NotSame(dispose, await Task.WhenAny(dispose, Task.Delay(100)));
+        release.Set();
+        await Task.WhenAll(enable, dispose);
+
+        testMode.SetEnabled(false);
+        Assert.Equal(1, notifications);
+    }
+
+    [Fact]
+    public void DeveloperTestModeState_SubscriberExceptionDoesNotBlockRemainingSubscribers()
+    {
+        var state = new DeveloperTestModeState();
+        var called = 0;
+        state.Changed += (_, _) => throw new InvalidOperationException("test");
+        state.Changed += (_, _) => called++;
+
+        state.SetEnabled(true);
+
+        Assert.True(state.IsEnabled);
+        Assert.Equal(1, called);
+    }
+
     private sealed class FakeRunningAppIdSource(uint appId) : IRunningAppIdSource
     {
         private uint _appId = appId;

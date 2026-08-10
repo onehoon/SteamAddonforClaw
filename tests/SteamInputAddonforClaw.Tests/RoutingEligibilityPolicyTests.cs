@@ -76,6 +76,34 @@ public sealed class RoutingEligibilityPolicyTests
     }
 
     [Fact]
+    public void DeveloperToActualActiveHandoff_DoesNotResetExternalControllerLatch()
+    {
+        var machine = new RoutingSessionStateMachine();
+        var developer = SteamSessionState.CreateDeveloperTest();
+        var actual = SteamSessionState.FromRunningAppId(123);
+        machine.ObserveSteamSessionState(developer);
+        Assert.Equal(RoutingDecisionKind.VetoedForSession, machine.Evaluate(Input(developer, External(ExternalControllerAssessmentStatus.ExternalPresent)) ).Kind);
+
+        machine.ObserveSteamSessionState(actual);
+
+        Assert.Equal(RoutingDecisionReason.ExternalControllerSessionLatched, machine.Evaluate(Input(actual)).Reason);
+    }
+
+    [Fact]
+    public void ActualToDeveloperActiveHandoff_DoesNotResetExternalControllerLatch()
+    {
+        var machine = new RoutingSessionStateMachine();
+        var actual = SteamSessionState.FromRunningAppId(123);
+        var developer = SteamSessionState.CreateDeveloperTest();
+        machine.ObserveSteamSessionState(actual);
+        Assert.Equal(RoutingDecisionKind.VetoedForSession, machine.Evaluate(Input(actual, External(ExternalControllerAssessmentStatus.ExternalPresent))).Kind);
+
+        machine.ObserveSteamSessionState(developer);
+
+        Assert.Equal(RoutingDecisionReason.ExternalControllerSessionLatched, machine.Evaluate(Input(developer)).Reason);
+    }
+
+    [Fact]
     public void ExternalControllerBeforeSteam_IsPassiveButDoesNotLatch()
     {
         var machine = new RoutingSessionStateMachine();
@@ -160,8 +188,18 @@ public sealed class RoutingEligibilityPolicyTests
         SoftwareRuntimeStatus hhc = SoftwareRuntimeStatus.NotRunning,
         SoftwareRuntimeStatus clawTweaks = SoftwareRuntimeStatus.NotRunning,
         PrerequisiteStatus prerequisiteStatus = PrerequisiteStatus.Ready,
+        RuntimePrerequisiteAssessment? prerequisites = null) => Input(SteamSessionState.FromRunningAppId(appId), external, recoverySafe, hardware, hhc, clawTweaks, prerequisiteStatus, prerequisites);
+
+    private static RoutingPolicyInput Input(
+        SteamSessionState steam,
+        ExternalControllerAssessment? external = null,
+        bool recoverySafe = true,
+        HardwareCompatibilityAssessment? hardware = null,
+        SoftwareRuntimeStatus hhc = SoftwareRuntimeStatus.NotRunning,
+        SoftwareRuntimeStatus clawTweaks = SoftwareRuntimeStatus.NotRunning,
+        PrerequisiteStatus prerequisiteStatus = PrerequisiteStatus.Ready,
         RuntimePrerequisiteAssessment? prerequisites = null) => new(
-            SteamSessionState.FromRunningAppId(appId),
+            steam,
             external ?? External(ExternalControllerAssessmentStatus.Clear),
             hardware ?? SupportedHardware(),
             new CurrentControllerEnvironmentCompatibilityPolicy().Evaluate([Software(ControllerSoftwareKind.MsiCenterM, SoftwareRuntimeStatus.Running, SoftwareInstallationStatus.Installed), Software(ControllerSoftwareKind.ClawTweaks, clawTweaks), Software(ControllerSoftwareKind.HandheldCompanion, hhc)]),

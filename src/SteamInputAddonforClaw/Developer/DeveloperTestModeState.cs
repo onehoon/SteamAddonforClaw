@@ -1,5 +1,7 @@
 namespace SteamInputAddonforClaw.Developer;
 
+using SteamInputAddonforClaw.Diagnostics;
+
 public sealed class DeveloperTestModeState
 {
     private readonly Lock _sync = new();
@@ -22,6 +24,11 @@ public sealed class DeveloperTestModeState
             handlers = Changed;
         }
 
-        handlers?.Invoke(this, EventArgs.Empty);
+        AppLog.Info("Developer.TestMode", "Developer Test Mode changed.", ("Enabled", enabled));
+        foreach (var handler in handlers?.GetInvocationList().OfType<EventHandler>() ?? [])
+        {
+            try { handler(this, EventArgs.Empty); }
+            catch (Exception exception) { AppLog.Warn("Developer.TestMode", "Test Mode subscriber failed.", exception); }
+        }
     }
 }

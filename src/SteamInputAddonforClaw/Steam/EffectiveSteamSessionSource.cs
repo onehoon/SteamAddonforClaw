@@ -9,6 +9,7 @@ public sealed class EffectiveSteamSessionSource : IDisposable
     private readonly SteamSessionWatcher _watcher;
     private readonly DeveloperTestModeState _testMode;
     private readonly Lock _sync = new();
+    private readonly Lock _publicationGate = new();
     private readonly Queue<SteamSessionStateChangedEventArgs> _pendingTransitions = new();
     private bool _publishing;
     private bool _disposed;
@@ -52,30 +53,44 @@ public sealed class EffectiveSteamSessionSource : IDisposable
 
     private void Drain()
     {
-        while (true)
+        lock (_publicationGate)
         {
-            SteamSessionStateChangedEventArgs? transition;
-            lock (_sync)
+            while (true)
             {
-                if (_pendingTransitions.Count == 0) { _publishing = false; return; }
-                transition = _pendingTransitions.Dequeue();
-            }
+                SteamSessionStateChangedEventArgs? transition;
+                lock (_sync)
+                {
+                    if (_pendingTransitions.Count == 0) { _publishing = false; return; }
+                    transition = _pendingTransitions.Dequeue();
+                }
 
-            foreach (var handler in StateChanged?.GetInvocationList().OfType<EventHandler<SteamSessionStateChangedEventArgs>>() ?? [])
-            {
-                try { handler(this, transition); }
-                catch (Exception exception) { Diagnostics.AppLog.Warn("Steam.Effective", "Effective state subscriber failed.", exception); }
+                Diagnostics.AppLog.Info("Steam.Effective", "Effective Steam session state changed.",
+                    ("PreviousRunningAppID", transition.Previous.RunningAppId),
+                    ("CurrentRunningAppID", transition.Current.RunningAppId),
+                    ("PreviousActive", transition.Previous.IsActive),
+                    ("CurrentActive", transition.Current.IsActive),
+                    ("PreviousSource", transition.Previous.Source),
+                    ("CurrentSource", transition.Current.Source));
+                foreach (var handler in StateChanged?.GetInvocationList().OfType<EventHandler<SteamSessionStateChangedEventArgs>>() ?? [])
+                {
+                    try { handler(this, transition); }
+                    catch (Exception exception) { Diagnostics.AppLog.Warn("Steam.Effective", "Effective state subscriber failed.", exception); }
+                }
             }
         }
     }
 
     public void Dispose()
     {
-        lock (_sync)
+        lock (_publicationGate)
         {
-            if (_disposed) return;
-            _disposed = true;
-            _pendingTransitions.Clear();
+            lock (_sync)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                _pendingTransitions.Clear();
+                _publishing = false;
+            }
         }
         _watcher.StateChanged -= OnInputChanged;
         _testMode.Changed -= OnInputChanged;
