@@ -167,6 +167,27 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
     }
 
     [Fact]
+    public async Task Suspend_tracked_instance_disappears_but_replacement_viiper_candidate_remains()
+    {
+        var tracked = Device("USB\\VID_28DE&PID_1102\\A"); var replacement = Device("USB\\VID_28DE&PID_1102\\B"); var api = new FakeApi(); var tracker = new AddonOwnedVirtualDeviceTracker();
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [tracked], [replacement]), () => api, tracker);
+        Assert.True((await coordinator.StartAsync()).Succeeded);
+        Assert.False(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 12, 13, CancellationToken.None));
+        Assert.True(tracker.HasUncertainOwnership); Assert.False(tracker.IsExcluded(tracked));
+    }
+
+    [Fact]
+    public async Task Suspend_at_final_running_commit_cannot_publish_or_start_report_pump()
+    {
+        var device = Device("USB\\VID_28DE&PID_1102\\VIIPER"); var gate = new PowerMutationGate(true); var api = new FakeApi(); var tracker = new AddonOwnedVirtualDeviceTracker();
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [device], []), () => api, tracker, gate, () => gate.TryEnterBarrier(out _, out _));
+        var result = await coordinator.StartAsync();
+        Assert.False(result.Succeeded); Assert.Equal("PowerTransitionInvalidated", result.Reason); Assert.NotEqual(ViiperSteamControllerPocState.Running, coordinator.State); Assert.False(tracker.IsExcluded(device));
+        Assert.True(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 14, gate.Epoch, CancellationToken.None));
+        Assert.Equal(2, api.Calls.Count(call => call == "SetInput"));
+    }
+
+    [Fact]
     public async Task Suspend_during_pulse_leaves_neutral_state()
     {
         var device = Device("USB\\VID_28DE&PID_1102\\VIIPER"); var api = new FakeApi(); var gate = new PowerMutationGate(true);
@@ -248,16 +269,16 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
             Assert.True((await coordinator.StartAsync()).Succeeded);
             Assert.True(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 31, 32, CancellationToken.None));
             var log = File.ReadAllText(Directory.GetFiles(directory, "*.log").Single());
-            Assert.Contains("Suspend quiesce started", log); Assert.Contains("Cycle=31", log); Assert.Contains("Epoch=32", log); Assert.Contains("VIIPER native teardown completed", log); Assert.Contains("Report pump stopped", log);
+            Assert.Contains("Suspend quiesce started", log); Assert.Contains("Cycle=31", log); Assert.Contains("Epoch=32", log); Assert.Contains("VIIPER native teardown completed", log); Assert.Contains("Report pump stopped", log); Assert.Equal(1, log.Split("VIIPER suspend quiesce completed.").Length - 1);
         }
         finally { AppLog.DirectoryOverride = null; if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
-    private static ViiperSteamControllerPocCoordinator Create(HardwareCompatibilityAssessment hardware, IControllerDeviceEnumerator enumerator, Func<IViiperNativeApi> factory, AddonOwnedVirtualDeviceTracker? tracker = null, PowerMutationGate? powerGate = null)
+    private static ViiperSteamControllerPocCoordinator Create(HardwareCompatibilityAssessment hardware, IControllerDeviceEnumerator enumerator, Func<IViiperNativeApi> factory, AddonOwnedVirtualDeviceTracker? tracker = null, PowerMutationGate? powerGate = null, Action? beforeRunningCommit = null)
     {
         var snapshot = Snapshot(hardware);
         var path = Path.GetTempFileName();
-        return new ViiperSteamControllerPocCoordinator(new SnapshotProvider(snapshot), enumerator, tracker ?? new AddonOwnedVirtualDeviceTracker(), path, _ => factory(), powerGate: powerGate);
+        return new ViiperSteamControllerPocCoordinator(new SnapshotProvider(snapshot), enumerator, tracker ?? new AddonOwnedVirtualDeviceTracker(), path, _ => factory(), powerGate: powerGate, beforeRunningCommit: beforeRunningCommit);
     }
 
     private static SystemStatusSnapshot Snapshot(bool steamActive = true, ExternalControllerAssessmentStatus external = ExternalControllerAssessmentStatus.Clear) => Snapshot(new(HardwareCompatibilityStatus.Supported, null, null, "test"), steamActive, external);

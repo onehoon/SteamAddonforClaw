@@ -52,5 +52,14 @@ internal sealed class PowerMutationGate
             return true;
         }
     }
+    internal bool TryCommitMutation(PowerMutationToken token, Action commitState)
+    {
+        lock (_sync)
+        {
+            if (!_open || _epoch != token.Epoch) return false;
+            commitState();
+            return true;
+        }
+    }
     internal void Close() { lock (_sync) _open = false; }
 }
