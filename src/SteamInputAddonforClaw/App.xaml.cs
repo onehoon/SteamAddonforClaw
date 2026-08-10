@@ -16,6 +16,7 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Power;
 
 namespace SteamInputAddonforClaw;
 
@@ -32,6 +33,9 @@ public partial class App : Application
     private bool _isExplicitExit;
     private readonly SingleInstanceGate _singleInstanceGate;
     private readonly RoutingSessionStateMachine _routingSessionStateMachine = new();
+    private PowerTransitionWatcher? _powerWatcher;
+    private PowerTransitionCoordinator? _powerCoordinator;
+    private ViiperSteamControllerPocCoordinator? _viiperPoc;
 
     public App()
         : this(arguments: null, Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized."))
@@ -140,6 +144,8 @@ public partial class App : Application
                 environmentReadiness);
         }
 
+        var recoverySafetyState = new RecoverySafetyState(recoverySafe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
+        var powerGate = new PowerMutationGate();
         var statusProvider = new SystemStatusProvider(
             new WindowsDeviceInformationProvider(),
             new WindowsDeviceProbeContextFactory(),
@@ -155,10 +161,19 @@ public partial class App : Application
                 new ViiperRuntimeInspector()),
             () => _steamSessionWatcher?.State ?? SteamSessionState.FromRunningAppId(0),
             CaptureExternalControllerAssessment,
-            () => recoverySafe,
+            () => recoverySafetyState.Current == RecoverySafety.Safe,
             routingSessionStateMachine: _routingSessionStateMachine);
-        var viiperPoc = new ViiperSteamControllerPocCoordinator(statusProvider, new WindowsControllerDeviceEnumerator(), addonOwnedVirtualDeviceTracker, Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll"));
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: viiperPoc);
+        _viiperPoc = new ViiperSteamControllerPocCoordinator(statusProvider, new WindowsControllerDeviceEnumerator(), addonOwnedVirtualDeviceTracker, Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll"), powerGate: powerGate);
+        _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, async token =>
+        {
+            if (_recoveryManager is null) return false;
+            var result = await _recoveryManager.RecoverIncompleteSessionAsync(token).ConfigureAwait(false);
+            return result.Status is RecoveryStatus.Success or RecoveryStatus.NoRecoveryNeeded;
+        }, [_viiperPoc]);
+        _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator, _viiperPoc.CancelLifecycle);
+        if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
+        else powerGate.OpenAfterRecovery();
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: _viiperPoc);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
@@ -208,6 +223,12 @@ public partial class App : Application
         _runningAppIdSource = null;
         _systemTrayIcon?.Dispose();
         _systemTrayIcon = null;
+        _powerWatcher?.Dispose();
+        _powerWatcher = null;
+        if (_powerCoordinator is not null) _powerCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _powerCoordinator = null;
+        if (_viiperPoc is not null) _viiperPoc.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _viiperPoc = null;
         AppLog.Info("Runtime cleanup completed.");
     }
 

@@ -263,7 +263,6 @@ public sealed partial class MainWindow : Window
             source.TestCompleted -= OnMsiClawInputTestCompleted;
             _m1M2DiagnosticCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
-        _viiperSteamControllerPocCoordinator?.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     private MsiClawInputSource CreateMsiClawInputSource()

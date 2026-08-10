@@ -1,13 +1,14 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Power;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 internal enum ViiperSteamControllerPocState { Stopped, Starting, Running, Stopping, Failed }
 internal sealed record ViiperSteamControllerPocResult(bool Succeeded, ViiperSteamControllerPocState State, string Reason);
 
-internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
+internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IPowerTransitionParticipant
 {
     private const uint BusId = 1;
     private const ushort VendorId = 0x28DE;
@@ -28,26 +29,38 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
     private Task? _reportPump;
     private readonly Lock _reportSync = new();
     private int _syntheticButtons;
+    private readonly PowerMutationGate? _powerGate;
+    private readonly ViiperVirtualDeviceIdentityPolicy _identityPolicy;
+    private CancellationTokenSource _lifecycleCancellation = new();
 
-    internal ViiperSteamControllerPocCoordinator(ISystemStatusProvider statusProvider, IControllerDeviceEnumerator deviceEnumerator, AddonOwnedVirtualDeviceTracker tracker, string payloadPath, Func<string, IViiperNativeApi>? nativeLoader = null)
+    internal ViiperSteamControllerPocCoordinator(ISystemStatusProvider statusProvider, IControllerDeviceEnumerator deviceEnumerator, AddonOwnedVirtualDeviceTracker tracker, string payloadPath, Func<string, IViiperNativeApi>? nativeLoader = null, PowerMutationGate? powerGate = null, ViiperVirtualDeviceIdentityPolicy? identityPolicy = null)
     {
         _statusProvider = statusProvider;
         _deviceEnumerator = deviceEnumerator;
         _tracker = tracker;
         _payloadPath = payloadPath;
         _nativeLoader = nativeLoader ?? ViiperNativeApi.Load;
+        _powerGate = powerGate;
+        _identityPolicy = identityPolicy ?? new ViiperVirtualDeviceIdentityPolicy();
     }
 
     internal ViiperSteamControllerPocState State => _state;
+    public string Name => "VIIPER";
 
     internal async Task<ViiperSteamControllerPocResult> StartAsync(CancellationToken cancellationToken = default)
     {
         await _mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            var token = new PowerMutationToken(0);
+            if (_powerGate is not null && !_powerGate.TryAcquire(out token)) return new(false, _state, "PowerGateClosed");
+            if (_lifecycleCancellation.IsCancellationRequested) { _lifecycleCancellation.Dispose(); _lifecycleCancellation = new CancellationTokenSource(); }
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifecycleCancellation.Token);
+            var operationToken = linked.Token;
             if (_state == ViiperSteamControllerPocState.Running) return new(true, _state, "AlreadyRunning");
             if (_state == ViiperSteamControllerPocState.Failed) return new(false, _state, "FailedStateRequiresRestart");
-            var status = await _statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
+            var status = await _statusProvider.CaptureAsync(operationToken).ConfigureAwait(false);
+            EnsureCurrent(token);
             if (!AllowsStart(status)) return new(false, _state, "SafetyGateDenied");
             if (!File.Exists(_payloadPath)) return new(false, _state, "ViiperPayloadMissing");
 
@@ -61,7 +74,8 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
             if (_api.SetFeedbackCallback(BusId, _deviceId, feedback => AppLog.Debug("ViiperPoc", "Steam Controller feedback received.", ("Length", feedback.Length))) != 0) return Fail("ViiperFeedbackCallbackFailed", ownershipUncertain: true);
             Send(new ClassicSteamControllerInput(false, false));
 
-            _trackedDevice = await WaitForCreatedDeviceAsync(before, cancellationToken).ConfigureAwait(false);
+            _trackedDevice = await WaitForCreatedDeviceAsync(before, operationToken).ConfigureAwait(false);
+            EnsureCurrent(token);
             if (_trackedDevice is null) return Fail("ViiperDeviceIdentityUnverified", ownershipUncertain: true);
             _tracker.Publish(_trackedDevice);
             _state = ViiperSteamControllerPocState.Running;
@@ -73,10 +87,16 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
         }
         catch (Exception exception)
         {
+            if (_powerGate is not null && !_powerGate.IsOpen) AppLog.Warn("ViiperPoc.Power", "VIIPER start invalidated by power transition.", null, ("CurrentEpoch", _powerGate.Epoch));
             AppLog.Error("ViiperPoc", "Classic Steam Controller PoC start failed.", exception);
             return Fail("StartException", ownershipUncertain: _deviceId != 0);
         }
         finally { _mutex.Release(); }
+    }
+
+    private void EnsureCurrent(PowerMutationToken token)
+    {
+        if (_powerGate is not null && !_powerGate.IsCurrent(token)) throw new OperationCanceledException("Power mutation token is stale.");
     }
 
     internal async Task<ViiperSteamControllerPocResult> StopAsync(CancellationToken cancellationToken = default)
@@ -185,7 +205,7 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
         var known = before.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         for (var attempt = 0; attempt < 50; attempt++)
         {
-            var candidates = _deviceEnumerator.EnumeratePresentDevices().Where(device => !known.Contains(device.InstanceId) && device.VendorId == VendorId && device.ProductId == ProductId && HasViiperTopology(device)).ToArray();
+            var candidates = _deviceEnumerator.EnumeratePresentDevices().Where(device => !known.Contains(device.InstanceId) && _identityPolicy.IsMatchingCandidate(device)).ToArray();
             if (candidates.Length == 1) return candidates[0];
             if (candidates.Length > 1) return null;
             await Task.Delay(100, token).ConfigureAwait(false);
@@ -216,7 +236,24 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable
         return new(false, _state, reason);
     }
 
-    private static bool HasViiperTopology(ControllerDeviceInfo device) => string.Join('\n', device.AncestorInstanceIds.Append(device.InstanceId).Append(device.Service ?? string.Empty)).Contains("USBIP", StringComparison.OrdinalIgnoreCase) || string.Join('\n', device.AncestorInstanceIds.Append(device.InstanceId).Append(device.Service ?? string.Empty)).Contains("VIIPER", StringComparison.OrdinalIgnoreCase);
     private static bool AllowsStart(SystemStatusSnapshot snapshot) => snapshot.HardwareCompatibility.Status == SteamInputAddonforClaw.Devices.HardwareCompatibilityStatus.Supported && snapshot.Compatibility.AllowsMutation && snapshot.RecoverySafe && snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.Clear && snapshot.Steam.IsActive && snapshot.Prerequisites.HidHide.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Ready && snapshot.Prerequisites.UsbIpWin2.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Ready && snapshot.Prerequisites.Viiper.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Present;
+    internal void CancelLifecycle() { try { _lifecycleCancellation.Cancel(); } catch { } }
+    public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
+    {
+        CancelLifecycle();
+        Volatile.Write(ref _syntheticButtons, 0);
+        var remaining = deadline - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero) { _tracker.MarkOwnershipUncertain(); return false; }
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(remaining);
+        var result = await StopAsync(timeout.Token).ConfigureAwait(false);
+        if (!result.Succeeded) _tracker.MarkOwnershipUncertain();
+        return result.Succeeded;
+    }
+    public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken)
+    {
+        if (!_tracker.HasUncertainOwnership) return Task.FromResult(true);
+        try { return Task.FromResult(_tracker.ClearUncertaintyAfterVerifiedAbsence(_deviceEnumerator.EnumeratePresentDevices(), _identityPolicy)); }
+        catch { return Task.FromResult(false); }
+    }
     public async ValueTask DisposeAsync() { if (_state is ViiperSteamControllerPocState.Running or ViiperSteamControllerPocState.Starting) await StopAsync(); _mutex.Dispose(); }
 }
