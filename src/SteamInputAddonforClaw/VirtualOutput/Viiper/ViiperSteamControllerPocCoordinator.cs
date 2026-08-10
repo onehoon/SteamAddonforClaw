@@ -28,6 +28,13 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
     private ViiperSteamControllerPocState _state;
     private uint _deviceId;
     private uint _frame;
+    private long _reportsSent;
+    private long _reportSendFailures;
+    private uint? _firstPumpFrame;
+    private uint? _lastPumpFrame;
+    private DateTimeOffset? _reportPumpStartedUtc;
+    private DateTimeOffset? _lastSuccessfulReportUtc;
+    private DateTimeOffset? _reportPumpStopRequestedUtc;
     private CancellationTokenSource? _runningLifetime;
     private Task? _reportPump;
     private readonly Lock _reportSync = new();
@@ -127,12 +134,14 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
             if (_api is null) return await FailAsync("NativeApiUnavailable").ConfigureAwait(false);
             _state = ViiperSteamControllerPocState.Stopping;
             Volatile.Write(ref _syntheticButtons, 0);
+            _reportPumpStopRequestedUtc = DateTimeOffset.UtcNow;
             _runningLifetime?.Cancel();
             if (_reportPump is not null) await _reportPump.ConfigureAwait(false);
             await _nativeOperationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             ViiperNativeTeardownResult teardown;
             try { teardown = CleanupNativeSessionUnderLock("NormalStop", null, null); }
             finally { _nativeOperationLock.Release(); }
+            LogReportPumpSummary("NormalStop", teardown.FinalNeutralSucceeded);
             if (!teardown.Success) { _tracker.MarkOwnershipUncertain(); _state = ViiperSteamControllerPocState.Failed; return new(false, _state, "ViiperNativeTeardownFailed"); }
             if (_trackedDevice is not null && !await WaitForDisappearanceAsync(_trackedDevice.InstanceId, cancellationToken).ConfigureAwait(false)) return await FailAsync("PnPDisappearanceTimedOut", ownershipUncertain: true).ConfigureAwait(false);
             if (_trackedDevice is not null) _tracker.Remove(_trackedDevice);
@@ -168,20 +177,33 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         return new(true, _state, leftGrip ? "LeftGripPulse" : "RightGripPulse");
     }
 
-    private void Send(ClassicSteamControllerInput input)
+    private void Send(ClassicSteamControllerInput input, bool reportPump = false)
     {
         lock (_reportSync)
         {
             if (_api is null) return;
-            ClassicSteamControllerReportBuilder.Write(_report, _frame++, input);
-            if (_api.SetInput(BusId, _deviceId, _report) != 0) throw new InvalidOperationException($"VIIPER input failed: {_api.GetLastError()}");
+            var frame = _frame++;
+            ClassicSteamControllerReportBuilder.Write(_report, frame, input);
+            if (_api.SetInput(BusId, _deviceId, _report) != 0)
+            {
+                if (reportPump) _reportSendFailures++;
+                throw new InvalidOperationException($"VIIPER input failed: {_api.GetLastError()}");
+            }
+            if (reportPump)
+            {
+                _reportsSent++;
+                _firstPumpFrame ??= frame;
+                _lastPumpFrame = frame;
+                _lastSuccessfulReportUtc = DateTimeOffset.UtcNow;
+            }
         }
     }
 
     private async Task RunReportPumpAsync(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(4));
-        try { while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) Send(CurrentInput()); }
+        _reportPumpStartedUtc = DateTimeOffset.UtcNow;
+        try { while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) Send(CurrentInput(), reportPump: true); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception exception)
         {
@@ -266,6 +288,7 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
     }
     private async Task<ViiperSteamControllerPocResult> FailAsync(string reason, bool ownershipUncertain = false)
     {
+        _reportPumpStopRequestedUtc = DateTimeOffset.UtcNow;
         _runningLifetime?.Cancel(); if (ownershipUncertain) _tracker.MarkOwnershipUncertain();
         await _nativeOperationLock.WaitAsync().ConfigureAwait(false);
         try { _ = CleanupNativeSessionUnderLock(reason, null, null); }
@@ -299,6 +322,7 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         AppLog.Info("ViiperPoc.Power", "Suspend quiesce started.", ("Cycle", cycle), ("Epoch", epoch), ("ViiperState", _state), ("HasApi", _api is not null), ("Initialized", _nativeInitialized), ("BusCreated", _busCreated), ("DeviceCreated", _deviceCreated), ("DeviceId", _deviceId), ("BudgetRemainingMs", (deadline - started).TotalMilliseconds));
         CancelLifecycle();
         Volatile.Write(ref _syntheticButtons, 0);
+        _reportPumpStopRequestedUtc = DateTimeOffset.UtcNow;
         _runningLifetime?.Cancel();
         var remaining = deadline - DateTimeOffset.UtcNow;
         if (remaining <= TimeSpan.Zero) { _tracker.MarkOwnershipUncertain(); return false; }
@@ -313,31 +337,41 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
             tracked = _trackedDevice; _trackedDevice = null;
         }
         finally { _nativeOperationLock.Release(); }
-        if (!teardown.Success) { _tracker.MarkOwnershipUncertain(); AppLog.Warn("ViiperPoc.Power", "Suspend native teardown completed with failures.", null, ("Cycle", cycle), ("Epoch", epoch), ("ElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds)); return false; }
+        LogReportPumpSummary("Suspend", teardown.FinalNeutralSucceeded, cycle, epoch);
+        _state = ViiperSteamControllerPocState.Stopped;
+        if (!teardown.Success) { _tracker.MarkOwnershipUncertain(); AppLog.Warn("ViiperPoc.Power", "Suspend native teardown completed with failures.", null, ("Cycle", cycle), ("Epoch", epoch), ("ElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds), ("OwnershipUncertain", true)); return false; }
         if (tracked is null)
         {
             if (teardown.HadDevice) { _tracker.MarkOwnershipUncertain(); AppLog.Warn("ViiperPoc.Power", "Suspend teardown could not verify an untracked created device.", null, ("Cycle", cycle), ("Epoch", epoch), ("OwnershipUncertain", true)); return false; }
-            _state = ViiperSteamControllerPocState.Stopped; return true;
+            return true;
         }
         for (var attempt = 0; attempt < 3; attempt++)
         {
             if (DateTimeOffset.UtcNow >= deadline) break;
             try
             {
-                if (_deviceEnumerator.EnumeratePresentDevices().All(device => !string.Equals(device.InstanceId, tracked.InstanceId, StringComparison.OrdinalIgnoreCase)))
+                var present = _deviceEnumerator.EnumeratePresentDevices();
+                var stillPresent = present.Any(device => string.Equals(device.InstanceId, tracked.InstanceId, StringComparison.OrdinalIgnoreCase));
+                AppLog.Trace("ViiperPoc.PnP", "Suspend PnP quick verification poll.", ("Cycle", cycle), ("Epoch", epoch), ("Attempt", attempt + 1), ("TrackedInstancePresent", stillPresent), ("CandidatePresent", present.Any(_identityPolicy.IsMatchingCandidate)), ("RemainingBudgetMs", (deadline - DateTimeOffset.UtcNow).TotalMilliseconds));
+                if (!stillPresent)
                 {
                     _tracker.Remove(tracked); _state = ViiperSteamControllerPocState.Stopped;
                     AppLog.Info("ViiperPoc.Power", "Suspend PnP quick verification completed.", ("Cycle", cycle), ("Epoch", epoch), ("Outcome", "VerifiedAbsent"), ("Attempt", attempt + 1));
                     AppLog.Info("ViiperPoc.Power", "Suspend quiesce completed.", ("Cycle", cycle), ("Epoch", epoch), ("Outcome", "Succeeded"), ("TotalElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds), ("OwnershipUncertain", false)); return true;
                 }
             }
-            catch { break; }
+            catch (Exception exception) { AppLog.Warn("ViiperPoc.PnP", "Suspend PnP quick verification failed.", exception, ("Cycle", cycle), ("Epoch", epoch), ("Attempt", attempt + 1), ("Outcome", "EnumerationFailed")); break; }
             var delay = TimeSpan.FromMilliseconds(Math.Min(25, Math.Max(0, (deadline - DateTimeOffset.UtcNow).TotalMilliseconds)));
             if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         }
         _tracker.MarkOwnershipUncertain();
-        AppLog.Warn("ViiperPoc.Power", "Suspend PnP quick verification did not confirm disappearance.", null, ("Cycle", cycle), ("Epoch", epoch), ("OwnershipUncertain", true));
+        AppLog.Warn("ViiperPoc.Power", "Suspend PnP quick verification did not confirm disappearance.", null, ("Cycle", cycle), ("Epoch", epoch), ("Outcome", DateTimeOffset.UtcNow >= deadline ? "DeadlineExpired" : "StillPresent"), ("OwnershipUncertain", true), ("TotalElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds));
         return false;
+    }
+    private void LogReportPumpSummary(string reason, bool finalNeutralSucceeded, long? cycle = null, long? epoch = null)
+    {
+        if (_reportPumpStartedUtc is null) return;
+        AppLog.Info("ViiperPoc.ReportPump", "Report pump stopped.", ("Reason", reason), ("Cycle", cycle), ("Epoch", epoch), ("ReportsSent", _reportsSent), ("FirstFrame", _firstPumpFrame), ("LastFrame", _lastPumpFrame), ("SendFailures", _reportSendFailures), ("PumpStartedUtc", _reportPumpStartedUtc), ("LastSuccessfulSendUtc", _lastSuccessfulReportUtc), ("PumpStopRequestedUtc", _reportPumpStopRequestedUtc), ("FinalNeutralSucceeded", finalNeutralSucceeded));
     }
     public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken)
     {
