@@ -30,6 +30,34 @@ public sealed class FullNonGyroPipelineTests
     }
 
     [Theory]
+    [InlineData(true, false, 0x80, 0x00)]
+    [InlineData(false, true, 0x00, 0x01)]
+    public void Maps_M2_to_left_grip_and_M1_to_right_grip(bool m2, bool m1, byte expectedByte9, byte expectedByte10)
+    {
+        var buttons = new bool[17]; buttons[15] = m1; buttons[16] = m2;
+        Assert.True(MsiClawControllerStateMapper.TryMap(new DirectInputState(buttons, 32768, 32768, 32768, 0, 0, 0, [-1]), out var state));
+        var report = new byte[64]; ClassicSteamControllerReportBuilder.Write(report, 0, ClassicSteamControllerInputMapper.Map(state));
+        Assert.Equal(expectedByte9, report[9] & 0x80); Assert.Equal(expectedByte10, report[10] & 0x01);
+    }
+
+    [Theory]
+    [InlineData(0, short.MaxValue)] [InlineData(65535, -32767)]
+    public void Inverted_axis_endpoints_are_clamped(int raw, short expected)
+    {
+        Assert.True(MsiClawControllerStateMapper.TryMap(new DirectInputState(new bool[17], 32768, raw, 32768, 0, 0, 0, [-1]), out var state));
+        Assert.Equal(expected, state.LeftStick.Y);
+    }
+
+    [Fact]
+    public void Center_offset_does_not_activate_right_pad_and_duplicate_trigger_fields_match()
+    {
+        var input = new ClassicSteamControllerInput(default, default, new(1, -1), new(128, 64), false, false);
+        var report = new byte[64]; ClassicSteamControllerReportBuilder.Write(report, 0, input);
+        Assert.Equal(0, report[10] & 0x10);
+        Assert.Equal(report[24..26], report[50..52]); Assert.Equal(report[26..28], report[52..54]);
+    }
+
+    [Theory]
     [InlineData(-1, false, false, false, false)] [InlineData(0, true, false, false, false)] [InlineData(22500, false, false, true, true)] [InlineData(31500, true, false, false, true)]
     public void Maps_pov_to_independent_direction_bits(int pov, bool up, bool right, bool down, bool left)
     {
