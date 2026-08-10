@@ -35,6 +35,7 @@ public sealed partial class MainWindow : Window
     private readonly ISystemStatusProvider _systemStatusProvider;
     private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
+    private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
     private readonly DeveloperTestModeState? _developerTestModeState;
     private bool _isInitializingTestMode;
     private SystemStatusSnapshot? _latestSystemStatus;
@@ -45,6 +46,10 @@ public sealed partial class MainWindow : Window
     private int _isRefreshingStatus;
     private int _isGeneratingEnvironmentDiscoveryReport;
     private string? _environmentDiscoveryDirectory;
+    private bool _setupPromptActive;
+    private bool _setupPromptDeclinedForCurrentProcess;
+    private bool _windowActivatedForUser;
+    private bool _setupPromptPendingActivation;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -60,11 +65,13 @@ public sealed partial class MainWindow : Window
         ISystemStatusProvider? systemStatusProvider = null,
         IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
         IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
-        DeveloperTestModeState? developerTestModeState = null)
+        DeveloperTestModeState? developerTestModeState = null,
+        IElevatedProcessRunner? prerequisiteSetupRunner = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
         _hidHideReceiptStore = hidHideReceiptStore ?? new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
+        _prerequisiteSetupRunner = prerequisiteSetupRunner ?? new ElevatedProcessRunner();
         _developerTestModeState = developerTestModeState;
         _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
             new WindowsEnvironmentDiscoverySnapshotSource(),
@@ -76,6 +83,7 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         ApplyDefaultWindowSize();
         Closed += OnWindowClosed;
+        Activated += OnWindowActivated;
         _isLoadingStartupSettings = true;
         LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
         _isLoadingStartupSettings = false;
@@ -88,6 +96,18 @@ public sealed partial class MainWindow : Window
         ExternalControllersList.ItemsSource = _externalControllerCards;
         RuntimeStatusList.ItemsSource = _runtimeCards;
         MainNavigationView.SelectedItem = StatusNavigationItem;
+        _ = RefreshSystemStatusAsync();
+    }
+
+    private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+    {
+        if (args.WindowActivationState == WindowActivationState.Deactivated) return;
+        if (_windowActivatedForUser)
+        {
+            if (_setupPromptPendingActivation) _ = RefreshSystemStatusAsync();
+            return;
+        }
+        _windowActivatedForUser = true;
         _ = RefreshSystemStatusAsync();
     }
 
@@ -183,11 +203,10 @@ public sealed partial class MainWindow : Window
     private void ShowPage(MainNavigationPage page)
     {
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
-        SetupContent.Visibility = page == MainNavigationPage.Setup ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
-        if (page is MainNavigationPage.Status or MainNavigationPage.Setup) _ = RefreshSystemStatusAsync();
+        if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
     }
 
     private async void RefreshStatusButton_Click(object sender, RoutedEventArgs args) => await RefreshSystemStatusAsync();
@@ -221,6 +240,71 @@ public sealed partial class MainWindow : Window
             new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
         ]);
         Replace(_externalControllerCards, ExternalControllerStatusCardFactory.Create(snapshot.ExternalController));
+        var setup = EvaluateFirstTimeSetup(snapshot);
+        var canInstall = setup.CanInstallRequiredComponents;
+        var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
+        Replace(_runtimeCards,
+        [
+            new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
+            new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
+        ]);
+        if (PrerequisiteSetupPromptPolicy.IsInstallable(setup))
+        {
+            if (_windowActivatedForUser)
+                _ = PromptForPrerequisiteSetupAsync();
+            else
+                RequestSetupPromptActivation();
+        }
+    }
+
+    private void RequestSetupPromptActivation()
+    {
+        if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess || _setupPromptPendingActivation) return;
+        _setupPromptPendingActivation = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_windowActivatedForUser) return;
+            AppWindow.Show();
+            Activate();
+        });
+    }
+
+    private async Task PromptForPrerequisiteSetupAsync()
+    {
+        if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess) return;
+        if (Content.XamlRoot is null)
+        {
+            _setupPromptPendingActivation = true;
+            return;
+        }
+        _setupPromptPendingActivation = false;
+        _setupPromptActive = true;
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Setup required",
+                Content = "Steam Input Addon for Claw needs a few required components. Install them now?",
+                PrimaryButtonText = "Install",
+                CloseButtonText = "Not now",
+                XamlRoot = Content.XamlRoot
+            };
+            AppLog.Info("PrerequisiteSetupPrompt", "Prerequisite setup prompt shown.", ("Action", "Shown"));
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                _setupPromptDeclinedForCurrentProcess = true;
+                AppLog.Info("PrerequisiteSetupPrompt", "Prerequisite setup prompt declined.", ("Action", "Declined"));
+                return;
+            }
+            AppLog.Info("PrerequisiteSetupPrompt", "Prerequisite setup prompt accepted.", ("Action", "Accepted"));
+            await RunPrerequisiteSetupAsync();
+        }
+        catch (Exception exception) { AppLog.Warn("PrerequisiteSetup", "Prerequisite setup prompt failed.", exception); }
+        finally { _setupPromptActive = false; }
+    }
+
+    private FirstTimeSetupAssessment EvaluateFirstTimeSetup(SystemStatusSnapshot snapshot)
+    {
         var receipt = _hidHideReceiptStore.Load();
         var usbReceipt = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath).Load();
         var storage = ProvisioningStorageSecurity.Inspect(VelopackAppPaths.ProvisioningStateDirectory);
@@ -233,30 +317,16 @@ public sealed partial class MainWindow : Window
             ? ComponentProvisioningState.Corrupt
             : usbReceipt.Receipt is not null ? ToComponentProvisioningState(usbReceipt.Receipt.State)
             : ComponentProvisioningState.None;
-        var setup = FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
-            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController, snapshot.Steam.IsActive ? SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId) : SteamSessionState.FromRunningAppId(0),
-            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2,
-            new(hidHideState, usbIpState)));
-        var canInstall = setup.CanInstallRequiredComponents;
-        var receiptMessage = setup.Status == FirstTimeSetupStatus.Complete ? "Setup complete. Routing runtime is not available in this build."
-            : FormatFirstTimeSetupMessage(setup);
-        var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
-        Replace(_runtimeCards,
-        [
-            new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
-            new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
-        ]);
-        SetupHidHideText.Text = $"HidHide: {snapshot.Prerequisites.HidHide.Status}";
-        SetupUsbIpText.Text = $"usbip-win2: {snapshot.Prerequisites.UsbIpWin2.Status}";
-        InstallRequiredComponentsButton.IsEnabled = canInstall;
-        SetupStatusText.Text = receiptMessage;
-        if (ShouldNavigateToSetup(setup) && _navigationState.CurrentPage == MainNavigationPage.Status)
-            ShowPage(_navigationState.OpenSetup());
+        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
+            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController,
+            SteamSessionState.FromRunningAppId(snapshot.Steam.IsActive ? snapshot.Steam.RunningAppId : 0),
+            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, new(hidHideState, usbIpState)));
     }
 
-    private async void InstallHidHideButton_Click(object sender, RoutedEventArgs args)
+    private async Task RunPrerequisiteSetupAsync()
     {
         var current = await _systemStatusProvider.CaptureAsync();
+        var currentSetup = EvaluateFirstTimeSetup(current);
         AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
             ("HidHideStatus", current.Prerequisites.HidHide.Status),
             ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
@@ -265,26 +335,46 @@ public sealed partial class MainWindow : Window
             ("ExternalControllerStatus", current.ExternalController.Status),
             ("SteamActive", current.Steam.IsActive),
             ("RecoverySafe", current.RecoverySafe));
-        if (current.HardwareCompatibility.Status != HardwareCompatibilityStatus.Supported)
+        if (!PrerequisiteSetupPromptPolicy.IsInstallable(currentSetup))
         {
             RenderSystemStatus(current);
             return;
         }
-        InstallRequiredComponentsButton.IsEnabled = false;
-        SetupStatusText.Text = "Installing required components...";
         try
         {
             var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
-            var result = await new ElevatedProcessRunner().RunAsync(executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
-            SetupStatusText.Text = ElevatedPrerequisiteSetup.TranslateExitCode(result) switch
+            var result = await PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(
+                currentSetup, _prerequisiteSetupRunner, executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
+            if (result is null) return;
+            var resultKind = ElevatedPrerequisiteSetup.TranslateExitCode(result);
+            AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", resultKind));
+            if (resultKind == ElevatedPrerequisiteSetup.ResultKind.RebootRequired)
             {
-                ElevatedPrerequisiteSetup.ResultKind.Installed => "Required components were installed.",
-                ElevatedPrerequisiteSetup.ResultKind.RebootRequired => "Restart Windows to complete component setup.",
-                ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress => "Another setup operation is already in progress.",
-                ElevatedPrerequisiteSetup.ResultKind.Blocked => "A required component is installed but not ready. Restart Windows or verify its installation before retrying.",
-                ElevatedPrerequisiteSetup.ResultKind.Cancelled => "Installation was cancelled.",
-                _ => result.Reason ?? "Required component installation failed."
-            };
+                var restartDialog = new ContentDialog
+                {
+                    Title = "Restart required",
+                    Content = "Windows needs to restart to finish setting up Steam Input Addon for Claw.",
+                    PrimaryButtonText = "Restart now",
+                    CloseButtonText = "Later",
+                    XamlRoot = Content.XamlRoot
+                };
+                if (await restartDialog.ShowAsync() == ContentDialogResult.Primary)
+                    Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false });
+            }
+            else if (resultKind is ElevatedPrerequisiteSetup.ResultKind.Blocked or ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress ||
+                     resultKind is ElevatedPrerequisiteSetup.ResultKind.Failed)
+            {
+                var message = resultKind == ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress
+                    ? "Another setup operation is already in progress."
+                    : "Setup couldn't be completed. Check Status or the application log for details.";
+                await new ContentDialog
+                {
+                    Title = "Setup unavailable",
+                    Content = message,
+                    CloseButtonText = "OK",
+                    XamlRoot = Content.XamlRoot
+                }.ShowAsync();
+            }
         }
         finally { await RefreshSystemStatusAsync(); }
     }
@@ -324,26 +414,6 @@ public sealed partial class MainWindow : Window
         UsbIpWin2ProvisioningReceiptState.AttemptCancelled => ComponentProvisioningState.AttemptCancelled,
         _ => ComponentProvisioningState.Indeterminate
     };
-    private static string FormatFirstTimeSetupMessage(FirstTimeSetupAssessment assessment) => assessment.Reason switch
-    {
-        FirstTimeSetupReason.MissingComponents => "HidHide and usbip-win2 are required for controller routing.",
-        FirstTimeSetupReason.PendingReboot => "Restart Windows to complete component setup.",
-        FirstTimeSetupReason.LegacyHidHideMissing => "A legacy HidHide installation record needs manual verification before setup can continue.",
-        FirstTimeSetupReason.ProvisioningUncertain => "Provisioning state could not be verified. Installation is blocked.",
-        FirstTimeSetupReason.RecoveryUnsafe => "Recovery must complete before required components can be installed.",
-        FirstTimeSetupReason.ExternalController => "Disconnect external controllers before installing required components.",
-        FirstTimeSetupReason.ExternalControllerIndeterminate => "External-controller state could not be verified. Installation is blocked.",
-        FirstTimeSetupReason.CompatibilityUnsupported => "This controller software environment is not supported for routing.",
-        FirstTimeSetupReason.CompatibilityIndeterminate => "Controller software state could not be verified. Installation is blocked.",
-        FirstTimeSetupReason.HardwareUnsupported => "This handheld model is not supported by the current version.",
-        FirstTimeSetupReason.HardwareIndeterminate => "Handheld model compatibility could not be verified. Installation is blocked.",
-        FirstTimeSetupReason.SteamActive => "Exit the active Steam session before installing required components.",
-        _ => string.Empty
-    };
-
-    internal static bool ShouldNavigateToSetup(FirstTimeSetupAssessment assessment) =>
-        assessment.Status is FirstTimeSetupStatus.Required or FirstTimeSetupStatus.RestartRequired;
-
     private static ISystemStatusProvider CreateDefaultSystemStatusProvider()
     {
         var devices = new WindowsControllerDeviceEnumerator();
@@ -382,6 +452,8 @@ public sealed partial class MainWindow : Window
     private void MainNavigationView_Loaded(object sender, RoutedEventArgs args)
     {
         SetEnglishSettingsItemContent();
+        if (_setupPromptPendingActivation && _windowActivatedForUser)
+            _ = PromptForPrerequisiteSetupAsync();
 
         var navigationItems = MainNavigationView.MenuItems
             .OfType<NavigationViewItem>()
