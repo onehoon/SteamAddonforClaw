@@ -55,7 +55,6 @@ public sealed class FirstTimeSetupPolicyTests
 
     [Theory]
     [InlineData((int)ComponentProvisioningState.InstallStarted)]
-    [InlineData((int)ComponentProvisioningState.AttemptFailed)]
     [InlineData((int)ComponentProvisioningState.Corrupt)]
     public void UnsafeReceiptState_BlocksAnotherInstallAttempt(int state)
     {
@@ -118,6 +117,28 @@ public sealed class FirstTimeSetupPolicyTests
 
         Assert.True(outcome.IsProvisioned);
         Assert.False(outcome.RequiresRestart);
+    }
+
+    [Fact]
+    public void ExitZeroWithInstalledControlDeviceAndDisabledConfiguration_IsInstallationSuccess()
+    {
+        var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(0, true, false, null, "1.5.230.0", PrerequisiteStatus.Unusable);
+
+        Assert.True(outcome.IsProvisioned);
+        Assert.False(outcome.RequiresRestart);
+        Assert.Equal("InstalledControlDeviceNotRuntimeReady", outcome.Reason);
+    }
+
+    [Fact]
+    public void FailedReceiptWithMissingComponent_IsRetryable()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Missing) with
+        {
+            Provisioning = new(ComponentProvisioningState.AttemptFailed, ComponentProvisioningState.None)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.True(setup.CanInstallRequiredComponents);
     }
 
     [Fact]

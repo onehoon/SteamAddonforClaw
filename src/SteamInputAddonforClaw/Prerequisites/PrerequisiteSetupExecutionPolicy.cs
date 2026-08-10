@@ -18,9 +18,10 @@ internal static class PrerequisiteSetupExecutionPolicy
         if (exitCode == 3010) return new(false, true, "InstallerRequestedRestart");
         if (exitCode != 0) return new(false, false, "InstallerExitCode" + exitCode);
         if (!inspectionSucceeded) return new(false, false, "PostInstallPackageInspectionFailed");
-        if (!packageInstalled) return new(false, false, "PostInstallPackageMissing");
-        if (!string.Equals(observedVersion, expectedVersion, StringComparison.OrdinalIgnoreCase)) return new(false, false, "PostInstallVersionMismatch");
-        if (prerequisiteStatus != PrerequisiteStatus.Ready) return new(false, false, "PostInstallPrerequisiteNotReady");
+        if (!packageInstalled && prerequisiteStatus != PrerequisiteStatus.Unusable) return new(false, false, "PostInstallPackageMissing");
+        if (prerequisiteStatus != PrerequisiteStatus.Unusable && !string.Equals(observedVersion, expectedVersion, StringComparison.OrdinalIgnoreCase)) return new(false, false, "PostInstallVersionMismatch");
+        if (prerequisiteStatus is not (PrerequisiteStatus.Ready or PrerequisiteStatus.Unusable)) return new(false, false, "PostInstallPrerequisiteNotReady");
+        if (prerequisiteStatus == PrerequisiteStatus.Unusable) return new(true, false, "InstalledControlDeviceNotRuntimeReady");
         return new(true, false, "Provisioned");
     }
 }

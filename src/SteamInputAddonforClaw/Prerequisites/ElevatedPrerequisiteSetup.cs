@@ -76,8 +76,15 @@ internal static class ElevatedPrerequisiteSetup
             if (hidAction == PrerequisiteComponentAction.RestartRequired) restartRequired = true;
             if (hidAction == PrerequisiteComponentAction.Blocked)
             {
+                if (hidHide.Installed && hidPrerequisite.Status == PrerequisiteStatus.Unusable)
+                {
+                    AppLog.Info("PrerequisiteSetup", "HidHide is installed but runtime configuration is not ready; continuing to usbip-win2.", ("Reason", hidPrerequisite.Reason), ("Action", "ContinuePrerequisiteSetup"));
+                }
+                else
+                {
                 AppLog.Warn("PrerequisiteSetup", "HidHide is installed but its control device is not ready; reinstall is forbidden.", null, ("Reason", "HidHidePackagePresentPrerequisiteUnusable"), ("PrerequisiteStatus", hidPrerequisite.Status));
                 return 3;
+                }
             }
             if (!hidHide.Installed)
             {
@@ -95,8 +102,7 @@ internal static class ElevatedPrerequisiteSetup
                     return 1;
                 }
                 var code = RunChild("HidHide", HidHidePackageMetadata.InstallerPath, "/exenoui /qn /norestart", HidHidePackageMetadata.InstallerSha256);
-                var after = new WindowsHidHidePackageProbe().Inspect();
-                var afterPrerequisite = new HidHidePrerequisiteInspector(new HidHideDriverClient()).Inspect();
+                var (after, afterPrerequisite) = WaitForHidHidePostInstallEvidence(receipt.InstallerVersion);
                 var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
                 var state = outcome.IsProvisioned ? HidHideProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? HidHideProvisioningReceiptState.InstalledPendingReboot : HidHideProvisioningReceiptState.AttemptFailed;
                 hidStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
@@ -148,6 +154,30 @@ internal static class ElevatedPrerequisiteSetup
             AppLog.Error("PrerequisiteSetup", "Elevated prerequisite setup failed unexpectedly.", exception);
             return 1;
         }
+        }
+    }
+
+    private static (HidHidePackageState Package, PrerequisiteAssessment Prerequisite) WaitForHidHidePostInstallEvidence(string expectedVersion)
+    {
+        const int timeoutMs = 15000;
+        const int pollIntervalMs = 500;
+        var started = Environment.TickCount64;
+        var attempt = 0;
+        AppLog.Info("PrerequisiteSetup", "HidHide post-install verification started.", ("InstallerExitCode", 0), ("TimeoutMs", timeoutMs), ("PollIntervalMs", pollIntervalMs));
+        while (true)
+        {
+            attempt++;
+            var package = new WindowsHidHidePackageProbe().Inspect();
+            var prerequisite = new HidHidePrerequisiteInspector(new HidHideDriverClient()).Inspect();
+            var controlEvidence = prerequisite.Status is PrerequisiteStatus.Ready or PrerequisiteStatus.Unusable;
+            AppLog.Debug("PrerequisiteSetup", "HidHide post-install verification poll.", ("Attempt", attempt), ("ElapsedMs", Environment.TickCount64 - started), ("PackageInstalled", package.Installed), ("ControlStatus", prerequisite.Reason));
+            if ((package.InspectionSucceeded && package.Installed) || controlEvidence)
+            {
+                AppLog.Info("PrerequisiteSetup", "HidHide installation established.", ("Attempt", attempt), ("ElapsedMs", Environment.TickCount64 - started), ("Evidence", package.Installed ? "Package" : "ControlDevice"), ("ControlStatus", prerequisite.Reason), ("Action", "ContinuePrerequisiteSetup"));
+                return (package, prerequisite);
+            }
+            if (Environment.TickCount64 - started >= timeoutMs) return (package, prerequisite);
+            Thread.Sleep(pollIntervalMs);
         }
     }
 

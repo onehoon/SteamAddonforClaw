@@ -23,7 +23,11 @@ internal static class FirstTimeSetupPolicy
             return new(FirstTimeSetupStatus.Indeterminate, FirstTimeSetupReason.HardwareIndeterminate, false);
         if (input.Provisioning.HidHide is ComponentProvisioningState.Corrupt or ComponentProvisioningState.Indeterminate || input.Provisioning.UsbIpWin2 is ComponentProvisioningState.Corrupt or ComponentProvisioningState.Indeterminate)
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
-        if (input.Provisioning.HidHide is ComponentProvisioningState.InstallStarted or ComponentProvisioningState.AttemptFailed || input.Provisioning.UsbIpWin2 is ComponentProvisioningState.InstallStarted or ComponentProvisioningState.AttemptFailed)
+        if (input.Provisioning.HidHide == ComponentProvisioningState.InstallStarted || input.Provisioning.UsbIpWin2 == ComponentProvisioningState.InstallStarted)
+            return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
+        if (input.Provisioning.HidHide == ComponentProvisioningState.AttemptFailed && input.HidHide.Status == PrerequisiteStatus.Indeterminate)
+            return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
+        if (input.Provisioning.UsbIpWin2 == ComponentProvisioningState.AttemptFailed && input.UsbIpWin2.Status == PrerequisiteStatus.Indeterminate)
             return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
         if (!input.RecoverySafe) return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.RecoveryUnsafe, false);
         if (input.ExternalController.Status == ExternalControllerAssessmentStatus.ExternalPresent) return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ExternalController, false);

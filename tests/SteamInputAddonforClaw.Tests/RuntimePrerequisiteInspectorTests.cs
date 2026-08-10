@@ -26,6 +26,7 @@ public sealed class RuntimePrerequisiteInspectorTests
     [InlineData((int)HidHideInspectionStatus.Disabled, (int)PrerequisiteStatus.Unusable)]
     [InlineData((int)HidHideInspectionStatus.InverseWhitelist, (int)PrerequisiteStatus.Unusable)]
     [InlineData((int)HidHideInspectionStatus.ConfigurationUnavailable, (int)PrerequisiteStatus.Indeterminate)]
+    [InlineData((int)HidHideInspectionStatus.AccessDenied, (int)PrerequisiteStatus.Indeterminate)]
     public void HidHideInspection_MapsToFailClosedPrerequisiteStatus(int inspectionStatusValue, int expectedValue)
     {
         var inspectionStatus = (HidHideInspectionStatus)inspectionStatusValue;

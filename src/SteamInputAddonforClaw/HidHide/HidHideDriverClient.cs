@@ -45,6 +45,11 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
         {
             return new(HidHideInspectionStatus.NotInstalled, new HashSet<string>(StringComparer.OrdinalIgnoreCase), Reason: exception.Message);
         }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 5)
+        {
+            AppLog.Warn("HidHide", "HidHide control device access was denied.", exception, ("Operation", "OpenControlDevice"), ("Win32Error", 5), ("Reason", "HidHideControlDeviceAccessDenied"), ("Action", "RemainPassive"));
+            return new(HidHideInspectionStatus.AccessDenied, new HashSet<string>(StringComparer.OrdinalIgnoreCase), Reason: exception.Message);
+        }
         catch (Exception exception)
         {
             AppLog.Warn("HidHide", "HidHide driver inspection failed.", exception, ("Action", "DoNotMutate"));
