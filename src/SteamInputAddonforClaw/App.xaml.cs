@@ -39,6 +39,7 @@ public partial class App : Application
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
     private ViiperSteamControllerPocCoordinator? _viiperPoc;
+    private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
 
     public App()
         : this(arguments: null, Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized."))
@@ -180,8 +181,9 @@ public partial class App : Application
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
-        var nativeDiagnostic = nativeState is null ? null : new MsiClawNativeModeDiagnosticCoordinator(nativeState, _recoveryManager!, powerGate);
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: _viiperPoc, developerTestModeState: _developerTestModeState, msiClawNativeModeDiagnosticCoordinator: nativeDiagnostic);
+        _msiClawNativeModeSession = nativeState is null ? null : new MsiClawNativeModeSessionCoordinator(nativeState, _recoveryManager!, powerGate);
+        if (_msiClawNativeModeSession is not null) _ = _msiClawNativeModeSession.ObserveAsync(_effectiveSteamSessionSource.State);
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, viiperSteamControllerPocCoordinator: _viiperPoc, developerTestModeState: _developerTestModeState);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
@@ -206,6 +208,7 @@ public partial class App : Application
     {
         _routingSessionStateMachine.ObserveSteamSessionState(args.Current);
         _mainWindow?.UpdateSteamSessionState(args.Current);
+        if (_msiClawNativeModeSession is not null) _ = _msiClawNativeModeSession.ObserveAsync(args.Current);
     }
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
@@ -239,6 +242,8 @@ public partial class App : Application
         _powerCoordinator = null;
         if (_viiperPoc is not null) _viiperPoc.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _viiperPoc = null;
+        if (_msiClawNativeModeSession is not null) _msiClawNativeModeSession.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _msiClawNativeModeSession = null;
         AppLog.Info("Runtime cleanup completed.");
     }
 
