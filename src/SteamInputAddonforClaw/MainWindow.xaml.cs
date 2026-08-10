@@ -50,6 +50,7 @@ public sealed partial class MainWindow : Window
     private bool _setupPromptDeclinedForCurrentProcess;
     private bool _windowActivatedForUser;
     private bool _setupPromptPendingActivation;
+    private bool _prerequisiteSetupInProgress;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -133,7 +134,7 @@ public sealed partial class MainWindow : Window
 
     private void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
-        if (!_isInitializingTestMode)
+        if (!_isInitializingTestMode && !_prerequisiteSetupInProgress)
             _developerTestModeState?.SetEnabled(TestModeToggleSwitch.IsOn);
     }
 
@@ -149,6 +150,7 @@ public sealed partial class MainWindow : Window
 
     private async void GenerateEnvironmentDiscoveryReportButton_Click(object sender, RoutedEventArgs args)
     {
+        if (_prerequisiteSetupInProgress) return;
         if (Interlocked.Exchange(ref _isGeneratingEnvironmentDiscoveryReport, 1) != 0) return;
         GenerateEnvironmentDiscoveryReportButton.IsEnabled = false;
         OpenEnvironmentDiscoveryFolderButton.IsEnabled = false;
@@ -176,6 +178,7 @@ public sealed partial class MainWindow : Window
 
     private void OpenEnvironmentDiscoveryFolderButton_Click(object sender, RoutedEventArgs args)
     {
+        if (_prerequisiteSetupInProgress) return;
         if (string.IsNullOrWhiteSpace(_environmentDiscoveryDirectory)) return;
         try
         {
@@ -213,6 +216,7 @@ public sealed partial class MainWindow : Window
 
     private async Task RefreshSystemStatusAsync()
     {
+        if (_prerequisiteSetupInProgress) return;
         if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0) return;
         RefreshStatusButton.IsEnabled = false;
         try { RenderSystemStatus(await _systemStatusProvider.CaptureAsync()); }
@@ -271,7 +275,7 @@ public sealed partial class MainWindow : Window
 
     private async Task PromptForPrerequisiteSetupAsync()
     {
-        if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess) return;
+        if (_setupPromptActive || _setupPromptDeclinedForCurrentProcess || _prerequisiteSetupInProgress) return;
         if (Content.XamlRoot is null)
         {
             _setupPromptPendingActivation = true;
@@ -325,23 +329,26 @@ public sealed partial class MainWindow : Window
 
     private async Task RunPrerequisiteSetupAsync()
     {
-        var current = await _systemStatusProvider.CaptureAsync();
-        var currentSetup = EvaluateFirstTimeSetup(current);
-        AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
-            ("HidHideStatus", current.Prerequisites.HidHide.Status),
-            ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
-            ("CompatibilityStatus", current.Compatibility.Status),
-            ("CompatibilityReason", current.Compatibility.Reason),
-            ("ExternalControllerStatus", current.ExternalController.Status),
-            ("SteamActive", current.Steam.IsActive),
-            ("RecoverySafe", current.RecoverySafe));
-        if (!PrerequisiteSetupPromptPolicy.IsInstallable(currentSetup))
-        {
-            RenderSystemStatus(current);
-            return;
-        }
+        if (_prerequisiteSetupInProgress) return;
+        _prerequisiteSetupInProgress = true;
+        UpdatePrerequisiteSetupBusyUi();
         try
         {
+            var current = await _systemStatusProvider.CaptureAsync();
+            var currentSetup = EvaluateFirstTimeSetup(current);
+            AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
+                ("HidHideStatus", current.Prerequisites.HidHide.Status),
+                ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
+                ("CompatibilityStatus", current.Compatibility.Status),
+                ("CompatibilityReason", current.Compatibility.Reason),
+                ("ExternalControllerStatus", current.ExternalController.Status),
+                ("SteamActive", current.Steam.IsActive),
+                ("RecoverySafe", current.RecoverySafe));
+            if (!PrerequisiteSetupPromptPolicy.IsInstallable(currentSetup))
+            {
+                RenderSystemStatus(current);
+                return;
+            }
             var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
             var result = await PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(
                 currentSetup, _prerequisiteSetupRunner, executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
@@ -376,7 +383,19 @@ public sealed partial class MainWindow : Window
                 }.ShowAsync();
             }
         }
-        finally { await RefreshSystemStatusAsync(); }
+        finally
+        {
+            _prerequisiteSetupInProgress = false;
+            UpdatePrerequisiteSetupBusyUi();
+            await RefreshSystemStatusAsync();
+        }
+    }
+
+    private void UpdatePrerequisiteSetupBusyUi()
+    {
+        PrerequisiteSetupBusyOverlay.Visibility = _prerequisiteSetupInProgress ? Visibility.Visible : Visibility.Collapsed;
+        MainNavigationView.IsHitTestVisible = !_prerequisiteSetupInProgress;
+        RefreshStatusButton.IsEnabled = !_prerequisiteSetupInProgress;
     }
 
     private void ShowStatusButton_Click(object sender, RoutedEventArgs args)
