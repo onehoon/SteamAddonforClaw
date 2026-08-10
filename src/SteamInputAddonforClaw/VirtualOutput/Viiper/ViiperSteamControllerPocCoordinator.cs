@@ -2,11 +2,13 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Power;
+using System.Diagnostics;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 internal enum ViiperSteamControllerPocState { Stopped, Starting, Running, Stopping, Failed }
 internal sealed record ViiperSteamControllerPocResult(bool Succeeded, ViiperSteamControllerPocState State, string Reason);
+internal sealed record ViiperNativeTeardownResult(bool Success, bool HadApi, bool HadDevice, bool HadBus, bool WasInitialized, bool FinalNeutralSucceeded, bool RemoveDeviceSucceeded, bool RemoveBusSucceeded, bool ShutdownSucceeded, bool DisposeSucceeded);
 
 internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IPowerTransitionParticipant
 {
@@ -18,7 +20,8 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
     private readonly AddonOwnedVirtualDeviceTracker _tracker;
     private readonly string _payloadPath;
     private readonly Func<string, IViiperNativeApi> _nativeLoader;
-    private readonly SemaphoreSlim _mutex = new(1, 1);
+    private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
+    private readonly SemaphoreSlim _nativeOperationLock = new(1, 1);
     private readonly byte[] _report = new byte[ClassicSteamControllerReportBuilder.ReportLength];
     private IViiperNativeApi? _api;
     private ControllerDeviceInfo? _trackedDevice;
@@ -32,6 +35,9 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
     private readonly PowerMutationGate? _powerGate;
     private readonly ViiperVirtualDeviceIdentityPolicy _identityPolicy;
     private CancellationTokenSource _lifecycleCancellation = new();
+    private bool _nativeInitialized;
+    private bool _busCreated;
+    private bool _deviceCreated;
 
     internal ViiperSteamControllerPocCoordinator(ISystemStatusProvider statusProvider, IControllerDeviceEnumerator deviceEnumerator, AddonOwnedVirtualDeviceTracker tracker, string payloadPath, Func<string, IViiperNativeApi>? nativeLoader = null, PowerMutationGate? powerGate = null, ViiperVirtualDeviceIdentityPolicy? identityPolicy = null)
     {
@@ -49,7 +55,7 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
 
     internal async Task<ViiperSteamControllerPocResult> StartAsync(CancellationToken cancellationToken = default)
     {
-        await _mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var token = new PowerMutationToken(0);
@@ -66,24 +72,18 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
 
             _state = ViiperSteamControllerPocState.Starting;
             var before = _deviceEnumerator.EnumeratePresentDevices();
-            EnsureCurrent(token);
-            _api = _nativeLoader(Path.GetFullPath(_payloadPath));
-            EnsureCurrent(token);
-            if (!_api.GetDeviceTypes().Contains("steamcontroller", StringComparer.Ordinal)) return Fail("SteamControllerTypeUnavailable");
-            EnsureCurrent(token);
-            if (_api.Initialize("127.0.0.1:3241") != 0) return Fail("ViiperInitFailed");
-            EnsureCurrent(token);
-            if (_api.CreateBus(BusId) != 0) return Fail("ViiperBusCreateFailed");
-            EnsureCurrent(token);
-            if (_api.AddDevice(BusId, "steamcontroller", VendorId, ProductId, out _deviceId) != 0) return Fail("ViiperDeviceAddFailed");
-            EnsureCurrent(token);
-            if (_api.SetFeedbackCallback(BusId, _deviceId, feedback => AppLog.Debug("ViiperPoc", "Steam Controller feedback received.", ("Length", feedback.Length))) != 0) return Fail("ViiperFeedbackCallbackFailed", ownershipUncertain: true);
-            EnsureCurrent(token);
-            Send(new ClassicSteamControllerInput(false, false));
+            _api = await ExecuteNativeAsync(token, "Load", () => _nativeLoader(Path.GetFullPath(_payloadPath)), operationToken).ConfigureAwait(false);
+            if (!await ExecuteNativeAsync(token, "GetDeviceTypes", () => _api.GetDeviceTypes().Contains("steamcontroller", StringComparer.Ordinal), operationToken).ConfigureAwait(false)) return await FailAsync("SteamControllerTypeUnavailable").ConfigureAwait(false);
+            if (await ExecuteNativeAsync(token, "Initialize", () => _api.Initialize("127.0.0.1:3241"), operationToken).ConfigureAwait(false) != 0) return await FailAsync("ViiperInitFailed").ConfigureAwait(false); _nativeInitialized = true;
+            if (await ExecuteNativeAsync(token, "CreateBus", () => _api.CreateBus(BusId), operationToken).ConfigureAwait(false) != 0) return await FailAsync("ViiperBusCreateFailed").ConfigureAwait(false); _busCreated = true;
+            var addResult = await ExecuteNativeAsync(token, "AddDevice", () => _api.AddDevice(BusId, "steamcontroller", VendorId, ProductId, out _deviceId), operationToken).ConfigureAwait(false);
+            if (addResult != 0) return await FailAsync("ViiperDeviceAddFailed").ConfigureAwait(false); _deviceCreated = true;
+            if (await ExecuteNativeAsync(token, "SetFeedbackCallback", () => _api.SetFeedbackCallback(BusId, _deviceId, feedback => AppLog.Debug("ViiperPoc", "Steam Controller feedback received.", ("Length", feedback.Length))), operationToken).ConfigureAwait(false) != 0) return await FailAsync("ViiperFeedbackCallbackFailed", ownershipUncertain: true).ConfigureAwait(false);
+            await ExecuteNativeAsync(token, "InitialNeutral", () => { Send(new ClassicSteamControllerInput(false, false)); return 0; }, operationToken).ConfigureAwait(false);
 
             _trackedDevice = await WaitForCreatedDeviceAsync(before, operationToken).ConfigureAwait(false);
             EnsureCurrent(token);
-            if (_trackedDevice is null) return Fail("ViiperDeviceIdentityUnverified", ownershipUncertain: true);
+            if (_trackedDevice is null) return await FailAsync("ViiperDeviceIdentityUnverified", ownershipUncertain: true).ConfigureAwait(false);
             EnsureCurrent(token);
             _tracker.Publish(_trackedDevice);
             EnsureCurrent(token);
@@ -94,13 +94,18 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
             AppLog.Info("ViiperPoc", "Classic Steam Controller PoC started.", ("BusId", BusId), ("DeviceId", _deviceId), ("InstanceId", _trackedDevice.InstanceId));
             return new(true, _state, "Started");
         }
+        catch (OperationCanceledException) when (_powerGate is not null && !_powerGate.IsOpen)
+        {
+            AppLog.Warn("ViiperPoc.Power", "VIIPER start invalidated by power transition.", null, ("CurrentEpoch", _powerGate.Epoch));
+            return new(false, _state, "PowerTransitionInvalidated");
+        }
         catch (Exception exception)
         {
             if (_powerGate is not null && !_powerGate.IsOpen) AppLog.Warn("ViiperPoc.Power", "VIIPER start invalidated by power transition.", null, ("CurrentEpoch", _powerGate.Epoch));
             AppLog.Error("ViiperPoc", "Classic Steam Controller PoC start failed.", exception);
-            return Fail("StartException", ownershipUncertain: _deviceId != 0);
+            return await FailAsync("StartException", ownershipUncertain: _deviceId != 0).ConfigureAwait(false);
         }
-        finally { _mutex.Release(); }
+        finally { _lifecycleLock.Release(); }
     }
 
     private void EnsureCurrent(PowerMutationToken token)
@@ -110,25 +115,23 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
 
     internal async Task<ViiperSteamControllerPocResult> StopAsync(CancellationToken cancellationToken = default)
     {
-        await _mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_state == ViiperSteamControllerPocState.Stopped) return new(true, _state, "AlreadyStopped");
-            if (_api is null) return Fail("NativeApiUnavailable");
+            if (_api is null) return await FailAsync("NativeApiUnavailable").ConfigureAwait(false);
             _state = ViiperSteamControllerPocState.Stopping;
             Volatile.Write(ref _syntheticButtons, 0);
             _runningLifetime?.Cancel();
             if (_reportPump is not null) await _reportPump.ConfigureAwait(false);
-            Send(new ClassicSteamControllerInput(false, false));
-            if (_api.RemoveDevice(BusId, _deviceId) != 0) return Fail("ViiperDeviceRemoveFailed", ownershipUncertain: true);
-            if (_trackedDevice is not null && !await WaitForDisappearanceAsync(_trackedDevice.InstanceId, cancellationToken).ConfigureAwait(false)) return Fail("PnPDisappearanceTimedOut", ownershipUncertain: true);
+            await _nativeOperationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            ViiperNativeTeardownResult teardown;
+            try { teardown = CleanupNativeSessionUnderLock("NormalStop", null, null); }
+            finally { _nativeOperationLock.Release(); }
+            if (!teardown.Success) { _tracker.MarkOwnershipUncertain(); _state = ViiperSteamControllerPocState.Failed; return new(false, _state, "ViiperNativeTeardownFailed"); }
+            if (_trackedDevice is not null && !await WaitForDisappearanceAsync(_trackedDevice.InstanceId, cancellationToken).ConfigureAwait(false)) return await FailAsync("PnPDisappearanceTimedOut", ownershipUncertain: true).ConfigureAwait(false);
             if (_trackedDevice is not null) _tracker.Remove(_trackedDevice);
-            _api.RemoveBus(BusId);
-            _api.Shutdown();
-            _api.Dispose();
-            _api = null;
             _trackedDevice = null;
-            _deviceId = 0;
             _state = ViiperSteamControllerPocState.Stopped;
             AppLog.Info("ViiperPoc", "Classic Steam Controller PoC stopped.");
             return new(true, _state, "Stopped");
@@ -136,9 +139,9 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         catch (Exception exception)
         {
             AppLog.Error("ViiperPoc", "Classic Steam Controller PoC stop failed.", exception);
-            return Fail("StopException");
+            return await FailAsync("StopException").ConfigureAwait(false);
         }
-        finally { _mutex.Release(); }
+        finally { _lifecycleLock.Release(); }
     }
 
     internal async Task<ViiperSteamControllerPocResult> PulseAsync(bool leftGrip, bool rightGrip, CancellationToken cancellationToken = default)
@@ -174,13 +177,13 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
 
     private async Task HandleReportPumpFailureAsync()
     {
-        await _mutex.WaitAsync().ConfigureAwait(false);
+        await _lifecycleLock.WaitAsync().ConfigureAwait(false);
         try
         {
             if (_state == ViiperSteamControllerPocState.Running)
-                Fail("ReportPumpFailure", ownershipUncertain: true);
+                await FailAsync("ReportPumpFailure", ownershipUncertain: true).ConfigureAwait(false);
         }
-        finally { _mutex.Release(); }
+        finally { _lifecycleLock.Release(); }
     }
 
     private ClassicSteamControllerInput CurrentInput()
@@ -232,31 +235,90 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         return false;
     }
 
-    private ViiperSteamControllerPocResult Fail(string reason, bool ownershipUncertain = false)
+    private async Task<T> ExecuteNativeAsync<T>(PowerMutationToken token, string operation, Func<T> action, CancellationToken cancellationToken)
     {
-        _runningLifetime?.Cancel();
-        if (ownershipUncertain) _tracker.MarkOwnershipUncertain();
-        try { if (_api is not null) { if (_deviceId != 0) _api.RemoveDevice(BusId, _deviceId); _api.RemoveBus(BusId); _api.Shutdown(); _api.Dispose(); } } catch { }
-        _api = null;
-        _trackedDevice = null;
-        _deviceId = 0;
-        _state = ViiperSteamControllerPocState.Failed;
-        AppLog.Warn("ViiperPoc", "Classic Steam Controller PoC entered failed state.", null, ("Reason", reason));
-        return new(false, _state, reason);
+        var started = Stopwatch.GetTimestamp();
+        AppLog.Trace("ViiperPoc.Lifecycle", "VIIPER native operation waiting.", ("Operation", operation), ("CapturedEpoch", token.Epoch));
+        await _nativeOperationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            try { EnsureCurrent(token); }
+            catch { AppLog.Warn("ViiperPoc.Lifecycle", "VIIPER native operation rejected by stale power epoch.", null, ("Operation", operation), ("CapturedEpoch", token.Epoch), ("CurrentEpoch", _powerGate?.Epoch)); throw; }
+            AppLog.Debug("ViiperPoc.Lifecycle", "VIIPER native operation admitted.", ("Operation", operation), ("CapturedEpoch", token.Epoch));
+            return action();
+        }
+        finally { _nativeOperationLock.Release(); AppLog.Trace("ViiperPoc.Lifecycle", "VIIPER native operation completed.", ("Operation", operation), ("ElapsedMs", Stopwatch.GetElapsedTime(started).TotalMilliseconds)); }
+    }
+    private async Task<ViiperSteamControllerPocResult> FailAsync(string reason, bool ownershipUncertain = false)
+    {
+        _runningLifetime?.Cancel(); if (ownershipUncertain) _tracker.MarkOwnershipUncertain();
+        await _nativeOperationLock.WaitAsync().ConfigureAwait(false);
+        try { _ = CleanupNativeSessionUnderLock(reason, null, null); }
+        finally { _nativeOperationLock.Release(); }
+        _trackedDevice = null; _state = ViiperSteamControllerPocState.Failed;
+        AppLog.Warn("ViiperPoc", "Classic Steam Controller PoC entered failed state.", null, ("Reason", reason)); return new(false, _state, reason);
+    }
+    private ViiperNativeTeardownResult CleanupNativeSessionUnderLock(string reason, long? cycle, long? epoch)
+    {
+        var api = _api; var hadApi = api is not null; var hadDevice = _deviceCreated; var hadBus = _busCreated; var initialized = _nativeInitialized;
+        var neutral = !hadDevice; var removeDevice = !hadDevice; var removeBus = !hadBus; var shutdown = !initialized; var dispose = !hadApi;
+        if (api is not null)
+        {
+            try { if (hadDevice) { Send(new ClassicSteamControllerInput(false, false)); neutral = true; } } catch { neutral = false; }
+            try { if (hadDevice) removeDevice = api.RemoveDevice(BusId, _deviceId) == 0; } catch { removeDevice = false; }
+            try { if (hadBus) removeBus = api.RemoveBus(BusId) == 0; } catch { removeBus = false; }
+            try { if (initialized) { api.Shutdown(); shutdown = true; } } catch { shutdown = false; }
+            try { api.Dispose(); dispose = true; } catch { dispose = false; }
+        }
+        _api = null; _deviceId = 0; _deviceCreated = _busCreated = _nativeInitialized = false;
+        var result = new ViiperNativeTeardownResult(neutral && removeDevice && removeBus && shutdown && dispose, hadApi, hadDevice, hadBus, initialized, neutral, removeDevice, removeBus, shutdown, dispose);
+        AppLog.Info("ViiperPoc.Power", "VIIPER native teardown completed.", ("Reason", reason), ("Cycle", cycle), ("Epoch", epoch), ("FinalNeutralSucceeded", neutral), ("RemoveDeviceSucceeded", removeDevice), ("RemoveBusSucceeded", removeBus), ("ShutdownSucceeded", shutdown), ("DisposeSucceeded", dispose));
+        return result;
     }
 
     private static bool AllowsStart(SystemStatusSnapshot snapshot) => snapshot.HardwareCompatibility.Status == SteamInputAddonforClaw.Devices.HardwareCompatibilityStatus.Supported && snapshot.Compatibility.AllowsMutation && snapshot.RecoverySafe && snapshot.ExternalController.Status == ExternalControllerAssessmentStatus.Clear && snapshot.Steam.IsActive && snapshot.Prerequisites.HidHide.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Ready && snapshot.Prerequisites.UsbIpWin2.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Ready && snapshot.Prerequisites.Viiper.Status == SteamInputAddonforClaw.Prerequisites.PrerequisiteStatus.Present;
     internal void CancelLifecycle() { try { _lifecycleCancellation.Cancel(); } catch { } }
     public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
     {
+        var started = DateTimeOffset.UtcNow;
+        AppLog.Info("ViiperPoc.Power", "Suspend quiesce started.", ("Cycle", cycle), ("Epoch", epoch), ("ViiperState", _state), ("HasApi", _api is not null), ("Initialized", _nativeInitialized), ("BusCreated", _busCreated), ("DeviceCreated", _deviceCreated), ("DeviceId", _deviceId), ("BudgetRemainingMs", (deadline - started).TotalMilliseconds));
         CancelLifecycle();
         Volatile.Write(ref _syntheticButtons, 0);
+        _runningLifetime?.Cancel();
         var remaining = deadline - DateTimeOffset.UtcNow;
         if (remaining <= TimeSpan.Zero) { _tracker.MarkOwnershipUncertain(); return false; }
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(remaining);
-        var result = await StopAsync(timeout.Token).ConfigureAwait(false);
-        if (!result.Succeeded) _tracker.MarkOwnershipUncertain();
-        return result.Succeeded;
+        try { if (_reportPump is not null) await _reportPump.WaitAsync(timeout.Token).ConfigureAwait(false); await _nativeOperationLock.WaitAsync(timeout.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { _tracker.MarkOwnershipUncertain(); AppLog.Warn("ViiperPoc.Power", "VIIPER suspend teardown could not acquire native-operation lock before deadline.", null, ("Cycle", cycle), ("Epoch", epoch), ("ElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds)); return false; }
+        ControllerDeviceInfo? tracked;
+        ViiperNativeTeardownResult teardown;
+        try
+        {
+            teardown = CleanupNativeSessionUnderLock("Suspend", cycle, epoch);
+            tracked = _trackedDevice; _trackedDevice = null;
+        }
+        finally { _nativeOperationLock.Release(); }
+        if (!teardown.Success) { _tracker.MarkOwnershipUncertain(); AppLog.Warn("ViiperPoc.Power", "Suspend native teardown completed with failures.", null, ("Cycle", cycle), ("Epoch", epoch), ("ElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds)); return false; }
+        if (tracked is null) { _state = ViiperSteamControllerPocState.Stopped; return true; }
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            if (DateTimeOffset.UtcNow >= deadline) break;
+            try
+            {
+                if (_deviceEnumerator.EnumeratePresentDevices().All(device => !string.Equals(device.InstanceId, tracked.InstanceId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _tracker.Remove(tracked); _state = ViiperSteamControllerPocState.Stopped;
+                    AppLog.Info("ViiperPoc.Power", "Suspend PnP quick verification completed.", ("Cycle", cycle), ("Epoch", epoch), ("Outcome", "VerifiedAbsent"), ("Attempt", attempt + 1));
+                    AppLog.Info("ViiperPoc.Power", "Suspend quiesce completed.", ("Cycle", cycle), ("Epoch", epoch), ("Outcome", "Succeeded"), ("TotalElapsedMs", (DateTimeOffset.UtcNow - started).TotalMilliseconds), ("OwnershipUncertain", false)); return true;
+                }
+            }
+            catch { break; }
+            var delay = TimeSpan.FromMilliseconds(Math.Min(25, Math.Max(0, (deadline - DateTimeOffset.UtcNow).TotalMilliseconds)));
+            if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        }
+        _tracker.MarkOwnershipUncertain();
+        AppLog.Warn("ViiperPoc.Power", "Suspend PnP quick verification did not confirm disappearance.", null, ("Cycle", cycle), ("Epoch", epoch), ("OwnershipUncertain", true));
+        return false;
     }
     public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken)
     {
@@ -264,5 +326,5 @@ internal sealed class ViiperSteamControllerPocCoordinator : IAsyncDisposable, IP
         try { return Task.FromResult(_tracker.ClearUncertaintyAfterVerifiedAbsence(_deviceEnumerator.EnumeratePresentDevices(), _identityPolicy)); }
         catch { return Task.FromResult(false); }
     }
-    public async ValueTask DisposeAsync() { if (_state is ViiperSteamControllerPocState.Running or ViiperSteamControllerPocState.Starting) await StopAsync(); _mutex.Dispose(); }
+    public async ValueTask DisposeAsync() { if (_state is ViiperSteamControllerPocState.Running or ViiperSteamControllerPocState.Starting) await StopAsync(); _lifecycleLock.Dispose(); _nativeOperationLock.Dispose(); }
 }

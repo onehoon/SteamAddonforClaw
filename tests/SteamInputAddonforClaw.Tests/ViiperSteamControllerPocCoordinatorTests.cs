@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Power;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -101,11 +102,37 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
         Assert.True(tracker.HasUncertainOwnership); Assert.Equal(ViiperSteamControllerPocState.Failed, coordinator.State);
     }
 
-    private static ViiperSteamControllerPocCoordinator Create(HardwareCompatibilityAssessment hardware, IControllerDeviceEnumerator enumerator, Func<IViiperNativeApi> factory, AddonOwnedVirtualDeviceTracker? tracker = null)
+    [Fact]
+    public async Task Suspend_quiesce_uses_bounded_path_and_orders_native_teardown()
+    {
+        var device = Device("USB\\VID_28DE&PID_1102\\VIIPER"); var api = new FakeApi();
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [device], []), () => api);
+        Assert.True((await coordinator.StartAsync()).Succeeded);
+        Assert.True(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 4, 9, CancellationToken.None));
+        Assert.True(api.Calls.IndexOf("RemoveDevice") > api.Calls.IndexOf("SetInput"));
+        Assert.True(api.Calls.IndexOf("RemoveBus") > api.Calls.IndexOf("RemoveDevice"));
+        Assert.True(api.Calls.IndexOf("Shutdown") > api.Calls.IndexOf("RemoveBus"));
+        Assert.True(api.Calls.IndexOf("Dispose") > api.Calls.IndexOf("Shutdown"));
+    }
+
+    [Fact]
+    public async Task Suspend_quiesce_does_not_wait_for_start_lifecycle_lock()
+    {
+        var gate = new PowerMutationGate(true); var api = new FakeApi();
+        await using var coordinator = Create(new(HardwareCompatibilityStatus.Supported, null, null, "test"), new SequenceEnumerator([], [], []), () => api, powerGate: gate);
+        var start = coordinator.StartAsync();
+        Assert.True(SpinWait.SpinUntil(() => api.AddCount == 1, TimeSpan.FromSeconds(1)));
+        gate.TryEnterBarrier(out _, out _); coordinator.CancelLifecycle();
+        Assert.True(await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, gate.Epoch, CancellationToken.None));
+        var startResult = await start;
+        Assert.Equal("PowerTransitionInvalidated", startResult.Reason); Assert.Equal(1, api.RemoveCount);
+    }
+
+    private static ViiperSteamControllerPocCoordinator Create(HardwareCompatibilityAssessment hardware, IControllerDeviceEnumerator enumerator, Func<IViiperNativeApi> factory, AddonOwnedVirtualDeviceTracker? tracker = null, PowerMutationGate? powerGate = null)
     {
         var snapshot = Snapshot(hardware);
         var path = Path.GetTempFileName();
-        return new ViiperSteamControllerPocCoordinator(new SnapshotProvider(snapshot), enumerator, tracker ?? new AddonOwnedVirtualDeviceTracker(), path, _ => factory());
+        return new ViiperSteamControllerPocCoordinator(new SnapshotProvider(snapshot), enumerator, tracker ?? new AddonOwnedVirtualDeviceTracker(), path, _ => factory(), powerGate: powerGate);
     }
 
     private static SystemStatusSnapshot Snapshot(bool steamActive = true, ExternalControllerAssessmentStatus external = ExternalControllerAssessmentStatus.Clear) => Snapshot(new(HardwareCompatibilityStatus.Supported, null, null, "test"), steamActive, external);
@@ -118,9 +145,9 @@ public sealed class ViiperSteamControllerPocCoordinatorTests
     private sealed class FakeApi : IViiperNativeApi
     {
         public int InitializeCount; public int CreateBusCount; public int AddCount; public int FeedbackCount; public int SetInputCount; public int RemoveCount; public int RemoveBusCount; public int ShutdownCount; public bool Disposed; public int FailInputAfter; public int RemoveResult; public int FeedbackResult;
-        public int Initialize(string listenAddress) { InitializeCount++; return 0; } public void Shutdown() => ShutdownCount++; public int CreateBus(uint id) { CreateBusCount++; return 0; } public int RemoveBus(uint id) { RemoveBusCount++; return 0; }
-        public int AddDevice(uint bus, string type, ushort vid, ushort pid, out uint id) { AddCount++; Assert.Equal("steamcontroller", type); Assert.Equal((ushort)0x28DE, vid); Assert.Equal((ushort)0x1102, pid); id = 3; return 0; }
-        public int RemoveDevice(uint bus, uint id) { RemoveCount++; return RemoveResult; } public int SetInput(uint bus, uint id, byte[] report) { SetInputCount++; return FailInputAfter > 0 && SetInputCount >= FailInputAfter ? -1 : 0; } public int SetFeedbackCallback(uint bus, uint id, Action<ReadOnlyMemory<byte>> callback) { FeedbackCount++; return FeedbackResult; }
-        public string[] GetDeviceTypes() => ["steamcontroller"]; public string? GetLastError() => null; public void Dispose() => Disposed = true;
+        public List<string> Calls { get; } = []; public int Initialize(string listenAddress) { Calls.Add("Initialize"); InitializeCount++; return 0; } public void Shutdown() { Calls.Add("Shutdown"); ShutdownCount++; } public int CreateBus(uint id) { Calls.Add("CreateBus"); CreateBusCount++; return 0; } public int RemoveBus(uint id) { Calls.Add("RemoveBus"); RemoveBusCount++; return 0; }
+        public int AddDevice(uint bus, string type, ushort vid, ushort pid, out uint id) { Calls.Add("AddDevice"); AddCount++; Assert.Equal("steamcontroller", type); Assert.Equal((ushort)0x28DE, vid); Assert.Equal((ushort)0x1102, pid); id = 3; return 0; }
+        public int RemoveDevice(uint bus, uint id) { Calls.Add("RemoveDevice"); RemoveCount++; return RemoveResult; } public int SetInput(uint bus, uint id, byte[] report) { Calls.Add("SetInput"); SetInputCount++; return FailInputAfter > 0 && SetInputCount >= FailInputAfter ? -1 : 0; } public int SetFeedbackCallback(uint bus, uint id, Action<ReadOnlyMemory<byte>> callback) { Calls.Add("Feedback"); FeedbackCount++; return FeedbackResult; }
+        public string[] GetDeviceTypes() => ["steamcontroller"]; public string? GetLastError() => null; public void Dispose() { Calls.Add("Dispose"); Disposed = true; }
     }
 }
