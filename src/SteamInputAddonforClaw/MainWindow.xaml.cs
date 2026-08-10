@@ -8,10 +8,8 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
-using SteamInputAddonforClaw.Input;
-using SteamInputAddonforClaw.Input.DirectInput;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Windowing;
@@ -32,10 +30,6 @@ namespace SteamInputAddonforClaw;
 public sealed partial class MainWindow : Window
 {
     private readonly StartupSettingsCoordinator _startupSettings;
-    private readonly Func<IDirectInputDeviceEnumerator> _directInputEnumeratorFactory;
-    private readonly RecoveryManager _recoveryManager;
-    private MsiClawInputSource? _msiClawInputSource;
-    private M1M2DiagnosticCoordinator? _m1M2DiagnosticCoordinator;
     private bool _isLoadingStartupSettings;
     private readonly MainNavigationState _navigationState = new();
     private readonly ISystemStatusProvider _systemStatusProvider;
@@ -69,7 +63,6 @@ public sealed partial class MainWindow : Window
         DeveloperTestModeState? developerTestModeState = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
-        _recoveryManager = recoveryManager ?? new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), hidHideClient: new HidHideDriverClient());
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
         _hidHideReceiptStore = hidHideReceiptStore ?? new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
         _developerTestModeState = developerTestModeState;
@@ -82,8 +75,6 @@ public sealed partial class MainWindow : Window
         Title = FormatWindowTitle(GetDisplayVersion());
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         ApplyDefaultWindowSize();
-        var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        _directInputEnumeratorFactory = () => new VorticeDirectInputDeviceEnumerator(windowHandle);
         Closed += OnWindowClosed;
         _isLoadingStartupSettings = true;
         LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
@@ -181,84 +172,7 @@ public sealed partial class MainWindow : Window
         ReturnToSettings("BackButton");
     }
 
-    private void StartM1M2TestButton_Click(object sender, RoutedEventArgs args)
-    {
-        _m1M2DiagnosticCoordinator ??= CreateM1M2DiagnosticCoordinator();
-        var result = _m1M2DiagnosticCoordinator.Start();
-        M1M2TestStatusText.Text = $"Status: {result.Message}";
-        if (result.Started)
-        {
-            M1TestStatusText.Text = "M1: Waiting";
-            M2TestStatusText.Text = "M2: Waiting";
-            IndependentTestStatusText.Text = "Independent: Waiting";
-            StartM1M2TestButton.IsEnabled = false;
-            StopM1M2TestButton.IsEnabled = true;
-        }
-    }
-
-    private async void StopM1M2TestButton_Click(object sender, RoutedEventArgs args)
-    {
-        if (_m1M2DiagnosticCoordinator is not null)
-        {
-            await _m1M2DiagnosticCoordinator.StopAsync();
-        }
-    }
-
-    private void OnMsiClawInputStateChanged(object? sender, ControllerState state)
-    {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (MsiClawInputSource.IsM1Pressed(state)) M1TestStatusText.Text = "M1: OK";
-            if (MsiClawInputSource.IsM2Pressed(state)) M2TestStatusText.Text = "M2: OK";
-        });
-    }
-
-    private void OnMsiClawInputIndependentVerified(object? sender, EventArgs args)
-    {
-        DispatcherQueue.TryEnqueue(() => IndependentTestStatusText.Text = "Independent: OK");
-    }
-
-    private void OnMsiClawInputTestCompleted(object? sender, MsiClawInputTestSummary summary)
-    {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            M1M2TestStatusText.Text = $"Status: Completed ({summary.DurationMs} ms, {summary.StopReason})";
-            if (summary.Independent) IndependentTestStatusText.Text = "Independent: OK";
-            StartM1M2TestButton.IsEnabled = true;
-            StopM1M2TestButton.IsEnabled = false;
-        });
-    }
-
-    private void OnWindowClosed(object sender, WindowEventArgs args)
-    {
-        if (_m1M2DiagnosticCoordinator is not null)
-        {
-            var source = _msiClawInputSource!;
-            source.StateChanged -= OnMsiClawInputStateChanged;
-            source.IndependentVerified -= OnMsiClawInputIndependentVerified;
-            source.TestCompleted -= OnMsiClawInputTestCompleted;
-            _m1M2DiagnosticCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        }
-    }
-
-    private MsiClawInputSource CreateMsiClawInputSource()
-    {
-        var source = new MsiClawInputSource(_directInputEnumeratorFactory);
-        source.StateChanged += OnMsiClawInputStateChanged;
-        source.IndependentVerified += OnMsiClawInputIndependentVerified;
-        source.TestCompleted += OnMsiClawInputTestCompleted;
-        return source;
-    }
-
-    private M1M2DiagnosticCoordinator CreateM1M2DiagnosticCoordinator()
-    {
-        _msiClawInputSource ??= CreateMsiClawInputSource();
-        var executablePath = Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable.");
-        return new M1M2DiagnosticCoordinator(_msiClawInputSource, new HidHideDriverClient(), _recoveryManager, executablePath, ResolveMsiDirectInputHidInstanceIds);
-    }
-
-    private static IReadOnlyList<string> ResolveMsiDirectInputHidInstanceIds() =>
-        MsiClawHardware.ResolveDirectInputHidInstanceIds(new WindowsControllerDeviceEnumerator().EnumeratePresentDevices());
+    private void OnWindowClosed(object sender, WindowEventArgs args) { }
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {

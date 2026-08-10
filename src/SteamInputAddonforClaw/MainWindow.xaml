@@ -161,18 +161,6 @@
                 </Border>
                 <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
                     <StackPanel Spacing="10">
-                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="M1/M2 DirectInput Test" />
-                        <TextBlock Text="Tests the existing PID_1902 DirectInput device only. No controller mode changes are made." TextWrapping="Wrap" />
-                        <TextBlock x:Name="M1M2TestStatusText" Text="Status: Idle" />
-                        <TextBlock x:Name="M1TestStatusText" Text="M1: Waiting" />
-                        <TextBlock x:Name="M2TestStatusText" Text="M2: Waiting" />
-                        <TextBlock x:Name="IndependentTestStatusText" Text="Independent: Waiting" />
-                        <Button x:Name="StartM1M2TestButton" Click="StartM1M2TestButton_Click" Content="Start M1/M2 Test" />
-                        <Button x:Name="StopM1M2TestButton" Click="StopM1M2TestButton_Click" Content="Stop Test" IsEnabled="False" />
-                    </StackPanel>
-                </Border>
-                <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                    <StackPanel Spacing="10">
                         <TextBlock FontSize="20" FontWeight="SemiBold" Text="Environment Discovery" />
                         <TextBlock Opacity="0.7" Text="Generate a read-only system report for controller software detection development." TextWrapping="Wrap" />
                         <Button x:Name="GenerateEnvironmentDiscoveryReportButton" Click="GenerateEnvironmentDiscoveryReportButton_Click" Content="Generate Report" HorizontalAlignment="Left" />
