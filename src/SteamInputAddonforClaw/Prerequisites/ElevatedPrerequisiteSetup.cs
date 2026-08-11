@@ -103,7 +103,10 @@ internal static class ElevatedPrerequisiteSetup
                 var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
                 var state = outcome.IsProvisioned ? HidHideProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? HidHideProvisioningReceiptState.InstalledPendingReboot : HidHideProvisioningReceiptState.AttemptFailed;
                 hidStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
-                if (after.InspectionSucceeded && after.Installed) shortcutCleanup.RemoveInstallerCreated(shortcutsBeforeInstall);
+                var exactPackageEstablished = after.InspectionSucceeded
+                    && after.Installed
+                    && HidHidePackageVersionPolicy.AreEquivalent(after.Version, receipt.InstallerVersion);
+                if (exactPackageEstablished) shortcutCleanup.RemoveInstallerCreated(shortcutsBeforeInstall);
                 AppLog.Info("PrerequisiteSetup", "HidHide installation result recorded.", ("AttemptId", receipt.AttemptId), ("ExitCode", code), ("ReceiptState", state), ("PackageInstalled", after.Installed), ("PackageVersion", after.Version), ("PrerequisiteStatus", afterPrerequisite.Status));
                 if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
                 restartRequired |= code == 3010;
@@ -219,7 +222,7 @@ internal static class ElevatedPrerequisiteSetup
         {
             var package = packageProbe();
             var prerequisite = prerequisiteProbe();
-            var packageEvidence = package.InspectionSucceeded && package.Installed && HidHidePackageVersionPolicy.AreEquivalent(package.Version, expectedVersion);
+            var packageEvidence = package.InspectionSucceeded && package.Installed && string.Equals(package.Version, expectedVersion, StringComparison.OrdinalIgnoreCase);
             AppLog.Debug("PrerequisiteSetup", "usbip-win2 post-install verification poll.", ("ElapsedMs", clock() - started), ("PackageInstalled", package.Installed), ("PackageVersion", package.Version), ("RuntimeStatus", prerequisite.Status), ("InstallerExitCode", installerExitCode));
             if (packageEvidence) return (package, prerequisite);
             if (clock() - started >= timeoutMs) return (package, prerequisite);

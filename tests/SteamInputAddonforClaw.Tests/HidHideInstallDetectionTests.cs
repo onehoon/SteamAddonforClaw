@@ -39,8 +39,32 @@ public sealed class HidHideInstallDetectionTests
         var result = probe.Inspect();
 
         Assert.False(result.Installed);
-        Assert.True(result.InspectionSucceeded);
+        Assert.False(result.InspectionSucceeded);
         Assert.Null(result.Version);
+    }
+
+    [Fact]
+    public void MatchingIdentityWithoutUsableVersion_FailsClosed()
+    {
+        var probe = new WindowsHidHidePackageProbe(new FakeRegistry(
+            [new("HidHide", null, "Nefarius Software Solutions e.U.")], []));
+
+        var result = probe.Inspect();
+
+        Assert.False(result.Installed);
+        Assert.False(result.InspectionSucceeded);
+    }
+
+    [Fact]
+    public void ConflictingEvidence_CannotBecomeInstallableMissingState()
+    {
+        var package = new HidHidePackageState(false, null, false);
+        var assessment = ComponentInstallationAssessmentPolicy.AssessHidHide(
+            package,
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "Missing"),
+            "1.5.230.0");
+
+        Assert.Equal(ComponentInstallationStatus.Indeterminate, assessment.Status);
     }
 
     [Fact]

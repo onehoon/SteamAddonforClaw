@@ -58,31 +58,42 @@ internal sealed class WindowsHidHidePackageProbe : IHidHidePackageProbe
     {
         try
         {
-            var matches = Enum.GetValues<RegistryView>().Where(view => view is RegistryView.Registry64 or RegistryView.Registry32)
-                .SelectMany(view => _uninstallRegistry.Enumerate(view).Where(IsExactCandidate).Select(candidate => (View: view, Candidate: candidate)))
-                .Where(item => TryNormalizeVersion(item.Candidate.DisplayVersion, out _)).ToArray();
-            var versions = matches.Select(item => NormalizeVersion(item.Candidate.DisplayVersion!)).Distinct().ToArray();
+            var candidates = Enum.GetValues<RegistryView>().Where(view => view is RegistryView.Registry64 or RegistryView.Registry32)
+                .SelectMany(view => _uninstallRegistry.Enumerate(view).Where(IsExactCandidate).Select(candidate => (View: view, Candidate: candidate))).ToArray();
+            if (candidates.Any(item => !TryNormalizeVersion(item.Candidate.DisplayVersion, out _)))
+            {
+                AppLog.Warn("HidHidePackageProbe", "HidHide uninstall evidence had an invalid version.", null, ("Source", "HKLMUninstall"), ("Reason", "InvalidPackageVersion"));
+                return new(false, null, false);
+            }
+            var evidence = candidates.Select(item => NormalizeVersion(item.Candidate.DisplayVersion!)).ToList();
+            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                var dependencyVersion = ReadDependencyVersion(view);
+                if (dependencyVersion is not null) evidence.Add(dependencyVersion);
+            }
+            var versions = evidence.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (versions.Length > 1)
             {
-                AppLog.Warn("HidHidePackageProbe", "Conflicting HidHide uninstall evidence found.", null, ("Source", "HKLMUninstall"), ("CandidateCount", matches.Length), ("Reason", "ConflictingPackageEvidence"));
-                return new(false, null, true);
+                AppLog.Warn("HidHidePackageProbe", "Conflicting HidHide package evidence found.", null, ("Source", "HKLMUninstallAndDependency"), ("CandidateCount", candidates.Length), ("Reason", "ConflictingPackageEvidence"));
+                return new(false, null, false);
             }
             if (versions.Length == 1)
             {
-                AppLog.Info("HidHidePackageProbe", "HidHide uninstall package evidence found.", ("Source", "HKLMUninstall"), ("CandidateCount", matches.Length), ("ObservedVersion", matches[0].Candidate.DisplayVersion), ("NormalizedVersion", versions[0]), ("PublisherMatch", true), ("Installed", true));
+                AppLog.Info("HidHidePackageProbe", "HidHide package evidence found.", ("Source", candidates.Length > 0 ? "HKLMUninstall" : "InstallerDependencyFallback"), ("CandidateCount", candidates.Length), ("NormalizedVersion", versions[0]), ("PublisherMatch", candidates.Length > 0), ("Installed", true));
                 return new(true, versions[0], true);
             }
 
-            using var key = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, RegistryView.Registry64).OpenSubKey(VersionKey);
-            var legacyVersion = key?.GetValue("Version") as string;
-            if (TryNormalizeVersion(legacyVersion, out var normalizedLegacy))
-            {
-                AppLog.Info("HidHidePackageProbe", "HidHide dependency package evidence found.", ("Source", "InstallerDependencyFallback"), ("NormalizedVersion", normalizedLegacy), ("Installed", true));
-                return new(true, normalizedLegacy, true);
-            }
             return new(false, null, true);
         }
         catch { return new(false, null, false); }
+    }
+
+    private static string? ReadDependencyVersion(RegistryView view)
+    {
+        using var key = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view).OpenSubKey(VersionKey);
+        if (key is null) return null;
+        var raw = key.GetValue("Version") as string;
+        return TryNormalizeVersion(raw, out var normalized) ? normalized : throw new InvalidDataException("The HidHide dependency version is invalid.");
     }
 
     internal static bool IsExactCandidate(HidHideUninstallCandidate candidate) => string.Equals(candidate.DisplayName.Trim(), ProductName, StringComparison.OrdinalIgnoreCase) && string.Equals(candidate.Publisher?.Trim(), PublisherName, StringComparison.OrdinalIgnoreCase);
