@@ -2,6 +2,8 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Input;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -15,11 +17,12 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task SuccessfulCreationResolvesPnPAndSendsOneNeutralReport()
     {
         var runtime = new FakeRuntime();
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")]]), new FakeHidHide());
+        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
         Assert.True(result.Succeeded, result.Reason);
         Assert.Equal(1, runtime.NeutralReports);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
@@ -174,7 +177,48 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
-    private ClassicSteamControllerOutputStage Create(FakeRuntime runtime, FakeEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false)
+    [Fact]
+    public async Task LivePublisherStartsAfterNeutralAndStopsBeforeDeviceRemoval()
+    {
+        var runtime = new FakeRuntime();
+        var ticks = new ManualTicks(); runtime.BlockInput = true;
+        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        ticks.Tick(); await runtime.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        var rollback = stage.RollbackMutationAsync(CancellationToken.None).AsTask();
+        await Task.Yield(); Assert.Equal(0, runtime.RemovedDevices);
+        runtime.ReleaseInput.TrySetResult();
+        Assert.True((await rollback).Succeeded);
+        Assert.True(runtime.Trace.IndexOf("Neutral") < runtime.Trace.IndexOf("Input"));
+        Assert.True(runtime.Trace.LastIndexOf("Input") < runtime.Trace.IndexOf("Remove"));
+    }
+
+    [Fact]
+    public async Task NeutralRejectionDoesNotStartPublisher()
+    {
+        var runtime = new FakeRuntime { NeutralAccepted = false };
+        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain("Input", runtime.Trace);
+    }
+
+    [Fact]
+    public async Task LivePublisherFaultRequestsOneFailClosedNotification()
+    {
+        var runtime = new FakeRuntime { InputAccepted = false };
+        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var fault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stage.SetOutputFaultHandler(() => { fault.TrySetResult(); return ValueTask.CompletedTask; });
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        await fault.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    private ClassicSteamControllerOutputStage Create(FakeRuntime runtime, FakeEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null)
     {
         Directory.CreateDirectory(_directory);
         var store = new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"));
@@ -182,7 +226,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         // The stage requires an existing recovery session; seed a valid empty session directly.
         var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, _session, DateTimeOffset.UtcNow, null, new());
         File.WriteAllText(Path.Combine(_directory, "recovery.json"), System.Text.Json.JsonSerializer.Serialize(journal));
-        return new(runtime, enumerator, new(new ViiperVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, timeout, TimeSpan.FromMilliseconds(1));
+        return new(runtime, enumerator, new(new ViiperVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks);
     }
 
     private static ControllerDeviceInfo Device(string id) => new(id, Guid.Empty, null, [], "VIIPER", ["HID\\VID_28DE&PID_1102"], [], "HIDClass", null, "VIIPER", 0x28DE, 0x1102, true);
@@ -192,15 +236,28 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Count - 1)]; }
     private sealed class FakeRuntime : IViiperRuntime
     {
-        public int NeutralReports; public int RemovedDevices; public int CreatedDevices; public bool CancelAfterStart; public bool BusRemoved = true;
+        public List<string> Trace { get; } = [];
+        public int NeutralReports; public int RemovedDevices; public int CreatedDevices; public bool CancelAfterStart; public bool BusRemoved = true; public bool NeutralAccepted = true; public bool InputAccepted = true; public bool BlockInput;
+        public TaskCompletionSource InputEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseInput { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public IReadOnlyCollection<uint> OwnedDeviceIds => CreatedDevices > RemovedDevices ? [7] : [];
         public uint BusId => 1;
         public void Start() { if (CancelAfterStart) throw new OperationCanceledException(); }
         public uint CreateDevice() { CreatedDevices++; return 7; }
-        public bool SetNeutral(uint id) { NeutralReports++; return true; }
-        public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) { RemovedDevices++; return new(true, BusRemoved); }
+        public bool SetNeutral(uint id) { Trace.Add("Neutral"); NeutralReports++; return NeutralAccepted; }
+        public bool SetInput(uint id, byte[] report) { Trace.Add("Input"); InputEntered.TrySetResult(); if (BlockInput) ReleaseInput.Task.GetAwaiter().GetResult(); return InputAccepted; }
+        public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) { Trace.Add("Remove"); RemovedDevices++; return new(true, BusRemoved); }
         public void StopIfUnused() { }
         public void Dispose() { }
+    }
+    private sealed class FakeSnapshot : IControllerStateSnapshotSource
+    { public ControllerState LatestState => new(new AuxiliaryButtonState([false, false])); }
+    private sealed class ManualTicks : IInputReportTickSource
+    {
+        private readonly Queue<TaskCompletionSource<bool>> _waiters = new();
+        public ValueTask<bool> WaitForTickAsync(CancellationToken token)
+        { var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously); _waiters.Enqueue(waiter); token.Register(() => waiter.TrySetCanceled(token)); return new(waiter.Task); }
+        public void Tick() { Assert.NotEmpty(_waiters); _waiters.Dequeue().TrySetResult(true); }
     }
     private sealed class FakeHidHide : IHidHideClient
     { public HidHideInspection Inspection { get; init; } = new(HidHideInspectionStatus.Available, new HashSet<string>()); public HidHideInspection Inspect() => Inspection; public bool AddApplication(string p) => true; public bool RemoveApplication(string p) => true; public bool AddHiddenDevice(string p) => true; public bool RemoveHiddenDevice(string p) => true; }

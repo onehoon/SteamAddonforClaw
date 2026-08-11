@@ -23,8 +23,12 @@ internal static class ClassicSteamControllerReportBuilder
         var b = input.Buttons; report[8] = (byte)((b.A ? 0x80 : 0) | (b.X ? 0x40 : 0) | (b.B ? 0x20 : 0) | (b.Y ? 0x10 : 0) | (b.LeftBumper ? 8 : 0) | (b.RightBumper ? 4 : 0) | (b.LeftTriggerFull ? 2 : 0) | (b.RightTriggerFull ? 1 : 0));
         report[9] = (byte)((b.DPadUp ? 1 : 0) | (b.DPadRight ? 2 : 0) | (b.DPadLeft ? 4 : 0) | (b.DPadDown ? 8 : 0) | (b.Back ? 0x10 : 0) | (b.Start ? 0x40 : 0) | (input.LeftGrip ? 0x80 : 0));
         var active = (Math.Abs(input.RightPad.X) > 1 || Math.Abs(input.RightPad.Y) > 1) || b.RightStickClick; report[10] = (byte)((input.RightGrip ? 1 : 0) | (b.RightStickClick ? 4 : 0) | (active ? 0x10 : 0) | (b.LeftStickClick ? 0x40 : 0));
-        report[11] = input.Triggers.Left; report[12] = input.Triggers.Right; WriteStick(report[16..20], input.LeftStick); WriteStick(report[20..24], input.RightPad); WriteRawTrigger(report[24..26], input.Triggers.Left); WriteRawTrigger(report[26..28], input.Triggers.Right); WriteRawTrigger(report[50..52], input.Triggers.Left); WriteRawTrigger(report[52..54], input.Triggers.Right); WriteStick(report[54..58], input.LeftStick); BinaryPrimitives.WriteUInt16LittleEndian(report[40..42], 0x4000); BinaryPrimitives.WriteUInt16LittleEndian(report[62..64], 3000);
+        var leftRaw = EffectiveRawTrigger(input.Triggers.Left, b.LeftTriggerFull);
+        var rightRaw = EffectiveRawTrigger(input.Triggers.Right, b.RightTriggerFull);
+        report[11] = RawTriggerToByte(leftRaw); report[12] = RawTriggerToByte(rightRaw); WriteStick(report[16..20], input.LeftStick); WriteStick(report[20..24], input.RightPad); WriteRawTrigger(report[24..26], leftRaw); WriteRawTrigger(report[26..28], rightRaw); WriteRawTrigger(report[50..52], leftRaw); WriteRawTrigger(report[52..54], rightRaw); WriteStick(report[54..58], input.LeftStick); BinaryPrimitives.WriteUInt16LittleEndian(report[40..42], 0x4000); BinaryPrimitives.WriteUInt16LittleEndian(report[62..64], 3000);
     }
     private static void WriteStick(Span<byte> target, StickState value) { BinaryPrimitives.WriteInt16LittleEndian(target, value.X); BinaryPrimitives.WriteInt16LittleEndian(target[2..], value.Y); }
-    private static void WriteRawTrigger(Span<byte> target, byte value) => BinaryPrimitives.WriteInt16LittleEndian(target, (short)(value * 26000 / 255));
+    private static int EffectiveRawTrigger(byte value, bool full) => full ? 26000 : value * 26000 / 255;
+    private static byte RawTriggerToByte(int raw) => (byte)Math.Clamp(raw * 255 / 26000, 0, 255);
+    private static void WriteRawTrigger(Span<byte> target, int value) => BinaryPrimitives.WriteUInt16LittleEndian(target, (ushort)value);
 }

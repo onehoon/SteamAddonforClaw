@@ -9,11 +9,13 @@ The project exposes the MSI Claw built-in controller to Steam as a **Classic Ste
 
 The addon intentionally does not implement its own remapping, macros, profiles, or controller configuration system. Those functions are delegated to **Steam Input**.
 
-An explicit Stock routing experiment can now create a recoverable embedded-VIIPER Classic Steam Controller (`28DE:1102`) after verifying its Windows PnP identity and addon ownership. The default production plan remains NativeMode-only; live controller-state publishing is reserved for the separate follow-up report-routing work.
+An explicit Stock routing experiment can now create a recoverable embedded-VIIPER Classic Steam Controller (`28DE:1102`) after verifying its Windows PnP identity and addon ownership. When the physical PID_1902 source is active, the same owned device receives normalized non-Gyro `ControllerState` reports from an independent nominal 250 Hz publisher; the publisher is stopped before virtual-device removal. The default production plan remains NativeMode-only.
 
 ## PID_1902 non-Gyro input pipeline
 
 The PID_1902 DirectInput layout is independently normalized into device-independent controller state for the Classic Steam Controller output path. The non-Gyro pipeline covers A/B/X/Y, 8-way D-pad, LB/RB, analog and full-pull LT/RT, Back/Start, L3/R3, both sticks, and M1/M2. The Claw right stick is represented as the Classic Steam Controller right pad; R3 is right-pad click, M2 is left grip, and M1 is right grip. Gyro and accelerometer input remain deferred. Native controller-mode switching, recoverable HidHide routing, and automatic Steam-session/Test-Mode routing are implemented for the Developer Test Mode path; normal production routing remains NativeMode-only by default.
+
+This MVP path does not include gyro, accelerometer, rumble, haptics, Game Bar temporary Xbox360 routing, ClawTweaks production compatibility, or production auto-enable of the complete routing pipeline. Hardware success and Steam recognition remain subject to MSI Claw validation.
 
 > Unofficial project. Not affiliated with MSI or Valve.
 
@@ -1097,7 +1099,7 @@ The Developer-only Classic Steam Controller lifecycle PoC bundles `libVIIPER.dll
 
 The embedded DLL is loaded only through an absolute path using `NativeLibrary.Load` and required C exports. A standalone `viiper.exe` is not required. Handheld Companion's bundled DLL is not redistributed or used as a dependency; HHC remains a behavioral reference only.
 
-The PoC creates synthetic `28DE:1102` input and offers only neutral, Left Grip, and Right Grip reports. It does not read physical controller input, perform routing, change MSI controller mode, or mutate HidHide. Windows PnP identity, Steam recognition, independent grip behavior, repeated lifecycle, and crash cleanup require explicit hardware validation before this runtime can be promoted beyond the developer menu.
+The embedded runtime creates `28DE:1102` input, accepts the normalized non-Gyro report stream, and preserves the recoverable lifecycle. It does not implement gyro or accelerometer input, battery monitoring, or independent virtual-device recovery. Windows PnP identity, Steam recognition, independent grip behavior, repeated lifecycle, and crash cleanup require explicit hardware validation before this runtime can be promoted beyond the developer menu.
 
 # Reference Projects
 

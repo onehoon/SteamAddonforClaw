@@ -5,7 +5,7 @@ using SteamInputAddonforClaw.Input.DirectInput;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
+public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerStateSnapshotSource
 {
     private static readonly int M1AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M1);
     private static readonly int M2AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M2);
@@ -29,6 +29,11 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
     public event EventHandler<ControllerState>? StateChanged;
     public event EventHandler? IndependentVerified;
     public event EventHandler<MsiClawInputTestSummary>? TestCompleted;
+
+    private sealed class StateBox(ControllerState value) { internal ControllerState Value { get; } = value; }
+    private static ControllerState NeutralState() => new(new AuxiliaryButtonState(Enumerable.Repeat(false, MsiClawControls.Catalog.Count).ToArray()));
+    private StateBox _latestState = new(NeutralState());
+    public ControllerState LatestState => Volatile.Read(ref _latestState).Value;
 
     internal static bool IsM1Pressed(ControllerState state) => state.Auxiliary[M1AuxiliaryIndex];
     internal static bool IsM2Pressed(ControllerState state) => state.Auxiliary[M2AuxiliaryIndex];
@@ -229,7 +234,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
     private async Task PollAsync(InputSession session)
     {
         var stopwatch = Stopwatch.StartNew();
-        var previous = new ControllerState(new AuxiliaryButtonState([false, false]));
+        var previous = NeutralState();
         var hasPrevious = false;
         var m1Observed = false;
         var m2Observed = false;
@@ -263,6 +268,8 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
                     AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", "InsufficientButtonCount"));
                     break;
                 }
+
+                Volatile.Write(ref _latestState, new StateBox(current));
 
                 if (!hasPrevious)
                 {
@@ -307,6 +314,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
         }
         finally
         {
+            Volatile.Write(ref _latestState, new StateBox(NeutralState()));
             cleanupSucceeded = CleanupSession(session);
             var summary = new MsiClawInputTestSummary(session.Id, stopwatch.ElapsedMilliseconds, m1Observed, m2Observed, independent, readFailures, cleanupSucceeded, stopReason);
             lock (_sync)

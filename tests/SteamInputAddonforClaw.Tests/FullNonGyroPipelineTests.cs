@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Input;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -55,6 +56,81 @@ public sealed class FullNonGyroPipelineTests
         var report = new byte[64]; ClassicSteamControllerReportBuilder.Write(report, 0, input);
         Assert.Equal(0, report[10] & 0x10);
         Assert.Equal(report[24..26], report[50..52]); Assert.Equal(report[26..28], report[52..54]);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(128, 13050)]
+    [InlineData(255, 26000)]
+    public void Trigger_raw_scaling_preserves_the_26000_contract(byte value, short expected)
+    {
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, new(default, default, default, new(value, value), false, false));
+        Assert.Equal(expected, BitConverter.ToInt16(report, 24));
+        Assert.Equal(expected, BitConverter.ToInt16(report, 26));
+    }
+
+    [Fact]
+    public void Digital_full_triggers_and_right_stick_are_preserved_without_guide()
+    {
+        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true);
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, new(buttons, default, new(123, -456), new(0, 255), false, false));
+        Assert.Equal(0x03, report[8] & 0x03);
+        Assert.Equal(0, report[9] & 0x20);
+        Assert.Equal(123, BitConverter.ToInt16(report, 20));
+        Assert.Equal(-456, BitConverter.ToInt16(report, 22));
+        Assert.Equal(0x10, report[10] & 0x10);
+        Assert.Equal(0x04, report[10] & 0x04);
+        Assert.Equal(0x4000, BitConverter.ToUInt16(report, 40));
+        Assert.Equal(3000, BitConverter.ToUInt16(report, 62));
+    }
+
+    [Fact]
+    public void Trigger_full_click_survives_viiper_round_trip_semantics()
+    {
+        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true);
+        var input = new ClassicSteamControllerInput(buttons, default, default, new(0, 100), false, false);
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        var hostVisible = RebuildHostVisibleTriggerBits(report);
+
+        Assert.Equal(26000, BitConverter.ToUInt16(report, 24));
+        Assert.Equal(26000, BitConverter.ToUInt16(report, 26));
+        Assert.True(hostVisible.leftFull);
+        Assert.True(hostVisible.rightFull);
+    }
+
+    [Fact]
+    public void Partial_trigger_without_full_click_preserves_analog_value()
+    {
+        var input = new ClassicSteamControllerInput(default, default, default, new(128, 0), false, false);
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        Assert.Equal(13050, BitConverter.ToUInt16(report, 24));
+        Assert.False(RebuildHostVisibleTriggerBits(report).leftFull);
+    }
+
+    [Fact]
+    public void Maximum_analog_trigger_without_digital_full_click_round_trips_as_full()
+    {
+        var input = new ClassicSteamControllerInput(default, default, default, new(255, 0), false, false);
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        Assert.True(RebuildHostVisibleTriggerBits(report).leftFull);
+    }
+
+    private static (bool leftFull, bool rightFull) RebuildHostVisibleTriggerBits(byte[] report)
+    {
+        // Pinned VIIPER InputState.UnmarshalBinary/buildReport behavior: trigger
+        // full-click bits are reconstructed from the raw trigger fields.
+        var leftRaw = BitConverter.ToUInt16(report, 24);
+        var rightRaw = BitConverter.ToUInt16(report, 26);
+        static byte TriggerRawToByte(ushort raw) => (byte)Math.Clamp(raw * 255 / 26000, 0, 255);
+        return (TriggerRawToByte(leftRaw) >= 0xFF, TriggerRawToByte(rightRaw) >= 0xFF);
     }
 
     [Theory]

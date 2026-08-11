@@ -222,6 +222,7 @@ public sealed class MsiClawInputSourceTests
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var summaryTask = ObserveSummary(source);
 
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
         Assert.True(source.Start().Started);
         var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
         await source.StopAsync();
@@ -231,6 +232,7 @@ public sealed class MsiClawInputSourceTests
         Assert.Equal(1, summary.ReadFailures);
         Assert.Equal(1, device.UnacquireCount);
         Assert.Equal(1, device.DisposeCount);
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
     }
 
     [Fact]
@@ -247,6 +249,7 @@ public sealed class MsiClawInputSourceTests
         Assert.Equal(1, summary.ReadFailures);
         Assert.Equal(1, device.UnacquireCount);
         Assert.Equal(1, device.DisposeCount);
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
     }
 
     [Fact]
@@ -295,7 +298,9 @@ public sealed class MsiClawInputSourceTests
 
         Assert.True(source.Start().Started);
         await changedStateObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, true])), source.LatestState);
         await source.StopAsync();
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
 
         Assert.Equal(
             [new ControllerState(new AuxiliaryButtonState([false, false])), new ControllerState(new AuxiliaryButtonState([false, true]))],
