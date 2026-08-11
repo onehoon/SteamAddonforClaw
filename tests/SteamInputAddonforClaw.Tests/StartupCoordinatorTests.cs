@@ -1,5 +1,7 @@
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Recovery;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -11,7 +13,7 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded));
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.True(result.RecoverySafe);
         Assert.Equal(["Recovery", "UpdateGate", "EnvironmentDetector", "EnvironmentWaiter"], events);
@@ -22,7 +24,7 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Success));
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Success));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.True(result.RecoverySafe);
         Assert.Contains("EnvironmentDetector", events);
@@ -33,7 +35,7 @@ public sealed class StartupCoordinatorTests
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure));
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.False(result.RecoverySafe);
         Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
@@ -46,7 +48,7 @@ public sealed class StartupCoordinatorTests
         var coordinator = new StartupCoordinator(
             new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeEnvironmentDetector(events),
-            new FakeEnvironmentWaiter(events));
+            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -62,7 +64,7 @@ public sealed class StartupCoordinatorTests
         var coordinator = new StartupCoordinator(
             new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
             new FakeEnvironmentDetector(events),
-            new FakeEnvironmentWaiter(events));
+            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -79,6 +81,7 @@ public sealed class StartupCoordinatorTests
             new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeEnvironmentDetector(events, ClawTweaksState.Starting, ClawTweaksState.Active),
             new FakeEnvironmentWaiter(events),
+            new FakeProbeFactory(), new FakeHardwareEvaluator(),
             clawTweaksStartingCheckInterval: TimeSpan.Zero);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -96,6 +99,7 @@ public sealed class StartupCoordinatorTests
             new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeEnvironmentDetector(events, ClawTweaksState.Starting),
             new FakeEnvironmentWaiter(events),
+            new FakeProbeFactory(), new FakeHardwareEvaluator(),
             clawTweaksStartingTimeout: TimeSpan.Zero);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
@@ -114,7 +118,7 @@ public sealed class StartupCoordinatorTests
         var coordinator = new StartupCoordinator(
             new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeEnvironmentDetector(events, ClawTweaksState.InstalledInactive),
-            waiter);
+            waiter, new FakeProbeFactory(), new FakeHardwareEvaluator());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -129,7 +133,7 @@ public sealed class StartupCoordinatorTests
         var coordinator = new StartupCoordinator(
             new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeEnvironmentDetector(events, ClawTweaksState.Indeterminate),
-            new FakeEnvironmentWaiter(events));
+            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -186,4 +190,9 @@ public sealed class StartupCoordinatorTests
             return new ControllerEnvironment(mode, state);
         }
     }
+
+    private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
+    private sealed class FakeHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test"); }
+    private sealed class ThrowingProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => throw new Xunit.Sdk.XunitException("Hardware probe must not run after recovery failure."); }
+    private sealed class ThrowingHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => throw new Xunit.Sdk.XunitException("Hardware evaluator must not run after recovery failure."); }
 }

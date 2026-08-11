@@ -16,6 +16,7 @@ internal enum ClawTweaksState
 
 internal enum ControllerEnvironmentMode
 {
+    Unsupported,
     StockCenterM,
     ClawTweaks,
     HHCManaged,
