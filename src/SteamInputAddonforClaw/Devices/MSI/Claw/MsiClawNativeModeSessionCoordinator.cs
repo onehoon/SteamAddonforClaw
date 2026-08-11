@@ -163,6 +163,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (!captured.AllowsMutation) return MsiClawNativeModePreflightResult.Failure("SnapshotDoesNotAllowMutation");
         var original = captured.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
         if (original is null) return MsiClawNativeModePreflightResult.Failure("PayloadInvalid");
+        if (original.IdentityConfidence != MsiClawIdentityConfidence.Strong) return MsiClawNativeModePreflightResult.Failure("PhysicalIdentityNotStrong");
         if (original.Mode != MsiClawNativeMode.XInput) return MsiClawNativeModePreflightResult.Failure("OriginalModeUnsupported");
         return MsiClawNativeModePreflightResult.Success();
     }
