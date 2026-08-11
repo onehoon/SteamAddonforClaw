@@ -40,18 +40,34 @@ internal sealed class ViiperRuntimeManager : IDisposable
     internal uint CreateDevice()
     {
         Start();
-        if (_busId is null)
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            for (uint candidate = 1; candidate < uint.MaxValue; candidate++)
+            EnsureBus();
+            if (_api!.AddDevice(BusId, DeviceType, VendorId, ProductId, out var deviceId) == 0)
             {
-                if (_api!.CreateBus(candidate) == 0) { _busId = candidate; break; }
+                _devices.Add(deviceId);
+                return deviceId;
             }
-            if (_busId is null) throw new InvalidOperationException(_api!.GetLastError() ?? "VIIPER bus creation failed.");
+
+            // VIIPER invalidates a bus after an AddDevice failure. Dispose that
+            // bus and retry once on a freshly allocated bus.
+            var failedBus = _busId;
+            _busId = null;
+            if (failedBus is not null && _api.RemoveBus(failedBus.Value) != 0)
+                throw new InvalidOperationException(_api.GetLastError() ?? "VIIPER failed to remove the invalid bus.");
         }
-        if (_api!.AddDevice(BusId, DeviceType, VendorId, ProductId, out var deviceId) != 0)
-            throw new InvalidOperationException(_api.GetLastError() ?? "VIIPER device creation failed.");
-        _devices.Add(deviceId);
-        return deviceId;
+
+        throw new InvalidOperationException(_api!.GetLastError() ?? "VIIPER device creation failed after bus retry.");
+    }
+
+    private void EnsureBus()
+    {
+        if (_busId is not null) return;
+        for (uint candidate = 1; candidate < uint.MaxValue; candidate++)
+        {
+            if (_api!.CreateBus(candidate) == 0) { _busId = candidate; return; }
+        }
+        throw new InvalidOperationException(_api!.GetLastError() ?? "VIIPER bus creation failed.");
     }
 
     internal bool SetNeutral(uint deviceId)
@@ -68,7 +84,7 @@ internal sealed class ViiperRuntimeManager : IDisposable
         if (result) _devices.Remove(deviceId);
         if (_devices.Count == 0 && _busId is { } ownedBus)
         {
-            _api.RemoveBus(ownedBus);
+            if (_api.RemoveBus(ownedBus) != 0) return false;
             _busId = null;
         }
         return result;
