@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
 using Xunit;
 
@@ -214,6 +215,26 @@ public sealed class RecoveryManagerTests : IDisposable
 
         Assert.Equal(RecoveryStatus.Success, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
         Assert.Equal(["HID\\B", "HID\\A", "C:\\addon-b.exe", "C:\\addon-a.exe", "RestoreNative"], trace);
+    }
+
+    [Theory]
+    [InlineData((int)HidHideInspectionStatus.Disabled)]
+    [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
+    public async Task RecoveryDeviceAddition_WhenConfigurationIsReadable_RestoresEntry(int statusValue)
+    {
+        var status = (HidHideInspectionStatus)statusValue;
+        var hidHide = new FakeHidHide { Status = status };
+        var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success);
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), new HandheldDeviceRegistry([new FakeAdapter(DeviceId, nativeState)]), hidHide);
+        var session = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        manager.RecordHidHideDeviceAddition(session.RecoverySessionId, "HID\\Claw");
+        hidHide.HiddenEntries.Add("HID\\Claw");
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Success, result.Status);
+        Assert.Empty(hidHide.HiddenEntries);
+        Assert.Equal(RecoveryStatus.NoRecoveryNeeded, manager.LoadJournal().Status);
     }
 
     [Fact]
@@ -453,7 +474,8 @@ public sealed class RecoveryManagerTests : IDisposable
         public int RemoveCount { get; private set; }
         public List<string>? Events { get; init; }
         public bool RemoveSucceeds { get; init; } = true;
-        public SteamInputAddonforClaw.HidHide.HidHideInspection Inspect() => new(SteamInputAddonforClaw.HidHide.HidHideInspectionStatus.Available, Entries, HiddenEntries.ToArray());
+        public SteamInputAddonforClaw.HidHide.HidHideInspectionStatus Status { get; init; } = SteamInputAddonforClaw.HidHide.HidHideInspectionStatus.Available;
+        public SteamInputAddonforClaw.HidHide.HidHideInspection Inspect() => new(Status, Entries, HiddenEntries.ToArray());
         public bool AddApplication(string executablePath) => true;
         public bool RemoveApplication(string executablePath) { RemoveCount++; Events?.Add(executablePath); if (!RemoveSucceeds) return false; return Entries.Remove(executablePath); }
         public bool AddHiddenDevice(string deviceEntry) => HiddenEntries.Add(deviceEntry);

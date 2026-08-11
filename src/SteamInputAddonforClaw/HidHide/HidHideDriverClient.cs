@@ -69,7 +69,7 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
         try
         {
             var inspection = Inspect();
-            if (inspection.Status != HidHideInspectionStatus.Available) return false;
+            if (!inspection.IsConfigurationReadable) return false;
             var entries = (inspection.HiddenDeviceEntries ?? []).ToList();
             var index = entries.FindIndex(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase));
             if (add ? index >= 0 : index < 0) return true;
@@ -79,7 +79,7 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
             using var device = _nativeApi.Open(GenericRead | GenericWrite);
             WriteMultiString(device, Ioctl(2051), entries);
             var verification = Inspect();
-            if (verification.Status != HidHideInspectionStatus.Available) return false;
+            if (!verification.IsConfigurationReadable) return false;
             var present = (verification.HiddenDeviceEntries ?? [])
                 .Any(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase));
             return add == present;

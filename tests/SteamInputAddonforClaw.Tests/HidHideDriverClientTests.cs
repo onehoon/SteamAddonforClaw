@@ -114,11 +114,13 @@ public sealed class HidHideDriverClientTests
     public void AddHiddenDevice_PreservesExistingEntriesAndUsesVerifiedIoctl()
     {
         var device = new FakeDevice([], ["A", "B"]) { Active = true };
-        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+        var native = new FakeNative(device);
+        var client = new HidHideDriverClient(native, Converter());
 
         Assert.True(client.AddHiddenDevice("C"));
         Assert.Equal(["A", "B", "C"], device.Blacklist);
-        Assert.Contains(2051u, device.WrittenFunctions);
+        Assert.Contains(0x8001600Cu, device.WrittenControlCodes);
+        Assert.Equal(HidHideDriverClient.GenericRead | 0x40000000u, native.WriteDesiredAccess);
     }
 
     [Fact]
@@ -151,6 +153,16 @@ public sealed class HidHideDriverClientTests
         Assert.Empty(device.WrittenFunctions);
     }
 
+    [Fact]
+    public void RemoveHiddenDevice_WhenDisabled_RemovesExactEntry()
+    {
+        var device = new FakeDevice([], ["ABC"]) { Active = false };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.RemoveHiddenDevice("abc"));
+        Assert.Empty(device.Blacklist);
+    }
+
     private static HidHidePathConverter Converter() => new(new FakeDosDevices());
 
     private sealed class FakeDosDevices : IDosDeviceNameResolver
@@ -161,7 +173,8 @@ public sealed class HidHideDriverClientTests
     private sealed class FakeNative(FakeDevice device) : IHidHideNativeApi
     {
         public uint DesiredAccess { get; private set; }
-        public IHidHideControlDevice Open(uint desiredAccess) { DesiredAccess = desiredAccess; return device; }
+        public uint WriteDesiredAccess { get; private set; }
+        public IHidHideControlDevice Open(uint desiredAccess) { DesiredAccess = desiredAccess; if ((desiredAccess & 0x40000000u) != 0) WriteDesiredAccess = desiredAccess; return device; }
     }
 
     private sealed class FakeDevice(List<string> whitelist, List<string> blacklist) : IHidHideControlDevice
@@ -170,6 +183,7 @@ public sealed class HidHideDriverClientTests
         public List<string> Blacklist { get; } = blacklist;
         public bool Active { get; init; }
         public List<uint> WrittenFunctions { get; } = [];
+        public List<uint> WrittenControlCodes { get; } = [];
         public uint? QuerySizeOverride { get; init; }
         public uint? ReturnedLengthOverride { get; init; }
         public int ZeroBufferQueries { get; private set; }
@@ -202,6 +216,7 @@ public sealed class HidHideDriverClientTests
             if (function == 2051)
             {
                 WrittenFunctions.Add(function);
+                WrittenControlCodes.Add(code);
                 Blacklist.Clear(); Blacklist.AddRange(HidHideDriverClient.DeserializeMultiString(input!)); bytesReturned = 0; return true;
             }
             bytesReturned = 0; errorCode = 1; return false;
