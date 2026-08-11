@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage, IPowerTransitionParticipant
 {
-    private readonly ViiperRuntimeManager _runtime;
+    private readonly IViiperRuntime _runtime;
     private readonly IControllerDeviceEnumerator _enumerator;
     private readonly ViiperVirtualDeviceIdentityResolver _resolver;
     private readonly AddonOwnedVirtualDeviceTracker _tracker;
@@ -23,7 +23,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     private uint _busId;
     private IReadOnlyList<ControllerDeviceInfo>? _owned;
 
-    internal ClassicSteamControllerOutputStage(ViiperRuntimeManager runtime, IControllerDeviceEnumerator enumerator,
+    internal ClassicSteamControllerOutputStage(IViiperRuntime runtime, IControllerDeviceEnumerator enumerator,
         ViiperVirtualDeviceIdentityResolver resolver, AddonOwnedVirtualDeviceTracker tracker, RecoveryManager recovery,
         Func<Guid?> sessionId, IHidHideClient hidHide, TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null)
     {

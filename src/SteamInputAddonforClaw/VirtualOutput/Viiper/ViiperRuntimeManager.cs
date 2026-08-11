@@ -1,6 +1,17 @@
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
-internal sealed class ViiperRuntimeManager : IDisposable
+internal interface IViiperRuntime : IDisposable
+{
+    IReadOnlyCollection<uint> OwnedDeviceIds { get; }
+    uint BusId { get; }
+    void Start();
+    uint CreateDevice();
+    bool SetNeutral(uint deviceId);
+    bool RemoveDevice(uint busId, uint deviceId);
+    void StopIfUnused();
+}
+
+internal sealed class ViiperRuntimeManager : IViiperRuntime
 {
     internal const string ListenAddress = "127.0.0.1:3241";
     internal const string DeviceType = "steamcontroller";
@@ -24,6 +35,14 @@ internal sealed class ViiperRuntimeManager : IDisposable
 
     internal IReadOnlyCollection<uint> OwnedDeviceIds => _devices;
     internal uint BusId => _busId ?? throw new InvalidOperationException("The VIIPER bus is not running.");
+
+    IReadOnlyCollection<uint> IViiperRuntime.OwnedDeviceIds => OwnedDeviceIds;
+    uint IViiperRuntime.BusId => BusId;
+    void IViiperRuntime.Start() => Start();
+    uint IViiperRuntime.CreateDevice() => CreateDevice();
+    bool IViiperRuntime.SetNeutral(uint deviceId) => SetNeutral(deviceId);
+    bool IViiperRuntime.RemoveDevice(uint busId, uint deviceId) => RemoveDevice(busId, deviceId);
+    void IViiperRuntime.StopIfUnused() => StopIfUnused();
 
     internal void Start()
     {
