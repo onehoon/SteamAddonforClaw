@@ -80,7 +80,7 @@ public sealed class MsiClawNativeModeStageTests
     [Fact]
     public async Task EnterFailureDoesNotOwnMutation()
     {
-        var session = new FakeSession { EnterResult = false };
+        var session = new FakeSession { EnterResult = false, RequiresRollback = false };
         var stage = new MsiClawNativeModeStage(session);
         await stage.PrepareMutationAsync(CancellationToken.None);
 
@@ -90,6 +90,21 @@ public sealed class MsiClawNativeModeStageTests
         Assert.False(execute.Succeeded);
         Assert.True(rollback.Succeeded);
         Assert.Equal(0, session.ExitCalls);
+    }
+
+    [Fact]
+    public async Task EnterFailureAfterRecoveryBoundaryRetainsOwnershipForRollback()
+    {
+        var session = new FakeSession { EnterResult = false, RequiresRollback = true };
+        var stage = new MsiClawNativeModeStage(session);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var execute = await stage.ExecuteMutationAsync(CancellationToken.None);
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.False(execute.Succeeded);
+        Assert.True(rollback.Succeeded);
+        Assert.Equal(1, session.ExitCalls);
     }
 
     [Fact]
@@ -151,8 +166,10 @@ public sealed class MsiClawNativeModeStageTests
         internal MsiClawNativeModePreflightResult Preflight { get; set; } = MsiClawNativeModePreflightResult.Success();
         internal bool EnterResult { get; set; } = true;
         internal bool ActiveAfterEnter { get; set; } = true;
+        internal bool RequiresRollback { get; set; } = true;
         internal Queue<bool> ExitResults { get; set; } = new([true]);
         public bool IsActive { get; private set; }
+        public bool HasOwnedRecoveryBoundary { get; private set; }
         internal int InspectCalls { get; private set; }
         internal int EnterCalls { get; private set; }
         internal int ExitCalls { get; private set; }
@@ -163,18 +180,21 @@ public sealed class MsiClawNativeModeStageTests
             return ValueTask.FromResult(Preflight);
         }
 
-        public Task<bool> EnterForPipelineAsync(CancellationToken cancellationToken)
+        public Task<MsiClawNativeModeEnterResult> EnterForPipelineAsync(CancellationToken cancellationToken)
         {
             EnterCalls++;
             IsActive = EnterResult && ActiveAfterEnter;
-            return Task.FromResult(EnterResult);
+            HasOwnedRecoveryBoundary = RequiresRollback;
+            return Task.FromResult(EnterResult
+                ? MsiClawNativeModeEnterResult.Success()
+                : MsiClawNativeModeEnterResult.Failure(RequiresRollback, "NativeModeEnterFailed"));
         }
 
         public Task<bool> ExitForPipelineAsync(CancellationToken cancellationToken)
         {
             ExitCalls++;
             var result = ExitResults.Dequeue();
-            if (result) IsActive = false;
+            if (result) { IsActive = false; HasOwnedRecoveryBoundary = false; }
             return Task.FromResult(result);
         }
     }

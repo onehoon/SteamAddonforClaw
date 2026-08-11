@@ -75,6 +75,40 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.Equal(["CanonicalRoutingReconciliationFailed"], unsafeReasons);
     }
 
+    [Fact]
+    public async Task JournalCreatedBeforeEnterFailureRetainsRecoveryOwnership()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailEnter = true };
+        await using var coordinator = CreateCoordinator(devices, modeController);
+
+        Assert.False(await coordinator.ObserveRoutingDecisionAsync(Eligible(), 1));
+        Assert.False(coordinator.IsActive);
+        Assert.True(coordinator.HasOwnedRecoveryBoundary);
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.False(coordinator.HasOwnedRecoveryBoundary);
+        Assert.Contains(MsiClawNativeMode.XInput, modeController.Targets);
+    }
+
+    [Fact]
+    public async Task PowerEpochChangeAfterEnterRetainsRecoveryOwnership()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var gate = new PowerMutationGate(initiallyOpen: true);
+        var modeController = new FakeModeController(devices);
+        modeController.AfterModeApplied = () => gate.Close();
+        await using var coordinator = CreateCoordinator(devices, modeController, gate);
+
+        Assert.False(await coordinator.ObserveRoutingDecisionAsync(Eligible(), 1));
+        Assert.False(coordinator.IsActive);
+        Assert.True(coordinator.HasOwnedRecoveryBoundary);
+        Assert.False(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        gate.OpenAfterRecovery();
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.False(coordinator.HasOwnedRecoveryBoundary);
+        Assert.Equal([MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput], modeController.Targets);
+    }
+
     private static MsiClawNativeModeSessionCoordinator CreateCoordinator(
         FakeDeviceEnumerator devices,
         FakeModeController modeController,
@@ -105,6 +139,8 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     {
         public bool BlockFirstSwitch { get; set; }
         public bool FailRestore { get; set; }
+        public bool FailEnter { get; set; }
+        public Action? AfterModeApplied { get; set; }
         public TaskCompletionSource FirstSwitchStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<MsiClawNativeMode> Targets { get; } = [];
         private readonly TaskCompletionSource _releaseFirstSwitch = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -118,6 +154,13 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
                 FirstSwitchStarted.SetResult();
                 await _releaseFirstSwitch.Task.WaitAsync(cancellationToken);
             }
+            if (target == MsiClawNativeMode.DirectInput)
+            {
+                devices.Mode = target;
+                AfterModeApplied?.Invoke();
+            }
+            if (target == MsiClawNativeMode.DirectInput && FailEnter)
+                throw new IOException("simulated enter failure");
             if (target == MsiClawNativeMode.XInput && FailRestore)
                 throw new IOException("simulated restore failure");
             devices.Mode = target;

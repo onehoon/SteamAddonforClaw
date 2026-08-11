@@ -8,11 +8,18 @@ internal sealed record MsiClawNativeModePreflightResult(bool Succeeded, string R
     internal static MsiClawNativeModePreflightResult Failure(string reason) => new(false, reason);
 }
 
+internal sealed record MsiClawNativeModeEnterResult(bool Succeeded, bool RequiresRollback, string Reason)
+{
+    internal static MsiClawNativeModeEnterResult Success(string reason = "NativeModeEntered") => new(true, true, reason);
+    internal static MsiClawNativeModeEnterResult Failure(bool requiresRollback, string reason) => new(false, requiresRollback, reason);
+}
+
 internal interface IMsiClawNativeModeStageSession
 {
     bool IsActive { get; }
+    bool HasOwnedRecoveryBoundary { get; }
     ValueTask<MsiClawNativeModePreflightResult> InspectForPipelineAsync(CancellationToken cancellationToken);
-    Task<bool> EnterForPipelineAsync(CancellationToken cancellationToken);
+    Task<MsiClawNativeModeEnterResult> EnterForPipelineAsync(CancellationToken cancellationToken);
     Task<bool> ExitForPipelineAsync(CancellationToken cancellationToken);
 }
 
@@ -54,16 +61,21 @@ internal sealed class MsiClawNativeModeStage : IRoutingPipelineStage
         if (!_prepared) return RoutingStageOperationResult.Failure("NativeModeNotPrepared");
 
         var entered = await _session.EnterForPipelineAsync(cancellationToken).ConfigureAwait(false);
-        if (!entered || !_session.IsActive)
+        if (!entered.Succeeded || !_session.IsActive)
         {
             _prepared = false;
-            _ownsMutation = false;
-            return RoutingStageOperationResult.Failure("NativeModeEnterFailed");
+            _ownsMutation = entered.RequiresRollback || _session.HasOwnedRecoveryBoundary;
+            return RoutingStageOperationResult.Failure(entered.Reason);
         }
 
         _prepared = false;
-        _ownsMutation = true;
-        return RoutingStageOperationResult.Success("NativeModeEntered");
+        _ownsMutation = entered.RequiresRollback && _session.HasOwnedRecoveryBoundary;
+        if (!_ownsMutation)
+        {
+            return RoutingStageOperationResult.Failure("NativeModeRecoveryBoundaryMissing");
+        }
+
+        return RoutingStageOperationResult.Success(entered.Reason);
     }
 
     public async ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)

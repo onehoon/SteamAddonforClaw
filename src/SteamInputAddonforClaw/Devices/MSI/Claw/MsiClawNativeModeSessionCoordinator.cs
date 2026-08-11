@@ -16,6 +16,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DeviceNativeStateSnapshot? _snapshot;
     private bool _active;
+    private bool _recoveryBoundaryOwned;
     private readonly Func<bool>? _mutationAllowed;
     private CancellationTokenSource? _safetyMonitor;
     private bool _vetoLatched;
@@ -50,6 +51,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         => ObserveRoutingDecisionCoreAsync(decision, generation, cancellationToken);
 
     public bool IsActive => _active;
+    public bool HasOwnedRecoveryBoundary => _recoveryBoundaryOwned;
 
     public async ValueTask<MsiClawNativeModePreflightResult> InspectForPipelineAsync(CancellationToken cancellationToken)
     {
@@ -58,7 +60,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         finally { _gate.Release(); }
     }
 
-    public async Task<bool> EnterForPipelineAsync(CancellationToken cancellationToken)
+    public async Task<MsiClawNativeModeEnterResult> EnterForPipelineAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { return await StartCoreLockedAsync(cancellationToken).ConfigureAwait(false); }
@@ -127,36 +129,50 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         return MsiClawNativeModePreflightResult.Success();
     }
 
-    private async Task<bool> StartCoreLockedAsync(CancellationToken cancellationToken)
+    private async Task<MsiClawNativeModeEnterResult> StartCoreLockedAsync(CancellationToken cancellationToken)
     {
         var preflight = InspectCoreLocked();
-        if (!preflight.Succeeded) return false;
-        if (!_powerGate.TryAcquire(out var token)) return false;
+        if (!preflight.Succeeded) return MsiClawNativeModeEnterResult.Failure(false, preflight.Reason);
+        if (!_powerGate.TryAcquire(out var token)) return MsiClawNativeModeEnterResult.Failure(false, "PowerGateClosed");
         var captured = _nativeState.CaptureSnapshot();
-        if (!captured.AllowsMutation || captured.Snapshot is null) return false;
+        if (!captured.AllowsMutation || captured.Snapshot is null) return MsiClawNativeModeEnterResult.Failure(false, "SnapshotUnavailable");
         var original = captured.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
-        if (original is null || original.Mode != MsiClawNativeMode.XInput) return false;
-        if (!_powerGate.IsCurrent(token)) return false;
+        if (original is null) return MsiClawNativeModeEnterResult.Failure(false, "PayloadInvalid");
+        if (original.Mode != MsiClawNativeMode.XInput) return MsiClawNativeModeEnterResult.Failure(false, "OriginalModeUnsupported");
+        if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(false, "PowerGateClosed");
         var journal = _recovery.BeginDeviceNativeStateMutation(captured);
-        if (journal.Status != RecoveryStatus.Success) return false;
+        if (journal.Status != RecoveryStatus.Success) return MsiClawNativeModeEnterResult.Failure(false, "RecoveryJournalUnavailable");
+        _snapshot = captured.Snapshot;
+        _recoveryBoundaryOwned = true;
         var identity = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
-        var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
-        if (!result.Succeeded || !_powerGate.IsCurrent(token)) return false;
-        _snapshot = captured.Snapshot; _active = true;
+        MsiClawModeTransitionResult result;
+        try
+        {
+            result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            return MsiClawNativeModeEnterResult.Failure(true, exception.GetType().Name);
+        }
+
+        if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
+        if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(true, "PowerGateChangedAfterModeSwitch");
+        _active = true;
         _safetyMonitor = new CancellationTokenSource();
         _ = MonitorSafetyAsync(_safetyMonitor.Token);
-        return true;
+        return MsiClawNativeModeEnterResult.Success();
     }
 
     private async Task<bool> StopCoreLockedAsync(CancellationToken cancellationToken, bool reportFailure = true)
     {
-        if (!_active || _snapshot is null) return true;
+        if (!_active && !_recoveryBoundaryOwned) return true;
+        if (_snapshot is null) { if (reportFailure) MarkRecoveryUnsafe("NativeSnapshotMissingDuringRestore"); return false; }
         if (!_powerGate.TryAcquire(out var token)) { if (reportFailure) MarkRecoveryUnsafe("PowerGateAcquireFailedDuringRestore"); return false; }
         var restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false);
         if (!restored.Restored || !_powerGate.IsCurrent(token)) { if (reportFailure) MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
         var completed = _recovery.CompleteRecoverySession();
         if (completed.Status != RecoveryStatus.Success) { if (reportFailure) MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
-        _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false;
+        _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false; _recoveryBoundaryOwned = false;
         return true;
     }
 
