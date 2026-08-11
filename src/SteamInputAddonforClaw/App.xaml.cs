@@ -39,8 +39,7 @@ public partial class App : Application
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
     private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
-    private long _nativeRoutingGeneration;
-    private ISystemStatusProvider? _systemStatusProvider;
+    private RoutingPipelineRuntimeCoordinator? _routingRuntimeCoordinator;
 
     public App()
         : this(arguments: null, Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized."))
@@ -181,7 +180,6 @@ public partial class App : Application
             CaptureExternalControllerAssessment,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             routingSessionStateMachine: _routingSessionStateMachine);
-        _systemStatusProvider = statusProvider;
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         _msiClawNativeModeSession = nativeState is null ? null : new MsiClawNativeModeSessionCoordinator(
             nativeState,
@@ -193,6 +191,18 @@ public partial class App : Application
                 recoverySafetyState.Set(RecoverySafety.Unsafe);
                 AppLog.Error("Recovery", "MSI native mode recovery became unsafe.", new InvalidOperationException(reason), ("Reason", reason));
             });
+        if (_msiClawNativeModeSession is not null)
+        {
+            var nativeModeStage = new MsiClawNativeModeStage(_msiClawNativeModeSession);
+            var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage]);
+            var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(
+                new RoutingEnvironmentStrategyResolver(),
+                pipelineExecutor);
+            _routingRuntimeCoordinator = new RoutingPipelineRuntimeCoordinator(
+                statusProvider,
+                pipelineSessionCoordinator,
+                [_msiClawNativeModeSession]);
+        }
         var powerParticipants = _msiClawNativeModeSession is null
             ? Array.Empty<IPowerTransitionParticipant>()
             : new IPowerTransitionParticipant[] { _msiClawNativeModeSession };
@@ -203,15 +213,13 @@ public partial class App : Application
             return result.Status is RecoveryStatus.Success or RecoveryStatus.NoRecoveryNeeded;
         }, powerParticipants, async token =>
         {
-            if (_msiClawNativeModeSession is null) return true;
-            var generation = Interlocked.Increment(ref _nativeRoutingGeneration);
-            var snapshot = await statusProvider.CaptureAsync(token).ConfigureAwait(false);
-            return await _msiClawNativeModeSession.ReconcileRoutingDecisionAsync(snapshot.RoutingDecision, generation, token).ConfigureAwait(false);
+            if (_routingRuntimeCoordinator is null) return true;
+            return await _routingRuntimeCoordinator.ReconcileAfterRecoveryAsync(token).ConfigureAwait(false);
         });
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator, static () => { });
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
-        _ = ReconcileNativeRoutingAsync();
+        _ = ReconcileRoutingAsync();
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, developerTestModeState: _developerTestModeState);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
@@ -237,25 +245,38 @@ public partial class App : Application
     {
         _routingSessionStateMachine.ObserveSteamSessionState(args.Current);
         _mainWindow?.UpdateSteamSessionState(args.Current);
-        _ = ReconcileNativeRoutingAsync();
+        _ = ReconcileRoutingAsync();
     }
 
-    private async Task ReconcileNativeRoutingAsync(CancellationToken cancellationToken = default)
+    private async Task ReconcileRoutingAsync(CancellationToken cancellationToken = default)
     {
-        if (_msiClawNativeModeSession is null || _systemStatusProvider is not { } statusProvider) return;
+        if (_routingRuntimeCoordinator is null) return;
         try
         {
-            var generation = Interlocked.Increment(ref _nativeRoutingGeneration);
-            var snapshot = await statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
-            await _msiClawNativeModeSession.ObserveRoutingDecisionAsync(snapshot.RoutingDecision, generation, cancellationToken).ConfigureAwait(false);
+            var result = await _routingRuntimeCoordinator.ReconcileAsync(cancellationToken).ConfigureAwait(false);
+            if (!result.Succeeded)
+                AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,
+                    ("Action", result.Action), ("State", result.State), ("Reason", result.Reason));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception exception)
         {
-            AppLog.Warn("NativeMode", "Canonical routing reconciliation failed; native routing is being failed closed.", exception);
-            try { await _msiClawNativeModeSession.FailClosedAsync("CanonicalRoutingReconciliationFailed", cancellationToken).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-            catch (Exception failClosedException) { AppLog.Error("NativeMode", "Failed to fail closed after canonical routing reconciliation error.", failClosedException); }
+            AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation failed; routing is being failed closed.", exception);
+            try
+            {
+                var rollback = await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
+                if (!rollback.Succeeded)
+                    AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));
+            }
+            catch (Exception rollbackException)
+            {
+                AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback threw an exception.", rollbackException);
+            }
+            if (_msiClawNativeModeSession is not null)
+            {
+                try { await _msiClawNativeModeSession.FailClosedAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception failClosedException) { AppLog.Error("NativeMode", "Failed to fail closed after routing reconciliation error.", failClosedException); }
+            }
         }
     }
 
@@ -286,6 +307,25 @@ public partial class App : Application
         _systemTrayIcon = null;
         _powerWatcher?.Dispose();
         _powerWatcher = null;
+        if (_routingRuntimeCoordinator is not null)
+        {
+            try
+            {
+                var shutdown = _routingRuntimeCoordinator.ShutdownAsync().AsTask().GetAwaiter().GetResult();
+                if (!shutdown.Succeeded && _msiClawNativeModeSession is not null)
+                    _msiClawNativeModeSession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("Routing.Runtime", "Routing pipeline shutdown failed; attempting NativeMode fail-close.", exception);
+                if (_msiClawNativeModeSession is not null)
+                {
+                    try { _msiClawNativeModeSession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).GetAwaiter().GetResult(); }
+                    catch (Exception failClosedException) { AppLog.Error("NativeMode", "NativeMode shutdown fail-close failed.", failClosedException); }
+                }
+            }
+            _routingRuntimeCoordinator = null;
+        }
         if (_powerCoordinator is not null) _powerCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _powerCoordinator = null;
         if (_msiClawNativeModeSession is not null) _msiClawNativeModeSession.DisposeAsync().AsTask().GetAwaiter().GetResult();

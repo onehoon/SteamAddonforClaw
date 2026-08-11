@@ -55,6 +55,22 @@ internal sealed class RoutingPipelineRuntimeCoordinator
         finally { _transitionGate.Release(); }
     }
 
+    internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedAsync()
+    {
+        if (IsShutdownRequested) return RuntimeStoppedResult();
+        await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            if (IsShutdownRequested) return RuntimeStoppedResult();
+            return await _sessionCoordinator.ReconcileAsync(
+                RecoveryResetDecision,
+                IndeterminateClassification,
+                RoutingExperimentOptions.None,
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        finally { _transitionGate.Release(); }
+    }
+
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ShutdownAsync()
     {
         Interlocked.Exchange(ref _shutdownRequested, 1);
@@ -97,13 +113,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator
         if (!retirement.Succeeded || _sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null)
             return false;
 
-        var snapshot = await _statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        var classification = Classify(snapshot.ControllerSoftware);
-        var result = await _sessionCoordinator.ReconcileAsync(
-            snapshot.RoutingDecision,
-            classification,
-            RoutingExperimentOptions.None,
-            cancellationToken).ConfigureAwait(false);
+        var result = await ReconcileCoreAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("Routing.Runtime", "Post-recovery routing reconciliation completed.",
             ("Succeeded", result.Succeeded), ("Action", result.Action), ("Reason", result.Reason));
         return result.Succeeded;

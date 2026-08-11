@@ -53,6 +53,61 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task FailClosedRetiresActiveSessionWithoutTerminatingRuntime()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        var result = await bridge.Bridge.FailClosedAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Null(bridge.Session.PendingCleanup);
+        Assert.Equal(RoutingOperationalState.Passive, bridge.Session.CurrentState);
+
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        Assert.Equal(2, executor.ExecutedPlans.Count);
+    }
+
+    [Fact]
+    public async Task FailClosedCleanupFailurePreservesPendingCleanup()
+    {
+        var executor = new FakeExecutor();
+        executor.RollbackResults.Enqueue(new(false, RoutingStageKind.NativeMode, "CleanupFailed"));
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        var result = await bridge.Bridge.FailClosedAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.NotNull(bridge.Session.PendingCleanup);
+        Assert.Equal(RoutingOperationalState.OverrideActive, bridge.Session.CurrentState);
+    }
+
+    [Fact]
+    public async Task PostRecoverySteamInactiveAppliesSessionBoundary()
+    {
+        var executor = new FakeExecutor();
+        var participant = new FakeBoundaryParticipant();
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(new(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive), Software()));
+        var bridge = Create(provider, executor, participant);
+
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        Assert.True(await bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None));
+
+        Assert.Equal(1, participant.CallCount);
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Equal(RoutingOperationalState.Passive, bridge.Session.CurrentState);
+        Assert.Single(executor.RollbackPlans);
+        Assert.Single(executor.ExecutedPlans);
+    }
+
+    [Fact]
     public async Task RecoveryRetiresOldSessionThenFreshEnters()
     {
         var executor = new FakeExecutor();
