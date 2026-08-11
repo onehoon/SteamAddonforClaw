@@ -10,7 +10,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class RoutingPipelineRuntimeCoordinatorTests
 {
     [Fact]
-    public async Task StockEligibleUsesCanonicalSnapshotAndStockBaseline()
+    public async Task StockEligibleUsesCanonicalSnapshotAndNormalStockRoutingBaseline()
     {
         var executor = new FakeExecutor();
         var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
@@ -22,7 +22,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.Single(executor.ExecutedPlans);
         var plan = executor.ExecutedPlans.Single();
         Assert.Equal(RoutingStageMode.Enabled, plan.NativeMode);
-        Assert.Equal(RoutingStageMode.Disabled, plan.PhysicalInput);
+        Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalInput);
+        Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalIsolation);
+        Assert.Equal(RoutingStageMode.Enabled, plan.SteamOutput);
         Assert.NotNull(bridge.Session.ActiveSession);
     }
 

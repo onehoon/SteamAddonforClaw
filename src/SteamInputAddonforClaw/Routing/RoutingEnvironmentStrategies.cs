@@ -26,10 +26,10 @@ internal sealed class StockCenterMRoutingStrategy : IRoutingEnvironmentStrategy
 
     public RoutingPipelinePlan BuildBaselinePlan() => new(
         RoutingStageMode.Enabled,
+        RoutingStageMode.Enabled,
+        RoutingStageMode.Enabled,
         RoutingStageMode.Disabled,
-        RoutingStageMode.Disabled,
-        RoutingStageMode.Disabled,
-        RoutingStageMode.Disabled,
+        RoutingStageMode.Enabled,
         RoutingStageMode.Disabled,
         RoutingStageMode.Disabled);
 }

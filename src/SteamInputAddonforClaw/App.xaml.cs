@@ -183,7 +183,7 @@ public partial class App : Application
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())),
                 new ViiperRuntimeInspector()),
-            () => _effectiveSteamSessionSource?.State ?? SteamSessionState.FromRunningAppId(0),
+            () => _steamSessionWatcher?.State ?? SteamSessionState.FromRunningAppId(0),
             CaptureExternalControllerAssessment,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             routingSessionStateMachine: _routingSessionStateMachine);
@@ -228,11 +228,7 @@ public partial class App : Application
                 statusProvider,
                 pipelineSessionCoordinator,
                 [_msiClawNativeModeSession],
-                () => _developerTestModeState?.IsEnabled == true
-                    ? new RoutingExperimentOptions(
-                        new RoutingStageExperimentOptions(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled),
-                        RoutingStageExperimentOptions.None)
-                    : RoutingExperimentOptions.None);
+                () => RoutingExperimentOptions.None);
             steamOutputStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false); });
         }
         _userTerminationGuard = new UserTerminationGuard(
