@@ -15,6 +15,11 @@ internal interface IRoutingEnvironmentStrategy
     RoutingPipelinePlan BuildBaselinePlan();
 }
 
+internal interface IRoutingEnvironmentStrategyResolver
+{
+    IRoutingEnvironmentStrategy Resolve(ControllerManagerClassification classification);
+}
+
 internal sealed class StockCenterMRoutingStrategy : IRoutingEnvironmentStrategy
 {
     public RoutingEnvironmentStrategyKind Kind => RoutingEnvironmentStrategyKind.StockCenterM;
@@ -43,7 +48,7 @@ internal sealed class UnsupportedRoutingStrategy : IRoutingEnvironmentStrategy
     public RoutingPipelinePlan BuildBaselinePlan() => RoutingPipelinePlan.AllDisabled;
 }
 
-internal sealed class RoutingEnvironmentStrategyResolver
+internal sealed class RoutingEnvironmentStrategyResolver : IRoutingEnvironmentStrategyResolver
 {
     private readonly IRoutingEnvironmentStrategy _stockCenterM;
     private readonly IRoutingEnvironmentStrategy _clawTweaks;
@@ -59,7 +64,7 @@ internal sealed class RoutingEnvironmentStrategyResolver
         _unsupported = unsupported ?? new UnsupportedRoutingStrategy();
     }
 
-    internal IRoutingEnvironmentStrategy Resolve(ControllerManagerClassification classification) => classification.Kind switch
+    public IRoutingEnvironmentStrategy Resolve(ControllerManagerClassification classification) => classification.Kind switch
     {
         ControllerManagerKind.None => _stockCenterM,
         ControllerManagerKind.ClawTweaks => _clawTweaks,
