@@ -7,11 +7,20 @@ internal sealed record RecoveryMutationState(
     IReadOnlyList<string>? HidHideDeviceAdditions = null,
     IReadOnlyList<string>? ExecutableWhitelistAdditions = null,
     IReadOnlyList<string>? AddonOwnedVirtualDevices = null,
-    bool TemporaryXbox360OutputCreated = false)
+    bool TemporaryXbox360OutputCreated = false,
+    IReadOnlyList<AddonOwnedVirtualDeviceRecoveryEntry>? AddonOwnedVirtualDeviceEntries = null)
 {
     public bool HasRecordedMutations => DeviceNativeStateChanged || TemporaryXbox360OutputCreated ||
-        HidHideDeviceAdditions is { Count: > 0 } || ExecutableWhitelistAdditions is { Count: > 0 } || AddonOwnedVirtualDevices is { Count: > 0 };
+        HidHideDeviceAdditions is { Count: > 0 } || ExecutableWhitelistAdditions is { Count: > 0 } || AddonOwnedVirtualDevices is { Count: > 0 } || AddonOwnedVirtualDeviceEntries is { Count: > 0 };
 }
+
+internal sealed record AddonOwnedVirtualDeviceRecoveryEntry(
+    Guid MutationId,
+    string DeviceType,
+    ushort VendorId,
+    ushort ProductId,
+    IReadOnlyList<string> PreExistingMatchingInstanceIds,
+    IReadOnlyList<string> ResolvedInstanceIds);
 
 internal sealed record RecoveryJournal(
     int SchemaVersion,

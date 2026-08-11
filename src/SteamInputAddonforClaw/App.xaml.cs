@@ -41,6 +41,7 @@ public partial class App : Application
     private PowerTransitionCoordinator? _powerCoordinator;
     private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
     private MsiClawInputSource? _physicalInputSource;
+    private ViiperRuntimeManager? _viiperRuntime;
     private RoutingPipelineRuntimeCoordinator? _routingRuntimeCoordinator;
     private UserTerminationGuard? _userTerminationGuard;
 
@@ -72,7 +73,7 @@ public partial class App : Application
         var addonOwnedVirtualDeviceTracker = new AddonOwnedVirtualDeviceTracker();
         var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher, addonOwnedVirtualDeviceTracker);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
-        _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient());
+        _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(deviceEnumerator),
@@ -194,6 +195,7 @@ public partial class App : Application
                 recoverySafetyState.Set(RecoverySafety.Unsafe);
                 AppLog.Error("Recovery", "MSI native mode recovery became unsafe.", new InvalidOperationException(reason), ("Reason", reason));
             });
+        IPowerTransitionParticipant? steamOutputPowerParticipant = null;
         if (_msiClawNativeModeSession is not null)
         {
             var nativeModeStage = new MsiClawNativeModeStage(_msiClawNativeModeSession);
@@ -205,14 +207,29 @@ public partial class App : Application
                 _recoveryManager!,
                 new HidHideDriverClient(),
                 () => Environment.ProcessPath);
-            var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage]);
+            _viiperRuntime = new ViiperRuntimeManager(Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll"));
+            var steamOutputStage = new ClassicSteamControllerOutputStage(
+                _viiperRuntime,
+                new WindowsControllerDeviceEnumerator(),
+                new ViiperVirtualDeviceIdentityResolver(new ViiperVirtualDeviceIdentityPolicy()),
+                addonOwnedVirtualDeviceTracker,
+                _recoveryManager!,
+                () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
+                new HidHideDriverClient());
+            steamOutputPowerParticipant = steamOutputStage;
+            var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage, steamOutputStage]);
             var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(
                 new RoutingEnvironmentStrategyResolver(),
                 pipelineExecutor);
             _routingRuntimeCoordinator = new RoutingPipelineRuntimeCoordinator(
                 statusProvider,
                 pipelineSessionCoordinator,
-                [_msiClawNativeModeSession]);
+                [_msiClawNativeModeSession],
+                () => _developerTestModeState?.IsEnabled == true
+                    ? new RoutingExperimentOptions(
+                        new RoutingStageExperimentOptions(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled),
+                        RoutingStageExperimentOptions.None)
+                    : RoutingExperimentOptions.None);
         }
         _userTerminationGuard = new UserTerminationGuard(
             () => _routingRuntimeCoordinator?.CaptureTerminationSnapshot() ?? default,
@@ -221,7 +238,9 @@ public partial class App : Application
             () => recoverySafetyState.Current == RecoverySafety.Safe && _recoveryManager?.HasIncompleteRecovery == true);
         var powerParticipants = _msiClawNativeModeSession is null
             ? Array.Empty<IPowerTransitionParticipant>()
-            : new IPowerTransitionParticipant[] { _msiClawNativeModeSession };
+            : steamOutputPowerParticipant is null
+                ? new IPowerTransitionParticipant[] { _msiClawNativeModeSession }
+                : new IPowerTransitionParticipant[] { _msiClawNativeModeSession, steamOutputPowerParticipant };
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, async token =>
         {
             if (_recoveryManager is null) return false;
@@ -232,7 +251,8 @@ public partial class App : Application
             if (_routingRuntimeCoordinator is null) return true;
             return await _routingRuntimeCoordinator.ReconcileAfterRecoveryAsync(token).ConfigureAwait(false);
         });
-        _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator, static () => { });
+        _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
+            () => _routingRuntimeCoordinator?.CancelInFlightTransition());
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
         _ = ReconcileRoutingAsync();
@@ -348,6 +368,8 @@ public partial class App : Application
         _msiClawNativeModeSession = null;
         if (_physicalInputSource is not null) _physicalInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _physicalInputSource = null;
+        _viiperRuntime?.Dispose();
+        _viiperRuntime = null;
         AppLog.Info("Runtime cleanup completed.");
     }
 

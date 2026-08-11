@@ -23,18 +23,23 @@ internal sealed class RoutingPipelineRuntimeCoordinator
     private readonly ISystemStatusProvider _statusProvider;
     private readonly RoutingPipelineSessionCoordinator _sessionCoordinator;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
+    private readonly Func<RoutingExperimentOptions> _experimentOptionsProvider;
     private readonly SemaphoreSlim _transitionGate = new(1, 1);
+    private readonly Lock _cancellationSync = new();
+    private CancellationTokenSource _transitionCancellation = new();
     private int _shutdownRequested;
     private int _transitionOperationCount;
 
     internal RoutingPipelineRuntimeCoordinator(
         ISystemStatusProvider statusProvider,
         RoutingPipelineSessionCoordinator sessionCoordinator,
-        IEnumerable<IRoutingRuntimeSessionBoundaryParticipant>? sessionBoundaryParticipants = null)
+        IEnumerable<IRoutingRuntimeSessionBoundaryParticipant>? sessionBoundaryParticipants = null,
+        Func<RoutingExperimentOptions>? experimentOptionsProvider = null)
     {
         _statusProvider = statusProvider ?? throw new ArgumentNullException(nameof(statusProvider));
         _sessionCoordinator = sessionCoordinator ?? throw new ArgumentNullException(nameof(sessionCoordinator));
         _sessionBoundaryParticipants = (sessionBoundaryParticipants ?? []).ToArray();
+        _experimentOptionsProvider = experimentOptionsProvider ?? (() => RoutingExperimentOptions.None);
     }
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileAsync(CancellationToken cancellationToken)
@@ -47,7 +52,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator
             await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
-            return await ReconcileCoreAsync(cancellationToken).ConfigureAwait(false);
+            using var transition = CreateTransitionCancellation(cancellationToken);
+            return await ReconcileCoreAsync(transition.Token).ConfigureAwait(false);
         }
         finally
         {
@@ -66,7 +72,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator
             await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             acquired = true;
             if (IsShutdownRequested) return false;
-            return await ReconcileAfterRecoveryCoreAsync(cancellationToken).ConfigureAwait(false);
+            using var transition = CreateTransitionCancellation(cancellationToken);
+            return await ReconcileAfterRecoveryCoreAsync(transition.Token).ConfigureAwait(false);
         }
         finally
         {
@@ -85,11 +92,12 @@ internal sealed class RoutingPipelineRuntimeCoordinator
             await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
+            using var transition = CreateTransitionCancellation(CancellationToken.None);
             return await _sessionCoordinator.ReconcileAsync(
                 RecoveryResetDecision,
                 IndeterminateClassification,
                 RoutingExperimentOptions.None,
-                CancellationToken.None).ConfigureAwait(false);
+                transition.Token).ConfigureAwait(false);
         }
         finally
         {
@@ -107,6 +115,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator
         {
             await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             acquired = true;
+            CancelInFlightTransition();
             return await _sessionCoordinator.ReconcileAsync(
                 new RoutingDecision(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive),
                 IndeterminateClassification,
@@ -126,6 +135,21 @@ internal sealed class RoutingPipelineRuntimeCoordinator
             _sessionCoordinator.PendingCleanup is not null,
             IsShutdownRequested);
 
+    internal void CancelInFlightTransition()
+    {
+        lock (_cancellationSync)
+        {
+            _transitionCancellation.Cancel();
+            _transitionCancellation = new CancellationTokenSource();
+        }
+    }
+
+    private CancellationTokenSource CreateTransitionCancellation(CancellationToken cancellationToken)
+    {
+        lock (_cancellationSync)
+            return CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _transitionCancellation.Token);
+    }
+
     private async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileCoreAsync(CancellationToken cancellationToken)
     {
         var snapshot = await _statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
@@ -133,7 +157,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator
         var result = await _sessionCoordinator.ReconcileAsync(
             snapshot.RoutingDecision,
             classification,
-            RoutingExperimentOptions.None,
+            _experimentOptionsProvider(),
             cancellationToken).ConfigureAwait(false);
         if (IsSteamSessionEnded(snapshot.RoutingDecision) && result.Succeeded &&
             _sessionCoordinator.ActiveSession is null && _sessionCoordinator.PendingCleanup is null)

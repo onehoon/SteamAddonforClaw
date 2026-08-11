@@ -79,24 +79,14 @@ public sealed class ExternalControllerDetector
 
     private static string GetLogicalControllerKey(ControllerDeviceInfo device)
     {
-        if (device.ContainerId is Guid containerId && IsUsableContainerId(containerId))
-        {
-            return $"container:{containerId:D}";
-        }
+        if (ControllerLogicalIdentity.IsUsableContainerId(device.ContainerId))
+            return ControllerLogicalIdentity.GetLogicalKey(device);
 
         if (device.ContainerId is Guid invalidContainerId)
         {
             AppLog.Trace("PnP", "Container ID ignored for logical grouping.", ("InstanceId", device.InstanceId), ("ContainerId", invalidContainerId), ("Reason", invalidContainerId == Guid.Empty ? "EmptyContainerId" : "SentinelContainerId"), ("Fallback", string.IsNullOrWhiteSpace(device.ParentInstanceId) ? "InstanceId" : "ParentInstanceId"));
         }
 
-        if (!string.IsNullOrWhiteSpace(device.ParentInstanceId))
-        {
-            return $"parent:{device.ParentInstanceId}";
-        }
-
-        return $"instance:{device.InstanceId}";
+        return ControllerLogicalIdentity.GetLogicalKey(device);
     }
-
-    private static bool IsUsableContainerId(Guid containerId)
-        => containerId != Guid.Empty && containerId != new Guid("00000000-0000-0000-ffff-ffffffffffff");
 }

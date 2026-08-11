@@ -1,0 +1,140 @@
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+public sealed class ViiperRuntimeManagerTests
+{
+    [Fact]
+    public void AddDeviceFailureInvalidatesBusAndRetriesOnFreshBus()
+    {
+        var api = new FakeApi { AddResults = [1, 0] };
+        using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+
+        var deviceId = runtime.CreateDevice();
+
+        Assert.Equal((uint)42, deviceId);
+        Assert.Equal(new uint[] { 1, 2 }, api.CreatedBuses);
+        Assert.Equal(new uint[] { 1 }, api.RemovedBuses);
+        Assert.Equal((uint)2, runtime.BusId);
+    }
+
+    [Fact]
+    public void CreateDeviceUsesExactClassicSteamControllerEndpoint()
+    {
+        var api = new FakeApi();
+        using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+
+        runtime.CreateDevice();
+
+        Assert.Equal([ViiperRuntimeManager.ListenAddress], api.InitializeCalls);
+        var call = Assert.Single(api.AddDeviceCalls);
+        Assert.Equal((uint)1, call.BusId);
+        Assert.Equal("steamcontroller", call.TypeName);
+        Assert.Equal((ushort)0x28DE, call.VendorId);
+        Assert.Equal((ushort)0x1102, call.ProductId);
+    }
+
+    [Fact]
+    public void UnsupportedDeviceTypeFailsAfterInitializationShutdown()
+    {
+        var api = new FakeApi { DeviceTypes = ["xbox360"] };
+        using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => runtime.Start());
+
+        Assert.Equal("VIIPER does not support steamcontroller.", exception.Message);
+        Assert.True(api.ShutdownCalled);
+        Assert.True(api.Disposed);
+    }
+
+    [Fact]
+    public void FailedBusRemovalDoesNotReportDeviceCleanupAsComplete()
+    {
+        var api = new FakeApi { RemoveBusResult = 1 };
+        using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+        var deviceId = runtime.CreateDevice();
+
+        var removal = runtime.RemoveDevice(runtime.BusId, deviceId);
+
+        Assert.True(removal.DeviceRemoved);
+        Assert.False(removal.BusRemoved);
+        Assert.DoesNotContain(deviceId, runtime.OwnedDeviceIds);
+        Assert.Empty(runtime.OwnedDeviceIds);
+    }
+
+    [Fact]
+    public void DeviceRemovalIsNotRetriedAfterBusCleanupFailure()
+    {
+        var api = new FakeApi { RemoveBusResult = 1 };
+        using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+        var deviceId = runtime.CreateDevice();
+
+        var first = runtime.RemoveDevice(runtime.BusId, deviceId);
+        var second = runtime.RemoveDevice(runtime.BusId, deviceId);
+
+        Assert.True(first.DeviceRemoved);
+        Assert.False(first.BusRemoved);
+        Assert.False(second.DeviceRemoved);
+        Assert.Equal([deviceId], api.RemovedDevices);
+    }
+
+    [Fact]
+    public void PersistentCreateBusFailureIsBounded()
+    {
+        var api = new FakeApi { CreateBusResult = 1 };
+        using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => runtime.CreateDevice());
+
+        Assert.Equal("fake error", exception.Message);
+        Assert.Equal(16, api.CreatedBuses.Count);
+        Assert.Empty(api.AddDeviceCalls);
+    }
+
+    [Fact]
+    public void DisposeRemovesOwnedDevicesAndDisposesNativeRuntime()
+    {
+        var api = new FakeApi();
+        var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+        var deviceId = runtime.CreateDevice();
+
+        runtime.Dispose();
+
+        Assert.Contains(deviceId, api.RemovedDevices);
+        Assert.True(api.Disposed);
+    }
+
+    private sealed class FakeApi : IViiperNativeApi
+    {
+        public int[] AddResults { get; init; } = [0];
+        public int CreateBusResult { get; init; }
+        public int RemoveBusResult { get; init; }
+        public List<uint> CreatedBuses { get; } = [];
+        public List<uint> RemovedBuses { get; } = [];
+        public List<uint> RemovedDevices { get; } = [];
+        public List<(uint BusId, string TypeName, ushort VendorId, ushort ProductId)> AddDeviceCalls { get; } = [];
+        public List<string> InitializeCalls { get; } = [];
+        public string[] DeviceTypes { get; init; } = [ViiperRuntimeManager.DeviceType];
+        public bool ShutdownCalled { get; private set; }
+        public bool Disposed { get; private set; }
+        private int _addIndex;
+
+        public int Initialize(string listenAddress) { InitializeCalls.Add(listenAddress); return 0; }
+        public void Shutdown() { ShutdownCalled = true; }
+        public int CreateBus(uint busId) { CreatedBuses.Add(busId); return CreateBusResult; }
+        public int RemoveBus(uint busId) { RemovedBuses.Add(busId); return RemoveBusResult; }
+        public int AddDevice(uint busId, string typeName, ushort vendorId, ushort productId, out uint deviceId)
+        {
+            AddDeviceCalls.Add((busId, typeName, vendorId, productId));
+            deviceId = 42;
+            return AddResults[Math.Min(_addIndex++, AddResults.Length - 1)];
+        }
+        public int RemoveDevice(uint busId, uint deviceId) { RemovedDevices.Add(deviceId); return 0; }
+        public int SetInput(uint busId, uint deviceId, byte[] report) => 0;
+        public int SetFeedbackCallback(uint busId, uint deviceId, Action<ReadOnlyMemory<byte>> callback) => 0;
+        public string[] GetDeviceTypes() => DeviceTypes;
+        public string? GetLastError() => "fake error";
+        public void Dispose() { Disposed = true; }
+    }
+}

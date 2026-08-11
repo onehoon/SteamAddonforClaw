@@ -9,9 +9,11 @@ The project exposes the MSI Claw built-in controller to Steam as a **Classic Ste
 
 The addon intentionally does not implement its own remapping, macros, profiles, or controller configuration system. Those functions are delegated to **Steam Input**.
 
+An explicit Stock routing experiment can now create a recoverable embedded-VIIPER Classic Steam Controller (`28DE:1102`) after verifying its Windows PnP identity and addon ownership. The default production plan remains NativeMode-only; live controller-state publishing is reserved for the separate follow-up report-routing work.
+
 ## PID_1902 non-Gyro input pipeline
 
-The PID_1902 DirectInput layout is independently normalized into device-independent controller state for the Classic Steam Controller output path. The non-Gyro pipeline covers A/B/X/Y, 8-way D-pad, LB/RB, analog and full-pull LT/RT, Back/Start, L3/R3, both sticks, and M1/M2. The Claw right stick is represented as the Classic Steam Controller right pad; R3 is right-pad click, M2 is left grip, and M1 is right grip. Gyro, accelerometer, native controller-mode switching, HidHide routing, and automatic Steam-session/Test-Mode routing remain deferred.
+The PID_1902 DirectInput layout is independently normalized into device-independent controller state for the Classic Steam Controller output path. The non-Gyro pipeline covers A/B/X/Y, 8-way D-pad, LB/RB, analog and full-pull LT/RT, Back/Start, L3/R3, both sticks, and M1/M2. The Claw right stick is represented as the Classic Steam Controller right pad; R3 is right-pad click, M2 is left grip, and M1 is right grip. Gyro and accelerometer input remain deferred. Native controller-mode switching, recoverable HidHide routing, and automatic Steam-session/Test-Mode routing are implemented for the Developer Test Mode path; normal production routing remains NativeMode-only by default.
 
 > Unofficial project. Not affiliated with MSI or Valve.
 
@@ -96,7 +98,7 @@ The addon should remain a small routing layer between the MSI Claw controller an
 
 Native controller state is owned by the active handheld-device adapter. Recovery persists a device-neutral snapshot envelope with a stable device ID and an opaque device-specific payload, then selects the restoring adapter from that journaled ID rather than re-detecting the current handheld. The recovery core never interprets device-specific payloads.
 
-Recovery schema v2 can record multiple addon-owned mutations in one session. Mutation evidence is persisted before the corresponding change, each successful rollback clears only its own recorded mutation, and the journal is deleted only when empty. Current mixed crash recovery supports native device state, HidHide executable whitelist additions, and HidHide physical-device additions in reverse mutation order with progressive checkpoints. Virtual-output and temporary Xbox output mutations remain unsupported and fail closed.
+Recovery schema v3 can record multiple addon-owned mutations in one session. Mutation evidence is persisted before the corresponding change, each successful rollback clears only its own recorded mutation, and the journal is deleted only when empty. Current mixed crash recovery supports native device state, HidHide executable whitelist additions, HidHide physical-device additions, and structured addon-owned virtual-output evidence in reverse mutation order with progressive checkpoints. If a journaled VIIPER device is still present after a crash, recovery preserves that exact virtual-output evidence and remains unsafe/passive, but it still restores independently recoverable MSI Claw native-state and HidHide mutations first. Temporary Xbox output mutations remain unsupported and fail closed.
 
 MSI Claw native-state restoration currently verifies an already-restored state only; active controller mode switching and restoration remain a later hardware PoC.
 
@@ -182,7 +184,7 @@ The initial pipeline stages are `NativeMode`, `PhysicalInput`, `PhysicalIsolatio
 
 The plan does not infer stage dependencies. The generic executor uses an explicit forward order of `NativeMode` → `PhysicalInput` → `PhysicalIsolation` → `ThirdPartyIsolation` → `SteamOutput` → `XboxOutput` → `GameBarRouting`, with rollback in reverse order.
 
-`ObserveOnly` never enters the mutation boundary. Enabled stages must successfully complete `PrepareMutationAsync` before `ExecuteMutationAsync` may perform intended routing or device mutation. A failed prepare or execute operation triggers best-effort rollback of the current and previously prepared Enabled stages in reverse order. `PrepareMutationAsync` is the generic recovery boundary; concrete stages must capture or persist the exact state required for their own safe rollback before reporting preparation success. This PR does not expand the recovery journal schema or claim mixed-stage crash recovery support.
+`ObserveOnly` never enters the mutation boundary. Enabled stages must successfully complete `PrepareMutationAsync` before `ExecuteMutationAsync` may perform intended routing or device mutation. A failed prepare or execute operation triggers best-effort rollback of the current and previously prepared Enabled stages in reverse order. `PrepareMutationAsync` is the generic preflight boundary; each concrete stage must persist mutation recovery intent before entering a non-trivial mutation state, then checkpoint and clear only its own recorded mutation after verified rollback.
 
 `ControllerManagerClassification` is the canonical input for selecting an environment routing strategy. The initial strategy families are `StockCenterM`, `ClawTweaks`, and `Unsupported`: no third-party manager selects StockCenterM; ClawTweaks selects ClawTweaks; Handheld Companion, Winhanced, multiple managers, indeterminate, and unknown classifications select Unsupported.
 
@@ -200,7 +202,7 @@ Runtime reconciliation is serialized across status capture and pipeline transiti
 
 User-initiated Exit and Restart are disabled while the addon owns live routing mutations, recovery state, or pending routing cleanup. Termination availability is derived from addon ownership and transition state, not directly from RunningAppID or external-controller presence. After successful rollback and restoration, Exit and Restart become available again even if the Steam session remains active under an external-controller veto. A frozen pipeline `ActiveSession` alone is not treated as physical mutation ownership.
 
-Unsupported, Handheld Companion, Winhanced, multiple-manager, indeterminate, and unknown environment strategies cannot be enabled through experiment options. Experiment options do not bypass compatibility, routing eligibility, external-controller veto, recovery safety, or prerequisite gates. Production uses `RoutingExperimentOptions.None`; options are not live mutable toggles and define no user-facing persistence or UI.
+Unsupported, Handheld Companion, Winhanced, multiple-manager, indeterminate, and unknown environment strategies cannot be enabled through experiment options. Experiment options do not bypass compatibility, routing eligibility, external-controller veto, recovery safety, or prerequisite gates. Production remains NativeMode-only by default; the App wires the Stock MSI Center M experimental path only when Developer Test Mode is enabled, with `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, and `SteamOutput` enabled together. Options are not live mutable user toggles and define no user-facing persistence or general Settings UI.
 
 The Stock MSI Claw `PhysicalInput` stage now has a concrete PID_1902 implementation and publishes only its exact owned immutable identity. The recoverable `PhysicalIsolation` stage is registered in the production executor but remains disabled in the default Stock plan until SteamOutput is connected; normal Steam sessions therefore remain NativeMode-only. PID_1902 selection is not based on VID/PID count alone: the DirectInput interface must resolve to a verified MSI gamepad PnP interface and MSI physical root. Multiple descriptors are accepted only when they share the same verified physical identity and PnP instance; otherwise acquisition fails closed.
 
@@ -863,11 +865,12 @@ A recovery session may contain multiple recorded mutations. Each mutation's
  recovery evidence is persisted before the corresponding change, and successful
  stage rollback clears only the mutation owned by that stage. The journal is
  deleted only after all recorded mutations have been cleared. Current mixed
- crash-recovery support is limited to native device state and HidHide
- executable whitelist additions. HidHide device entries and virtual-output
- recovery remain unsupported and fail closed. Recovery schema version 2 is
- retained; this extends the lifecycle of the existing state rather than its
- serialization format.
+ crash-recovery support covers native device state, HidHide executable
+ whitelist additions, HidHide physical-device entries, and structured
+ addon-owned virtual-output entries. If the recorded VIIPER device is still
+ present, recovery preserves that virtual-output evidence and remains unsafe,
+ but independently recoverable Claw native-state and HidHide mutations are
+ still restored. Recovery schema version 3 is the current format.
 
 Crash recovery takes priority over normal controller initialization.
 

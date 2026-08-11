@@ -289,6 +289,22 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task PowerBarrierCancellationCancelsInFlightPipelineTransition()
+    {
+        var executor = new FakeExecutor { BlockNextExecute = true };
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        var reconcile = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteStarted.Task;
+
+        bridge.Bridge.CancelInFlightTransition();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reconcile);
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.False(bridge.Bridge.CaptureTerminationSnapshot().TransitionInProgress);
+    }
+
+    [Fact]
     public async Task PendingCleanupAppearsInTerminationSnapshotUntilRetrySucceeds()
     {
         var executor = new FakeExecutor();
@@ -425,14 +441,27 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         internal List<RoutingPipelinePlan> ExecutedPlans { get; } = [];
         internal List<RoutingPipelinePlan> RollbackPlans { get; } = [];
         internal Queue<RoutingPipelineRollbackResult> RollbackResults { get; } = [];
+        internal bool BlockNextExecute { get; set; }
         internal bool BlockNextRollback { get; set; }
+        internal TaskCompletionSource ExecuteStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource RollbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ReleaseRollback { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public ValueTask<RoutingPipelineExecutionResult> ExecuteAsync(RoutingPipelinePlan plan, CancellationToken cancellationToken)
         {
             ExecutedPlans.Add(plan);
-            return ValueTask.FromResult(RoutingPipelineExecutionResult.Success());
+            return ExecuteCoreAsync(cancellationToken);
+        }
+
+        private async ValueTask<RoutingPipelineExecutionResult> ExecuteCoreAsync(CancellationToken cancellationToken)
+        {
+            if (BlockNextExecute)
+            {
+                BlockNextExecute = false;
+                ExecuteStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            return RoutingPipelineExecutionResult.Success();
         }
 
         public ValueTask<RoutingPipelineRollbackResult> RollbackAsync(RoutingPipelinePlan plan, CancellationToken cancellationToken)

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
 using Xunit;
@@ -90,6 +91,120 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.True(journal.Mutations.DeviceNativeStateChanged);
         Assert.Contains("C:\\addon.exe", journal.Mutations.ExecutableWhitelistAdditions!);
         Assert.Contains("HID\\Claw", journal.Mutations.HidHideDeviceAdditions!);
+    }
+
+    [Fact]
+    public void VirtualDeviceMutationRoundTripsStructuredIdentity()
+    {
+        var manager = Manager();
+        var session = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        var mutationId = Guid.NewGuid();
+
+        Assert.Equal(RecoveryStatus.Success, manager.RecordAddonOwnedVirtualDeviceIntent(
+            session.RecoverySessionId, mutationId, "steamcontroller", 0x28DE, 0x1102, []).Status);
+        Assert.Equal(RecoveryStatus.Success, manager.ResolveAddonOwnedVirtualDeviceIdentity(
+            session.RecoverySessionId, mutationId, ["USB\\VID_28DE&PID_1102\\owned"]).Status);
+
+        var loaded = manager.LoadJournal().Journal!;
+        var entry = Assert.Single(loaded.Mutations.AddonOwnedVirtualDeviceEntries!);
+        Assert.Equal(3, loaded.SchemaVersion);
+        Assert.Equal(mutationId, entry.MutationId);
+        Assert.Equal("steamcontroller", entry.DeviceType);
+        Assert.Equal((ushort)0x28DE, entry.VendorId);
+        Assert.Equal((ushort)0x1102, entry.ProductId);
+        Assert.Equal("USB\\VID_28DE&PID_1102\\owned", Assert.Single(entry.ResolvedInstanceIds));
+    }
+
+    [Fact]
+    public async Task StartupRecoveryFailsClosedWhenResolvedVirtualDeviceIsPresent()
+    {
+        var sessionId = Guid.NewGuid();
+        var mutationId = Guid.NewGuid();
+        var journal = new RecoveryJournal(3, sessionId, DateTimeOffset.UtcNow, null,
+            new(AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["owned-instance"])]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), deviceEnumerator: new FakeControllerEnumerator([
+            Device("owned-instance")]), hidHideClient: new FakeHidHide());
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.True(File.Exists(PathName));
+    }
+
+    [Fact]
+    public async Task MixedCrashRecoveryRestoresNativeAndHidHideWhilePreservingStaleVirtualEvidence()
+    {
+        var sessionId = Guid.NewGuid();
+        var mutationId = Guid.NewGuid();
+        var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success);
+        var hidHide = new FakeHidHide();
+        hidHide.HiddenEntries.Add("HID\\MSI_CLAW");
+        hidHide.Entries.Add("C:\\addon.exe");
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, sessionId, DateTimeOffset.UtcNow, Snapshot(),
+            new(
+                DeviceNativeStateChanged: true,
+                ExecutableWhitelistAdditions: ["C:\\addon.exe"],
+                HidHideDeviceAdditions: ["HID\\MSI_CLAW"],
+                AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["owned-instance"])]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        var manager = new RecoveryManager(
+            new RecoveryJournalStore(PathName),
+            new HandheldDeviceRegistry([new FakeAdapter(DeviceId, nativeState)]),
+            hidHide,
+            new FakeControllerEnumerator([Device("owned-instance")]));
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.Empty(hidHide.HiddenEntries);
+        Assert.Empty(hidHide.Entries);
+        Assert.Equal(1, nativeState.RestoreCount);
+        var remaining = manager.LoadJournal().Journal!;
+        Assert.False(remaining.Mutations.DeviceNativeStateChanged);
+        Assert.Empty(remaining.Mutations.HidHideDeviceAdditions!);
+        Assert.Empty(remaining.Mutations.ExecutableWhitelistAdditions!);
+        Assert.Equal(mutationId, Assert.Single(remaining.Mutations.AddonOwnedVirtualDeviceEntries!).MutationId);
+    }
+
+    [Fact]
+    public async Task StartupRecoveryCompletesUnresolvedIntentWhenNoNewDeviceExists()
+    {
+        var sessionId = Guid.NewGuid();
+        var journal = new RecoveryJournal(3, sessionId, DateTimeOffset.UtcNow, null,
+            new(AddonOwnedVirtualDeviceEntries: [new(Guid.NewGuid(), "steamcontroller", 0x28DE, 0x1102, [], [])]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), deviceEnumerator: new FakeControllerEnumerator([]), hidHideClient: new FakeHidHide());
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Success, result.Status);
+        Assert.False(File.Exists(PathName));
+    }
+
+    [Fact]
+    public async Task StartupRecoveryFailsClosedWhenUnresolvedIntentHasNewDevice()
+    {
+        var journal = new RecoveryJournal(3, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(AddonOwnedVirtualDeviceEntries: [new(Guid.NewGuid(), "steamcontroller", 0x28DE, 0x1102, [], [])]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), deviceEnumerator: new FakeControllerEnumerator([Device("new-instance")]), hidHideClient: new FakeHidHide());
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.True(File.Exists(PathName));
+    }
+
+    private static ControllerDeviceInfo Device(string instanceId) => new(instanceId, null, null, [], "HID", [], [], null, null, null, 0x28DE, 0x1102, true);
+
+    private sealed class FakeControllerEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
+    {
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices;
     }
 
     [Fact]
