@@ -184,6 +184,20 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.Equal("RecoveryBoundaryAlreadyOwned", reentry.Reason);
     }
 
+    [Fact]
+    public async Task SteamSessionBoundaryDoesNotResetWhileNativeSessionIsActive()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices);
+        await using var coordinator = CreateCoordinator(devices, modeController);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        Assert.False(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+        Assert.True(coordinator.HasOwnedRecoveryBoundary);
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+    }
+
     private static MsiClawNativeModeSessionCoordinator CreateCoordinator(
         FakeDeviceEnumerator devices,
         FakeModeController modeController,

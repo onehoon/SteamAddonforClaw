@@ -3,6 +3,11 @@ using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Routing;
 
+internal interface IRoutingRuntimeSessionBoundaryParticipant
+{
+    ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken);
+}
+
 internal sealed class RoutingPipelineRuntimeCoordinator
 {
     private static readonly RoutingDecision RecoveryResetDecision =
@@ -12,27 +17,75 @@ internal sealed class RoutingPipelineRuntimeCoordinator
 
     private readonly ISystemStatusProvider _statusProvider;
     private readonly RoutingPipelineSessionCoordinator _sessionCoordinator;
+    private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
+    private readonly SemaphoreSlim _transitionGate = new(1, 1);
+    private int _shutdownRequested;
 
     internal RoutingPipelineRuntimeCoordinator(
         ISystemStatusProvider statusProvider,
-        RoutingPipelineSessionCoordinator sessionCoordinator)
+        RoutingPipelineSessionCoordinator sessionCoordinator,
+        IEnumerable<IRoutingRuntimeSessionBoundaryParticipant>? sessionBoundaryParticipants = null)
     {
         _statusProvider = statusProvider ?? throw new ArgumentNullException(nameof(statusProvider));
         _sessionCoordinator = sessionCoordinator ?? throw new ArgumentNullException(nameof(sessionCoordinator));
+        _sessionBoundaryParticipants = (sessionBoundaryParticipants ?? []).ToArray();
     }
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileAsync(CancellationToken cancellationToken)
     {
+        if (IsShutdownRequested) return RuntimeStoppedResult();
+        await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (IsShutdownRequested) return RuntimeStoppedResult();
+            return await ReconcileCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _transitionGate.Release(); }
+    }
+
+    internal async ValueTask<bool> ReconcileAfterRecoveryAsync(CancellationToken cancellationToken)
+    {
+        if (IsShutdownRequested) return false;
+        await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (IsShutdownRequested) return false;
+            return await ReconcileAfterRecoveryCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _transitionGate.Release(); }
+    }
+
+    internal async ValueTask<RoutingPipelineSessionReconcileResult> ShutdownAsync()
+    {
+        Interlocked.Exchange(ref _shutdownRequested, 1);
+        await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            return await _sessionCoordinator.ReconcileAsync(
+                new RoutingDecision(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive),
+                IndeterminateClassification,
+                RoutingExperimentOptions.None,
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        finally { _transitionGate.Release(); }
+    }
+
+    private async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileCoreAsync(CancellationToken cancellationToken)
+    {
         var snapshot = await _statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
         var classification = Classify(snapshot.ControllerSoftware);
-        return await _sessionCoordinator.ReconcileAsync(
+        var result = await _sessionCoordinator.ReconcileAsync(
             snapshot.RoutingDecision,
             classification,
             RoutingExperimentOptions.None,
             cancellationToken).ConfigureAwait(false);
+        if (IsSteamSessionEnded(snapshot.RoutingDecision) && result.Succeeded &&
+            _sessionCoordinator.ActiveSession is null && _sessionCoordinator.PendingCleanup is null)
+            return await ApplySessionBoundaryAsync(result).ConfigureAwait(false);
+        return result;
     }
 
-    internal async ValueTask<bool> ReconcileAfterRecoveryAsync(CancellationToken cancellationToken)
+    private async ValueTask<bool> ReconcileAfterRecoveryCoreAsync(CancellationToken cancellationToken)
     {
         // RecoveryManager restores hardware before this boundary. Retire the old frozen
         // pipeline session first; never reuse it for post-recovery re-entry.
@@ -56,17 +109,29 @@ internal sealed class RoutingPipelineRuntimeCoordinator
         return result.Succeeded;
     }
 
-    internal async ValueTask<RoutingPipelineSessionReconcileResult> ShutdownAsync()
+    private async ValueTask<RoutingPipelineSessionReconcileResult> ApplySessionBoundaryAsync(RoutingPipelineSessionReconcileResult result)
     {
-        var result = await _sessionCoordinator.ReconcileAsync(
-            new RoutingDecision(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive),
-            IndeterminateClassification,
-            RoutingExperimentOptions.None,
-            CancellationToken.None).ConfigureAwait(false);
-        AppLog.Info("Routing.Runtime", "Shutdown routing reconciliation completed.",
-            ("Succeeded", result.Succeeded), ("Action", result.Action), ("Reason", result.Reason));
+        foreach (var participant in _sessionBoundaryParticipants)
+        {
+            try
+            {
+                if (!await participant.OnSteamSessionEndedAsync(CancellationToken.None).ConfigureAwait(false))
+                    return new(false, result.State, result.Action, "SteamSessionBoundaryFailed");
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("Routing.Runtime", "Steam session boundary participant failed.", exception);
+                return new(false, result.State, result.Action, "SteamSessionBoundaryFailed");
+            }
+        }
         return result;
     }
+
+    private bool IsShutdownRequested => Volatile.Read(ref _shutdownRequested) != 0;
+    private static bool IsSteamSessionEnded(RoutingDecision decision) =>
+        decision.Kind == RoutingDecisionKind.WaitingForSteam && decision.Reason == RoutingDecisionReason.SteamInactive;
+    private RoutingPipelineSessionReconcileResult RuntimeStoppedResult() =>
+        new(true, _sessionCoordinator.CurrentState, RoutingActionKind.None, "RuntimeShuttingDown");
 
     private static ControllerManagerClassification Classify(IReadOnlyList<ControllerSoftwareStatus> software)
     {
