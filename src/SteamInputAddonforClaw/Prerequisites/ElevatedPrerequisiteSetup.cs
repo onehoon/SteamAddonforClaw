@@ -81,6 +81,8 @@ internal static class ElevatedPrerequisiteSetup
             if (hidReceipt?.State == HidHideProvisioningReceiptState.InstalledPendingReboot) restartRequired = true;
             if (hidInstallation.Status == ComponentInstallationStatus.Missing)
             {
+                var shortcutCleanup = new HidHideDesktopShortcutCleanup();
+                var shortcutsBeforeInstall = shortcutCleanup.Snapshot();
                 if (File.Exists(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath))
                 {
                     AppLog.Warn("PrerequisiteSetup", "HidHide installation was blocked by an untrusted legacy receipt.", null, ("Reason", "LegacyHidHideReceiptPresent"));
@@ -101,6 +103,7 @@ internal static class ElevatedPrerequisiteSetup
                 var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
                 var state = outcome.IsProvisioned ? HidHideProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? HidHideProvisioningReceiptState.InstalledPendingReboot : HidHideProvisioningReceiptState.AttemptFailed;
                 hidStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
+                if (after.InspectionSucceeded && after.Installed) shortcutCleanup.RemoveInstallerCreated(shortcutsBeforeInstall);
                 AppLog.Info("PrerequisiteSetup", "HidHide installation result recorded.", ("AttemptId", receipt.AttemptId), ("ExitCode", code), ("ReceiptState", state), ("PackageInstalled", after.Installed), ("PackageVersion", after.Version), ("PrerequisiteStatus", afterPrerequisite.Status));
                 if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
                 restartRequired |= code == 3010;
@@ -180,7 +183,7 @@ internal static class ElevatedPrerequisiteSetup
             attempt++;
             var package = packageProbe();
             var prerequisite = prerequisiteProbe();
-            var packageEvidence = package.InspectionSucceeded && package.Installed && string.Equals(package.Version, expectedVersion, StringComparison.OrdinalIgnoreCase);
+            var packageEvidence = package.InspectionSucceeded && package.Installed && HidHidePackageVersionPolicy.AreEquivalent(package.Version, expectedVersion);
             AppLog.Debug("PrerequisiteSetup", "HidHide post-install verification poll.", ("Attempt", attempt), ("ElapsedMs", clock() - started), ("PackageInstalled", package.Installed), ("ControlStatus", prerequisite.Reason));
             if (packageEvidence)
             {
@@ -216,7 +219,7 @@ internal static class ElevatedPrerequisiteSetup
         {
             var package = packageProbe();
             var prerequisite = prerequisiteProbe();
-            var packageEvidence = package.InspectionSucceeded && package.Installed && string.Equals(package.Version, expectedVersion, StringComparison.OrdinalIgnoreCase);
+            var packageEvidence = package.InspectionSucceeded && package.Installed && HidHidePackageVersionPolicy.AreEquivalent(package.Version, expectedVersion);
             AppLog.Debug("PrerequisiteSetup", "usbip-win2 post-install verification poll.", ("ElapsedMs", clock() - started), ("PackageInstalled", package.Installed), ("PackageVersion", package.Version), ("RuntimeStatus", prerequisite.Status), ("InstallerExitCode", installerExitCode));
             if (packageEvidence) return (package, prerequisite);
             if (clock() - started >= timeoutMs) return (package, prerequisite);
@@ -266,7 +269,7 @@ internal static class ElevatedPrerequisiteSetup
         if (receipt.State is HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.AttemptFailed
             && package.InspectionSucceeded
             && package.Installed
-            && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase))
+            && HidHidePackageVersionPolicy.AreEquivalent(package.Version, receipt.InstallerVersion))
         {
             store.Save(receipt with { State = HidHideProvisioningReceiptState.Provisioned, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = null });
             AppLog.Info("PrerequisiteSetup", "HidHide failed receipt reconciled from exact installed package evidence.", ("AttemptId", receipt.AttemptId), ("State", HidHideProvisioningReceiptState.Provisioned), ("PackageInstalled", package.Installed), ("PackageVersion", package.Version), ("PrerequisiteStatus", prerequisite.Status));
@@ -276,7 +279,7 @@ internal static class ElevatedPrerequisiteSetup
             && BootSession.HasChangedSince(receipt.StartedAtUtc)
             && package.InspectionSucceeded
             && package.Installed
-            && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase))
+            && HidHidePackageVersionPolicy.AreEquivalent(package.Version, receipt.InstallerVersion))
         {
             store.Save(receipt with { State = HidHideProvisioningReceiptState.Provisioned, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = null });
             return;

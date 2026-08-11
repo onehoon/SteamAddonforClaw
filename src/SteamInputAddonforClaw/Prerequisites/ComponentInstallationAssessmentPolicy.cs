@@ -15,7 +15,9 @@ internal static class ComponentInstallationAssessmentPolicy
         if (!inspectionSucceeded)
             return new(kind, ComponentInstallationStatus.Indeterminate, "PackageInspectionFailed", version);
         if (installed)
-            return string.Equals(version, expectedVersion, StringComparison.OrdinalIgnoreCase)
+            return (kind == PrerequisiteKind.HidHide
+                ? HidHidePackageVersionPolicy.AreEquivalent(version, expectedVersion)
+                : string.Equals(version, expectedVersion, StringComparison.OrdinalIgnoreCase))
                 ? new(kind, ComponentInstallationStatus.Installed, "ExpectedPackagePresent", version)
                 : new(kind, ComponentInstallationStatus.Incompatible, "UnexpectedPackageVersion", version);
         if (runtime.Status == PrerequisiteStatus.Missing)

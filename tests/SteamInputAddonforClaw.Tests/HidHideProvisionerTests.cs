@@ -180,6 +180,21 @@ public sealed class HidHideProvisionerTests
     }
 
     [Fact]
+    public void FailedReceipt_RealWorldDisplayVersionReconcilesWithoutReinstall()
+    {
+        var receipt = Receipt(HidHideProvisioningReceiptState.AttemptFailed) with { FailureReason = "InstallerExitCode0" };
+        var store = new FakeStore { Receipt = receipt };
+        var runner = new FakeRunner();
+
+        Create(runner, store, HidHideInspectionStatus.Disabled, new(true, "1.5.230", true)).Reconcile();
+
+        Assert.Equal(HidHideProvisioningReceiptState.Provisioned, store.Receipt?.State);
+        Assert.Null(store.Receipt?.FailureReason);
+        Assert.Equal("1.5.230", store.Receipt?.ObservedInstalledVersion);
+        Assert.Equal(0, runner.Calls);
+    }
+
+    [Fact]
     public void InspectionFailure_DoesNotPromoteAnUnresolvedReceipt()
     {
         var receipt = Receipt(HidHideProvisioningReceiptState.InstallStarted);
