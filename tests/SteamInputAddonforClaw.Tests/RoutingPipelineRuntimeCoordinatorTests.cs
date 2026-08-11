@@ -200,6 +200,49 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task PostRecoveryTransitionCannotInterleaveWithNormalReconcile()
+    {
+        var executor = new FakeExecutor { BlockNextRollback = true };
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(Eligible(), Software()),
+            Snapshot(new(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive), Software()));
+        var bridge = Create(provider, executor);
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        var recovery = bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None).AsTask();
+        await executor.RollbackStarted.Task;
+        var normal = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await Task.Delay(10);
+        Assert.Equal(1, provider.CaptureCount);
+
+        executor.ReleaseRollback.TrySetResult();
+        await Task.WhenAll(recovery, normal);
+        Assert.Equal(3, provider.CaptureCount);
+        Assert.Equal(2, executor.ExecutedPlans.Count);
+    }
+
+    [Fact]
+    public async Task ShutdownRequestedPreventsQueuedReentry()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software())) { BlockNextCapture = true };
+        var bridge = Create(provider, executor);
+        var first = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await provider.CaptureStarted.Task;
+        var shutdown = bridge.Bridge.ShutdownAsync().AsTask();
+        var queued = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        provider.ReleaseCapture.TrySetResult();
+
+        await Task.WhenAll(first, shutdown, queued);
+        Assert.Equal(1, provider.CaptureCount);
+        Assert.Single(executor.ExecutedPlans);
+        Assert.Single(executor.RollbackPlans);
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Equal(RoutingOperationalState.Passive, bridge.Session.CurrentState);
+    }
+
+    [Fact]
     public async Task ShutdownIsTerminalAndLaterReconcileIsNoOp()
     {
         var executor = new FakeExecutor();
@@ -280,6 +323,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         internal List<RoutingPipelinePlan> ExecutedPlans { get; } = [];
         internal List<RoutingPipelinePlan> RollbackPlans { get; } = [];
         internal Queue<RoutingPipelineRollbackResult> RollbackResults { get; } = [];
+        internal bool BlockNextRollback { get; set; }
+        internal TaskCompletionSource RollbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseRollback { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public ValueTask<RoutingPipelineExecutionResult> ExecuteAsync(RoutingPipelinePlan plan, CancellationToken cancellationToken)
         {
@@ -290,7 +336,18 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         public ValueTask<RoutingPipelineRollbackResult> RollbackAsync(RoutingPipelinePlan plan, CancellationToken cancellationToken)
         {
             RollbackPlans.Add(plan);
-            return ValueTask.FromResult(RollbackResults.Count == 0 ? new RoutingPipelineRollbackResult(true, null, "Success") : RollbackResults.Dequeue());
+            return RollbackCoreAsync(plan, cancellationToken);
+        }
+
+        private async ValueTask<RoutingPipelineRollbackResult> RollbackCoreAsync(RoutingPipelinePlan plan, CancellationToken cancellationToken)
+        {
+            if (BlockNextRollback)
+            {
+                BlockNextRollback = false;
+                RollbackStarted.TrySetResult();
+                await ReleaseRollback.Task.WaitAsync(cancellationToken);
+            }
+            return RollbackResults.Count == 0 ? new RoutingPipelineRollbackResult(true, null, "Success") : RollbackResults.Dequeue();
         }
     }
 
