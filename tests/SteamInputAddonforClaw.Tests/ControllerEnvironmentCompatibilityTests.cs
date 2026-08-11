@@ -38,6 +38,98 @@ public sealed class ControllerEnvironmentCompatibilityTests
         ControllerEnvironmentCompatibilityReason.MultipleThirdPartyControllerManagersNotSupportedByCurrentVersion,
         _policy.Evaluate(Software(clawTweaks: Status(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.Installed), handheldCompanion: Status(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.Installed))).Reason);
 
+    [Fact]
+    public void Winhanced_IsAnOptionalSnapshotInputAndIsUnsupportedWhenPresent()
+    {
+        var statuses = Software();
+        statuses.Add(Status(ControllerSoftwareKind.Winhanced, SoftwareInstallationStatus.Installed));
+        var assessment = _policy.Evaluate(statuses);
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, assessment.Status);
+        Assert.Equal(ControllerEnvironmentCompatibilityReason.WinhancedNotSupportedByCurrentVersion, assessment.Reason);
+        Assert.False(assessment.AllowsMutation);
+    }
+
+    [Fact]
+    public void Winhanced_Running_IsUnsupported()
+    {
+        var statuses = Software();
+        statuses.Add(Status(ControllerSoftwareKind.Winhanced, runtime: SoftwareRuntimeStatus.Running));
+        var assessment = _policy.Evaluate(statuses);
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, assessment.Status);
+        Assert.Equal(ControllerEnvironmentCompatibilityReason.WinhancedNotSupportedByCurrentVersion, assessment.Reason);
+    }
+
+    [Fact]
+    public void Winhanced_Unresolved_IsIndeterminate()
+    {
+        var statuses = Software();
+        statuses.Add(Status(ControllerSoftwareKind.Winhanced, runtime: SoftwareRuntimeStatus.Indeterminate));
+        var assessment = _policy.Evaluate(statuses);
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Indeterminate, assessment.Status);
+        Assert.Equal(ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate, assessment.Reason);
+    }
+
+    [Theory]
+    [InlineData((int)ControllerSoftwareKind.ClawTweaks, (int)ControllerSoftwareKind.Winhanced)]
+    [InlineData((int)ControllerSoftwareKind.HandheldCompanion, (int)ControllerSoftwareKind.Winhanced)]
+    public void ThirdPartyManagerWithWinhanced_IsMultiple(int firstKindValue, int secondKindValue)
+    {
+        var statuses = Software();
+        var firstKind = (ControllerSoftwareKind)firstKindValue;
+        var secondKind = (ControllerSoftwareKind)secondKindValue;
+        statuses[(int)firstKind] = Status(firstKind, SoftwareInstallationStatus.Installed);
+        statuses.Add(Status(secondKind, SoftwareInstallationStatus.Installed));
+        var assessment = _policy.Evaluate(statuses);
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Unsupported, assessment.Status);
+        Assert.Equal(ControllerEnvironmentCompatibilityReason.MultipleThirdPartyControllerManagersNotSupportedByCurrentVersion, assessment.Reason);
+    }
+
+    [Fact]
+    public void AllThirdPartyManagersPresent_IsMultiple()
+    {
+        var statuses = Software();
+        statuses[(int)ControllerSoftwareKind.ClawTweaks] = Status(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.Installed);
+        statuses[(int)ControllerSoftwareKind.HandheldCompanion] = Status(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.Installed);
+        statuses.Add(Status(ControllerSoftwareKind.Winhanced, SoftwareInstallationStatus.Installed));
+        Assert.Equal(ControllerEnvironmentCompatibilityReason.MultipleThirdPartyControllerManagersNotSupportedByCurrentVersion, _policy.Evaluate(statuses).Reason);
+    }
+
+    [Fact]
+    public void UnknownManagerClassification_IsFailClosed()
+    {
+        var classification = new ControllerManagerClassification((ControllerManagerKind)999, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate);
+        var assessment = CurrentControllerEnvironmentCompatibilityPolicy.MapClassification(classification, Status(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running));
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Indeterminate, assessment.Status);
+        Assert.False(assessment.AllowsMutation);
+    }
+
+    [Fact]
+    public void WinhancedAbsentOrNotInstalled_PreservesStockBehavior()
+    {
+        var absent = _policy.Evaluate(Software());
+        var notInstalled = Software();
+        notInstalled.Add(Status(ControllerSoftwareKind.Winhanced));
+        Assert.Equal(absent, _policy.Evaluate(notInstalled));
+    }
+
+    [Fact]
+    public void PresentManagerTakesPrecedenceOverUnresolvedManager()
+    {
+        var statuses = Software(clawTweaks: Status(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.Installed), handheldCompanion: Status(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.Indeterminate, SoftwareRuntimeStatus.Indeterminate));
+        Assert.Equal(ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion, _policy.Evaluate(statuses).Reason);
+    }
+
+    [Fact]
+    public void DuplicateOptionalWinhanced_IsIndeterminate()
+    {
+        var statuses = Software();
+        statuses.Add(Status(ControllerSoftwareKind.Winhanced));
+        statuses.Add(Status(ControllerSoftwareKind.Winhanced));
+        var assessment = _policy.Evaluate(statuses);
+        Assert.Equal(ControllerEnvironmentCompatibilityStatus.Indeterminate, assessment.Status);
+        Assert.False(assessment.AllowsMutation);
+    }
+
     [Theory]
     [InlineData((int)SoftwareInstallationStatus.NotInstalled, (int)SoftwareRuntimeStatus.NotRunning, (int)ControllerEnvironmentCompatibilityStatus.Unsupported, (int)ControllerEnvironmentCompatibilityReason.MsiCenterMRequired)]
     [InlineData((int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.NotRunning, (int)ControllerEnvironmentCompatibilityStatus.Unsupported, (int)ControllerEnvironmentCompatibilityReason.MsiCenterMNotOperational)]

@@ -9,7 +9,7 @@ namespace SteamInputAddonforClaw.Status;
 
 internal sealed record DeviceStatusSnapshot(string Manufacturer, string Model, string BaseBoardProduct, IReadOnlyList<string> GpuModels);
 
-internal enum ControllerSoftwareKind { MsiCenterM, ClawTweaks, HandheldCompanion }
+internal enum ControllerSoftwareKind { MsiCenterM, ClawTweaks, HandheldCompanion, Winhanced }
 internal enum SoftwareInstallationStatus { Installed, NotInstalled, Indeterminate }
 internal enum SoftwareRuntimeStatus { Running, NotRunning, Starting, Indeterminate }
 internal sealed record ControllerSoftwareStatus(ControllerSoftwareKind Kind, string DisplayName, SoftwareInstallationStatus Installation, SoftwareRuntimeStatus Runtime, string Reason);
