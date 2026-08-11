@@ -89,7 +89,9 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Equal("DeviceAddReportedFailure", (await stage.ExecuteMutationAsync(CancellationToken.None)).Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.DoesNotContain("HID\\CHILD", hid.HiddenDevices);
+        Assert.DoesNotContain(hid.HiddenDevices, x => string.Equals(x, "USB\\MSI_ROOT", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("RemoveDevice:USB\\MSI_ROOT", hid.Trace);
+        Assert.DoesNotContain(hid.Applications, x => string.Equals(x, "C:\\addon.exe", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
