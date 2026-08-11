@@ -292,8 +292,8 @@ public sealed class FirstTimeSetupPolicyTests
 
         Assert.Equal(FirstTimeSetupStatus.Complete, setup.Status);
         Assert.False(prerequisites.IsRoutingReady);
-        Assert.Equal("Setup complete", presentation.Status);
-        Assert.Equal("Routing runtime is not available in this build.", presentation.Reason);
+        Assert.Equal("SetupRequired", presentation.Status);
+        Assert.Equal("VIIPER is required for controller routing.", presentation.Reason);
     }
 
     [Theory]
