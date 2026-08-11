@@ -332,6 +332,8 @@ public sealed class M1M2DiagnosticCoordinatorTests
         public HidHideInspection Inspect() => new(InspectionStatuses.TryDequeue(out var status) ? status : Status, Entries, Hidden ? ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST"] : []);
         public bool AddApplication(string executablePath) { AddCount++; _events?.Add("Add"); if (!AddSucceeds) { if (AddChangesBeforeFailure) Entries.Add(executablePath); return false; } Entries.Add(executablePath); return true; }
         public bool RemoveApplication(string executablePath) { RemoveCount++; _events?.Add("Remove"); if (!RemoveSucceeds) return false; Entries.Remove(executablePath); return true; }
+        public bool AddHiddenDevice(string deviceEntry) => true;
+        public bool RemoveHiddenDevice(string deviceEntry) => true;
     }
 
     private sealed class MemoryStore(List<string>? events = null) : IRecoveryJournalStore

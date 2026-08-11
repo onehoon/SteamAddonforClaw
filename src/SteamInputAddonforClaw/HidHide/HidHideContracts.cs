@@ -18,4 +18,6 @@ internal interface IHidHideClient
     HidHideInspection Inspect();
     bool AddApplication(string executablePath);
     bool RemoveApplication(string executablePath);
+    bool AddHiddenDevice(string deviceEntry);
+    bool RemoveHiddenDevice(string deviceEntry);
 }

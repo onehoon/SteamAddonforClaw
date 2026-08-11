@@ -108,6 +108,18 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         });
     }
 
+    public RecoveryResult RecordHidHideDeviceAddition(Guid recoverySessionId, string deviceEntry)
+    {
+        if (!TryNormalizeDeviceEntry(deviceEntry, out var normalized))
+            return new(RecoveryStatus.Failure, "The HidHide device entry is unavailable.");
+        return UpdateRecoverySession(recoverySessionId, journal =>
+        {
+            var additions = (journal.Mutations.HidHideDeviceAdditions ?? []).ToList();
+            if (!additions.Contains(normalized, StringComparer.OrdinalIgnoreCase)) additions.Add(normalized);
+            return journal with { Mutations = journal.Mutations with { HidHideDeviceAdditions = additions } };
+        });
+    }
+
     public RecoveryResult CompleteDeviceNativeStateMutation(Guid recoverySessionId) =>
         UpdateRecoverySession(recoverySessionId, journal => journal with
         {
@@ -127,6 +139,25 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
                 .ToArray();
             return journal with { Mutations = journal.Mutations with { ExecutableWhitelistAdditions = additions } };
         });
+    }
+
+    public RecoveryResult CompleteHidHideDeviceAddition(Guid recoverySessionId, string deviceEntry)
+    {
+        if (!TryNormalizeDeviceEntry(deviceEntry, out var normalized))
+            return new(RecoveryStatus.Failure, "The HidHide device entry is unavailable.");
+        return UpdateRecoverySession(recoverySessionId, journal =>
+        {
+            var additions = (journal.Mutations.HidHideDeviceAdditions ?? [])
+                .Where(entry => !string.Equals(entry, normalized, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            return journal with { Mutations = journal.Mutations with { HidHideDeviceAdditions = additions } };
+        });
+    }
+
+    private static bool TryNormalizeDeviceEntry(string? deviceEntry, out string normalized)
+    {
+        normalized = deviceEntry?.Trim() ?? string.Empty;
+        return normalized.Length > 0;
     }
 
     private RecoveryResult UpdateRecoverySession(Guid expectedRecoverySessionId, Func<RecoveryJournal, RecoveryJournal> update)
@@ -226,6 +257,22 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             return emptyCompletion with { Journal = journal };
         }
 
+        var deviceAdditions = journal.Mutations.HidHideDeviceAdditions ?? [];
+        for (var index = deviceAdditions.Count - 1; index >= 0; index--)
+        {
+            var recovered = RecoverHidHideDeviceAddition(journal, deviceAdditions[index]);
+            if (recovered.Status != RecoveryStatus.Success) return LogFailure(recovered, stopwatch);
+            var deviceCompletion = CompleteHidHideDeviceAddition(journal.RecoverySessionId, deviceAdditions[index]);
+            if (deviceCompletion.Status != RecoveryStatus.Success) return LogFailure(deviceCompletion with { Journal = journal }, stopwatch);
+            journal = deviceCompletion.Journal ?? journal with
+            {
+                Mutations = journal.Mutations with
+                {
+                    HidHideDeviceAdditions = deviceAdditions.Take(index).ToArray()
+                }
+            };
+        }
+
         var additions = journal.Mutations.ExecutableWhitelistAdditions ?? [];
         for (var index = additions.Count - 1; index >= 0; index--)
         {
@@ -264,11 +311,18 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
     private bool CanRecoverRecordedMutations(RecoveryJournal journal, out string reason)
     {
         if (!IsValidJournal(journal)) { reason = "Recovery journal is missing required state."; return false; }
-        if (journal.Mutations.HidHideDeviceAdditions is { Count: > 0 }) { reason = "Recorded HidHide device mutations are unsupported."; return false; }
         if (journal.Mutations.AddonOwnedVirtualDevices is { Count: > 0 }) { reason = "Recorded virtual-device mutations are unsupported."; return false; }
         if (journal.Mutations.TemporaryXbox360OutputCreated) { reason = "Recorded Xbox output mutations are unsupported."; return false; }
-        if (journal.Mutations.ExecutableWhitelistAdditions is { Count: > 0 } && hidHideClient is null)
-        { reason = "HidHide recovery support is unavailable."; return false; }
+        if (journal.Mutations.ExecutableWhitelistAdditions is { Count: > 0 } || journal.Mutations.HidHideDeviceAdditions is { Count: > 0 })
+        {
+            if (hidHideClient is null) { reason = "HidHide recovery support is unavailable."; return false; }
+            var inspection = hidHideClient.Inspect();
+            if (!inspection.IsConfigurationReadable)
+            { reason = $"HidHide recovery inspection is unsafe: {inspection.Status}."; return false; }
+        }
+        if (journal.Mutations.HidHideDeviceAdditions is { Count: > 0 } &&
+            journal.Mutations.HidHideDeviceAdditions.Any(string.IsNullOrWhiteSpace))
+        { reason = "The journaled HidHide device entry is invalid."; return false; }
         if (journal.Mutations.DeviceNativeStateChanged && (deviceRegistry is null || journal.OriginalDeviceState is null))
         { reason = "Native-state recovery support is unavailable."; return false; }
         if (journal.Mutations.DeviceNativeStateChanged)
@@ -333,6 +387,32 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
 
         AppLog.Info("HidHide", "Recorded HidHide whitelist lease removed.", ("ExecutablePath", executablePath));
         return new(RecoveryStatus.Success, "Recorded HidHide whitelist lease restored.", journal);
+    }
+
+    private RecoveryResult RecoverHidHideDeviceAddition(RecoveryJournal journal, string deviceEntry)
+    {
+        if (hidHideClient is null)
+            return new(RecoveryStatus.Failure, "HidHide recovery support is unavailable.", journal);
+
+        var inspection = hidHideClient.Inspect();
+        AppLog.Info("HidHide", "HidHide device recovery inspection completed.", ("Status", inspection.Status), ("DeviceEntry", deviceEntry));
+        if (!inspection.IsConfigurationReadable)
+            return new(RecoveryStatus.Failure, $"HidHide recovery inspection is unsafe: {inspection.Status}.", journal);
+
+        var present = (inspection.HiddenDeviceEntries ?? [])
+            .Any(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase));
+        if (!present)
+            return new(RecoveryStatus.Success, "Recorded HidHide device entry was already restored.", journal);
+
+        if (!hidHideClient.RemoveHiddenDevice(deviceEntry))
+            return new(RecoveryStatus.Failure, "Recorded HidHide device entry could not be removed.", journal);
+
+        var verification = hidHideClient.Inspect();
+        if (!verification.IsConfigurationReadable || (verification.HiddenDeviceEntries ?? [])
+            .Any(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase)))
+            return new(RecoveryStatus.Failure, "Recorded HidHide device entry removal could not be verified.", journal);
+
+        return new(RecoveryStatus.Success, "Recorded HidHide device entry restored.", journal);
     }
 
     public RecoveryResult CompleteRecoverySession()

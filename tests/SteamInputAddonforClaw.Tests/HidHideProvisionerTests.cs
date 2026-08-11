@@ -231,6 +231,8 @@ public sealed class HidHideProvisionerTests
         public HidHideInspection Inspect() => new(status, new HashSet<string>());
         public bool AddApplication(string executablePath) => true;
         public bool RemoveApplication(string executablePath) => true;
+        public bool AddHiddenDevice(string deviceEntry) => true;
+        public bool RemoveHiddenDevice(string deviceEntry) => true;
     }
     private sealed class FakePackageProbe(HidHidePackageState state) : IHidHidePackageProbe { public HidHidePackageState Inspect() => state; }
     private sealed class SequencedPackageProbe(params HidHidePackageState[] states) : IHidHidePackageProbe

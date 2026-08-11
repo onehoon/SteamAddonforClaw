@@ -145,6 +145,8 @@ public sealed class RuntimePrerequisiteInspectorTests
         public HidHideInspection Inspect() => new(status, new HashSet<string>());
         public bool AddApplication(string executablePath) => throw new NotSupportedException();
         public bool RemoveApplication(string executablePath) => throw new NotSupportedException();
+        public bool AddHiddenDevice(string deviceEntry) => throw new NotSupportedException();
+        public bool RemoveHiddenDevice(string deviceEntry) => throw new NotSupportedException();
     }
 
     private sealed class ThrowingHidHideClient : IHidHideClient
@@ -152,6 +154,8 @@ public sealed class RuntimePrerequisiteInspectorTests
         public HidHideInspection Inspect() => throw new InvalidOperationException();
         public bool AddApplication(string executablePath) => throw new NotSupportedException();
         public bool RemoveApplication(string executablePath) => throw new NotSupportedException();
+        public bool AddHiddenDevice(string deviceEntry) => throw new NotSupportedException();
+        public bool RemoveHiddenDevice(string deviceEntry) => throw new NotSupportedException();
     }
 
     private sealed class FakeUsbIpProbe(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled = false) : IUsbIpWin2DeviceProbe

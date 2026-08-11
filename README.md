@@ -96,6 +96,8 @@ The addon should remain a small routing layer between the MSI Claw controller an
 
 Native controller state is owned by the active handheld-device adapter. Recovery persists a device-neutral snapshot envelope with a stable device ID and an opaque device-specific payload, then selects the restoring adapter from that journaled ID rather than re-detecting the current handheld. The recovery core never interprets device-specific payloads.
 
+Recovery schema v2 can record multiple addon-owned mutations in one session. Mutation evidence is persisted before the corresponding change, each successful rollback clears only its own recorded mutation, and the journal is deleted only when empty. Current mixed crash recovery supports native device state, HidHide executable whitelist additions, and HidHide physical-device additions in reverse mutation order with progressive checkpoints. Virtual-output and temporary Xbox output mutations remain unsupported and fail closed.
+
 MSI Claw native-state restoration currently verifies an already-restored state only; active controller mode switching and restoration remain a later hardware PoC.
 
 ## Power-transition safety
@@ -804,7 +806,7 @@ HidHide and usbip-win2 are required prerequisites for supported addon routing. I
 
 The pinned usbip-win2 baseline is official x64 release **0.9.7.7**. Version 0.9.7.8 is deliberately excluded from bundled and runtime-download candidates. The setup page warns that USB devices can briefly disconnect while usbip-win2 installs; the helper uses `/NORESTART` and reports restart-required rather than restarting Windows itself.
 
-The v1 compatibility baseline is the official HidHide 1.5.230 release. The addon uses its persistent configuration API with recovery journaling; newer process/session blacklist APIs are not required by v1.
+The v1 compatibility baseline is the official HidHide 1.5.230 release. The addon uses its persistent configuration API with recovery journaling; newer process/session blacklist APIs are not required by v1. The recoverable HidHide device-mutation foundation preserves unrelated entries and tracks only exact entries newly owned by the addon; the PhysicalIsolation stage remains disabled.
 
 Installing HidHide alone must not hide the MSI Claw controller. While the addon is PASSIVE, it owns no HidHide device hiding or whitelist lease. In Stock MSI Center M environments the physical controller remains normally exposed; existing ClawTweaks/HHC HidHide configuration and controller exposure state are left unchanged.
 

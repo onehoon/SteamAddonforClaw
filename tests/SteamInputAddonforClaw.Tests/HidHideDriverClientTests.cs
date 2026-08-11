@@ -110,6 +110,47 @@ public sealed class HidHideDriverClientTests
         Assert.Equal([clawTweaks, helper], device.Whitelist);
     }
 
+    [Fact]
+    public void AddHiddenDevice_PreservesExistingEntriesAndUsesVerifiedIoctl()
+    {
+        var device = new FakeDevice([], ["A", "B"]) { Active = true };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.AddHiddenDevice("C"));
+        Assert.Equal(["A", "B", "C"], device.Blacklist);
+        Assert.Contains(2051u, device.WrittenFunctions);
+    }
+
+    [Fact]
+    public void AddHiddenDevice_ExistingExactEntryDoesNotWrite()
+    {
+        var device = new FakeDevice([], ["ABC"]) { Active = true };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.AddHiddenDevice("abc"));
+        Assert.Empty(device.WrittenFunctions);
+    }
+
+    [Fact]
+    public void RemoveHiddenDevice_RemovesOnlyExactEntry()
+    {
+        var device = new FakeDevice([], ["ABC", "ABC2", "Other"]) { Active = true };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.RemoveHiddenDevice("abc"));
+        Assert.Equal(["ABC2", "Other"], device.Blacklist);
+    }
+
+    [Fact]
+    public void RemoveHiddenDevice_AlreadyAbsentDoesNotWrite()
+    {
+        var device = new FakeDevice([], ["ABC"]) { Active = true };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.RemoveHiddenDevice("missing"));
+        Assert.Empty(device.WrittenFunctions);
+    }
+
     private static HidHidePathConverter Converter() => new(new FakeDosDevices());
 
     private sealed class FakeDosDevices : IDosDeviceNameResolver
@@ -127,6 +168,8 @@ public sealed class HidHideDriverClientTests
     {
         public List<string> Whitelist { get; } = whitelist;
         public List<string> Blacklist { get; } = blacklist;
+        public bool Active { get; init; }
+        public List<uint> WrittenFunctions { get; } = [];
         public uint? QuerySizeOverride { get; init; }
         public uint? ReturnedLengthOverride { get; init; }
         public int ZeroBufferQueries { get; private set; }
@@ -142,7 +185,7 @@ public sealed class HidHideDriverClientTests
             if (function is 2052 or 2054)
             {
                 bytesReturned = 1;
-                if (output is not null) output[0] = 0;
+                if (output is not null) output[0] = function == 2052 && Active ? (byte)1 : (byte)0;
                 return true;
             }
             if (function is 2048 or 2050)
@@ -155,6 +198,11 @@ public sealed class HidHideDriverClientTests
             if (function == 2049)
             {
                 Whitelist.Clear(); Whitelist.AddRange(HidHideDriverClient.DeserializeMultiString(input!)); bytesReturned = 0; return true;
+            }
+            if (function == 2051)
+            {
+                WrittenFunctions.Add(function);
+                Blacklist.Clear(); Blacklist.AddRange(HidHideDriverClient.DeserializeMultiString(input!)); bytesReturned = 0; return true;
             }
             bytesReturned = 0; errorCode = 1; return false;
         }
