@@ -34,6 +34,7 @@ public sealed class MsiClawPhysicalInputStageTests
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Equal(descriptor, input.PreparedDescriptor);
         Assert.Equal(1, input.StartPreparedCount);
+        Assert.Equal(new MsiClawPhysicalInputIdentity(descriptor.InstanceGuid, descriptor.DevicePath!, descriptor.PnpInstanceId!, descriptor.PhysicalIdentity!), stage.CurrentIdentity);
     }
 
     [Fact]
@@ -57,6 +58,7 @@ public sealed class MsiClawPhysicalInputStageTests
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Equal(1, input.StopCount);
+        Assert.Null(stage.CurrentIdentity);
     }
 
     [Fact]

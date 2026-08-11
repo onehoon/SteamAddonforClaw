@@ -23,6 +23,11 @@ internal interface IMsiClawNativeModeStageSession
     Task<bool> ExitForPipelineAsync(CancellationToken cancellationToken);
 }
 
+internal interface IRoutingRecoverySessionProvider
+{
+    Guid? CurrentRecoverySessionId { get; }
+}
+
 internal sealed class MsiClawNativeModeStage : IRoutingPipelineStage
 {
     private readonly IMsiClawNativeModeStageSession _session;

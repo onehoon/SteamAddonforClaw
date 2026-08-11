@@ -34,7 +34,7 @@ internal static class RoutingExperimentPlanBuilder
         var baseline = strategy.BuildBaselinePlan();
         if (!AreKnownModes(baseline)) return RoutingPipelinePlan.AllDisabled;
 
-        return new(
+        var plan = new RoutingPipelinePlan(
             overrides.NativeMode ?? baseline.NativeMode,
             overrides.PhysicalInput ?? baseline.PhysicalInput,
             overrides.PhysicalIsolation ?? baseline.PhysicalIsolation,
@@ -42,6 +42,11 @@ internal static class RoutingExperimentPlanBuilder
             overrides.SteamOutput ?? baseline.SteamOutput,
             overrides.XboxOutput ?? baseline.XboxOutput,
             overrides.GameBarRouting ?? baseline.GameBarRouting);
+        if (strategy.Kind == RoutingEnvironmentStrategyKind.StockCenterM
+            && plan.PhysicalIsolation == RoutingStageMode.Enabled
+            && plan.PhysicalInput != RoutingStageMode.Enabled)
+            return RoutingPipelinePlan.AllDisabled;
+        return plan;
     }
 
     private static bool AreKnownModes(RoutingStageExperimentOptions options) =>
