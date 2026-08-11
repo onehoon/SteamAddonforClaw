@@ -94,6 +94,31 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task FailedEnterWithFailedRollbackPreservesPendingCleanupForRetry()
+    {
+        var executor = new FakeExecutor
+        {
+            ExecuteResult = new(false, RoutingStageKind.PhysicalIsolation, "StageFailed", false)
+        };
+        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+
+        var failed = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), RoutingExperimentOptions.None, CancellationToken.None);
+
+        Assert.False(failed.Succeeded);
+        Assert.Null(coordinator.ActiveSession);
+        Assert.NotNull(coordinator.PendingCleanup);
+        var frozen = coordinator.PendingCleanup!.Session;
+        executor.RollbackResults.Enqueue(new(true, null, "Success"));
+
+        var cleanup = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), RoutingExperimentOptions.None, CancellationToken.None);
+
+        Assert.True(cleanup.Succeeded);
+        Assert.Equal(frozen.Plan, executor.RollbackPlans.Single());
+        Assert.Null(coordinator.PendingCleanup);
+        Assert.Null(coordinator.ActiveSession);
+    }
+
+    [Fact]
     public async Task FailedExitPreservesFrozenSessionAndRetryUsesSamePlan()
     {
         var executor = new FakeExecutor();
@@ -115,6 +140,32 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         Assert.True(second.Succeeded);
         Assert.Equal(frozen.Plan, executor.RollbackPlans[0]);
         Assert.Equal(frozen.Plan, executor.RollbackPlans[1]);
+        Assert.Null(coordinator.ActiveSession);
+    }
+
+    [Fact]
+    public async Task PendingExitCleanupPrecedesEligibleDecision()
+    {
+        var executor = new FakeExecutor();
+        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), RoutingExperimentOptions.None, CancellationToken.None);
+        var frozen = coordinator.ActiveSession;
+        Assert.NotNull(frozen);
+        executor.RollbackResults.Enqueue(new(false, RoutingStageKind.PhysicalIsolation, "CleanupFailed"));
+        executor.RollbackResults.Enqueue(new(true, null, "Success"));
+
+        var failedExit = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.WaitingForSteam), Classification(ControllerManagerKind.None), RoutingExperimentOptions.None, CancellationToken.None);
+        var retry = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.ClawTweaks), new RoutingExperimentOptions(
+            RoutingStageExperimentOptions.None,
+            new RoutingStageExperimentOptions(SteamOutput: RoutingStageMode.Enabled)), CancellationToken.None);
+
+        Assert.False(failedExit.Succeeded);
+        Assert.True(retry.Succeeded);
+        Assert.Equal("PendingCleanupCompleted", retry.Reason);
+        Assert.Equal(frozen.Plan, executor.RollbackPlans[0]);
+        Assert.Equal(frozen.Plan, executor.RollbackPlans[1]);
+        Assert.Empty(executor.ExecutedPlans.Skip(1));
+        Assert.Equal(RoutingOperationalState.Passive, coordinator.CurrentState);
         Assert.Null(coordinator.ActiveSession);
     }
 

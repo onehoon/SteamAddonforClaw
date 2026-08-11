@@ -8,6 +8,10 @@ internal sealed record ActiveRoutingPipelineSession(
     ControllerManagerClassification Classification,
     RoutingPipelinePlan Plan);
 
+internal sealed record PendingRoutingPipelineCleanup(
+    ActiveRoutingPipelineSession Session,
+    RoutingActionPlan ActionPlan);
+
 internal sealed record RoutingPipelineSessionReconcileResult(
     bool Succeeded,
     RoutingOperationalState State,
@@ -22,6 +26,7 @@ internal sealed class RoutingPipelineSessionCoordinator
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _sessionSync = new();
     private ActiveRoutingPipelineSession? _activeSession;
+    private PendingRoutingPipelineCleanup? _pendingCleanup;
 
     internal RoutingPipelineSessionCoordinator(
         IRoutingEnvironmentStrategyResolver strategyResolver,
@@ -41,6 +46,14 @@ internal sealed class RoutingPipelineSessionCoordinator
         }
     }
 
+    internal PendingRoutingPipelineCleanup? PendingCleanup
+    {
+        get
+        {
+            lock (_sessionSync) return _pendingCleanup;
+        }
+    }
+
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileAsync(
         RoutingDecision decision,
         ControllerManagerClassification classification,
@@ -50,6 +63,13 @@ internal sealed class RoutingPipelineSessionCoordinator
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (PendingCleanup is not null)
+            {
+                var cleanupResult = await RetryPendingCleanupAsync().ConfigureAwait(false);
+                if (!cleanupResult.Succeeded) return cleanupResult;
+                return cleanupResult;
+            }
+
             var actionPlan = _routingCoordinator.Plan(decision);
             if (actionPlan.Action == RoutingActionKind.None)
                 return Success(actionPlan.Action, actionPlan.Reason.ToString());
@@ -97,13 +117,18 @@ internal sealed class RoutingPipelineSessionCoordinator
 
         if (!execution.Succeeded)
         {
-            ClearActiveSession();
+            if (!execution.RollbackSucceeded)
+                SetPendingCleanup(new(candidate, actionPlan));
+            else
+                ClearActiveSession();
             return Failure(actionPlan.Action, $"PipelineEnterFailed:{execution.Reason}");
         }
 
         if (!_routingCoordinator.TryCommit(actionPlan))
         {
-            await _pipelineExecutor.RollbackAsync(plan, CancellationToken.None).ConfigureAwait(false);
+            var rollback = await _pipelineExecutor.RollbackAsync(plan, CancellationToken.None).ConfigureAwait(false);
+            if (!rollback.Succeeded)
+                SetPendingCleanup(new(candidate, actionPlan));
             ClearActiveSession();
             return Failure(actionPlan.Action, "RoutingCommitFailedAfterEnter");
         }
@@ -129,6 +154,7 @@ internal sealed class RoutingPipelineSessionCoordinator
         var rollback = await _pipelineExecutor.RollbackAsync(session.Plan, cancellationToken).ConfigureAwait(false);
         if (!rollback.Succeeded)
         {
+            SetPendingCleanup(new(session, actionPlan));
             AppLog.Warn("Routing.Session", "Routing session rollback failed.", fields:
                 [("Action", actionPlan.Action), ("Result", "RollbackFailed"), ("FailedStage", rollback.FailedStage),
                  ("Reason", rollback.Reason), ("SessionPreserved", true)]);
@@ -153,9 +179,38 @@ internal sealed class RoutingPipelineSessionCoordinator
         lock (_sessionSync) _activeSession = session;
     }
 
+    private void SetPendingCleanup(PendingRoutingPipelineCleanup cleanup)
+    {
+        lock (_sessionSync) _pendingCleanup = cleanup;
+    }
+
     private void ClearActiveSession()
     {
         lock (_sessionSync) _activeSession = null;
+    }
+
+    private void ClearPendingCleanup()
+    {
+        lock (_sessionSync) _pendingCleanup = null;
+    }
+
+    private async ValueTask<RoutingPipelineSessionReconcileResult> RetryPendingCleanupAsync()
+    {
+        var pending = PendingCleanup;
+        if (pending is null) return Success(RoutingActionKind.None, "NoPendingCleanup");
+
+        var rollback = await _pipelineExecutor.RollbackAsync(pending.Session.Plan, CancellationToken.None).ConfigureAwait(false);
+        if (!rollback.Succeeded)
+            return Failure(pending.ActionPlan.Action, $"PendingCleanupFailed:{rollback.Reason}");
+
+        if (pending.ActionPlan.Action == RoutingActionKind.ExitOverride && !_routingCoordinator.TryCommit(pending.ActionPlan))
+            return Failure(pending.ActionPlan.Action, "RoutingCommitFailedAfterPendingCleanup");
+
+        if (pending.ActionPlan.Action == RoutingActionKind.ExitOverride)
+            ClearActiveSession();
+
+        ClearPendingCleanup();
+        return Success(pending.ActionPlan.Action, "PendingCleanupCompleted");
     }
 
     private RoutingPipelineSessionReconcileResult Success(RoutingActionKind action, string reason) =>
