@@ -63,7 +63,18 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     public async Task<MsiClawNativeModeEnterResult> EnterForPipelineAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await StartCoreLockedAsync(cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            return await StartCoreLockedAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return MsiClawNativeModeEnterResult.Failure(_recoveryBoundaryOwned, exception.GetType().Name);
+        }
         finally { _gate.Release(); }
     }
 
@@ -145,16 +156,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         _snapshot = captured.Snapshot;
         _recoveryBoundaryOwned = true;
         var identity = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
-        MsiClawModeTransitionResult result;
-        try
-        {
-            result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            return MsiClawNativeModeEnterResult.Failure(true, exception.GetType().Name);
-        }
-
+        var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(true, "PowerGateChangedAfterModeSwitch");
         _active = true;

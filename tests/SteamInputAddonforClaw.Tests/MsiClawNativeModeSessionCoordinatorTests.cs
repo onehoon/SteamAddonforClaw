@@ -82,12 +82,41 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         var modeController = new FakeModeController(devices) { FailEnter = true };
         await using var coordinator = CreateCoordinator(devices, modeController);
 
-        Assert.False(await coordinator.ObserveRoutingDecisionAsync(Eligible(), 1));
+        await Assert.ThrowsAsync<IOException>(() => coordinator.ObserveRoutingDecisionAsync(Eligible(), 1));
         Assert.False(coordinator.IsActive);
         Assert.True(coordinator.HasOwnedRecoveryBoundary);
         Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
         Assert.False(coordinator.HasOwnedRecoveryBoundary);
         Assert.Contains(MsiClawNativeMode.XInput, modeController.Targets);
+    }
+
+    [Fact]
+    public async Task PipelineEnterConvertsPostJournalExceptionToTypedRollbackFailure()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailEnter = true };
+        await using var coordinator = CreateCoordinator(devices, modeController);
+
+        var result = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.True(result.RequiresRollback);
+        Assert.Equal(nameof(IOException), result.Reason);
+        Assert.True(coordinator.HasOwnedRecoveryBoundary);
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PipelineEnterPreservesCancellationAndRecoveryOwnership()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { ThrowEnterCancellation = true };
+        await using var coordinator = CreateCoordinator(devices, modeController);
+        using var cancellation = new CancellationTokenSource();
+        modeController.AfterModeApplied = cancellation.Cancel;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coordinator.EnterForPipelineAsync(cancellation.Token));
+        Assert.True(coordinator.HasOwnedRecoveryBoundary);
     }
 
     [Fact]
@@ -140,6 +169,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         public bool BlockFirstSwitch { get; set; }
         public bool FailRestore { get; set; }
         public bool FailEnter { get; set; }
+        public bool ThrowEnterCancellation { get; set; }
         public Action? AfterModeApplied { get; set; }
         public TaskCompletionSource FirstSwitchStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<MsiClawNativeMode> Targets { get; } = [];
@@ -161,6 +191,8 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
             }
             if (target == MsiClawNativeMode.DirectInput && FailEnter)
                 throw new IOException("simulated enter failure");
+            if (target == MsiClawNativeMode.DirectInput && ThrowEnterCancellation)
+                throw new OperationCanceledException(cancellationToken);
             if (target == MsiClawNativeMode.XInput && FailRestore)
                 throw new IOException("simulated restore failure");
             devices.Mode = target;

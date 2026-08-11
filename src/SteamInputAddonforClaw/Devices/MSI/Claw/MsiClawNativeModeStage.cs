@@ -87,7 +87,7 @@ internal sealed class MsiClawNativeModeStage : IRoutingPipelineStage
         }
 
         var restored = await _session.ExitForPipelineAsync(cancellationToken).ConfigureAwait(false);
-        if (!restored || _session.IsActive)
+        if (!restored || _session.IsActive || _session.HasOwnedRecoveryBoundary)
             return RoutingStageOperationResult.Failure("NativeModeRestoreFailed");
 
         _ownsMutation = false;
