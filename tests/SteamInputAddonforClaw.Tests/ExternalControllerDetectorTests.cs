@@ -103,7 +103,7 @@ public sealed class ExternalControllerDetectorTests
     public void Detect_WhenSteamController1304OnlyExposesMouseCollection_ReturnsClear()
     {
         var root = SteamController1304Root();
-        var mouse = SteamController1304HidCollection([root.InstanceId, "USB\\ROOT_HUB30\\1"], "HID_DEVICE_SYSTEM_MOUSE", 0x0002);
+        var mouse = SteamController1304HidCollection([root.InstanceId, "USB\\ROOT_HUB30\\1"], "HID_DEVICE_SYSTEM_MOUSE", 0x0002, 0x0001);
         var assessment = Detect([mouse, root]);
         var result = new ControllerDeviceClassifier().ClassifyDetailed(mouse, new ControllerTopologySnapshot([mouse, root]));
 
@@ -138,6 +138,23 @@ public sealed class ExternalControllerDetectorTests
         Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
         Assert.Equal(ControllerDeviceClassification.KnownVirtual, result.Classification);
         Assert.Equal("KnownVirtualUsbIpAncestor", result.Reason);
+    }
+
+    [Theory]
+    [InlineData("HID_DEVICE_SYSTEM_MOUSE", 0x0001, 0x0002)]
+    [InlineData("HID_DEVICE_SYSTEM_KEYBOARD", 0x0001, 0x0006)]
+    [InlineData("HID_DEVICE_UP:FF00_U:0002", 0xFF00, 0x0002)]
+    public void Detect_WhenSteamController1304CollectionIsNotControllerCollection_ReturnsClear(string evidence, int usagePage, int usage)
+    {
+        var root = SteamController1304Root();
+        var collection = SteamController1304HidCollection([root.InstanceId, "USB\\ROOT_HUB30\\1"], evidence, (ushort)usage, (ushort)usagePage);
+
+        var assessment = Detect([collection, root]);
+        var result = new ControllerDeviceClassifier().ClassifyDetailed(collection, new ControllerTopologySnapshot([collection, root]));
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, assessment.Status);
+        Assert.Equal(ControllerDeviceClassification.NotController, result.Classification);
+        Assert.Equal("SteamController1304CollectionIsNotControllerCapable", result.Reason);
     }
 
     [Fact]
@@ -417,7 +434,7 @@ public sealed class ExternalControllerDetectorTests
             true);
     }
 
-    private static ControllerDeviceInfo SteamController1304HidCollection(IReadOnlyList<string> ancestorInstanceIds, string evidence = "HID_DEVICE_UP:0001_U:0004", ushort usage = 0x0004)
+    private static ControllerDeviceInfo SteamController1304HidCollection(IReadOnlyList<string> ancestorInstanceIds, string evidence = "HID_DEVICE_UP:FF00_U:0001", ushort usage = 0x0001, ushort usagePage = 0xFF00)
     {
         return new ControllerDeviceInfo(
             "HID\\VID_28DE&PID_1304&MI_02&COL03\\STEAM_CONTROLLER",
@@ -433,7 +450,7 @@ public sealed class ExternalControllerDetectorTests
             0x28DE,
             0x1304,
             true,
-            UsagePage: 0x0001,
+            UsagePage: usagePage,
             Usage: usage);
     }
 
