@@ -39,7 +39,7 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
                 try { normalizedWhitelist.Add(_pathConverter.ToDosPath(fullImageName)); }
                 catch (Exception exception) { AppLog.Warn("HidHide", "A HidHide whitelist entry could not be normalized.", exception, ("Action", "PreserveRawEntry")); }
             }
-            var status = !active ? HidHideInspectionStatus.Disabled : inverse ? HidHideInspectionStatus.InverseWhitelist : HidHideInspectionStatus.Available;
+            var status = inverse ? HidHideInspectionStatus.InverseWhitelist : !active ? HidHideInspectionStatus.Disabled : HidHideInspectionStatus.Available;
             return new(status, normalizedWhitelist, blacklist, rawWhitelist, active, inverse);
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == 2)

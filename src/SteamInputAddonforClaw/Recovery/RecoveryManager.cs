@@ -332,7 +332,7 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         {
             if (hidHideClient is null) return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state recovery support is unavailable.", journal), stopwatch);
             var inspection = hidHideClient.Inspect();
-            if (!inspection.IsConfigurationReadable || inspection.IsInverseWhitelist)
+            if (!inspection.IsConfigurationReadable)
                 return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state recovery inspection is unsafe.", journal), stopwatch);
             if (inspection.IsActive != originalActive && !hidHideClient.SetActive(originalActive))
                 return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state restoration could not be verified.", journal), stopwatch);
@@ -456,7 +456,7 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         {
             if (hidHideClient is null) { reason = "HidHide active-state recovery support is unavailable."; return false; }
             var inspection = hidHideClient.Inspect();
-            if (!inspection.IsConfigurationReadable || inspection.IsInverseWhitelist) { reason = "HidHide active-state recovery inspection is unsafe."; return false; }
+            if (!inspection.IsConfigurationReadable) { reason = "HidHide active-state recovery inspection is unsafe."; return false; }
         }
         reason = "Recoverable recorded mutations.";
         return true;

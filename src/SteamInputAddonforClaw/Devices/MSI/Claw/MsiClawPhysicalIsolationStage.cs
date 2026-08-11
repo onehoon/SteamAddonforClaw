@@ -23,7 +23,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     private bool _activeMutationJournaled;
     private bool _activeMutationOwned;
 
-    private sealed record Prepared(MsiClawPhysicalInputIdentity Identity, Guid SessionId, string ExecutablePath, bool WhitelistPreExisting, EntryState[] Entries, bool OriginalActive);
+    private sealed record Prepared(MsiClawPhysicalInputIdentity Identity, Guid SessionId, string ExecutablePath, bool WhitelistPreExisting, EntryState[] Entries, bool OriginalActive, bool OriginalInverse);
     private sealed class EntryState(string value, bool preExisting)
     {
         internal string Value { get; } = value;
@@ -60,7 +60,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(value => new EntryState(value, (inspection.HiddenDeviceEntries ?? []).Any(existing => string.Equals(existing, value, StringComparison.OrdinalIgnoreCase))))
             .ToArray();
-        lock (_sync) _prepared = new(identity, id, executablePath, inspection.ApplicationWhitelist.Contains(executablePath), values, inspection.IsActive);
+        lock (_sync) _prepared = new(identity, id, executablePath, inspection.ApplicationWhitelist.Contains(executablePath), values, inspection.IsActive, inspection.IsInverseWhitelist);
         return ValueTask.FromResult(Success("Ready"));
     }
 
@@ -69,6 +69,9 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         cancellationToken.ThrowIfCancellationRequested(); Prepared? prepared; lock (_sync) prepared = _prepared;
         if (prepared is null) return ValueTask.FromResult(Failure("PhysicalIsolationNotPrepared"));
         if (!Matches(prepared)) return ValueTask.FromResult(Failure("PhysicalIsolationDrift"));
+        var currentInspection = _hidHide.Inspect();
+        if (!currentInspection.IsConfigurationReadable || currentInspection.IsActive != prepared.OriginalActive || currentInspection.IsInverseWhitelist != prepared.OriginalInverse)
+            return ValueTask.FromResult(Failure("HidHideStateDrift"));
         _sessionId = prepared.SessionId; _executablePath = prepared.ExecutablePath; _entries = prepared.Entries;
 
         if (!prepared.WhitelistPreExisting)
@@ -129,7 +132,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         if (_activeMutationOwned || _activeMutationJournaled)
         {
             var inspection = _hidHide.Inspect();
-            if (!inspection.IsConfigurationReadable || inspection.IsInverseWhitelist) return ValueTask.FromResult(Failure("ActiveStateRestoreUnverified"));
+            if (!inspection.IsConfigurationReadable) return ValueTask.FromResult(Failure("ActiveStateRestoreUnverified"));
             if (inspection.IsActive && !_hidHide.SetActive(false)) return ValueTask.FromResult(Failure("ActiveStateRestoreFailed"));
             var verification = _hidHide.Inspect();
             if (!verification.IsConfigurationReadable || verification.IsActive) return ValueTask.FromResult(Failure("ActiveStateRestoreUnverified"));

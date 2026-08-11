@@ -36,6 +36,16 @@ public sealed class HidHideDriverClientTests
         Assert.True(device.ZeroBufferQueries >= 2);
     }
 
+    [Fact]
+    public void Inspect_InverseWhitelistWinsWhenInactive()
+    {
+        var device = new FakeDevice([], []) { Active = false, Inverse = true };
+        var inspection = new HidHideDriverClient(new FakeNative(device), Converter()).Inspect();
+
+        Assert.Equal(HidHideInspectionStatus.InverseWhitelist, inspection.Status);
+        Assert.True(inspection.IsInverseWhitelist);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(3)]
@@ -195,6 +205,7 @@ public sealed class HidHideDriverClientTests
         public List<string> Whitelist { get; } = whitelist;
         public List<string> Blacklist { get; } = blacklist;
         public bool Active { get; set; }
+        public bool Inverse { get; init; }
         public List<byte> ActivePayloads { get; } = [];
         public List<uint> WrittenFunctions { get; } = [];
         public List<uint> WrittenControlCodes { get; } = [];
@@ -213,7 +224,7 @@ public sealed class HidHideDriverClientTests
             if (function is 2052 or 2054)
             {
                 bytesReturned = 1;
-                if (output is not null) output[0] = function == 2052 && Active ? (byte)1 : (byte)0;
+                if (output is not null) output[0] = function == 2052 ? (Active ? (byte)1 : (byte)0) : (Inverse ? (byte)1 : (byte)0);
                 return true;
             }
             if (function is 2048 or 2050)

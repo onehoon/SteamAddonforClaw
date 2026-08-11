@@ -332,6 +332,25 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.Equal(["HID\\B", "HID\\A", "C:\\addon-b.exe", "C:\\addon-a.exe", "RestoreNative"], trace);
     }
 
+    [Fact]
+    public async Task ActiveStateRecoveryRunsBeforeDeviceAndWhitelistCleanup()
+    {
+        var trace = new List<string>();
+        var hidHide = new FakeHidHide { Events = trace, Active = true };
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), hidHideClient: hidHide);
+        var session = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(OriginalHidHideActiveState: false, HidHideDeviceAdditions: ["HID\\A"], ExecutableWhitelistAdditions: ["C:\\addon.exe"]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(session));
+        hidHide.HiddenEntries.Add("HID\\A");
+        hidHide.Entries.Add("C:\\addon.exe");
+
+        Assert.Equal(RecoveryStatus.Success, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
+        Assert.Equal("SetActive:False", trace[0]);
+        Assert.Equal(["SetActive:False", "HID\\A", "C:\\addon.exe"], trace);
+        Assert.False(hidHide.Active);
+    }
+
     [Theory]
     [InlineData((int)HidHideInspectionStatus.Disabled)]
     [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
@@ -589,8 +608,10 @@ public sealed class RecoveryManagerTests : IDisposable
         public int RemoveCount { get; private set; }
         public List<string>? Events { get; init; }
         public bool RemoveSucceeds { get; init; } = true;
+        public bool Active { get; set; }
         public SteamInputAddonforClaw.HidHide.HidHideInspectionStatus Status { get; init; } = SteamInputAddonforClaw.HidHide.HidHideInspectionStatus.Available;
-        public SteamInputAddonforClaw.HidHide.HidHideInspection Inspect() => new(Status, Entries, HiddenEntries.ToArray());
+        public SteamInputAddonforClaw.HidHide.HidHideInspection Inspect() => new(Status, Entries, HiddenEntries.ToArray(), IsActive: Active, IsInverseWhitelist: Status == HidHideInspectionStatus.InverseWhitelist);
+        public bool SetActive(bool active) { Active = active; Events?.Add("SetActive:" + active); return true; }
         public bool AddApplication(string executablePath) => true;
         public bool RemoveApplication(string executablePath) { RemoveCount++; Events?.Add(executablePath); if (!RemoveSucceeds) return false; return Entries.Remove(executablePath); }
         public bool AddHiddenDevice(string deviceEntry) => HiddenEntries.Add(deviceEntry);
