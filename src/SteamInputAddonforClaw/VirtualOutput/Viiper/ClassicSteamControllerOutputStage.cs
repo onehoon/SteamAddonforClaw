@@ -71,12 +71,12 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             _before.Where(device => device.VendorId == ViiperRuntimeManager.VendorId && device.ProductId == ViiperRuntimeManager.ProductId).Select(device => device.InstanceId));
         if (!intent.IsSafeToContinue) return RoutingStageOperationResult.Failure("VirtualDeviceRecoveryIntentFailed");
 
-        _tracker.MarkOwnershipUncertain();
+            _tracker.MarkOwnershipUncertain();
         try
         {
             _runtime.Start();
-            _busId = _runtime.BusId;
             _deviceId = _runtime.CreateDevice();
+            _busId = _runtime.BusId;
             var resolved = await WaitForIdentityAsync(_before, cancellationToken).ConfigureAwait(false);
             if (!resolved.Succeeded) return await FailAndRollbackAsync(resolved.Reason).ConfigureAwait(false);
             _owned = resolved.Devices;
