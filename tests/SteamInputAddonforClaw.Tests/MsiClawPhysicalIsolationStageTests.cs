@@ -58,6 +58,40 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.Contains("C:\\addon.exe", hid.Applications);
     }
 
+    [Fact]
+    public async Task WhitelistVerifiedAbsentButJournalCompletionFailureKeepsRollbackPending()
+    {
+        var hid = new FakeHidHide { FailApplicationAddWithoutApplying = true };
+        var stage = Create(hid, store: new FaultingStore(JournalPath, successfulReplacements: 1));
+        var prepare = await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True(prepare.Succeeded, prepare.Reason);
+        var execute = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.False(execute.Succeeded);
+        Assert.Equal("WhitelistJournalCompletionFailed", execute.Reason);
+        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task DeviceVerifiedAbsentButJournalCompletionFailureKeepsRollbackPending()
+    {
+        var hid = new FakeHidHide { FailDeviceAddWithoutApplying = true };
+        var stage = Create(hid, store: new FaultingStore(JournalPath, successfulReplacements: 2));
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal("DeviceJournalCompletionFailed", (await stage.ExecuteMutationAsync(CancellationToken.None)).Reason);
+        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task AddReportsFailureButPresentMutationIsRolledBack()
+    {
+        var hid = new FakeHidHide { ReportDeviceAddFailureAfterApplying = true };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal("DeviceAddReportedFailure", (await stage.ExecuteMutationAsync(CancellationToken.None)).Reason);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.DoesNotContain("HID\\CHILD", hid.HiddenDevices);
+    }
+
     [Theory]
     [InlineData((int)HidHideInspectionStatus.Disabled)]
     [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
@@ -70,10 +104,10 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.Empty(hid.Trace);
     }
 
-    private MsiClawPhysicalIsolationStage Create(FakeHidHide hid, string physicalIdentity = "USB\\MSI_ROOT")
+    private MsiClawPhysicalIsolationStage Create(FakeHidHide hid, string physicalIdentity = "USB\\MSI_ROOT", IRecoveryJournalStore? store = null)
     {
         Directory.CreateDirectory(_directory);
-        var recovery = new RecoveryManager(new RecoveryJournalStore(JournalPath));
+        var recovery = new RecoveryManager(store ?? new RecoveryJournalStore(JournalPath));
         recovery.BeginDeviceNativeStateMutation(new(NativeStateCaptureStatus.Success,
             new(new("test"), 1, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(new { Mode = "XInput" })), "captured"));
         var sessionId = recovery.LoadJournal().Journal!.RecoverySessionId;
@@ -91,12 +125,29 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         public List<string> HiddenDevices { get; set; } = [];
         public List<string> Trace { get; } = [];
         public bool FailInspectionAfterDeviceMutation { get; set; }
+        public bool FailDeviceAdd { get; set; }
+        public bool ReportDeviceAddFailureAfterApplying { get; set; }
+        public bool FailApplicationAddWithoutApplying { get; set; }
+        public bool FailDeviceAddWithoutApplying { get; set; }
         public HidHideInspection Inspect() => FailInspectionAfterDeviceMutation && Trace.Any(x => x.StartsWith("AddDevice"))
             ? new(HidHideInspectionStatus.ConfigurationUnavailable, new HashSet<string>(Applications), HiddenDevices)
             : new(Status, new HashSet<string>(Applications), HiddenDevices);
-        public bool AddApplication(string path) { Trace.Add("AddApplication"); Applications.Add(path); return true; }
+        public bool AddApplication(string path) { Trace.Add("AddApplication"); if (FailApplicationAddWithoutApplying) return false; Applications.Add(path); return true; }
         public bool RemoveApplication(string path) { Trace.Add("RemoveApplication"); Applications.RemoveAll(x => string.Equals(x, path, StringComparison.OrdinalIgnoreCase)); return true; }
-        public bool AddHiddenDevice(string entry) { Trace.Add("AddDevice:" + entry); HiddenDevices.Add(entry); return true; }
+        public bool AddHiddenDevice(string entry) { Trace.Add("AddDevice:" + entry); if (FailDeviceAddWithoutApplying) return false; HiddenDevices.Add(entry); return !FailDeviceAdd && !ReportDeviceAddFailureAfterApplying; }
         public bool RemoveHiddenDevice(string entry) { Trace.Add("RemoveDevice:" + entry); HiddenDevices.RemoveAll(x => string.Equals(x, entry, StringComparison.OrdinalIgnoreCase)); return true; }
+    }
+
+    private sealed class FaultingStore(string path, int successfulReplacements) : IRecoveryJournalStore
+    {
+        private readonly RecoveryJournalStore _inner = new(path);
+        private int _replacements;
+        public string JournalPath => _inner.JournalPath;
+        public bool Exists() => _inner.Exists();
+        public string ReadText() => _inner.ReadText();
+        public void WriteNew(RecoveryJournal journal) => _inner.WriteNew(journal);
+        public void ReplaceExisting(RecoveryJournal journal)
+        { if (_replacements++ >= successfulReplacements) throw new IOException("Injected journal completion failure."); _inner.ReplaceExisting(journal); }
+        public void Delete() => _inner.Delete();
     }
 }

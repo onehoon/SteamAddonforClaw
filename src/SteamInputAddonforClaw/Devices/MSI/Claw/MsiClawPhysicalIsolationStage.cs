@@ -18,6 +18,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     private EntryState[] _entries = [];
     private bool _ownedWhitelist;
     private bool _ambiguousWhitelist;
+    private bool _journaledWhitelist;
 
     private sealed record Prepared(MsiClawPhysicalInputIdentity Identity, Guid SessionId, string ExecutablePath, bool WhitelistPreExisting, EntryState[] Entries);
     private sealed class EntryState(string value, bool preExisting)
@@ -70,11 +71,17 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         if (!prepared.WhitelistPreExisting)
         {
             if (_recovery.RecordHidHideWhitelistAddition(_sessionId, _executablePath).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("WhitelistJournalFailed"));
+            _journaledWhitelist = true;
             var addSucceeded = Try(() => _hidHide.AddApplication(_executablePath));
             var verification = _hidHide.Inspect();
             if (!verification.IsConfigurationReadable) { _ambiguousWhitelist = true; return ValueTask.FromResult(Failure("WhitelistMutationAmbiguous")); }
             var present = verification.ApplicationWhitelist.Contains(_executablePath);
-            if (!present) { _recovery.CompleteHidHideWhitelistAddition(_sessionId, _executablePath); return ValueTask.FromResult(Failure(addSucceeded ? "WhitelistVerificationFailed" : "WhitelistAddFailed")); }
+            if (!present)
+            {
+                var completed = _recovery.CompleteHidHideWhitelistAddition(_sessionId, _executablePath).Status == RecoveryStatus.Success;
+                if (completed) _journaledWhitelist = false;
+                return ValueTask.FromResult(Failure(completed ? (addSucceeded ? "WhitelistVerificationFailed" : "WhitelistAddFailed") : "WhitelistJournalCompletionFailed"));
+            }
             _ownedWhitelist = true;
             if (!addSucceeded) return ValueTask.FromResult(Failure("WhitelistAddReportedFailure"));
         }
@@ -88,7 +95,12 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             var verification = _hidHide.Inspect();
             if (!verification.IsConfigurationReadable) { entry.Ambiguous = true; return ValueTask.FromResult(Failure("DeviceMutationAmbiguous")); }
             var present = (verification.HiddenDeviceEntries ?? []).Any(existing => string.Equals(existing, entry.Value, StringComparison.OrdinalIgnoreCase));
-            if (!present) { _recovery.CompleteHidHideDeviceAddition(_sessionId, entry.Value); entry.Journaled = false; return ValueTask.FromResult(Failure(addSucceeded ? "DeviceVerificationFailed" : "DeviceAddFailed")); }
+            if (!present)
+            {
+                var completed = _recovery.CompleteHidHideDeviceAddition(_sessionId, entry.Value).Status == RecoveryStatus.Success;
+                if (completed) entry.Journaled = false;
+                return ValueTask.FromResult(Failure(completed ? (addSucceeded ? "DeviceVerificationFailed" : "DeviceAddFailed") : "DeviceJournalCompletionFailed"));
+            }
             entry.Owned = true;
             if (!addSucceeded) return ValueTask.FromResult(Failure("DeviceAddReportedFailure"));
         }
@@ -108,13 +120,25 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             if (_recovery.CompleteHidHideDeviceAddition(_sessionId, entry.Value).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("DeviceJournalCompletionFailed"));
             entry.Owned = false; entry.Journaled = false;
         }
+        foreach (var entry in _entries.Reverse().Where(entry => entry.Journaled && !entry.Owned))
+        {
+            if (_recovery.CompleteHidHideDeviceAddition(_sessionId, entry.Value).Status != RecoveryStatus.Success)
+                return ValueTask.FromResult(Failure("DeviceJournalCompletionFailed"));
+            entry.Journaled = false;
+        }
         if (_ownedWhitelist)
         {
             if (!Try(() => _hidHide.RemoveApplication(_executablePath!))) return ValueTask.FromResult(Failure("WhitelistRemoveFailed"));
             var verification = _hidHide.Inspect();
             if (!verification.IsConfigurationReadable || verification.ApplicationWhitelist.Contains(_executablePath!)) return ValueTask.FromResult(Failure("WhitelistRemovalUnverified"));
             if (_recovery.CompleteHidHideWhitelistAddition(_sessionId, _executablePath!).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("WhitelistJournalCompletionFailed"));
-            _ownedWhitelist = false;
+            _ownedWhitelist = false; _journaledWhitelist = false;
+        }
+        if (_journaledWhitelist && !_ownedWhitelist)
+        {
+            if (_recovery.CompleteHidHideWhitelistAddition(_sessionId, _executablePath!).Status != RecoveryStatus.Success)
+                return ValueTask.FromResult(Failure("WhitelistJournalCompletionFailed"));
+            _journaledWhitelist = false;
         }
         lock (_sync) _prepared = null;
         return ValueTask.FromResult(Success("PhysicalIsolationRestored"));
