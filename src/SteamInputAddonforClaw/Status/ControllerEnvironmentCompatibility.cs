@@ -12,7 +12,8 @@ internal enum ControllerEnvironmentCompatibilityReason
     MsiCenterMRequired,
     MsiCenterMNotOperational,
     MsiCenterMStarting,
-    ControllerSoftwareStateIndeterminate
+    ControllerSoftwareStateIndeterminate,
+    WinhancedNotSupportedByCurrentVersion
 }
 
 internal sealed record ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus Status, ControllerEnvironmentCompatibilityReason Reason)
@@ -20,18 +21,25 @@ internal sealed record ControllerEnvironmentCompatibilityAssessment(ControllerEn
     public bool AllowsMutation => Status == ControllerEnvironmentCompatibilityStatus.Supported;
 }
 
-internal sealed record ControllerSoftwareSnapshot(ControllerSoftwareStatus MsiCenterM, ControllerSoftwareStatus ClawTweaks, ControllerSoftwareStatus HandheldCompanion)
+internal sealed record ControllerSoftwareSnapshot(
+    ControllerSoftwareStatus MsiCenterM,
+    ControllerSoftwareStatus ClawTweaks,
+    ControllerSoftwareStatus HandheldCompanion,
+    ControllerSoftwareStatus? Winhanced = null)
 {
     public static bool TryCreate(IReadOnlyList<ControllerSoftwareStatus> statuses, out ControllerSoftwareSnapshot? snapshot)
     {
         snapshot = null;
-        if (statuses is null || statuses.Count != 3) return false;
+        if (statuses is null) return false;
         var grouped = statuses.GroupBy(status => status.Kind).ToDictionary(group => group.Key, group => group.ToArray());
         if (!grouped.TryGetValue(ControllerSoftwareKind.MsiCenterM, out var centerM) || centerM.Length != 1
             || !grouped.TryGetValue(ControllerSoftwareKind.ClawTweaks, out var clawTweaks) || clawTweaks.Length != 1
             || !grouped.TryGetValue(ControllerSoftwareKind.HandheldCompanion, out var handheldCompanion) || handheldCompanion.Length != 1)
             return false;
-        snapshot = new(centerM[0], clawTweaks[0], handheldCompanion[0]);
+        if (grouped.Keys.Any(kind => kind is not (ControllerSoftwareKind.MsiCenterM or ControllerSoftwareKind.ClawTweaks or ControllerSoftwareKind.HandheldCompanion or ControllerSoftwareKind.Winhanced))
+            || (grouped.TryGetValue(ControllerSoftwareKind.Winhanced, out var winhanced) && winhanced.Length > 1))
+            return false;
+        snapshot = new(centerM[0], clawTweaks[0], handheldCompanion[0], winhanced?[0]);
         return true;
     }
 }
@@ -54,21 +62,26 @@ internal sealed class CurrentControllerEnvironmentCompatibilityPolicy : IControl
 
     private static ControllerEnvironmentCompatibilityAssessment Evaluate(ControllerSoftwareSnapshot software)
     {
-        var clawTweaksPresent = IsPresent(software.ClawTweaks);
-        var handheldCompanionPresent = IsPresent(software.HandheldCompanion);
-        if (clawTweaksPresent && handheldCompanionPresent) return Unsupported(ControllerEnvironmentCompatibilityReason.MultipleThirdPartyControllerManagersNotSupportedByCurrentVersion);
-        if (clawTweaksPresent) return Unsupported(ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion);
-        if (handheldCompanionPresent) return Unsupported(ControllerEnvironmentCompatibilityReason.HandheldCompanionNotSupportedByCurrentVersion);
-        if (IsUnresolved(software.ClawTweaks) || IsUnresolved(software.HandheldCompanion)) return Indeterminate();
-        if (software.MsiCenterM.Installation == SoftwareInstallationStatus.Indeterminate || software.MsiCenterM.Runtime == SoftwareRuntimeStatus.Indeterminate) return Indeterminate();
-        if (software.MsiCenterM.Runtime == SoftwareRuntimeStatus.Starting) return new(ControllerEnvironmentCompatibilityStatus.Indeterminate, ControllerEnvironmentCompatibilityReason.MsiCenterMStarting);
-        if (software.MsiCenterM.Installation == SoftwareInstallationStatus.NotInstalled) return Unsupported(ControllerEnvironmentCompatibilityReason.MsiCenterMRequired);
-        if (software.MsiCenterM.Runtime != SoftwareRuntimeStatus.Running) return Unsupported(ControllerEnvironmentCompatibilityReason.MsiCenterMNotOperational);
-        return new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported);
+        var classification = ControllerManagerClassifier.Classify(software);
+        return classification.Kind switch
+        {
+            ControllerManagerKind.Multiple => Unsupported(ControllerEnvironmentCompatibilityReason.MultipleThirdPartyControllerManagersNotSupportedByCurrentVersion),
+            ControllerManagerKind.ClawTweaks => Unsupported(ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion),
+            ControllerManagerKind.HandheldCompanion => Unsupported(ControllerEnvironmentCompatibilityReason.HandheldCompanionNotSupportedByCurrentVersion),
+            ControllerManagerKind.Winhanced => Unsupported(ControllerEnvironmentCompatibilityReason.WinhancedNotSupportedByCurrentVersion),
+            ControllerManagerKind.Indeterminate => Indeterminate(),
+            _ => EvaluateStockCenterM(software.MsiCenterM)
+        };
     }
 
-    private static bool IsPresent(ControllerSoftwareStatus status) => status.Installation == SoftwareInstallationStatus.Installed || status.Runtime == SoftwareRuntimeStatus.Running;
-    private static bool IsUnresolved(ControllerSoftwareStatus status) => status.Installation == SoftwareInstallationStatus.Indeterminate || status.Runtime is SoftwareRuntimeStatus.Starting or SoftwareRuntimeStatus.Indeterminate;
+    private static ControllerEnvironmentCompatibilityAssessment EvaluateStockCenterM(ControllerSoftwareStatus centerM)
+    {
+        if (centerM.Installation == SoftwareInstallationStatus.Indeterminate || centerM.Runtime == SoftwareRuntimeStatus.Indeterminate) return Indeterminate();
+        if (centerM.Runtime == SoftwareRuntimeStatus.Starting) return new(ControllerEnvironmentCompatibilityStatus.Indeterminate, ControllerEnvironmentCompatibilityReason.MsiCenterMStarting);
+        if (centerM.Installation == SoftwareInstallationStatus.NotInstalled) return Unsupported(ControllerEnvironmentCompatibilityReason.MsiCenterMRequired);
+        if (centerM.Runtime != SoftwareRuntimeStatus.Running) return Unsupported(ControllerEnvironmentCompatibilityReason.MsiCenterMNotOperational);
+        return new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported);
+    }
     private static ControllerEnvironmentCompatibilityAssessment Unsupported(ControllerEnvironmentCompatibilityReason reason) => new(ControllerEnvironmentCompatibilityStatus.Unsupported, reason);
     private static ControllerEnvironmentCompatibilityAssessment Indeterminate() => new(ControllerEnvironmentCompatibilityStatus.Indeterminate, ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate);
 }
