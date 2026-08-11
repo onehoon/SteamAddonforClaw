@@ -81,6 +81,21 @@ public sealed class MsiClawNativeStateManagerTests
     }
 
     [Fact]
+    public void CaptureSnapshot_RootAndCompositeChildren_CollapseByRootInstance()
+    {
+        var sentinel = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
+        var devices = new[]
+        {
+            Device(0x1901, "USB\\VID_0DB0&PID_1901\\CLAW_A", sentinel, parentInstanceId: "USB_PARENT"),
+            Device(0x1901, "USB\\VID_0DB0&PID_1901&MI_00\\A", sentinel, parentInstanceId: "PARENT_00", ancestors: ["USB\\VID_0DB0&PID_1901\\CLAW_A"]),
+            Device(0x1901, "HID\\VID_0DB0&PID_1901\\A", sentinel, parentInstanceId: "PARENT_HID", ancestors: ["USB\\VID_0DB0&PID_1901&MI_00\\A", "USB\\VID_0DB0&PID_1901\\CLAW_A"])
+        };
+        var result = new MsiClawNativeStateManager(new Enumerator(devices)).CaptureSnapshot();
+        Assert.Equal(NativeStateCaptureStatus.Success, result.Status);
+        Assert.Equal(MsiClawNativeMode.XInput, result.Snapshot!.Payload.Deserialize<MsiClawNativeStatePayload>()!.Mode);
+    }
+
+    [Fact]
     public void CaptureSnapshot_TwoPhysicalRoots_RemainsIndeterminate()
     {
         var result = new MsiClawNativeStateManager(new Enumerator([
