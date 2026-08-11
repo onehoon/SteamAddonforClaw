@@ -80,6 +80,21 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             : null;
     }
 
+    public Guid? TryGetStandaloneHidHideWhitelistLeaseSessionId(string executablePath)
+    {
+        var loaded = LoadJournal();
+        if (loaded.Status != RecoveryStatus.Success || loaded.Journal is not { } journal)
+            return null;
+        if (journal.Mutations.DeviceNativeStateChanged || journal.Mutations.TemporaryXbox360OutputCreated ||
+            journal.Mutations.HidHideDeviceAdditions is { Count: > 0 } || journal.Mutations.AddonOwnedVirtualDevices is { Count: > 0 } ||
+            journal.Mutations.ExecutableWhitelistAdditions is not { Count: 1 })
+            return null;
+        var normalized = Path.GetFullPath(executablePath);
+        return string.Equals(journal.Mutations.ExecutableWhitelistAdditions[0], normalized, StringComparison.OrdinalIgnoreCase)
+            ? journal.RecoverySessionId
+            : null;
+    }
+
     public RecoveryResult RecordHidHideWhitelistAddition(Guid recoverySessionId, string executablePath)
     {
         if (string.IsNullOrWhiteSpace(executablePath))
@@ -256,6 +271,13 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         { reason = "HidHide recovery support is unavailable."; return false; }
         if (journal.Mutations.DeviceNativeStateChanged && (deviceRegistry is null || journal.OriginalDeviceState is null))
         { reason = "Native-state recovery support is unavailable."; return false; }
+        if (journal.Mutations.DeviceNativeStateChanged)
+        {
+            if (!deviceRegistry!.TryGetById(journal.OriginalDeviceState!.DeviceId, out var adapter))
+            { reason = "The journaled handheld device adapter is unavailable."; return false; }
+            if (adapter.NativeState is null || adapter.NativeState.DeviceId != journal.OriginalDeviceState.DeviceId)
+            { reason = "The journaled handheld device native-state manager is unavailable."; return false; }
+        }
         reason = "Recoverable recorded mutations.";
         return true;
     }

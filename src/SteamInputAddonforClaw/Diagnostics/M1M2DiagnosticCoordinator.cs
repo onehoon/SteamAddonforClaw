@@ -106,8 +106,8 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
         }
         else
         {
-            _ownsWhitelistLease = _recoveryManager.OwnsHidHideWhitelistLease(_executablePath);
-            if (_ownsWhitelistLease) _recoverySessionId = _recoveryManager.GetHidHideWhitelistLeaseSessionId(_executablePath);
+            _recoverySessionId = _recoveryManager.TryGetStandaloneHidHideWhitelistLeaseSessionId(_executablePath);
+            _ownsWhitelistLease = _recoverySessionId is not null;
         }
 
         var result = _inputSource.Start();

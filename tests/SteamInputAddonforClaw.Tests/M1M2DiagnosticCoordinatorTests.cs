@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Recovery;
 using Xunit;
 
@@ -216,6 +217,29 @@ public sealed class M1M2DiagnosticCoordinatorTests
     }
 
     [Fact]
+    public async Task DiagnosticDoesNotReclaimRoutingOwnedMixedWhitelistLease()
+    {
+        var store = new MemoryStore();
+        var hidHide = new FakeHidHide { Hidden = true };
+        hidHide.Entries.Add(AddonPath);
+        store.WriteNew(new RecoveryJournal(
+            RecoveryManager.CurrentSchemaVersion,
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow,
+            new(DeviceIdForTest(), 1, DateTimeOffset.UtcNow, System.Text.Json.JsonSerializer.SerializeToElement(new { Mode = "XInput" })),
+            new(DeviceNativeStateChanged: true, ExecutableWhitelistAdditions: [AddonPath])));
+        var input = new FakeInput();
+        await using var coordinator = Create(input, hidHide, store);
+
+        Assert.True(coordinator.Start().Started);
+        await coordinator.StopAsync();
+
+        Assert.Equal(0, hidHide.RemoveCount);
+        Assert.Contains(AddonPath, hidHide.Entries, StringComparer.OrdinalIgnoreCase);
+        Assert.True(store.Exists());
+    }
+
+    [Fact]
     public async Task CrashRecovery_RemovesOnlyRecordedAddonEntryAndPreservesOthers()
     {
         var store = new MemoryStore();
@@ -277,6 +301,8 @@ public sealed class M1M2DiagnosticCoordinatorTests
 
     private static M1M2DiagnosticCoordinator Create(FakeInput input, FakeHidHide hidHide, MemoryStore store) =>
         new(input, hidHide, new RecoveryManager(store, hidHideClient: hidHide), AddonPath, () => ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST"]);
+
+    private static HandheldDeviceId DeviceIdForTest() => new("test.device");
 
     private sealed class FakeInput(List<string>? events = null) : IMsiClawInputDiagnostic
     {
