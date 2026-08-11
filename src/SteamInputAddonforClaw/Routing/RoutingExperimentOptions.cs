@@ -42,7 +42,9 @@ internal static class RoutingExperimentPlanBuilder
             overrides.SteamOutput ?? baseline.SteamOutput,
             overrides.XboxOutput ?? baseline.XboxOutput,
             overrides.GameBarRouting ?? baseline.GameBarRouting);
-        if (plan.PhysicalIsolation == RoutingStageMode.Enabled && plan.PhysicalInput != RoutingStageMode.Enabled)
+        if (strategy.Kind == RoutingEnvironmentStrategyKind.StockCenterM
+            && plan.PhysicalIsolation == RoutingStageMode.Enabled
+            && plan.PhysicalInput != RoutingStageMode.Enabled)
             return RoutingPipelinePlan.AllDisabled;
         return plan;
     }

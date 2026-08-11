@@ -186,7 +186,6 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(true, "PowerGateChangedAfterModeSwitch");
-        lock (_recoveryStateSync) { }
         _active = true;
         _safetyMonitor = new CancellationTokenSource();
         _ = MonitorSafetyAsync(_safetyMonitor.Token);

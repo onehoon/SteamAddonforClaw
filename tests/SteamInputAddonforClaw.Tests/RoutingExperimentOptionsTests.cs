@@ -25,14 +25,16 @@ public sealed class RoutingExperimentOptionsTests
     public void ObserveOnlyAndEnabledOverridesArePreservedWithoutInference()
     {
         var options = new RoutingExperimentOptions(
-            new(NativeMode: RoutingStageMode.Disabled, PhysicalInput: RoutingStageMode.ObserveOnly, PhysicalIsolation: RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled, GameBarRouting: RoutingStageMode.Enabled),
-            RoutingStageExperimentOptions.None);
-        var plan = Build(new StockCenterMRoutingStrategy(), options);
-        if (plan == RoutingPipelinePlan.AllDisabled) return;
+            RoutingStageExperimentOptions.None,
+            new(NativeMode: RoutingStageMode.Disabled, PhysicalInput: RoutingStageMode.ObserveOnly, PhysicalIsolation: RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled, GameBarRouting: RoutingStageMode.Enabled));
+        var plan = Build(new ClawTweaksRoutingStrategy(), options);
         Assert.Equal(RoutingStageMode.Disabled, plan.NativeMode);
         Assert.Equal(RoutingStageMode.ObserveOnly, plan.PhysicalInput);
         Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalIsolation);
-        Assert.Equal(RoutingPipelinePlan.AllDisabled, plan);
+        Assert.Equal(RoutingStageMode.Disabled, plan.ThirdPartyIsolation);
+        Assert.Equal(RoutingStageMode.Enabled, plan.SteamOutput);
+        Assert.Equal(RoutingStageMode.Disabled, plan.XboxOutput);
+        Assert.Equal(RoutingStageMode.Enabled, plan.GameBarRouting);
     }
 
     [Theory]
@@ -52,14 +54,16 @@ public sealed class RoutingExperimentOptionsTests
     {
         var stage = (RoutingStageKind)stageValue;
         var plan = Build(new ClawTweaksRoutingStrategy(), new(RoutingStageExperimentOptions.None, WithMode(RoutingStageExperimentOptions.None, stage, RoutingStageMode.Enabled)));
-        if (stage == RoutingStageKind.PhysicalIsolation)
-        {
-            Assert.Equal(RoutingPipelinePlan.AllDisabled, plan);
-            return;
-        }
         Assert.Equal(RoutingStageMode.Enabled, plan.GetMode(stage));
         foreach (var other in Enum.GetValues<RoutingStageKind>().Where(other => other != stage))
             Assert.Equal(RoutingStageMode.Disabled, plan.GetMode(other));
+    }
+
+    [Fact]
+    public void StockPhysicalIsolationRequiresEnabledPhysicalInput()
+    {
+        var options = new RoutingExperimentOptions(new(PhysicalInput: RoutingStageMode.ObserveOnly, PhysicalIsolation: RoutingStageMode.Enabled), RoutingStageExperimentOptions.None);
+        Assert.Equal(RoutingPipelinePlan.AllDisabled, Build(new StockCenterMRoutingStrategy(), options));
     }
 
     [Fact]

@@ -14,15 +14,23 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     private readonly Lock _sync = new();
     private Prepared? _prepared;
     private Guid _sessionId;
-    private string? _exe;
-    private string? _device;
+    private string? _executablePath;
+    private EntryState[] _entries = [];
     private bool _ownedWhitelist;
-    private bool _ownedDevice;
+    private bool _ambiguousWhitelist;
 
-    private sealed record Prepared(MsiClawPhysicalInputIdentity Identity, Guid SessionId, string ExecutablePath, bool HasWhitelist, bool HasDevice);
+    private sealed record Prepared(MsiClawPhysicalInputIdentity Identity, Guid SessionId, string ExecutablePath, bool WhitelistPreExisting, EntryState[] Entries);
+    private sealed class EntryState(string value, bool preExisting)
+    {
+        internal string Value { get; } = value;
+        internal bool PreExisting { get; } = preExisting;
+        internal bool Journaled { get; set; }
+        internal bool Owned { get; set; }
+        internal bool Ambiguous { get; set; }
+    }
 
     internal MsiClawPhysicalIsolationStage(IMsiClawPhysicalInputIdentityProvider input, IRoutingRecoverySessionProvider session, RecoveryManager recovery, IHidHideClient hidHide, Func<string?>? executablePathProvider = null)
-    { _input = input; _session = session; _recovery = recovery; _hidHide = hidHide; _executablePathProvider = executablePathProvider ?? (() => Environment.ProcessPath); }
+    { _input = input ?? throw new ArgumentNullException(nameof(input)); _session = session ?? throw new ArgumentNullException(nameof(session)); _recovery = recovery ?? throw new ArgumentNullException(nameof(recovery)); _hidHide = hidHide ?? throw new ArgumentNullException(nameof(hidHide)); _executablePathProvider = executablePathProvider ?? (() => Environment.ProcessPath); }
 
     public RoutingStageKind Kind => RoutingStageKind.PhysicalIsolation;
 
@@ -33,69 +41,89 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     {
         cancellationToken.ThrowIfCancellationRequested();
         var identity = _input.CurrentIdentity;
-        if (identity is null) return ValueTask.FromResult(RoutingStageOperationResult.Failure("PhysicalInputIdentityMissing"));
-        if (string.IsNullOrWhiteSpace(identity.PnpInstanceId) || string.IsNullOrWhiteSpace(identity.PhysicalIdentity)) return ValueTask.FromResult(RoutingStageOperationResult.Failure("PhysicalInputIdentityInvalid"));
+        if (identity is null) return ValueTask.FromResult(Failure("PhysicalInputIdentityMissing"));
+        if (string.IsNullOrWhiteSpace(identity.PnpInstanceId) || string.IsNullOrWhiteSpace(identity.PhysicalIdentity)) return ValueTask.FromResult(Failure("PhysicalInputIdentityInvalid"));
         var sessionId = _session.CurrentRecoverySessionId;
-        if (sessionId is not { } id) return ValueTask.FromResult(RoutingStageOperationResult.Failure("RecoverySessionMissing"));
+        if (sessionId is not { } id) return ValueTask.FromResult(Failure("RecoverySessionMissing"));
         var path = _executablePathProvider();
-        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)) return ValueTask.FromResult(RoutingStageOperationResult.Failure("ExecutablePathInvalid"));
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)) return ValueTask.FromResult(Failure("ExecutablePathInvalid"));
         var inspection = _hidHide.Inspect();
-        if (inspection.Status != HidHideInspectionStatus.Available) return ValueTask.FromResult(RoutingStageOperationResult.Failure(inspection.Status.ToString()));
-        var normalized = Path.GetFullPath(path);
-        var device = identity.PnpInstanceId.Trim();
-        lock (_sync) _prepared = new(identity, id, normalized, inspection.ApplicationWhitelist.Contains(normalized), (inspection.HiddenDeviceEntries ?? []).Any(x => string.Equals(x, device, StringComparison.OrdinalIgnoreCase)));
-        return ValueTask.FromResult(RoutingStageOperationResult.Success("Ready"));
+        if (inspection.Status != HidHideInspectionStatus.Available) return ValueTask.FromResult(Failure(inspection.Status.ToString()));
+
+        var executablePath = Path.GetFullPath(path);
+        var values = new[] { identity.PhysicalIdentity.Trim(), identity.PnpInstanceId.Trim() }
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(value => new EntryState(value, (inspection.HiddenDeviceEntries ?? []).Any(existing => string.Equals(existing, value, StringComparison.OrdinalIgnoreCase))))
+            .ToArray();
+        lock (_sync) _prepared = new(identity, id, executablePath, inspection.ApplicationWhitelist.Contains(executablePath), values);
+        return ValueTask.FromResult(Success("Ready"));
     }
 
     public ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested(); Prepared? p; lock (_sync) p = _prepared;
-        if (p is null) return ValueTask.FromResult(RoutingStageOperationResult.Failure("PhysicalIsolationNotPrepared"));
-        if (!Matches(p)) return ValueTask.FromResult(RoutingStageOperationResult.Failure("PhysicalIsolationDrift"));
-        _sessionId = p.SessionId; _exe = p.ExecutablePath; _device = p.Identity.PnpInstanceId.Trim();
-        if (!p.HasWhitelist)
+        cancellationToken.ThrowIfCancellationRequested(); Prepared? prepared; lock (_sync) prepared = _prepared;
+        if (prepared is null) return ValueTask.FromResult(Failure("PhysicalIsolationNotPrepared"));
+        if (!Matches(prepared)) return ValueTask.FromResult(Failure("PhysicalIsolationDrift"));
+        _sessionId = prepared.SessionId; _executablePath = prepared.ExecutablePath; _entries = prepared.Entries;
+
+        if (!prepared.WhitelistPreExisting)
         {
-            if (_recovery.RecordHidHideWhitelistAddition(_sessionId, _exe).Status != RecoveryStatus.Success) return ValueTask.FromResult(RoutingStageOperationResult.Failure("WhitelistJournalFailed"));
-            var added = false; try { added = _hidHide.AddApplication(_exe); } catch { }
-            var verify = _hidHide.Inspect();
-            if (verify.IsConfigurationReadable && verify.ApplicationWhitelist.Contains(_exe)) _ownedWhitelist = true;
-            else if (!verify.IsConfigurationReadable) return ValueTask.FromResult(RoutingStageOperationResult.Failure("WhitelistMutationAmbiguous"));
-            else { _recovery.CompleteHidHideWhitelistAddition(_sessionId, _exe); return ValueTask.FromResult(RoutingStageOperationResult.Failure(added ? "WhitelistVerificationFailed" : "WhitelistAddFailed")); }
+            if (_recovery.RecordHidHideWhitelistAddition(_sessionId, _executablePath).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("WhitelistJournalFailed"));
+            var addSucceeded = Try(() => _hidHide.AddApplication(_executablePath));
+            var verification = _hidHide.Inspect();
+            if (!verification.IsConfigurationReadable) { _ambiguousWhitelist = true; return ValueTask.FromResult(Failure("WhitelistMutationAmbiguous")); }
+            var present = verification.ApplicationWhitelist.Contains(_executablePath);
+            if (!present) { _recovery.CompleteHidHideWhitelistAddition(_sessionId, _executablePath); return ValueTask.FromResult(Failure(addSucceeded ? "WhitelistVerificationFailed" : "WhitelistAddFailed")); }
+            _ownedWhitelist = true;
+            if (!addSucceeded) return ValueTask.FromResult(Failure("WhitelistAddReportedFailure"));
         }
-        if (!p.HasDevice)
+
+        foreach (var entry in _entries)
         {
-            if (_recovery.RecordHidHideDeviceAddition(_sessionId, _device).Status != RecoveryStatus.Success) return ValueTask.FromResult(RoutingStageOperationResult.Failure("DeviceJournalFailed"));
-            var added = false; try { added = _hidHide.AddHiddenDevice(_device); } catch { }
-            var verify = _hidHide.Inspect();
-            if (verify.IsConfigurationReadable && (verify.HiddenDeviceEntries ?? []).Any(x => string.Equals(x, _device, StringComparison.OrdinalIgnoreCase))) _ownedDevice = true;
-            else if (!verify.IsConfigurationReadable) return ValueTask.FromResult(RoutingStageOperationResult.Failure("DeviceMutationAmbiguous"));
-            else { _recovery.CompleteHidHideDeviceAddition(_sessionId, _device); return ValueTask.FromResult(RoutingStageOperationResult.Failure(added ? "DeviceVerificationFailed" : "DeviceAddFailed")); }
+            if (entry.PreExisting) continue;
+            if (_recovery.RecordHidHideDeviceAddition(_sessionId, entry.Value).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("DeviceJournalFailed"));
+            entry.Journaled = true;
+            var addSucceeded = Try(() => _hidHide.AddHiddenDevice(entry.Value));
+            var verification = _hidHide.Inspect();
+            if (!verification.IsConfigurationReadable) { entry.Ambiguous = true; return ValueTask.FromResult(Failure("DeviceMutationAmbiguous")); }
+            var present = (verification.HiddenDeviceEntries ?? []).Any(existing => string.Equals(existing, entry.Value, StringComparison.OrdinalIgnoreCase));
+            if (!present) { _recovery.CompleteHidHideDeviceAddition(_sessionId, entry.Value); entry.Journaled = false; return ValueTask.FromResult(Failure(addSucceeded ? "DeviceVerificationFailed" : "DeviceAddFailed")); }
+            entry.Owned = true;
+            if (!addSucceeded) return ValueTask.FromResult(Failure("DeviceAddReportedFailure"));
         }
         lock (_sync) _prepared = null;
-        return ValueTask.FromResult(RoutingStageOperationResult.Success("PhysicalIsolationActive"));
+        return ValueTask.FromResult(Success("PhysicalIsolationActive"));
     }
 
     public ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (_ownedDevice)
+        if (_ambiguousWhitelist || _entries.Any(entry => entry.Ambiguous)) return ValueTask.FromResult(Failure("AmbiguousMutationPending"));
+        foreach (var entry in _entries.Reverse().Where(entry => entry.Owned))
         {
-            if (!_hidHide.RemoveHiddenDevice(_device!)) return ValueTask.FromResult(RoutingStageOperationResult.Failure("DeviceRemoveFailed"));
-            var check = _hidHide.Inspect(); if (!check.IsConfigurationReadable || (check.HiddenDeviceEntries ?? []).Any(x => string.Equals(x, _device, StringComparison.OrdinalIgnoreCase))) return ValueTask.FromResult(RoutingStageOperationResult.Failure("DeviceRemovalUnverified"));
-            if (_recovery.CompleteHidHideDeviceAddition(_sessionId, _device!).Status != RecoveryStatus.Success) return ValueTask.FromResult(RoutingStageOperationResult.Failure("DeviceJournalCompletionFailed"));
-            _ownedDevice = false;
+            if (!Try(() => _hidHide.RemoveHiddenDevice(entry.Value))) return ValueTask.FromResult(Failure("DeviceRemoveFailed"));
+            var verification = _hidHide.Inspect();
+            if (!verification.IsConfigurationReadable || (verification.HiddenDeviceEntries ?? []).Any(existing => string.Equals(existing, entry.Value, StringComparison.OrdinalIgnoreCase))) return ValueTask.FromResult(Failure("DeviceRemovalUnverified"));
+            if (_recovery.CompleteHidHideDeviceAddition(_sessionId, entry.Value).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("DeviceJournalCompletionFailed"));
+            entry.Owned = false; entry.Journaled = false;
         }
         if (_ownedWhitelist)
         {
-            if (!_hidHide.RemoveApplication(_exe!)) return ValueTask.FromResult(RoutingStageOperationResult.Failure("WhitelistRemoveFailed"));
-            var check = _hidHide.Inspect(); if (!check.IsConfigurationReadable || check.ApplicationWhitelist.Contains(_exe!)) return ValueTask.FromResult(RoutingStageOperationResult.Failure("WhitelistRemovalUnverified"));
-            if (_recovery.CompleteHidHideWhitelistAddition(_sessionId, _exe!).Status != RecoveryStatus.Success) return ValueTask.FromResult(RoutingStageOperationResult.Failure("WhitelistJournalCompletionFailed"));
+            if (!Try(() => _hidHide.RemoveApplication(_executablePath!))) return ValueTask.FromResult(Failure("WhitelistRemoveFailed"));
+            var verification = _hidHide.Inspect();
+            if (!verification.IsConfigurationReadable || verification.ApplicationWhitelist.Contains(_executablePath!)) return ValueTask.FromResult(Failure("WhitelistRemovalUnverified"));
+            if (_recovery.CompleteHidHideWhitelistAddition(_sessionId, _executablePath!).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("WhitelistJournalCompletionFailed"));
             _ownedWhitelist = false;
         }
-        _prepared = null; return ValueTask.FromResult(RoutingStageOperationResult.Success("PhysicalIsolationRestored"));
+        lock (_sync) _prepared = null;
+        return ValueTask.FromResult(Success("PhysicalIsolationRestored"));
     }
 
-    private bool Matches(Prepared p) => _session.CurrentRecoverySessionId == p.SessionId && _input.CurrentIdentity is { } now && now == p.Identity;
+    private bool Matches(Prepared prepared) => _session.CurrentRecoverySessionId == prepared.SessionId && _input.CurrentIdentity is { } current && current == prepared.Identity;
     private RoutingStageOperationResult Inspect(bool requireAvailable)
-    { var i = _input.CurrentIdentity; if (i is null) return RoutingStageOperationResult.Failure("PhysicalInputIdentityMissing"); var s = _hidHide.Inspect(); if (requireAvailable && s.Status != HidHideInspectionStatus.Available) return RoutingStageOperationResult.Failure(s.Status.ToString()); return RoutingStageOperationResult.Success(s.Status.ToString()); }
+    { if (_input.CurrentIdentity is null) return Failure("PhysicalInputIdentityMissing"); var inspection = _hidHide.Inspect(); return requireAvailable && inspection.Status != HidHideInspectionStatus.Available ? Failure(inspection.Status.ToString()) : Success(inspection.Status.ToString()); }
+    private static bool Try(Func<bool> mutation) { try { return mutation(); } catch { return false; } }
+    private static RoutingStageOperationResult Success(string reason) => RoutingStageOperationResult.Success(reason);
+    private static RoutingStageOperationResult Failure(string reason) => RoutingStageOperationResult.Failure(reason);
 }
