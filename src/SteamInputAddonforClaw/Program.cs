@@ -6,6 +6,8 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Lifecycle;
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Install;
+using SteamInputAddonforClaw.Settings;
 
 namespace SteamInputAddonforClaw;
 
@@ -19,10 +21,12 @@ public static class Program
         try
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
+            var persistedLogLevel = LogLevelBootstrap.Read(VelopackAppPaths.SettingsPath);
+            AppLog.MinimumLevelOverride = persistedLogLevel == AppLogPreference.Debug ? AppLogLevel.Debug : AppLogLevel.Info;
             AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));
-            AppLog.Info("Velopack", "Velopack bootstrap starting.");
+            AppLog.Debug("Velopack", "Velopack bootstrap starting.");
             VelopackApp.Build().Run();
-            AppLog.Info("Velopack", "Velopack bootstrap completed.");
+            AppLog.Debug("Velopack", "Velopack bootstrap completed.");
             if (args.Contains(ElevatedPrerequisiteSetup.Argument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = ElevatedPrerequisiteSetup.Run();

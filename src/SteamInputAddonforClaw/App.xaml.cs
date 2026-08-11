@@ -157,7 +157,7 @@ public partial class App : Application
                 rawAssessment,
                 environmentMode,
                 environmentReadiness);
-            AppLog.Info("ExternalController", "External controller assessment evaluated.",
+            AppLog.Debug("ExternalController", "External controller assessment evaluated.",
                 ("RawStatus", rawAssessment.Status),
                 ("EffectiveStatus", effectiveAssessment.Status),
                 ("RawCount", rawAssessment.DetectedExternalControllerCount),

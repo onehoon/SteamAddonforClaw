@@ -23,7 +23,7 @@ public sealed class ExternalControllerDetector
                 AppLog.Warn("ExternalController", "Addon-owned virtual-device ownership is uncertain.", null, ("Action", "Passive"));
                 return new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, []);
             }
-            AppLog.Info("ExternalController", "External controller detection started.");
+            AppLog.Debug("ExternalController", "External controller detection started.");
             var stopwatch = Stopwatch.StartNew();
             var devices = _deviceEnumerator.EnumeratePresentDevices();
             var topology = new ControllerTopologySnapshot(devices);
@@ -58,7 +58,7 @@ public sealed class ExternalControllerDetector
             {
                 foreach (var controller in externalControllers)
                 {
-                    AppLog.Info("ExternalController", "Physical controller candidate confirmed.", ("InstanceId", controller.InstanceId), ("VID", controller.VendorId), ("PID", controller.ProductId), ("VirtualAncestorEvidence", false), ("Classification", ControllerDeviceClassification.ExternalPhysical), ("Action", "Veto"));
+                    AppLog.Debug("ExternalController", "Physical controller candidate confirmed.", ("InstanceId", controller.InstanceId), ("VID", controller.VendorId), ("PID", controller.ProductId), ("VirtualAncestorEvidence", false), ("Classification", ControllerDeviceClassification.ExternalPhysical), ("Action", "Veto"));
                 }
                 AppLog.Warn("ExternalController", "External physical controller detected.", null, ("Count", externalControllers.Length), ("Action", "Veto"));
                 return new ExternalControllerAssessment(ExternalControllerAssessmentStatus.ExternalPresent, externalControllers.Length, externalControllers);
@@ -67,7 +67,7 @@ public sealed class ExternalControllerDetector
             var assessment = groups.Any(group => group.Classifications.Any(result => result.Classification == ControllerDeviceClassification.Indeterminate))
                 ? new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, [])
                 : new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []);
-            AppLog.Info("ExternalController", "External controller assessment completed.", ("Status", assessment.Status), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+            AppLog.Debug("ExternalController", "External controller assessment completed.", ("Status", assessment.Status), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
             return assessment;
         }
         catch (Exception exception)
