@@ -67,6 +67,18 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         Assert.Equal(1, runtime.RemovedDevices);
     }
 
+    [Fact]
+    public async Task InactiveAndDoubleRollbackAreSuccessfulNoOps()
+    {
+        var runtime = new FakeRuntime();
+        var stage = Create(runtime, new FakeEnumerator([[]]), new FakeHidHide());
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+        Assert.True(rollback.Succeeded);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
     private ClassicSteamControllerOutputStage Create(FakeRuntime runtime, FakeEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null)
     {
         Directory.CreateDirectory(_directory);

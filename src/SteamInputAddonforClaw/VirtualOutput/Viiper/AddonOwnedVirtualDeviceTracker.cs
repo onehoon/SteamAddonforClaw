@@ -41,9 +41,12 @@ internal sealed class AddonOwnedVirtualDeviceTracker : IControllerIdentityExclus
         Volatile.Write(ref _uncertainOwnership, 1);
     }
 
-    internal bool ClearUncertaintyAfterVerifiedAbsence(IEnumerable<ControllerDeviceInfo> present, ViiperVirtualDeviceIdentityPolicy policy)
+    internal bool ClearUncertaintyAfterVerifiedAbsence(IEnumerable<ControllerDeviceInfo> present, ViiperVirtualDeviceIdentityPolicy policy,
+        IEnumerable<ControllerDeviceInfo>? before = null, IEnumerable<ControllerDeviceInfo>? owned = null)
     {
-        if (present.Any(policy.IsMatchingCandidate)) return false;
+        var beforeIds = (before ?? []).Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ownedIds = (owned ?? []).Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (present.Any(device => policy.IsMatchingCandidate(device) && !beforeIds.Contains(device.InstanceId) && !ownedIds.Contains(device.InstanceId))) return false;
         _instanceIds.Clear();
         Volatile.Write(ref _uncertainOwnership, 0);
         return true;

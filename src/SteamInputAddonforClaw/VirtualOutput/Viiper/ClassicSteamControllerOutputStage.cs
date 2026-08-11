@@ -106,6 +106,12 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     public async ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
     {
         if (_state == LifecycleState.Inactive) return RoutingStageOperationResult.Success("SteamOutputAlreadyInactive");
+        if (_state == LifecycleState.Prepared)
+        {
+            _before = null;
+            _state = LifecycleState.Inactive;
+            return RoutingStageOperationResult.Success("SteamOutputPreparationCancelled");
+        }
         _state = LifecycleState.RollingBack;
         if (_sessionId() is not { } session) return RoutingStageOperationResult.Failure("RecoverySessionUnavailable");
         var hadResolvedIdentity = _owned is { Count: > 0 };
@@ -117,7 +123,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
                 : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
             if (!absent) return RoutingStageOperationResult.Failure("VirtualDevicePnPStillPresent");
         }
-        if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new ViiperVirtualDeviceIdentityPolicy()))
+        if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new ViiperVirtualDeviceIdentityPolicy(), _before, _owned))
             return RoutingStageOperationResult.Failure("UnrelatedMatchingVirtualDeviceStillPresent");
         var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
         if (!complete.IsSafeToContinue) return RoutingStageOperationResult.Failure("VirtualDeviceRecoveryCompletionFailed");
