@@ -13,6 +13,18 @@ public sealed class RuntimePrerequisiteInspectorTests
         Assert.Equal(PrerequisiteStatus.Unusable, assessment.Status);
         Assert.Equal("ViiperPayloadHashMismatch", assessment.Reason);
     }
+
+    [Fact]
+    public void ViiperInspection_AcceptsTheExactBundledPayloadHash()
+    {
+        var assessment = new ViiperRuntimeInspector(
+            new FakePayloadFileSystem(true),
+            "payload\\libVIIPER.dll",
+            new FakePayloadHashProvider(ViiperRuntimeInspector.ExpectedPayloadSha256)).Inspect();
+
+        Assert.Equal(PrerequisiteStatus.Ready, assessment.Status);
+        Assert.Equal("ViiperRuntimeReady", assessment.Reason);
+    }
     [Fact]
     public void UsbIpWin2Inspection_UsesTheUdePnPAndServiceIdentities()
     {
@@ -98,12 +110,12 @@ public sealed class RuntimePrerequisiteInspectorTests
     }
 
     [Fact]
-    public void ViiperPayload_PresentRemainsUnverifiedAndNotReady()
+    public void ViiperPayload_ExactBundledPayload_IsReady()
     {
         var assessment = new ViiperRuntimeInspector(new FakePayloadFileSystem(true), "payload\\libVIIPER.dll").Inspect();
 
-        Assert.Equal(PrerequisiteStatus.Present, assessment.Status);
-        Assert.Equal("ViiperPayloadPresentUnverified", assessment.Reason);
+        Assert.Equal(PrerequisiteStatus.Ready, assessment.Status);
+        Assert.Equal("ViiperRuntimeReady", assessment.Reason);
     }
 
     [Fact]
