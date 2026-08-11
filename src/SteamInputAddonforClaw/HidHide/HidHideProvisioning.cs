@@ -22,19 +22,154 @@ internal static class HidHidePackageMetadata
 internal sealed record HidHidePackageState(bool Installed, string? Version, bool InspectionSucceeded);
 internal interface IHidHidePackageProbe { HidHidePackageState Inspect(); }
 
+internal sealed record HidHideUninstallCandidate(string DisplayName, string? DisplayVersion, string? Publisher);
+internal interface IHidHideUninstallRegistry
+{
+    IReadOnlyList<HidHideUninstallCandidate> Enumerate(RegistryView view);
+}
+
+internal interface IHidHideDependencyRegistry
+{
+    string? ReadVersion(RegistryView view);
+}
+
+internal sealed class WindowsHidHideUninstallRegistry : IHidHideUninstallRegistry
+{
+    private const string UninstallPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+    public IReadOnlyList<HidHideUninstallCandidate> Enumerate(RegistryView view)
+    {
+        using var root = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+        using var uninstall = root.OpenSubKey(UninstallPath);
+        if (uninstall is null) return [];
+        var candidates = new List<HidHideUninstallCandidate>();
+        foreach (var name in uninstall.GetSubKeyNames())
+        {
+            using var entry = uninstall.OpenSubKey(name);
+            if (entry?.GetValue("DisplayName") is string displayName)
+                candidates.Add(new(displayName, entry.GetValue("DisplayVersion") as string, entry.GetValue("Publisher") as string));
+        }
+        return candidates;
+    }
+}
+
+internal sealed class WindowsHidHideDependencyRegistry : IHidHideDependencyRegistry
+{
+    public string? ReadVersion(RegistryView view)
+    {
+        using var key = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view).OpenSubKey(@"Installer\Dependencies\NSS.Drivers.HidHide.x64");
+        return key?.GetValue("Version") as string;
+    }
+}
+
 internal sealed class WindowsHidHidePackageProbe : IHidHidePackageProbe
 {
-    private const string VersionKey = @"Installer\Dependencies\NSS.Drivers.HidHide.x64";
+    private const string ProductName = "HidHide";
+    private const string PublisherName = "Nefarius Software Solutions e.U.";
+    private readonly IHidHideUninstallRegistry _uninstallRegistry;
+    private readonly IHidHideDependencyRegistry _dependencyRegistry;
+    internal WindowsHidHidePackageProbe(IHidHideUninstallRegistry? uninstallRegistry = null, IHidHideDependencyRegistry? dependencyRegistry = null)
+    { _uninstallRegistry = uninstallRegistry ?? new WindowsHidHideUninstallRegistry(); _dependencyRegistry = dependencyRegistry ?? uninstallRegistry as IHidHideDependencyRegistry ?? new WindowsHidHideDependencyRegistry(); }
     public HidHidePackageState Inspect()
     {
         try
         {
-            using var key = Registry.ClassesRoot.OpenSubKey(VersionKey);
-            var version = key?.GetValue("Version") as string;
-            return new(!string.IsNullOrWhiteSpace(version), version, true);
+            var candidates = Enum.GetValues<RegistryView>().Where(view => view is RegistryView.Registry64 or RegistryView.Registry32)
+                .SelectMany(view => _uninstallRegistry.Enumerate(view).Where(IsExactCandidate).Select(candidate => (View: view, Candidate: candidate))).ToArray();
+            if (candidates.Any(item => !TryNormalizeVersion(item.Candidate.DisplayVersion, out _)))
+            {
+                AppLog.Warn("HidHidePackageProbe", "HidHide uninstall evidence had an invalid version.", null, ("Source", "HKLMUninstall"), ("Reason", "InvalidPackageVersion"));
+                return new(false, null, false);
+            }
+            var evidence = candidates.Select(item => NormalizeVersion(item.Candidate.DisplayVersion!)).ToList();
+            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                var dependencyVersion = ReadDependencyVersion(view);
+                if (dependencyVersion is not null) evidence.Add(dependencyVersion);
+            }
+            var versions = evidence.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (versions.Length > 1)
+            {
+                AppLog.Warn("HidHidePackageProbe", "Conflicting HidHide package evidence found.", null, ("Source", "HKLMUninstallAndDependency"), ("CandidateCount", candidates.Length), ("Reason", "ConflictingPackageEvidence"));
+                return new(false, null, false);
+            }
+            if (versions.Length == 1)
+            {
+                AppLog.Info("HidHidePackageProbe", "HidHide package evidence found.", ("Source", candidates.Length > 0 ? "HKLMUninstall" : "InstallerDependencyFallback"), ("CandidateCount", candidates.Length), ("NormalizedVersion", versions[0]), ("PublisherMatch", candidates.Length > 0), ("Installed", true));
+                return new(true, versions[0], true);
+            }
+
+            return new(false, null, true);
         }
         catch { return new(false, null, false); }
     }
+
+    private string? ReadDependencyVersion(RegistryView view)
+    {
+        var raw = _dependencyRegistry.ReadVersion(view);
+        if (raw is null) return null;
+        return TryNormalizeVersion(raw, out var normalized) ? normalized : throw new InvalidDataException("The HidHide dependency version is invalid.");
+    }
+
+    internal static bool IsExactCandidate(HidHideUninstallCandidate candidate) => string.Equals(candidate.DisplayName.Trim(), ProductName, StringComparison.OrdinalIgnoreCase) && string.Equals(candidate.Publisher?.Trim(), PublisherName, StringComparison.OrdinalIgnoreCase);
+    internal static bool TryNormalizeVersion(string? value, out string normalized)
+    {
+        if (Version.TryParse(value, out var version)) { normalized = NormalizeVersion(version); return true; }
+        normalized = string.Empty; return false;
+    }
+    internal static string NormalizeVersion(string value) => NormalizeVersion(Version.Parse(value));
+    internal static string NormalizeVersion(Version version) => new Version(version.Major, Math.Max(version.Minor, 0), Math.Max(version.Build, 0), Math.Max(version.Revision, 0)).ToString(4);
+}
+
+internal static class HidHidePackageVersionPolicy
+{
+    internal static bool AreEquivalent(string? left, string? right) => WindowsHidHidePackageProbe.TryNormalizeVersion(left, out var normalizedLeft)
+        && WindowsHidHidePackageProbe.TryNormalizeVersion(right, out var normalizedRight)
+        && string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
+}
+
+internal interface IHidHideShortcutFileSystem
+{
+    bool Exists(string path);
+    void Delete(string path);
+}
+
+internal sealed class WindowsHidHideShortcutFileSystem : IHidHideShortcutFileSystem
+{
+    public bool Exists(string path) => File.Exists(path);
+    public void Delete(string path) => File.Delete(path);
+}
+
+internal sealed class HidHideDesktopShortcutCleanup
+{
+    internal const string ShortcutFileName = "HidHide Configuration Client.lnk";
+    private readonly IHidHideShortcutFileSystem _fileSystem;
+    private readonly IReadOnlyList<string> _paths;
+
+    internal HidHideDesktopShortcutCleanup(IHidHideShortcutFileSystem? fileSystem = null, IEnumerable<string>? paths = null)
+    {
+        _fileSystem = fileSystem ?? new WindowsHidHideShortcutFileSystem();
+        _paths = (paths ?? [
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), ShortcutFileName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), ShortcutFileName)])
+            .Where(path => !string.IsNullOrWhiteSpace(path)).Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    internal IReadOnlySet<string> Snapshot()
+        => _paths.Where(path => SafeExists(path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    internal void RemoveInstallerCreated(IReadOnlySet<string> before)
+    {
+        foreach (var path in _paths.Where(path => !before.Contains(path) && SafeExists(path)))
+        {
+            try { _fileSystem.Delete(path); AppLog.Info("HidHideProvisioning", "HidHide desktop shortcut removed.", ("DesktopShortcutCreatedByInstall", true), ("DesktopShortcutRemoved", true)); }
+            catch (Exception exception) { AppLog.Warn("HidHideProvisioning", "HidHide desktop shortcut cleanup failed.", exception, ("Reason", "DesktopShortcutCleanupFailed")); }
+        }
+    }
+
+    internal static bool IsExactPackageEstablished(HidHidePackageState package, string expectedVersion)
+        => package.InspectionSucceeded && package.Installed && HidHidePackageVersionPolicy.AreEquivalent(package.Version, expectedVersion);
+
+    private bool SafeExists(string path) { try { return _fileSystem.Exists(path); } catch { return false; } }
 }
 
 internal enum HidHideProvisioningReceiptState { InstallStarted, Provisioned, InstalledPendingReboot, AttemptFailed, AttemptCancelled }
@@ -233,11 +368,12 @@ internal sealed class HidHideProvisioner(
         var prerequisite = prerequisiteInspector.Inspect();
         var package = packageProbe.Inspect();
         AppLog.Info("HidHideProvisioning", "HidHide installer validation completed.", ("Action", "ValidationCompleted"), ("PrerequisiteStatus", prerequisite.Status), ("ObservedVersion", package.Version));
-        if (package.InspectionSucceeded && prerequisite.Status == PrerequisiteStatus.Ready && package.Installed && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
-            && receipt.State is HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.InstalledPendingReboot)
+        if (package.InspectionSucceeded && package.Installed && HidHidePackageVersionPolicy.AreEquivalent(package.Version, receipt.InstallerVersion)
+            && receipt.State is HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.AttemptFailed or HidHideProvisioningReceiptState.InstalledPendingReboot
+            && (prerequisite.Status == PrerequisiteStatus.Ready || receipt.State == HidHideProvisioningReceiptState.AttemptFailed))
             SaveTransition(receipt, HidHideProvisioningReceiptState.Provisioned, package.Version);
         else if (package.InspectionSucceeded && receipt.State == HidHideProvisioningReceiptState.InstallStarted && package.Installed
-            && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase)
+            && HidHidePackageVersionPolicy.AreEquivalent(package.Version, receipt.InstallerVersion)
             && prerequisite.Status != PrerequisiteStatus.Ready)
             SaveTransition(receipt, HidHideProvisioningReceiptState.InstalledPendingReboot, package.Version);
         AppLog.Info("HidHideProvisioning", "HidHide provisioning receipt reconciled.", ("Action", "ReceiptReconciled"), ("PreviousState", receipt.State));
@@ -249,7 +385,7 @@ internal sealed class HidHideProvisioner(
     {
         var prerequisite = prerequisiteInspector.Inspect();
         var package = packageProbe.Inspect();
-        if (prerequisite.Status == PrerequisiteStatus.Ready && package.Installed && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase))
+        if (prerequisite.Status == PrerequisiteStatus.Ready && package.Installed && HidHidePackageVersionPolicy.AreEquivalent(package.Version, receipt.InstallerVersion))
         {
             SaveTransition(receipt, HidHideProvisioningReceiptState.Provisioned, package.Version);
             return new(HidHideProvisioningResultKind.Installed, "HidHideProvisioned");
@@ -266,5 +402,5 @@ internal sealed class HidHideProvisioner(
     private static bool VerifyInstaller(string path) => File.Exists(path)
         && string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))), HidHidePackageMetadata.InstallerSha256, StringComparison.OrdinalIgnoreCase);
     private static HidHideProvisioningReceipt NewReceipt(HidHideProvisioningReceiptState state) => new(HidHideProvisioningReceipt.CurrentSchemaVersion, state, Guid.NewGuid(), HidHidePackageMetadata.BundledVersion.ToString(), HidHidePackageMetadata.InstallerSha256, PrerequisiteStatus.Missing, DateTimeOffset.UtcNow, null, null);
-    private void SaveTransition(HidHideProvisioningReceipt receipt, HidHideProvisioningReceiptState state, string? observedVersion) => receiptStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = observedVersion });
+    private void SaveTransition(HidHideProvisioningReceipt receipt, HidHideProvisioningReceiptState state, string? observedVersion) => receiptStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = observedVersion, FailureReason = state == HidHideProvisioningReceiptState.Provisioned ? null : receipt.FailureReason });
 }
