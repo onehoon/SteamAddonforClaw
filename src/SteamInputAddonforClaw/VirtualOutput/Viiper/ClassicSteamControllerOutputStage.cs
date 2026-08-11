@@ -8,6 +8,7 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage, IPowerTransitionParticipant
 {
+    private enum LifecycleState { Inactive, Prepared, Creating, Active, RollingBack }
     private readonly IViiperRuntime _runtime;
     private readonly IControllerDeviceEnumerator _enumerator;
     private readonly ViiperVirtualDeviceIdentityResolver _resolver;
@@ -22,6 +23,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     private uint _deviceId;
     private uint _busId;
     private IReadOnlyList<ControllerDeviceInfo>? _owned;
+    private LifecycleState _state;
 
     internal ClassicSteamControllerOutputStage(IViiperRuntime runtime, IControllerDeviceEnumerator enumerator,
         ViiperVirtualDeviceIdentityResolver resolver, AddonOwnedVirtualDeviceTracker tracker, RecoveryManager recovery,
@@ -36,6 +38,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
 
     public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
     {
+        if (_state == LifecycleState.Inactive) return true;
         var result = await RollbackMutationAsync(cancellationToken).ConfigureAwait(false);
         return result.Succeeded;
     }
@@ -56,15 +59,18 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (_sessionId() is null) return ValueTask.FromResult(RoutingStageOperationResult.Failure("RecoverySessionUnavailable"));
+        if (_state != LifecycleState.Inactive) return ValueTask.FromResult(RoutingStageOperationResult.Failure("SteamOutputAlreadyActive"));
         if (_before is not null) return ValueTask.FromResult(RoutingStageOperationResult.Failure("SteamOutputAlreadyPrepared"));
         _before = _enumerator.EnumeratePresentDevices();
         _mutationId = Guid.NewGuid();
+        _state = LifecycleState.Prepared;
         return ValueTask.FromResult(RoutingStageOperationResult.Success("SteamOutputPreflightComplete"));
     }
 
     public async ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
     {
         if (_before is null || _sessionId() is not { } session) return RoutingStageOperationResult.Failure("SteamOutputNotPrepared");
+        _state = LifecycleState.Creating;
         cancellationToken.ThrowIfCancellationRequested();
         var intent = _recovery.RecordAddonOwnedVirtualDeviceIntent(session, _mutationId, ViiperRuntimeManager.DeviceType,
             ViiperRuntimeManager.VendorId, ViiperRuntimeManager.ProductId,
@@ -90,6 +96,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
                 return await FailAndRollbackAsync("HidHideOutputAlreadyBlocked").ConfigureAwait(false);
             _tracker.ResolveOwnership(_owned);
             if (!_runtime.SetNeutral(_deviceId)) return await FailAndRollbackAsync("NeutralReportRejected").ConfigureAwait(false);
+            _state = LifecycleState.Active;
             return RoutingStageOperationResult.Success("ClassicSteamControllerCreated");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -98,6 +105,8 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
 
     public async ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
     {
+        if (_state == LifecycleState.Inactive) return RoutingStageOperationResult.Success("SteamOutputAlreadyInactive");
+        _state = LifecycleState.RollingBack;
         if (_sessionId() is not { } session) return RoutingStageOperationResult.Failure("RecoverySessionUnavailable");
         var hadResolvedIdentity = _owned is { Count: > 0 };
         if (_deviceId != 0)
@@ -108,10 +117,11 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
                 : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
             if (!absent) return RoutingStageOperationResult.Failure("VirtualDevicePnPStillPresent");
         }
+        if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new ViiperVirtualDeviceIdentityPolicy()))
+            return RoutingStageOperationResult.Failure("UnrelatedMatchingVirtualDeviceStillPresent");
         var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
         if (!complete.IsSafeToContinue) return RoutingStageOperationResult.Failure("VirtualDeviceRecoveryCompletionFailed");
-        _tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new ViiperVirtualDeviceIdentityPolicy());
-        _deviceId = 0; _busId = 0; _owned = null; _before = null; _runtime.StopIfUnused();
+        _deviceId = 0; _busId = 0; _owned = null; _before = null; _state = LifecycleState.Inactive; _runtime.StopIfUnused();
         return RoutingStageOperationResult.Success("ClassicSteamControllerRemoved");
     }
 

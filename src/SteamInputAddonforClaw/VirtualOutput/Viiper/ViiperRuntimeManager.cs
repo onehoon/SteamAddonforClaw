@@ -54,7 +54,11 @@ internal sealed class ViiperRuntimeManager : IViiperRuntime
             if (!api.GetDeviceTypes().Contains(DeviceType, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("VIIPER does not support steamcontroller.");
             _api = api;
         }
-        catch { api.Dispose(); throw; }
+        catch
+        {
+            try { api.Shutdown(); } finally { api.Dispose(); }
+            throw;
+        }
     }
 
     internal uint CreateDevice()

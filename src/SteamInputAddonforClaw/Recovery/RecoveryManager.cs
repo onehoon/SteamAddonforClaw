@@ -88,6 +88,7 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             return null;
         if (journal.Mutations.DeviceNativeStateChanged || journal.Mutations.TemporaryXbox360OutputCreated ||
             journal.Mutations.HidHideDeviceAdditions is { Count: > 0 } || journal.Mutations.AddonOwnedVirtualDevices is { Count: > 0 } ||
+            journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } ||
             journal.Mutations.ExecutableWhitelistAdditions is not { Count: 1 })
             return null;
         var normalized = Path.GetFullPath(executablePath);
@@ -230,7 +231,11 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
     private static bool IsValidJournal(RecoveryJournal journal) =>
         journal.SchemaVersion == CurrentSchemaVersion &&
         journal.RecoverySessionId != Guid.Empty && journal.Mutations is not null &&
-        (!journal.Mutations.DeviceNativeStateChanged || journal.OriginalDeviceState is not null);
+        (!journal.Mutations.DeviceNativeStateChanged || journal.OriginalDeviceState is not null) &&
+        (journal.Mutations.AddonOwnedVirtualDeviceEntries ?? []).All(entry =>
+            entry.MutationId != Guid.Empty && !string.IsNullOrWhiteSpace(entry.DeviceType) &&
+            entry.PreExistingMatchingInstanceIds.All(id => !string.IsNullOrWhiteSpace(id)) &&
+            entry.ResolvedInstanceIds.All(id => !string.IsNullOrWhiteSpace(id)));
 
     private RecoveryResult BeginRecoverySession(DeviceNativeStateSnapshot snapshot, RecoveryMutationState mutations)
     {
@@ -260,8 +265,7 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             if (schema == CurrentSchemaVersion)
             {
                 var journal = JsonSerializer.Deserialize<RecoveryJournal>(json) ?? throw new InvalidDataException("The recovery journal contains no recovery state.");
-                if (journal.RecoverySessionId == Guid.Empty || journal.Mutations is null ||
-                    (journal.Mutations.DeviceNativeStateChanged && journal.OriginalDeviceState is null))
+                if (!IsValidJournal(journal))
                     return new(RecoveryStatus.Failure, "Recovery journal is missing required state.", journal);
                 return new(RecoveryStatus.Success, "Recovery journal loaded.", journal);
             }

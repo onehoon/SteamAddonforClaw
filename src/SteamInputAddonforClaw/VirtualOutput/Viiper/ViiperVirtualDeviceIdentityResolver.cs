@@ -22,5 +22,9 @@ internal sealed class ViiperVirtualDeviceIdentityResolver(ViiperVirtualDeviceIde
     }
 
     private static string GetLogicalKey(ControllerDeviceInfo device) =>
-        device.ContainerId?.ToString("D") ?? device.ParentInstanceId ?? device.InstanceId;
+        IsUsableContainer(device.ContainerId) ? device.ContainerId!.Value.ToString("D") :
+            (!string.IsNullOrWhiteSpace(device.ParentInstanceId) ? device.ParentInstanceId! : device.InstanceId);
+
+    private static bool IsUsableContainer(Guid? containerId) => containerId is { } value && value != Guid.Empty &&
+        value != new Guid("00000000-0000-0000-ffff-ffffffffffff");
 }
