@@ -3,13 +3,14 @@ using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage
+internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiClawPhysicalInputIdentityProvider
 {
     private readonly Func<IDirectInputDeviceEnumerator> _enumeratorFactory;
     private readonly IMsiClawPreparedInputSource _inputSource;
     private readonly Lock _sync = new();
     private DirectInputDeviceDescriptor? _preparedDescriptor;
     private bool _ownsInputSession;
+    private MsiClawPhysicalInputIdentity? _currentIdentity;
 
     internal MsiClawPhysicalInputStage(Func<IDirectInputDeviceEnumerator> enumeratorFactory, IMsiClawPreparedInputSource inputSource)
     {
@@ -18,6 +19,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage
     }
 
     public RoutingStageKind Kind => RoutingStageKind.PhysicalInput;
+    public MsiClawPhysicalInputIdentity? CurrentIdentity { get { lock (_sync) return _currentIdentity; } }
 
     public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)
     {
@@ -85,7 +87,11 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage
             return ValueTask.FromResult(RoutingStageOperationResult.Failure(result.Status.ToString()));
         if (!_inputSource.IsRunning)
             return ValueTask.FromResult(RoutingStageOperationResult.Failure("InputSourceDidNotStart"));
-        lock (_sync) _ownsInputSession = true;
+        lock (_sync)
+        {
+            _ownsInputSession = true;
+            _currentIdentity = new(descriptor.InstanceGuid, descriptor.DevicePath!, descriptor.PnpInstanceId!, descriptor.PhysicalIdentity!);
+        }
         return ValueTask.FromResult(RoutingStageOperationResult.Success("Started"));
     }
 
@@ -111,6 +117,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage
         {
             _preparedDescriptor = null;
             _ownsInputSession = false;
+            _currentIdentity = null;
         }
         return RoutingStageOperationResult.Success("Stopped");
     }

@@ -8,6 +8,7 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
+using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -39,6 +40,7 @@ public partial class App : Application
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
     private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
+    private MsiClawInputSource? _physicalInputSource;
     private RoutingPipelineRuntimeCoordinator? _routingRuntimeCoordinator;
     private UserTerminationGuard? _userTerminationGuard;
 
@@ -195,7 +197,15 @@ public partial class App : Application
         if (_msiClawNativeModeSession is not null)
         {
             var nativeModeStage = new MsiClawNativeModeStage(_msiClawNativeModeSession);
-            var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage]);
+            _physicalInputSource = new MsiClawInputSource(() => new VorticeDirectInputDeviceEnumerator(IntPtr.Zero));
+            var physicalInputStage = new MsiClawPhysicalInputStage(() => new VorticeDirectInputDeviceEnumerator(IntPtr.Zero), _physicalInputSource);
+            var physicalIsolationStage = new MsiClawPhysicalIsolationStage(
+                physicalInputStage,
+                _msiClawNativeModeSession,
+                _recoveryManager!,
+                new HidHideDriverClient(),
+                () => Environment.ProcessPath);
+            var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage]);
             var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(
                 new RoutingEnvironmentStrategyResolver(),
                 pipelineExecutor);
@@ -336,6 +346,8 @@ public partial class App : Application
         _powerCoordinator = null;
         if (_msiClawNativeModeSession is not null) _msiClawNativeModeSession.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _msiClawNativeModeSession = null;
+        if (_physicalInputSource is not null) _physicalInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _physicalInputSource = null;
         AppLog.Info("Runtime cleanup completed.");
     }
 

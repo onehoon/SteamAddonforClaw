@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -38,6 +39,13 @@ internal interface IMsiClawPreparedInputSource : IAsyncDisposable
     bool IsRunning { get; }
     MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor);
     Task StopAsync();
+}
+
+internal sealed record MsiClawPhysicalInputIdentity(Guid InstanceGuid, string DevicePath, string PnpInstanceId, string PhysicalIdentity);
+
+internal interface IMsiClawPhysicalInputIdentityProvider
+{
+    MsiClawPhysicalInputIdentity? CurrentIdentity { get; }
 }
 
 internal interface IMsiClawInputDiagnostic : IMsiClawPreparedInputSource

@@ -8,7 +8,7 @@ using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IPowerTransitionParticipant, IMsiClawNativeModeStageSession, IRoutingRuntimeSessionBoundaryParticipant
+internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IPowerTransitionParticipant, IMsiClawNativeModeStageSession, IRoutingRuntimeSessionBoundaryParticipant, IRoutingRecoverySessionProvider
 {
     private readonly MsiClawNativeStateManager _nativeState;
     private readonly RecoveryManager _recovery;
@@ -23,6 +23,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private bool _vetoLatched;
     private long _decisionGeneration;
     private readonly Action<string>? _markRecoveryUnsafe;
+    private readonly Lock _recoveryStateSync = new();
 
     internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, Func<bool>? mutationAllowed = null, Action<string>? markRecoveryUnsafe = null)
     { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _mutationAllowed = mutationAllowed; _markRecoveryUnsafe = markRecoveryUnsafe; }
@@ -50,8 +51,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
             // RecoveryManager restored the journaled state and deleted the journal before
             // participant reconciliation. The next entry must capture a fresh snapshot.
             _snapshot = null;
-            _recoveryBoundaryOwned = false;
-            _recoverySessionId = null;
+            lock (_recoveryStateSync) { _recoveryBoundaryOwned = false; _recoverySessionId = null; }
         }
         return Task.FromResult(true);
     }
@@ -63,7 +63,8 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         => ObserveRoutingDecisionCoreAsync(decision, generation, cancellationToken);
 
     public bool IsActive => _active;
-    public bool HasOwnedRecoveryBoundary => _recoveryBoundaryOwned;
+    public bool HasOwnedRecoveryBoundary { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned; } }
+    public Guid? CurrentRecoverySessionId { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned ? _recoverySessionId : null; } }
 
     public async ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken)
     {
@@ -180,12 +181,12 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         var journal = _recovery.BeginDeviceNativeStateMutation(captured);
         if (journal.Status != RecoveryStatus.Success) return MsiClawNativeModeEnterResult.Failure(false, "RecoveryJournalUnavailable");
         _snapshot = captured.Snapshot;
-        _recoveryBoundaryOwned = true;
-        _recoverySessionId = journal.Journal!.RecoverySessionId;
+        lock (_recoveryStateSync) { _recoveryBoundaryOwned = true; _recoverySessionId = journal.Journal!.RecoverySessionId; }
         var identity = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
         var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(true, "PowerGateChangedAfterModeSwitch");
+        lock (_recoveryStateSync) { }
         _active = true;
         _safetyMonitor = new CancellationTokenSource();
         _ = MonitorSafetyAsync(_safetyMonitor.Token);
@@ -206,7 +207,8 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         }
         var completed = _recovery.CompleteDeviceNativeStateMutation(recoverySessionId);
         if (completed.Status != RecoveryStatus.Success) { if (reportFailure) MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
-        _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false; _recoveryBoundaryOwned = false; _recoverySessionId = null;
+        _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false;
+        lock (_recoveryStateSync) { _recoveryBoundaryOwned = false; _recoverySessionId = null; }
         return true;
     }
 
