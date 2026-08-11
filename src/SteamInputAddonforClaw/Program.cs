@@ -6,6 +6,8 @@ using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Lifecycle;
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Install;
+using SteamInputAddonforClaw.Settings;
 
 namespace SteamInputAddonforClaw;
 
@@ -19,10 +21,11 @@ public static class Program
         try
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
-            AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));
-            AppLog.Info("Velopack", "Velopack bootstrap starting.");
             VelopackApp.Build().Run();
-            AppLog.Info("Velopack", "Velopack bootstrap completed.");
+            var persistedLogLevel = LogLevelBootstrap.Read(VelopackAppPaths.SettingsPath);
+            AppLog.MinimumLevelOverride = persistedLogLevel == AppLogPreference.Debug ? AppLogLevel.Debug : AppLogLevel.Info;
+            AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));
+            AppLog.Debug("Velopack", "Velopack bootstrap completed.");
             if (args.Contains(ElevatedPrerequisiteSetup.Argument, StringComparer.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = ElevatedPrerequisiteSetup.Run();
@@ -60,7 +63,7 @@ public static class Program
                     return;
                 }
 
-                AppLog.Trace("SingleInstance", "Restart waiting for previous instance.", ("Attempt", restartAttempt), ("RemainingMs", (restartDeadline - DateTimeOffset.UtcNow).TotalMilliseconds));
+                AppLog.Debug("SingleInstance", "Restart waiting for previous instance.", ("Attempt", restartAttempt), ("RemainingMs", (restartDeadline - DateTimeOffset.UtcNow).TotalMilliseconds));
                 Thread.Sleep(TimeSpan.FromMilliseconds(100));
             }
 
@@ -69,26 +72,26 @@ public static class Program
                 CurrentSingleInstanceGate = singleInstanceGate;
                 var launchMode = args.Contains("--background", StringComparer.OrdinalIgnoreCase) ? "Background" : "Manual";
                 AppLog.Info("App", "Application launch header.", ("Version", typeof(Program).Assembly.GetName().Version), ("LaunchMode", launchMode), ("PID", Environment.ProcessId), ("ProcessArchitecture", RuntimeInformation.ProcessArchitecture), ("OSArchitecture", RuntimeInformation.OSArchitecture), ("OS", Environment.OSVersion), ("Runtime", Environment.Version), ("ProcessPath", Environment.ProcessPath), ("BaseDirectory", AppContext.BaseDirectory));
-                AppLog.Info("COM wrapper initialization starting.");
+                AppLog.Debug("COM wrapper initialization starting.");
                 ComWrappersSupport.InitializeComWrappers();
-                AppLog.Info("COM wrapper initialization completed.");
+                AppLog.Debug("COM wrapper initialization completed.");
                 var winUiAssets = WinUiRuntimeAssetProbe.Inspect(AppContext.BaseDirectory);
-                AppLog.Info("Startup", "WinUI runtime assets.",
+                AppLog.Debug("Startup", "WinUI runtime assets.",
                     ("BaseDirectory", AppContext.BaseDirectory),
                     ("AppXbf", winUiAssets[0].Exists), ("AppXbfBytes", winUiAssets[0].SizeBytes),
                     ("MainWindowXbf", winUiAssets[1].Exists), ("MainWindowXbfBytes", winUiAssets[1].SizeBytes),
                     ("Pri", winUiAssets[2].Exists), ("PriBytes", winUiAssets[2].SizeBytes),
                     ("AppIcon", winUiAssets[3].Exists), ("AppIconBytes", winUiAssets[3].SizeBytes));
-                AppLog.Info("XAML Application.Start entering.");
+                AppLog.Debug("XAML Application.Start entering.");
                 Application.Start(_ =>
                 {
-                    AppLog.Info("XAML startup callback entered.");
+                    AppLog.Debug("XAML startup callback entered.");
                     var synchronizationContext = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
                     SynchronizationContext.SetSynchronizationContext(synchronizationContext);
-                    AppLog.Info("Creating App instance.");
+                    AppLog.Debug("Creating App instance.");
                     var app = new App(args, singleInstanceGate);
                     app.UnhandledException += (_, eventArgs) => AppLog.Error("Unhandled XAML exception.", eventArgs.Exception);
-                    AppLog.Info("App instance created.");
+                    AppLog.Debug("App instance created.");
                 });
             }
         }

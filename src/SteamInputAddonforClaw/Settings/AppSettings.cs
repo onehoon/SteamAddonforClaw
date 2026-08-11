@@ -1,3 +1,5 @@
 namespace SteamInputAddonforClaw.Settings;
 
-public sealed record AppSettings(bool LaunchAtWindowsStartup = true);
+public enum AppLogPreference { Info, Debug }
+
+public sealed record AppSettings(bool LaunchAtWindowsStartup = true, AppLogPreference LogLevel = AppLogPreference.Info);

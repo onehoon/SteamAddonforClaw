@@ -9,7 +9,11 @@ public sealed class DiagnosticLoggingTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw-DiagnosticTests", Guid.NewGuid().ToString("N"));
 
-    public DiagnosticLoggingTests() => AppLog.DirectoryOverride = _directory;
+    public DiagnosticLoggingTests()
+    {
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+    }
 
     [Fact]
     public void ControllerStateDiagnostics_LogsChangedControlsAndAnalogValues()
@@ -60,6 +64,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
     public void Dispose()
     {
         AppLog.DirectoryOverride = null;
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 }

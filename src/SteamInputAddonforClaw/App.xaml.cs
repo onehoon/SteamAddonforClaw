@@ -130,6 +130,7 @@ public partial class App : Application
 
         var settingsStore = new SettingsStore(VelopackAppPaths.SettingsPath);
         var settings = settingsStore.Load();
+        AppLog.MinimumLevelOverride = settings.LogLevel == AppLogPreference.Debug ? AppLogLevel.Debug : AppLogLevel.Info;
         var startupRegistration = new WindowsTaskSchedulerStartupManager();
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
         var startupRegistrationResult = startupSettings.Repair();
@@ -156,7 +157,7 @@ public partial class App : Application
                 rawAssessment,
                 environmentMode,
                 environmentReadiness);
-            AppLog.Info("ExternalController", "External controller assessment evaluated.",
+            AppLog.Debug("ExternalController", "External controller assessment evaluated.",
                 ("RawStatus", rawAssessment.Status),
                 ("EffectiveStatus", effectiveAssessment.Status),
                 ("RawCount", rawAssessment.DetectedExternalControllerCount),

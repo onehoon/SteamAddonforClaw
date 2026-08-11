@@ -25,7 +25,7 @@ internal sealed class ControllerTopologySnapshot
             .Where(_devicesByInstanceId.ContainsKey)
             .Select(instanceId => _devicesByInstanceId[instanceId])
             .ToArray();
-        AppLog.Trace("PnP", "Controller ancestry resolved.", ("InstanceId", device.InstanceId), ("AncestorCount", device.AncestorInstanceIds.Count), ("ResolvedAncestorCount", ancestors.Length), ("UnresolvedAncestorCount", device.AncestorInstanceIds.Count - ancestors.Length));
+        AppLog.Debug("PnP", "Controller ancestry resolved.", ("InstanceId", device.InstanceId), ("AncestorCount", device.AncestorInstanceIds.Count), ("ResolvedAncestorCount", ancestors.Length), ("UnresolvedAncestorCount", device.AncestorInstanceIds.Count - ancestors.Length));
         return ancestors;
     }
 }

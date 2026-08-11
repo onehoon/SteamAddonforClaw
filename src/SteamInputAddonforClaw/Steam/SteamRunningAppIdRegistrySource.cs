@@ -37,7 +37,7 @@ public sealed class SteamRunningAppIdRegistrySource : IRunningAppIdSource, IDisp
             using var steamKey = Registry.CurrentUser.OpenSubKey(SteamRegistryPath, writable: false);
             var rawValue = steamKey?.GetValue(RunningAppIdValueName);
             var runningAppId = ConvertRegistryValueToRunningAppId(rawValue);
-            AppLog.Trace(
+            AppLog.Debug(
                 "Steam",
                 "RunningAppID registry value read.",
                 ("RawType", rawValue?.GetType().Name ?? "null"),

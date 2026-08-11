@@ -13,11 +13,11 @@ internal static class ClawTweaksCompatibilitySnapshotLogger
     public static void LogAtStartup(IControllerDeviceEnumerator deviceEnumerator)
     {
         ArgumentNullException.ThrowIfNull(deviceEnumerator);
-        AppLog.Info("CompatibilitySnapshot", "ClawTweaks compatibility snapshot started.");
+        AppLog.Debug("CompatibilitySnapshot", "ClawTweaks compatibility snapshot started.");
         LogPackages();
         LogProcesses();
         LogRelevantDevices(deviceEnumerator);
-        AppLog.Info("CompatibilitySnapshot", "ClawTweaks compatibility snapshot completed.");
+        AppLog.Debug("CompatibilitySnapshot", "ClawTweaks compatibility snapshot completed.");
     }
 
     private static void LogPackages()
@@ -30,10 +30,10 @@ internal static class ClawTweaksCompatibilitySnapshotLogger
                     || MatchesAny(package.DisplayName, PackageTokens))
                 .ToArray();
 
-            AppLog.Info("CompatibilitySnapshot", "MSIX package registration inspection completed.", ("MatchCount", packages.Length));
+            AppLog.Debug("CompatibilitySnapshot", "MSIX package registration inspection completed.", ("MatchCount", packages.Length));
             foreach (var package in packages)
             {
-                AppLog.Info("CompatibilitySnapshot", "MSIX package candidate.",
+                AppLog.Debug("CompatibilitySnapshot", "MSIX package candidate.",
                     ("Name", package.Id.Name),
                     ("FamilyName", package.Id.FamilyName),
                     ("FullName", package.Id.FullName),
@@ -56,12 +56,12 @@ internal static class ClawTweaksCompatibilitySnapshotLogger
                 .OrderBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            AppLog.Info("CompatibilitySnapshot", "Helper process inspection completed.", ("MatchCount", processes.Length));
+            AppLog.Debug("CompatibilitySnapshot", "Helper process inspection completed.", ("MatchCount", processes.Length));
             foreach (var process in processes)
             {
                 try
                 {
-                    AppLog.Info("CompatibilitySnapshot", "Helper process candidate.",
+                    AppLog.Debug("CompatibilitySnapshot", "Helper process candidate.",
                         ("ProcessName", process.ProcessName),
                         ("ProcessId", process.Id),
                         ("SessionId", process.SessionId),
@@ -91,10 +91,10 @@ internal static class ClawTweaksCompatibilitySnapshotLogger
                 .Where(IsCompatibilityRelevant)
                 .ToArray();
 
-            AppLog.Info("CompatibilitySnapshot", "Compatibility PnP inspection completed.", ("MatchCount", devices.Length));
+            AppLog.Debug("CompatibilitySnapshot", "Compatibility PnP inspection completed.", ("MatchCount", devices.Length));
             foreach (var device in devices)
             {
-                AppLog.Info("CompatibilitySnapshot", "Compatibility PnP device candidate.",
+                AppLog.Debug("CompatibilitySnapshot", "Compatibility PnP device candidate.",
                     ("InstanceId", device.InstanceId),
                     ("ParentInstanceId", device.ParentInstanceId),
                     ("AncestorInstanceIds", string.Join(" | ", device.AncestorInstanceIds)),

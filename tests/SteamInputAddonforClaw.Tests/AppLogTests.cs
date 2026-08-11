@@ -23,15 +23,14 @@ public sealed class AppLogTests : IDisposable
     {
         AppLog.DirectoryOverride = _directory;
         Directory.CreateDirectory(_directory);
-        AppLog.Trace("Test", "trace", ("Field", "value with spaces"));
-        AppLog.Debug("Test", "debug");
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        AppLog.Debug("Test", "debug", ("Field", "value with spaces"));
         AppLog.Info("Test", "info");
         AppLog.Warn("Test", "warn");
         AppLog.Error("Test", "error", new InvalidOperationException("failure"));
         AppLog.Fatal("Test", "fatal", new InvalidOperationException("fatal failure"));
 
         var log = File.ReadAllText(Directory.EnumerateFiles(_directory).Single());
-        Assert.Contains("[TRACE]", log);
         Assert.Contains("[DEBUG]", log);
         Assert.Contains("[INFO]", log);
         Assert.Contains("[WARN]", log);
@@ -50,12 +49,26 @@ public sealed class AppLogTests : IDisposable
     {
         AppLog.DirectoryOverride = _directory;
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
-        AppLog.Trace("Test", "hidden");
+        AppLog.Debug("Test", "hidden");
         AppLog.Info("Test", "visible");
 
         var log = File.ReadAllText(Directory.EnumerateFiles(_directory).Single());
         Assert.DoesNotContain("hidden", log);
         Assert.Contains("visible", log);
+    }
+
+    [Fact]
+    public void MinimumLevel_CanChangeLive()
+    {
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        AppLog.Debug("Test", "Debug A");
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        AppLog.Debug("Test", "Debug B");
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        AppLog.Debug("Test", "Debug C");
+        var log = File.ReadAllText(Directory.EnumerateFiles(_directory).Single());
+        Assert.DoesNotContain("Debug A", log); Assert.Contains("Debug B", log); Assert.DoesNotContain("Debug C", log);
     }
 
     [Fact]
@@ -123,7 +136,7 @@ public sealed class AppLogTests : IDisposable
     public void Dispose()
     {
         AppLog.DirectoryOverride = null;
-        AppLog.MinimumLevelOverride = AppLogLevel.Trace;
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 }
