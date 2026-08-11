@@ -184,16 +184,71 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.Equal("RecoveryBoundaryAlreadyOwned", reentry.Reason);
     }
 
+    [Fact]
+    public async Task SteamSessionBoundaryDoesNotResetWhileNativeSessionIsActive()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices);
+        await using var coordinator = CreateCoordinator(devices, modeController);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        Assert.False(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+        Assert.True(coordinator.HasOwnedRecoveryBoundary);
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ExternalVetoResetsOnlyAtNextSteamSessionBoundary()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices);
+        var mutationAllowed = true;
+        await using var coordinator = CreateCoordinator(
+            devices,
+            modeController,
+            mutationAllowed: () => mutationAllowed);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+
+        mutationAllowed = false;
+        await WaitUntilAsync(
+            () => !coordinator.IsActive && devices.Mode == MsiClawNativeMode.XInput,
+            TimeSpan.FromSeconds(3));
+
+        var blocked = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+        Assert.False(blocked.Succeeded);
+        Assert.Equal("SessionVetoLatched", blocked.Reason);
+
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+        mutationAllowed = true;
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+    }
+
     private static MsiClawNativeModeSessionCoordinator CreateCoordinator(
         FakeDeviceEnumerator devices,
         FakeModeController modeController,
         PowerMutationGate? gate = null,
-        Action<string>? markUnsafe = null)
+        Action<string>? markUnsafe = null,
+        Func<bool>? mutationAllowed = null)
     {
         var store = new MemoryJournalStore();
         var recovery = new RecoveryManager(store);
         var native = new MsiClawNativeStateManager(devices, modeController);
-        return new(native, recovery, gate ?? new PowerMutationGate(initiallyOpen: true), markRecoveryUnsafe: markUnsafe);
+        return new(native, recovery, gate ?? new PowerMutationGate(initiallyOpen: true), mutationAllowed: mutationAllowed, markRecoveryUnsafe: markUnsafe);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (!predicate())
+        {
+            if (DateTime.UtcNow >= deadline)
+                throw new TimeoutException("The expected native-mode safety transition did not occur.");
+            await Task.Delay(20);
+        }
     }
 
     private static RoutingDecision Eligible() => new(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible);
