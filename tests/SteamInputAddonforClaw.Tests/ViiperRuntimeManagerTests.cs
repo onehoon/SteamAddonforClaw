@@ -103,6 +103,22 @@ public sealed class ViiperRuntimeManagerTests
     }
 
     [Fact]
+    public void InactiveRuntimeRejectsInputWithoutCallingNativeApi()
+    {
+        var api = new FakeApi(); using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+        Assert.False(runtime.SetInput(7, new byte[64]));
+        Assert.Empty(api.InputCalls);
+    }
+
+    [Fact]
+    public void NativeInputFailureIsReportedAsFailure()
+    {
+        var api = new FakeApi { SetInputResult = 1 }; using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+        var deviceId = runtime.CreateDevice();
+        Assert.False(runtime.SetInput(deviceId, new byte[64]));
+    }
+
+    [Fact]
     public void PersistentCreateBusFailureIsBounded()
     {
         var api = new FakeApi { CreateBusResult = 1 };
@@ -133,6 +149,7 @@ public sealed class ViiperRuntimeManagerTests
         public int[] AddResults { get; init; } = [0];
         public int CreateBusResult { get; init; }
         public int RemoveBusResult { get; init; }
+        public int SetInputResult { get; init; }
         public List<uint> CreatedBuses { get; } = [];
         public List<uint> RemovedBuses { get; } = [];
         public List<uint> RemovedDevices { get; } = [];
@@ -155,7 +172,7 @@ public sealed class ViiperRuntimeManagerTests
             return AddResults[Math.Min(_addIndex++, AddResults.Length - 1)];
         }
         public int RemoveDevice(uint busId, uint deviceId) { RemovedDevices.Add(deviceId); return 0; }
-        public int SetInput(uint busId, uint deviceId, byte[] report) { InputCalls.Add((busId, deviceId, report.ToArray())); return 0; }
+        public int SetInput(uint busId, uint deviceId, byte[] report) { InputCalls.Add((busId, deviceId, report.ToArray())); return SetInputResult; }
         public int SetFeedbackCallback(uint busId, uint deviceId, Action<ReadOnlyMemory<byte>> callback) => 0;
         public string[] GetDeviceTypes() => DeviceTypes;
         public string? GetLastError() => "fake error";

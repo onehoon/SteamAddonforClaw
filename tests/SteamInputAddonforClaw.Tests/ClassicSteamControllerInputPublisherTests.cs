@@ -49,6 +49,24 @@ public sealed class ClassicSteamControllerInputPublisherTests
         Assert.Equal(1, faults); Assert.Single(runtime.Reports);
     }
 
+    [Fact]
+    public async Task SendExceptionStopsAndNotifiesOnce()
+    {
+        var runtime = new FakeRuntime { ThrowOnSend = true }; var ticks = new ManualTicks(); var faults = 0;
+        var publisher = new ClassicSteamControllerInputPublisher(new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))), runtime, 7, ticks, _ => faults++);
+        publisher.Start(); await Task.Yield(); ticks.Tick(); await publisher.StopAsync(); await publisher.StopAsync();
+        Assert.Equal(1, faults); Assert.Single(runtime.Reports);
+    }
+
+    [Fact]
+    public async Task DuplicateStartIsRejectedAndStopIsIdempotent()
+    {
+        var publisher = new ClassicSteamControllerInputPublisher(new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))), new FakeRuntime(), 7, new ManualTicks());
+        publisher.Start();
+        Assert.Throws<InvalidOperationException>(publisher.Start);
+        await publisher.StopAsync(); await publisher.StopAsync();
+    }
+
     private sealed class Snapshot(ControllerState value) : IControllerStateSnapshotSource
     { public ControllerState Value { get; set; } = value; public ControllerState LatestState => Value; }
     private sealed class ManualTicks : IInputReportTickSource
@@ -60,11 +78,11 @@ public sealed class ClassicSteamControllerInputPublisherTests
     }
     private sealed class FakeRuntime : IViiperRuntime
     {
-        public bool Accept = true; public List<byte[]> Reports { get; } = [];
+        public bool Accept = true; public bool ThrowOnSend; public List<byte[]> Reports { get; } = [];
         public IReadOnlyCollection<uint> OwnedDeviceIds => [7]; public uint BusId => 1;
         public void Start() { } public uint CreateDevice() => 7;
         public bool SetNeutral(uint id) => true;
-        public bool SetInput(uint id, byte[] report) { Reports.Add(report); return Accept; }
+        public bool SetInput(uint id, byte[] report) { Reports.Add(report); if (ThrowOnSend) throw new InvalidOperationException("send failed"); return Accept; }
         public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) => new(true, true);
         public void StopIfUnused() { } public void Dispose() { }
         public async Task WaitForCountAsync(int count) { while (Reports.Count < count) await Task.Yield(); }

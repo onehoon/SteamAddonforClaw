@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Input;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -55,6 +56,34 @@ public sealed class FullNonGyroPipelineTests
         var report = new byte[64]; ClassicSteamControllerReportBuilder.Write(report, 0, input);
         Assert.Equal(0, report[10] & 0x10);
         Assert.Equal(report[24..26], report[50..52]); Assert.Equal(report[26..28], report[52..54]);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(128, 13050)]
+    [InlineData(255, 26000)]
+    public void Trigger_raw_scaling_preserves_the_26000_contract(byte value, short expected)
+    {
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, new(default, default, default, new(value, value), false, false));
+        Assert.Equal(expected, BitConverter.ToInt16(report, 24));
+        Assert.Equal(expected, BitConverter.ToInt16(report, 26));
+    }
+
+    [Fact]
+    public void Digital_full_triggers_and_right_stick_are_preserved_without_guide()
+    {
+        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true);
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, new(buttons, default, new(123, -456), new(0, 255), false, false));
+        Assert.Equal(0x03, report[8] & 0x03);
+        Assert.Equal(0, report[8] & 0x08);
+        Assert.Equal(123, BitConverter.ToInt16(report, 20));
+        Assert.Equal(-456, BitConverter.ToInt16(report, 22));
+        Assert.Equal(0x10, report[10] & 0x10);
+        Assert.Equal(0x04, report[10] & 0x04);
+        Assert.Equal(0x4000, BitConverter.ToUInt16(report, 40));
+        Assert.Equal(3000, BitConverter.ToUInt16(report, 62));
     }
 
     [Theory]
