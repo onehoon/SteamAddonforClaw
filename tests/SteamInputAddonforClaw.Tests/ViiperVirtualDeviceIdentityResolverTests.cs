@@ -34,6 +34,19 @@ public sealed class ViiperVirtualDeviceIdentityResolverTests
         Assert.Equal(2, result.Devices.Count);
     }
 
+    [Fact]
+    public void EmptyOrSentinelContainersFallBackToParentAndRemainAmbiguousWhenParentsDiffer()
+    {
+        var sentinel = new Guid("00000000-0000-0000-ffff-ffffffffffff");
+        var first = DeviceWithParent("USB\\VID_28DE&PID_1102\\ONE", "PARENT_ONE", Guid.Empty);
+        var second = DeviceWithParent("USB\\VID_28DE&PID_1102\\TWO", "PARENT_TWO", sentinel);
+        var result = new ViiperVirtualDeviceIdentityResolver(new ViiperVirtualDeviceIdentityPolicy()).Resolve([], [first, second]);
+        Assert.Equal(ViiperVirtualDeviceResolutionStatus.Ambiguous, result.Status);
+    }
+
     private static ControllerDeviceInfo Device(string id, string topology, Guid? container = null) =>
         new(id, container, null, [topology], "USBIP", [], [], "HIDClass", null, "usbip", 0x28DE, 0x1102, true);
+
+    private static ControllerDeviceInfo DeviceWithParent(string id, string parent, Guid container) =>
+        new(id, container, parent, ["USBIP"], "USBIP", [], [], "HIDClass", null, "usbip", 0x28DE, 0x1102, true);
 }
