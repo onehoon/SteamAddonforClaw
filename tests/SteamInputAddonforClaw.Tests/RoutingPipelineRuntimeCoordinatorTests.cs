@@ -1,5 +1,8 @@
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -36,6 +39,30 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var result = await bridge.Bridge.FailClosedAsync();
 
         Assert.True(result.Succeeded);
+        Assert.Single(executor.RollbackPlans);
+        Assert.Null(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task PublisherFaultInvokesTheActualRuntimeFailClosedPath()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = CreateWithOptions(provider, executor, () => new RoutingExperimentOptions(
+            new(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled),
+            RoutingStageExperimentOptions.None));
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+
+        var ticks = new PublisherManualTicks();
+        var runtime = new PublisherFailingRuntime();
+        var failClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new ClassicSteamControllerInputPublisher(
+            new PublisherSnapshot(), runtime, 7, ticks,
+            exception => _ = Task.Run(async () => { var result = await bridge.Bridge.FailClosedAsync(); if (result.Succeeded) failClosed.TrySetResult(); }));
+        publisher.Start(); await Task.Yield(); ticks.Tick();
+
+        await failClosed.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await publisher.StopAsync();
         Assert.Single(executor.RollbackPlans);
         Assert.Null(bridge.Session.ActiveSession);
     }
@@ -514,5 +541,23 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
             CallCount++;
             return ValueTask.FromResult(Result);
         }
+    }
+
+    private sealed class PublisherSnapshot : IControllerStateSnapshotSource
+    { public ControllerState LatestState => new(new AuxiliaryButtonState([false, false])); }
+    private sealed class PublisherFailingRuntime : IViiperRuntime
+    {
+        public IReadOnlyCollection<uint> OwnedDeviceIds => [7]; public uint BusId => 1;
+        public void Start() { } public uint CreateDevice() => 7; public bool SetNeutral(uint id) => true;
+        public bool SetInput(uint id, byte[] report) => false;
+        public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) => new(true, true);
+        public void StopIfUnused() { } public void Dispose() { }
+    }
+    private sealed class PublisherManualTicks : IInputReportTickSource
+    {
+        private readonly Queue<TaskCompletionSource<bool>> _waiters = new();
+        public ValueTask<bool> WaitForTickAsync(CancellationToken token)
+        { var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously); _waiters.Enqueue(waiter); token.Register(() => waiter.TrySetCanceled(token)); return new(waiter.Task); }
+        public void Tick() { Assert.NotEmpty(_waiters); _waiters.Dequeue().TrySetResult(true); }
     }
 }
