@@ -43,6 +43,8 @@ internal sealed class ClassicSteamControllerInputPublisher
     private uint _frame;
     private int _reportCount;
     private int _faultReported;
+    private long _lastHeartbeat;
+    private int _reportsAtHeartbeat;
 
     internal ClassicSteamControllerInputPublisher(IControllerStateSnapshotSource snapshot, IViiperRuntime runtime, uint deviceId,
         IInputReportTickSource? ticks = null, Action<Exception>? fault = null)
@@ -81,6 +83,13 @@ internal sealed class ClassicSteamControllerInputPublisher
                     return;
                 }
                 _reportCount++;
+                var now = Stopwatch.GetTimestamp();
+                if (_lastHeartbeat == 0) _lastHeartbeat = now;
+                if (Stopwatch.GetElapsedTime(_lastHeartbeat) >= TimeSpan.FromSeconds(1))
+                {
+                    AppLog.Debug("SteamOutput", "Classic Steam Controller publisher heartbeat", ("DeviceId", _deviceId), ("ReportCount", _reportCount), ("ReportsLastSecond", _reportCount - _reportsAtHeartbeat), ("LatestFrame", _frame), ("PublisherRunning", true));
+                    _reportsAtHeartbeat = _reportCount; _lastHeartbeat = now;
+                }
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }

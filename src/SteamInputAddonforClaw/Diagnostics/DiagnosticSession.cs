@@ -1,0 +1,62 @@
+using System.Diagnostics;
+using SteamInputAddonforClaw.Input;
+
+namespace SteamInputAddonforClaw.Diagnostics;
+
+internal static class DiagnosticSession
+{
+    private static long _nextId;
+    internal static Context Start(uint raw, uint effective, string source)
+    {
+        var context = new Context(Interlocked.Increment(ref _nextId), raw, effective, source, Stopwatch.GetTimestamp());
+        AppLog.Info("SteamDiagnostic", "Session started", ("Session", context.Id), ("RawRunningAppID", raw), ("EffectiveRunningAppID", effective), ("EffectiveSource", source));
+        return context;
+    }
+    internal static void Complete(Context context, params (string Key, object? Value)[] fields) => AppLog.Info("SteamDiagnostic", "Session completed", fields.Append(("Session", context.Id)).Append(("RawRunningAppID", context.RawRunningAppId)).Append(("EffectiveRunningAppID", context.EffectiveRunningAppId)).Append(("EffectiveSource", context.Source)).Append(("DurationMs", (long)Stopwatch.GetElapsedTime(context.StartTimestamp).TotalMilliseconds)).ToArray());
+    internal sealed record Context(long Id, uint RawRunningAppId, uint EffectiveRunningAppId, string Source, long StartTimestamp);
+}
+
+internal sealed class DiagnosticSessionTracker
+{
+    private DiagnosticSession.Context? _current;
+    internal void Observe(uint rawRunningAppId, uint effectiveRunningAppId, string source)
+    {
+        var identityChanged = _current is not null && (_current.RawRunningAppId != rawRunningAppId || _current.Source != source || _current.EffectiveRunningAppId != effectiveRunningAppId);
+        if (identityChanged) { DiagnosticSession.Complete(_current!); _current = null; }
+        if (_current is null && (rawRunningAppId != 0 || source == "DeveloperTest")) _current = DiagnosticSession.Start(rawRunningAppId, effectiveRunningAppId, source);
+    }
+    internal void Complete() { if (_current is not null) DiagnosticSession.Complete(_current); _current = null; }
+}
+
+internal static class ControllerStateDiagnostics
+{
+    private static readonly TimeSpan AnalogMinimumInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly Lock AnalogSync = new();
+    private static long _lastAnalogTimestamp;
+    private static ControllerState _lastAnalogState;
+    private static bool _hasAnalogState;
+
+    internal static void LogChanges(ControllerState oldState, ControllerState state, int session)
+    {
+        var fields = new List<(string Key, object? Value)>();
+        Add(fields, "A", oldState.Buttons.A, state.Buttons.A); Add(fields, "B", oldState.Buttons.B, state.Buttons.B); Add(fields, "X", oldState.Buttons.X, state.Buttons.X); Add(fields, "Y", oldState.Buttons.Y, state.Buttons.Y);
+        Add(fields, "LB", oldState.Buttons.LeftBumper, state.Buttons.LeftBumper); Add(fields, "RB", oldState.Buttons.RightBumper, state.Buttons.RightBumper); Add(fields, "Back", oldState.Buttons.Back, state.Buttons.Back); Add(fields, "Start", oldState.Buttons.Start, state.Buttons.Start);
+        Add(fields, "L3", oldState.Buttons.LeftStickClick, state.Buttons.LeftStickClick); Add(fields, "R3", oldState.Buttons.RightStickClick, state.Buttons.RightStickClick); Add(fields, "LTFull", oldState.Buttons.LeftTriggerFull, state.Buttons.LeftTriggerFull); Add(fields, "RTFull", oldState.Buttons.RightTriggerFull, state.Buttons.RightTriggerFull);
+        Add(fields, "M1", oldState.Auxiliary[1], state.Auxiliary[1]); Add(fields, "M2", oldState.Auxiliary[0], state.Auxiliary[0]);
+        var analogChanged = oldState.LeftStick != state.LeftStick || oldState.RightStick != state.RightStick || oldState.Triggers != state.Triggers;
+        if (analogChanged && ShouldLogAnalog(state)) fields.Add(("Analog", $"LX={state.LeftStick.X},LY={state.LeftStick.Y},RX={state.RightStick.X},RY={state.RightStick.Y},LT={state.Triggers.Left},RT={state.Triggers.Right}"));
+        if (fields.Count > 0) AppLog.Debug("Input", "ControllerState changed", fields.Append(("TestSession", session)).ToArray());
+    }
+    private static bool ShouldLogAnalog(ControllerState state)
+    {
+        lock (AnalogSync)
+        {
+            var now = Stopwatch.GetTimestamp();
+            var intervalElapsed = _lastAnalogTimestamp == 0 || Stopwatch.GetElapsedTime(_lastAnalogTimestamp) >= AnalogMinimumInterval;
+            var meaningful = !_hasAnalogState || Math.Abs(state.LeftStick.X - _lastAnalogState.LeftStick.X) >= 512 || Math.Abs(state.LeftStick.Y - _lastAnalogState.LeftStick.Y) >= 512 || Math.Abs(state.RightStick.X - _lastAnalogState.RightStick.X) >= 512 || Math.Abs(state.RightStick.Y - _lastAnalogState.RightStick.Y) >= 512 || Math.Abs(state.Triggers.Left - _lastAnalogState.Triggers.Left) >= 8 || Math.Abs(state.Triggers.Right - _lastAnalogState.Triggers.Right) >= 8;
+            if (!intervalElapsed || !meaningful) return false;
+            _lastAnalogTimestamp = now; _lastAnalogState = state; _hasAnalogState = true; return true;
+        }
+    }
+    private static void Add(List<(string Key, object? Value)> fields, string name, bool oldValue, bool newValue) { if (oldValue != newValue) fields.Add((name, $"{oldValue}->{newValue}")); }
+}

@@ -148,6 +148,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
                 fault: ReportOutputFault);
             _publisher.Start();
             _state = LifecycleState.Active;
+            AppLog.Debug("SteamOutput", "SteamOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{ViiperRuntimeManager.VendorId:X4}"), ("PID", $"{ViiperRuntimeManager.ProductId:X4}"), ("NeutralAccepted", true));
             return RoutingStageOperationResult.Success("ClassicSteamControllerCreated");
         }
         catch (OperationCanceledException)
@@ -190,11 +191,13 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         }
         if (_sessionId() is not { } session) return RoutingStageOperationResult.Failure("RecoverySessionUnavailable");
         var hadResolvedIdentity = _owned is { Count: > 0 };
+        var removal = ViiperDeviceRemovalResult.Failed;
+        var absent = false;
         if (_deviceId != 0)
         {
-            var removal = _runtime.RemoveDevice(_busId, _deviceId);
+            removal = _runtime.RemoveDevice(_busId, _deviceId);
             if (!removal.DeviceRemoved) return RoutingStageOperationResult.Failure("VirtualDeviceRemoveFailed");
-            var absent = hadResolvedIdentity
+            absent = hadResolvedIdentity
                 ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
                 : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
             if (!absent) return RoutingStageOperationResult.Failure("VirtualDevicePnPStillPresent");
@@ -203,6 +206,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             return RoutingStageOperationResult.Failure("UnrelatedMatchingVirtualDeviceStillPresent");
         var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
         if (!complete.IsSafeToContinue) return RoutingStageOperationResult.Failure("VirtualDeviceRecoveryCompletionFailed");
+        AppLog.Debug("SteamOutput", "SteamOutput inactive", ("BusId", _busId), ("DeviceId", _deviceId), ("DeviceRemoved", removal.DeviceRemoved), ("BusRemoved", removal.BusRemoved), ("PnPAbsent", absent), ("RecoveryMutationCompleted", complete.IsSafeToContinue));
         _deviceId = 0; _busId = 0; _owned = null; _before = null; _state = LifecycleState.Inactive; _runtime.StopIfUnused();
         return RoutingStageOperationResult.Success("ClassicSteamControllerRemoved");
     }

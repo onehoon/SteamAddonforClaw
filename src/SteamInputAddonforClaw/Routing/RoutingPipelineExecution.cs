@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.Routing;
 
 internal readonly record struct RoutingStageOperationResult(bool Succeeded, string Reason)
@@ -112,7 +115,9 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
 
                 if (mode == RoutingStageMode.ObserveOnly)
                 {
+                    var started = Stopwatch.GetTimestamp();
                     var observation = await stage.ObserveAsync(cancellationToken).ConfigureAwait(false);
+                    AppLog.Debug("Routing", "Stage operation", ("Stage", kind), ("Phase", "Observe"), ("Result", observation.Succeeded ? "Success" : "Failure"), ("Reason", observation.Reason), ("ElapsedMs", (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds));
                     if (!observation.Succeeded)
                         return await FailAsync(kind, observation.Reason, rollbackCandidates).ConfigureAwait(false);
                     continue;
@@ -122,11 +127,15 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
                     return await FailAsync(kind, "UnknownStageMode", rollbackCandidates).ConfigureAwait(false);
 
                 rollbackCandidates.Add((kind, stage));
+                var prepareStarted = Stopwatch.GetTimestamp();
                 var preparation = await stage.PrepareMutationAsync(cancellationToken).ConfigureAwait(false);
+                AppLog.Debug("Routing", "Stage operation", ("Stage", kind), ("Phase", "Prepare"), ("Result", preparation.Succeeded ? "Success" : "Failure"), ("Reason", preparation.Reason), ("ElapsedMs", (long)Stopwatch.GetElapsedTime(prepareStarted).TotalMilliseconds));
                 if (!preparation.Succeeded)
                     return await FailAsync(kind, preparation.Reason, rollbackCandidates).ConfigureAwait(false);
 
+                var executeStarted = Stopwatch.GetTimestamp();
                 var execution = await stage.ExecuteMutationAsync(cancellationToken).ConfigureAwait(false);
+                AppLog.Debug("Routing", "Stage operation", ("Stage", kind), ("Phase", "Execute"), ("Result", execution.Succeeded ? "Success" : "Failure"), ("Reason", execution.Reason), ("ElapsedMs", (long)Stopwatch.GetElapsedTime(executeStarted).TotalMilliseconds));
                 if (!execution.Succeeded)
                     return await FailAsync(kind, execution.Reason, rollbackCandidates).ConfigureAwait(false);
             }
@@ -181,7 +190,9 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
 
             try
             {
+                var started = Stopwatch.GetTimestamp();
                 var result = await entry.Stage.RollbackMutationAsync(CancellationToken.None).ConfigureAwait(false);
+                AppLog.Debug("Routing", "Stage operation", ("Stage", entry.Kind), ("Phase", "Rollback"), ("Result", result.Succeeded ? "Success" : "Failure"), ("Reason", result.Reason), ("ElapsedMs", (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds));
                 if (!result.Succeeded)
                     firstFailure ??= new(false, entry.Kind, result.Reason);
             }
