@@ -10,7 +10,29 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class RoutingPipelineRuntimeCoordinatorTests
 {
     [Fact]
-    public async Task StockEligibleUsesCanonicalSnapshotAndStockBaseline()
+    public async Task SyntheticTestModeSessionBoundaryEntersAndRollsBackTheProductionPipeline()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(WaitingForSteam(), Software()));
+        var bridge = Create(provider, executor);
+
+        var entered = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        var exited = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(entered.Succeeded);
+        Assert.Equal(RoutingActionKind.EnterOverride, entered.Action);
+        Assert.True(exited.Succeeded);
+        Assert.Equal(RoutingActionKind.ExitOverride, exited.Action);
+        Assert.Single(executor.ExecutedPlans);
+        Assert.Single(executor.RollbackPlans);
+        Assert.Equal(new StockCenterMRoutingStrategy().BuildBaselinePlan(), executor.ExecutedPlans.Single());
+        Assert.Equal(executor.ExecutedPlans.Single(), executor.RollbackPlans.Single());
+    }
+
+    [Fact]
+    public async Task StockEligibleUsesCanonicalSnapshotAndNormalStockRoutingBaseline()
     {
         var executor = new FakeExecutor();
         var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
@@ -22,7 +44,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.Single(executor.ExecutedPlans);
         var plan = executor.ExecutedPlans.Single();
         Assert.Equal(RoutingStageMode.Enabled, plan.NativeMode);
-        Assert.Equal(RoutingStageMode.Disabled, plan.PhysicalInput);
+        Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalInput);
+        Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalIsolation);
+        Assert.Equal(RoutingStageMode.Enabled, plan.SteamOutput);
         Assert.NotNull(bridge.Session.ActiveSession);
     }
 
@@ -458,6 +482,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         new(new("Test", "Test", "Test", []), null!, software, null!, null!, null!, null!, decision, null!, true);
 
     private static RoutingDecision Eligible() => new(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible);
+    private static RoutingDecision WaitingForSteam() => new(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive);
 
     private sealed class FakeStatusProvider(params SystemStatusSnapshot[] snapshots) : ISystemStatusProvider
     {

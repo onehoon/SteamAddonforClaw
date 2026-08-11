@@ -228,11 +228,7 @@ public partial class App : Application
                 statusProvider,
                 pipelineSessionCoordinator,
                 [_msiClawNativeModeSession],
-                () => _developerTestModeState?.IsEnabled == true
-                    ? new RoutingExperimentOptions(
-                        new RoutingStageExperimentOptions(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled),
-                        RoutingStageExperimentOptions.None)
-                    : RoutingExperimentOptions.None);
+                () => RoutingExperimentOptions.None);
             steamOutputStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false); });
         }
         _userTerminationGuard = new UserTerminationGuard(

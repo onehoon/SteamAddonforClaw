@@ -57,6 +57,27 @@ public sealed class EffectiveSteamSessionSourceTests
     }
 
     [Fact]
+    public void TestModeOnAndOffPublishesTheSyntheticSessionBoundary()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        var testMode = new DeveloperTestModeState();
+        using var effective = new EffectiveSteamSessionSource(watcher, testMode);
+        watcher.Start();
+        var states = new List<SteamSessionState>();
+        effective.StateChanged += (_, args) => states.Add(args.Current);
+
+        testMode.SetEnabled(true);
+        testMode.SetEnabled(false);
+
+        Assert.Equal(2, states.Count);
+        Assert.True(states[0].IsActive);
+        Assert.Equal(SteamSessionSource.DeveloperTest, states[0].Source);
+        Assert.False(states[1].IsActive);
+        Assert.Equal(SteamSessionSource.Actual, states[1].Source);
+    }
+
+    [Fact]
     public void ReentrantChanges_ArePublishedInCommitOrder()
     {
         var actual = new FakeRunningAppIdSource(0);

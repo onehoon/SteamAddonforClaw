@@ -43,6 +43,12 @@ public sealed class RoutingExperimentOptionsTests
     {
         var stage = (RoutingStageKind)stageValue;
         var plan = Build(new StockCenterMRoutingStrategy(), new(WithMode(RoutingStageExperimentOptions.None, stage, stage == RoutingStageKind.NativeMode ? RoutingStageMode.Disabled : RoutingStageMode.ObserveOnly), RoutingStageExperimentOptions.None));
+        if (stage is RoutingStageKind.PhysicalInput or RoutingStageKind.PhysicalIsolation)
+        {
+            Assert.Equal(RoutingPipelinePlan.AllDisabled, plan);
+            return;
+        }
+
         Assert.Equal(stage == RoutingStageKind.NativeMode ? RoutingStageMode.Disabled : RoutingStageMode.ObserveOnly, plan.GetMode(stage));
         foreach (var other in Enum.GetValues<RoutingStageKind>().Where(other => other != stage))
             Assert.Equal(new StockCenterMRoutingStrategy().BuildBaselinePlan().GetMode(other), plan.GetMode(other));
@@ -75,7 +81,7 @@ public sealed class RoutingExperimentOptionsTests
 
         options = new(RoutingStageExperimentOptions.None, new(PhysicalInput: RoutingStageMode.ObserveOnly));
         plan = Build(new StockCenterMRoutingStrategy(), options);
-        Assert.Equal(RoutingStageMode.Disabled, plan.PhysicalInput);
+        Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalInput);
     }
 
     [Fact]

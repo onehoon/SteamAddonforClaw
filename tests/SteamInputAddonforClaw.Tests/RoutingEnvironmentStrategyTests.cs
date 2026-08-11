@@ -45,14 +45,14 @@ public sealed class RoutingEnvironmentStrategyTests
     }
 
     [Fact]
-    public void StockBaselineEnablesOnlyNativeMode()
+    public void StockBaselineEnablesNormalSteamRoutingStages()
     {
         var plan = new StockCenterMRoutingStrategy().BuildBaselinePlan();
         Assert.Equal(RoutingStageMode.Enabled, plan.NativeMode);
-        Assert.Equal(RoutingStageMode.Disabled, plan.PhysicalInput);
-        Assert.Equal(RoutingStageMode.Disabled, plan.PhysicalIsolation);
+        Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalInput);
+        Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalIsolation);
         Assert.Equal(RoutingStageMode.Disabled, plan.ThirdPartyIsolation);
-        Assert.Equal(RoutingStageMode.Disabled, plan.SteamOutput);
+        Assert.Equal(RoutingStageMode.Enabled, plan.SteamOutput);
         Assert.Equal(RoutingStageMode.Disabled, plan.XboxOutput);
         Assert.Equal(RoutingStageMode.Disabled, plan.GameBarRouting);
     }
