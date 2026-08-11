@@ -323,12 +323,14 @@ public sealed partial class MainWindow : Window
             ? ComponentProvisioningState.Corrupt
             : usbReceipt.Receipt is not null ? ToComponentProvisioningState(usbReceipt.Receipt.State)
             : ComponentProvisioningState.None;
+        var hidBootChanged = receipt.Receipt is { State: HidHideProvisioningReceiptState.InstalledPendingReboot } hidPending && BootSession.HasChangedSince(hidPending.StartedAtUtc);
+        var usbBootChanged = usbReceipt.Receipt is { State: UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot } usbPending && BootSession.HasChangedSince(usbPending.StartedAtUtc);
         var hidInstallation = ComponentInstallationAssessmentPolicy.AssessHidHide(hidPackage, snapshot.Prerequisites.HidHide, HidHidePackageMetadata.BundledVersion.ToString());
         var usbInstallation = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
         return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
             snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController,
             SteamSessionState.FromRunningAppId(snapshot.Steam.IsActive ? snapshot.Steam.RunningAppId : 0),
-            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstallation, usbInstallation, new(hidHideState, usbIpState)));
+            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstallation, usbInstallation, new(hidHideState, usbIpState, hidBootChanged, usbBootChanged)));
     }
 
     private async Task RunPrerequisiteSetupAsync()

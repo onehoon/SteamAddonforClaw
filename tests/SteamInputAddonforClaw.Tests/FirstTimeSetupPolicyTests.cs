@@ -243,6 +243,40 @@ public sealed class FirstTimeSetupPolicyTests
     }
 
     [Fact]
+    public void InstallStartedWithExactPackage_DoesNotBlockMissingComponentSetup()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Missing) with
+        {
+            Provisioning = new(ComponentProvisioningState.InstallStarted, ComponentProvisioningState.None)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, setup.Status);
+        Assert.True(setup.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void PendingRebootInSameBootSession_RemainsRestartRequired()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
+        {
+            Provisioning = new(ComponentProvisioningState.PendingReboot, ComponentProvisioningState.None)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.RestartRequired, setup.Status);
+    }
+
+    [Fact]
+    public void PendingRebootAfterBootChangeIsCompleteWhenPackagesAreInstalled()
+    {
+        var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
+        {
+            Provisioning = new(ComponentProvisioningState.PendingReboot, ComponentProvisioningState.None, HidHideBootSessionChanged: true)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Complete, setup.Status);
+    }
+
+    [Fact]
     public void SetupCompleteWithViiperUnavailable_DoesNotPresentSetupRequired()
     {
         var setup = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready));

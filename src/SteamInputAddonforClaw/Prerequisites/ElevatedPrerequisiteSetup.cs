@@ -263,13 +263,22 @@ internal static class ElevatedPrerequisiteSetup
         var loaded = store.Load();
         if (loaded.IsCorrupt) throw new InvalidDataException("The HidHide provisioning receipt is corrupt.");
         if (loaded.Receipt is not { State: HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.InstalledPendingReboot or HidHideProvisioningReceiptState.AttemptFailed } receipt) return;
-        if (receipt.State == HidHideProvisioningReceiptState.AttemptFailed
+        if (receipt.State is HidHideProvisioningReceiptState.InstallStarted or HidHideProvisioningReceiptState.AttemptFailed
             && package.InspectionSucceeded
             && package.Installed
             && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase))
         {
             store.Save(receipt with { State = HidHideProvisioningReceiptState.Provisioned, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = null });
             AppLog.Info("PrerequisiteSetup", "HidHide failed receipt reconciled from exact installed package evidence.", ("AttemptId", receipt.AttemptId), ("State", HidHideProvisioningReceiptState.Provisioned), ("PackageInstalled", package.Installed), ("PackageVersion", package.Version), ("PrerequisiteStatus", prerequisite.Status));
+            return;
+        }
+        if (receipt.State == HidHideProvisioningReceiptState.InstalledPendingReboot
+            && BootSession.HasChangedSince(receipt.StartedAtUtc)
+            && package.InspectionSucceeded
+            && package.Installed
+            && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            store.Save(receipt with { State = HidHideProvisioningReceiptState.Provisioned, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = null });
             return;
         }
         var decision = ProvisioningReconciliationPolicy.Evaluate(package.InspectionSucceeded, package.Installed, package.Version, receipt.InstallerVersion, prerequisite.Status, receipt.State == HidHideProvisioningReceiptState.InstallStarted);
@@ -288,13 +297,22 @@ internal static class ElevatedPrerequisiteSetup
         var loaded = store.Load();
         if (loaded.IsCorrupt) throw new InvalidDataException("The usbip-win2 provisioning receipt is corrupt.");
         if (loaded.Receipt is not { State: UsbIpWin2ProvisioningReceiptState.InstallStarted or UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot or UsbIpWin2ProvisioningReceiptState.AttemptFailed } receipt) return;
-        if (receipt.State == UsbIpWin2ProvisioningReceiptState.AttemptFailed
+        if (receipt.State is UsbIpWin2ProvisioningReceiptState.InstallStarted or UsbIpWin2ProvisioningReceiptState.AttemptFailed
             && package.InspectionSucceeded
             && package.Installed
             && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase))
         {
             store.Save(receipt with { State = UsbIpWin2ProvisioningReceiptState.Provisioned, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = null });
             AppLog.Info("PrerequisiteSetup", "usbip-win2 failed receipt reconciled from exact installed package evidence.", ("AttemptId", receipt.AttemptId), ("PackageVersion", package.Version));
+            return;
+        }
+        if (receipt.State == UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot
+            && BootSession.HasChangedSince(receipt.StartedAtUtc)
+            && package.InspectionSucceeded
+            && package.Installed
+            && string.Equals(package.Version, receipt.InstallerVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            store.Save(receipt with { State = UsbIpWin2ProvisioningReceiptState.Provisioned, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = package.Version, FailureReason = null });
             return;
         }
         var decision = ProvisioningReconciliationPolicy.Evaluate(package.InspectionSucceeded, package.Installed, package.Version, receipt.InstallerVersion, prerequisite.Status, receipt.State == UsbIpWin2ProvisioningReceiptState.InstallStarted);
