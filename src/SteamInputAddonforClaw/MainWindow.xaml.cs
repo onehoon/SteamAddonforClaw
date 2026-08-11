@@ -38,6 +38,7 @@ public sealed partial class MainWindow : Window
     private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
     private readonly DeveloperTestModeState? _developerTestModeState;
     private bool _isInitializingTestMode;
+    private bool _isInitializingLogLevel;
     private SystemStatusSnapshot? _latestSystemStatus;
     private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
@@ -91,6 +92,9 @@ public sealed partial class MainWindow : Window
         _isInitializingTestMode = true;
         TestModeToggleSwitch.IsOn = _developerTestModeState?.IsEnabled == true;
         _isInitializingTestMode = false;
+        _isInitializingLogLevel = true;
+        LogLevelComboBox.SelectedIndex = _startupSettings.Settings.LogLevel == AppLogPreference.Debug ? 1 : 0;
+        _isInitializingLogLevel = false;
         StartupSettingsStatusText.Text = startupRegistrationMessage;
         ControllerSoftwareRepeater.ItemsSource = _softwareCards;
         RoutingComponentsRepeater.ItemsSource = _componentCards;
@@ -136,6 +140,13 @@ public sealed partial class MainWindow : Window
     {
         if (!_isInitializingTestMode && !_prerequisiteSetupInProgress)
             _developerTestModeState?.SetEnabled(TestModeToggleSwitch.IsOn);
+    }
+
+    private void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_isInitializingLogLevel || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
+        var level = AppSettingsPolicy.Normalize(value);
+        _startupSettings.ChangeLogLevel(level);
     }
 
 

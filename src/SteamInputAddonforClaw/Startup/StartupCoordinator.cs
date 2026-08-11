@@ -81,7 +81,7 @@ internal sealed class StartupCoordinator
                 return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
             }
 
-            AppLog.Trace("ClawTweaks", "ClawTweaks startup wait.", ("RemainingMs", (deadline - DateTimeOffset.UtcNow).TotalMilliseconds));
+            AppLog.Debug("ClawTweaks", "ClawTweaks startup wait.", ("RemainingMs", (deadline - DateTimeOffset.UtcNow).TotalMilliseconds));
             await Task.Delay(_clawTweaksStartingCheckInterval, cancellationToken).ConfigureAwait(false);
             environment = _environmentDetector.Detect();
         }

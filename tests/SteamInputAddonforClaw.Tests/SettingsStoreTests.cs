@@ -29,6 +29,33 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void LegacySettings_DefaultsLogLevelToInfo()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json"); Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false}");
+        var settings = new SettingsStore(path).Load();
+        Assert.False(settings.LaunchAtWindowsStartup); Assert.Equal(AppLogPreference.Info, settings.LogLevel);
+    }
+
+    [Fact]
+    public void InvalidLogLevel_PreservesOtherSettingsAndDefaultsToInfo()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json"); Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false,\"LogLevel\":\"SomethingInvalid\"}");
+        var settings = new SettingsStore(path).Load();
+        Assert.False(settings.LaunchAtWindowsStartup); Assert.Equal(AppLogPreference.Info, settings.LogLevel);
+    }
+
+    [Fact]
+    public void DebugLogLevel_RoundTripsAsText()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        store.Save(new AppSettings(false, AppLogPreference.Debug));
+        Assert.Equal(AppLogPreference.Debug, store.Load().LogLevel);
+        Assert.Contains("\"LogLevel\": \"Debug\"", File.ReadAllText(Path.Combine(_testDirectory, "settings.json")));
+    }
+
+    [Fact]
     public void CreateTaskConfiguration_UsesStableExecutablePath()
     {
         var configuration = WindowsTaskSchedulerStartupManager.CreateTaskConfiguration(@"C:\Custom Install\SteamInputAddonforClaw.exe", "DOMAIN\\User");

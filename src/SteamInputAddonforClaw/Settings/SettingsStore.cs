@@ -24,14 +24,19 @@ public sealed class SettingsStore
                 return new AppSettings();
             }
 
-            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_settingsPath)) ?? new AppSettings();
-            AppLog.Info("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup));
+            using var document = JsonDocument.Parse(File.ReadAllText(_settingsPath));
+            var root = document.RootElement;
+            var startup = root.TryGetProperty("LaunchAtWindowsStartup", out var startupProperty) && startupProperty.ValueKind is JsonValueKind.False or JsonValueKind.True
+                ? startupProperty.GetBoolean() : true;
+            var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
+            var settings = new AppSettings(startup, logLevel);
+            AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
             return settings;
         }
         catch (JsonException exception)
         {
             AppLog.Warn("Settings", "Settings parsing failed. Using defaults.", exception, ("Action", "Defaults"));
-            return new AppSettings();
+                return new AppSettings();
         }
         catch (IOException exception)
         {
@@ -43,13 +48,14 @@ public sealed class SettingsStore
     public void Save(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        AppLog.Info("Settings", "Settings save started.", ("Path", _settingsPath), ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup));
+        AppLog.Debug("Settings", "Settings save started.", ("Path", _settingsPath), ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
 
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, SerializerOptions));
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString() };
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
-        AppLog.Info("Settings", "Settings save completed.");
+        AppLog.Debug("Settings", "Settings save completed.");
     }
 }

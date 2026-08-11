@@ -156,6 +156,14 @@
                         </StackPanel>
                     </Grid>
                 </Border>
+                <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <SymbolIcon VerticalAlignment="Top" Symbol="Document" />
+                        <StackPanel Grid.Column="1" Spacing="2"><TextBlock FontSize="18" FontWeight="SemiBold" Text="Logging" /><TextBlock Opacity="0.7" Text="Control application log verbosity. Info is recommended for normal use. Debug records detailed controller and PnP diagnostics and may significantly increase log size." TextWrapping="Wrap" /></StackPanel>
+                        <ComboBox x:Name="LogLevelComboBox" Grid.Column="2" Width="120" SelectionChanged="LogLevelComboBox_SelectionChanged"><ComboBoxItem Content="Info" /><ComboBoxItem Content="Debug" /></ComboBox>
+                    </Grid>
+                </Border>
                 </StackPanel>
             </ScrollViewer>
         </Grid>

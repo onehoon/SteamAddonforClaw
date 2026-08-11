@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace SteamInputAddonforClaw.Diagnostics;
 
-internal enum AppLogLevel { Trace, Debug, Info, Warn, Error, Fatal }
+internal enum AppLogLevel { Debug, Info, Warn, Error, Fatal }
 
 internal static class AppLog
 {
@@ -12,11 +12,12 @@ internal static class AppLog
     private static readonly string LaunchId = Guid.NewGuid().ToString("N")[..10];
     private static readonly string DefaultDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "logs");
     internal static string? DirectoryOverride { get; set; }
-    internal static AppLogLevel MinimumLevelOverride { get; set; } = AppLogLevel.Trace;
+    private static int _minimumLevel = (int)AppLogLevel.Info;
+    internal static AppLogLevel MinimumLevelOverride { get => (AppLogLevel)Volatile.Read(ref _minimumLevel); set => Volatile.Write(ref _minimumLevel, (int)value); }
     internal static string DirectoryPath => DirectoryOverride ?? DefaultDirectory;
 
-    public static void Trace(string category, string message, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Trace, category, message, null, fields);
     public static void Debug(string category, string message, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Debug, category, message, null, fields);
+    public static void Debug(string message) => Debug("App", message);
     public static void Info(string message) => Info("App", message);
     public static void Info(string category, string message, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Info, category, message, null, fields);
     public static void Warn(string category, string message, Exception? exception = null, params (string Key, object? Value)[] fields) => Write(AppLogLevel.Warn, category, message, exception, fields);

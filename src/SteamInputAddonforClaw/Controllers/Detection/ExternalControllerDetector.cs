@@ -40,12 +40,12 @@ public sealed class ExternalControllerDetector
 
             foreach (var group in groups)
             {
-                AppLog.Trace("ExternalController", "Logical controller group.", ("LogicalGroupKey", group.Key), ("InterfaceCount", group.Devices.Length));
+                AppLog.Debug("ExternalController", "Logical controller group.", ("LogicalGroupKey", group.Key), ("InterfaceCount", group.Devices.Length));
                 for (var index = 0; index < group.Devices.Length; index++)
                 {
                     var device = group.Devices[index];
                     var classification = group.Classifications[index];
-                    AppLog.Trace("PnP", "Controller interface classified.", ("LogicalGroupKey", group.Key), ("InstanceId", device.InstanceId), ("ParentInstanceId", device.ParentInstanceId), ("ContainerId", device.ContainerId), ("VID", device.VendorId), ("PID", device.ProductId), ("EnumeratorName", device.EnumeratorName), ("Service", device.Service), ("Classification", classification.Classification), ("Reason", classification.Reason), ("EvidenceAncestorInstanceId", classification.EvidenceDevice?.InstanceId), ("EvidenceHardwareId", classification.EvidenceDevice?.HardwareIds.FirstOrDefault()), ("EvidenceService", classification.EvidenceDevice?.Service));
+                    AppLog.Debug("PnP", "Controller interface classified.", ("LogicalGroupKey", group.Key), ("InstanceId", device.InstanceId), ("ParentInstanceId", device.ParentInstanceId), ("ContainerId", device.ContainerId), ("VID", device.VendorId), ("PID", device.ProductId), ("EnumeratorName", device.EnumeratorName), ("Service", device.Service), ("Classification", classification.Classification), ("Reason", classification.Reason), ("EvidenceAncestorInstanceId", classification.EvidenceDevice?.InstanceId), ("EvidenceHardwareId", classification.EvidenceDevice?.HardwareIds.FirstOrDefault()), ("EvidenceService", classification.EvidenceDevice?.Service));
                 }
             }
 
@@ -84,7 +84,7 @@ public sealed class ExternalControllerDetector
 
         if (device.ContainerId is Guid invalidContainerId)
         {
-            AppLog.Trace("PnP", "Container ID ignored for logical grouping.", ("InstanceId", device.InstanceId), ("ContainerId", invalidContainerId), ("Reason", invalidContainerId == Guid.Empty ? "EmptyContainerId" : "SentinelContainerId"), ("Fallback", string.IsNullOrWhiteSpace(device.ParentInstanceId) ? "InstanceId" : "ParentInstanceId"));
+            AppLog.Debug("PnP", "Container ID ignored for logical grouping.", ("InstanceId", device.InstanceId), ("ContainerId", invalidContainerId), ("Reason", invalidContainerId == Guid.Empty ? "EmptyContainerId" : "SentinelContainerId"), ("Fallback", string.IsNullOrWhiteSpace(device.ParentInstanceId) ? "InstanceId" : "ParentInstanceId"));
         }
 
         return ControllerLogicalIdentity.GetLogicalKey(device);

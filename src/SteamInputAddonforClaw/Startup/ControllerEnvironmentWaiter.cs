@@ -54,7 +54,7 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
                 cancellationToken.ThrowIfCancellationRequested();
                 attempt++;
                 var (snapshot, ready) = CreateRelevantTopologySnapshot(mode);
-                AppLog.Trace("Environment", "Readiness poll.", ("Attempt", attempt), ("Ready", ready), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+                AppLog.Debug("Environment", "Readiness poll.", ("Attempt", attempt), ("Ready", ready), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
                 if (!ready)
                 {
                     stableSnapshotCount = 0;

@@ -88,7 +88,7 @@ public sealed class SteamSessionWatcher : IDisposable
             var nextState = SteamSessionState.FromRunningAppId(_runningAppIdSource.GetRunningAppId());
             if (nextState == _state)
             {
-                AppLog.Trace("Steam", "Registry notification produced no state change.", ("RunningAppID", nextState.RunningAppId));
+                AppLog.Debug("Steam", "Registry notification produced no state change.", ("RunningAppID", nextState.RunningAppId));
                 return;
             }
 
