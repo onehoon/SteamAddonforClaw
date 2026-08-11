@@ -186,6 +186,10 @@ This contract is not wired into production routing yet. The plan does not infer 
 
 Strategy selection does not authorize controller mutation. Routing eligibility, external-controller veto, recovery safety, prerequisite readiness, and compatibility policy remain separate mandatory gates. The current safe baselines are StockCenterM with only `NativeMode = Enabled`, and ClawTweaks/Unsupported with every stage disabled. These are baseline plans, not finalized production routing requirements, and the existence of a ClawTweaks strategy does not make ClawTweaks supported by the current compatibility policy.
 
+Experiment options are immutable overlays on environment strategy baselines. Stock Center M and ClawTweaks options are independent: a stage override configured for one environment is never applied to the other. A null override inherits the baseline, while `Disabled`, `ObserveOnly`, or `Enabled` explicitly replaces that stage's baseline mode.
+
+Unsupported, Handheld Companion, Winhanced, multiple-manager, indeterminate, and unknown environment strategies cannot be enabled through experiment options. Experiment options do not bypass compatibility, routing eligibility, external-controller veto, recovery safety, or prerequisite gates. They are not wired into production routing, are not live mutable toggles, and define no user-facing persistence or UI.
+
 ---
 
 # State Priority
