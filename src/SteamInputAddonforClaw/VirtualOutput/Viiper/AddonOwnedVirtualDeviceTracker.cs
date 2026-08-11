@@ -17,6 +17,18 @@ internal sealed class AddonOwnedVirtualDeviceTracker : IControllerIdentityExclus
         _instanceIds[device.InstanceId] = 0;
     }
 
+    internal void ResolveOwnership(IEnumerable<ControllerDeviceInfo> devices)
+    {
+        var resolved = devices.Where(device => !string.IsNullOrWhiteSpace(device.InstanceId))
+            .Select(device => device.InstanceId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (resolved.Length == 0) throw new ArgumentException("At least one verified virtual-device identity is required.", nameof(devices));
+        _instanceIds.Clear();
+        foreach (var instanceId in resolved) _instanceIds[instanceId] = 0;
+        Volatile.Write(ref _uncertainOwnership, 0);
+    }
+
     internal void Remove(ControllerDeviceInfo device)
     {
         _instanceIds.TryRemove(device.InstanceId, out _);

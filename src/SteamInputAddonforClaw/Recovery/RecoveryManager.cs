@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Controllers.Detection;
 
 namespace SteamInputAddonforClaw.Recovery;
 
@@ -13,9 +14,9 @@ internal interface IRecoveryManager
     Task<RecoveryResult> RecoverIncompleteSessionAsync(CancellationToken cancellationToken);
 }
 
-internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDeviceRegistry? deviceRegistry = null, IHidHideClient? hidHideClient = null) : IRecoveryManager
+internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDeviceRegistry? deviceRegistry = null, IHidHideClient? hidHideClient = null, IControllerDeviceEnumerator? deviceEnumerator = null) : IRecoveryManager
 {
-    internal const int CurrentSchemaVersion = 2;
+    internal const int CurrentSchemaVersion = 3;
     public bool HasIncompleteRecovery
     {
         get
@@ -119,6 +120,44 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             return journal with { Mutations = journal.Mutations with { HidHideDeviceAdditions = additions } };
         });
     }
+
+    public RecoveryResult RecordAddonOwnedVirtualDeviceIntent(Guid sessionId, Guid mutationId, string deviceType, ushort vendorId, ushort productId, IEnumerable<string> preExistingIds)
+    {
+        if (mutationId == Guid.Empty || string.IsNullOrWhiteSpace(deviceType)) return new(RecoveryStatus.Failure, "The virtual-device mutation identity is invalid.");
+        var existing = NormalizeIds(preExistingIds);
+        return UpdateRecoverySession(sessionId, journal =>
+        {
+            var entries = (journal.Mutations.AddonOwnedVirtualDeviceEntries ?? []).ToList();
+            if (entries.Any(entry => entry.MutationId == mutationId)) throw new InvalidOperationException("The virtual-device mutation ID is already recorded.");
+            entries.Add(new(mutationId, deviceType, vendorId, productId, existing, []));
+            return journal with { Mutations = journal.Mutations with { AddonOwnedVirtualDeviceEntries = entries } };
+        });
+    }
+
+    public RecoveryResult ResolveAddonOwnedVirtualDeviceIdentity(Guid sessionId, Guid mutationId, IEnumerable<string> resolvedIds)
+    {
+        var resolved = NormalizeIds(resolvedIds);
+        if (resolved.Count == 0) return new(RecoveryStatus.Failure, "At least one resolved virtual-device identity is required.");
+        return UpdateRecoverySession(sessionId, journal =>
+        {
+            var entries = (journal.Mutations.AddonOwnedVirtualDeviceEntries ?? []).ToList();
+            var index = entries.FindIndex(entry => entry.MutationId == mutationId);
+            if (index < 0) throw new InvalidOperationException("The virtual-device mutation ID is unknown.");
+            entries[index] = entries[index] with { ResolvedInstanceIds = resolved };
+            return journal with { Mutations = journal.Mutations with { AddonOwnedVirtualDeviceEntries = entries } };
+        });
+    }
+
+    public RecoveryResult CompleteAddonOwnedVirtualDeviceMutation(Guid sessionId, Guid mutationId) =>
+        UpdateRecoverySession(sessionId, journal =>
+        {
+            var entries = (journal.Mutations.AddonOwnedVirtualDeviceEntries ?? []).Where(entry => entry.MutationId != mutationId).ToArray();
+            if (entries.Length == (journal.Mutations.AddonOwnedVirtualDeviceEntries?.Count ?? 0)) throw new InvalidOperationException("The virtual-device mutation ID is unknown.");
+            return journal with { Mutations = journal.Mutations with { AddonOwnedVirtualDeviceEntries = entries } };
+        });
+
+    private static IReadOnlyList<string> NormalizeIds(IEnumerable<string> values) =>
+        (values ?? []).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
     public RecoveryResult CompleteDeviceNativeStateMutation(Guid recoverySessionId) =>
         UpdateRecoverySession(recoverySessionId, journal => journal with
@@ -227,6 +266,17 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
                 return new(RecoveryStatus.Success, "Recovery journal loaded.", journal);
             }
             if (schema == 1) return TranslateLegacyV1(json);
+            if (schema == 2)
+            {
+                var legacy = JsonSerializer.Deserialize<RecoveryJournal>(json) ?? throw new InvalidDataException("The legacy recovery journal contains no state.");
+                using var legacyDocument = JsonDocument.Parse(json);
+                var virtualProperty = legacyDocument.RootElement.GetProperty("Mutations").GetProperty("AddonOwnedVirtualDevices");
+                if (virtualProperty.ValueKind is not JsonValueKind.Null and not JsonValueKind.Array)
+                    return new(RecoveryStatus.Failure, "Legacy virtual-device recovery evidence cannot be translated safely.", legacy);
+                if (virtualProperty.ValueKind == JsonValueKind.Array && virtualProperty.GetArrayLength() > 0)
+                    return new(RecoveryStatus.Failure, "Legacy virtual-device recovery evidence cannot be translated safely.", legacy);
+                return new(RecoveryStatus.Success, "Legacy schema v2 recovery journal loaded.", legacy with { SchemaVersion = CurrentSchemaVersion });
+            }
             return new(RecoveryStatus.Failure, $"Unsupported recovery schema {schema}.");
         }
         catch (Exception exception)
@@ -255,6 +305,22 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             if (emptyCompletion.Status == RecoveryStatus.Success)
                 AppLog.Info("Recovery", "Empty recovery journal completed.", ("SessionId", journal.RecoverySessionId), ("JournalDeleted", true));
             return emptyCompletion with { Journal = journal };
+        }
+
+        if (journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } virtualEntries)
+        {
+            for (var index = virtualEntries.Count - 1; index >= 0; index--)
+            {
+                var completion = CompleteAddonOwnedVirtualDeviceMutation(journal.RecoverySessionId, virtualEntries[index].MutationId);
+                if (completion.Status != RecoveryStatus.Success) return LogFailure(completion with { Journal = journal }, stopwatch);
+                journal = completion.Journal ?? journal with
+                {
+                    Mutations = journal.Mutations with
+                    {
+                        AddonOwnedVirtualDeviceEntries = virtualEntries.Take(index).ToArray()
+                    }
+                };
+            }
         }
 
         var deviceAdditions = journal.Mutations.HidHideDeviceAdditions ?? [];
@@ -312,6 +378,20 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
     {
         if (!IsValidJournal(journal)) { reason = "Recovery journal is missing required state."; return false; }
         if (journal.Mutations.AddonOwnedVirtualDevices is { Count: > 0 }) { reason = "Recorded virtual-device mutations are unsupported."; return false; }
+        if (journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } entries)
+        {
+            if (deviceEnumerator is null) { reason = "Virtual-device recovery enumeration is unavailable."; return false; }
+            var present = deviceEnumerator.EnumeratePresentDevices();
+            foreach (var entry in entries)
+            {
+                var ids = entry.ResolvedInstanceIds.Count > 0 ? entry.ResolvedInstanceIds :
+                    present.Where(device => device.VendorId == entry.VendorId && device.ProductId == entry.ProductId &&
+                        !entry.PreExistingMatchingInstanceIds.Contains(device.InstanceId, StringComparer.OrdinalIgnoreCase))
+                        .Select(device => device.InstanceId).ToArray();
+                if (ids.Any(id => present.Any(device => string.Equals(device.InstanceId, id, StringComparison.OrdinalIgnoreCase))))
+                { reason = "A journaled virtual device is still present."; return false; }
+            }
+        }
         if (journal.Mutations.TemporaryXbox360OutputCreated) { reason = "Recorded Xbox output mutations are unsupported."; return false; }
         if (journal.Mutations.ExecutableWhitelistAdditions is { Count: > 0 } || journal.Mutations.HidHideDeviceAdditions is { Count: > 0 })
         {

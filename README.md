@@ -9,6 +9,8 @@ The project exposes the MSI Claw built-in controller to Steam as a **Classic Ste
 
 The addon intentionally does not implement its own remapping, macros, profiles, or controller configuration system. Those functions are delegated to **Steam Input**.
 
+An explicit Stock routing experiment can now create a recoverable embedded-VIIPER Classic Steam Controller (`28DE:1102`) after verifying its Windows PnP identity and addon ownership. The default production plan remains NativeMode-only; live controller-state publishing is reserved for the separate follow-up report-routing work.
+
 ## PID_1902 non-Gyro input pipeline
 
 The PID_1902 DirectInput layout is independently normalized into device-independent controller state for the Classic Steam Controller output path. The non-Gyro pipeline covers A/B/X/Y, 8-way D-pad, LB/RB, analog and full-pull LT/RT, Back/Start, L3/R3, both sticks, and M1/M2. The Claw right stick is represented as the Classic Steam Controller right pad; R3 is right-pad click, M2 is left grip, and M1 is right grip. Gyro, accelerometer, native controller-mode switching, HidHide routing, and automatic Steam-session/Test-Mode routing remain deferred.

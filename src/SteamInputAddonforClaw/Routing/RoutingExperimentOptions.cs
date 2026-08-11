@@ -46,6 +46,10 @@ internal static class RoutingExperimentPlanBuilder
             && plan.PhysicalIsolation == RoutingStageMode.Enabled
             && plan.PhysicalInput != RoutingStageMode.Enabled)
             return RoutingPipelinePlan.AllDisabled;
+        if (strategy.Kind == RoutingEnvironmentStrategyKind.StockCenterM
+            && plan.SteamOutput == RoutingStageMode.Enabled
+            && (plan.PhysicalInput != RoutingStageMode.Enabled || plan.PhysicalIsolation != RoutingStageMode.Enabled))
+            return RoutingPipelinePlan.AllDisabled;
         return plan;
     }
 

@@ -72,7 +72,7 @@ public partial class App : Application
         var addonOwnedVirtualDeviceTracker = new AddonOwnedVirtualDeviceTracker();
         var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher, addonOwnedVirtualDeviceTracker);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
-        _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient());
+        _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(deviceEnumerator),
@@ -194,6 +194,7 @@ public partial class App : Application
                 recoverySafetyState.Set(RecoverySafety.Unsafe);
                 AppLog.Error("Recovery", "MSI native mode recovery became unsafe.", new InvalidOperationException(reason), ("Reason", reason));
             });
+        IPowerTransitionParticipant? steamOutputPowerParticipant = null;
         if (_msiClawNativeModeSession is not null)
         {
             var nativeModeStage = new MsiClawNativeModeStage(_msiClawNativeModeSession);
@@ -205,7 +206,16 @@ public partial class App : Application
                 _recoveryManager!,
                 new HidHideDriverClient(),
                 () => Environment.ProcessPath);
-            var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage]);
+            var viiperRuntime = new ViiperRuntimeManager(Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll"));
+            var steamOutputStage = new ClassicSteamControllerOutputStage(
+                viiperRuntime,
+                new WindowsControllerDeviceEnumerator(),
+                new ViiperVirtualDeviceIdentityResolver(new ViiperVirtualDeviceIdentityPolicy()),
+                addonOwnedVirtualDeviceTracker,
+                _recoveryManager!,
+                () => _msiClawNativeModeSession?.CurrentRecoverySessionId);
+            steamOutputPowerParticipant = steamOutputStage;
+            var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage, steamOutputStage]);
             var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(
                 new RoutingEnvironmentStrategyResolver(),
                 pipelineExecutor);
@@ -221,7 +231,9 @@ public partial class App : Application
             () => recoverySafetyState.Current == RecoverySafety.Safe && _recoveryManager?.HasIncompleteRecovery == true);
         var powerParticipants = _msiClawNativeModeSession is null
             ? Array.Empty<IPowerTransitionParticipant>()
-            : new IPowerTransitionParticipant[] { _msiClawNativeModeSession };
+            : steamOutputPowerParticipant is null
+                ? new IPowerTransitionParticipant[] { _msiClawNativeModeSession }
+                : new IPowerTransitionParticipant[] { _msiClawNativeModeSession, steamOutputPowerParticipant };
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, async token =>
         {
             if (_recoveryManager is null) return false;
