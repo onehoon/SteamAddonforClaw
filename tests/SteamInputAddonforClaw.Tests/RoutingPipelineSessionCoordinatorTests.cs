@@ -214,6 +214,25 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task CancellationRollbackFailurePreservesPendingCleanup()
+    {
+        var executor = new FakeExecutor { CancellationRollback = new(false, RoutingStageKind.NativeMode, "CleanupFailed") };
+        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await coordinator.ReconcileAsync(
+            Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), RoutingExperimentOptions.None, CancellationToken.None));
+
+        Assert.NotNull(coordinator.PendingCleanup);
+        executor.RollbackResults.Enqueue(new(true, null, "Success"));
+        var retry = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.WaitingForSteam), Classification(ControllerManagerKind.None), RoutingExperimentOptions.None, CancellationToken.None);
+
+        Assert.True(retry.Succeeded);
+        Assert.Equal(RoutingOperationalState.Passive, retry.State);
+        Assert.Null(coordinator.PendingCleanup);
+        Assert.Equal(2, executor.RollbackPlans.Count);
+    }
+
+    [Fact]
     public async Task ReconcileTransitionsAreSerialized()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -261,6 +280,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         internal Queue<RoutingPipelineRollbackResult> RollbackResults { get; } = [];
         internal RoutingPipelineExecutionResult ExecuteResult { get; set; } = RoutingPipelineExecutionResult.Success();
         internal bool ThrowCancellation { get; set; }
+        internal RoutingPipelineRollbackResult? CancellationRollback { get; set; }
         internal Action? ExecuteStarted { get; set; }
         internal Func<Task>? WaitForExecuteRelease { get; set; }
         internal int MaxConcurrentExecutions { get; private set; }
@@ -275,6 +295,13 @@ public sealed class RoutingPipelineSessionCoordinatorTests
             {
                 ExecuteStarted?.Invoke();
                 if (WaitForExecuteRelease is not null) await WaitForExecuteRelease().ConfigureAwait(false);
+                if (CancellationRollback is not null)
+                {
+                    RollbackPlans.Add(plan);
+                    var cancellation = new OperationCanceledException(cancellationToken);
+                    RoutingPipelineCancellationMetadata.Attach(cancellation, CancellationRollback);
+                    throw cancellation;
+                }
                 if (ThrowCancellation) throw new OperationCanceledException(cancellationToken);
                 return ExecuteResult;
             }

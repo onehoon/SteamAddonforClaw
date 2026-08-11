@@ -54,6 +54,26 @@ internal sealed record RoutingPipelineRollbackResult(
     RoutingStageKind? FailedStage,
     string Reason);
 
+internal static class RoutingPipelineCancellationMetadata
+{
+    private const string RollbackKey = "SteamInputAddonforClaw.RoutingPipelineRollback";
+
+    internal static void Attach(OperationCanceledException exception, RoutingPipelineRollbackResult rollback) =>
+        exception.Data[RollbackKey] = rollback;
+
+    internal static bool TryGet(OperationCanceledException exception, out RoutingPipelineRollbackResult rollback)
+    {
+        if (exception.Data[RollbackKey] is RoutingPipelineRollbackResult result)
+        {
+            rollback = result;
+            return true;
+        }
+
+        rollback = null!;
+        return false;
+    }
+}
+
 internal interface IRoutingPipelineExecutor
 {
     ValueTask<RoutingPipelineExecutionResult> ExecuteAsync(RoutingPipelinePlan plan, CancellationToken cancellationToken);
@@ -113,9 +133,10 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
 
             return RoutingPipelineExecutionResult.Success();
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
         {
-            await RollbackCandidatesAsync(rollbackCandidates).ConfigureAwait(false);
+            var rollback = await RollbackCandidatesAsync(rollbackCandidates).ConfigureAwait(false);
+            RoutingPipelineCancellationMetadata.Attach(exception, rollback);
             throw;
         }
         catch (Exception exception)

@@ -109,9 +109,12 @@ internal sealed class RoutingPipelineSessionCoordinator
         {
             execution = await _pipelineExecutor.ExecuteAsync(plan, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            ClearActiveSession();
+            if (RoutingPipelineCancellationMetadata.TryGet(exception, out var rollback) && !rollback.Succeeded)
+                SetPendingCleanup(new(candidate, actionPlan));
+            else
+                ClearActiveSession();
             throw;
         }
 

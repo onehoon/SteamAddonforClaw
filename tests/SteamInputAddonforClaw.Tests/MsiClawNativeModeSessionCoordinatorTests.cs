@@ -85,6 +85,12 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         await Assert.ThrowsAsync<IOException>(() => coordinator.ObserveRoutingDecisionAsync(Eligible(), 1));
         Assert.False(coordinator.IsActive);
         Assert.True(coordinator.HasOwnedRecoveryBoundary);
+        var targetCount = modeController.Targets.Count;
+        var reentry = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+        Assert.False(reentry.Succeeded);
+        Assert.True(reentry.RequiresRollback);
+        Assert.Equal("RecoveryBoundaryAlreadyOwned", reentry.Reason);
+        Assert.Equal(targetCount, modeController.Targets.Count);
         Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
         Assert.False(coordinator.HasOwnedRecoveryBoundary);
         Assert.Contains(MsiClawNativeMode.XInput, modeController.Targets);

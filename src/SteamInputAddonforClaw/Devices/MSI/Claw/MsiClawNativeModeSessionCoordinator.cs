@@ -128,6 +128,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private MsiClawNativeModePreflightResult InspectCoreLocked()
     {
         if (_active) return MsiClawNativeModePreflightResult.Failure("AlreadyActive");
+        if (_recoveryBoundaryOwned) return MsiClawNativeModePreflightResult.Failure("RecoveryBoundaryAlreadyOwned");
         if (_vetoLatched) return MsiClawNativeModePreflightResult.Failure("SessionVetoLatched");
         if (_mutationAllowed is not null && !_mutationAllowed()) return MsiClawNativeModePreflightResult.Failure("MutationNotAllowed");
         if (!_powerGate.IsOpen || !_powerGate.TryAcquire(out _)) return MsiClawNativeModePreflightResult.Failure("PowerGateClosed");
@@ -143,7 +144,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private async Task<MsiClawNativeModeEnterResult> StartCoreLockedAsync(CancellationToken cancellationToken)
     {
         var preflight = InspectCoreLocked();
-        if (!preflight.Succeeded) return MsiClawNativeModeEnterResult.Failure(false, preflight.Reason);
+        if (!preflight.Succeeded) return MsiClawNativeModeEnterResult.Failure(_recoveryBoundaryOwned, preflight.Reason);
         if (!_powerGate.TryAcquire(out var token)) return MsiClawNativeModeEnterResult.Failure(false, "PowerGateClosed");
         var captured = _nativeState.CaptureSnapshot();
         if (!captured.AllowsMutation || captured.Snapshot is null) return MsiClawNativeModeEnterResult.Failure(false, "SnapshotUnavailable");
