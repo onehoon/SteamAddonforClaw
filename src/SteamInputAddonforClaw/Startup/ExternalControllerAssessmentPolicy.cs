@@ -14,6 +14,9 @@ internal static class ExternalControllerAssessmentPolicy
             return assessment;
         }
 
+        if (environmentMode == ControllerEnvironmentMode.Unsupported && environmentReadiness == ControllerEnvironmentReadiness.NotApplicable)
+            return assessment;
+
         return environmentMode == ControllerEnvironmentMode.HHCManaged
                || environmentReadiness != ControllerEnvironmentReadiness.Stable
             ? new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, [])

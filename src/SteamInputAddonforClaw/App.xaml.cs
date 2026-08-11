@@ -78,7 +78,9 @@ public partial class App : Application
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(deviceEnumerator),
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
-            recoveryManager: _recoveryManager);
+            recoveryManager: _recoveryManager,
+            probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
+            hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
 
         try
         {

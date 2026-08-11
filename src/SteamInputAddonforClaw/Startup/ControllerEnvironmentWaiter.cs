@@ -9,7 +9,7 @@ internal interface IControllerEnvironmentWaiter
     Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken);
 }
 
-internal enum ControllerEnvironmentReadiness { Stable, Indeterminate }
+internal enum ControllerEnvironmentReadiness { NotApplicable, Stable, Indeterminate }
 
 internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
 {
@@ -35,6 +35,11 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
 
     public async Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken)
     {
+        if (mode == ControllerEnvironmentMode.Unsupported)
+        {
+            AppLog.Info("Environment", "Environment readiness wait skipped.", ("Mode", mode), ("Result", ControllerEnvironmentReadiness.NotApplicable), ("Reason", "UnsupportedHardware"));
+            return ControllerEnvironmentReadiness.NotApplicable;
+        }
         string? previousSnapshot = null;
         var stableSnapshotCount = 0;
         var deadline = DateTimeOffset.UtcNow + _timeout;

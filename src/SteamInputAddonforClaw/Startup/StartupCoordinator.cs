@@ -3,6 +3,7 @@ namespace SteamInputAddonforClaw.Startup;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Recovery;
+using SteamInputAddonforClaw.Devices;
 
 internal sealed class StartupCoordinator
 {
@@ -12,6 +13,8 @@ internal sealed class StartupCoordinator
     private readonly TimeSpan _clawTweaksStartingTimeout;
     private readonly TimeSpan _clawTweaksStartingCheckInterval;
     private readonly IRecoveryManager? _recoveryManager;
+    private readonly IWindowsDeviceProbeContextFactory? _probeContextFactory;
+    private readonly IHardwareCompatibilityEvaluator? _hardwareCompatibilityEvaluator;
 
     public StartupCoordinator(
         IUpdateGate updateGate,
@@ -19,7 +22,9 @@ internal sealed class StartupCoordinator
         IControllerEnvironmentWaiter environmentWaiter,
         TimeSpan? clawTweaksStartingTimeout = null,
         TimeSpan? clawTweaksStartingCheckInterval = null,
-        IRecoveryManager? recoveryManager = null)
+        IRecoveryManager? recoveryManager = null,
+        IWindowsDeviceProbeContextFactory? probeContextFactory = null,
+        IHardwareCompatibilityEvaluator? hardwareCompatibilityEvaluator = null)
     {
         _updateGate = updateGate;
         _environmentDetector = environmentDetector;
@@ -27,6 +32,8 @@ internal sealed class StartupCoordinator
         _clawTweaksStartingTimeout = clawTweaksStartingTimeout ?? TimeSpan.FromSeconds(5);
         _clawTweaksStartingCheckInterval = clawTweaksStartingCheckInterval ?? TimeSpan.FromMilliseconds(350);
         _recoveryManager = recoveryManager;
+        _probeContextFactory = probeContextFactory;
+        _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator;
     }
 
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
@@ -48,6 +55,18 @@ internal sealed class StartupCoordinator
         {
             AppLog.Info("Startup", "Runtime startup aborted because update restart was scheduled.", ("Action", "Exit"));
             return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
+        }
+
+        if (_probeContextFactory is not null && _hardwareCompatibilityEvaluator is not null)
+        {
+            var hardware = EvaluateHardwareCompatibility();
+            AppLog.Info("Hardware", "Startup hardware compatibility assessment completed.",
+                ("Status", hardware.Status), ("DeviceFamily", hardware.DeviceFamily), ("DeviceModel", hardware.DeviceModel), ("Reason", hardware.Reason),
+                ("Action", hardware.Status == HardwareCompatibilityStatus.Supported ? "Continue" : "Passive"));
+            if (hardware.Status == HardwareCompatibilityStatus.Unsupported)
+                return new StartupResult(true, ControllerEnvironmentMode.Unsupported, ControllerEnvironmentReadiness.NotApplicable);
+            if (hardware.Status == HardwareCompatibilityStatus.Indeterminate)
+                return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
         }
 
         var deadline = DateTimeOffset.UtcNow + _clawTweaksStartingTimeout;
@@ -84,6 +103,16 @@ internal sealed class StartupCoordinator
         var readiness = await _environmentWaiter.WaitUntilStableAsync(environment.Mode, cancellationToken).ConfigureAwait(false);
         AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
         return new StartupResult(true, environment.Mode, readiness);
+    }
+
+    private HardwareCompatibilityAssessment EvaluateHardwareCompatibility()
+    {
+        try { return _hardwareCompatibilityEvaluator!.Evaluate(_probeContextFactory!.Capture()); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Hardware", "Startup hardware compatibility assessment failed.", exception, ("Status", HardwareCompatibilityStatus.Indeterminate), ("Action", "Passive"));
+            return new(HardwareCompatibilityStatus.Indeterminate, null, null, "HardwareCompatibilityEvaluationFailed:" + exception.GetType().Name);
+        }
     }
 }
 
