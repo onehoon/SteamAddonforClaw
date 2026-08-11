@@ -134,6 +134,42 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task MixedCrashRecoveryRestoresNativeAndHidHideWhilePreservingStaleVirtualEvidence()
+    {
+        var sessionId = Guid.NewGuid();
+        var mutationId = Guid.NewGuid();
+        var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success);
+        var hidHide = new FakeHidHide();
+        hidHide.HiddenEntries.Add("HID\\MSI_CLAW");
+        hidHide.Entries.Add("C:\\addon.exe");
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, sessionId, DateTimeOffset.UtcNow, Snapshot(),
+            new(
+                DeviceNativeStateChanged: true,
+                ExecutableWhitelistAdditions: ["C:\\addon.exe"],
+                HidHideDeviceAdditions: ["HID\\MSI_CLAW"],
+                AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["owned-instance"])]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        var manager = new RecoveryManager(
+            new RecoveryJournalStore(PathName),
+            new HandheldDeviceRegistry([new FakeAdapter(DeviceId, nativeState)]),
+            hidHide,
+            new FakeControllerEnumerator([Device("owned-instance")]));
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.Empty(hidHide.HiddenEntries);
+        Assert.Empty(hidHide.Entries);
+        Assert.Equal(1, nativeState.RestoreCount);
+        var remaining = manager.LoadJournal().Journal!;
+        Assert.False(remaining.Mutations.DeviceNativeStateChanged);
+        Assert.Empty(remaining.Mutations.HidHideDeviceAdditions!);
+        Assert.Empty(remaining.Mutations.ExecutableWhitelistAdditions!);
+        Assert.Equal(mutationId, Assert.Single(remaining.Mutations.AddonOwnedVirtualDeviceEntries!).MutationId);
+    }
+
+    [Fact]
     public async Task StartupRecoveryCompletesUnresolvedIntentWhenNoNewDeviceExists()
     {
         var sessionId = Guid.NewGuid();

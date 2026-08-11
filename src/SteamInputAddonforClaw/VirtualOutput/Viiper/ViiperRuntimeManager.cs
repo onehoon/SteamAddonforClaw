@@ -7,8 +7,13 @@ internal interface IViiperRuntime : IDisposable
     void Start();
     uint CreateDevice();
     bool SetNeutral(uint deviceId);
-    bool RemoveDevice(uint busId, uint deviceId);
+    ViiperDeviceRemovalResult RemoveDevice(uint busId, uint deviceId);
     void StopIfUnused();
+}
+
+internal readonly record struct ViiperDeviceRemovalResult(bool DeviceRemoved, bool BusRemoved)
+{
+    internal static ViiperDeviceRemovalResult Failed { get; } = new(false, false);
 }
 
 internal sealed class ViiperRuntimeManager : IViiperRuntime
@@ -25,6 +30,7 @@ internal sealed class ViiperRuntimeManager : IViiperRuntime
     private uint _nextBusCandidate = 1;
     private readonly HashSet<uint> _devices = [];
     private bool _disposed;
+    private const int MaxBusAllocationAttempts = 16;
 
     internal ViiperRuntimeManager(string dllPath, Func<string, IViiperNativeApi>? apiFactory = null)
     {
@@ -41,7 +47,7 @@ internal sealed class ViiperRuntimeManager : IViiperRuntime
     void IViiperRuntime.Start() => Start();
     uint IViiperRuntime.CreateDevice() => CreateDevice();
     bool IViiperRuntime.SetNeutral(uint deviceId) => SetNeutral(deviceId);
-    bool IViiperRuntime.RemoveDevice(uint busId, uint deviceId) => RemoveDevice(busId, deviceId);
+    ViiperDeviceRemovalResult IViiperRuntime.RemoveDevice(uint busId, uint deviceId) => RemoveDevice(busId, deviceId);
     void IViiperRuntime.StopIfUnused() => StopIfUnused();
 
     internal void Start()
@@ -87,8 +93,9 @@ internal sealed class ViiperRuntimeManager : IViiperRuntime
     private void EnsureBus()
     {
         if (_busId is not null) return;
-        for (var candidate = _nextBusCandidate; candidate < uint.MaxValue; candidate++)
+        for (var attempt = 0; attempt < MaxBusAllocationAttempts; attempt++)
         {
+            var candidate = _nextBusCandidate++;
             if (_api!.CreateBus(candidate) == 0) { _busId = candidate; _nextBusCandidate = candidate + 1; return; }
         }
         throw new InvalidOperationException(_api!.GetLastError() ?? "VIIPER bus creation failed.");
@@ -101,19 +108,20 @@ internal sealed class ViiperRuntimeManager : IViiperRuntime
         return _api is not null && _devices.Contains(deviceId) && _api.SetInput(BusId, deviceId, report) == 0;
     }
 
-    internal bool RemoveDevice(uint busId, uint deviceId)
+    internal ViiperDeviceRemovalResult RemoveDevice(uint busId, uint deviceId)
     {
-        if (_api is null || _busId != busId || !_devices.Contains(deviceId)) return false;
-        var result = _api.RemoveDevice(busId, deviceId) == 0;
-        if (result && _devices.Count == 1)
+        if (_api is null || _busId != busId || !_devices.Contains(deviceId)) return ViiperDeviceRemovalResult.Failed;
+        if (_api.RemoveDevice(busId, deviceId) != 0) return ViiperDeviceRemovalResult.Failed;
+
+        _devices.Remove(deviceId);
+        if (_devices.Count == 0)
         {
-            if (_api.RemoveBus(busId) != 0) return false;
-            _devices.Remove(deviceId);
-            _busId = null;
-            return true;
+            var busRemoved = _api.RemoveBus(busId) == 0;
+            if (busRemoved) _busId = null;
+            return new(true, busRemoved);
         }
-        if (result) _devices.Remove(deviceId);
-        return result;
+
+        return new(true, true);
     }
 
     internal void StopIfUnused()
