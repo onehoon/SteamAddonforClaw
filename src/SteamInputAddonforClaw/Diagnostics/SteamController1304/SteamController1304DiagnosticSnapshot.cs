@@ -24,7 +24,8 @@ internal sealed record SteamController1304RawInputSnapshot(
 internal sealed record SteamController1304DiagnosticSnapshot(
     IReadOnlyList<SteamController1304DeviceSnapshot> Devices,
     IReadOnlyList<SteamController1304RawInputSnapshot> RawInputDevices,
-    string? Failure = null);
+    string? Failure = null,
+    SteamController1304ConnectionAssessment? Connection = null);
 
 internal interface ISteamController1304StateProbe
 {

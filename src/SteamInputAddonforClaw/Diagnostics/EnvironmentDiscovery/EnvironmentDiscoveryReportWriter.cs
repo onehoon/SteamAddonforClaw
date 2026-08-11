@@ -129,6 +129,13 @@ internal sealed class EnvironmentDiscoveryReportWriter
         if (Failure(text, section)) return;
         var snapshot = section.Items.Single();
         Field(text, "CaptureFailure", snapshot.Failure ?? "None");
+        if (snapshot.Connection is { } connection)
+        {
+            text.AppendLine($"ConnectionProbeStatus: {connection.Status}");
+            text.AppendLine($"ConnectionProbeReason: {Safe(connection.Reason)}");
+            text.AppendLine($"ConnectionProbeReceiver: {Safe(connection.ReceiverInstanceId)}");
+            text.AppendLine($"ConnectionProbeEvidence: {Safe(connection.Evidence)}");
+        }
         text.AppendLine($"LogicalDeviceCount: {snapshot.Devices.Select(device => device.ContainerId).Distinct().Count()}");
         foreach (var device in snapshot.Devices.OrderBy(device => device.InstanceId, StringComparer.OrdinalIgnoreCase))
         {
