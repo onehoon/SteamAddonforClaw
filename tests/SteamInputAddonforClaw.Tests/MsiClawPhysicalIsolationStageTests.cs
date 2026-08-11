@@ -35,6 +35,73 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
+    public async Task InactiveHidHideIsEnabledLastAndRestoredFirst()
+    {
+        var hid = new FakeHidHide { Active = false };
+        var stage = Create(hid);
+
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal("SetActive:True", hid.Trace[^1]);
+        Assert.True(hid.Active);
+
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal("SetActive:False", hid.Trace[4]);
+        Assert.False(hid.Active);
+    }
+
+    [Fact]
+    public async Task HidHideInverseDriftStopsBeforeAnyMutation()
+    {
+        var hid = new FakeHidHide { Active = false };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+
+        hid.Inverse = true;
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Equal("HidHideStateDrift", result.Reason);
+        Assert.DoesNotContain(hid.Trace, entry => entry.StartsWith("Add", StringComparison.Ordinal));
+        Assert.DoesNotContain("SetActive:True", hid.Trace);
+    }
+
+    [Fact]
+    public async Task HidHideActiveDriftStopsBeforeAnyMutation()
+    {
+        var hid = new FakeHidHide { Active = false };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+
+        hid.Active = true;
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Equal("HidHideStateDrift", result.Reason);
+        Assert.Empty(hid.Trace);
+    }
+
+    [Fact]
+    public async Task HidHideInverseDriftBeforeActivationDoesNotEnableOrOwnGlobalState()
+    {
+        var hid = new FakeHidHide { Active = false, DriftToInverseAfterDeviceAdd = true };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("HidHideStateDriftBeforeActivation", result.Reason);
+        Assert.DoesNotContain("SetActive:True", hid.Trace);
+        Assert.False(hid.Active);
+        Assert.True(hid.Inverse);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.DoesNotContain("C:\\addon.exe", hid.Applications);
+        Assert.Empty(hid.HiddenDevices);
+        Assert.True(hid.Inverse);
+    }
+
+    [Fact]
     public async Task PreExistingEntriesArePreserved()
     {
         var hid = new FakeHidHide { HiddenDevices = ["USB\\MSI_ROOT", "HID\\CHILD"], Applications = ["C:\\addon.exe"] };
@@ -95,7 +162,6 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Theory]
-    [InlineData((int)HidHideInspectionStatus.Disabled)]
     [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
     [InlineData((int)HidHideInspectionStatus.ConfigurationUnavailable)]
     public async Task NonAvailableHidHideCannotStartMutation(int status)
@@ -131,12 +197,16 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         public bool ReportDeviceAddFailureAfterApplying { get; set; }
         public bool FailApplicationAddWithoutApplying { get; set; }
         public bool FailDeviceAddWithoutApplying { get; set; }
+        public bool Active { get; set; } = true;
+        public bool Inverse { get; set; }
+        public bool DriftToInverseAfterDeviceAdd { get; set; }
         public HidHideInspection Inspect() => FailInspectionAfterDeviceMutation && Trace.Any(x => x.StartsWith("AddDevice"))
-            ? new(HidHideInspectionStatus.ConfigurationUnavailable, new HashSet<string>(Applications), HiddenDevices)
-            : new(Status, new HashSet<string>(Applications), HiddenDevices);
+            ? new(HidHideInspectionStatus.ConfigurationUnavailable, new HashSet<string>(Applications), HiddenDevices, IsActive: Active, IsInverseWhitelist: Inverse)
+            : new(Status, new HashSet<string>(Applications), HiddenDevices, IsActive: Active, IsInverseWhitelist: Inverse);
+        public bool SetActive(bool active) { Trace.Add("SetActive:" + active); Active = active; return true; }
         public bool AddApplication(string path) { Trace.Add("AddApplication"); if (FailApplicationAddWithoutApplying) return false; Applications.Add(path); return true; }
         public bool RemoveApplication(string path) { Trace.Add("RemoveApplication"); Applications.RemoveAll(x => string.Equals(x, path, StringComparison.OrdinalIgnoreCase)); return true; }
-        public bool AddHiddenDevice(string entry) { Trace.Add("AddDevice:" + entry); if (FailDeviceAddWithoutApplying) return false; HiddenDevices.Add(entry); return !FailDeviceAdd && !ReportDeviceAddFailureAfterApplying; }
+        public bool AddHiddenDevice(string entry) { Trace.Add("AddDevice:" + entry); if (FailDeviceAddWithoutApplying) return false; HiddenDevices.Add(entry); if (DriftToInverseAfterDeviceAdd) Inverse = true; return !FailDeviceAdd && !ReportDeviceAddFailureAfterApplying; }
         public bool RemoveHiddenDevice(string entry) { Trace.Add("RemoveDevice:" + entry); HiddenDevices.RemoveAll(x => string.Equals(x, entry, StringComparison.OrdinalIgnoreCase)); return true; }
     }
 

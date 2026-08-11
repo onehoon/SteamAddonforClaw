@@ -154,14 +154,14 @@ public sealed class FirstTimeSetupPolicyTests
         var packagePoll = 0;
         var result = ElevatedPrerequisiteSetup.WaitForHidHidePostInstallEvidence(
             () => packagePoll++ == 0 ? new HidHidePackageState(false, null, true) : new HidHidePackageState(true, "1.5.230.0", true),
-            () => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideDisabled"),
+            () => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideAvailableInactive"),
             () => elapsed,
             milliseconds => elapsed += milliseconds,
             "1.5.230.0",
             0);
 
-        Assert.Equal(PrerequisiteStatus.Unusable, result.Prerequisite.Status);
-        Assert.Equal("HidHideDisabled", result.Prerequisite.Reason);
+        Assert.Equal(PrerequisiteStatus.Ready, result.Prerequisite.Status);
+        Assert.Equal("HidHideAvailableInactive", result.Prerequisite.Reason);
         Assert.Equal(2, packagePoll);
     }
 
@@ -207,7 +207,7 @@ public sealed class FirstTimeSetupPolicyTests
     {
         var assessment = ComponentInstallationAssessmentPolicy.AssessHidHide(
             new HidHidePackageState(true, "1.5.230.0", true),
-            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideDisabled"),
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideAvailableInactive"),
             "1.5.230.0");
 
         Assert.Equal(ComponentInstallationStatus.Installed, assessment.Status);

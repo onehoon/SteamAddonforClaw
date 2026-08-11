@@ -20,8 +20,10 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     private bool _ownedWhitelist;
     private bool _ambiguousWhitelist;
     private bool _journaledWhitelist;
+    private bool _activeMutationJournaled;
+    private bool _activeMutationOwned;
 
-    private sealed record Prepared(MsiClawPhysicalInputIdentity Identity, Guid SessionId, string ExecutablePath, bool WhitelistPreExisting, EntryState[] Entries);
+    private sealed record Prepared(MsiClawPhysicalInputIdentity Identity, Guid SessionId, string ExecutablePath, bool WhitelistPreExisting, EntryState[] Entries, bool OriginalActive, bool OriginalInverse);
     private sealed class EntryState(string value, bool preExisting)
     {
         internal string Value { get; } = value;
@@ -50,7 +52,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         var path = _executablePathProvider();
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)) return ValueTask.FromResult(Failure("ExecutablePathInvalid"));
         var inspection = _hidHide.Inspect();
-        if (inspection.Status != HidHideInspectionStatus.Available) return ValueTask.FromResult(Failure(inspection.Status.ToString()));
+        if (!inspection.CanPrepareRouting) return ValueTask.FromResult(Failure(inspection.Status.ToString()));
 
         var executablePath = Path.GetFullPath(path);
         var values = new[] { identity.PhysicalIdentity.Trim(), identity.PnpInstanceId.Trim() }
@@ -58,7 +60,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(value => new EntryState(value, (inspection.HiddenDeviceEntries ?? []).Any(existing => string.Equals(existing, value, StringComparison.OrdinalIgnoreCase))))
             .ToArray();
-        lock (_sync) _prepared = new(identity, id, executablePath, inspection.ApplicationWhitelist.Contains(executablePath), values);
+        lock (_sync) _prepared = new(identity, id, executablePath, inspection.ApplicationWhitelist.Contains(executablePath), values, inspection.IsActive, inspection.IsInverseWhitelist);
         return ValueTask.FromResult(Success("Ready"));
     }
 
@@ -67,6 +69,9 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         cancellationToken.ThrowIfCancellationRequested(); Prepared? prepared; lock (_sync) prepared = _prepared;
         if (prepared is null) return ValueTask.FromResult(Failure("PhysicalIsolationNotPrepared"));
         if (!Matches(prepared)) return ValueTask.FromResult(Failure("PhysicalIsolationDrift"));
+        var currentInspection = _hidHide.Inspect();
+        if (!currentInspection.IsConfigurationReadable || currentInspection.IsActive != prepared.OriginalActive || currentInspection.IsInverseWhitelist != prepared.OriginalInverse)
+            return ValueTask.FromResult(Failure("HidHideStateDrift"));
         _sessionId = prepared.SessionId; _executablePath = prepared.ExecutablePath; _entries = prepared.Entries;
 
         if (!prepared.WhitelistPreExisting)
@@ -105,6 +110,20 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             entry.Owned = true;
             if (!addSucceeded) return ValueTask.FromResult(Failure("DeviceAddReportedFailure"));
         }
+        if (!prepared.OriginalActive)
+        {
+            var activationInspection = _hidHide.Inspect();
+            if (!activationInspection.IsConfigurationReadable || activationInspection.IsActive != prepared.OriginalActive || activationInspection.IsInverseWhitelist != prepared.OriginalInverse)
+                return ValueTask.FromResult(Failure("HidHideStateDriftBeforeActivation"));
+            if (_recovery.RecordHidHideActiveStateMutation(_sessionId, false).Status != RecoveryStatus.Success)
+                return ValueTask.FromResult(Failure("ActiveStateJournalFailed"));
+            _activeMutationJournaled = true;
+            if (!_hidHide.SetActive(true)) return ValueTask.FromResult(Failure("ActiveStateEnableFailed"));
+            var verification = _hidHide.Inspect();
+            if (!verification.IsConfigurationReadable || verification.IsInverseWhitelist || !verification.IsActive)
+                return ValueTask.FromResult(Failure("ActiveStateEnableUnverified"));
+            _activeMutationOwned = true;
+        }
         lock (_sync) _prepared = null;
         AppLog.Debug("PhysicalIsolation", "PhysicalIsolation active", ("WhitelistPreExisting", prepared.WhitelistPreExisting), ("WhitelistAddonOwned", _ownedWhitelist), ("Entries", string.Join("|", _entries.Select(entry => $"{entry.Value};PreExisting={entry.PreExisting};AddonOwned={entry.Owned}"))));
         return ValueTask.FromResult(Success("PhysicalIsolationActive"));
@@ -113,6 +132,17 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     public ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (_activeMutationOwned || _activeMutationJournaled)
+        {
+            var inspection = _hidHide.Inspect();
+            if (!inspection.IsConfigurationReadable) return ValueTask.FromResult(Failure("ActiveStateRestoreUnverified"));
+            if (inspection.IsActive && !_hidHide.SetActive(false)) return ValueTask.FromResult(Failure("ActiveStateRestoreFailed"));
+            var verification = _hidHide.Inspect();
+            if (!verification.IsConfigurationReadable || verification.IsActive) return ValueTask.FromResult(Failure("ActiveStateRestoreUnverified"));
+            if (_recovery.CompleteHidHideActiveStateMutation(_sessionId).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("ActiveStateJournalCompletionFailed"));
+            _activeMutationOwned = false;
+            _activeMutationJournaled = false;
+        }
         if (_ambiguousWhitelist || _entries.Any(entry => entry.Ambiguous)) return ValueTask.FromResult(Failure("AmbiguousMutationPending"));
         foreach (var entry in _entries.Reverse().Where(entry => entry.Owned))
         {

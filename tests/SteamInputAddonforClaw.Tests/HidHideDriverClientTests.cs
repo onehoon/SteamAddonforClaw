@@ -36,6 +36,16 @@ public sealed class HidHideDriverClientTests
         Assert.True(device.ZeroBufferQueries >= 2);
     }
 
+    [Fact]
+    public void Inspect_InverseWhitelistWinsWhenInactive()
+    {
+        var device = new FakeDevice([], []) { Active = false, Inverse = true };
+        var inspection = new HidHideDriverClient(new FakeNative(device), Converter()).Inspect();
+
+        Assert.Equal(HidHideInspectionStatus.InverseWhitelist, inspection.Status);
+        Assert.True(inspection.IsInverseWhitelist);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(3)]
@@ -123,6 +133,19 @@ public sealed class HidHideDriverClientTests
         Assert.Equal(HidHideDriverClient.GenericRead | 0x40000000u, native.WriteDesiredAccess);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SetActive_UsesOneByteBooleanAndVerifiesState(bool active)
+    {
+        var device = new FakeDevice([], []) { Active = false };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.SetActive(active));
+        Assert.Equal(active, device.Active);
+        Assert.Equal((byte)(active ? 1 : 0), Assert.Single(device.ActivePayloads));
+    }
+
     [Fact]
     public void AddHiddenDevice_ExistingExactEntryDoesNotWrite()
     {
@@ -181,7 +204,9 @@ public sealed class HidHideDriverClientTests
     {
         public List<string> Whitelist { get; } = whitelist;
         public List<string> Blacklist { get; } = blacklist;
-        public bool Active { get; init; }
+        public bool Active { get; set; }
+        public bool Inverse { get; init; }
+        public List<byte> ActivePayloads { get; } = [];
         public List<uint> WrittenFunctions { get; } = [];
         public List<uint> WrittenControlCodes { get; } = [];
         public uint? QuerySizeOverride { get; init; }
@@ -199,7 +224,7 @@ public sealed class HidHideDriverClientTests
             if (function is 2052 or 2054)
             {
                 bytesReturned = 1;
-                if (output is not null) output[0] = function == 2052 && Active ? (byte)1 : (byte)0;
+                if (output is not null) output[0] = function == 2052 ? (Active ? (byte)1 : (byte)0) : (Inverse ? (byte)1 : (byte)0);
                 return true;
             }
             if (function is 2048 or 2050)
@@ -208,6 +233,12 @@ public sealed class HidHideDriverClientTests
                 var bytes = HidHideDriverClient.SerializeMultiString(values);
                 if (output is null) { ZeroBufferQueries++; bytesReturned = (uint)bytes.Length; return true; }
                 Array.Copy(bytes, output, bytes.Length); bytesReturned = (uint)bytes.Length; return true;
+            }
+            if (function == 2053)
+            {
+                ActivePayloads.Add(input is { Length: 1 } ? input[0] : byte.MaxValue);
+                if (input is not { Length: 1 }) { bytesReturned = 0; return false; }
+                Active = input[0] != 0; bytesReturned = 0; return true;
             }
             if (function == 2049)
             {

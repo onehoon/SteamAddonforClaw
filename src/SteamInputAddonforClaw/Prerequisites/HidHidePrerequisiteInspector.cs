@@ -17,7 +17,7 @@ internal sealed class HidHidePrerequisiteInspector(IHidHideClient hidHideClient,
             {
                 HidHideInspectionStatus.Available => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideAvailable", version),
                 HidHideInspectionStatus.NotInstalled => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "HidHideControlDeviceMissing", version),
-                HidHideInspectionStatus.Disabled => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideDisabled", version),
+                HidHideInspectionStatus.Disabled => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideAvailableInactive", version),
                 HidHideInspectionStatus.InverseWhitelist => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideInverseWhitelist", version),
                 HidHideInspectionStatus.AccessDenied => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Indeterminate, "HidHideControlDeviceAccessDenied", version),
                 HidHideInspectionStatus.ConfigurationUnavailable => new(PrerequisiteKind.HidHide, PrerequisiteStatus.Indeterminate, "HidHideConfigurationUnavailable", version),

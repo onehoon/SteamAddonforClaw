@@ -111,7 +111,7 @@ public sealed class HidHideInstallDetectionTests
     {
         var result = ComponentInstallationAssessmentPolicy.AssessHidHide(
             new(true, "1.5.230", true),
-            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Unusable, "HidHideDisabled"),
+            new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "HidHideAvailableInactive"),
             "1.5.230.0");
 
         Assert.Equal(ComponentInstallationStatus.Installed, result.Status);
