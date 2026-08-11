@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Power;
+using SteamInputAddonforClaw.HidHide;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
@@ -13,6 +14,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     private readonly AddonOwnedVirtualDeviceTracker _tracker;
     private readonly RecoveryManager _recovery;
     private readonly Func<Guid?> _sessionId;
+    private readonly IHidHideClient _hidHide;
     private readonly TimeSpan _pnPTimeout;
     private readonly TimeSpan _pollInterval;
     private IReadOnlyList<ControllerDeviceInfo>? _before;
@@ -23,9 +25,9 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
 
     internal ClassicSteamControllerOutputStage(ViiperRuntimeManager runtime, IControllerDeviceEnumerator enumerator,
         ViiperVirtualDeviceIdentityResolver resolver, AddonOwnedVirtualDeviceTracker tracker, RecoveryManager recovery,
-        Func<Guid?> sessionId, TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null)
+        Func<Guid?> sessionId, IHidHideClient hidHide, TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null)
     {
-        _runtime = runtime; _enumerator = enumerator; _resolver = resolver; _tracker = tracker; _recovery = recovery; _sessionId = sessionId;
+        _runtime = runtime; _enumerator = enumerator; _resolver = resolver; _tracker = tracker; _recovery = recovery; _sessionId = sessionId; _hidHide = hidHide;
         _pnPTimeout = pnPTimeout ?? TimeSpan.FromSeconds(5); _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(50);
     }
 
@@ -80,6 +82,12 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             _owned = resolved.Devices;
             var checkpoint = _recovery.ResolveAddonOwnedVirtualDeviceIdentity(session, _mutationId, _owned.Select(device => device.InstanceId));
             if (!checkpoint.IsSafeToContinue) return await FailAndRollbackAsync("VirtualDeviceRecoveryCheckpointFailed").ConfigureAwait(false);
+            var hidHideInspection = _hidHide.Inspect();
+            if (!hidHideInspection.IsConfigurationReadable) return await FailAndRollbackAsync("HidHideOutputInspectionUnavailable").ConfigureAwait(false);
+            var ownedEntries = _owned.SelectMany(device => device.AncestorInstanceIds.Append(device.InstanceId).Append(device.ParentInstanceId ?? string.Empty))
+                .Where(value => !string.IsNullOrWhiteSpace(value)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if ((hidHideInspection.HiddenDeviceEntries ?? []).Any(ownedEntries.Contains))
+                return await FailAndRollbackAsync("HidHideOutputAlreadyBlocked").ConfigureAwait(false);
             _tracker.ResolveOwnership(_owned);
             if (!_runtime.SetNeutral(_deviceId)) return await FailAndRollbackAsync("NeutralReportRejected").ConfigureAwait(false);
             return RoutingStageOperationResult.Success("ClassicSteamControllerCreated");

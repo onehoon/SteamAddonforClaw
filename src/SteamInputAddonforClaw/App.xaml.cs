@@ -213,7 +213,8 @@ public partial class App : Application
                 new ViiperVirtualDeviceIdentityResolver(new ViiperVirtualDeviceIdentityPolicy()),
                 addonOwnedVirtualDeviceTracker,
                 _recoveryManager!,
-                () => _msiClawNativeModeSession?.CurrentRecoverySessionId);
+                () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
+                new HidHideDriverClient());
             steamOutputPowerParticipant = steamOutputStage;
             var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage, steamOutputStage]);
             var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(
