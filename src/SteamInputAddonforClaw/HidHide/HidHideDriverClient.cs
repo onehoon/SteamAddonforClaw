@@ -18,6 +18,7 @@ internal interface IHidHideControlDevice : IDisposable
 internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, IHidHidePathConverter? pathConverter = null) : IHidHideClient
 {
     internal const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
     private const uint DeviceType = 32769;
     private const uint FileReadData = 0x0001;
     private readonly IHidHideNativeApi _nativeApi = nativeApi ?? new HidHideNativeApi();
@@ -59,6 +60,37 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
 
     public bool AddApplication(string executablePath) => UpdateWhitelist(executablePath, add: true);
     public bool RemoveApplication(string executablePath) => UpdateWhitelist(executablePath, add: false);
+    public bool AddHiddenDevice(string deviceEntry) => UpdateHiddenDevices(deviceEntry, add: true);
+    public bool RemoveHiddenDevice(string deviceEntry) => UpdateHiddenDevices(deviceEntry, add: false);
+
+    private bool UpdateHiddenDevices(string deviceEntry, bool add)
+    {
+        if (string.IsNullOrWhiteSpace(deviceEntry)) return false;
+        try
+        {
+            var inspection = Inspect();
+            if (!inspection.IsConfigurationReadable) return false;
+            var entries = (inspection.HiddenDeviceEntries ?? []).ToList();
+            var index = entries.FindIndex(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase));
+            if (add ? index >= 0 : index < 0) return true;
+            if (add) entries.Add(deviceEntry);
+            else entries.RemoveAt(index);
+
+            using var device = _nativeApi.Open(GenericRead | GenericWrite);
+            WriteMultiString(device, Ioctl(2051), entries);
+            var verification = Inspect();
+            if (!verification.IsConfigurationReadable) return false;
+            var present = (verification.HiddenDeviceEntries ?? [])
+                .Any(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase));
+            return add == present;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("HidHide", "HidHide hidden-device mutation failed.", exception,
+                ("DeviceEntry", deviceEntry), ("Action", "PreserveJournal"));
+            return false;
+        }
+    }
 
     private bool UpdateWhitelist(string executablePath, bool add)
     {
@@ -133,6 +165,8 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
         if (!device.DeviceIoControl(controlCode, input, output, out bytesReturned, out var errorCode)) throw new Win32Exception(errorCode);
     }
 
+    // HidHide control contract: hidden-device list write (SET_BLACKLIST), verified against
+    // DS4Windows HidHideAPIDevice.cs, reference SHA 3579450dc8f50a74d9532e711249589c732c460b.
     private static uint Ioctl(uint function) => (DeviceType << 16) | (FileReadData << 14) | (function << 2);
 }
 

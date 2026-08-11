@@ -110,6 +110,59 @@ public sealed class HidHideDriverClientTests
         Assert.Equal([clawTweaks, helper], device.Whitelist);
     }
 
+    [Fact]
+    public void AddHiddenDevice_PreservesExistingEntriesAndUsesVerifiedIoctl()
+    {
+        var device = new FakeDevice([], ["A", "B"]) { Active = true };
+        var native = new FakeNative(device);
+        var client = new HidHideDriverClient(native, Converter());
+
+        Assert.True(client.AddHiddenDevice("C"));
+        Assert.Equal(["A", "B", "C"], device.Blacklist);
+        Assert.Contains(0x8001600Cu, device.WrittenControlCodes);
+        Assert.Equal(HidHideDriverClient.GenericRead | 0x40000000u, native.WriteDesiredAccess);
+    }
+
+    [Fact]
+    public void AddHiddenDevice_ExistingExactEntryDoesNotWrite()
+    {
+        var device = new FakeDevice([], ["ABC"]) { Active = true };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.AddHiddenDevice("abc"));
+        Assert.Empty(device.WrittenFunctions);
+    }
+
+    [Fact]
+    public void RemoveHiddenDevice_RemovesOnlyExactEntry()
+    {
+        var device = new FakeDevice([], ["ABC", "ABC2", "Other"]) { Active = true };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.RemoveHiddenDevice("abc"));
+        Assert.Equal(["ABC2", "Other"], device.Blacklist);
+    }
+
+    [Fact]
+    public void RemoveHiddenDevice_AlreadyAbsentDoesNotWrite()
+    {
+        var device = new FakeDevice([], ["ABC"]) { Active = true };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.RemoveHiddenDevice("missing"));
+        Assert.Empty(device.WrittenFunctions);
+    }
+
+    [Fact]
+    public void RemoveHiddenDevice_WhenDisabled_RemovesExactEntry()
+    {
+        var device = new FakeDevice([], ["ABC"]) { Active = false };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.True(client.RemoveHiddenDevice("abc"));
+        Assert.Empty(device.Blacklist);
+    }
+
     private static HidHidePathConverter Converter() => new(new FakeDosDevices());
 
     private sealed class FakeDosDevices : IDosDeviceNameResolver
@@ -120,13 +173,17 @@ public sealed class HidHideDriverClientTests
     private sealed class FakeNative(FakeDevice device) : IHidHideNativeApi
     {
         public uint DesiredAccess { get; private set; }
-        public IHidHideControlDevice Open(uint desiredAccess) { DesiredAccess = desiredAccess; return device; }
+        public uint WriteDesiredAccess { get; private set; }
+        public IHidHideControlDevice Open(uint desiredAccess) { DesiredAccess = desiredAccess; if ((desiredAccess & 0x40000000u) != 0) WriteDesiredAccess = desiredAccess; return device; }
     }
 
     private sealed class FakeDevice(List<string> whitelist, List<string> blacklist) : IHidHideControlDevice
     {
         public List<string> Whitelist { get; } = whitelist;
         public List<string> Blacklist { get; } = blacklist;
+        public bool Active { get; init; }
+        public List<uint> WrittenFunctions { get; } = [];
+        public List<uint> WrittenControlCodes { get; } = [];
         public uint? QuerySizeOverride { get; init; }
         public uint? ReturnedLengthOverride { get; init; }
         public int ZeroBufferQueries { get; private set; }
@@ -142,7 +199,7 @@ public sealed class HidHideDriverClientTests
             if (function is 2052 or 2054)
             {
                 bytesReturned = 1;
-                if (output is not null) output[0] = 0;
+                if (output is not null) output[0] = function == 2052 && Active ? (byte)1 : (byte)0;
                 return true;
             }
             if (function is 2048 or 2050)
@@ -155,6 +212,12 @@ public sealed class HidHideDriverClientTests
             if (function == 2049)
             {
                 Whitelist.Clear(); Whitelist.AddRange(HidHideDriverClient.DeserializeMultiString(input!)); bytesReturned = 0; return true;
+            }
+            if (function == 2051)
+            {
+                WrittenFunctions.Add(function);
+                WrittenControlCodes.Add(code);
+                Blacklist.Clear(); Blacklist.AddRange(HidHideDriverClient.DeserializeMultiString(input!)); bytesReturned = 0; return true;
             }
             bytesReturned = 0; errorCode = 1; return false;
         }
