@@ -93,6 +93,28 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
+    public void VirtualDeviceMutationRoundTripsStructuredIdentity()
+    {
+        var manager = Manager();
+        var session = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        var mutationId = Guid.NewGuid();
+
+        Assert.Equal(RecoveryStatus.Success, manager.RecordAddonOwnedVirtualDeviceIntent(
+            session.RecoverySessionId, mutationId, "steamcontroller", 0x28DE, 0x1102, []).Status);
+        Assert.Equal(RecoveryStatus.Success, manager.ResolveAddonOwnedVirtualDeviceIdentity(
+            session.RecoverySessionId, mutationId, ["USB\\VID_28DE&PID_1102\\owned"]).Status);
+
+        var loaded = manager.LoadJournal().Journal!;
+        var entry = Assert.Single(loaded.Mutations.AddonOwnedVirtualDeviceEntries!);
+        Assert.Equal(3, loaded.SchemaVersion);
+        Assert.Equal(mutationId, entry.MutationId);
+        Assert.Equal("steamcontroller", entry.DeviceType);
+        Assert.Equal((ushort)0x28DE, entry.VendorId);
+        Assert.Equal((ushort)0x1102, entry.ProductId);
+        Assert.Equal("USB\\VID_28DE&PID_1102\\owned", Assert.Single(entry.ResolvedInstanceIds));
+    }
+
+    [Fact]
     public void WrongSessionCannotRecordDeviceAddition()
     {
         var manager = Manager();
