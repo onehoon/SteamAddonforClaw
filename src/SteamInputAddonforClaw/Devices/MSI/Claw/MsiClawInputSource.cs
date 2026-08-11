@@ -93,6 +93,15 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
                 return MapSelectionFailure(selection);
             }
 
+            AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.",
+                ("TestSession", nextSession),
+                ("CandidateCount", selection.CandidateCount),
+                ("VID", MsiClawHardware.FormatVendorId()),
+                ("PID", MsiClawHardware.FormatDirectInputProductId()),
+                ("InstanceGuid", selection.Descriptor!.InstanceGuid),
+                ("PnpInstanceId", selection.Descriptor.PnpInstanceId),
+                ("PhysicalIdentity", selection.Descriptor.PhysicalIdentity),
+                ("SelectionReason", selection.Reason));
             return StartCoreLocked(enumerator, selection.Descriptor!, nextSession, "Diagnostics");
         }
     }
