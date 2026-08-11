@@ -21,11 +21,10 @@ public static class Program
         try
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
+            VelopackApp.Build().Run();
             var persistedLogLevel = LogLevelBootstrap.Read(VelopackAppPaths.SettingsPath);
             AppLog.MinimumLevelOverride = persistedLogLevel == AppLogPreference.Debug ? AppLogLevel.Debug : AppLogLevel.Info;
             AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));
-            AppLog.Debug("Velopack", "Velopack bootstrap starting.");
-            VelopackApp.Build().Run();
             AppLog.Debug("Velopack", "Velopack bootstrap completed.");
             if (args.Contains(ElevatedPrerequisiteSetup.Argument, StringComparer.OrdinalIgnoreCase))
             {
