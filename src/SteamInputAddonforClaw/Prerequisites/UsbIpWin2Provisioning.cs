@@ -31,24 +31,44 @@ internal sealed record UsbIpWin2ProvisioningReceipt(int SchemaVersion, UsbIpWin2
     public const int CurrentSchemaVersion = 1;
     public bool IsValid => SchemaVersion == CurrentSchemaVersion && AttemptId != Guid.Empty && PreProvisioningStatus == PrerequisiteStatus.Missing && Version.TryParse(InstallerVersion, out _) && InstallerSha256.Length == 64 && InstallerSha256.All(Uri.IsHexDigit);
 }
-internal sealed class UsbIpWin2ProvisioningReceiptStore(string path)
+internal sealed class UsbIpWin2ProvisioningReceiptStore
 {
+    private readonly string _path;
+    private readonly Func<string, ProvisioningStorageAssessment> _storageInspector;
+
+    public UsbIpWin2ProvisioningReceiptStore(string path, Func<string, ProvisioningStorageAssessment>? storageInspector = null)
+    {
+        _path = path;
+        _storageInspector = storageInspector ?? ProvisioningStorageSecurity.Inspect;
+    }
+
     public UsbIpWin2ReceiptLoadResult Load()
     {
-        var directory = Path.GetDirectoryName(path);
+        var directory = Path.GetDirectoryName(_path);
         if (directory is null) return new(null, true);
-        var security = ProvisioningStorageSecurity.Inspect(directory);
+        var security = _storageInspector(directory);
         if (security.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate) return new(null, true);
-        if (!File.Exists(path)) return new(null, false);
-        try { var receipt = JsonSerializer.Deserialize<UsbIpWin2ProvisioningReceipt>(File.ReadAllText(path)); return receipt is { IsValid: true } ? new(receipt, false) : new(null, true); } catch { return new(null, true); }
+        if (!File.Exists(_path)) return new(null, false);
+        try { var receipt = JsonSerializer.Deserialize<UsbIpWin2ProvisioningReceipt>(File.ReadAllText(_path)); return receipt is { IsValid: true } ? new(receipt, false) : new(null, true); } catch { return new(null, true); }
     }
     public void Save(UsbIpWin2ProvisioningReceipt receipt)
     {
         if (!receipt.IsValid) throw new InvalidDataException();
-        var directory = Path.GetDirectoryName(path) ?? throw new InvalidOperationException();
-        if (ProvisioningStorageSecurity.Inspect(directory).Status != ProvisioningStorageStatus.Trusted) throw new InvalidOperationException("Provisioning storage is unsafe.");
-        var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        try { using var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough); JsonSerializer.Serialize(stream, receipt); stream.Flush(true); if (File.Exists(path)) File.Replace(temp, path, null); else File.Move(temp, path); } finally { if (File.Exists(temp)) File.Delete(temp); }
+        var directory = Path.GetDirectoryName(_path) ?? throw new InvalidOperationException();
+        if (_storageInspector(directory).Status != ProvisioningStorageStatus.Trusted) throw new InvalidOperationException("Provisioning storage is unsafe.");
+        var temp = _path + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                JsonSerializer.Serialize(stream, receipt);
+                stream.Flush(true);
+            }
+
+            if (File.Exists(_path)) File.Replace(temp, _path, null);
+            else File.Move(temp, _path);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 }
 
