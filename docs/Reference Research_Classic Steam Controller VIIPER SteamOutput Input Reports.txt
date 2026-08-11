@@ -1,0 +1,2952 @@
+Steam Input Addon for Claw
+Reference Research Notes — Classic Steam Controller / VIIPER / SteamOutput / Input Reports
+
+Date: 2026-08-11
+Scope: Combined reference research for planned PR #78 SteamOutput lifecycle and PR #79 live ControllerState -> Classic Steam Controller reports
+Purpose:
+  - Perform one comprehensive source review before implementation is split into separate PRs.
+  - Preserve exact upstream evidence, project decisions, unresolved questions, and hardware-validation requirements.
+  - Give later Codex/Luna implementation tasks a pinned source basis instead of asking the implementation model to infer the design from scratch.
+
+IMPORTANT:
+  Research is combined.
+  Implementation must remain split.
+
+  PR #78:
+    SteamOutput / embedded VIIPER / Classic Steam Controller lifecycle only.
+
+  PR #79:
+    Live non-gyro ControllerState -> Classic Steam Controller input report mapping.
+
+  Do NOT combine #78 and #79 into one implementation PR.
+
+
+===============================================================================
+1. FIXED REFERENCE SET
+===============================================================================
+
+The project's mandatory three-repository reference set for this work is:
+
+A. Steam Input Addon for Claw
+Repository:
+  onehoon/SteamInputAddonforClaw
+
+Pinned revision:
+  78686866b7fe57c6e6584a1dcbb320d2b2935f98
+
+Role:
+  Final authority for:
+  - project architecture
+  - routing stage ownership
+  - recovery/journaling
+  - passive behavior
+  - external-controller veto
+  - addon-owned virtual-device identity
+  - HidHide ownership rules
+  - production activation timing
+
+
+B. Handheld Companion
+Repository:
+  Valkirie/HandheldCompanion
+
+Pinned revision:
+  1ee1b78cbdb6a83f8027f7b5f377a04e07996264
+
+Role:
+  Primary production reference for:
+  - Classic Steam Controller target behavior
+  - MSI Claw DirectInput mapping
+  - VIIPER target lifecycle on handheld hardware
+  - report cadence
+  - suspend/resume behavior
+  - output/rumble handling
+
+The pinned revision includes the later VIIPER initialization/cleanup work,
+including commit:
+
+  9132ff726f8a2bcdd59346fa573cda07066b9ac5
+  "Fix virtual controller initialization cleanup"
+
+
+C. hbashton/DS4Windows
+Repository:
+  hbashton/DS4Windows
+
+Pinned revision:
+  3579450dc8f50a74d9532e711249589c732c460b
+
+Role:
+  Generic production reference for:
+  - VIIPER output-device lifecycle
+  - physical-vs-virtual separation
+  - own-virtual device discovery
+  - before/after device snapshots
+  - HidHide interactions with newly created virtual outputs
+  - cleanup patterns
+
+
+===============================================================================
+2. SUPPLEMENTAL PRIMARY IMPLEMENTATION SOURCE
+===============================================================================
+
+For #78/#79, the three wrapper/application repositories are not sufficient
+to establish the actual Classic Steam Controller USB/HID and C API contract.
+
+Therefore this research also inspected the implementation that corresponds
+to the binary already bundled by SteamInputAddonforClaw:
+
+Repository lineage:
+  Alia5/VIIPER
+    ->
+  Valkirie/VIIPER
+    ->
+  onehoon/VIIPER
+
+Pinned corresponding source commit:
+  209c882009caea4f3baf322b9b6020c1a921feed
+
+SteamInputAddonforClaw pins its own fork through:
+
+  immutable tag:
+    steam-input-addon-baseline-1
+
+  source commit:
+    209c882009caea4f3baf322b9b6020c1a921feed
+
+  bundled libVIIPER.dll SHA-256:
+    04FD174EE7DDAA65D17B9C356668A67DBD5CCA3F08CF6051455A863095DD8474
+
+This supplemental source is used only to establish the actual behavior of the
+already selected VIIPER implementation.
+
+It does NOT replace the project's three-repository decision hierarchy.
+
+
+===============================================================================
+3. REFERENCE PRIORITY RULE
+===============================================================================
+
+If sources differ:
+
+MSI Claw hardware behavior
+  -> Handheld Companion
+
+Classic Steam Controller target behavior used successfully by HHC
+  -> Handheld Companion + canonical VIIPER implementation
+
+Generic VIIPER / own-virtual / HidHide interaction patterns
+  -> DS4Windows
+
+Recovery, passive behavior, veto, exact ownership, and stage architecture
+  -> SteamInputAddonforClaw
+
+Actual libVIIPER C API / USB descriptor / report normalization behavior
+  -> pinned VIIPER source corresponding to our embedded binary
+
+
+===============================================================================
+4. LICENSE / COPYING RULE
+===============================================================================
+
+Reference projects are behavior/protocol evidence.
+
+Do NOT:
+  - copy HHC architecture wholesale
+  - copy HHC classes or large method bodies
+  - copy DS4Windows architecture wholesale
+  - make HHC or DS4Windows a runtime dependency
+
+Implement minimal behavior independently inside SteamInputAddonforClaw's
+existing architecture.
+
+The addon already has an independently pinned/rebuilt libVIIPER artifact with
+source provenance.
+
+Any directly reused third-party code must preserve required notices.
+
+
+===============================================================================
+5. TARGET REPO — CURRENT FOUNDATIONS ALREADY PRESENT
+===============================================================================
+
+Pinned target revision:
+  78686866b7fe57c6e6584a1dcbb320d2b2935f98
+
+Important files reviewed:
+
+  src/SteamInputAddonforClaw/App.xaml.cs
+
+  src/SteamInputAddonforClaw/VirtualOutput/Viiper/
+    ViiperNativeApi.cs
+    AddonOwnedVirtualDeviceTracker.cs
+    ViiperVirtualDeviceIdentityPolicy.cs
+    ClassicSteamControllerReportBuilder.cs
+
+  src/SteamInputAddonforClaw/Dependencies/Viiper/
+    PROVENANCE.md
+
+  src/SteamInputAddonforClaw/Prerequisites/
+    ViiperRuntimeInspector.cs
+
+  src/SteamInputAddonforClaw/Controllers/Detection/
+    IControllerIdentityExclusionSource.cs
+    ControllerDeviceClassifier.cs
+    ExternalControllerDetector.cs
+
+  src/SteamInputAddonforClaw/Input/
+    ControllerState.cs
+
+  src/SteamInputAddonforClaw/Devices/MSI/Claw/
+    MsiClawControllerStateMapper.cs
+    MsiClawSteamInputMapping.cs
+    MsiClawControls.cs
+
+  src/SteamInputAddonforClaw/Recovery/
+    RecoveryJournal.cs
+    RecoveryManager.cs
+
+  docs/protocol/
+    classic-steam-controller-report.md
+
+  tests/SteamInputAddonforClaw.Tests/
+    FullNonGyroPipelineTests.cs
+    AddonOwnedVirtualDeviceTrackerTests.cs
+
+
+===============================================================================
+6. TARGET REPO — VIIPER C API WRAPPER IS ALREADY SUFFICIENT
+===============================================================================
+
+SOURCE FACT:
+
+SteamInputAddonforClaw already has IViiperNativeApi / ViiperNativeApi with:
+
+  Initialize(listenAddress)
+  Shutdown()
+  CreateBus(busId)
+  RemoveBus(busId)
+  AddDevice(busId, typeName, vendorId, productId, out deviceId)
+  RemoveDevice(busId, deviceId)
+  SetInput(busId, deviceId, report)
+  SetFeedbackCallback(busId, deviceId, callback)
+  GetDeviceTypes()
+  GetLastError()
+
+The wrapper dynamically loads the DLL from an absolute path and binds the
+current C exports.
+
+PROJECT DECISION:
+
+PR #78 should reuse this wrapper.
+
+Do NOT add:
+  - standalone viiper.exe dependency
+  - a second P/Invoke surface
+  - direct usbip.exe command management unless a later recovery PoC proves it
+    is needed
+  - ViGEmBus dependency
+
+
+===============================================================================
+7. CLASSIC STEAM CONTROLLER DEVICE TYPE — USE THE EXACT TYPE
+===============================================================================
+
+SOURCE FACT — HHC:
+
+SteamControllerTarget declares:
+
+  DeviceType = "steamcontroller"
+
+VirtualManager creates Classic Steam Controller using:
+
+  VID 0x28DE
+  PID 0x1102
+
+
+SOURCE FACT — VIIPER:
+
+Canonical Steam Controller V1/Gordon registry name:
+
+  steamcontroller
+
+Canonical aliases include:
+
+  gordon
+  steam-controller-v1
+  steam-controller
+  steamcontroller-v1
+
+
+CRITICAL SOURCE FACT:
+
+VIIPER alias:
+
+  "msi-claw"
+
+does NOT mean Classic Steam Controller.
+
+It maps to:
+
+  registryName = "steamdeck"
+  VID = 0x28DE
+  PID = 0x12FA
+
+
+PROJECT DECISION:
+
+PR #78 must use exactly:
+
+  typeName = "steamcontroller"
+  VID      = 0x28DE
+  PID      = 0x1102
+
+Never create the MVP device through alias:
+
+  "msi-claw"
+
+The v1 target is Gordon / Classic Steam Controller, not the newer handheld
+Steam Deck-style profile.
+
+
+===============================================================================
+8. VIIPER SERVER BINDING — LOOPBACK ONLY
+===============================================================================
+
+SOURCE FACT — VIIPER:
+
+viiper_init("") defaults to:
+
+  0.0.0.0:3241
+
+SOURCE FACT — HHC:
+
+HHC defaults to:
+
+  Host = 127.0.0.1
+  Port = 3241
+
+and initializes libVIIPER with that explicit host/port.
+
+
+PROJECT DECISION:
+
+SteamInputAddonforClaw should explicitly initialize the embedded VIIPER server
+on loopback, for example:
+
+  127.0.0.1:3241
+
+Do not rely on libVIIPER's empty-string default.
+
+Reason:
+  The addon only needs local usbip attachment.
+  There is no reason for its embedded server to listen on every network
+  interface.
+
+
+===============================================================================
+9. HHC — CLASSIC STEAM CONTROLLER CREATION
+===============================================================================
+
+SOURCE FACT:
+
+HHC VirtualManager uses:
+
+  case HIDmode.SteamController:
+      new SteamControllerTarget(0x28DE, 0x1102)
+
+SteamControllerTarget:
+
+  DeviceType = "steamcontroller"
+  InputLength = 64
+  MasterIntervalOverrideHz = 250
+
+
+PROJECT DECISION:
+
+This is the strongest currently deployed reference for the first MVP target:
+
+  Classic Steam Controller
+  wired Gordon
+  28DE:1102
+  64-byte input state
+  250 Hz target cadence
+
+
+===============================================================================
+10. HHC — GENERAL VIIPER TARGET LIFECYCLE
+===============================================================================
+
+SOURCE FACT:
+
+HHC VIIPERTarget.Connect():
+
+  1. requires ViiperServerManager running
+  2. obtains or creates a VIIPER bus
+  3. AddDevice(busId, DeviceType, vendorId, productId)
+  4. if device add fails:
+       invalidate bus ID
+       obtain/create another bus
+       retry device add
+  5. stores returned device ID
+  6. subscribes to feedback/output
+  7. marks target connected
+
+Disconnect/Cleanup:
+
+  - unregister feedback event
+  - RemoveDevice(exact busId, exact deviceId)
+  - clear local IDs
+  - clear service reference
+
+Dispose calls Disconnect.
+
+
+PROJECT DECISION:
+
+Use exact bus/device ownership.
+
+Do not treat "a VIIPER device exists" as sufficient ownership evidence.
+
+The addon must know the exact in-process:
+
+  busId
+  deviceId
+
+for normal clean rollback.
+
+
+===============================================================================
+11. VIIPER ADDDEVICE SUCCESS IS NOT WINDOWS-PNP SUCCESS
+===============================================================================
+
+CRITICAL SOURCE FACT — VIIPER C API:
+
+viiper_device_add_ex():
+
+  - creates the virtual USB device
+  - adds it to the internal VIIPER bus
+  - discovers its VIIPER device ID
+  - attempts auto-attach to Windows through usbip-win2
+  - if auto-attach fails, it logs the failure
+
+The auto-attach failure is NOT necessarily returned as a fatal
+viiper_device_add_ex failure.
+
+The source explicitly allows the caller to retry attachment separately.
+
+
+PROJECT DECISION:
+
+PR #78 must NOT define creation success as:
+
+  AddDevice(...) == 0
+
+Creation is complete only after the exact Windows PnP output identity is
+observed and verified.
+
+Required conceptual contract:
+
+  AddDevice success
+      +
+  Windows PnP appearance
+      +
+  exact own-virtual identity resolution
+      =
+  SteamOutput creation success
+
+
+===============================================================================
+12. VIIPER WINDOWS ATTACH PATH
+===============================================================================
+
+SOURCE FACT:
+
+The pinned VIIPER implementation attempts local Windows USB/IP attach with:
+
+  first:
+    usbip-win2 native/IOCTL attach path
+
+  fallback:
+    usbip.exe-style path
+
+The embedded API therefore eventually appears to Windows as a USB/IP-backed
+virtual USB device.
+
+PROJECT IMPLICATION:
+
+A VIIPER output can look sufficiently "physical" in Windows PnP that
+VID/PID-only or "USB means physical" classification is unsafe.
+
+This reinforces the existing project rule:
+
+  Track addon-owned VIIPER outputs explicitly by creation-time identity.
+
+
+===============================================================================
+13. OWN-VIRTUAL IDENTITY — TARGET REPO ALREADY HAS A SAFETY GATE
+===============================================================================
+
+SOURCE FACT:
+
+AddonOwnedVirtualDeviceTracker currently tracks exact instance IDs
+case-insensitively.
+
+It exposes:
+
+  IsExcluded(device)
+  HasUncertainOwnership
+
+and supports:
+
+  Publish(device)
+  Remove(device)
+  MarkOwnershipUncertain()
+  ClearUncertaintyAfterVerifiedAbsence(...)
+
+
+SOURCE FACT:
+
+ExternalControllerDetector checks uncertain own-virtual identity BEFORE normal
+external-controller classification.
+
+If ownership is uncertain:
+
+  external-controller assessment becomes Indeterminate/passive.
+
+
+PROJECT DECISION:
+
+This is exactly the right fail-closed gate for the virtual-device hotplug
+window.
+
+#78 must use it.
+
+
+===============================================================================
+14. TRACKER API GAP — PUBLISH DOES NOT RESOLVE UNCERTAINTY
+===============================================================================
+
+SOURCE FACT:
+
+Current tracker behavior:
+
+  MarkOwnershipUncertain()
+    -> clears known IDs
+    -> sets uncertainty
+
+  Publish(device)
+    -> adds ID
+    -> does NOT clear uncertainty
+
+  ClearUncertaintyAfterVerifiedAbsence(...)
+    -> only clears uncertainty if no matching candidate exists
+
+
+PROJECT DECISION:
+
+#78 likely needs a minimal atomic resolution API, conceptually:
+
+  ResolveOwnership(verifiedDevices)
+
+that:
+
+  - publishes the exact verified addon-owned instance IDs
+  - clears uncertainty in the same ownership transition
+
+Do not work around this by:
+  - publishing then globally clearing without checking identity
+  - marking the output as external temporarily
+  - excluding every 28DE:1102 device
+
+
+===============================================================================
+15. OWN-VIRTUAL DISCOVERY — DS4WINDOWS PRODUCTION PATTERN
+===============================================================================
+
+SOURCE FACT:
+
+The reviewed DS4Windows fork performs a before/after registration flow for
+its VIIPER Sony outputs.
+
+Before output Connect():
+
+  SnapshotBeforeOwnVirtualSony()
+  BeginOwnVirtualSonyConnect()
+
+After successful Connect():
+
+  RegisterOwnVirtualSonyAsync(beforeSnapshot, ...)
+
+This exists specifically so the complete newly created USB/IP/HID device is
+not re-ingested as physical input.
+
+
+PROJECT DECISION:
+
+For #78, use the same generic principle but the project's own architecture:
+
+  before PnP snapshot
+      ->
+  mark addon own-output identity uncertain
+      ->
+  create exact steamcontroller 28DE:1102
+      ->
+  wait for PnP
+      ->
+  after PnP snapshot
+      ->
+  exact delta / topology correlation
+      ->
+  atomically publish addon-owned identity
+      ->
+  clear uncertainty
+
+Do not copy DS4Windows manager architecture.
+
+
+===============================================================================
+16. OWN-VIRTUAL IDENTIFICATION MUST NOT CLAIM PRE-EXISTING VIIPER DEVICES
+===============================================================================
+
+PROJECT DECISION:
+
+The candidate output must be resolved from:
+
+  before/after delta
+  +
+  exact 28DE:1102
+  +
+  VIIPER/USBIP topology evidence
+  +
+  container/parent relationships where available
+
+Do NOT:
+
+  find all 28DE:1102
+  -> claim all as addon-owned
+
+A real physical Valve Steam Controller or a virtual controller created by
+another program must not be excluded from external-controller detection merely
+because its VID/PID matches.
+
+
+===============================================================================
+17. MULTIPLE / AMBIGUOUS OUTPUT CANDIDATES
+===============================================================================
+
+PROJECT DECISION:
+
+If creation produces:
+
+  zero verified new candidates
+  or
+  multiple unrelated verified new candidates
+
+the addon must fail closed.
+
+Do not select:
+  - first candidate
+  - newest candidate
+  - arbitrary matching VID/PID
+
+On ambiguity:
+
+  preserve own-virtual uncertainty
+  compensate/remove the in-process VIIPER device if possible
+  verify PnP disappearance
+  keep recovery evidence if cleanup cannot be verified
+
+
+===============================================================================
+18. CLASSIC STEAM CONTROLLER USB DESCRIPTOR
+===============================================================================
+
+SOURCE FACT — VIIPER:
+
+Default USB device descriptor:
+
+  USB version: 0x0200
+  Device class: 0
+  Max EP0 packet: 0x40
+  VID: 0x28DE
+  PID: 0x1102
+  bcdDevice: 0x0100
+  Manufacturer string: "Valve Software"
+  Product string: "Wired Controller"
+  One configuration
+
+The virtual device is composite with three HID interfaces:
+
+  interface 0:
+    Keyboard
+    HID boot-keyboard style
+    endpoint 1 IN
+    8-byte report
+
+  interface 1:
+    Mouse
+    HID mouse
+    endpoint 2 IN
+    4-byte report
+
+  interface 2:
+    Controller
+    vendor page 0xFF00
+    endpoint 3 IN
+    64-byte report
+    64-byte input/output/feature report definitions
+
+Controller endpoint max packet:
+  0x0040
+
+Controller interval:
+  0x06
+
+
+PROJECT DECISION:
+
+Do not reconstruct this descriptor in SteamInputAddonforClaw.
+
+Use VIIPER's `"steamcontroller"` implementation and let VIIPER own the
+descriptor/feature-report protocol.
+
+
+===============================================================================
+19. LIZARD MODE / KEYBOARD-MOUSE INTERFACES
+===============================================================================
+
+SOURCE FACT — VIIPER:
+
+The Gordon implementation includes firmware-like keyboard and mouse interfaces.
+
+Its tests confirm default "lizard mode" behavior can emit keyboard input until
+Steam clears mappings / changes settings.
+
+Steam feature/settings commands can disable or change this behavior.
+
+
+PROJECT IMPLICATION:
+
+The addon should not try to emulate or manually suppress Gordon feature
+commands itself.
+
+Steam is expected to configure the Classic Steam Controller through its
+feature-report protocol.
+
+HARDWARE/INTEGRATION VERIFICATION REQUIRED:
+
+During #78 hardware testing, confirm that creating a neutral Gordon output does
+not cause unintended keyboard/mouse activity before Steam configures it.
+
+If an observable startup phantom input exists, investigate the VIIPER Gordon
+implementation rather than adding unrelated keyboard filtering in the addon.
+
+
+===============================================================================
+20. FEATURE REPORTS ARE VIIPER'S RESPONSIBILITY
+===============================================================================
+
+SOURCE FACT:
+
+VIIPER implements Gordon host commands/settings including:
+
+  digital mapping get/set/clear/default
+  controller mode
+  settings values
+  device info
+  attributes
+  string attributes
+  lizard mode
+  IMU mode
+  IMU reset
+  haptic/rumble/output command forwarding
+
+Feature GetDeviceInfo reports:
+  VID/PID
+  controller mode
+  "Wired Controller"
+
+PROJECT DECISION:
+
+Do not implement Steam Controller feature-report handling in C#.
+
+The addon supplies:
+  - lifecycle
+  - latest physical input state encoded into VIIPER's expected 64-byte state
+  - optional feedback consumer later
+
+VIIPER owns:
+  - USB descriptor
+  - HID feature protocol
+  - host command semantics
+  - Steam-side compatibility behavior
+
+
+===============================================================================
+21. CLASSIC STEAM CONTROLLER 64-BYTE REPORT HEADER
+===============================================================================
+
+SOURCE FACT — HHC + VIIPER:
+
+64 bytes total.
+
+Header:
+
+  byte 0 = 0x01
+  byte 1 = 0x00
+  byte 2 = 0x01
+  byte 3 = 0x3C
+
+Frame:
+  bytes 4..7
+
+Buttons begin:
+  byte 8
+
+
+===============================================================================
+22. BUTTON BYTE 8 — VERIFIED BIT MAP
+===============================================================================
+
+SOURCE FACT — HHC and VIIPER agree:
+
+byte 8:
+
+  0x80 = A
+  0x40 = X
+  0x20 = B
+  0x10 = Y
+  0x08 = L1 / LB
+  0x04 = R1 / RB
+  0x02 = L2 full
+  0x01 = R2 full
+
+
+===============================================================================
+23. BUTTON BYTE 9 — VERIFIED BIT MAP
+===============================================================================
+
+SOURCE FACT:
+
+byte 9:
+
+  0x01 = D-pad Up
+  0x02 = D-pad Right
+  0x04 = D-pad Left
+  0x08 = D-pad Down
+  0x10 = Menu / Back
+  0x20 = Steam / Special / Guide
+  0x40 = Options / Start
+  0x80 = Left Grip
+
+
+===============================================================================
+24. BUTTON BYTE 10 — VERIFIED BIT MAP
+===============================================================================
+
+SOURCE FACT:
+
+byte 10:
+
+  0x01 = Right Grip
+  0x02 = Left Pad Press
+  0x04 = Right Pad Press
+  0x08 = Left Pad Touch
+  0x10 = Right Pad Touch
+  0x40 = L3 / Left Stick Click
+  0x80 = Left Pad + Left Stick active flag
+
+
+IMPORTANT:
+
+There is no separate conventional Classic Steam Controller right-stick click
+bit.
+
+HHC maps:
+  RightStickClick
+to:
+  RightPadPress (0x04)
+
+
+===============================================================================
+25. CLAW DIRECTINPUT BUTTON MAP — HHC
+===============================================================================
+
+SOURCE FACT — HHC DClawController:
+
+Face buttons:
+
+  Buttons[1] -> A
+  Buttons[2] -> B
+  Buttons[0] -> X
+  Buttons[3] -> Y
+
+Shoulders:
+
+  Buttons[4] -> L1
+  Buttons[5] -> R1
+
+Digital full-trigger inputs:
+
+  Buttons[6] -> L2 Full
+  Buttons[7] -> R2 Full
+
+Menu:
+
+  Buttons[8] -> Back
+  Buttons[9] -> Start
+
+Stick clicks:
+
+  Buttons[10] -> L3
+  Buttons[11] -> R3
+
+Rear buttons:
+
+  Buttons[15] -> M1
+  Buttons[16] -> M2
+
+D-pad:
+  POV values, including diagonal combinations
+
+Analog trigger axes:
+
+  RotationX -> L2
+  RotationY -> R2
+
+Left stick:
+
+  X -> Left X
+  Y -> Left Y, inverted during normalization
+
+Right stick:
+
+  Z -> Right X
+  RotationZ -> Right Y, inverted during normalization
+
+
+===============================================================================
+26. AUTHORITATIVE REAR MAPPING FOR THIS PROJECT
+===============================================================================
+
+PROJECT DECISION:
+
+  physical M2
+    ->
+  Classic Steam Controller Left Grip
+    ->
+  byte 9 bit 0x80
+
+  physical M1
+    ->
+  Classic Steam Controller Right Grip
+    ->
+  byte 10 bit 0x01
+
+This mapping is authoritative for SteamInputAddonforClaw.
+
+Do not reverse it based on HHC OEM3/OEM4 naming.
+
+The target repo already models:
+
+  M2 -> LeftRear
+  M1 -> RightRear
+
+and ClassicSteamControllerInputMapper maps:
+
+  LeftRear -> LeftGrip
+  RightRear -> RightGrip
+
+
+===============================================================================
+27. D-PAD — USE COMBINABLE BITS
+===============================================================================
+
+SOURCE FACT:
+
+Gordon report represents Up/Right/Left/Down as individual bits.
+
+PROJECT DECISION:
+
+Diagonal POV input must set two bits.
+
+Examples:
+
+  Up+Right
+    byte9 = 0x01 | 0x02
+
+  Down+Left
+    byte9 = 0x08 | 0x04
+
+Do not collapse the physical POV into one synthetic D-pad ordinal at output.
+
+
+===============================================================================
+28. LEFT STICK FIELDS
+===============================================================================
+
+SOURCE FACT — HHC + VIIPER:
+
+Primary left surface:
+  X = bytes 16..17 signed int16 LE
+  Y = bytes 18..19 signed int16 LE
+
+Dedicated left stick:
+  X = bytes 54..55
+  Y = bytes 56..57
+
+HHC writes the physical left stick into both places when left pad is not active.
+
+PROJECT DECISION:
+
+For Claw, which has a physical left stick and no physical Steam touchpad,
+write normalized left stick to:
+
+  16/18
+  and
+  54/56
+
+This matches current target builder and HHC precedent.
+
+
+===============================================================================
+29. RIGHT STICK IS REPRESENTED AS RIGHT PAD
+===============================================================================
+
+SOURCE FACT:
+
+Classic Steam Controller V1 has a right trackpad, not a conventional second
+analog stick field.
+
+HHC maps its general right-stick input into right-pad axes for this target.
+
+Right pad:
+  X = bytes 20..21 signed int16 LE
+  Y = bytes 22..23 signed int16 LE
+
+PROJECT DECISION:
+
+Claw RightStick -> Gordon RightPad.
+
+R3:
+  -> RightPadPress bit 0x04
+
+The current target builder also derives RightPadTouch while the mapped right
+stick is active.
+
+
+HARDWARE VALIDATION REQUIRED:
+
+Verify Steam Input behavior for:
+  - center
+  - tiny drift
+  - full X/Y range
+  - touch activation threshold
+  - R3 click
+
+The addon must not add a gameplay deadzone/remapping policy merely to make the
+right pad feel different.
+
+Steam Input should remain the remapping/sensitivity owner.
+
+
+===============================================================================
+30. ANALOG TRIGGER REPORT FIELDS
+===============================================================================
+
+SOURCE FACT:
+
+Gordon analog trigger raw scale:
+
+  0 .. 26000
+
+Fields:
+
+  byte 11 = L trigger reduced 0..255 representation
+  byte 12 = R trigger reduced 0..255 representation
+
+  bytes 24..25 = L trigger raw
+  bytes 26..27 = R trigger raw
+
+duplicate raw trigger fields:
+
+  bytes 50..51 = L
+  bytes 52..53 = R
+
+HHC scales Claw normalized 0..255 trigger axis to:
+
+  raw = byteValue * 26000 / 255
+
+
+===============================================================================
+31. CRITICAL TRIGGER ROUND-TRIP BEHAVIOR
+===============================================================================
+
+CRITICAL SOURCE FACT — VIIPER:
+
+The C API does not blindly forward the caller's 64 bytes to the USB host.
+
+For steamcontroller:
+
+  incoming C# 64-byte report
+    ->
+  InputState.UnmarshalBinary()
+    ->
+  SteamController.UpdateInputState()
+    ->
+  VIIPER later rebuilds the host-visible Gordon report
+
+During UnmarshalBinary():
+
+  byte 8 L2/R2 full bits are NOT stored as independent normalized fields.
+
+The trigger state is reconstructed from raw trigger fields.
+
+During buildReport():
+
+  L2/R2 digital/full bits are regenerated from the trigger raw values.
+
+Full bit is emitted when:
+
+  triggerRawToByte(raw) >= 0xFF
+
+which requires raw at or above:
+
+  26000
+
+
+PROJECT DECISION:
+
+Physical Claw full-trigger buttons:
+
+  Buttons[6] / LeftTriggerFull
+  Buttons[7] / RightTriggerFull
+
+must not be represented only by byte 8 bits.
+
+If a physical Full input is true, #79 should ensure the corresponding raw
+trigger state reaches at least/max:
+
+  26000
+
+before SetInput.
+
+Otherwise the direct byte8 full bit can disappear during VIIPER's
+Unmarshal -> normalized state -> rebuild round trip.
+
+
+===============================================================================
+32. TARGET BUILDER TRIGGER CHANGE REQUIRED FOR #79
+===============================================================================
+
+SOURCE FACT — current target builder:
+
+Current builder:
+
+  - sets byte8 full-trigger bits from GamepadButtons.LeftTriggerFull /
+    RightTriggerFull
+  - independently converts TriggerState byte to 0..26000 raw
+
+That is logically correct for a raw Gordon packet but not sufficient when the
+packet goes through VIIPER's InputState normalization.
+
+
+PROJECT DECISION:
+
+#79 must harden trigger encoding.
+
+Conceptually:
+
+  leftRaw = scale(analogLeft)
+
+  if LeftTriggerFull:
+      leftRaw = 26000
+
+  rightRaw = scale(analogRight)
+
+  if RightTriggerFull:
+      rightRaw = 26000
+
+Then write the same raw values consistently to:
+  24/26
+  50/52
+  and derived 11/12 representation.
+
+Tests must validate behavior through VIIPER-compatible round-trip semantics,
+not only inspect the pre-VIIPER C# buffer.
+
+
+===============================================================================
+33. FRAME COUNTER OWNERSHIP
+===============================================================================
+
+SOURCE FACT — target builder:
+
+Current C# builder accepts a uint frame and writes it at bytes 4..7.
+
+SOURCE FACT — VIIPER:
+
+The C API parses that field into InputState.Frame.
+
+SteamController.UpdateInputState then updates its internal current state and
+increments/assigns its own effective frame as part of device state updates.
+
+The USB host-visible report is built from VIIPER's device state.
+
+
+PROJECT DECISION:
+
+Do not treat the C# frame argument as the authoritative USB-host sequence.
+
+#79 should:
+  - document that VIIPER owns effective host-visible frame progression
+  - avoid building correctness tests around a specific client-side frame
+    increment unless the current VIIPER behavior requires it
+
+A future cleanup may remove or de-emphasize the C# frame parameter if it is
+not useful outside unit tests.
+
+
+===============================================================================
+34. REPORT UPDATE CADENCE
+===============================================================================
+
+SOURCE FACT — HHC:
+
+SteamControllerTarget:
+
+  MasterIntervalOverrideHz = 250
+
+This is:
+  4 ms period.
+
+
+PROJECT DECISION:
+
+Use HHC's deployed 250 Hz as the initial parity target for live #79 publishing.
+
+Recommended architecture:
+
+  DirectInput polling/update
+      ->
+  latest immutable ControllerState
+
+  active SteamOutput publisher
+      ->
+  every ~4 ms
+      ->
+  snapshot latest ControllerState
+      ->
+  build Gordon state
+      ->
+  VIIPER SetInput
+
+Do not:
+  - create/destroy the virtual controller for input changes
+  - tie controller lifetime to report cadence
+  - create one task per input event
+
+
+===============================================================================
+35. VIIPER HOST POLLING VS CLIENT STATE UPDATES
+===============================================================================
+
+SOURCE FACT:
+
+VIIPER stores the latest normalized state.
+
+The host-facing controller endpoint builds reports from the current snapshot.
+
+Therefore:
+  VIIPER USB host polling
+and
+  addon SetInput update events
+are separate layers.
+
+PROJECT DECISION:
+
+The addon should maintain a predictable active-state publisher rather than
+assuming every physical DirectInput event maps 1:1 to one Steam USB transfer.
+
+Initial parity choice:
+  250 Hz active-only SetInput loop.
+
+
+===============================================================================
+36. IMU / GYRO — EXCLUDED FROM INITIAL MVP
+===============================================================================
+
+SOURCE FACT:
+
+Gordon report reserves:
+
+  28..33 acceleration
+  34..39 gyro
+  40..47 orientation/quaternion
+
+VIIPER also implements:
+  SettingIMUMode
+  raw accel/gyro/orientation gating
+  FeatureResetIMU calibration behavior
+
+SOURCE FACT:
+
+If a quaternion is entirely zero, VIIPER can produce neutral W = 0x4000 in
+its normalized report builder.
+
+CURRENT TARGET BUILDER:
+
+  writes neutral quaternion W 0x4000
+  leaves accel/gyro zero
+
+
+PROJECT DECISION:
+
+#78/#79 initial MVP:
+  - no sensor acquisition
+  - no MotionState
+  - no gyro settings
+  - no gyro-to-mouse
+  - no calibration UI
+
+Send neutral motion.
+
+Gyro is a separate post-MVP research/implementation phase.
+
+
+===============================================================================
+37. BATTERY FIELD
+===============================================================================
+
+SOURCE FACT — HHC + VIIPER:
+
+Gordon default battery voltage:
+  3000 mV
+
+Fields:
+  bytes 62..63 uint16 LE
+
+PROJECT DECISION:
+
+Use fixed 3000 mV for the wired virtual Classic Steam Controller in the
+initial MVP.
+
+Do not add physical Claw battery plumbing merely for #79.
+
+
+===============================================================================
+38. GUIDE / STEAM BUTTON
+===============================================================================
+
+SOURCE FACT:
+
+Gordon byte9 0x20 is Steam/Special.
+
+SOURCE FACT — reviewed HHC Claw DirectInput map:
+
+No independently verified ordinary DClawController button mapping was found
+for a dedicated Guide/Steam button alongside the normal button mapping listed
+above.
+
+PROJECT DECISION:
+
+Do not synthesize Guide/Steam in #79.
+
+Leave it neutral unless a separately verified physical source is established.
+
+Do not map MSI OEM/navigation UI buttons into Steam Guide speculatively.
+
+
+===============================================================================
+39. REPORT MAPPING MATRIX — #79
+===============================================================================
+
+Physical MSI Claw input
+  -> normalized ControllerState
+  -> Gordon output
+
+Face:
+
+  A  Buttons[1]
+    -> A
+    -> byte8 0x80
+
+  B  Buttons[2]
+    -> B
+    -> byte8 0x20
+
+  X  Buttons[0]
+    -> X
+    -> byte8 0x40
+
+  Y  Buttons[3]
+    -> Y
+    -> byte8 0x10
+
+
+Shoulders:
+
+  LB Buttons[4]
+    -> byte8 0x08
+
+  RB Buttons[5]
+    -> byte8 0x04
+
+
+Triggers:
+
+  analog L2 RotationX
+    -> normalized 0..255
+    -> raw 0..26000
+    -> 24/25 and 50/51
+    -> reduced byte11
+
+  analog R2 RotationY
+    -> normalized 0..255
+    -> raw 0..26000
+    -> 26/27 and 52/53
+    -> reduced byte12
+
+  L2 full Buttons[6]
+    -> force raw L2 to 26000
+    -> VIIPER regenerates byte8 0x02
+
+  R2 full Buttons[7]
+    -> force raw R2 to 26000
+    -> VIIPER regenerates byte8 0x01
+
+
+D-pad:
+
+  POV Up
+    -> byte9 0x01
+
+  Right
+    -> 0x02
+
+  Left
+    -> 0x04
+
+  Down
+    -> 0x08
+
+  diagonal
+    -> OR two directional bits
+
+
+Menu:
+
+  Back Buttons[8]
+    -> byte9 0x10
+
+  Start Buttons[9]
+    -> byte9 0x40
+
+  Guide/Steam
+    -> no verified source
+    -> 0
+
+
+Sticks:
+
+  L3 Buttons[10]
+    -> byte10 0x40
+
+  R3 Buttons[11]
+    -> RightPadPress
+    -> byte10 0x04
+
+  LeftStick
+    -> bytes 16/18
+    -> duplicate dedicated 54/56
+
+  RightStick
+    -> RightPad 20/22
+    -> RightPadTouch when active
+
+
+Rear:
+
+  M2 Buttons[16]
+    -> Left Grip
+    -> byte9 0x80
+
+  M1 Buttons[15]
+    -> Right Grip
+    -> byte10 0x01
+
+
+Motion:
+
+  accel / gyro / orientation
+    -> neutral for initial MVP
+
+
+Battery:
+
+  3000 mV
+    -> bytes 62/63
+
+
+===============================================================================
+40. RIGHT-PAD TOUCH DERIVATION
+===============================================================================
+
+CURRENT TARGET BUILDER:
+
+RightPadTouch is derived when:
+
+  abs(RightPad.X) > 1
+  OR
+  abs(RightPad.Y) > 1
+  OR
+  RightStickClick
+
+PROJECT DECISION:
+
+Keep the concept that the physical right stick must make the emulated Gordon
+right pad "active".
+
+However the exact threshold is not considered hardware-proven.
+
+HARDWARE VALIDATION REQUIRED:
+
+Measure actual normalized idle noise and test Steam Input.
+
+If threshold >1 produces persistent touch due to stick noise, adjust only the
+minimal activation rule required to represent the physical stick reliably.
+
+Do not introduce a general deadzone editor.
+
+
+===============================================================================
+41. HHC FEEDBACK / RUMBLE EVIDENCE
+===============================================================================
+
+SOURCE FACT:
+
+HHC SteamControllerTarget consumes Gordon output commands including:
+
+  0xB6 play audio/jingle
+  0x8F haptic pulse
+  0xEA haptic command
+  0xEB rumble command
+
+and converts them into generic vibration for the physical controller.
+
+
+SOURCE FACT — VIIPER:
+
+The C API can register a per-device feedback callback and forwards the Gordon
+output state to it.
+
+
+PROJECT DECISION:
+
+Feedback is not required to prove #78 lifecycle or #79 input routing.
+
+Recommended:
+  #78 may establish/capture callback plumbing if it naturally belongs to
+  VirtualOutputManager ownership.
+
+But:
+  physical rumble pass-through can be a later small PR.
+
+Do not let feedback scope delay first input-routing MVP.
+
+
+===============================================================================
+42. HIDHIDE AND NEWLY CREATED VIRTUAL OUTPUTS
+===============================================================================
+
+SOURCE FACT — DS4Windows:
+
+The reviewed fork contains explicit handling for newly created VIIPER virtual
+Sony outputs and HidHide.
+
+The generic problem it protects against is:
+
+  virtual output is created and writable by the process
+  but
+  an existing HidHide blacklist entry can make the output invisible to games.
+
+
+IMPORTANT PROJECT OWNERSHIP DIFFERENCE:
+
+DS4Windows may manage/adopt/remove entries under its own ownership model.
+
+SteamInputAddonforClaw has a stricter rule:
+
+  pre-existing HidHide configuration is not ours.
+
+
+PROJECT DECISION FOR #78:
+
+If the newly created addon Gordon output is already covered by a pre-existing
+HidHide blacklist entry:
+
+  do NOT remove that pre-existing entry in #78.
+
+Instead:
+
+  fail the SteamOutput creation
+  remove the addon-created virtual device
+  preserve the existing HidHide configuration
+  remain passive/fail closed
+
+If future product requirements demand temporary unhide, that would require a
+new explicitly journaled reversible mutation type and separate review.
+
+
+===============================================================================
+43. NO HIDHIDE GLOBAL STATE CHANGES FROM STEAMOUTPUT
+===============================================================================
+
+PROJECT DECISION:
+
+#78 must not:
+  - enable global HidHide
+  - disable global HidHide
+  - change inverse mode
+  - clear a blacklist
+  - take ownership of another program's entry
+
+PhysicalIsolation owns only the exact additions already established in #77.
+
+SteamOutput must not broaden HidHide ownership.
+
+
+===============================================================================
+44. VIIPER BUS OWNERSHIP
+===============================================================================
+
+SOURCE FACT — HHC:
+
+HHC shares one tracked VIIPER bus through ViiperServerManager.
+
+SOURCE FACT — VIIPER:
+
+viiper_shutdown removes all server buses/devices managed by that embedded
+server instance.
+
+PROJECT DECISION:
+
+Within SteamInputAddonforClaw's own embedded libVIIPER instance, manage bus
+ownership explicitly.
+
+For initial MVP:
+  one addon-owned bus is sufficient.
+
+Do not assume:
+  "bus 1 belongs to us"
+without recording whether this instance created it.
+
+Keep lifecycle small enough to support the later temporary Game Bar X360
+output on the same managed VIIPER runtime.
+
+
+===============================================================================
+45. GAME BAR FUTURE REQUIREMENT AFFECTS #78 ARCHITECTURE
+===============================================================================
+
+PROJECT FIXED RULE:
+
+During an eligible Steam session, Game Bar must not cause Classic Steam
+Controller disconnect/recreate.
+
+Future behavior:
+
+Normal:
+  same Steam Controller = live
+  X360 companion        = neutral/off
+
+Game Bar:
+  same Steam Controller = neutral
+  temporary/session X360 = live
+
+Exit Game Bar:
+  same Steam Controller = live again
+
+
+PROJECT DECISION FOR #78:
+
+SteamOutput lifecycle must support a persistent session-owned Gordon object.
+
+Do not design SteamOutput around:
+  "destroy output whenever reports go neutral".
+
+Neutral/report routing and device lifecycle are separate concepts.
+
+
+===============================================================================
+46. SUSPEND / RESUME — HHC PRODUCTION PRECEDENT
+===============================================================================
+
+SOURCE FACT:
+
+HHC VirtualManager.Suspend(OS=true):
+
+  - switches controller mode to NoController
+  - stops VIIPER server
+
+Resume(OS=true):
+
+  - restarts VIIPER
+  - recreates/restores the selected controller mode
+
+
+PROJECT DECISION:
+
+For the first MVP, system sleep/hibernate is allowed to be a legitimate
+virtual-device disconnect/recreate boundary.
+
+This is distinct from Game Bar.
+
+Recommended initial power policy:
+
+  suspend:
+    stop report publisher
+    cleanly remove Steam output
+    shut down owned VIIPER runtime as appropriate
+    retain recovery-safe state
+
+  resume:
+    normal recovery/re-evaluation first
+    if still eligible:
+      recreate Steam output
+      resolve exact new identity
+      restart publisher
+
+
+HARDWARE VALIDATION REQUIRED:
+
+Confirm Windows 11 sleep/hibernate behavior on MSI Claw.
+
+Do not assume device identity/container remains stable across recreation.
+
+
+===============================================================================
+47. CLEAN VIIPER SHUTDOWN
+===============================================================================
+
+SOURCE FACT:
+
+viiper_shutdown():
+
+  - removes all buses from the embedded server
+  - buses remove their devices
+  - closes the server
+  - clears VIIPER internal device/attach/feedback tracking
+
+
+PROJECT DECISION:
+
+Normal app/pipeline shutdown must still remove the exact session-owned device
+first and verify PnP absence.
+
+Then remove/shutdown broader VIIPER runtime ownership.
+
+Do not rely only on process termination.
+
+
+===============================================================================
+48. CRASH RECOVERY — IMPORTANT UNRESOLVED BOUNDARY
+===============================================================================
+
+SOURCE FACT:
+
+The reviewed source establishes clean removal behavior.
+
+It does NOT sufficiently prove this stronger statement:
+
+  "If the process dies unexpectedly, every Windows usbip-win2 PnP device
+   created by libVIIPER is guaranteed to disappear immediately and reliably."
+
+
+PROJECT DECISION:
+
+Do not assume automatic crash cleanup.
+
+#78 must extend recovery conservatively.
+
+
+===============================================================================
+49. CURRENT RECOVERY DOES NOT YET RECOVER VIRTUAL DEVICES
+===============================================================================
+
+SOURCE FACT — target RecoveryManager:
+
+Recovery schema v2 already contains:
+
+  AddonOwnedVirtualDevices
+
+but startup recovery currently rejects any journal containing one or more
+virtual-device mutations with:
+
+  Recorded virtual-device mutations are unsupported.
+
+Temporary Xbox output recovery is also currently unsupported.
+
+
+PROJECT DECISION:
+
+#78 is the stage that must define the first safe semantics for
+AddonOwnedVirtualDevices.
+
+
+===============================================================================
+50. #78 VIRTUAL-DEVICE RECOVERY — MINIMUM SAFE CONTRACT
+===============================================================================
+
+There are two distinct recovery situations.
+
+
+A. Normal in-process rollback
+
+Known:
+  exact busId
+  exact deviceId
+  exact Windows own-virtual identity
+
+Can perform:
+  stop publisher
+  RemoveDevice(busId, deviceId)
+  wait for/verify PnP absence
+  clear tracker ownership
+  checkpoint journal
+
+
+B. Startup after process crash
+
+Not safely known:
+  old in-process VIIPER server object
+  usable old bus/device handles
+  whether Windows usbip-win2 already detached the PnP device
+
+Known from journal:
+  exact Windows identity that was created/owned
+
+
+MINIMUM PROJECT DECISION:
+
+Startup:
+
+  inspect exact journaled addon-owned virtual identities
+
+  if exact identity is absent:
+      treat actual virtual mutation as already restored
+      checkpoint/complete that recovery item
+
+  if exact identity is still present:
+      do NOT guess
+      do NOT delete journal
+      do NOT broadly detach USB/IP devices
+      mark recovery unsafe / remain passive
+
+until an exact stale-detach primitive is independently verified.
+
+
+===============================================================================
+51. CREATION-TO-IDENTITY CRASH WINDOW
+===============================================================================
+
+A fundamental timing window exists:
+
+  create VIIPER device
+      ->
+  Windows PnP appears
+      ->
+  exact Windows instance identity becomes knowable
+
+If the process crashes after creation but before exact identity journaling,
+the persistent journal may not yet know which PnP instance was created.
+
+
+PROJECT DECISION:
+
+#78 must explicitly model this window.
+
+A safe implementation should combine:
+
+  pre-create ownership uncertainty
+  +
+  pre-create recovery intent / mutation boundary
+  +
+  immediate after-create identity resolution
+  +
+  exact identity replacement/checkpoint
+  +
+  compensation on any failure
+
+Do not pretend this window does not exist.
+
+
+IMPLEMENTATION NOTE:
+
+The exact journal representation should be chosen in #78 after reading the
+current RecoveryManager APIs.
+
+Do not persist transient in-process bus/device IDs as if they were durable
+Windows identities.
+
+
+===============================================================================
+52. STARTUP PRESENT-DEVICE RECOVERY IS A STOP CONDITION, NOT A GUESSING TASK
+===============================================================================
+
+If startup finds an exact journaled Gordon PnP identity still present and no
+verified exact detach mechanism exists:
+
+  stop normal routing
+  preserve evidence
+  report recovery unsafe
+
+This is preferable to:
+
+  - removing arbitrary USB/IP devices
+  - resetting all VIIPER state
+  - clearing all matching 28DE:1102 devices
+  - deleting the journal
+
+
+===============================================================================
+53. #78 CREATION SUCCESS GATE
+===============================================================================
+
+Recommended success sequence:
+
+  1. routing/environment eligibility already frozen
+  2. PhysicalInput owned
+  3. PhysicalIsolation owned
+  4. recovery session exists
+  5. validate bundled VIIPER/runtime prerequisites
+  6. load embedded libVIIPER
+  7. initialize explicit loopback server
+  8. verify `"steamcontroller"` appears in supported types
+  9. capture before-PnP snapshot
+ 10. mark addon-own identity uncertain
+ 11. persist pre-create virtual-output recovery intent
+ 12. create/get owned bus
+ 13. AddDevice("steamcontroller", 28DE, 1102)
+ 14. wait for Windows PnP
+ 15. resolve exact new addon-owned candidate(s)
+ 16. verify not accidentally HidHide-cloaked
+ 17. atomically publish exact exclusion identity and clear uncertainty
+ 18. replace/checkpoint recovery record with exact durable identity
+ 19. send neutral Gordon state
+ 20. mark SteamOutput stage active
+
+If any step fails:
+  compensate in strict reverse order where safely possible.
+
+
+===============================================================================
+54. #78 ROLLBACK ORDER
+===============================================================================
+
+Recommended conceptual rollback:
+
+  1. stop any SteamOutput report publisher / future callbacks
+  2. stop accepting new input into output
+  3. RemoveDevice(exact busId, deviceId)
+  4. verify exact Windows PnP output identity is absent
+  5. remove exact own-virtual tracker identity / clear uncertainty
+  6. checkpoint virtual-device recovery mutation
+  7. remove owned bus if no longer needed
+  8. shutdown owned libVIIPER runtime if no output remains
+  9. allow pipeline rollback to continue:
+       PhysicalIsolation
+       PhysicalInput
+       NativeMode
+
+If PnP absence cannot be verified:
+  do not claim SteamOutput rollback success.
+
+
+===============================================================================
+55. #78 DEFAULT PRODUCTION BASELINE
+===============================================================================
+
+IMPORTANT:
+
+After #78 alone, default Stock production must still remain:
+
+  NativeMode             Enabled
+  PhysicalInput          Disabled
+  PhysicalIsolation      Disabled
+  ThirdPartyIsolation    Disabled
+  SteamOutput            Disabled
+  XboxOutput             Disabled
+  GameBarRouting         Disabled
+
+Reason:
+
+#78 should create a neutral/test Gordon output but #79 live full ControllerState
+mapping is not yet production-ready.
+
+Do not hide the physical controller in ordinary user sessions until the
+replacement path is complete.
+
+
+===============================================================================
+56. #78 EXPERIMENTAL PIPELINE
+===============================================================================
+
+#78 should be testable through an explicit Stock experimental plan:
+
+  NativeMode
+    Enabled
+
+  PhysicalInput
+    Enabled
+
+  PhysicalIsolation
+    Enabled
+
+  SteamOutput
+    Enabled
+
+All later stages:
+  Disabled
+
+
+This provides:
+
+  exact physical input owned
+      ->
+  exact physical input hidden
+      ->
+  neutral Classic Steam Controller replacement
+
+only under an explicit test/experiment path.
+
+
+===============================================================================
+57. #78 NEUTRAL REPORT
+===============================================================================
+
+Initial #78 neutral state:
+
+  all buttons false
+  sticks centered
+  triggers zero
+  grips false
+  right pad neutral
+  IMU neutral
+  battery 3000
+
+The Classic Steam Controller should remain connected while receiving neutral
+state.
+
+No live controller mapping belongs in #78.
+
+
+===============================================================================
+58. #78 HIDHIDE PRE-BLACKLISTED OUTPUT POLICY
+===============================================================================
+
+If after creating the exact new Gordon output its Windows PnP identity is
+already listed in existing HidHide configuration:
+
+  Source fact:
+    this can make virtual output unavailable to games.
+
+Project ownership rule:
+    existing entry may belong to user / HHC / ClawTweaks / another tool.
+
+PROJECT DECISION:
+
+  do not remove it
+
+Instead:
+
+  fail SteamOutput creation
+  remove our new output
+  preserve the pre-existing HidHide entry
+  report clear reason
+
+
+===============================================================================
+59. #78 TEST PLAN — MINIMUM
+===============================================================================
+
+Unit/integration tests should cover:
+
+Runtime/API:
+  - exact DLL load path
+  - init success/failure
+  - loopback address
+  - `"steamcontroller"` support required
+  - exact 28DE:1102 AddDevice arguments
+  - AddDevice return failure
+  - AddDevice success but PnP never appears
+  - AddDevice success but ambiguous PnP delta
+
+Own identity:
+  - preexisting 28DE:1102 not claimed
+  - one exact new candidate claimed
+  - multiple candidate ambiguity fails
+  - uncertainty set before create
+  - uncertainty remains through unresolved window
+  - exact publish + uncertainty clear is atomic
+  - external detector is Indeterminate while uncertain
+  - external detector excludes only exact resolved own output
+
+HidHide:
+  - newly created output not blacklisted -> success
+  - preexisting blacklist contains new path -> fail + remove output
+  - no preexisting HidHide mutation performed
+
+Recovery:
+  - recovery intent before create
+  - exact identity checkpoint after resolution
+  - device remove before journal completion
+  - PnP absence required before completion
+  - completion failure keeps recovery ownership
+  - startup journaled identity absent -> checkpoint success
+  - startup journaled identity still present -> fail closed
+  - creation crash-window state remains unsafe, never silently discarded
+
+Lifecycle:
+  - idempotent rollback
+  - RemoveDevice called once for owned device
+  - bus cleanup after device
+  - VIIPER shutdown only after owned output cleanup
+  - cancellation at every major boundary
+  - shutdown during transition
+  - suspend removes output cleanly
+  - resume may recreate through fresh identity resolution
+
+Production safety:
+  - RoutingExperimentOptions.None does not execute SteamOutput
+  - normal production remains NativeMode-only
+  - unsupported environments remain passive
+  - external-controller veto prevents creation
+
+
+===============================================================================
+60. #79 INPUT MAPPING PRINCIPLE
+===============================================================================
+
+#79 must consume only the project's normalized ControllerState.
+
+Do not let SteamOutput know:
+
+  DirectInput DevicePath
+  Buttons[15]
+  Buttons[16]
+  raw DirectInput axis objects
+  MSI VID/PID
+  Center M
+
+Device-specific normalization stays upstream.
+
+Output mapping only sees canonical state.
+
+
+===============================================================================
+61. #79 NO GENERAL REMAPPING POLICY
+===============================================================================
+
+#79 is NOT:
+  - a remapping layer
+  - a macro engine
+  - an action set engine
+  - a deadzone editor
+  - a turbo engine
+  - gyro-to-mouse
+
+Its job is only:
+
+  canonical physical state
+      ->
+  accurate Classic Steam Controller state
+
+Steam Input performs user mapping.
+
+
+===============================================================================
+62. #79 REPORT BUILDER — EXISTING CODE IS A GOOD BASE, NOT FINAL PROOF
+===============================================================================
+
+SOURCE FACT:
+
+Current target repo already contains:
+
+  ClassicSteamControllerInputMapper
+  ClassicSteamControllerReportBuilder
+
+It already covers:
+  - face buttons
+  - bumpers
+  - D-pad
+  - Back/Start
+  - grips
+  - left stick
+  - right stick -> right pad
+  - triggers
+  - R3 -> right pad click
+  - neutral IMU
+  - 3000mV
+
+PROJECT DECISION:
+
+Reuse/refine the existing builder.
+
+Do not create a second parallel Gordon encoder.
+
+Required #79 changes/tests should focus on semantics that were not previously
+validated through the actual pinned VIIPER normalize/rebuild path.
+
+
+===============================================================================
+63. #79 CRITICAL VIIPER ROUND-TRIP TEST
+===============================================================================
+
+Recommended golden test strategy:
+
+  ControllerState
+    ->
+  ClassicSteamControllerReportBuilder
+    ->
+  parse according to pinned VIIPER InputState.UnmarshalBinary semantics
+    ->
+  rebuild according to pinned VIIPER buildReport semantics
+    ->
+  assert final host-visible Gordon meaning
+
+This is especially important for:
+  - full trigger bits
+  - duplicated trigger raw fields
+  - frame
+  - quaternion default
+  - left primary surface semantics
+
+
+===============================================================================
+64. #79 PER-CONTROL TEST MATRIX
+===============================================================================
+
+Every control should have a one-at-a-time test:
+
+  A
+  B
+  X
+  Y
+
+  D-pad Up
+  D-pad Right
+  D-pad Down
+  D-pad Left
+  all four diagonals
+
+  LB
+  RB
+
+  L trigger:
+    zero
+    midpoint
+    max analog
+    digital/full only
+    analog + full
+
+  R trigger:
+    same cases
+
+  L3
+  R3
+
+  Back
+  Start
+
+  M2 -> Left Grip only
+  M1 -> Right Grip only
+  M1+M2 together
+
+  Left stick:
+    center
+    min X
+    max X
+    min Y
+    max Y
+    diagonals
+
+  Right stick/right pad:
+    center
+    min/max axes
+    touch activation
+    R3 press
+
+  neutral report:
+    no phantom bits/axes
+
+
+===============================================================================
+65. #79 AXIS RANGE / INVERSION VALIDATION
+===============================================================================
+
+SOURCE FACT:
+
+HHC Claw DirectInput normalization inverts physical Y axes before they enter
+its canonical state.
+
+PROJECT DECISION:
+
+The output builder should trust normalized ControllerState orientation.
+
+Do not add MSI-specific inversion in SteamOutput.
+
+
+HARDWARE VALIDATION REQUIRED:
+
+On the actual MSI Claw verify in Steam Input tester:
+
+  Left:
+    push right -> positive expected direction
+    push left
+    push up
+    push down
+
+  Right:
+    same four directions through Gordon right-pad representation
+
+If a direction is wrong:
+  fix the device normalization boundary,
+not a random per-game remap.
+
+
+===============================================================================
+66. #79 250 HZ PUBLISHER LIFETIME
+===============================================================================
+
+Publisher exists only while SteamOutput stage is active.
+
+Enter:
+  start after exact virtual device is resolved and neutral send succeeds
+
+Exit:
+  stop publisher before RemoveDevice
+
+Suspend:
+  stop before output removal
+
+Game Bar future:
+  publisher remains attached to same Gordon output but switches source to
+  neutral state
+
+External-controller veto:
+  stop publisher immediately during disengage
+
+
+===============================================================================
+67. #79 SETINPUT FAILURE
+===============================================================================
+
+SOURCE FACT — HHC:
+
+If VIIPER SetInput fails, HHC invalidates bus state and treats the target as
+disconnected.
+
+PROJECT DECISION:
+
+For SteamInputAddonforClaw:
+
+SetInput failure during active routing is not a harmless dropped frame.
+
+It means replacement output health is uncertain.
+
+Required behavior:
+  fail active SteamOutput
+  begin rollback/disengage
+  preserve recovery evidence until output absence is verified
+
+Do not continue hiding the physical controller while replacement output health
+is unknown.
+
+
+===============================================================================
+68. REPORT FLOOD / BACKGROUND ACTIVITY
+===============================================================================
+
+HHC previously required care around system sleep and repeated gyro updates.
+
+Initial MVP has no gyro, but the same principle applies:
+
+  250 Hz is an active routing cadence
+  not an app-global forever timer
+
+Publisher must stop when:
+  - no eligible Steam session
+  - external veto
+  - rollback
+  - suspend
+  - app shutdown
+
+
+===============================================================================
+69. #79 SAME DEVICE — NO HOTPLUG FOR INPUT TRANSITIONS
+===============================================================================
+
+Live state changes:
+
+  buttons
+  sticks
+  triggers
+  grips
+  neutral/live switching
+
+must only alter reports.
+
+They must not recreate the virtual Steam Controller.
+
+This preserves Steam Input binding/session stability.
+
+
+===============================================================================
+70. PRODUCTION ACTIVATION SHOULD WAIT UNTIL #79 + HARDWARE PROOF
+===============================================================================
+
+After #79 code is complete, do not automatically assume production-ready.
+
+First hardware validation must confirm:
+
+  - Steam recognizes device as Classic Steam Controller
+  - no duplicate physical game input
+  - every mapped control works
+  - both grips are independently bindable
+  - analog axes/ranges are correct
+  - trigger full-click survives VIIPER
+  - no phantom keyboard/mouse/lizard input
+  - clean exit restoration works
+  - crash/sleep behavior is acceptable
+
+Only then consider enabling the complete Stock replacement baseline.
+
+
+===============================================================================
+71. FUTURE STOCK PRODUCTION PLAN AFTER PROOF
+===============================================================================
+
+Expected eventual Stock plan:
+
+  NativeMode             Enabled
+  PhysicalInput          Enabled
+  PhysicalIsolation      Enabled
+  ThirdPartyIsolation    Disabled for Stock unless evidence requires it
+  SteamOutput            Enabled
+  XboxOutput             Disabled normally
+  GameBarRouting         later enabled after companion-output work
+
+The key atomic rule:
+
+  never production-enable PhysicalIsolation without a viable replacement
+  SteamOutput in the same eligible routing path.
+
+
+===============================================================================
+72. HARDWARE VALIDATION — #78 DEVICE LIFECYCLE
+===============================================================================
+
+Record exact values on MSI Claw:
+
+  before create:
+    all 28DE:1102 candidates
+    instance IDs
+    parent IDs
+    container IDs
+    enumerator
+    service
+    hardware IDs
+
+  after create:
+    same full data
+
+Confirm:
+
+  one new Gordon logical device is attributable to addon creation.
+
+Verify Steam shows:
+
+  Valve / Wired Controller
+  VID 28DE
+  PID 1102
+
+Verify Steam identifies it as:
+  Classic Steam Controller
+not:
+  generic gamepad
+  Steam Deck
+  third-party handheld profile
+
+
+===============================================================================
+73. HARDWARE VALIDATION — EXTERNAL CONTROLLER EXCLUSION
+===============================================================================
+
+With addon Gordon active:
+
+  external detector should not veto on addon-owned 28DE:1102.
+
+Then connect a real external controller:
+
+  Xbox
+  DualSense
+  8BitDo
+  or other
+
+Expected:
+  immediate external veto
+  addon Steam output removed
+  physical/native state restored
+  veto latched until Steam session ends
+
+Also test a real physical Valve Steam Controller if available:
+
+  it must be treated as external physical
+  and must NOT be excluded merely because it is 28DE:1102.
+
+
+===============================================================================
+74. HARDWARE VALIDATION — HIDHIDE
+===============================================================================
+
+Verify:
+
+  addon physical Claw hide works
+  addon can continue DirectInput reading
+  Gordon virtual output remains visible to Steam/games
+  pre-existing HidHide entries remain unchanged
+
+Deliberately pre-blacklist the Gordon candidate path only in a controlled test
+if safe/possible:
+
+Expected #78 policy:
+  output creation fails
+  addon output is removed
+  pre-existing blacklist entry remains
+
+
+===============================================================================
+75. HARDWARE VALIDATION — KEY-BY-KEY
+===============================================================================
+
+Use Steam's controller test/config UI.
+
+Test individually:
+
+  A
+  B
+  X
+  Y
+
+  D-pad:
+    U
+    UR
+    R
+    DR
+    D
+    DL
+    L
+    UL
+
+  LB
+  RB
+
+  LT:
+    smooth analog range
+    full click
+
+  RT:
+    smooth analog range
+    full click
+
+  Left stick:
+    X/Y extremes
+    center
+    L3
+
+  Right stick represented as right pad:
+    X/Y extremes
+    center
+    touch/active behavior
+    R3/right pad click
+
+  Back
+  Start
+
+  M2:
+    only Left Grip
+
+  M1:
+    only Right Grip
+
+  M1 + M2:
+    independent simultaneous grip state
+
+
+===============================================================================
+76. HARDWARE VALIDATION — GRIP REBINDING
+===============================================================================
+
+This is a critical project acceptance test.
+
+In Steam Input:
+
+  bind Left Grip to one obvious action
+  bind Right Grip to a different obvious action
+
+Verify:
+
+  M2 triggers only Left Grip binding
+  M1 triggers only Right Grip binding
+
+Then reverse/customize mappings in Steam Input and verify the addon requires no
+mapping configuration of its own.
+
+
+===============================================================================
+77. HARDWARE VALIDATION — TRIGGER FULL-CLICK
+===============================================================================
+
+Important due VIIPER round-trip behavior.
+
+Test:
+
+  analog trigger 0%
+  partial values
+  100% analog
+  physical full-trigger button state
+
+Verify host-visible Gordon report and Steam Input both show full press.
+
+If physical Buttons[6]/[7] can become true before analog axis mathematically
+reaches exact 255, ensure #79's raw-force-max policy preserves the click.
+
+
+===============================================================================
+78. HARDWARE VALIDATION — CRASH
+===============================================================================
+
+During active experimental replacement:
+
+  force-kill addon process
+
+Immediately inspect Windows PnP for:
+  exact journaled Gordon instance
+  usbip-win2 residue
+
+Restart addon.
+
+Expected minimum:
+
+If device is gone:
+  recovery clears exact virtual mutation and continues restoring remaining
+  journal state.
+
+If device remains:
+  addon must remain recovery-unsafe/passive unless a verified exact stale
+  detach mechanism has been implemented.
+
+Do not accept:
+  silently deleting virtual recovery evidence.
+
+
+===============================================================================
+79. HARDWARE VALIDATION — SLEEP / HIBERNATE
+===============================================================================
+
+Test both:
+
+  Sleep
+  Hibernate
+
+while routing active.
+
+Verify:
+  pre-suspend rollback/output cleanup
+  no hidden physical controller left unusable
+  no stale Gordon output accumulation
+  resume recovery before new routing
+  fresh identity resolution
+  only one Gordon output after resume
+  Steam Input remains usable
+
+
+===============================================================================
+80. HARDWARE VALIDATION — STEAM SESSION EXIT
+===============================================================================
+
+When RunningAppID returns 0:
+
+Expected strict reverse routing cleanup:
+
+  SteamOutput removed
+  PhysicalIsolation restored
+  PhysicalInput released
+  NativeMode exact previous state restored
+
+No addon virtual controller remains.
+
+
+===============================================================================
+81. SOURCE-DERIVED FACTS VS PROJECT INFERENCES
+===============================================================================
+
+DIRECT SOURCE FACTS:
+
+HHC:
+  - Classic Steam Controller target is 28DE:1102.
+  - DeviceType is "steamcontroller".
+  - Input length is 64.
+  - HHC uses 250 Hz master interval for this target.
+  - HHC removes/disposes virtual controller during target-mode changes.
+  - HHC suspend removes virtual controller and stops VIIPER; resume restores it.
+  - HHC Gordon input bit/axis layout is as documented above.
+  - HHC maps generic right stick click to right-pad press.
+  - HHC Claw DInput mapping confirms the physical controls listed above.
+
+VIIPER:
+  - default Gordon VID/PID is 28DE:1102.
+  - "msi-claw" alias is a Steam Deck-type 28DE:12FA profile, not Gordon.
+  - Gordon is a composite keyboard/mouse/controller device.
+  - controller interface has 64-byte vendor HID reports.
+  - VIIPER implements Gordon feature commands/settings.
+  - viiper_device_add_ex auto-attaches to Windows but attach failure is not
+    necessarily fatal to AddDevice.
+  - SetInput parses the 64-byte report into InputState.
+  - host-visible report is rebuilt from normalized state.
+  - digital trigger-full bits are regenerated from raw trigger state.
+  - raw max is 26000.
+  - neutral quaternion W defaults to 0x4000 when all quaternion fields are zero.
+  - clean viiper_shutdown removes managed buses/devices from the embedded
+    server and clears internal tracking.
+
+DS4Windows:
+  - VIIPER output creation is paired with explicit own-virtual discovery.
+  - before/after snapshot is used for new virtual Sony output registration.
+  - output removal/disconnect uses exact output ownership.
+  - newly created virtual output and HidHide interaction requires explicit
+    protection in a real controller-management implementation.
+
+SteamInputAddonforClaw:
+  - current VIIPER native wrapper already exposes required core C APIs.
+  - embedded binary has pinned source/build/hash provenance.
+  - AddonOwnedVirtualDeviceTracker supports exact IDs and uncertain ownership.
+  - ExternalControllerDetector becomes Indeterminate while own-virtual identity
+    is uncertain.
+  - current Gordon builder already implements most non-gyro mapping.
+  - recovery schema already has AddonOwnedVirtualDevices but startup recovery
+    currently rejects virtual-device mutations.
+
+
+PROJECT INFERENCES / DECISIONS:
+
+  - use explicit "steamcontroller" 28DE:1102, never "msi-claw".
+  - use explicit loopback server.
+  - AddDevice success is insufficient; PnP identity verification is mandatory.
+  - combine before/after PnP delta with exact topology for own-output identity.
+  - tracker needs an atomic resolved-ownership transition.
+  - do not mutate pre-existing HidHide entries that hide a newly created output.
+  - crash startup may clear virtual recovery only after exact absence is verified;
+    present stale device is a fail-close condition until exact detach is proven.
+  - #78 remains neutral and production-disabled.
+  - #79 uses 250 Hz active publisher.
+  - #79 must force raw trigger to 26000 for physical full-trigger input.
+  - M2 -> Left Grip, M1 -> Right Grip.
+  - right stick -> Gordon right pad.
+  - Guide remains unmapped without evidence.
+
+
+HARDWARE-VERIFICATION-ONLY ITEMS:
+
+  - exact Windows PnP/container topology of created Gordon output.
+  - whether usbip-win2 always detaches device after abrupt process crash.
+  - whether right-pad touch threshold needs adjustment for Claw stick noise.
+  - actual Steam recognition and key/axis behavior.
+  - whether lizard-mode startup can cause observable phantom keyboard/mouse input.
+  - exact sleep/hibernate behavior on Windows 11/MSI Claw.
+
+
+===============================================================================
+82. IMPORTANT OPEN QUESTION — CRASH DETACH
+===============================================================================
+
+This research intentionally does NOT close the following question:
+
+  Does the currently deployed usbip-win2 path guarantee that a Windows-attached
+  Gordon PnP device disappears after libVIIPER host process crash without an
+  orderly detach?
+
+The reviewed HHC/DS4Windows/VIIPER sources did not provide enough evidence to
+make that guarantee.
+
+Do not turn an assumption into recovery logic.
+
+This should be answered by:
+  1. an exact upstream/driver source proof, or
+  2. a controlled runtime PoC on Windows 11, preferably followed by source
+     confirmation.
+
+
+===============================================================================
+83. IMPORTANT OPEN QUESTION — POWER-CYCLE / PNP TIMING
+===============================================================================
+
+Windows PnP arrival/removal is asynchronous from the add/remove API perspective.
+
+#78 must define bounded wait/verification behavior.
+
+Do not:
+  Thread.Sleep(fixed magic duration)
+  -> assume success
+
+Prefer:
+  event-driven or bounded polling against exact PnP identity.
+
+Exact timeout values can be decided from existing project patterns and hardware
+measurement.
+
+
+===============================================================================
+84. IMPLEMENTATION SEQUENCING AFTER THIS RESEARCH
+===============================================================================
+
+Research:
+  COMPLETE AS ONE BODY OF WORK.
+
+Implementation remains:
+
+PR #78
+  SteamOutput / VIIPER Classic Steam Controller lifecycle
+
+  Includes:
+    runtime
+    create/remove
+    own identity
+    external exclusion
+    HidHide output safety
+    neutral state
+    recovery
+    suspend/resume
+
+  Excludes:
+    live full ControllerState mapping
+    production default enable
+    gyro
+    Game Bar X360
+
+
+Then review/merge #78.
+
+
+PR #79
+  Live non-gyro ControllerState -> Gordon report routing
+
+  Includes:
+    250 Hz publisher
+    key-by-key mapping
+    trigger full-click correction
+    grip mapping
+    axes
+    right-stick-as-right-pad
+    report/round-trip tests
+
+  Excludes:
+    gyro
+    Game Bar X360 lifecycle
+    general remapping UI
+
+
+Then hardware validation.
+
+
+Only after successful hardware proof:
+  consider enabling the complete Stock replacement path in production.
+
+
+===============================================================================
+85. LUNA REFERENCE GATE FOR #78 AND #79
+===============================================================================
+
+When writing the later Luna task, require Luna to re-check:
+
+SteamInputAddonforClaw:
+  exact latest main SHA
+  existing files affected by this research
+
+HHC:
+  pinned/current SHA
+  SteamControllerTarget.cs
+  VIIPERTarget.cs
+  VirtualManager.cs
+  ViiperServerManager.cs
+  DClawController.cs
+
+DS4Windows:
+  pinned/current SHA
+  OutputSlotManager.cs
+  ViiperOutDevice.cs
+  ControlService.cs
+  DS4Devices.cs
+
+VIIPER corresponding source:
+  exact provenance commit
+  clib/main.go
+  device/steamcontroller/const.go
+  device/steamcontroller/inputstate.go
+  device/steamcontroller/device.go
+  device/steamcontroller/handler.go
+  device/steamcontroller/steamcontroller_test.go
+
+The implementation PR body should record the exact revisions actually used.
+
+If a reference revision changes after this document:
+  compare behavior before using the new source;
+  do not silently assume compatibility.
+
+
+===============================================================================
+86. FINAL RECOMMENDATION
+===============================================================================
+
+The current codebase is already well-positioned for #78/#79.
+
+The most important findings that change implementation detail are:
+
+1. Use explicit:
+     "steamcontroller"
+     28DE:1102
+   not VIIPER alias "msi-claw".
+
+2. AddDevice API success is not enough.
+   Windows PnP output identity must be verified.
+
+3. Own-virtual identity needs a before/after snapshot and an uncertainty gate.
+   Current tracker needs a resolved-ownership transition.
+
+4. Do not remove a pre-existing HidHide blacklist entry merely to make the new
+   virtual output visible.
+   Fail and compensate instead.
+
+5. Crash persistence of usbip-win2 PnP is not proven.
+   Recovery must verify absence and fail closed on unresolved presence.
+
+6. HHC's deployed Gordon target is a strong 250 Hz precedent.
+
+7. VIIPER parses and rebuilds Gordon input.
+   Therefore the physical L2/R2 full-click must force raw trigger = 26000;
+   writing only the Gordon digital bit is not sufficient.
+
+8. VIIPER owns the effective host-visible state/frame semantics.
+   Do not over-specify a client frame counter.
+
+9. M2 -> Left Grip and M1 -> Right Grip remain authoritative.
+
+10. #78 and #79 should use the same research basis but remain separate
+    implementation PRs.
+
+
+===============================================================================
+END
+===============================================================================
