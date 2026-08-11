@@ -67,6 +67,30 @@ public sealed class MsiClawNativeStateManagerTests
     }
 
     [Fact]
+    public void CaptureSnapshot_CompositeSentinelContainer_CollapsesByPhysicalRoot()
+    {
+        var devices = new[]
+        {
+            Device(0x1901, "USB\\VID_0DB0&PID_1901&MI_00\\A", Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), parentInstanceId: "PARENT_00", ancestors: ["USB\\VID_0DB0&PID_1901\\CLAW_A"]),
+            Device(0x1901, "USB\\VID_0DB0&PID_1901&MI_01\\A", Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), parentInstanceId: "PARENT_01", ancestors: ["USB\\VID_0DB0&PID_1901\\CLAW_A"]),
+            Device(0x1901, "HID\\VID_0DB0&PID_1901\\A", Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), parentInstanceId: "PARENT_HID", ancestors: ["USB\\VID_0DB0&PID_1901\\CLAW_A"])
+        };
+        var result = new MsiClawNativeStateManager(new Enumerator(devices)).CaptureSnapshot();
+        Assert.Equal(NativeStateCaptureStatus.Success, result.Status);
+        Assert.Equal(MsiClawNativeMode.XInput, result.Snapshot!.Payload.Deserialize<MsiClawNativeStatePayload>()!.Mode);
+    }
+
+    [Fact]
+    public void CaptureSnapshot_TwoPhysicalRoots_RemainsIndeterminate()
+    {
+        var result = new MsiClawNativeStateManager(new Enumerator([
+            Device(0x1901, "USB\\VID_0DB0&PID_1901&MI_00\\A", Guid.Empty, ancestors: ["USB\\VID_0DB0&PID_1901\\CLAW_A"]),
+            Device(0x1901, "USB\\VID_0DB0&PID_1901&MI_00\\B", Guid.Empty, ancestors: ["USB\\VID_0DB0&PID_1901\\CLAW_B"])
+        ])).CaptureSnapshot();
+        Assert.Equal(NativeStateCaptureStatus.Indeterminate, result.Status);
+    }
+
+    [Fact]
     public void CaptureSnapshot_WithoutContainerOrParent_UsesInstanceFallback()
     {
         var result = new MsiClawNativeStateManager(new Enumerator(
@@ -101,8 +125,8 @@ public sealed class MsiClawNativeStateManagerTests
         Assert.Equal(NativeStateRestoreStatus.Failed, (await source.RestoreSnapshotAsync(malformed, CancellationToken.None)).Status);
     }
 
-    private static ControllerDeviceInfo Device(ushort productId, string instanceId = "MSI\\DEVICE", Guid? container = null, ushort vendorId = 0x0DB0, string? parentInstanceId = "MSI\\PARENT") =>
-        new(instanceId, container, parentInstanceId, parentInstanceId is null ? [] : [parentInstanceId], "USB", [$"USB\\VID_{vendorId:X4}&PID_{productId:X4}"], [], "HIDClass", null, null, vendorId, productId, true);
+    private static ControllerDeviceInfo Device(ushort productId, string instanceId = "MSI\\DEVICE", Guid? container = null, ushort vendorId = 0x0DB0, string? parentInstanceId = "MSI\\PARENT", IReadOnlyList<string>? ancestors = null) =>
+        new(instanceId, container, parentInstanceId, ancestors ?? (parentInstanceId is null ? [] : [parentInstanceId]), "USB", [$"USB\\VID_{vendorId:X4}&PID_{productId:X4}"], [], "HIDClass", null, null, vendorId, productId, true);
     private sealed class Enumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices; }
     private sealed class ThrowingEnumerator : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => throw new InvalidOperationException(); }
 }

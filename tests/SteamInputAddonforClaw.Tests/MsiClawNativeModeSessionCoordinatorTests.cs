@@ -230,6 +230,21 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
     }
 
+    [Fact]
+    public async Task EnterWithValidSnapshotButWeakIdentityFailsBeforeMutation()
+    {
+        var devices = new WeakIdentityEnumerator();
+        var modeController = new NeverModeController();
+        await using var coordinator = CreateCoordinatorFor(devices, modeController);
+
+        var result = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("PhysicalIdentityNotStrong", result.Reason);
+        Assert.Equal(0, modeController.CallCount);
+        Assert.False(coordinator.HasOwnedRecoveryBoundary);
+    }
+
     private static MsiClawNativeModeSessionCoordinator CreateCoordinator(
         FakeDeviceEnumerator devices,
         FakeModeController modeController,
@@ -241,6 +256,12 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         var recovery = new RecoveryManager(store);
         var native = new MsiClawNativeStateManager(devices, modeController);
         return new(native, recovery, gate ?? new PowerMutationGate(initiallyOpen: true), mutationAllowed: mutationAllowed, markRecoveryUnsafe: markUnsafe);
+    }
+
+    private static MsiClawNativeModeSessionCoordinator CreateCoordinatorFor(IControllerDeviceEnumerator devices, IMsiClawModeController modeController)
+    {
+        var recovery = new RecoveryManager(new MemoryJournalStore());
+        return new(new MsiClawNativeStateManager(devices, modeController), recovery, new PowerMutationGate(initiallyOpen: true));
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
@@ -306,6 +327,22 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         }
 
         public void ReleaseFirstSwitch() => _releaseFirstSwitch.SetResult();
+    }
+
+    private sealed class WeakIdentityEnumerator : IControllerDeviceEnumerator
+    {
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
+        [new("USB\\VID_0DB0&PID_1901&MI_00\\A", Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), "PARENT", ["USB\\VID_0DB0&PID_1901\\CLAW_A"], "USB", [], [], "HIDClass", null, null, MsiClawHardware.VendorId, MsiClawHardware.XInputProductId, true)];
+    }
+
+    private sealed class NeverModeController : IMsiClawModeController
+    {
+        public int CallCount { get; private set; }
+        public Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            throw new InvalidOperationException("mode mutation must not be reached");
+        }
     }
 
     private sealed class MemoryJournalStore : IRecoveryJournalStore

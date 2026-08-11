@@ -35,7 +35,16 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         var logicalCandidates = candidates.GroupBy(LogicalIdentity, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderBy(device => device.InstanceId, StringComparer.OrdinalIgnoreCase).ToList()).ToList();
         if (logicalCandidates.Count != 1)
+        {
+            AppLog.Warn("NativeState", "MSI Claw native-state capture indeterminate.", null,
+                ("CaptureStatus", NativeStateCaptureStatus.Indeterminate),
+                ("Reason", "MultipleLogicalMsiControllers"),
+                ("CandidateCount", candidates.Count),
+                ("LogicalGroupCount", logicalCandidates.Count),
+                ("LogicalGroupKeys", string.Join(" | ", logicalCandidates.Select(group => LogicalIdentity(group[0])))),
+                ("Action", "Passive"));
             return new(NativeStateCaptureStatus.Indeterminate, null, "Multiple logical MSI controller candidates are present.");
+        }
 
         var selectedLogicalCandidate = logicalCandidates.Single();
         var products = selectedLogicalCandidate.Select(device => device.ProductId).Distinct().ToList();
@@ -46,7 +55,13 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         var identity = MsiClawPhysicalIdentity.From(selected);
         var payload = new MsiClawNativeStatePayload(mode, selected.InstanceId, selected.ParentInstanceId, selected.ContainerId, selected.ProductId, identity.Confidence);
         var snapshot = new DeviceNativeStateSnapshot(DeviceId, SnapshotFormatVersion, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(payload));
-        AppLog.Info("NativeState", "MSI Claw native state snapshot completed.", ("Mode", mode), ("InstanceId", selected.InstanceId), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+        AppLog.Info("NativeState", "MSI Claw native-state candidates grouped.",
+            ("CandidateCount", candidates.Count),
+            ("LogicalGroupCount", logicalCandidates.Count),
+            ("Mode", mode),
+            ("ResolvedPhysicalRoot", MsiPhysicalRoot(selected) ?? "Unavailable"),
+            ("IdentityConfidence", identity.Confidence),
+            ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         return new(NativeStateCaptureStatus.Success, snapshot, "Snapshot captured.");
     }
 
@@ -94,8 +109,18 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
 
     private static string LogicalIdentity(ControllerDeviceInfo device)
     {
-        if (device.ContainerId is Guid containerId && containerId != Guid.Empty && containerId != new Guid("00000000-0000-0000-ffff-ffffffffffff")) return $"container:{containerId:D}";
+        if (MsiPhysicalRoot(device) is { } physicalRoot) return $"root:{physicalRoot}";
+        if (ControllerLogicalIdentity.IsUsableContainerId(device.ContainerId)) return $"container:{device.ContainerId:D}";
         if (!string.IsNullOrWhiteSpace(device.ParentInstanceId)) return $"parent:{device.ParentInstanceId}";
         return $"instance:{device.InstanceId}";
+    }
+
+    private static string? MsiPhysicalRoot(ControllerDeviceInfo device)
+    {
+        var prefix = $"USB\\VID_{device.VendorId:X4}&PID_{device.ProductId:X4}\\";
+        return new[] { device.InstanceId }.Concat(device.AncestorInstanceIds)
+            .FirstOrDefault(instanceId => instanceId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                && !instanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase)
+                && !instanceId.Contains("&IG_", StringComparison.OrdinalIgnoreCase));
     }
 }
