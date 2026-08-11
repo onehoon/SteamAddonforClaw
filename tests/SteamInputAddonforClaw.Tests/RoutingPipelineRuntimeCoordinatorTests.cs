@@ -255,6 +255,53 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task TerminationSnapshotShowsInFlightReconcile()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software())) { BlockNextCapture = true };
+        var bridge = Create(provider, executor);
+        var reconcile = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await provider.CaptureStarted.Task;
+
+        Assert.True(bridge.Bridge.CaptureTerminationSnapshot().TransitionInProgress);
+        provider.ReleaseCapture.TrySetResult();
+        await reconcile;
+        Assert.False(bridge.Bridge.CaptureTerminationSnapshot().TransitionInProgress);
+    }
+
+    [Fact]
+    public async Task CancelledQueuedReconcileDoesNotLeakTransitionSnapshot()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software())) { BlockNextCapture = true };
+        var bridge = Create(provider, executor);
+        var first = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await provider.CaptureStarted.Task;
+        using var cancellation = new CancellationTokenSource();
+        var queued = bridge.Bridge.ReconcileAsync(cancellation.Token).AsTask();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued);
+        Assert.True(bridge.Bridge.CaptureTerminationSnapshot().TransitionInProgress);
+        provider.ReleaseCapture.TrySetResult();
+        await first;
+        Assert.False(bridge.Bridge.CaptureTerminationSnapshot().TransitionInProgress);
+    }
+
+    [Fact]
+    public async Task PendingCleanupAppearsInTerminationSnapshotUntilRetrySucceeds()
+    {
+        var executor = new FakeExecutor();
+        executor.RollbackResults.Enqueue(new(false, RoutingStageKind.NativeMode, "CleanupFailed"));
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.False((await bridge.Bridge.FailClosedAsync()).Succeeded);
+        Assert.True(bridge.Bridge.CaptureTerminationSnapshot().HasPendingCleanup);
+    }
+
+    [Fact]
     public async Task PostRecoveryTransitionCannotInterleaveWithNormalReconcile()
     {
         var executor = new FakeExecutor { BlockNextRollback = true };

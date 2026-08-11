@@ -21,24 +21,27 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint WM_NULL = 0;
     private const uint TPM_RETURNCMD = 0x0100;
     private const uint MF_STRING = 0;
+    private const uint MF_GRAYED = 0x00000001;
     private const uint MF_SEPARATOR = 0x0800;
     private readonly IntPtr _windowHandle;
     private readonly Action _open;
     private readonly Action _restart;
     private readonly Action _exit;
+    private readonly Func<UserTerminationDecision> _terminationDecision;
     private readonly uint _taskbarCreatedMessage;
     private readonly SubclassProc _subclassProc;
     private readonly IntPtr _icon;
 
     public bool IsAvailable { get; private set; }
 
-    public SystemTrayIcon(IntPtr windowHandle, Action open, Action restart, Action exit)
+    public SystemTrayIcon(IntPtr windowHandle, Action open, Action restart, Action exit, Func<UserTerminationDecision> terminationDecision)
     {
         AppLog.Info("Tray", "Tray initialization started.", ("HWND", $"0x{windowHandle:X}"));
         _windowHandle = windowHandle;
         _open = open;
         _restart = restart;
         _exit = exit;
+        _terminationDecision = terminationDecision ?? throw new ArgumentNullException(nameof(terminationDecision));
         _icon = ExtractIconW(IntPtr.Zero, Environment.ProcessPath!, 0);
         AppLog.Debug("Tray", "ExtractIconW completed.", ("Success", _icon != IntPtr.Zero));
         _taskbarCreatedMessage = RegisterWindowMessageW("TaskbarCreated");
@@ -124,8 +127,10 @@ internal sealed class SystemTrayIcon : IDisposable
         {
             AppendMenuW(menu, MF_STRING, 1, "Open");
             AppendMenuW(menu, MF_SEPARATOR, 0, null);
-            AppendMenuW(menu, MF_STRING, 2, "Restart");
-            AppendMenuW(menu, MF_STRING, 3, "Exit");
+            var termination = _terminationDecision();
+            var terminationFlags = TerminationMenuFlags(termination.CanTerminate);
+            AppendMenuW(menu, terminationFlags, 2, "Restart");
+            AppendMenuW(menu, terminationFlags, 3, "Exit");
             GetCursorPos(out var point);
             SetForegroundWindow(_windowHandle);
             var command = TrackPopupMenuEx(menu, TPM_RETURNCMD, point.X, point.Y, _windowHandle, IntPtr.Zero);
@@ -148,6 +153,8 @@ internal sealed class SystemTrayIcon : IDisposable
         }
         finally { DestroyMenu(menu); }
     }
+
+    internal static uint TerminationMenuFlags(bool canTerminate) => canTerminate ? MF_STRING : MF_STRING | MF_GRAYED;
 
     private NOTIFYICONDATA CreateNotifyIconData() => new()
     {
