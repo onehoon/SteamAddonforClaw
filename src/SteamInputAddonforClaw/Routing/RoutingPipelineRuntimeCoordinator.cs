@@ -3,6 +3,11 @@ using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Routing;
 
+internal readonly record struct RoutingRuntimeTerminationSnapshot(
+    bool TransitionInProgress,
+    bool HasPendingCleanup,
+    bool ShutdownRequested);
+
 internal interface IRoutingRuntimeSessionBoundaryParticipant
 {
     ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken);
@@ -20,6 +25,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
     private readonly SemaphoreSlim _transitionGate = new(1, 1);
     private int _shutdownRequested;
+    private int _transitionOperationCount;
 
     internal RoutingPipelineRuntimeCoordinator(
         ISystemStatusProvider statusProvider,
@@ -33,34 +39,51 @@ internal sealed class RoutingPipelineRuntimeCoordinator
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileAsync(CancellationToken cancellationToken)
     {
-        if (IsShutdownRequested) return RuntimeStoppedResult();
-        await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        Interlocked.Increment(ref _transitionOperationCount);
+        var acquired = false;
         try
         {
             if (IsShutdownRequested) return RuntimeStoppedResult();
+            await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquired = true;
+            if (IsShutdownRequested) return RuntimeStoppedResult();
             return await ReconcileCoreAsync(cancellationToken).ConfigureAwait(false);
         }
-        finally { _transitionGate.Release(); }
+        finally
+        {
+            if (acquired) _transitionGate.Release();
+            Interlocked.Decrement(ref _transitionOperationCount);
+        }
     }
 
     internal async ValueTask<bool> ReconcileAfterRecoveryAsync(CancellationToken cancellationToken)
     {
-        if (IsShutdownRequested) return false;
-        await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        Interlocked.Increment(ref _transitionOperationCount);
+        var acquired = false;
         try
         {
             if (IsShutdownRequested) return false;
+            await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquired = true;
+            if (IsShutdownRequested) return false;
             return await ReconcileAfterRecoveryCoreAsync(cancellationToken).ConfigureAwait(false);
         }
-        finally { _transitionGate.Release(); }
+        finally
+        {
+            if (acquired) _transitionGate.Release();
+            Interlocked.Decrement(ref _transitionOperationCount);
+        }
     }
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedAsync()
     {
-        if (IsShutdownRequested) return RuntimeStoppedResult();
-        await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        Interlocked.Increment(ref _transitionOperationCount);
+        var acquired = false;
         try
         {
+            if (IsShutdownRequested) return RuntimeStoppedResult();
+            await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
             return await _sessionCoordinator.ReconcileAsync(
                 RecoveryResetDecision,
@@ -68,23 +91,40 @@ internal sealed class RoutingPipelineRuntimeCoordinator
                 RoutingExperimentOptions.None,
                 CancellationToken.None).ConfigureAwait(false);
         }
-        finally { _transitionGate.Release(); }
+        finally
+        {
+            if (acquired) _transitionGate.Release();
+            Interlocked.Decrement(ref _transitionOperationCount);
+        }
     }
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ShutdownAsync()
     {
         Interlocked.Exchange(ref _shutdownRequested, 1);
-        await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        Interlocked.Increment(ref _transitionOperationCount);
+        var acquired = false;
         try
         {
+            await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            acquired = true;
             return await _sessionCoordinator.ReconcileAsync(
                 new RoutingDecision(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive),
                 IndeterminateClassification,
                 RoutingExperimentOptions.None,
                 CancellationToken.None).ConfigureAwait(false);
         }
-        finally { _transitionGate.Release(); }
+        finally
+        {
+            if (acquired) _transitionGate.Release();
+            Interlocked.Decrement(ref _transitionOperationCount);
+        }
     }
+
+    internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() =>
+        new(
+            Volatile.Read(ref _transitionOperationCount) > 0,
+            _sessionCoordinator.PendingCleanup is not null,
+            IsShutdownRequested);
 
     private async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileCoreAsync(CancellationToken cancellationToken)
     {

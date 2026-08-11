@@ -40,6 +40,7 @@ public partial class App : Application
     private PowerTransitionCoordinator? _powerCoordinator;
     private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
     private RoutingPipelineRuntimeCoordinator? _routingRuntimeCoordinator;
+    private UserTerminationGuard? _userTerminationGuard;
 
     public App()
         : this(arguments: null, Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized."))
@@ -203,6 +204,11 @@ public partial class App : Application
                 pipelineSessionCoordinator,
                 [_msiClawNativeModeSession]);
         }
+        _userTerminationGuard = new UserTerminationGuard(
+            () => _routingRuntimeCoordinator?.CaptureTerminationSnapshot() ?? default,
+            () => _msiClawNativeModeSession?.IsActive == true,
+            () => _msiClawNativeModeSession?.HasOwnedRecoveryBoundary == true,
+            () => recoverySafetyState.Current == RecoverySafety.Safe && _recoveryManager?.HasIncompleteRecovery == true);
         var powerParticipants = _msiClawNativeModeSession is null
             ? Array.Empty<IPowerTransitionParticipant>()
             : new IPowerTransitionParticipant[] { _msiClawNativeModeSession };
@@ -226,7 +232,7 @@ public partial class App : Application
 
         try
         {
-            _systemTrayIcon = new SystemTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(_mainWindow), ShowMainWindow, RestartApplication, ExitApplication);
+            _systemTrayIcon = new SystemTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(_mainWindow), ShowMainWindow, RestartApplication, ExitApplication, GetUserTerminationDecision);
         }
         catch (Exception exception)
         {
@@ -343,8 +349,22 @@ public partial class App : Application
             return;
         }
 
+        if (!_isExplicitExit && _systemTrayIcon?.IsAvailable != true)
+        {
+            var termination = GetUserTerminationDecision();
+            if (!termination.CanTerminate)
+            {
+                args.Cancel = true;
+                AppLog.Info("Lifecycle", "Window close blocked by active routing ownership.", ("Allowed", false), ("Reason", termination.Reason));
+                return;
+            }
+        }
+
         _isExplicitExit = true;
     }
+
+    private UserTerminationDecision GetUserTerminationDecision() =>
+        _userTerminationGuard?.Evaluate() ?? new(true, UserTerminationBlockReason.None);
 
     private void ShowMainWindow()
     {
@@ -361,6 +381,12 @@ public partial class App : Application
     {
         _dispatcherQueue?.TryEnqueue(() =>
         {
+            var termination = GetUserTerminationDecision();
+            if (!termination.CanTerminate)
+            {
+                AppLog.Info("Lifecycle", "Exit request blocked by active routing ownership.", ("Allowed", false), ("Reason", termination.Reason));
+                return;
+            }
             _isExplicitExit = true;
             AppLog.Info("Explicit application exit requested.");
             _mainWindow?.Close();
@@ -374,6 +400,12 @@ public partial class App : Application
         {
             try
             {
+                var termination = GetUserTerminationDecision();
+                if (!termination.CanTerminate)
+                {
+                    AppLog.Info("Lifecycle", "Restart request blocked by active routing ownership.", ("Allowed", false), ("Reason", termination.Reason));
+                    return;
+                }
                 var executablePath = Environment.ProcessPath ?? throw new InvalidOperationException("The current executable path is unavailable.");
                 var restartInfo = new ProcessStartInfo(executablePath)
                 {
