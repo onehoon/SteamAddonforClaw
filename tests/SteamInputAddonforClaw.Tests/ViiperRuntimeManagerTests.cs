@@ -30,12 +30,27 @@ public sealed class ViiperRuntimeManagerTests
         Assert.Contains(deviceId, runtime.OwnedDeviceIds);
     }
 
+    [Fact]
+    public void DisposeRemovesOwnedDevicesAndDisposesNativeRuntime()
+    {
+        var api = new FakeApi();
+        var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+        var deviceId = runtime.CreateDevice();
+
+        runtime.Dispose();
+
+        Assert.Contains(deviceId, api.RemovedDevices);
+        Assert.True(api.Disposed);
+    }
+
     private sealed class FakeApi : IViiperNativeApi
     {
         public int[] AddResults { get; init; } = [0];
         public int RemoveBusResult { get; init; }
         public List<uint> CreatedBuses { get; } = [];
         public List<uint> RemovedBuses { get; } = [];
+        public List<uint> RemovedDevices { get; } = [];
+        public bool Disposed { get; private set; }
         private int _addIndex;
 
         public int Initialize(string listenAddress) => 0;
@@ -47,11 +62,11 @@ public sealed class ViiperRuntimeManagerTests
             deviceId = 42;
             return AddResults[Math.Min(_addIndex++, AddResults.Length - 1)];
         }
-        public int RemoveDevice(uint busId, uint deviceId) => 0;
+        public int RemoveDevice(uint busId, uint deviceId) { RemovedDevices.Add(deviceId); return 0; }
         public int SetInput(uint busId, uint deviceId, byte[] report) => 0;
         public int SetFeedbackCallback(uint busId, uint deviceId, Action<ReadOnlyMemory<byte>> callback) => 0;
         public string[] GetDeviceTypes() => [ViiperRuntimeManager.DeviceType];
         public string? GetLastError() => "fake error";
-        public void Dispose() { }
+        public void Dispose() { Disposed = true; }
     }
 }
