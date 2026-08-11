@@ -77,7 +77,7 @@ public sealed class FullNonGyroPipelineTests
         var report = new byte[64];
         ClassicSteamControllerReportBuilder.Write(report, 0, new(buttons, default, new(123, -456), new(0, 255), false, false));
         Assert.Equal(0x03, report[8] & 0x03);
-        Assert.Equal(0, report[8] & 0x08);
+        Assert.Equal(0, report[9] & 0x20);
         Assert.Equal(123, BitConverter.ToInt16(report, 20));
         Assert.Equal(-456, BitConverter.ToInt16(report, 22));
         Assert.Equal(0x10, report[10] & 0x10);

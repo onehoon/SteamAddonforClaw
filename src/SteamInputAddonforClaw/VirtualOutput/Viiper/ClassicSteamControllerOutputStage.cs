@@ -29,18 +29,19 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     private LifecycleState _state;
     private CancellationTokenSource? _creationCancellation;
     private ClassicSteamControllerInputPublisher? _publisher;
-    private readonly IControllerStateSnapshotSource? _snapshot;
+    private readonly IControllerStateSnapshotSource _snapshot;
+    private readonly IInputReportTickSource? _reportTicks;
     private Func<ValueTask>? _outputFaultHandler;
     private int _outputFaultReported;
 
     internal ClassicSteamControllerOutputStage(IViiperRuntime runtime, IControllerDeviceEnumerator enumerator,
         ViiperVirtualDeviceIdentityResolver resolver, AddonOwnedVirtualDeviceTracker tracker, RecoveryManager recovery,
-        Func<Guid?> sessionId, IHidHideClient hidHide, TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null,
-        IControllerStateSnapshotSource? snapshot = null)
+        Func<Guid?> sessionId, IHidHideClient hidHide, IControllerStateSnapshotSource snapshot,
+        TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null, IInputReportTickSource? reportTicks = null)
     {
         _runtime = runtime; _enumerator = enumerator; _resolver = resolver; _tracker = tracker; _recovery = recovery; _sessionId = sessionId; _hidHide = hidHide;
         _pnPTimeout = pnPTimeout ?? TimeSpan.FromSeconds(5); _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(50);
-        _snapshot = snapshot;
+        _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot)); _reportTicks = reportTicks;
     }
 
     public RoutingStageKind Kind => RoutingStageKind.SteamOutput;
@@ -142,14 +143,11 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             _tracker.ResolveOwnership(_owned);
             operationToken.ThrowIfCancellationRequested();
             if (!_runtime.SetNeutral(_deviceId)) return await FailAndRollbackCoreAsync("NeutralReportRejected").ConfigureAwait(false);
-            if (_snapshot is not null)
-            {
-                _publisher = new ClassicSteamControllerInputPublisher(_snapshot, _runtime, _deviceId,
-                    fault: ReportOutputFault);
-                _publisher.Start();
-            }
-            _state = LifecycleState.Active;
             Interlocked.Exchange(ref _outputFaultReported, 0);
+            _publisher = new ClassicSteamControllerInputPublisher(_snapshot, _runtime, _deviceId, _reportTicks,
+                fault: ReportOutputFault);
+            _publisher.Start();
+            _state = LifecycleState.Active;
             return RoutingStageOperationResult.Success("ClassicSteamControllerCreated");
         }
         catch (OperationCanceledException)

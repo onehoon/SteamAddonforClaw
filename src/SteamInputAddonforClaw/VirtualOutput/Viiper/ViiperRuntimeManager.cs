@@ -7,7 +7,7 @@ internal interface IViiperRuntime : IDisposable
     void Start();
     uint CreateDevice();
     bool SetNeutral(uint deviceId);
-    bool SetInput(uint deviceId, byte[] report) => false;
+    bool SetInput(uint deviceId, byte[] report);
     ViiperDeviceRemovalResult RemoveDevice(uint busId, uint deviceId);
     void StopIfUnused();
 }

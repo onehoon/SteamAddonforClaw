@@ -215,7 +215,7 @@ public partial class App : Application
                 addonOwnedVirtualDeviceTracker,
                 _recoveryManager!,
                 () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
-                new HidHideDriverClient(), snapshot: _physicalInputSource);
+                new HidHideDriverClient(), _physicalInputSource);
             steamOutputPowerParticipant = steamOutputStage;
             var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage, steamOutputStage]);
             var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(

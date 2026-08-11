@@ -31,7 +31,8 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     public event EventHandler<MsiClawInputTestSummary>? TestCompleted;
 
     private sealed class StateBox(ControllerState value) { internal ControllerState Value { get; } = value; }
-    private StateBox _latestState = new(new ControllerState(new AuxiliaryButtonState([false, false])));
+    private static ControllerState NeutralState() => new(new AuxiliaryButtonState(Enumerable.Repeat(false, MsiClawControls.Catalog.Count).ToArray()));
+    private StateBox _latestState = new(NeutralState());
     public ControllerState LatestState => Volatile.Read(ref _latestState).Value;
 
     internal static bool IsM1Pressed(ControllerState state) => state.Auxiliary[M1AuxiliaryIndex];
@@ -233,7 +234,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     private async Task PollAsync(InputSession session)
     {
         var stopwatch = Stopwatch.StartNew();
-        var previous = new ControllerState(new AuxiliaryButtonState([false, false]));
+        var previous = NeutralState();
         var hasPrevious = false;
         var m1Observed = false;
         var m2Observed = false;
@@ -313,7 +314,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         }
         finally
         {
-            Volatile.Write(ref _latestState, new StateBox(new ControllerState(new AuxiliaryButtonState([false, false]))));
+            Volatile.Write(ref _latestState, new StateBox(NeutralState()));
             cleanupSucceeded = CleanupSession(session);
             var summary = new MsiClawInputTestSummary(session.Id, stopwatch.ElapsedMilliseconds, m1Observed, m2Observed, independent, readFailures, cleanupSucceeded, stopReason);
             lock (_sync)

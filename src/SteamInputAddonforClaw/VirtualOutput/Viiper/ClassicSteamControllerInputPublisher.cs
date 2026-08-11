@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
@@ -11,9 +12,21 @@ internal interface IInputReportTickSource
 
 internal sealed class PeriodicInputReportTickSource(TimeSpan interval) : IInputReportTickSource
 {
+    private readonly long _intervalTicks = Stopwatch.Frequency * interval.Ticks / TimeSpan.TicksPerSecond;
+    private long _nextDeadline;
+
     public async ValueTask<bool> WaitForTickAsync(CancellationToken cancellationToken)
     {
-        await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+        var now = Stopwatch.GetTimestamp();
+        if (_nextDeadline == 0) _nextDeadline = now + _intervalTicks;
+        var remaining = _nextDeadline - now;
+        if (remaining > 0)
+        {
+            var delay = TimeSpan.FromSeconds((double)remaining / Stopwatch.Frequency);
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        }
+        now = Stopwatch.GetTimestamp();
+        do { _nextDeadline += _intervalTicks; } while (_nextDeadline <= now);
         return true;
     }
 }

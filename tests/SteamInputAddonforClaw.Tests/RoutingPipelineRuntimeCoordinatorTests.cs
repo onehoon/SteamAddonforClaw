@@ -24,6 +24,23 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task FailClosedRollsBackTheActiveExperimentalPipeline()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = CreateWithOptions(provider, executor, () => new RoutingExperimentOptions(
+            new(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled),
+            RoutingStageExperimentOptions.None));
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var result = await bridge.Bridge.FailClosedAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Single(executor.RollbackPlans);
+        Assert.Null(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
     public async Task InvalidSoftwareSnapshotFailsClosedWithoutMutation()
     {
         var executor = new FakeExecutor();
@@ -395,6 +412,12 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     {
         var session = new RoutingPipelineSessionCoordinator(new RoutingEnvironmentStrategyResolver(), executor);
         return (new RoutingPipelineRuntimeCoordinator(provider, session, participants), session);
+    }
+
+    private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) CreateWithOptions(FakeStatusProvider provider, FakeExecutor executor, Func<RoutingExperimentOptions> options)
+    {
+        var session = new RoutingPipelineSessionCoordinator(new RoutingEnvironmentStrategyResolver(), executor);
+        return (new RoutingPipelineRuntimeCoordinator(provider, session, experimentOptionsProvider: options), session);
     }
 
     private static IReadOnlyList<ControllerSoftwareStatus> Software() =>
