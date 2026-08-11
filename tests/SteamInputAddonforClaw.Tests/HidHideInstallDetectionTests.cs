@@ -44,6 +44,38 @@ public sealed class HidHideInstallDetectionTests
     }
 
     [Fact]
+    public void DependencyOnlyEvidence_IsAccepted()
+    {
+        var result = new WindowsHidHidePackageProbe(new FakeRegistry([], [], "1.5.230")).Inspect();
+        Assert.True(result.Installed);
+        Assert.Equal("1.5.230.0", result.Version);
+    }
+
+    [Fact]
+    public void UninstallAndSameDependencyEvidence_IsAccepted()
+    {
+        var result = new WindowsHidHidePackageProbe(new FakeRegistry([new("HidHide", "1.5.230", "Nefarius Software Solutions e.U.")], [], "1.5.230.0")).Inspect();
+        Assert.True(result.Installed);
+        Assert.Equal("1.5.230.0", result.Version);
+    }
+
+    [Fact]
+    public void UninstallAndConflictingDependencyEvidence_FailsClosed()
+    {
+        var result = new WindowsHidHidePackageProbe(new FakeRegistry([new("HidHide", "1.5.230", "Nefarius Software Solutions e.U.")], [], "1.5.231")).Inspect();
+        Assert.False(result.Installed);
+        Assert.False(result.InspectionSucceeded);
+    }
+
+    [Fact]
+    public void InvalidDependencyVersion_FailsClosed()
+    {
+        var result = new WindowsHidHidePackageProbe(new FakeRegistry([], [], "not-a-version")).Inspect();
+        Assert.False(result.Installed);
+        Assert.False(result.InspectionSucceeded);
+    }
+
+    [Fact]
     public void MatchingIdentityWithoutUsableVersion_FailsClosed()
     {
         var probe = new WindowsHidHidePackageProbe(new FakeRegistry(
@@ -86,6 +118,12 @@ public sealed class HidHideInstallDetectionTests
     }
 
     [Fact]
+    public void ShortcutCleanup_IsNotEligibleForWrongPackageVersion()
+    {
+        Assert.False(HidHideDesktopShortcutCleanup.IsExactPackageEstablished(new(true, "1.5.231.0", true), "1.5.230.0"));
+    }
+
+    [Fact]
     public void ShortcutCleanup_PreservesPreExistingAndRemovesFreshShortcut()
     {
         var fileSystem = new FakeFileSystem(["C:\\Desktop\\HidHide Configuration Client.lnk"]);
@@ -114,8 +152,11 @@ public sealed class HidHideInstallDetectionTests
         Assert.Empty(fileSystem.Deleted);
     }
 
-    private sealed class FakeRegistry(IReadOnlyList<HidHideUninstallCandidate> registry64, IReadOnlyList<HidHideUninstallCandidate> registry32) : IHidHideUninstallRegistry
-    { public IReadOnlyList<HidHideUninstallCandidate> Enumerate(Microsoft.Win32.RegistryView view) => view == Microsoft.Win32.RegistryView.Registry64 ? registry64 : registry32; }
+    private sealed class FakeRegistry(IReadOnlyList<HidHideUninstallCandidate> registry64, IReadOnlyList<HidHideUninstallCandidate> registry32, string? dependency64 = null, string? dependency32 = null) : IHidHideUninstallRegistry, IHidHideDependencyRegistry
+    {
+        public IReadOnlyList<HidHideUninstallCandidate> Enumerate(Microsoft.Win32.RegistryView view) => view == Microsoft.Win32.RegistryView.Registry64 ? registry64 : registry32;
+        public string? ReadVersion(Microsoft.Win32.RegistryView view) => view == Microsoft.Win32.RegistryView.Registry64 ? dependency64 : dependency32;
+    }
 
     private sealed class FakeFileSystem(IEnumerable<string> files, bool throwOnDelete = false) : IHidHideShortcutFileSystem
     {

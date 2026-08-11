@@ -28,6 +28,11 @@ internal interface IHidHideUninstallRegistry
     IReadOnlyList<HidHideUninstallCandidate> Enumerate(RegistryView view);
 }
 
+internal interface IHidHideDependencyRegistry
+{
+    string? ReadVersion(RegistryView view);
+}
+
 internal sealed class WindowsHidHideUninstallRegistry : IHidHideUninstallRegistry
 {
     private const string UninstallPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -47,13 +52,23 @@ internal sealed class WindowsHidHideUninstallRegistry : IHidHideUninstallRegistr
     }
 }
 
+internal sealed class WindowsHidHideDependencyRegistry : IHidHideDependencyRegistry
+{
+    public string? ReadVersion(RegistryView view)
+    {
+        using var key = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view).OpenSubKey(@"Installer\Dependencies\NSS.Drivers.HidHide.x64");
+        return key?.GetValue("Version") as string;
+    }
+}
+
 internal sealed class WindowsHidHidePackageProbe : IHidHidePackageProbe
 {
-    private const string VersionKey = @"Installer\Dependencies\NSS.Drivers.HidHide.x64";
     private const string ProductName = "HidHide";
     private const string PublisherName = "Nefarius Software Solutions e.U.";
     private readonly IHidHideUninstallRegistry _uninstallRegistry;
-    internal WindowsHidHidePackageProbe(IHidHideUninstallRegistry? uninstallRegistry = null) => _uninstallRegistry = uninstallRegistry ?? new WindowsHidHideUninstallRegistry();
+    private readonly IHidHideDependencyRegistry _dependencyRegistry;
+    internal WindowsHidHidePackageProbe(IHidHideUninstallRegistry? uninstallRegistry = null, IHidHideDependencyRegistry? dependencyRegistry = null)
+    { _uninstallRegistry = uninstallRegistry ?? new WindowsHidHideUninstallRegistry(); _dependencyRegistry = dependencyRegistry ?? uninstallRegistry as IHidHideDependencyRegistry ?? new WindowsHidHideDependencyRegistry(); }
     public HidHidePackageState Inspect()
     {
         try
@@ -88,11 +103,10 @@ internal sealed class WindowsHidHidePackageProbe : IHidHidePackageProbe
         catch { return new(false, null, false); }
     }
 
-    private static string? ReadDependencyVersion(RegistryView view)
+    private string? ReadDependencyVersion(RegistryView view)
     {
-        using var key = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view).OpenSubKey(VersionKey);
-        if (key is null) return null;
-        var raw = key.GetValue("Version") as string;
+        var raw = _dependencyRegistry.ReadVersion(view);
+        if (raw is null) return null;
         return TryNormalizeVersion(raw, out var normalized) ? normalized : throw new InvalidDataException("The HidHide dependency version is invalid.");
     }
 
@@ -151,6 +165,9 @@ internal sealed class HidHideDesktopShortcutCleanup
             catch (Exception exception) { AppLog.Warn("HidHideProvisioning", "HidHide desktop shortcut cleanup failed.", exception, ("Reason", "DesktopShortcutCleanupFailed")); }
         }
     }
+
+    internal static bool IsExactPackageEstablished(HidHidePackageState package, string expectedVersion)
+        => package.InspectionSucceeded && package.Installed && HidHidePackageVersionPolicy.AreEquivalent(package.Version, expectedVersion);
 
     private bool SafeExists(string path) { try { return _fileSystem.Exists(path); } catch { return false; } }
 }

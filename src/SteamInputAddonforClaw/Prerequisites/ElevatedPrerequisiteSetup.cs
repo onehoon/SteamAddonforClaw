@@ -103,9 +103,7 @@ internal static class ElevatedPrerequisiteSetup
                 var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
                 var state = outcome.IsProvisioned ? HidHideProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? HidHideProvisioningReceiptState.InstalledPendingReboot : HidHideProvisioningReceiptState.AttemptFailed;
                 hidStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
-                var exactPackageEstablished = after.InspectionSucceeded
-                    && after.Installed
-                    && HidHidePackageVersionPolicy.AreEquivalent(after.Version, receipt.InstallerVersion);
+                var exactPackageEstablished = HidHideDesktopShortcutCleanup.IsExactPackageEstablished(after, receipt.InstallerVersion);
                 if (exactPackageEstablished) shortcutCleanup.RemoveInstallerCreated(shortcutsBeforeInstall);
                 AppLog.Info("PrerequisiteSetup", "HidHide installation result recorded.", ("AttemptId", receipt.AttemptId), ("ExitCode", code), ("ReceiptState", state), ("PackageInstalled", after.Installed), ("PackageVersion", after.Version), ("PrerequisiteStatus", afterPrerequisite.Status));
                 if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
