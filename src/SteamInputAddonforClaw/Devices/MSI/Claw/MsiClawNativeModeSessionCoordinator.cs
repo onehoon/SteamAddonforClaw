@@ -41,6 +41,16 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         // session observation to perform a fresh capture and transition.
         _active = false;
         _safetyMonitor?.Cancel();
+        _safetyMonitor?.Dispose();
+        _safetyMonitor = null;
+        if (_recoveryBoundaryOwned)
+        {
+            if (_recovery.HasIncompleteRecovery) return Task.FromResult(false);
+            // RecoveryManager restored the journaled state and deleted the journal before
+            // participant reconciliation. The next entry must capture a fresh snapshot.
+            _snapshot = null;
+            _recoveryBoundaryOwned = false;
+        }
         return Task.FromResult(true);
     }
 

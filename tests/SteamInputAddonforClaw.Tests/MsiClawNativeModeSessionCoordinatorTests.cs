@@ -144,6 +144,46 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.Equal([MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput], modeController.Targets);
     }
 
+    [Fact]
+    public async Task ResumeAfterRecoveryClearsOwnershipAndAllowsFreshNativeEntry()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices);
+        var store = new MemoryJournalStore();
+        var recovery = new RecoveryManager(store);
+        var gate = new PowerMutationGate(initiallyOpen: true);
+        var native = new MsiClawNativeStateManager(devices, modeController);
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(native, recovery, gate);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        devices.Mode = MsiClawNativeMode.XInput;
+        Assert.Equal(RecoveryStatus.Success, recovery.CompleteRecoverySession().Status);
+        Assert.True(await coordinator.ReconcileAfterResumeAsync(1, gate.Epoch, CancellationToken.None));
+        Assert.False(coordinator.HasOwnedRecoveryBoundary);
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal([MsiClawNativeMode.DirectInput, MsiClawNativeMode.DirectInput], modeController.Targets);
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ResumeWithIncompleteRecoveryPreservesOwnershipAndBlocksEntry()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices);
+        var store = new MemoryJournalStore();
+        var recovery = new RecoveryManager(store);
+        var gate = new PowerMutationGate(initiallyOpen: true);
+        var native = new MsiClawNativeStateManager(devices, modeController);
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(native, recovery, gate);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        Assert.False(await coordinator.ReconcileAfterResumeAsync(1, gate.Epoch, CancellationToken.None));
+        Assert.True(coordinator.HasOwnedRecoveryBoundary);
+        var reentry = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+        Assert.False(reentry.Succeeded);
+        Assert.Equal("RecoveryBoundaryAlreadyOwned", reentry.Reason);
+    }
+
     private static MsiClawNativeModeSessionCoordinator CreateCoordinator(
         FakeDeviceEnumerator devices,
         FakeModeController modeController,
