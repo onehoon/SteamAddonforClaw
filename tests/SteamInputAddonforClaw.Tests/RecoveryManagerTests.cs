@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
 using Xunit;
@@ -112,6 +113,31 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.Equal((ushort)0x28DE, entry.VendorId);
         Assert.Equal((ushort)0x1102, entry.ProductId);
         Assert.Equal("USB\\VID_28DE&PID_1102\\owned", Assert.Single(entry.ResolvedInstanceIds));
+    }
+
+    [Fact]
+    public async Task StartupRecoveryFailsClosedWhenResolvedVirtualDeviceIsPresent()
+    {
+        var sessionId = Guid.NewGuid();
+        var mutationId = Guid.NewGuid();
+        var journal = new RecoveryJournal(3, sessionId, DateTimeOffset.UtcNow, null,
+            new(AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["owned-instance"])]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), deviceEnumerator: new FakeControllerEnumerator([
+            Device("owned-instance")]), hidHideClient: new FakeHidHide());
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.True(File.Exists(PathName));
+    }
+
+    private static ControllerDeviceInfo Device(string instanceId) => new(instanceId, null, null, [], "HID", [], [], null, null, null, 0x28DE, 0x1102, true);
+
+    private sealed class FakeControllerEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
+    {
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices;
     }
 
     [Fact]
