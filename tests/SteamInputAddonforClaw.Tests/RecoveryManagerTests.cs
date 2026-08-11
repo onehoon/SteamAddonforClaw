@@ -133,6 +133,37 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.True(File.Exists(PathName));
     }
 
+    [Fact]
+    public async Task StartupRecoveryCompletesUnresolvedIntentWhenNoNewDeviceExists()
+    {
+        var sessionId = Guid.NewGuid();
+        var journal = new RecoveryJournal(3, sessionId, DateTimeOffset.UtcNow, null,
+            new(AddonOwnedVirtualDeviceEntries: [new(Guid.NewGuid(), "steamcontroller", 0x28DE, 0x1102, [], [])]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), deviceEnumerator: new FakeControllerEnumerator([]), hidHideClient: new FakeHidHide());
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Success, result.Status);
+        Assert.False(File.Exists(PathName));
+    }
+
+    [Fact]
+    public async Task StartupRecoveryFailsClosedWhenUnresolvedIntentHasNewDevice()
+    {
+        var journal = new RecoveryJournal(3, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(AddonOwnedVirtualDeviceEntries: [new(Guid.NewGuid(), "steamcontroller", 0x28DE, 0x1102, [], [])]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), deviceEnumerator: new FakeControllerEnumerator([Device("new-instance")]), hidHideClient: new FakeHidHide());
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.True(File.Exists(PathName));
+    }
+
     private static ControllerDeviceInfo Device(string instanceId) => new(instanceId, null, null, [], "HID", [], [], null, null, null, 0x28DE, 0x1102, true);
 
     private sealed class FakeControllerEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
