@@ -24,6 +24,22 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
+    public async Task StartPrepared_UsesExactDescriptorWithoutEnumeration()
+    {
+        var descriptor = Device(0x0DB0, 0x1902);
+        var device = new FakeDevice(State());
+        var enumerator = new FakeEnumerator([], device);
+        var source = new MsiClawInputSource(enumerator);
+
+        var result = source.StartPrepared(descriptor);
+
+        Assert.True(result.Started);
+        Assert.Equal(1, enumerator.CreateCount);
+        Assert.Equal(descriptor, enumerator.CreatedDescriptor);
+        await source.StopAsync();
+    }
+
+    [Fact]
     public void Start_WhenPid1902IsMissingAndEnumeratorCleanupFails_PreservesTheNotFoundResult()
     {
         var enumerator = new FakeEnumerator([Device(0x0DB0, 0x1901)]) { DisposeException = new InvalidOperationException("Dispose failed") };

@@ -62,7 +62,6 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
             }
 
             IDirectInputDeviceEnumerator? enumerator = null;
-            IDirectInputDevice? device = null;
             try
             {
                 enumerator = _enumeratorFactory();
@@ -74,44 +73,96 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
             }
 
             var nextSession = _testSession + 1;
-            var selection = SelectDevice(enumerator, nextSession);
-            if (selection.Status != MsiClawInputStartStatus.Started)
-            {
-                TryDisposeEnumerator(enumerator, nextSession);
-                return new MsiClawInputStartResult(selection.Status, selection.Message);
-            }
-
+            IReadOnlyList<DirectInputDeviceDescriptor> candidates;
             try
             {
-                device = enumerator.CreateDevice(selection.Descriptor!);
+                candidates = enumerator.EnumerateGameControllers();
             }
             catch (Exception exception)
             {
-                AppLog.Warn("DirectInput", "DirectInput device creation failed.", exception, ("Reason", "CreateDeviceFailed"), ("Action", "AbortDiagnostic"), ("NoChangesMade", true));
+                AppLog.Warn("MsiInput", "DirectInput enumeration failed.", exception, ("TestSession", nextSession), ("Reason", "EnumerationFailed"), ("Action", "AbortDiagnostic"), ("NoChangesMade", true));
                 TryDisposeEnumerator(enumerator, nextSession);
-                return new MsiClawInputStartResult(MsiClawInputStartStatus.CreateDeviceFailed, "DirectInput device creation failed. No controller settings were changed.");
+                return new(MsiClawInputStartStatus.EnumerationFailed, "DirectInput device enumeration failed. No controller settings were changed.");
             }
 
-            var session = new InputSession(++_testSession, enumerator, device, new CancellationTokenSource());
-            try
+            var selection = MsiClawDirectInputDeviceSelector.Select(candidates);
+            LogCandidates(candidates, nextSession);
+            if (!selection.IsSelected)
             {
-                AppLog.Info("DirectInput", "Device acquire started.", ("TestSession", session.Id), ("InstanceGuid", selection.Descriptor!.InstanceGuid));
-                var stopwatch = Stopwatch.StartNew();
-                device.Acquire();
-                AppLog.Info("DirectInput", "Device acquire succeeded.", ("TestSession", session.Id), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
-            }
-            catch (Exception exception)
-            {
-                AppLog.Warn("DirectInput", "Device acquire failed.", exception, ("TestSession", session.Id), ("Reason", "AcquireFailed"), ("Action", "AbortDiagnostic"), ("NoChangesMade", true));
-                CleanupBeforePolling(session);
-                return new MsiClawInputStartResult(MsiClawInputStartStatus.AcquireFailed, "DirectInput device acquisition failed. No controller settings were changed.");
+                TryDisposeEnumerator(enumerator, nextSession);
+                return MapSelectionFailure(selection);
             }
 
-            _currentSession = session;
-            session.PollingTask = PollAsync(session);
-            AppLog.Info("Diagnostics", "M1/M2 input diagnostic started.", ("TestSession", session.Id), ("VID", MsiClawHardware.FormatVendorId()), ("PID", MsiClawHardware.FormatDirectInputProductId()), ("InstanceGuid", selection.Descriptor!.InstanceGuid));
-            return new MsiClawInputStartResult(MsiClawInputStartStatus.Started, "M1/M2 DirectInput test is running.");
+            AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.",
+                ("TestSession", nextSession),
+                ("CandidateCount", selection.CandidateCount),
+                ("VID", MsiClawHardware.FormatVendorId()),
+                ("PID", MsiClawHardware.FormatDirectInputProductId()),
+                ("InstanceGuid", selection.Descriptor!.InstanceGuid),
+                ("PnpInstanceId", selection.Descriptor.PnpInstanceId),
+                ("PhysicalIdentity", selection.Descriptor.PhysicalIdentity),
+                ("SelectionReason", selection.Reason));
+            return StartCoreLocked(enumerator, selection.Descriptor!, nextSession, "Diagnostics");
         }
+    }
+
+    public MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor)
+    {
+        lock (_sync)
+        {
+            if (_disposed) return new(MsiClawInputStartStatus.InitializationFailed, "DirectInput is unavailable because the input source is disposed.");
+            if (_currentSession is not null) return new(MsiClawInputStartStatus.AlreadyRunning, "M1/M2 DirectInput test is already running.");
+            if (!MsiClawDirectInputDeviceSelector.Select([descriptor]).IsSelected)
+                return new(MsiClawInputStartStatus.Indeterminate, "The prepared DirectInput descriptor could not be verified. No changes were made.");
+
+            IDirectInputDeviceEnumerator enumerator;
+            try
+            {
+                enumerator = _enumeratorFactory();
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("DirectInput", "DirectInput initialization failed.", exception, ("Reason", "DirectInputInitializationFailed"), ("Action", "AbortInput"), ("NoChangesMade", true));
+                return new(MsiClawInputStartStatus.InitializationFailed, "DirectInput initialization failed. No controller settings were changed.");
+            }
+
+            return StartCoreLocked(enumerator, descriptor, _testSession + 1, "Routing");
+        }
+    }
+
+    private MsiClawInputStartResult StartCoreLocked(IDirectInputDeviceEnumerator enumerator, DirectInputDeviceDescriptor descriptor, int sessionId, string logCategory)
+    {
+        IDirectInputDevice? device = null;
+        try
+        {
+            device = enumerator.CreateDevice(descriptor);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("DirectInput", "DirectInput device creation failed.", exception, ("Reason", "CreateDeviceFailed"), ("Action", "AbortInput"), ("NoChangesMade", true));
+            TryDisposeEnumerator(enumerator, sessionId);
+            return new(MsiClawInputStartStatus.CreateDeviceFailed, "DirectInput device creation failed. No controller settings were changed.");
+        }
+
+        var session = new InputSession(++_testSession, enumerator, device, new CancellationTokenSource());
+        try
+        {
+            AppLog.Info("DirectInput", "Device acquire started.", ("TestSession", session.Id), ("InstanceGuid", descriptor.InstanceGuid));
+            var stopwatch = Stopwatch.StartNew();
+            device.Acquire();
+            AppLog.Info("DirectInput", "Device acquire succeeded.", ("TestSession", session.Id), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("DirectInput", "Device acquire failed.", exception, ("TestSession", session.Id), ("Reason", "AcquireFailed"), ("Action", "AbortInput"), ("NoChangesMade", true));
+            CleanupBeforePolling(session);
+            return new(MsiClawInputStartStatus.AcquireFailed, "DirectInput device acquisition failed. No controller settings were changed.");
+        }
+
+        _currentSession = session;
+        session.PollingTask = PollAsync(session);
+        AppLog.Info(logCategory, "M1/M2 input source started.", ("TestSession", session.Id), ("VID", MsiClawHardware.FormatVendorId()), ("PID", MsiClawHardware.FormatDirectInputProductId()), ("InstanceGuid", descriptor.InstanceGuid));
+        return new(MsiClawInputStartStatus.Started, "M1/M2 DirectInput test is running.");
     }
 
     public async Task StopAsync()
@@ -152,59 +203,27 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
         await StopAsync().ConfigureAwait(false);
     }
 
-    private SelectionResult SelectDevice(IDirectInputDeviceEnumerator enumerator, int testSession)
+    private static void LogCandidates(IReadOnlyList<DirectInputDeviceDescriptor> candidates, int testSession)
     {
-        AppLog.Info("MsiInput", "DirectInput enumeration started.", ("TestSession", testSession));
-        var stopwatch = Stopwatch.StartNew();
-        IReadOnlyList<DirectInputDeviceDescriptor> candidates;
-        try
-        {
-            candidates = enumerator.EnumerateGameControllers();
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("MsiInput", "DirectInput enumeration failed.", exception, ("TestSession", testSession), ("Reason", "EnumerationFailed"), ("Action", "AbortDiagnostic"), ("NoChangesMade", true));
-            return new SelectionResult(MsiClawInputStartStatus.EnumerationFailed, "DirectInput device enumeration failed. No controller settings were changed.", null);
-        }
-
-        AppLog.Debug("MsiInput", "DirectInput enumeration completed.", ("TestSession", testSession), ("DeviceCount", candidates.Count), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         foreach (var candidate in candidates)
         {
             var matches = MsiClawHardware.IsDirectInputController(candidate.VendorId, candidate.ProductId);
             AppLog.Trace("MsiInput", matches ? "DirectInput device candidate." : "DirectInput device ignored.", ("TestSession", testSession), ("InstanceGuid", candidate.InstanceGuid), ("ProductGuid", candidate.ProductGuid), ("ProductName", candidate.ProductName), ("VID", $"0x{candidate.VendorId:X4}"), ("PID", $"0x{candidate.ProductId:X4}"), ("DevicePath", candidate.DevicePath), ("PnpInstanceId", candidate.PnpInstanceId), ("PhysicalIdentity", candidate.PhysicalIdentity), ("UsagePage", candidate.UsagePage), ("Usage", candidate.Usage), ("ButtonCount", candidate.ButtonCount), ("AxisCount", candidate.AxisCount), ("MatchReason", matches ? "KnownMsiClawDirectInput" : "NotMsiClawPid1902"), ("SelectionReason", candidate.TopologyReason));
         }
 
-        var selectedCandidates = candidates.Where(candidate => MsiClawHardware.IsDirectInputController(candidate.VendorId, candidate.ProductId)).ToArray();
-        if (selectedCandidates.Length == 0) return NoCandidate(testSession);
-        if (selectedCandidates.Any(candidate => !HasVerifiedIdentity(candidate))) return Indeterminate(selectedCandidates.Length, testSession, string.Join(',', selectedCandidates.Select(candidate => candidate.TopologyReason ?? "PhysicalIdentityUnverified").Distinct()));
-        if (selectedCandidates.Any(candidate => candidate.ButtonCount is null or < MsiClawHardware.RequiredDirectInputButtonCount)) return Indeterminate(selectedCandidates.Length, testSession, "InsufficientButtonCount");
-        var identities = selectedCandidates.Select(candidate => candidate.PhysicalIdentity!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (identities.Length != 1) return Indeterminate(selectedCandidates.Length, testSession, "MultiplePhysicalIdentities");
-        var pnpInstanceIds = selectedCandidates.Select(candidate => candidate.PnpInstanceId!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (pnpInstanceIds.Length != 1) return Indeterminate(selectedCandidates.Length, testSession, "MultiplePnpInstanceIdentities");
-
-        return Select(selectedCandidates.OrderBy(candidate => candidate.InstanceGuid).First(), testSession, selectedCandidates.Length == 1 ? "VerifiedMsiPhysicalRoot" : "VerifiedMsiPhysicalRootAlias");
+        AppLog.Debug("MsiInput", "DirectInput enumeration completed.", ("TestSession", testSession), ("DeviceCount", candidates.Count));
     }
 
-    private static bool HasVerifiedIdentity(DirectInputDeviceDescriptor descriptor) =>
-        !string.IsNullOrWhiteSpace(descriptor.DevicePath) && !string.IsNullOrWhiteSpace(descriptor.PnpInstanceId) && !string.IsNullOrWhiteSpace(descriptor.PhysicalIdentity) && descriptor.UsagePage == 0x0001 && descriptor.Usage == 0x0005;
-
-    private static SelectionResult Select(DirectInputDeviceDescriptor descriptor, int testSession, string reason)
+    private static MsiClawInputStartResult MapSelectionFailure(MsiClawDirectInputSelectionResult selection)
     {
-        AppLog.Info("MsiInput", "MSI Claw DirectInput device selected.", ("TestSession", testSession), ("VID", MsiClawHardware.FormatVendorId()), ("PID", MsiClawHardware.FormatDirectInputProductId()), ("InstanceGuid", descriptor.InstanceGuid), ("PnpInstanceId", descriptor.PnpInstanceId), ("PhysicalIdentity", descriptor.PhysicalIdentity), ("SelectionReason", reason));
-        return new SelectionResult(MsiClawInputStartStatus.Started, "M1/M2 DirectInput test is running.", descriptor);
-    }
+        if (selection.Status == MsiClawDirectInputSelectionStatus.NotFound)
+        {
+            AppLog.Info("Diagnostics", "M1/M2 input diagnostic was not started.", ("Reason", selection.Reason), ("Action", "NoChangesMade"));
+            return new(MsiClawInputStartStatus.Pid1902NotFound, "DirectInput PID_1902 device not found. No changes were made.");
+        }
 
-    private static SelectionResult NoCandidate(int testSession)
-    {
-        AppLog.Info("Diagnostics", "M1/M2 input diagnostic was not started.", ("TestSession", testSession), ("Reason", "Pid1902NotFound"), ("Action", "NoChangesMade"));
-        return new SelectionResult(MsiClawInputStartStatus.Pid1902NotFound, "DirectInput PID_1902 device not found. No changes were made.", null);
-    }
-
-    private static SelectionResult Indeterminate(int candidateCount, int testSession, string reason)
-    {
-        AppLog.Warn("MsiInput", "MSI Claw DirectInput candidate selection is indeterminate.", null, ("TestSession", testSession), ("CandidateCount", candidateCount), ("Reason", reason), ("Action", "DoNotAcquire"));
-        return new SelectionResult(MsiClawInputStartStatus.Indeterminate, "MSI Claw PID_1902 DirectInput identity could not be verified. No changes were made.", null);
+        AppLog.Warn("MsiInput", "MSI Claw DirectInput candidate selection is indeterminate.", null, ("CandidateCount", selection.CandidateCount), ("Reason", selection.Reason), ("Action", "DoNotAcquire"));
+        return new(MsiClawInputStartStatus.Indeterminate, "MSI Claw PID_1902 DirectInput identity could not be verified. No changes were made.");
     }
 
     private async Task PollAsync(InputSession session)
@@ -388,5 +407,4 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
         public Task? PollingTask { get; set; }
     }
 
-    private sealed record SelectionResult(MsiClawInputStartStatus Status, string Message, DirectInputDeviceDescriptor? Descriptor);
 }

@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Controllers;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Recovery;
 using Xunit;
@@ -279,10 +280,12 @@ public sealed class M1M2DiagnosticCoordinatorTests
 
     private sealed class FakeInput(List<string>? events = null) : IMsiClawInputDiagnostic
     {
+        public event EventHandler<ControllerState>? StateChanged = delegate { };
         public event EventHandler<MsiClawInputTestSummary>? TestCompleted;
         public bool IsRunning { get; private set; }
         public int StartCount { get; private set; }
         public MsiClawInputStartResult Start() { StartCount++; IsRunning = true; events?.Add("Start"); return new(MsiClawInputStartStatus.Started, "Started"); }
+        public MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor) { IsRunning = true; events?.Add("StartPrepared"); return new(MsiClawInputStartStatus.Started, "Started"); }
         public Task StopAsync() { IsRunning = false; TestCompleted?.Invoke(this, new(1, 0, false, false, false, 0, true, MsiClawInputStopReason.Stopped)); return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
