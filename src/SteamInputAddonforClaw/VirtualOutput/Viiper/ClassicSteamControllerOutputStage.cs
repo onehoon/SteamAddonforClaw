@@ -99,10 +99,13 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     public async ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
     {
         if (_sessionId() is not { } session) return RoutingStageOperationResult.Failure("RecoverySessionUnavailable");
+        var hadResolvedIdentity = _owned is { Count: > 0 };
         if (_deviceId != 0)
         {
             if (!_runtime.RemoveDevice(_busId, _deviceId)) return RoutingStageOperationResult.Failure("VirtualDeviceRemoveFailed");
-            var absent = await WaitForAbsenceAsync(_owned?.Select(device => device.InstanceId) ?? [], cancellationToken).ConfigureAwait(false);
+            var absent = hadResolvedIdentity
+                ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
+                : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
             if (!absent) return RoutingStageOperationResult.Failure("VirtualDevicePnPStillPresent");
         }
         var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
@@ -127,6 +130,21 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         while (DateTime.UtcNow < deadline)
         { if (!_enumerator.EnumeratePresentDevices().Any(device => wanted.Contains(device.InstanceId))) return true; await Task.Delay(_pollInterval, token).ConfigureAwait(false); }
         return !_enumerator.EnumeratePresentDevices().Any(device => wanted.Contains(device.InstanceId));
+    }
+
+    private async ValueTask<bool> WaitForNoNewMatchingCandidatesAsync(CancellationToken token)
+    {
+        if (_before is null) return false;
+        var beforeIds = _before.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var deadline = DateTime.UtcNow + _pnPTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var current = _enumerator.EnumeratePresentDevices();
+            if (!current.Any(device => new ViiperVirtualDeviceIdentityPolicy().IsMatchingCandidate(device) && !beforeIds.Contains(device.InstanceId))) return true;
+            await Task.Delay(_pollInterval, token).ConfigureAwait(false);
+        }
+        var final = _enumerator.EnumeratePresentDevices();
+        return !final.Any(device => new ViiperVirtualDeviceIdentityPolicy().IsMatchingCandidate(device) && !beforeIds.Contains(device.InstanceId));
     }
 
     private async ValueTask<RoutingStageOperationResult> FailAndRollbackAsync(string reason)
