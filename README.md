@@ -178,7 +178,9 @@ Routing eligibility, action planning, and pipeline configuration are separate co
 
 The initial pipeline stages are `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, `ThirdPartyIsolation`, `SteamOutput`, `XboxOutput`, and `GameBarRouting`. Stage modes are intentionally independently configurable so Stock MSI Center M and ClawTweaks behavior can be validated experimentally before production strategies are fixed. Recovery and external-controller veto are not optional stages; they remain mandatory cross-cutting safety requirements.
 
-This contract is not wired into production routing yet. It does not define stage dependencies or execution order.
+This contract is not wired into production routing yet. The plan does not infer stage dependencies. A future generic executor uses an explicit forward order of `NativeMode` → `PhysicalInput` → `PhysicalIsolation` → `ThirdPartyIsolation` → `SteamOutput` → `XboxOutput` → `GameBarRouting`, with rollback in reverse order.
+
+`ObserveOnly` never enters the mutation boundary. Enabled stages must successfully complete `PrepareMutationAsync` before `ExecuteMutationAsync` may perform intended routing or device mutation. A failed prepare or execute operation triggers best-effort rollback of the current and previously prepared Enabled stages in reverse order. `PrepareMutationAsync` is the generic recovery boundary; concrete stages must capture or persist the exact state required for their own safe rollback before reporting preparation success. This PR does not expand the recovery journal schema or claim mixed-stage crash recovery support, and the generic executor is not wired into production routing yet.
 
 `ControllerManagerClassification` is the canonical input for selecting an environment routing strategy. The initial strategy families are `StockCenterM`, `ClawTweaks`, and `Unsupported`: no third-party manager selects StockCenterM; ClawTweaks selects ClawTweaks; Handheld Companion, Winhanced, multiple managers, indeterminate, and unknown classifications select Unsupported.
 
