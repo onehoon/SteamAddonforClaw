@@ -139,9 +139,13 @@ public sealed class AppLogTests : IDisposable
         {
             AppLog.DirectoryOverride = _directory; AppLog.Info("A");
             AppLog.DirectoryOverride = other; AppLog.Info("B");
+            AppLog.DirectoryOverride = _directory; AppLog.Info("A again");
             Assert.Equal(2, AppLog.PruneInvocationCount);
             Assert.Single(Directory.EnumerateFiles(_directory));
             Assert.Single(Directory.EnumerateFiles(other));
+            AppLog.LocalDateProvider = () => DateTime.Today.AddDays(1);
+            AppLog.Info("A next day");
+            Assert.Equal(3, AppLog.PruneInvocationCount);
         }
         finally { if (Directory.Exists(other)) Directory.Delete(other, true); }
     }

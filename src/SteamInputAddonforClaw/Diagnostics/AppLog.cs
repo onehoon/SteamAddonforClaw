@@ -14,8 +14,7 @@ internal static class AppLog
     private static readonly DateTimeOffset LaunchTimestamp = DateTimeOffset.Now;
     private static readonly string LaunchFileName = AppLogFileName.Create(LaunchTimestamp, Environment.ProcessId, LaunchId);
     private static readonly string DefaultDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "logs");
-    private static string? _lastPrunedDirectory;
-    private static DateTime? _lastPrunedDate;
+    private static readonly Dictionary<string, DateTime> LastPrunedDates = new(StringComparer.OrdinalIgnoreCase);
     internal static string? DirectoryOverride { get; set; }
     private static int _minimumLevel = (int)AppLogLevel.Info;
     internal static AppLogLevel MinimumLevelOverride { get => (AppLogLevel)Volatile.Read(ref _minimumLevel); set => Volatile.Write(ref _minimumLevel, (int)value); }
@@ -45,11 +44,10 @@ internal static class AppLog
                 var directory = DirectoryPath;
                 Directory.CreateDirectory(directory);
                 var today = LocalDateProvider().Date;
-                if (!string.Equals(_lastPrunedDirectory, directory, StringComparison.OrdinalIgnoreCase) || _lastPrunedDate != today)
+                if (!LastPrunedDates.TryGetValue(directory, out var lastPrunedDate) || lastPrunedDate != today)
                 {
                     Prune(directory, today);
-                    _lastPrunedDirectory = directory;
-                    _lastPrunedDate = today;
+                    LastPrunedDates[directory] = today;
                 }
                 var structured = string.Join(' ', fields.Select(field => $"{field.Key}={Format(field.Value)}"));
                 var details = exception is null ? string.Empty : $"{Environment.NewLine}{exception}";
@@ -87,8 +85,7 @@ internal static class AppLog
     {
         lock (Sync)
         {
-            _lastPrunedDirectory = null;
-            _lastPrunedDate = null;
+            LastPrunedDates.Clear();
             PruneInvocationCount = 0;
             LocalDateProvider = static () => DateTime.Now.Date;
         }
