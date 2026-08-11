@@ -112,6 +112,9 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         }
         if (!prepared.OriginalActive)
         {
+            var activationInspection = _hidHide.Inspect();
+            if (!activationInspection.IsConfigurationReadable || activationInspection.IsActive != prepared.OriginalActive || activationInspection.IsInverseWhitelist != prepared.OriginalInverse)
+                return ValueTask.FromResult(Failure("HidHideStateDriftBeforeActivation"));
             if (_recovery.RecordHidHideActiveStateMutation(_sessionId, false).Status != RecoveryStatus.Success)
                 return ValueTask.FromResult(Failure("ActiveStateJournalFailed"));
             _activeMutationJournaled = true;
