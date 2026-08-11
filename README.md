@@ -180,6 +180,10 @@ The initial pipeline stages are `NativeMode`, `PhysicalInput`, `PhysicalIsolatio
 
 This contract is not wired into production routing yet. It does not define stage dependencies or execution order.
 
+`ControllerManagerClassification` is the canonical input for selecting an environment routing strategy. The initial strategy families are `StockCenterM`, `ClawTweaks`, and `Unsupported`: no third-party manager selects StockCenterM; ClawTweaks selects ClawTweaks; Handheld Companion, Winhanced, multiple managers, indeterminate, and unknown classifications select Unsupported.
+
+Strategy selection does not authorize controller mutation. Routing eligibility, external-controller veto, recovery safety, prerequisite readiness, and compatibility policy remain separate mandatory gates. The current safe baselines are StockCenterM with only `NativeMode = Enabled`, and ClawTweaks/Unsupported with every stage disabled. These are baseline plans, not finalized production routing requirements, and the existence of a ClawTweaks strategy does not make ClawTweaks supported by the current compatibility policy.
+
 ---
 
 # State Priority
