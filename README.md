@@ -855,6 +855,16 @@ recovery journal incomplete?
     → continue normally
 ```
 
+A recovery session may contain multiple recorded mutations. Each mutation's
+ recovery evidence is persisted before the corresponding change, and successful
+ stage rollback clears only the mutation owned by that stage. The journal is
+ deleted only after all recorded mutations have been cleared. Current mixed
+ crash-recovery support is limited to native device state and HidHide
+ executable whitelist additions. HidHide device entries and virtual-output
+ recovery remain unsupported and fail closed. Recovery schema version 2 is
+ retained; this extends the lifecycle of the existing state rather than its
+ serialization format.
+
 Crash recovery takes priority over normal controller initialization.
 
 The addon must not leave the internal controller:

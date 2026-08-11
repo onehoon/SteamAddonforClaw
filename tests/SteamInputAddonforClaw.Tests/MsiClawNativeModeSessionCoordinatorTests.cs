@@ -312,6 +312,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         public bool Exists() => _journal is not null;
         public string ReadText() => JsonSerializer.Serialize(_journal);
         public void WriteNew(RecoveryJournal journal) => _journal = journal;
+        public void ReplaceExisting(RecoveryJournal journal) { if (_journal is null) throw new IOException(); _journal = journal; }
         public void Delete() => _journal = null;
     }
 }
