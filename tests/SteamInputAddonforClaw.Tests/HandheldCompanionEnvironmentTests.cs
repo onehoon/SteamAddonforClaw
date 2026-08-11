@@ -1,5 +1,7 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Startup;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -35,7 +37,7 @@ public sealed class HandheldCompanionEnvironmentTests
     public async Task RunAsync_WhenHandheldCompanionOwnsControllers_SkipsReadinessWait()
     {
         var waiter = new FakeWaiter();
-        var coordinator = new StartupCoordinator(new ContinueUpdateGate(), new HhcEnvironmentDetector(), waiter);
+        var coordinator = new StartupCoordinator(new ContinueUpdateGate(), new HhcEnvironmentDetector(), waiter, new FakeProbeFactory(), new FakeHardwareEvaluator());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -177,4 +179,7 @@ public sealed class HandheldCompanionEnvironmentTests
             return Task.FromResult(ControllerEnvironmentReadiness.Stable);
         }
     }
+
+    private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
+    private sealed class FakeHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test"); }
 }
