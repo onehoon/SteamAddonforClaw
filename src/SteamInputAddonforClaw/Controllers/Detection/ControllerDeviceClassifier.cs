@@ -82,7 +82,7 @@ public sealed class ControllerDeviceClassifier
                 return new ControllerClassificationResult(ControllerDeviceClassification.KnownVirtual, steamControllerKnownVirtual.Value.Reason, steamControllerKnownVirtual.Value.Device);
             }
 
-            if (!IsGameControllerCandidate(device))
+            if (!IsSteamController1304ControllerCollection(device))
             {
                 return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "SteamController1304CollectionIsNotControllerCapable");
             }
@@ -134,7 +134,8 @@ public sealed class ControllerDeviceClassifier
 
     public bool IsRelevantTopologyDevice(ControllerDeviceInfo device)
     {
-        return IsGameControllerCandidate(device)
+        return IsSteamController1304ControllerCollection(device)
+            || IsGameControllerCandidate(device)
             || MatchInternalController(device, topology: null).Status is InternalControllerMatchStatus.Match or InternalControllerMatchStatus.Indeterminate
             || ContainsKnownVirtualIdentity(device);
     }
@@ -182,6 +183,18 @@ public sealed class ControllerDeviceClassifier
             && device.EnumeratorName?.Equals("HID", StringComparison.OrdinalIgnoreCase) == true
             && device.InstanceId.StartsWith("HID\\VID_28DE&PID_1304&MI_", StringComparison.OrdinalIgnoreCase)
             && device.InstanceId.Contains("&COL", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSteamController1304ControllerCollection(ControllerDeviceInfo device)
+    {
+        if (!IsSteamController1304HidCollection(device))
+        {
+            return false;
+        }
+
+        return device.UsagePage == 0xFF00 && device.Usage == 0x0001
+            || device.HardwareIds.Concat(device.CompatibleIds)
+                .Any(id => id.Contains("HID_DEVICE_UP:FF00_U:0001", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool HasVerifiedSteamController1304PhysicalRoot(ControllerDeviceInfo device, ControllerTopologySnapshot? topology)
