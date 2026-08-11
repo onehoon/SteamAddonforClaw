@@ -172,6 +172,14 @@ In PASSIVE state:
 
 The addon should avoid persistent system-wide controller modifications whenever possible.
 
+## Routing Pipeline Contract
+
+Routing eligibility, action planning, and pipeline configuration are separate concerns. `RoutingDecision` determines whether routing is eligible. The existing `RoutingActionPlan` determines whether the runtime should enter or exit override. The future `RoutingPipelinePlan` describes per-stage `Disabled`, `ObserveOnly`, or `Enabled` intent for an environment-specific routing implementation.
+
+The initial pipeline stages are `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, `ThirdPartyIsolation`, `SteamOutput`, `XboxOutput`, and `GameBarRouting`. Stage modes are intentionally independently configurable so Stock MSI Center M and ClawTweaks behavior can be validated experimentally before production strategies are fixed. Recovery and external-controller veto are not optional stages; they remain mandatory cross-cutting safety requirements.
+
+This contract is not wired into production routing yet. It does not define stage dependencies or execution order.
+
 ---
 
 # State Priority
