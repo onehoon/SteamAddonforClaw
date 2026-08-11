@@ -224,7 +224,12 @@ public partial class App : Application
             _routingRuntimeCoordinator = new RoutingPipelineRuntimeCoordinator(
                 statusProvider,
                 pipelineSessionCoordinator,
-                [_msiClawNativeModeSession]);
+                [_msiClawNativeModeSession],
+                () => _developerTestModeState?.IsEnabled == true
+                    ? new RoutingExperimentOptions(
+                        new RoutingStageExperimentOptions(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled),
+                        RoutingStageExperimentOptions.None)
+                    : RoutingExperimentOptions.None);
         }
         _userTerminationGuard = new UserTerminationGuard(
             () => _routingRuntimeCoordinator?.CaptureTerminationSnapshot() ?? default,
