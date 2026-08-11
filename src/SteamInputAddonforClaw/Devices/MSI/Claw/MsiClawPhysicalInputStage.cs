@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -92,6 +93,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
             _ownsInputSession = true;
             _currentIdentity = new(descriptor.InstanceGuid, descriptor.DevicePath!, descriptor.PnpInstanceId!, descriptor.PhysicalIdentity!);
         }
+        AppLog.Debug("PhysicalInput", "PhysicalInput selected", ("InstanceGuid", descriptor.InstanceGuid), ("DevicePath", descriptor.DevicePath), ("PnpInstanceId", descriptor.PnpInstanceId), ("PhysicalIdentity", descriptor.PhysicalIdentity));
         return ValueTask.FromResult(RoutingStageOperationResult.Success("Started"));
     }
 

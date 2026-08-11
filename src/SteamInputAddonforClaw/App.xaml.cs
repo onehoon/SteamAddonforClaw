@@ -37,6 +37,7 @@ public partial class App : Application
     private readonly RoutingSessionStateMachine _routingSessionStateMachine = new();
     private DeveloperTestModeState? _developerTestModeState;
     private EffectiveSteamSessionSource? _effectiveSteamSessionSource;
+    private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
     private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
@@ -280,6 +281,7 @@ public partial class App : Application
 
     private void OnEffectiveSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args)
     {
+        _diagnosticSessions.Observe(_runningAppIdSource?.GetRunningAppId() ?? 0, args.Current.RunningAppId, args.Current.Source.ToString());
         _routingSessionStateMachine.ObserveSteamSessionState(args.Current);
         _mainWindow?.UpdateSteamSessionState(args.Current);
         _ = ReconcileRoutingAsync();
@@ -325,6 +327,7 @@ public partial class App : Application
         }
 
         _startupCancellationTokenSource.Cancel();
+        _diagnosticSessions.Complete();
 
         if (_effectiveSteamSessionSource is not null)
         {

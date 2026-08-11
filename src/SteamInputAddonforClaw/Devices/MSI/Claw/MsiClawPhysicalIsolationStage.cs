@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -105,6 +106,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             if (!addSucceeded) return ValueTask.FromResult(Failure("DeviceAddReportedFailure"));
         }
         lock (_sync) _prepared = null;
+        AppLog.Debug("PhysicalIsolation", "PhysicalIsolation active", ("WhitelistPreExisting", prepared.WhitelistPreExisting), ("WhitelistAddonOwned", _ownedWhitelist), ("Entries", string.Join("|", _entries.Select(entry => $"{entry.Value};PreExisting={entry.PreExisting};AddonOwned={entry.Owned}"))));
         return ValueTask.FromResult(Success("PhysicalIsolationActive"));
     }
 
@@ -141,6 +143,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             _journaledWhitelist = false;
         }
         lock (_sync) _prepared = null;
+        AppLog.Debug("PhysicalIsolation", "PhysicalIsolation restored", ("WhitelistAddonOwned", _ownedWhitelist), ("Entries", string.Join("|", _entries.Select(entry => $"{entry.Value};PreExisting={entry.PreExisting};AddonOwned={entry.Owned}"))));
         return ValueTask.FromResult(Success("PhysicalIsolationRestored"));
     }
 
