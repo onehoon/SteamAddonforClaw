@@ -61,18 +61,19 @@ internal sealed class CurrentControllerEnvironmentCompatibilityPolicy : IControl
     }
 
     private static ControllerEnvironmentCompatibilityAssessment Evaluate(ControllerSoftwareSnapshot software)
-    {
-        var classification = ControllerManagerClassifier.Classify(software);
-        return classification.Kind switch
+        => MapClassification(ControllerManagerClassifier.Classify(software), software.MsiCenterM);
+
+    internal static ControllerEnvironmentCompatibilityAssessment MapClassification(ControllerManagerClassification classification, ControllerSoftwareStatus centerM)
+        => classification.Kind switch
         {
             ControllerManagerKind.Multiple => Unsupported(ControllerEnvironmentCompatibilityReason.MultipleThirdPartyControllerManagersNotSupportedByCurrentVersion),
             ControllerManagerKind.ClawTweaks => Unsupported(ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion),
             ControllerManagerKind.HandheldCompanion => Unsupported(ControllerEnvironmentCompatibilityReason.HandheldCompanionNotSupportedByCurrentVersion),
             ControllerManagerKind.Winhanced => Unsupported(ControllerEnvironmentCompatibilityReason.WinhancedNotSupportedByCurrentVersion),
             ControllerManagerKind.Indeterminate => Indeterminate(),
-            _ => EvaluateStockCenterM(software.MsiCenterM)
+            ControllerManagerKind.None => EvaluateStockCenterM(centerM),
+            _ => Indeterminate()
         };
-    }
 
     private static ControllerEnvironmentCompatibilityAssessment EvaluateStockCenterM(ControllerSoftwareStatus centerM)
     {

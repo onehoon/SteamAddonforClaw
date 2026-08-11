@@ -33,7 +33,7 @@ internal static class AddonStatusEvaluator
     {
         ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion => "ClawTweaks is installed. This version supports stock MSI Center M only.",
         ControllerEnvironmentCompatibilityReason.HandheldCompanionNotSupportedByCurrentVersion => "Handheld Companion is installed. This version supports stock MSI Center M only.",
-        ControllerEnvironmentCompatibilityReason.MultipleThirdPartyControllerManagersNotSupportedByCurrentVersion => "ClawTweaks and Handheld Companion are installed. This version supports stock MSI Center M only.",
+        ControllerEnvironmentCompatibilityReason.MultipleThirdPartyControllerManagersNotSupportedByCurrentVersion => "Multiple third-party controller managers are installed. This version supports stock MSI Center M only.",
         ControllerEnvironmentCompatibilityReason.WinhancedNotSupportedByCurrentVersion => "Winhanced is installed. This version supports stock MSI Center M only.",
         ControllerEnvironmentCompatibilityReason.MsiCenterMRequired => "MSI Center M is required for this version.",
         ControllerEnvironmentCompatibilityReason.MsiCenterMNotOperational => "MSI Center M is not operational.",

@@ -27,7 +27,8 @@ internal static class ControllerManagerClassifier
         {
             ControllerManagerKind.ClawTweaks => new(ControllerManagerKind.ClawTweaks, ControllerManagerClassificationReason.ClawTweaksDetected),
             ControllerManagerKind.HandheldCompanion => new(ControllerManagerKind.HandheldCompanion, ControllerManagerClassificationReason.HandheldCompanionDetected),
-            _ => new(ControllerManagerKind.Winhanced, ControllerManagerClassificationReason.WinhancedDetected)
+            ControllerManagerKind.Winhanced => new(ControllerManagerKind.Winhanced, ControllerManagerClassificationReason.WinhancedDetected),
+            _ => new(ControllerManagerKind.Indeterminate, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate)
         };
         if (IsUnresolved(snapshot.ClawTweaks) || IsUnresolved(snapshot.HandheldCompanion) || (snapshot.Winhanced is not null && IsUnresolved(snapshot.Winhanced)))
             return new(ControllerManagerKind.Indeterminate, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate);
