@@ -12,9 +12,13 @@ internal sealed class WindowsSteamController1304StateProbe : ISteamController130
     private const uint RidDeviceName = 0x20000007;
 
     private readonly Func<IReadOnlyList<ControllerDeviceInfo>> _enumerateDevices;
+    private readonly ISteamController1304ConnectionProbe _connectionProbe;
 
-    public WindowsSteamController1304StateProbe(Func<IReadOnlyList<ControllerDeviceInfo>>? enumerateDevices = null) =>
+    public WindowsSteamController1304StateProbe(Func<IReadOnlyList<ControllerDeviceInfo>>? enumerateDevices = null, ISteamController1304ConnectionProbe? connectionProbe = null)
+    {
         _enumerateDevices = enumerateDevices ?? new WindowsControllerDeviceEnumerator().EnumeratePresentDevices;
+        _connectionProbe = connectionProbe ?? new WindowsSteamController1304ConnectionProbe();
+    }
 
     public SteamController1304DiagnosticSnapshot Capture()
     {
@@ -29,7 +33,15 @@ internal sealed class WindowsSteamController1304StateProbe : ISteamController130
                     device.UsagePage, device.Usage, device.Present))
                 .ToArray();
 
-            return new SteamController1304DiagnosticSnapshot(devices, CaptureRawInputDevices());
+            var receiver = _enumerateDevices()
+                .Where(device => device.Present && device.VendorId == SteamVendorId && device.ProductId == SteamControllerProductId &&
+                    string.Equals(device.EnumeratorName, "USB", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(device.Service, "usbccgp", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var connection = receiver.Length == 1
+                ? _connectionProbe.Probe(receiver[0])
+                : new(SteamController1304ConnectionStatus.Indeterminate, receiver.Length == 0 ? "SteamController1304ReceiverMissing" : "SteamController1304ReceiverAmbiguous", receiver.Length == 0 ? "<none>" : "<multiple>", $"ReceiverCount={receiver.Length}");
+            return new SteamController1304DiagnosticSnapshot(devices, CaptureRawInputDevices(), Connection: connection);
         }
         catch (Exception exception)
         {
