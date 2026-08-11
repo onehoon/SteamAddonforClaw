@@ -86,6 +86,34 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task RecoveryPendingCleanupRetriesBeforeFreshEntry()
+    {
+        var executor = new FakeExecutor();
+        executor.RollbackResults.Enqueue(new(false, RoutingStageKind.NativeMode, "CleanupFailed"));
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        var frozenPlan = bridge.Session.ActiveSession!.Plan;
+
+        Assert.False(await bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None));
+        Assert.NotNull(bridge.Session.PendingCleanup);
+        Assert.Equal(1, provider.CaptureCount);
+        Assert.Single(executor.ExecutedPlans);
+
+        executor.RollbackResults.Enqueue(new(true, null, "Success"));
+        Assert.True(await bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None));
+
+        Assert.Null(bridge.Session.PendingCleanup);
+        Assert.NotNull(bridge.Session.ActiveSession);
+        Assert.Equal(2, executor.RollbackPlans.Count);
+        Assert.Equal(frozenPlan, executor.RollbackPlans[0]);
+        Assert.Equal(frozenPlan, executor.RollbackPlans[1]);
+        Assert.Equal(2, provider.CaptureCount);
+        Assert.Equal(2, executor.ExecutedPlans.Count);
+    }
+
+    [Fact]
     public async Task ShutdownRollsBackWithoutCapturingStatus()
     {
         var executor = new FakeExecutor();
