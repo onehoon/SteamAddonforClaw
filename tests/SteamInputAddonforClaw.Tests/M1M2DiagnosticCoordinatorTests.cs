@@ -317,6 +317,7 @@ public sealed class M1M2DiagnosticCoordinatorTests
         public bool Exists() => _journal is not null;
         public string ReadText() => System.Text.Json.JsonSerializer.Serialize(_journal!);
         public void WriteNew(RecoveryJournal journal) { WriteCount++; events?.Add("PersistJournal"); if (ThrowOnWrite) throw new IOException(); _journal = journal; }
+        public void ReplaceExisting(RecoveryJournal journal) { WriteCount++; events?.Add("ReplaceJournal"); if (ThrowOnWrite) throw new IOException(); if (_journal is null) throw new IOException(); _journal = journal; }
         public void Delete() { events?.Add("DeleteJournal"); _journal = null; }
     }
 }

@@ -8,6 +8,7 @@ internal interface IRecoveryJournalStore
     bool Exists();
     string ReadText();
     void WriteNew(RecoveryJournal journal);
+    void ReplaceExisting(RecoveryJournal journal);
     void Delete();
 }
 
@@ -32,6 +33,27 @@ internal sealed class RecoveryJournalStore(string journalPath) : IRecoveryJourna
                 stream.Flush(flushToDisk: true);
             }
             File.Move(temporaryPath, JournalPath, overwrite: false);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+
+    public void ReplaceExisting(RecoveryJournal journal)
+    {
+        if (!Exists()) throw new IOException("The recovery journal does not exist.");
+        var directory = Path.GetDirectoryName(JournalPath) ?? throw new InvalidOperationException("Recovery journal directory is unavailable.");
+        Directory.CreateDirectory(directory);
+        var temporaryPath = JournalPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                JsonSerializer.Serialize(stream, journal, JsonOptions);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Replace(temporaryPath, JournalPath, destinationBackupFileName: null, ignoreMetadataErrors: true);
         }
         finally
         {

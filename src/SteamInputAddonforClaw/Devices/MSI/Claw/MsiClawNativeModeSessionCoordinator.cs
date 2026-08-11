@@ -17,6 +17,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private DeviceNativeStateSnapshot? _snapshot;
     private bool _active;
     private bool _recoveryBoundaryOwned;
+    private Guid? _recoverySessionId;
     private readonly Func<bool>? _mutationAllowed;
     private CancellationTokenSource? _safetyMonitor;
     private bool _vetoLatched;
@@ -50,6 +51,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
             // participant reconciliation. The next entry must capture a fresh snapshot.
             _snapshot = null;
             _recoveryBoundaryOwned = false;
+            _recoverySessionId = null;
         }
         return Task.FromResult(true);
     }
@@ -179,6 +181,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (journal.Status != RecoveryStatus.Success) return MsiClawNativeModeEnterResult.Failure(false, "RecoveryJournalUnavailable");
         _snapshot = captured.Snapshot;
         _recoveryBoundaryOwned = true;
+        _recoverySessionId = journal.Journal!.RecoverySessionId;
         var identity = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
         var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
@@ -196,9 +199,14 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (!_powerGate.TryAcquire(out var token)) { if (reportFailure) MarkRecoveryUnsafe("PowerGateAcquireFailedDuringRestore"); return false; }
         var restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false);
         if (!restored.Restored || !_powerGate.IsCurrent(token)) { if (reportFailure) MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
-        var completed = _recovery.CompleteRecoverySession();
+        if (_recoverySessionId is not { } recoverySessionId)
+        {
+            if (reportFailure) MarkRecoveryUnsafe("RecoverySessionIdMissingDuringRestore");
+            return false;
+        }
+        var completed = _recovery.CompleteDeviceNativeStateMutation(recoverySessionId);
         if (completed.Status != RecoveryStatus.Success) { if (reportFailure) MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
-        _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false; _recoveryBoundaryOwned = false;
+        _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false; _recoveryBoundaryOwned = false; _recoverySessionId = null;
         return true;
     }
 

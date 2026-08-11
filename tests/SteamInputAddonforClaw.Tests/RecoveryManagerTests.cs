@@ -63,6 +63,116 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
+    public void NativeThenWhitelistRecordUsesSameSession()
+    {
+        var manager = Manager();
+        var native = manager.BeginDeviceNativeStateMutation(Capture());
+        var recorded = manager.RecordHidHideWhitelistAddition(native.Journal!.RecoverySessionId, "C:\\addon.exe");
+        var journal = manager.LoadJournal().Journal!;
+
+        Assert.Equal(RecoveryStatus.Success, recorded.Status);
+        Assert.Equal(native.Journal.RecoverySessionId, journal.RecoverySessionId);
+        Assert.True(journal.Mutations.DeviceNativeStateChanged);
+        Assert.Contains("C:\\addon.exe", journal.Mutations.ExecutableWhitelistAdditions!);
+        Assert.NotNull(journal.OriginalDeviceState);
+    }
+
+    [Fact]
+    public void WrongSessionCannotModifyJournal()
+    {
+        var manager = Manager();
+        var native = manager.BeginDeviceNativeStateMutation(Capture());
+        var before = manager.LoadJournal().Journal!;
+        var result = manager.RecordHidHideWhitelistAddition(Guid.NewGuid(), "C:\\addon.exe");
+        var after = manager.LoadJournal().Journal!;
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.Equal(before.RecoverySessionId, after.RecoverySessionId);
+        Assert.Equal(before.Mutations, after.Mutations);
+        Assert.Equal(before.OriginalDeviceState!.DeviceId, after.OriginalDeviceState!.DeviceId);
+    }
+
+    [Fact]
+    public void StandaloneWhitelistBeginDoesNotJoinExistingNativeJournal()
+    {
+        var manager = Manager();
+        var native = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        var result = manager.BeginHidHideWhitelistLease("C:\\addon.exe");
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.Equal(native.RecoverySessionId, manager.LoadJournal().Journal!.RecoverySessionId);
+    }
+
+    [Fact]
+    public void MutationCompletionPreservesOtherMutationAndDeletesLastMutation()
+    {
+        var manager = Manager();
+        var native = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        Assert.Equal(RecoveryStatus.Success, manager.RecordHidHideWhitelistAddition(native.RecoverySessionId, "C:\\addon.exe").Status);
+
+        Assert.Equal(RecoveryStatus.Success, manager.CompleteHidHideWhitelistAddition(native.RecoverySessionId, "C:\\addon.exe").Status);
+        var afterWhitelist = manager.LoadJournal().Journal!;
+        Assert.True(afterWhitelist.Mutations.DeviceNativeStateChanged);
+        Assert.Empty(afterWhitelist.Mutations.ExecutableWhitelistAdditions!);
+
+        Assert.Equal(RecoveryStatus.Success, manager.CompleteDeviceNativeStateMutation(native.RecoverySessionId).Status);
+        Assert.Equal(RecoveryStatus.NoRecoveryNeeded, manager.LoadJournal().Status);
+    }
+
+    [Fact]
+    public void MutationCompletionWriteFailurePreservesJournalEvidence()
+    {
+        var journal = new RecoveryJournal(
+            RecoveryManager.CurrentSchemaVersion,
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow,
+            Snapshot(),
+            new(DeviceNativeStateChanged: true, ExecutableWhitelistAdditions: ["C:\\addon.exe"]));
+        var store = new FaultStore(journal: journal, writeFails: true);
+        var manager = new RecoveryManager(store);
+
+        var result = manager.CompleteHidHideWhitelistAddition(journal.RecoverySessionId, "C:\\addon.exe");
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.True(store.Exists());
+        Assert.True(manager.LoadJournal().Journal!.Mutations.DeviceNativeStateChanged);
+        Assert.Contains("C:\\addon.exe", manager.LoadJournal().Journal!.Mutations.ExecutableWhitelistAdditions!);
+    }
+
+    [Fact]
+    public async Task MixedNativeAndWhitelistRecoverInReverseWhitelistThenNativeOrder()
+    {
+        var manager = Manager(new HandheldDeviceRegistry([new FakeAdapter(DeviceId, new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success))]));
+        var hidHide = new FakeHidHide();
+        manager = new RecoveryManager(new RecoveryJournalStore(PathName), new HandheldDeviceRegistry([new FakeAdapter(DeviceId, new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success))]), hidHide);
+        var native = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        manager.RecordHidHideWhitelistAddition(native.RecoverySessionId, "C:\\addon.exe");
+        hidHide.Entries.Add("C:\\addon.exe");
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Success, result.Status);
+        Assert.Empty(hidHide.Entries);
+        Assert.Equal(1, hidHide.RemoveCount);
+        Assert.False(File.Exists(PathName));
+    }
+
+    [Fact]
+    public async Task UnsupportedMixedMutationFailsBeforePartialRecovery()
+    {
+        var hidHide = new FakeHidHide();
+        var native = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, Snapshot(),
+            new(true, ["HID\\test"], ["C:\\addon.exe"], null, false));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(native));
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), new HandheldDeviceRegistry([new FakeAdapter(DeviceId, new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success))]), hidHide);
+
+        Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
+        Assert.Equal(0, hidHide.RemoveCount);
+        Assert.True(File.Exists(PathName));
+    }
+
+    [Fact]
     public async Task NativeRestoreSuccess_DeletesJournal()
     {
         var native = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success);
@@ -189,15 +299,18 @@ public sealed class RecoveryManagerTests : IDisposable
     private sealed class NeverMatcher : IInternalControllerMatcher { public InternalControllerMatchResult Match(InternalControllerMatchContext context) => new(InternalControllerMatchStatus.NoMatch, "test"); }
     private sealed class FakeNativeStateManager(HandheldDeviceId deviceId, NativeStateRestoreStatus status) : INativeControllerStateManager
     {
+        public int RestoreCount { get; private set; }
         public HandheldDeviceId DeviceId => deviceId;
         public NativeStateCaptureResult CaptureSnapshot() => Capture();
-        public Task<NativeStateRestoreResult> RestoreSnapshotAsync(DeviceNativeStateSnapshot snapshot, CancellationToken cancellationToken) => Task.FromResult(new NativeStateRestoreResult(status, "test"));
+        public Task<NativeStateRestoreResult> RestoreSnapshotAsync(DeviceNativeStateSnapshot snapshot, CancellationToken cancellationToken) { RestoreCount++; return Task.FromResult(new NativeStateRestoreResult(status, "test")); }
     }
     private sealed class FakeHidHide : SteamInputAddonforClaw.HidHide.IHidHideClient
     {
-        public SteamInputAddonforClaw.HidHide.HidHideInspection Inspect() => new(SteamInputAddonforClaw.HidHide.HidHideInspectionStatus.Available, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        public HashSet<string> Entries { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public int RemoveCount { get; private set; }
+        public SteamInputAddonforClaw.HidHide.HidHideInspection Inspect() => new(SteamInputAddonforClaw.HidHide.HidHideInspectionStatus.Available, Entries);
         public bool AddApplication(string executablePath) => true;
-        public bool RemoveApplication(string executablePath) => true;
+        public bool RemoveApplication(string executablePath) { RemoveCount++; return Entries.Remove(executablePath); }
     }
     private sealed class FaultStore(RecoveryJournal? journal = null, bool writeFails = false, bool deleteFails = false) : IRecoveryJournalStore
     {
@@ -205,6 +318,7 @@ public sealed class RecoveryManagerTests : IDisposable
         public bool Exists() => journal is not null;
         public string ReadText() => JsonSerializer.Serialize(journal!);
         public void WriteNew(RecoveryJournal value) { if (writeFails) throw new IOException("write failed"); journal = value; }
+        public void ReplaceExisting(RecoveryJournal value) { if (writeFails) throw new IOException("replace failed"); if (journal is null) throw new IOException("missing journal"); journal = value; }
         public void Delete() { if (deleteFails) throw new IOException("delete failed"); journal = null; }
     }
 }

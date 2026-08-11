@@ -14,6 +14,7 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
     private readonly Func<IReadOnlyList<string>> _msiDirectInputHidInstanceIds;
     private readonly Lock _leaseSync = new();
     private bool _ownsWhitelistLease;
+    private Guid? _recoverySessionId;
 
     public M1M2DiagnosticCoordinator(
         IMsiClawInputDiagnostic inputSource,
@@ -58,12 +59,13 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
                 return new(MsiClawInputStartStatus.InitializationFailed, "HidHide recovery journal could not be persisted. No controller settings were changed.");
 
             AppLog.Info("HidHide", "HidHide whitelist lease journal persisted.", ("ExecutablePath", _executablePath), ("SessionId", journal.Journal!.RecoverySessionId));
+            _recoverySessionId = journal.Journal.RecoverySessionId;
             if (!_hidHideClient.AddApplication(_executablePath))
             {
                 var postFailureInspection = _hidHideClient.Inspect();
                 if (postFailureInspection.IsConfigurationReadable && !postFailureInspection.ApplicationWhitelist.Contains(_executablePath))
                 {
-                    var cleanup = _recoveryManager.CompleteRecoverySession();
+                    var cleanup = _recoveryManager.CompleteHidHideWhitelistAddition(_recoverySessionId!.Value, _executablePath);
                     AppLog.Warn("HidHide", "HidHide whitelist addition failed without a persisted entry.", null, ("ExecutablePath", _executablePath), ("JournalCleared", cleanup.Status == RecoveryStatus.Success), ("Action", "DoNotAcquire"));
                     return new(MsiClawInputStartStatus.InitializationFailed, "HidHide whitelist access could not be granted. No controller settings were changed.");
                 }
@@ -102,7 +104,11 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
                     : new(MsiClawInputStartStatus.InitializationFailed, $"HidHide access lease is unavailable ({leaseVerification.Status}). No controller settings were changed.");
             }
         }
-        else _ownsWhitelistLease = _recoveryManager.OwnsHidHideWhitelistLease(_executablePath);
+        else
+        {
+            _ownsWhitelistLease = _recoveryManager.OwnsHidHideWhitelistLease(_executablePath);
+            if (_ownsWhitelistLease) _recoverySessionId = _recoveryManager.GetHidHideWhitelistLeaseSessionId(_executablePath);
+        }
 
         var result = _inputSource.Start();
         if (!result.Started)
@@ -155,13 +161,19 @@ internal sealed class M1M2DiagnosticCoordinator : IAsyncDisposable
                 AppLog.Error("HidHide", "HidHide whitelist lease cleanup could not be verified.", new InvalidOperationException("HidHide whitelist removal verification failed."), ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
                 return false;
             }
-            var completed = _recoveryManager.CompleteRecoverySession();
+            if (_recoverySessionId is not { } recoverySessionId)
+            {
+                AppLog.Error("HidHide", "HidHide whitelist recovery session ID is missing.", new InvalidOperationException("RecoverySessionIdMissing"), ("Action", "PreserveJournal"));
+                return false;
+            }
+            var completed = _recoveryManager.CompleteHidHideWhitelistAddition(recoverySessionId, _executablePath);
             if (completed.Status != RecoveryStatus.Success)
             {
                 AppLog.Error("HidHide", "HidHide whitelist lease journal cleanup failed.", new InvalidOperationException(completed.Reason), ("ExecutablePath", _executablePath), ("Action", "PreserveJournal"));
                 return false;
             }
             _ownsWhitelistLease = false;
+            _recoverySessionId = null;
             AppLog.Info("HidHide", "HidHide whitelist lease released.", ("ExecutablePath", _executablePath), ("JournalDeleted", true));
             return true;
         }
