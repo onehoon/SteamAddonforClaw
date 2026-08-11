@@ -1,6 +1,6 @@
 namespace SteamInputAddonforClaw.HidHide;
 
-internal enum HidHideInspectionStatus { Available, NotInstalled, ConfigurationUnavailable, Disabled, InverseWhitelist }
+internal enum HidHideInspectionStatus { Available, NotInstalled, ConfigurationUnavailable, AccessDenied, Disabled, InverseWhitelist }
 
 internal sealed record HidHideInspection(
     HidHideInspectionStatus Status,
