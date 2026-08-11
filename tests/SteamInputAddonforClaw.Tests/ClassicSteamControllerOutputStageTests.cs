@@ -189,6 +189,30 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         Assert.True(runtime.Trace.LastIndexOf("Input") < runtime.Trace.IndexOf("Remove"));
     }
 
+    [Fact]
+    public async Task NeutralRejectionDoesNotStartPublisher()
+    {
+        var runtime = new FakeRuntime { NeutralAccepted = false };
+        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain("Input", runtime.Trace);
+    }
+
+    [Fact]
+    public async Task LivePublisherFaultRequestsOneFailClosedNotification()
+    {
+        var runtime = new FakeRuntime { InputAccepted = false };
+        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var fault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stage.SetOutputFaultHandler(() => { fault.TrySetResult(); return ValueTask.CompletedTask; });
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        await fault.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
     private ClassicSteamControllerOutputStage Create(FakeRuntime runtime, FakeEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null)
     {
         Directory.CreateDirectory(_directory);
@@ -208,13 +232,13 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     private sealed class FakeRuntime : IViiperRuntime
     {
         public List<string> Trace { get; } = [];
-        public int NeutralReports; public int RemovedDevices; public int CreatedDevices; public bool CancelAfterStart; public bool BusRemoved = true;
+        public int NeutralReports; public int RemovedDevices; public int CreatedDevices; public bool CancelAfterStart; public bool BusRemoved = true; public bool NeutralAccepted = true; public bool InputAccepted = true;
         public IReadOnlyCollection<uint> OwnedDeviceIds => CreatedDevices > RemovedDevices ? [7] : [];
         public uint BusId => 1;
         public void Start() { if (CancelAfterStart) throw new OperationCanceledException(); }
         public uint CreateDevice() { CreatedDevices++; return 7; }
-        public bool SetNeutral(uint id) { Trace.Add("Neutral"); NeutralReports++; return true; }
-        public bool SetInput(uint id, byte[] report) { Trace.Add("Input"); return true; }
+        public bool SetNeutral(uint id) { Trace.Add("Neutral"); NeutralReports++; return NeutralAccepted; }
+        public bool SetInput(uint id, byte[] report) { Trace.Add("Input"); return InputAccepted; }
         public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) { Trace.Add("Remove"); RemovedDevices++; return new(true, BusRemoved); }
         public void StopIfUnused() { }
         public void Dispose() { }
