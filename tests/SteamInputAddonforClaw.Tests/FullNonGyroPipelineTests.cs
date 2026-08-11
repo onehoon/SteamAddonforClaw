@@ -86,6 +86,53 @@ public sealed class FullNonGyroPipelineTests
         Assert.Equal(3000, BitConverter.ToUInt16(report, 62));
     }
 
+    [Fact]
+    public void Trigger_full_click_survives_viiper_round_trip_semantics()
+    {
+        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true);
+        var input = new ClassicSteamControllerInput(buttons, default, default, new(0, 100), false, false);
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        var hostVisible = RebuildHostVisibleTriggerBits(report);
+
+        Assert.Equal(26000, BitConverter.ToUInt16(report, 24));
+        Assert.Equal(26000, BitConverter.ToUInt16(report, 26));
+        Assert.True(hostVisible.leftFull);
+        Assert.True(hostVisible.rightFull);
+    }
+
+    [Fact]
+    public void Partial_trigger_without_full_click_preserves_analog_value()
+    {
+        var input = new ClassicSteamControllerInput(default, default, default, new(128, 0), false, false);
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        Assert.Equal(13050, BitConverter.ToUInt16(report, 24));
+        Assert.False(RebuildHostVisibleTriggerBits(report).leftFull);
+    }
+
+    [Fact]
+    public void Maximum_analog_trigger_without_digital_full_click_round_trips_as_full()
+    {
+        var input = new ClassicSteamControllerInput(default, default, default, new(255, 0), false, false);
+        var report = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        Assert.True(RebuildHostVisibleTriggerBits(report).leftFull);
+    }
+
+    private static (bool leftFull, bool rightFull) RebuildHostVisibleTriggerBits(byte[] report)
+    {
+        // Pinned VIIPER InputState.UnmarshalBinary/buildReport behavior: trigger
+        // full-click bits are reconstructed from the raw trigger fields.
+        var leftRaw = BitConverter.ToUInt16(report, 24);
+        var rightRaw = BitConverter.ToUInt16(report, 26);
+        static byte TriggerRawToByte(ushort raw) => (byte)Math.Clamp(raw * 255 / 26000, 0, 255);
+        return (TriggerRawToByte(leftRaw) >= 0xFF, TriggerRawToByte(rightRaw) >= 0xFF);
+    }
+
     [Theory]
     [InlineData(-1, false, false, false, false)] [InlineData(0, true, false, false, false)] [InlineData(22500, false, false, true, true)] [InlineData(31500, true, false, false, true)]
     public void Maps_pov_to_independent_direction_bits(int pov, bool up, bool right, bool down, bool left)
