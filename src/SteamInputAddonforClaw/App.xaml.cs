@@ -183,7 +183,7 @@ public partial class App : Application
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())),
                 new ViiperRuntimeInspector()),
-            () => _steamSessionWatcher?.State ?? SteamSessionState.FromRunningAppId(0),
+            () => _effectiveSteamSessionSource?.State ?? SteamSessionState.FromRunningAppId(0),
             CaptureExternalControllerAssessment,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             routingSessionStateMachine: _routingSessionStateMachine);
