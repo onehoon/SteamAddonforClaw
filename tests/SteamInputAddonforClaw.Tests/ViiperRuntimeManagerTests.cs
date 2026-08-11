@@ -80,6 +80,29 @@ public sealed class ViiperRuntimeManagerTests
     }
 
     [Fact]
+    public void SetInputUsesOwnedBusAndDeviceAndRejectsUnknownDevice()
+    {
+        var api = new FakeApi();
+        using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+        var deviceId = runtime.CreateDevice(); var report = new byte[64]; report[8] = 0x80;
+
+        Assert.True(runtime.SetInput(deviceId, report));
+        Assert.False(runtime.SetInput(deviceId + 1, report));
+        var call = Assert.Single(api.InputCalls);
+        Assert.Equal((uint)1, call.BusId); Assert.Equal(deviceId, call.DeviceId); Assert.Equal(report, call.Report);
+    }
+
+    [Fact]
+    public void SetNeutralReusesThe64ByteInputSubmissionPath()
+    {
+        var api = new FakeApi(); using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+        var deviceId = runtime.CreateDevice();
+        Assert.True(runtime.SetNeutral(deviceId));
+        var call = Assert.Single(api.InputCalls);
+        Assert.Equal(64, call.Report.Length); Assert.Equal((byte)1, call.Report[0]); Assert.Equal((byte)0xB8, call.Report[62]); Assert.Equal((byte)0x0B, call.Report[63]);
+    }
+
+    [Fact]
     public void PersistentCreateBusFailureIsBounded()
     {
         var api = new FakeApi { CreateBusResult = 1 };
@@ -114,6 +137,7 @@ public sealed class ViiperRuntimeManagerTests
         public List<uint> RemovedBuses { get; } = [];
         public List<uint> RemovedDevices { get; } = [];
         public List<(uint BusId, string TypeName, ushort VendorId, ushort ProductId)> AddDeviceCalls { get; } = [];
+        public List<(uint BusId, uint DeviceId, byte[] Report)> InputCalls { get; } = [];
         public List<string> InitializeCalls { get; } = [];
         public string[] DeviceTypes { get; init; } = [ViiperRuntimeManager.DeviceType];
         public bool ShutdownCalled { get; private set; }
@@ -131,7 +155,7 @@ public sealed class ViiperRuntimeManagerTests
             return AddResults[Math.Min(_addIndex++, AddResults.Length - 1)];
         }
         public int RemoveDevice(uint busId, uint deviceId) { RemovedDevices.Add(deviceId); return 0; }
-        public int SetInput(uint busId, uint deviceId, byte[] report) => 0;
+        public int SetInput(uint busId, uint deviceId, byte[] report) { InputCalls.Add((busId, deviceId, report.ToArray())); return 0; }
         public int SetFeedbackCallback(uint busId, uint deviceId, Action<ReadOnlyMemory<byte>> callback) => 0;
         public string[] GetDeviceTypes() => DeviceTypes;
         public string? GetLastError() => "fake error";

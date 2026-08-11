@@ -7,6 +7,7 @@ internal interface IViiperRuntime : IDisposable
     void Start();
     uint CreateDevice();
     bool SetNeutral(uint deviceId);
+    bool SetInput(uint deviceId, byte[] report) => false;
     ViiperDeviceRemovalResult RemoveDevice(uint busId, uint deviceId);
     void StopIfUnused();
 }
@@ -47,6 +48,7 @@ internal sealed class ViiperRuntimeManager : IViiperRuntime
     void IViiperRuntime.Start() => Start();
     uint IViiperRuntime.CreateDevice() => CreateDevice();
     bool IViiperRuntime.SetNeutral(uint deviceId) => SetNeutral(deviceId);
+    bool IViiperRuntime.SetInput(uint deviceId, byte[] report) => SetInput(deviceId, report);
     ViiperDeviceRemovalResult IViiperRuntime.RemoveDevice(uint busId, uint deviceId) => RemoveDevice(busId, deviceId);
     void IViiperRuntime.StopIfUnused() => StopIfUnused();
 
@@ -105,8 +107,11 @@ internal sealed class ViiperRuntimeManager : IViiperRuntime
     {
         var report = new byte[ClassicSteamControllerReportBuilder.ReportLength];
         ClassicSteamControllerReportBuilder.Write(report, 0, new ClassicSteamControllerInput(false, false));
-        return _api is not null && _devices.Contains(deviceId) && _api.SetInput(BusId, deviceId, report) == 0;
+        return SetInput(deviceId, report);
     }
+
+    internal bool SetInput(uint deviceId, byte[] report) =>
+        _api is not null && _busId is not null && _devices.Contains(deviceId) && report is not null && _api.SetInput(_busId.Value, deviceId, report) == 0;
 
     internal ViiperDeviceRemovalResult RemoveDevice(uint busId, uint deviceId)
     {

@@ -215,7 +215,7 @@ public partial class App : Application
                 addonOwnedVirtualDeviceTracker,
                 _recoveryManager!,
                 () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
-                new HidHideDriverClient());
+                new HidHideDriverClient(), snapshot: _physicalInputSource);
             steamOutputPowerParticipant = steamOutputStage;
             var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage, steamOutputStage]);
             var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(
@@ -230,6 +230,7 @@ public partial class App : Application
                         new RoutingStageExperimentOptions(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled),
                         RoutingStageExperimentOptions.None)
                     : RoutingExperimentOptions.None);
+            steamOutputStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false); });
         }
         _userTerminationGuard = new UserTerminationGuard(
             () => _routingRuntimeCoordinator?.CaptureTerminationSnapshot() ?? default,

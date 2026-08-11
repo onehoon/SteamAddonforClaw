@@ -5,7 +5,7 @@ using SteamInputAddonforClaw.Input.DirectInput;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
+public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerStateSnapshotSource
 {
     private static readonly int M1AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M1);
     private static readonly int M2AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M2);
@@ -29,6 +29,10 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
     public event EventHandler<ControllerState>? StateChanged;
     public event EventHandler? IndependentVerified;
     public event EventHandler<MsiClawInputTestSummary>? TestCompleted;
+
+    private sealed class StateBox(ControllerState value) { internal ControllerState Value { get; } = value; }
+    private StateBox _latestState = new(new ControllerState(new AuxiliaryButtonState([false, false])));
+    public ControllerState LatestState => Volatile.Read(ref _latestState).Value;
 
     internal static bool IsM1Pressed(ControllerState state) => state.Auxiliary[M1AuxiliaryIndex];
     internal static bool IsM2Pressed(ControllerState state) => state.Auxiliary[M2AuxiliaryIndex];
@@ -264,6 +268,8 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
                     break;
                 }
 
+                Volatile.Write(ref _latestState, new StateBox(current));
+
                 if (!hasPrevious)
                 {
                     AppLog.Trace("MsiInput", "Initial ControllerState.", ("TestSession", session.Id), ("M1", IsM1Pressed(current)), ("M2", IsM2Pressed(current)));
@@ -307,6 +313,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic
         }
         finally
         {
+            Volatile.Write(ref _latestState, new StateBox(new ControllerState(new AuxiliaryButtonState([false, false]))));
             cleanupSucceeded = CleanupSession(session);
             var summary = new MsiClawInputTestSummary(session.Id, stopwatch.ElapsedMilliseconds, m1Observed, m2Observed, independent, readFailures, cleanupSucceeded, stopReason);
             lock (_sync)

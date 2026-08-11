@@ -3,6 +3,8 @@ using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
@@ -26,17 +28,33 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     private IReadOnlyList<ControllerDeviceInfo>? _owned;
     private LifecycleState _state;
     private CancellationTokenSource? _creationCancellation;
+    private ClassicSteamControllerInputPublisher? _publisher;
+    private readonly IControllerStateSnapshotSource? _snapshot;
+    private Func<ValueTask>? _outputFaultHandler;
+    private int _outputFaultReported;
 
     internal ClassicSteamControllerOutputStage(IViiperRuntime runtime, IControllerDeviceEnumerator enumerator,
         ViiperVirtualDeviceIdentityResolver resolver, AddonOwnedVirtualDeviceTracker tracker, RecoveryManager recovery,
-        Func<Guid?> sessionId, IHidHideClient hidHide, TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null)
+        Func<Guid?> sessionId, IHidHideClient hidHide, TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null,
+        IControllerStateSnapshotSource? snapshot = null)
     {
         _runtime = runtime; _enumerator = enumerator; _resolver = resolver; _tracker = tracker; _recovery = recovery; _sessionId = sessionId; _hidHide = hidHide;
         _pnPTimeout = pnPTimeout ?? TimeSpan.FromSeconds(5); _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(50);
+        _snapshot = snapshot;
     }
 
     public RoutingStageKind Kind => RoutingStageKind.SteamOutput;
     public string Name => "SteamOutput";
+
+    internal void SetOutputFaultHandler(Func<ValueTask> handler) => _outputFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+
+    private void ReportOutputFault(Exception exception)
+    {
+        if (Interlocked.Exchange(ref _outputFaultReported, 1) != 0) return;
+        AppLog.Error("SteamOutput", "Live Classic Steam Controller publishing failed.", exception);
+        if (_outputFaultHandler is { } handler)
+            _ = Task.Run(async () => await handler().ConfigureAwait(false));
+    }
 
     public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
     {
@@ -124,7 +142,14 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             _tracker.ResolveOwnership(_owned);
             operationToken.ThrowIfCancellationRequested();
             if (!_runtime.SetNeutral(_deviceId)) return await FailAndRollbackCoreAsync("NeutralReportRejected").ConfigureAwait(false);
+            if (_snapshot is not null)
+            {
+                _publisher = new ClassicSteamControllerInputPublisher(_snapshot, _runtime, _deviceId,
+                    fault: ReportOutputFault);
+                _publisher.Start();
+            }
             _state = LifecycleState.Active;
+            Interlocked.Exchange(ref _outputFaultReported, 0);
             return RoutingStageOperationResult.Success("ClassicSteamControllerCreated");
         }
         catch (OperationCanceledException)
@@ -160,6 +185,11 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             return RoutingStageOperationResult.Success("SteamOutputPreparationCancelled");
         }
         _state = LifecycleState.RollingBack;
+        if (_publisher is not null)
+        {
+            await _publisher.StopAsync().ConfigureAwait(false);
+            _publisher = null;
+        }
         if (_sessionId() is not { } session) return RoutingStageOperationResult.Failure("RecoverySessionUnavailable");
         var hadResolvedIdentity = _owned is { Count: > 0 };
         if (_deviceId != 0)
