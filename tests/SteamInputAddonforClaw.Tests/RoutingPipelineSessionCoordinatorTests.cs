@@ -113,6 +113,8 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         var cleanup = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), RoutingExperimentOptions.None, CancellationToken.None);
 
         Assert.True(cleanup.Succeeded);
+        Assert.Equal(RoutingOperationalState.Passive, cleanup.State);
+        Assert.Equal(RoutingOperationalState.Passive, coordinator.CurrentState);
         Assert.Equal(frozen.Plan, executor.RollbackPlans.Single());
         Assert.Null(coordinator.PendingCleanup);
         Assert.Null(coordinator.ActiveSession);

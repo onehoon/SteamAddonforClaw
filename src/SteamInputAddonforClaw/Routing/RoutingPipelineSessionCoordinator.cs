@@ -210,7 +210,7 @@ internal sealed class RoutingPipelineSessionCoordinator
             ClearActiveSession();
 
         ClearPendingCleanup();
-        return Success(pending.ActionPlan.Action, "PendingCleanupCompleted");
+        return new(true, CurrentState, pending.ActionPlan.Action, "PendingCleanupCompleted");
     }
 
     private RoutingPipelineSessionReconcileResult Success(RoutingActionKind action, string reason) =>
