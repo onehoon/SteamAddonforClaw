@@ -1,3 +1,6 @@
+using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Input.DirectInput;
+
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 public enum MsiClawInputStartStatus
@@ -29,10 +32,16 @@ public sealed record MsiClawInputTestSummary(
 
 public enum MsiClawInputStopReason { Stopped, ReadStateFailed, InvalidButtonLayout }
 
-internal interface IMsiClawInputDiagnostic : IAsyncDisposable
+internal interface IMsiClawPreparedInputSource : IAsyncDisposable
+{
+    event EventHandler<ControllerState>? StateChanged;
+    bool IsRunning { get; }
+    MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor);
+    Task StopAsync();
+}
+
+internal interface IMsiClawInputDiagnostic : IMsiClawPreparedInputSource
 {
     event EventHandler<MsiClawInputTestSummary>? TestCompleted;
-    bool IsRunning { get; }
     MsiClawInputStartResult Start();
-    Task StopAsync();
 }
