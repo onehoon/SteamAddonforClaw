@@ -107,7 +107,7 @@ public sealed class RecoveryManagerTests : IDisposable
 
         var loaded = manager.LoadJournal().Journal!;
         var entry = Assert.Single(loaded.Mutations.AddonOwnedVirtualDeviceEntries!);
-        Assert.Equal(3, loaded.SchemaVersion);
+        Assert.Equal(4, loaded.SchemaVersion);
         Assert.Equal(mutationId, entry.MutationId);
         Assert.Equal("steamcontroller", entry.DeviceType);
         Assert.Equal((ushort)0x28DE, entry.VendorId);

@@ -23,7 +23,7 @@ public sealed class RuntimePrerequisiteInspectorTests
     [Theory]
     [InlineData((int)HidHideInspectionStatus.Available, (int)PrerequisiteStatus.Ready)]
     [InlineData((int)HidHideInspectionStatus.NotInstalled, (int)PrerequisiteStatus.Missing)]
-    [InlineData((int)HidHideInspectionStatus.Disabled, (int)PrerequisiteStatus.Unusable)]
+    [InlineData((int)HidHideInspectionStatus.Disabled, (int)PrerequisiteStatus.Ready)]
     [InlineData((int)HidHideInspectionStatus.InverseWhitelist, (int)PrerequisiteStatus.Unusable)]
     [InlineData((int)HidHideInspectionStatus.ConfigurationUnavailable, (int)PrerequisiteStatus.Indeterminate)]
     [InlineData((int)HidHideInspectionStatus.AccessDenied, (int)PrerequisiteStatus.Indeterminate)]
@@ -34,7 +34,7 @@ public sealed class RuntimePrerequisiteInspectorTests
         var assessment = new HidHidePrerequisiteInspector(new FakeHidHideClient(inspectionStatus)).Inspect();
 
         Assert.Equal(expected, assessment.Status);
-        if (inspectionStatus != HidHideInspectionStatus.Available)
+        if (inspectionStatus != HidHideInspectionStatus.Available && inspectionStatus != HidHideInspectionStatus.Disabled)
         {
             Assert.NotEqual(PrerequisiteStatus.Ready, assessment.Status);
         }

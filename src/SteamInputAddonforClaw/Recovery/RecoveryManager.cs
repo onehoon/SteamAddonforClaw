@@ -16,7 +16,7 @@ internal interface IRecoveryManager
 
 internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDeviceRegistry? deviceRegistry = null, IHidHideClient? hidHideClient = null, IControllerDeviceEnumerator? deviceEnumerator = null) : IRecoveryManager
 {
-    internal const int CurrentSchemaVersion = 3;
+    internal const int CurrentSchemaVersion = 4;
     public bool HasIncompleteRecovery
     {
         get
@@ -121,6 +121,18 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             return journal with { Mutations = journal.Mutations with { HidHideDeviceAdditions = additions } };
         });
     }
+
+    public RecoveryResult RecordHidHideActiveStateMutation(Guid recoverySessionId, bool originalActiveState) =>
+        UpdateRecoverySession(recoverySessionId, journal => journal with
+        {
+            Mutations = journal.Mutations with { OriginalHidHideActiveState = originalActiveState }
+        });
+
+    public RecoveryResult CompleteHidHideActiveStateMutation(Guid recoverySessionId) =>
+        UpdateRecoverySession(recoverySessionId, journal => journal with
+        {
+            Mutations = journal.Mutations with { OriginalHidHideActiveState = null }
+        });
 
     public RecoveryResult RecordAddonOwnedVirtualDeviceIntent(Guid sessionId, Guid mutationId, string deviceType, ushort vendorId, ushort productId, IEnumerable<string> preExistingIds)
     {
@@ -270,6 +282,11 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
                 return new(RecoveryStatus.Success, "Recovery journal loaded.", journal);
             }
             if (schema == 1) return TranslateLegacyV1(json);
+            if (schema == 3)
+            {
+                var legacy = JsonSerializer.Deserialize<RecoveryJournal>(json) ?? throw new InvalidDataException("The legacy recovery journal contains no state.");
+                return new(RecoveryStatus.Success, "Legacy schema v3 recovery journal loaded.", legacy with { SchemaVersion = CurrentSchemaVersion });
+            }
             if (schema == 2)
             {
                 var legacy = JsonSerializer.Deserialize<RecoveryJournal>(json) ?? throw new InvalidDataException("The legacy recovery journal contains no state.");
@@ -309,6 +326,22 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             if (emptyCompletion.Status == RecoveryStatus.Success)
                 AppLog.Info("Recovery", "Empty recovery journal completed.", ("SessionId", journal.RecoverySessionId), ("JournalDeleted", true));
             return emptyCompletion with { Journal = journal };
+        }
+
+        if (journal.Mutations.OriginalHidHideActiveState is { } originalActive)
+        {
+            if (hidHideClient is null) return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state recovery support is unavailable.", journal), stopwatch);
+            var inspection = hidHideClient.Inspect();
+            if (!inspection.IsConfigurationReadable || inspection.IsInverseWhitelist)
+                return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state recovery inspection is unsafe.", journal), stopwatch);
+            if (inspection.IsActive != originalActive && !hidHideClient.SetActive(originalActive))
+                return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state restoration could not be verified.", journal), stopwatch);
+            var verified = hidHideClient.Inspect();
+            if (!verified.IsConfigurationReadable || verified.IsActive != originalActive)
+                return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state restoration could not be verified.", journal), stopwatch);
+            var completion = CompleteHidHideActiveStateMutation(journal.RecoverySessionId);
+            if (completion.Status != RecoveryStatus.Success) return LogFailure(completion with { Journal = journal }, stopwatch);
+            journal = completion.Journal ?? journal with { Mutations = journal.Mutations with { OriginalHidHideActiveState = null } };
         }
 
         if (journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } virtualEntries)
@@ -418,6 +451,12 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             { reason = "The journaled handheld device adapter is unavailable."; return false; }
             if (adapter.NativeState is null || adapter.NativeState.DeviceId != journal.OriginalDeviceState.DeviceId)
             { reason = "The journaled handheld device native-state manager is unavailable."; return false; }
+        }
+        if (journal.Mutations.OriginalHidHideActiveState is not null)
+        {
+            if (hidHideClient is null) { reason = "HidHide active-state recovery support is unavailable."; return false; }
+            var inspection = hidHideClient.Inspect();
+            if (!inspection.IsConfigurationReadable || inspection.IsInverseWhitelist) { reason = "HidHide active-state recovery inspection is unsafe."; return false; }
         }
         reason = "Recoverable recorded mutations.";
         return true;

@@ -40,7 +40,7 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
                 catch (Exception exception) { AppLog.Warn("HidHide", "A HidHide whitelist entry could not be normalized.", exception, ("Action", "PreserveRawEntry")); }
             }
             var status = !active ? HidHideInspectionStatus.Disabled : inverse ? HidHideInspectionStatus.InverseWhitelist : HidHideInspectionStatus.Available;
-            return new(status, normalizedWhitelist, blacklist, rawWhitelist);
+            return new(status, normalizedWhitelist, blacklist, rawWhitelist, active, inverse);
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == 2)
         {
@@ -62,6 +62,21 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
     public bool RemoveApplication(string executablePath) => UpdateWhitelist(executablePath, add: false);
     public bool AddHiddenDevice(string deviceEntry) => UpdateHiddenDevices(deviceEntry, add: true);
     public bool RemoveHiddenDevice(string deviceEntry) => UpdateHiddenDevices(deviceEntry, add: false);
+    public bool SetActive(bool active)
+    {
+        try
+        {
+            using var device = _nativeApi.Open(GenericRead | GenericWrite);
+            Invoke(device, Ioctl(2053), [active ? (byte)1 : (byte)0], null, out _);
+            var inspection = Inspect();
+            return inspection.IsConfigurationReadable && inspection.IsActive == active;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("HidHide", "HidHide active-state mutation failed.", exception, ("Active", active), ("Action", "PreserveJournal"));
+            return false;
+        }
+    }
 
     private bool UpdateHiddenDevices(string deviceEntry, bool add)
     {
