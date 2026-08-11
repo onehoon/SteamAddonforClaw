@@ -11,6 +11,7 @@ internal sealed class ViiperRuntimeManager : IDisposable
     private readonly string _dllPath;
     private IViiperNativeApi? _api;
     private uint? _busId;
+    private uint _nextBusCandidate = 1;
     private readonly HashSet<uint> _devices = [];
     private bool _disposed;
 
@@ -63,9 +64,9 @@ internal sealed class ViiperRuntimeManager : IDisposable
     private void EnsureBus()
     {
         if (_busId is not null) return;
-        for (uint candidate = 1; candidate < uint.MaxValue; candidate++)
+        for (var candidate = _nextBusCandidate; candidate < uint.MaxValue; candidate++)
         {
-            if (_api!.CreateBus(candidate) == 0) { _busId = candidate; return; }
+            if (_api!.CreateBus(candidate) == 0) { _busId = candidate; _nextBusCandidate = candidate + 1; return; }
         }
         throw new InvalidOperationException(_api!.GetLastError() ?? "VIIPER bus creation failed.");
     }
@@ -81,12 +82,14 @@ internal sealed class ViiperRuntimeManager : IDisposable
     {
         if (_api is null || _busId != busId || !_devices.Contains(deviceId)) return false;
         var result = _api.RemoveDevice(busId, deviceId) == 0;
-        if (result) _devices.Remove(deviceId);
-        if (_devices.Count == 0 && _busId is { } ownedBus)
+        if (result && _devices.Count == 1)
         {
-            if (_api.RemoveBus(ownedBus) != 0) return false;
+            if (_api.RemoveBus(busId) != 0) return false;
+            _devices.Remove(deviceId);
             _busId = null;
+            return true;
         }
+        if (result) _devices.Remove(deviceId);
         return result;
     }
 
