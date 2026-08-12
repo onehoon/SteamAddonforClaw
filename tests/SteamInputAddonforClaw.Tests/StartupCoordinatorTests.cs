@@ -119,6 +119,36 @@ public sealed class StartupCoordinatorTests
     }
 
     [Fact]
+    public async Task BaselineValidation_RunsOnlyAfterStableStockCenterMReadiness()
+    {
+        var events = new List<string>();
+        var baseline = new FakeBaselineValidator(events, true);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            startupBaselineValidator: baseline);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.RecoverySafe);
+        Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentWaiter", "Baseline"], events);
+        Assert.Equal(1, baseline.Calls);
+    }
+
+    [Fact]
+    public async Task BaselineValidation_DoesNotRunForUnsupportedEnvironment()
+    {
+        var events = new List<string>();
+        var baseline = new FakeBaselineValidator(events, true);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events, ClawTweaksState.InstalledInactive), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            startupBaselineValidator: baseline);
+
+        await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(0, baseline.Calls);
+    }
+
+    [Fact]
     public async Task CanStartRuntimeAsync_WhenUpdateIsScheduled_DoesNotInitializeEnvironment()
     {
         var events = new List<string>();
@@ -207,6 +237,16 @@ public sealed class StartupCoordinatorTests
         {
             events.Add("UpdateGate");
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class FakeBaselineValidator(List<string> events, bool safe) : IStartupNativeBaselineValidator
+    {
+        public int Calls { get; private set; }
+        public Task<StartupNativeBaselineResult> ValidateAsync(CancellationToken cancellationToken)
+        {
+            Calls++; events.Add("Baseline");
+            return Task.FromResult(new StartupNativeBaselineResult(safe, safe ? "ok" : "failed"));
         }
     }
 

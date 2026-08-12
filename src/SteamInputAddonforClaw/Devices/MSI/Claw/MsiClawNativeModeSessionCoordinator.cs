@@ -209,16 +209,9 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (journal.Status != RecoveryStatus.Success) return MsiClawNativeModeEnterResult.Failure(false, "RecoveryJournalUnavailable");
         _snapshot = captured.Snapshot;
         lock (_recoveryStateSync) { _recoveryBoundaryOwned = true; _recoverySessionId = journal.Journal!.RecoverySessionId; }
-        if (original.Mode == MsiClawNativeMode.DirectInput)
-        {
-            AppLog.Debug("NativeMode", "NativeModeAlreadyTarget", ("OriginalMode", original.Mode), ("TargetMode", MsiClawNativeMode.DirectInput), ("Action", "NoModeSwitch"));
-        }
-        else
-        {
-            var identity = MsiClawPhysicalIdentity.FromPayload(original);
-            var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
-            if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
-        }
+        var identity = MsiClawPhysicalIdentity.FromPayload(original);
+        var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(true, "PowerGateChangedAfterModeSwitch");
         _active = true;
         _safetyMonitor = new CancellationTokenSource();
@@ -316,7 +309,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private static string? ValidateOriginalState(MsiClawNativeStatePayload original)
     {
         if (original.IdentityConfidence != MsiClawIdentityConfidence.Strong) return "PhysicalIdentityNotStrong";
-        return original.Mode is MsiClawNativeMode.XInput or MsiClawNativeMode.DirectInput ? null : "OriginalModeUnsupported";
+        return original.Mode == MsiClawNativeMode.XInput ? null : "OriginalModeUnsupported";
     }
 
     private void MarkRecoveryUnsafe(string reason)

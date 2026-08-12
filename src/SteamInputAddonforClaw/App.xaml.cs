@@ -75,13 +75,17 @@ public partial class App : Application
         var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher, addonOwnedVirtualDeviceTracker);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
         _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
+        var startupBaselineValidator = msiClawAdapter.NativeState is MsiClawNativeStateManager startupNativeState
+            ? new MsiClawStartupBaselineService(startupNativeState)
+            : null;
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(),
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
             recoveryManager: _recoveryManager,
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
-            hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
+            hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry),
+            startupBaselineValidator: startupBaselineValidator);
 
         try
         {

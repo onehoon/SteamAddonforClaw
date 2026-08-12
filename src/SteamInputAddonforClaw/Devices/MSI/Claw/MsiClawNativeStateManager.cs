@@ -3,6 +3,7 @@ using System.Text.Json;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Startup;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -100,6 +101,23 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         return restoredPayload is not null && PayloadMatchesOriginalState(restoredPayload, original)
             ? RestoreSucceeded()
             : new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "RestoredStateMismatch");
+    }
+
+    internal async Task<StartupNativeBaselineResult> EnsureStartupXInputBaselineAsync(CancellationToken cancellationToken)
+    {
+        var captured = CaptureSnapshot();
+        if (!captured.AllowsMutation || captured.Snapshot is null) return new(false, captured.Reason);
+        var current = captured.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
+        if (current is null || current.IdentityConfidence != MsiClawIdentityConfidence.Strong) return new(false, "PhysicalIdentityNotStrong");
+        if (current.Mode == MsiClawNativeMode.XInput) return new(true, "AlreadyXInputBaseline");
+        if (current.Mode != MsiClawNativeMode.DirectInput) return new(false, "UnsupportedNativeMode");
+        var transition = await SwitchModeAsync(MsiClawNativeMode.XInput, MsiClawPhysicalIdentity.FromPayload(current), cancellationToken).ConfigureAwait(false);
+        if (!transition.Succeeded) return new(false, transition.Reason);
+        var verified = await CaptureStableRestoreSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        var restored = verified.Snapshot?.Payload.Deserialize<MsiClawNativeStatePayload>();
+        return verified.AllowsMutation && restored is { Mode: MsiClawNativeMode.XInput, IdentityConfidence: MsiClawIdentityConfidence.Strong }
+            ? new(true, "XInputBaselineVerified")
+            : new(false, "XInputBaselineVerificationFailed");
     }
 
     private static MsiClawNativeMode? ModeFor(ushort? productId) => productId switch

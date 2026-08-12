@@ -141,6 +141,20 @@ public sealed class MsiClawNativeStateManagerTests
     }
 
     [Fact]
+    public async Task StartupBaseline_NormalizesDirectInputToVerifiedXInput()
+    {
+        var devices = new MutableModeEnumerator(Guid.NewGuid()) { Mode = MsiClawNativeMode.DirectInput };
+        var controller = new ApplyingModeController(devices);
+        var manager = new MsiClawNativeStateManager(devices, controller);
+
+        var result = await manager.EnsureStartupXInputBaselineAsync(CancellationToken.None);
+
+        Assert.True(result.IsSafeToContinue);
+        Assert.Equal(MsiClawNativeMode.XInput, devices.Mode);
+        Assert.NotNull(controller.SourceIdentity);
+    }
+
+    [Fact]
     public async Task Restore_AllowsLegacyUsableContainerSnapshotWithoutPhysicalKey()
     {
         var container = Guid.NewGuid();

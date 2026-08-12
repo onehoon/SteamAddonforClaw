@@ -13,6 +13,7 @@ internal sealed class StartupCoordinator
     private readonly IRecoveryManager? _recoveryManager;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
+    private readonly IStartupNativeBaselineValidator? _startupBaselineValidator;
 
     public StartupCoordinator(
         IUpdateGate updateGate,
@@ -20,7 +21,8 @@ internal sealed class StartupCoordinator
         IControllerEnvironmentWaiter environmentWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
-        IRecoveryManager? recoveryManager = null)
+        IRecoveryManager? recoveryManager = null,
+        IStartupNativeBaselineValidator? startupBaselineValidator = null)
     {
         _updateGate = updateGate;
         _environmentDetector = environmentDetector;
@@ -28,6 +30,7 @@ internal sealed class StartupCoordinator
         _recoveryManager = recoveryManager;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
+        _startupBaselineValidator = startupBaselineValidator;
     }
 
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
@@ -94,6 +97,17 @@ internal sealed class StartupCoordinator
         AppLog.Info("Environment", "Controller environment readiness wait started.", ("Mode", environment.Mode));
         var readiness = await _environmentWaiter.WaitUntilStableAsync(environment.Mode, cancellationToken).ConfigureAwait(false);
         AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
+        if (environment.Mode == ControllerEnvironmentMode.StockCenterM && readiness == ControllerEnvironmentReadiness.Stable && _startupBaselineValidator is not null)
+        {
+            var baseline = await _startupBaselineValidator.ValidateAsync(cancellationToken).ConfigureAwait(false);
+            if (!baseline.IsSafeToContinue)
+            {
+                AppLog.Warn("Startup", "Startup native baseline validation failed; routing remains passive.", null, ("Reason", baseline.Reason));
+                return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
+            }
+        }
+        else if (environment.Mode == ControllerEnvironmentMode.StockCenterM && readiness != ControllerEnvironmentReadiness.Stable)
+            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
         return new StartupResult(true, environment.Mode, readiness);
     }
 

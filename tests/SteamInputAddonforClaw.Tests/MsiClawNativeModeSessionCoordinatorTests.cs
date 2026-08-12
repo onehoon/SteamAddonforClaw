@@ -503,22 +503,18 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task DirectInputOriginalState_EntersAndRestoresWithoutAnyModeWrite()
+    public async Task DirectInputOriginalState_RemainsUnsupportedForRouting()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.DirectInput);
         var modeController = new FakeModeController(devices);
         await using var coordinator = CreateCoordinator(devices, modeController);
 
-        Assert.True((await coordinator.InspectForPipelineAsync(CancellationToken.None)).Succeeded);
-        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
-        Assert.True(coordinator.IsActive);
-        Assert.True(coordinator.HasOwnedRecoveryBoundary);
-        Assert.Empty(modeController.Targets);
+        var result = await coordinator.EnterForPipelineAsync(CancellationToken.None);
 
-        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.False(result.Succeeded);
+        Assert.Equal("OriginalModeUnsupported", result.Reason);
         Assert.False(coordinator.IsActive);
         Assert.False(coordinator.HasOwnedRecoveryBoundary);
-        Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
         Assert.Empty(modeController.Targets);
     }
 
