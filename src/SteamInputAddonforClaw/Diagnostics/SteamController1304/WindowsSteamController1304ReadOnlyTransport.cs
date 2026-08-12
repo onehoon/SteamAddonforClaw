@@ -14,18 +14,20 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
     private const uint DigcfDeviceInterface = 0x10;
     private const uint ErrorNoMoreItems = 259;
     private const byte WirelessStateCommand = 0xB4;
+    private static readonly TimeSpan CandidateTimeout = TimeSpan.FromMilliseconds(100);
+    internal static TimeSpan CandidateTimeoutForTests => CandidateTimeout;
 
     public byte[]? RequestConnectionStatus(ControllerDeviceInfo receiver, TimeSpan timeout)
     {
         var candidates = FindCandidates(receiver);
         if (candidates is null || candidates.Count == 0) return null;
-        return SteamController1304CandidateIteration.Query(candidates, timeout, candidate =>
+        return SteamController1304CandidateIteration.Query(candidates, candidate =>
         {
             AppLog.Debug("SteamController1304", "Receiver HID candidate query started.",
                 ("HidInterface", candidate.Path), ("UsagePage", "0xFF00"), ("Usage", "0x0001"),
                 ("InputReportByteLength", candidate.InputReportByteLength), ("OutputReportByteLength", candidate.OutputReportByteLength),
                 ("FeatureReportByteLength", candidate.FeatureReportByteLength));
-            return QueryCandidate(candidate, timeout);
+            return QueryCandidate(candidate, CandidateTimeout);
         });
     }
 
@@ -144,7 +146,7 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
 
 internal static class SteamController1304CandidateIteration
 {
-    internal static TReport? Query<TCandidate, TReport>(IReadOnlyList<TCandidate> candidates, TimeSpan candidateTimeout, Func<TCandidate, TReport?> query)
+    internal static TReport? Query<TCandidate, TReport>(IReadOnlyList<TCandidate> candidates, Func<TCandidate, TReport?> query)
         where TReport : class
     {
         var timedOut = false;

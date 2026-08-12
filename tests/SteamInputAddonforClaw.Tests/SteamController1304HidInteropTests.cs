@@ -35,7 +35,7 @@ public sealed class SteamController1304HidInteropTests
     public void CandidateTimeoutsDoNotPreventLaterCandidateFromSucceeding()
     {
         var queried = new List<int>();
-        var result = SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], TimeSpan.FromMilliseconds(1), candidate =>
+        var result = SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], candidate =>
         {
             queried.Add(candidate);
             if (candidate < 3) throw new TimeoutException();
@@ -51,13 +51,20 @@ public sealed class SteamController1304HidInteropTests
     {
         var queried = new List<int>();
 
-        Assert.Throws<TimeoutException>(() => SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], TimeSpan.FromMilliseconds(1), candidate =>
+        Assert.Throws<TimeoutException>(() => SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], candidate =>
         {
             queried.Add(candidate);
             throw new TimeoutException();
         }));
 
         Assert.Equal([1, 2, 3], queried);
+    }
+
+    [Fact]
+    public void ProductionCandidateTimeoutIsShorterThanProbeTimeout()
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(100), WindowsSteamController1304ReadOnlyTransport.CandidateTimeoutForTests);
+        Assert.True(WindowsSteamController1304ReadOnlyTransport.CandidateTimeoutForTests < TimeSpan.FromMilliseconds(250));
     }
 
     [Fact]
