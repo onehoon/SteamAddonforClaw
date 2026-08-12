@@ -91,7 +91,7 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
             new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
             new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
         }.Select(provider => provider.Capture()).ToArray();
-        var environment = new ClawTweaksEnvironmentDetector(devices).Detect();
+        var environment = new ClawTweaksEnvironmentDetector().Detect();
         return new CurrentDetectionDiscoveryInfo(software, environment, "NotEvaluated");
     }
 

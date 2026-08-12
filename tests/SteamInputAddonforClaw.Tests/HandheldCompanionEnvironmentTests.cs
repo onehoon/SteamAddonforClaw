@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Startup;
+using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
@@ -9,17 +10,25 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class HandheldCompanionEnvironmentTests
 {
     [Fact]
-    public void Detect_WhenHandheldCompanionIsNotRunning_UsesStockMode()
+    public void Detect_WhenHandheldCompanionIsNotInstalledAndNotRunning_UsesStockMode()
     {
-        var environment = CreateDetector(running: false).Detect();
+        var environment = CreateDetector(running: false, installed: false).Detect();
 
         Assert.Equal(ControllerEnvironmentMode.StockCenterM, environment.Mode);
     }
 
     [Fact]
+    public void Detect_WhenHandheldCompanionIsInstalledButNotRunning_IsUnsupported()
+    {
+        var environment = CreateDetector(running: false, installed: true).Detect();
+
+        Assert.Equal(ControllerEnvironmentMode.HHCManaged, environment.Mode);
+    }
+
+    [Fact]
     public void Detect_WhenHandheldCompanionIsRunning_YieldsOwnershipImmediately()
     {
-        var environment = CreateDetector(running: true).Detect();
+        var environment = CreateDetector(running: true, installed: false).Detect();
 
         Assert.Equal(ControllerEnvironmentMode.HHCManaged, environment.Mode);
     }
@@ -28,7 +37,7 @@ public sealed class HandheldCompanionEnvironmentTests
     public void Detect_WhenHandheldCompanionAndClawTweaksEvidenceExist_PrioritizesHandheldCompanion()
     {
         var clawTweaksVirtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
-        var environment = new ClawTweaksEnvironmentDetector(new FakeEnumerator([clawTweaksVirtualController]), new FakeRuntimeDetector(true)).Detect();
+        var environment = new ClawTweaksEnvironmentDetector(new FakeRuntimeDetector(true), handheldCompanionInstallationProbe: new FakeApplicationInstallationProbe(false)).Detect();
 
         Assert.Equal(ControllerEnvironmentMode.HHCManaged, environment.Mode);
     }
@@ -47,47 +56,47 @@ public sealed class HandheldCompanionEnvironmentTests
     }
 
     [Fact]
-    public void Detect_WhenClawTweaksHasOnlyUsbIpNonController_DoesNotTreatItAsActive()
+    public void Detect_WhenClawTweaksIsRunningWithoutTopology_IsStillUnsupported()
     {
         var usbIpDevice = new ControllerDeviceInfo("USB\\VID_1234&PID_5678", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "USB", ["USB\\VID_1234&PID_5678"], [], "USB", null, null, 0x1234, 0x5678, true);
-        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([usbIpDevice]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true));
+        var detector = new ClawTweaksEnvironmentDetector(new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true));
 
         var environment = detector.Detect();
 
-        Assert.Equal(ClawTweaksState.Starting, environment.ClawTweaksState);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
+        Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
     }
 
     [Theory]
     [InlineData("ROOT\\VIGEMBUS\\0001")]
     [InlineData("ROOT\\HANDHELDCOMPANION\\0001")]
-    public void Detect_WhenClawTweaksHasAnotherVirtualController_DoesNotTreatItAsActive(string ancestor)
+    public void Detect_WhenClawTweaksIsRunning_IsUnsupported(string ancestor)
     {
         var virtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, [ancestor], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
-        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([virtualController]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true));
-
-        var environment = detector.Detect();
-
-        Assert.Equal(ClawTweaksState.Starting, environment.ClawTweaksState);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
-    }
-
-    [Fact]
-    public void Detect_WhenClawTweaksHasViiperController_TreatsItAsActive()
-    {
-        var virtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
-        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([virtualController]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true));
+        var detector = new ClawTweaksEnvironmentDetector(new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true));
 
         var environment = detector.Detect();
 
         Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
-        Assert.Equal(ControllerEnvironmentMode.ClawTweaks, environment.Mode);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
+    }
+
+    [Fact]
+    public void Detect_WhenClawTweaksIsRunningWithVirtualDevice_IsUnsupported()
+    {
+        var virtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
+        var detector = new ClawTweaksEnvironmentDetector(new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true));
+
+        var environment = detector.Detect();
+
+        Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
     }
 
     [Fact]
     public void Detect_WhenClawTweaksRuntimeInspectionFails_ReturnsIndeterminate()
     {
-        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([]), new FakeRuntimeDetector(false), new ThrowingClawTweaksRuntimeDetector());
+        var detector = new ClawTweaksEnvironmentDetector(new FakeRuntimeDetector(false), new ThrowingClawTweaksRuntimeDetector());
 
         var environment = detector.Detect();
 
@@ -96,42 +105,42 @@ public sealed class HandheldCompanionEnvironmentTests
     }
 
     [Fact]
-    public void Detect_WhenMsixPackageRuntimeAndUsbIpTopologyExist_UsesClawTweaksMode()
+    public void Detect_WhenClawTweaksIsInstalledAndRunning_IsUnsupported()
     {
         var root = new ControllerDeviceInfo("ROOT\\USB\\0000", Guid.Empty, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "USB", null, "usbip2_ude", null, null, true);
         var controller = new ControllerDeviceInfo("HID\\VID_045E&PID_028E", Guid.NewGuid(), null, ["ROOT\\USB\\0000"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
-        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([controller, root]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true), new FakeInstallationProbe(true));
+        var detector = new ClawTweaksEnvironmentDetector(new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(true), new FakeInstallationProbe(true));
 
         var environment = detector.Detect();
 
-        Assert.Equal(ControllerEnvironmentMode.ClawTweaks, environment.Mode);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
         Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
     }
 
     [Fact]
-    public void Detect_WhenPackageAndVirtualTopologyExistWithoutRuntime_ReturnsIndeterminate()
+    public void Detect_WhenClawTweaksIsInstalledButNotRunning_IsUnsupported()
     {
         var virtualController = new ControllerDeviceInfo("HID\\VIRTUAL", Guid.NewGuid(), null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", ["HID\\VID_045E&PID_028E"], ["HID_DEVICE_UP:0001_U:0005"], "HIDClass", null, null, 0x045E, 0x028E, true);
-        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([virtualController]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(false), new FakeInstallationProbe(true));
+        var detector = new ClawTweaksEnvironmentDetector(new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(false), new FakeInstallationProbe(true));
 
         var environment = detector.Detect();
 
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
-        Assert.Equal(ClawTweaksState.Indeterminate, environment.ClawTweaksState);
-    }
-
-    [Fact]
-    public void Detect_WhenPackageIsInstalledWithoutRuntimeOrTopology_UsesStockCenterM()
-    {
-        var detector = new ClawTweaksEnvironmentDetector(new FakeEnumerator([]), new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(false), new FakeInstallationProbe(true));
-
-        var environment = detector.Detect();
-
-        Assert.Equal(ControllerEnvironmentMode.StockCenterM, environment.Mode);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
         Assert.Equal(ClawTweaksState.InstalledInactive, environment.ClawTweaksState);
     }
 
-    private static ClawTweaksEnvironmentDetector CreateDetector(bool running) => new(new FakeEnumerator([]), new FakeRuntimeDetector(running));
+    [Fact]
+    public void Detect_WhenClawTweaksIsInstalledWithoutRuntime_IsUnsupported()
+    {
+        var detector = new ClawTweaksEnvironmentDetector(new FakeRuntimeDetector(false), new FakeClawTweaksRuntimeDetector(false), new FakeInstallationProbe(true));
+
+        var environment = detector.Detect();
+
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
+        Assert.Equal(ClawTweaksState.InstalledInactive, environment.ClawTweaksState);
+    }
+
+    private static ClawTweaksEnvironmentDetector CreateDetector(bool running, bool installed) => new(new FakeRuntimeDetector(running), installationProbe: new FakeInstallationProbe(false), handheldCompanionInstallationProbe: new FakeApplicationInstallationProbe(installed));
 
     private sealed class FakeRuntimeDetector(bool running) : IHandheldCompanionRuntimeDetector
     {
@@ -140,12 +149,12 @@ public sealed class HandheldCompanionEnvironmentTests
 
     private sealed class FakeClawTweaksRuntimeDetector(bool running) : IClawTweaksRuntimeDetector
     {
-        public bool IsRunning() => running;
+        public bool IsRunning(ClawTweaksInstallationInfo _) => running;
     }
 
     private sealed class ThrowingClawTweaksRuntimeDetector : IClawTweaksRuntimeDetector
     {
-        public bool IsRunning() => throw new InvalidOperationException();
+        public bool IsRunning(ClawTweaksInstallationInfo _) => throw new InvalidOperationException();
     }
 
     private sealed class FakeInstallationProbe(bool installed) : IClawTweaksInstallationProbe
@@ -155,9 +164,9 @@ public sealed class HandheldCompanionEnvironmentTests
             : new(false, null, null, "None");
     }
 
-    private sealed class FakeEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
+    private sealed class FakeApplicationInstallationProbe(bool installed) : IApplicationInstallationProbe
     {
-        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices;
+        public ApplicationInstallationInfo Detect() => new(installed, installed ? "TestInstalled" : "TestNotInstalled");
     }
 
     private sealed class ContinueUpdateGate : IUpdateGate
