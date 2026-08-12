@@ -50,25 +50,14 @@ public sealed class SystemStatusTests
 
     [Theory]
     [InlineData((int)RoutingDecisionKind.Eligible, (int)AddonOperationalStatus.Ready)]
-    [InlineData((int)RoutingDecisionKind.VetoedForSession, (int)AddonOperationalStatus.Passive)]
     [InlineData((int)RoutingDecisionKind.WaitingForSteam, (int)AddonOperationalStatus.WaitingForSteam)]
     [InlineData((int)RoutingDecisionKind.SetupRequired, (int)AddonOperationalStatus.SetupRequired)]
     [InlineData((int)RoutingDecisionKind.Indeterminate, (int)AddonOperationalStatus.Indeterminate)]
     public void AddonStatus_MapsCanonicalRoutingDecision(int kindValue, int expectedValue)
     {
-        var status = AddonStatusEvaluator.Map(new((RoutingDecisionKind)kindValue, RoutingDecisionReason.Eligible), new(ExternalControllerAssessmentStatus.Clear, 0, []), Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
+        var status = AddonStatusEvaluator.Map(new((RoutingDecisionKind)kindValue, RoutingDecisionReason.Eligible), Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
 
         Assert.Equal((AddonOperationalStatus)expectedValue, status.Status);
-    }
-
-    [Fact]
-    public void AddonStatus_ExternalControllerPresentationUsesFriendlyName()
-    {
-        var assessment = new ExternalControllerAssessment(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device("Xbox Wireless Controller", 0x045E, 0x0B13)]);
-
-        var status = AddonStatusEvaluator.Map(new(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerPresent), assessment, Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
-
-        Assert.Equal("External physical controller detected: Xbox Wireless Controller.", status.Reason);
     }
 
     [Fact]
@@ -76,7 +65,6 @@ public sealed class SystemStatusTests
     {
         var status = AddonStatusEvaluator.Map(
             new(RoutingDecisionKind.Passive, RoutingDecisionReason.UnsupportedDevice),
-            new(ExternalControllerAssessmentStatus.Clear, 0, []),
             Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
 
         Assert.Equal(AddonOperationalStatus.Unsupported, status.Status);
@@ -84,74 +72,21 @@ public sealed class SystemStatusTests
     }
 
     [Fact]
-    public void ExternalControllerAssessment_HhcManagedEnvironmentFailsClosed()
+    public void AddonStatus_AddonOwnedOutputIdentityUncertainMapsToIndeterminatePresentation()
     {
-        var result = ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(
-            new(ExternalControllerAssessmentStatus.Clear, 0, []),
-            ControllerEnvironmentMode.HHCManaged,
-            ControllerEnvironmentReadiness.Stable);
+        var status = AddonStatusEvaluator.Map(
+            new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.AddonOwnedOutputIdentityUncertain),
+            Compatibility(ControllerEnvironmentCompatibilityStatus.Supported));
 
-        Assert.Equal(ExternalControllerAssessmentStatus.Indeterminate, result.Status);
-    }
-
-    [Fact]
-    public void ExternalControllerAssessment_ExternalControllerRemainsVetoInUnstableEnvironment()
-    {
-        var assessment = new ExternalControllerAssessment(
-            ExternalControllerAssessmentStatus.ExternalPresent,
-            1,
-            [Device("Xbox Wireless Controller", 0x045E, 0x0B13)]);
-
-        var result = ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(
-            assessment,
-            ControllerEnvironmentMode.HHCManaged,
-            ControllerEnvironmentReadiness.Indeterminate);
-
-        Assert.Same(assessment, result);
-    }
-
-    [Fact]
-    public void ExternalControllerCards_ClearProducesOneClearCard()
-    {
-        var cards = ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.Clear, 0, []));
-
-        var card = Assert.Single(cards);
-        Assert.Equal("No External Controller", card.Name);
-        Assert.Equal("Clear", card.Status);
-    }
-
-    [Fact]
-    public void ExternalControllerCards_UseFriendlyNameAndListEveryController()
-    {
-        var cards = ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.ExternalPresent, 2, [Device("Wireless Controller", 0x054C, 0x09CC), Device("Xbox Wireless Controller", 0x045E, 0x0B13)]));
-
-        Assert.Equal(2, cards.Count);
-        Assert.Equal(["Wireless Controller", "Xbox Wireless Controller"], cards.Select(card => card.Name));
-        Assert.Equal("VID 045E · PID 0B13", cards[1].Secondary);
-    }
-
-    [Fact]
-    public void ExternalControllerCards_UseVidPidFallbackWhenFriendlyNameIsMissing()
-    {
-        var card = Assert.Single(ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.ExternalPresent, 1, [Device(null, 0x1234, 0x5678)])));
-
-        Assert.Equal("Controller (VID 1234 / PID 5678)", card.Name);
-        Assert.Equal("Detected", card.Status);
-    }
-
-    [Fact]
-    public void ExternalControllerCards_IndeterminateDoesNotReportClear()
-    {
-        var card = Assert.Single(ExternalControllerStatusCardFactory.Create(new(ExternalControllerAssessmentStatus.Indeterminate, 0, [])));
-
-        Assert.Equal("Indeterminate", card.Status);
+        Assert.Equal(AddonOperationalStatus.Indeterminate, status.Status);
+        Assert.Contains("virtual controller identity", status.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public async Task SystemStatusProvider_ReusesPrerequisiteAssessmentAndBuildsOneSnapshot()
     {
         var prerequisites = Prerequisites(PrerequisiteStatus.Missing);
-        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))], new FakePrerequisiteInspector(prerequisites), () => SteamSessionState.FromRunningAppId(0), () => new(ExternalControllerAssessmentStatus.Clear, 0, []), () => true);
+        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))], new FakePrerequisiteInspector(prerequisites), () => SteamSessionState.FromRunningAppId(0), () => true);
 
         var snapshot = await provider.CaptureAsync();
 
@@ -176,7 +111,6 @@ public sealed class SystemStatusTests
             ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => SteamSessionState.FromRunningAppId(1),
-            () => new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []),
             () => false);
 
         var snapshot = await provider.CaptureAsync();
@@ -187,7 +121,7 @@ public sealed class SystemStatusTests
     }
 
     [Fact]
-    public async Task SystemStatusProvider_CapturesExternalControllerAssessmentOncePerSnapshot()
+    public async Task SystemStatusProvider_CapturesAddonOwnedOutputIdentityUncertaintyOncePerSnapshot()
     {
         var calls = 0;
         var provider = new SystemStatusProvider(
@@ -201,19 +135,41 @@ public sealed class SystemStatusTests
             ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => SteamSessionState.FromRunningAppId(1),
+            () => true,
             () =>
             {
                 calls++;
-                return new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []);
-            },
-            () => true);
+                return false;
+            });
 
         var snapshot = await provider.CaptureAsync();
 
         Assert.Equal(1, calls);
-        Assert.Equal(ExternalControllerAssessmentStatus.Clear, snapshot.ExternalController.Status);
         Assert.Equal(RoutingDecisionKind.Eligible, snapshot.RoutingDecision.Kind);
         Assert.Equal(AddonOperationalStatus.Ready, snapshot.Addon.Status);
+    }
+
+    [Fact]
+    public async Task SystemStatusProvider_AddonOwnedOutputIdentityUncertain_FailsSafeIndependentOfEnvironment()
+    {
+        var provider = new SystemStatusProvider(
+            new FakeDeviceProvider(),
+            SupportedProbeFactory(),
+            SupportedHardware(),
+            [
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)),
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)),
+                new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))
+            ],
+            new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
+            () => SteamSessionState.FromRunningAppId(1),
+            () => true,
+            () => true);
+
+        var snapshot = await provider.CaptureAsync();
+
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.AddonOwnedOutputIdentityUncertain), snapshot.RoutingDecision);
+        Assert.Equal(AddonOperationalStatus.Indeterminate, snapshot.Addon.Status);
     }
 
     [Fact]
@@ -230,7 +186,6 @@ public sealed class SystemStatusTests
             ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => SteamSessionState.FromRunningAppId(1),
-            () => new(ExternalControllerAssessmentStatus.Clear, 0, []),
             () => true);
 
         var snapshot = await provider.CaptureAsync();

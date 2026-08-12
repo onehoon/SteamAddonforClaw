@@ -1,4 +1,3 @@
-using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Steam;
@@ -14,11 +13,10 @@ internal sealed class SystemStatusProvider(
     IControllerEnvironmentAssessmentProvider environmentAssessmentProvider,
     IRuntimePrerequisiteInspector prerequisiteInspector,
     Func<SteamSessionState> steamStateProvider,
-    Func<ExternalControllerAssessment> externalControllerProvider,
     Func<bool> recoverySafeProvider,
-    IRoutingSessionStateMachine? routingSessionStateMachine = null) : ISystemStatusProvider
+    Func<bool>? addonOwnedOutputIdentityUncertainProvider = null) : ISystemStatusProvider
 {
-    private readonly IRoutingSessionStateMachine _routingSessionStateMachine = routingSessionStateMachine ?? new RoutingSessionStateMachine();
+    private readonly Func<bool> _addonOwnedOutputIdentityUncertainProvider = addonOwnedOutputIdentityUncertainProvider ?? (() => false);
 
     internal SystemStatusProvider(
         IDeviceInformationProvider deviceInformationProvider,
@@ -27,12 +25,11 @@ internal sealed class SystemStatusProvider(
         IReadOnlyList<IControllerSoftwareStatusProvider> softwareProviders,
         IRuntimePrerequisiteInspector prerequisiteInspector,
         Func<SteamSessionState> steamStateProvider,
-        Func<ExternalControllerAssessment> externalControllerProvider,
         Func<bool> recoverySafeProvider,
-        IRoutingSessionStateMachine? routingSessionStateMachine = null)
+        Func<bool>? addonOwnedOutputIdentityUncertainProvider = null)
         : this(deviceInformationProvider, deviceProbeContextFactory, hardwareCompatibilityEvaluator,
             new ControllerEnvironmentAssessmentProvider(softwareProviders), prerequisiteInspector, steamStateProvider,
-            externalControllerProvider, recoverySafeProvider, routingSessionStateMachine)
+            recoverySafeProvider, addonOwnedOutputIdentityUncertainProvider)
     {
     }
     public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) =>
@@ -49,15 +46,15 @@ internal sealed class SystemStatusProvider(
         var compatibility = environment.Compatibility;
         var prerequisites = prerequisiteInspector.Inspect();
         var steam = TrySteamState();
-        var external = TryExternalControllerAssessment();
         var recoverySafe = TryRecoverySafety();
-        var decision = _routingSessionStateMachine.Evaluate(new RoutingPolicyInput(steam, external, hardwareCompatibility, compatibility, prerequisites, recoverySafe));
-        var addon = AddonStatusEvaluator.Map(decision, external, compatibility);
+        var addonOwnedOutputIdentityUncertain = TryAddonOwnedOutputIdentityUncertain();
+        var decision = RoutingEligibilityPolicy.Evaluate(new RoutingPolicyInput(steam, hardwareCompatibility, compatibility, prerequisites, recoverySafe, addonOwnedOutputIdentityUncertain));
+        var addon = AddonStatusEvaluator.Map(decision, compatibility);
         AppLog.Debug("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
-        return new SystemStatusSnapshot(device, hardwareCompatibility, software, compatibility, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId, steam.Source), external, decision, addon, recoverySafe);
+        return new SystemStatusSnapshot(device, hardwareCompatibility, software, compatibility, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId, steam.Source), decision, addon, recoverySafe);
     }
 
     private SteamSessionState TrySteamState() { try { return steamStateProvider(); } catch { return SteamSessionState.FromRunningAppId(0); } }
-    private ExternalControllerAssessment TryExternalControllerAssessment() { try { return externalControllerProvider(); } catch { return new(ExternalControllerAssessmentStatus.Indeterminate, 0, []); } }
     private bool TryRecoverySafety() { try { return recoverySafeProvider(); } catch { return false; } }
+    private bool TryAddonOwnedOutputIdentityUncertain() { try { return _addonOwnedOutputIdentityUncertainProvider(); } catch { return true; } }
 }

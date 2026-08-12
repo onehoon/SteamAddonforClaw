@@ -471,7 +471,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     ];
 
     private static SystemStatusSnapshot Snapshot(RoutingDecision decision, IReadOnlyList<ControllerSoftwareStatus> software) =>
-        new(new("Test", "Test", "Test", []), null!, software, null!, null!, null!, null!, decision, null!, true);
+        new(new("Test", "Test", "Test", []), null!, software, null!, null!, null!, decision, null!, true);
 
     private static RoutingDecision Eligible() => new(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible);
     private static RoutingDecision WaitingForSteam() => new(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive);

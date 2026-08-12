@@ -168,21 +168,20 @@ public sealed class ControllerEnvironmentCompatibilityTests
     }
 
     [Fact]
-    public void UnsupportedCompatibility_MakesRoutingPassiveWithoutExternalLatch()
+    public void UnsupportedCompatibility_MakesRoutingPassive()
     {
         var compatibility = new ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus.Unsupported, ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion);
-        var input = new RoutingPolicyInput(SteamSessionState.FromRunningAppId(1), new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []), SupportedHardware(), compatibility, ReadyPrerequisites(), true);
-        var machine = new RoutingSessionStateMachine();
-        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Passive, RoutingDecisionReason.ControllerEnvironmentUnsupported), machine.Evaluate(input));
+        var input = new RoutingPolicyInput(SteamSessionState.FromRunningAppId(1), SupportedHardware(), compatibility, ReadyPrerequisites(), true);
+        Assert.Equal(new RoutingDecision(RoutingDecisionKind.Passive, RoutingDecisionReason.ControllerEnvironmentUnsupported), RoutingEligibilityPolicy.Evaluate(input));
         var supported = input with { Compatibility = new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported) };
-        Assert.Equal(RoutingDecisionKind.Eligible, machine.Evaluate(supported).Kind);
+        Assert.Equal(RoutingDecisionKind.Eligible, RoutingEligibilityPolicy.Evaluate(supported).Kind);
     }
 
     [Fact]
     public void CompatibilityUnsupported_MapsToSpecificAddonMessage()
     {
         var compatibility = new ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus.Unsupported, ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion);
-        var addon = AddonStatusEvaluator.Map(new(RoutingDecisionKind.Passive, RoutingDecisionReason.ControllerEnvironmentUnsupported), new(ExternalControllerAssessmentStatus.Clear, 0, []), compatibility);
+        var addon = AddonStatusEvaluator.Map(new(RoutingDecisionKind.Passive, RoutingDecisionReason.ControllerEnvironmentUnsupported), compatibility);
         Assert.Equal(AddonOperationalStatus.Unsupported, addon.Status);
         Assert.Contains("ClawTweaks is installed", addon.Reason);
     }

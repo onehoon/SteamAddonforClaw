@@ -243,13 +243,11 @@ internal sealed class RoutingPipelineSessionCoordinator
     private static string ActionReason(RoutingDecision decision, RoutingActionKind action) => action switch
     {
         RoutingActionKind.EnterOverride => "RoutingBecameEligible",
-        RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.VetoedForSession => "ExternalControllerVeto",
         RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.WaitingForSteam => "SteamSessionEnded",
         RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.SetupRequired => "SetupRequired",
         RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.Indeterminate && decision.Reason == RoutingDecisionReason.RecoveryUnsafe => "RecoveryUnsafe",
         RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.Indeterminate => "IndeterminateState",
         RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.Passive && decision.Reason == RoutingDecisionReason.ControllerEnvironmentUnsupported => "ControllerEnvironmentUnsupported",
-        RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.Passive && decision.Reason == RoutingDecisionReason.ExternalControllerPresent => "ExternalControllerVeto",
         RoutingActionKind.ExitOverride => "RoutingNoLongerEligible",
         _ => "AlreadyPassive"
     };

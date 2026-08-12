@@ -19,21 +19,14 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private bool _active;
     private bool _recoveryBoundaryOwned;
     private Guid? _recoverySessionId;
-    private readonly Func<bool>? _mutationAllowed;
-    private readonly Func<CancellationToken, Task> _safetyMonitorDelay;
-    private Func<Task<bool>>? _routingSafetyVetoHandler;
-    private CancellationTokenSource? _safetyMonitor;
-    private bool _vetoLatched;
     private long _decisionGeneration;
     private long? _unsafeRecoveryVersion;
     private bool _routingFaultLatched;
     private readonly Lock _recoveryStateSync = new();
 
-    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, RecoverySafetyState recoverySafety, Func<bool>? mutationAllowed = null, Func<Task<bool>>? routingSafetyVetoHandler = null, Func<CancellationToken, Task>? safetyMonitorDelay = null)
+    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, RecoverySafetyState recoverySafety)
     {
         _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _recoverySafety = recoverySafety;
-        _mutationAllowed = mutationAllowed; _routingSafetyVetoHandler = routingSafetyVetoHandler;
-        _safetyMonitorDelay = safetyMonitorDelay ?? (token => Task.Delay(TimeSpan.FromMilliseconds(500), token));
     }
 
     public string Name => "MsiClawNativeModeSession";
@@ -50,9 +43,6 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         // RecoveryManager may have restored the original snapshot. Force the next effective
         // session observation to perform a fresh capture and transition.
         _active = false;
-        _safetyMonitor?.Cancel();
-        _safetyMonitor?.Dispose();
-        _safetyMonitor = null;
         if (_recoveryBoundaryOwned)
         {
             if (_recovery.HasIncompleteRecovery) return Task.FromResult(false);
@@ -74,9 +64,6 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     public bool HasOwnedRecoveryBoundary { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned; } }
     public Guid? CurrentRecoverySessionId { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned ? _recoverySessionId : null; } }
 
-    internal void SetRoutingSafetyVetoHandler(Func<Task<bool>> handler) =>
-        _routingSafetyVetoHandler = handler ?? throw new ArgumentNullException(nameof(handler));
-
     internal async Task LatchRoutingFaultAsync(string reason, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -91,7 +78,6 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         {
             if (_active || _recoveryBoundaryOwned || _recovery.HasIncompleteRecovery)
                 return false;
-            _vetoLatched = false;
             _routingFaultLatched = false;
             AppLog.Debug("NativeMode", "RoutingFaultLatchCleared", ("Reason", "SteamSessionEnded"));
             return true;
@@ -143,8 +129,6 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
                 return false;
             }
             _decisionGeneration = generation;
-            if (decision.Kind == RoutingDecisionKind.WaitingForSteam && decision.Reason == RoutingDecisionReason.SteamInactive)
-                _vetoLatched = false;
 
             if (decision.Kind == RoutingDecisionKind.Eligible)
             {
@@ -176,13 +160,11 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (_active) return MsiClawNativeModePreflightResult.Failure("AlreadyActive");
         if (_recoveryBoundaryOwned) return MsiClawNativeModePreflightResult.Failure("RecoveryBoundaryAlreadyOwned");
         if (_routingFaultLatched) return MsiClawNativeModePreflightResult.Failure("RoutingFaultLatched");
-        if (_vetoLatched) return MsiClawNativeModePreflightResult.Failure("SessionVetoLatched");
         if (_recoverySafety.Current != RecoverySafety.Safe)
         {
             AppLog.Debug("NativeMode", "NativeForwardMutationDenied", ("RecoverySafety", _recoverySafety.Current));
             return MsiClawNativeModePreflightResult.Failure("RecoverySafetyNotSafe");
         }
-        if (_mutationAllowed is not null && !_mutationAllowed()) return MsiClawNativeModePreflightResult.Failure("MutationNotAllowed");
         if (!_powerGate.IsOpen || !_powerGate.TryAcquire(out _)) return MsiClawNativeModePreflightResult.Failure("PowerGateClosed");
         var captured = _nativeState.CaptureSnapshot();
         if (captured.Snapshot is null) return MsiClawNativeModePreflightResult.Failure("SnapshotUnavailable");
@@ -215,8 +197,6 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(true, "PowerGateChangedAfterModeSwitch");
         _active = true;
-        _safetyMonitor = new CancellationTokenSource();
-        _ = MonitorSafetyAsync(_safetyMonitor.Token);
         return MsiClawNativeModeEnterResult.Success();
     }
 
@@ -244,7 +224,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         }
         var completed = _recovery.CompleteDeviceNativeStateMutation(recoverySessionId);
         if (completed.Status != RecoveryStatus.Success) { if (reportFailure) MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
-        _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false;
+        _snapshot = null; _active = false;
         lock (_recoveryStateSync) { _recoveryBoundaryOwned = false; _recoverySessionId = null; }
         var recoverySafetyCleared = false;
         if (!_recovery.HasIncompleteRecovery && _unsafeRecoveryVersion is { } unsafeVersion &&
@@ -266,39 +246,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     }
 
     public async ValueTask DisposeAsync()
-    { try { await StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { } _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _gate.Dispose(); }
-
-    private async Task MonitorSafetyAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                await _safetyMonitorDelay(cancellationToken).ConfigureAwait(false);
-                if (_mutationAllowed is not null && !_mutationAllowed())
-                {
-                    _vetoLatched = true;
-                    AppLog.Warn("NativeMode", "External controller appeared during active MSI native override; handing off to canonical routing fail-close.", null);
-                    var handler = _routingSafetyVetoHandler;
-                    if (handler is null)
-                        AppLog.Error("NativeMode", "No canonical routing fail-close handler is configured for an active-session external controller veto.", new InvalidOperationException("RoutingSafetyVetoHandlerMissing"));
-                    else
-                    {
-                        try
-                        {
-                            if (await handler().ConfigureAwait(false)) return;
-                            AppLog.Error("NativeMode", "Canonical routing fail-close did not complete after an active-session external controller veto.", new InvalidOperationException("RoutingSafetyVetoCleanupFailed"));
-                        }
-                        catch (Exception exception)
-                        {
-                            AppLog.Error("NativeMode", "Canonical routing fail-close threw after an active-session external controller veto.", exception);
-                        }
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-    }
+    { try { await StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { } _gate.Dispose(); }
 
     private void LatchRoutingFaultCore(string reason)
     {

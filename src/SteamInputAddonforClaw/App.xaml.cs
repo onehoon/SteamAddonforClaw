@@ -34,7 +34,6 @@ public partial class App : Application
     private RecoveryManager? _recoveryManager;
     private bool _isExplicitExit;
     private readonly SingleInstanceGate _singleInstanceGate;
-    private readonly RoutingSessionStateMachine _routingSessionStateMachine = new();
     private DeveloperTestModeState? _developerTestModeState;
     private EffectiveSteamSessionSource? _effectiveSteamSessionSource;
     private readonly DiagnosticSessionTracker _diagnosticSessions = new();
@@ -134,34 +133,10 @@ public partial class App : Application
         {
             _steamSessionWatcher.Start();
             _effectiveSteamSessionSource.Refresh();
-            _routingSessionStateMachine.ObserveSteamSessionState(_effectiveSteamSessionSource.State);
         }
         else
         {
             AppLog.Warn("Recovery", "Steam/controller routing remains stopped because recovery is unsafe.", null, ("Action", "Passive"));
-        }
-
-        var controllerDetector = new ExternalControllerDetector(
-            new WindowsControllerDeviceEnumerator(),
-            classifier);
-
-        ExternalControllerAssessment CaptureExternalControllerAssessment()
-        {
-            var rawAssessment = controllerDetector.Detect();
-            var effectiveAssessment = ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(
-                rawAssessment,
-                environmentMode,
-                environmentReadiness);
-            AppLog.Debug("ExternalController", "External controller assessment evaluated.",
-                ("RawStatus", rawAssessment.Status),
-                ("EffectiveStatus", effectiveAssessment.Status),
-                ("RawCount", rawAssessment.DetectedExternalControllerCount),
-                ("EffectiveCount", effectiveAssessment.DetectedExternalControllerCount),
-                ("EnvironmentMode", environmentMode),
-                ("EnvironmentReadiness", environmentReadiness),
-                ("Adjusted", rawAssessment.Status != effectiveAssessment.Status),
-                ("Reason", rawAssessment.Status == effectiveAssessment.Status ? "None" : "EnvironmentSafety"));
-            return effectiveAssessment;
         }
 
         var recoverySafetyState = new RecoverySafetyState(recoverySafe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
@@ -177,15 +152,13 @@ public partial class App : Application
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())),
                 new ViiperRuntimeInspector()),
             () => _effectiveSteamSessionSource?.State ?? SteamSessionState.FromRunningAppId(0),
-            CaptureExternalControllerAssessment,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
-            routingSessionStateMachine: _routingSessionStateMachine);
+            () => addonOwnedVirtualDeviceTracker.HasUncertainOwnership);
         _msiClawNativeModeSession = nativeState is null ? null : new MsiClawNativeModeSessionCoordinator(
             nativeState,
             _recoveryManager!,
             powerGate,
-            recoverySafetyState,
-            () => CaptureExternalControllerAssessment().Status == ExternalControllerAssessmentStatus.Clear);
+            recoverySafetyState);
         IPowerTransitionParticipant? steamOutputPowerParticipant = null;
         if (_msiClawNativeModeSession is not null)
         {
@@ -214,12 +187,6 @@ public partial class App : Application
                 statusProvider,
                 pipelineSessionCoordinator,
                 [_msiClawNativeModeSession]);
-            _msiClawNativeModeSession.SetRoutingSafetyVetoHandler(async () =>
-            {
-                _routingRuntimeCoordinator.CancelInFlightTransition();
-                var result = await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
-                return result.Succeeded;
-            });
             steamOutputStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false); });
         }
         _userTerminationGuard = new UserTerminationGuard(
@@ -271,7 +238,6 @@ public partial class App : Application
     private void OnEffectiveSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args)
     {
         _diagnosticSessions.Observe(_runningAppIdSource?.GetRunningAppId() ?? 0, args.Current.RunningAppId, args.Current.Source.ToString());
-        _routingSessionStateMachine.ObserveSteamSessionState(args.Current);
         _mainWindow?.UpdateSteamSessionState(args.Current);
         _ = ReconcileRoutingAsync();
     }

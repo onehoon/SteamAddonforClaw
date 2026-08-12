@@ -1,4 +1,3 @@
-using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Routing;
@@ -23,7 +22,6 @@ internal sealed record SystemStatusSnapshot(
     ControllerEnvironmentCompatibilityAssessment Compatibility,
     RuntimePrerequisiteAssessment Prerequisites,
     SteamStatusSnapshot Steam,
-    ExternalControllerAssessment ExternalController,
     RoutingDecision RoutingDecision,
     AddonStatusSnapshot Addon,
     bool RecoverySafe = true);

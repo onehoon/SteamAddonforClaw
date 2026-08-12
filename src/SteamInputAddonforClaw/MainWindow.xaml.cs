@@ -44,7 +44,6 @@ public sealed partial class MainWindow : Window
     private SystemStatusSnapshot? _latestSystemStatus;
     private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
-    private readonly ObservableCollection<StatusCardViewModel> _externalControllerCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _runtimeCards = [];
     private int _isRefreshingStatus;
     private int _isGeneratingEnvironmentDiscoveryReport;
@@ -102,7 +101,6 @@ public sealed partial class MainWindow : Window
         StartupSettingsStatusText.Text = startupRegistrationMessage;
         ControllerSoftwareRepeater.ItemsSource = _softwareCards;
         RoutingComponentsRepeater.ItemsSource = _componentCards;
-        ExternalControllersList.ItemsSource = _externalControllerCards;
         RuntimeStatusList.ItemsSource = _runtimeCards;
         MainNavigationView.SelectedItem = StatusNavigationItem;
         _ = RefreshSystemStatusAsync();
@@ -485,7 +483,6 @@ public sealed partial class MainWindow : Window
             new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
             new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
         ]);
-        Replace(_externalControllerCards, ExternalControllerStatusCardFactory.Create(snapshot.ExternalController));
         var setup = EvaluateFirstTimeSetup(snapshot);
         var canInstall = setup.CanInstallRequiredComponents;
         var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
@@ -570,7 +567,7 @@ public sealed partial class MainWindow : Window
         var hidInstallation = ComponentInstallationAssessmentPolicy.AssessHidHide(hidPackage, snapshot.Prerequisites.HidHide, HidHidePackageMetadata.BundledVersion.ToString());
         var usbInstallation = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
         return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
-            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.ExternalController,
+            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe,
             SteamSessionState.FromRunningAppId(snapshot.Steam.IsActive ? snapshot.Steam.RunningAppId : 0),
             snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstallation, usbInstallation, new(hidHideState, usbIpState, hidBootChanged, usbBootChanged)));
     }
@@ -589,7 +586,6 @@ public sealed partial class MainWindow : Window
                 ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
                 ("CompatibilityStatus", current.Compatibility.Status),
                 ("CompatibilityReason", current.Compatibility.Reason),
-                ("ExternalControllerStatus", current.ExternalController.Status),
                 ("SteamActive", current.Steam.IsActive),
                 ("RecoverySafe", current.RecoverySafe));
             if (!PrerequisiteSetupPromptPolicy.IsInstallable(currentSetup))
@@ -685,13 +681,12 @@ public sealed partial class MainWindow : Window
     {
         var devices = new WindowsControllerDeviceEnumerator();
         var adapter = new MsiClawDeviceAdapter(devices);
-        var classifier = new ControllerDeviceClassifier(adapter.InternalControllerMatcher);
         return new SystemStatusProvider(new WindowsDeviceInformationProvider(),
         new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), devices),
         new HardwareCompatibilityEvaluator(new HandheldDeviceRegistry([adapter])),
         [new MsiCenterMSoftwareStatusProvider(), new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()), new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())],
         new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices)), new ViiperRuntimeInspector()),
-        () => SteamSessionState.FromRunningAppId(0), () => new ExternalControllerDetector(devices, classifier).Detect(), () => true);
+        () => SteamSessionState.FromRunningAppId(0), () => true);
     }
 
     private void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)

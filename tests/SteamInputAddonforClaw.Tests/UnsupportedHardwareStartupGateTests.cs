@@ -58,16 +58,6 @@ public sealed class UnsupportedHardwareStartupGateTests
     }
 
     [Fact]
-    public void UnsupportedExternalControllerPolicy_PreservesRawAssessment()
-    {
-        var clear = new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Clear, 0, []);
-        var external = new ExternalControllerAssessment(ExternalControllerAssessmentStatus.ExternalPresent, 1, []);
-
-        Assert.Same(clear, ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(clear, ControllerEnvironmentMode.Unsupported, ControllerEnvironmentReadiness.NotApplicable));
-        Assert.Same(external, ExternalControllerAssessmentPolicy.ApplyEnvironmentSafety(external, ControllerEnvironmentMode.Unsupported, ControllerEnvironmentReadiness.NotApplicable));
-    }
-
-    [Fact]
     public async Task UnsupportedWaiter_ReturnsNotApplicableWithoutEnumerating()
     {
         var waiter = new ControllerEnvironmentWaiter(new ThrowingEnumerator(), new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()));
