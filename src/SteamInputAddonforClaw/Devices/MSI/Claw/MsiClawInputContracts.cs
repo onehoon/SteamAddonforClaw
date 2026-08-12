@@ -46,6 +46,7 @@ internal interface IMsiClawRuntimeRecoverableInputSource
     void ConfigureRoutingRecovery(
         Func<DirectInputDeviceDescriptor, CancellationToken, ValueTask<bool>> prepareIsolation,
         Action<DirectInputDeviceDescriptor> publishIdentity,
+        Func<bool> recoveryAllowed,
         Func<ValueTask> terminalFaultHandler);
 }
 

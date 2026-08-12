@@ -247,7 +247,7 @@ public sealed class MsiClawInputSourceTests
         var terminalCalls = 0;
         var read = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         device.ReadPerformed += count => { if (count >= 2) read.TrySetResult(); };
-        source.ConfigureRoutingRecovery((_, _) => { rearmCalls++; return ValueTask.FromResult(true); }, _ => { }, () => { terminalCalls++; return ValueTask.CompletedTask; });
+        source.ConfigureRoutingRecovery((_, _) => { rearmCalls++; return ValueTask.FromResult(true); }, _ => { }, () => true, () => { terminalCalls++; return ValueTask.CompletedTask; });
 
         Assert.True(source.StartPrepared(descriptor).Started);
         await read.Task.WaitAsync(TimeSpan.FromSeconds(2));
@@ -274,7 +274,7 @@ public sealed class MsiClawInputSourceTests
         DirectInputDeviceDescriptor? published = null;
         var recoveredRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         secondDevice.ReadPerformed += _ => recoveredRead.TrySetResult();
-        source.ConfigureRoutingRecovery((descriptor, _) => { rearmed = descriptor; return ValueTask.FromResult(true); }, descriptor => published = descriptor, () => ValueTask.CompletedTask);
+        source.ConfigureRoutingRecovery((descriptor, _) => { rearmed = descriptor; return ValueTask.FromResult(true); }, descriptor => published = descriptor, () => true, () => ValueTask.CompletedTask);
 
         Assert.True(source.StartPrepared(original).Started);
         await recoveredRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
@@ -285,6 +285,29 @@ public sealed class MsiClawInputSourceTests
         Assert.Equal(replacement, published);
         Assert.Equal(1, firstDevice.UnacquireCount);
         Assert.Equal(1, firstDevice.DisposeCount);
+    }
+
+    [Fact]
+    public async Task RoutingInputLost_WhenRecoveryPermissionIsRevoked_DoesNotRearmOrAcquireReplacement()
+    {
+        var original = Device(0x0DB0, 0x1902);
+        var replacement = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_REPLACEMENT");
+        var firstDevice = new FakeDevice(new DirectInputOperationException(DirectInputFailureKind.InputLost, new InvalidOperationException()));
+        var secondDevice = new FakeDevice(State());
+        var initial = new FakeEnumerator([], firstDevice);
+        var reopened = new FakeEnumerator([replacement], secondDevice);
+        var enumerators = new Queue<FakeEnumerator>([initial, reopened]);
+        var source = new MsiClawInputSource(() => enumerators.Dequeue());
+        var terminal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var rearmCalls = 0;
+        source.ConfigureRoutingRecovery((_, _) => { rearmCalls++; return ValueTask.FromResult(true); }, _ => { }, () => false, () => { terminal.TrySetResult(); return ValueTask.CompletedTask; });
+
+        Assert.True(source.StartPrepared(original).Started);
+        await terminal.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(0, rearmCalls);
+        Assert.Equal(0, reopened.CreateCount);
+        Assert.Equal(0, secondDevice.AcquireCount);
     }
 
     [Fact]

@@ -156,11 +156,21 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             if (!_journaledWhitelist && _recovery.RecordHidHideWhitelistAddition(_sessionId, _executablePath).Status != RecoveryStatus.Success)
                 return ValueTask.FromResult(false);
             _journaledWhitelist = true;
-            if (!Try(() => _hidHide.AddApplication(_executablePath))) return ValueTask.FromResult(false);
+            var reportedSuccess = Try(() => _hidHide.AddApplication(_executablePath));
             inspection = _hidHide.Inspect();
-            if (!inspection.IsConfigurationReadable || !inspection.ApplicationWhitelist.Contains(_executablePath, StringComparer.OrdinalIgnoreCase))
+            if (!inspection.IsConfigurationReadable)
+            {
+                _ambiguousWhitelist = true;
                 return ValueTask.FromResult(false);
+            }
+            if (!inspection.ApplicationWhitelist.Contains(_executablePath, StringComparer.OrdinalIgnoreCase))
+            {
+                if (_recovery.CompleteHidHideWhitelistAddition(_sessionId, _executablePath).Status == RecoveryStatus.Success)
+                    _journaledWhitelist = false;
+                return ValueTask.FromResult(false);
+            }
             _ownedWhitelist = true;
+            if (!reportedSuccess) return ValueTask.FromResult(false);
         }
 
         var target = descriptor.PnpInstanceId!.Trim();
@@ -175,12 +185,21 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         if (!entry.Journaled && _recovery.RecordHidHideDeviceAddition(_sessionId, target).Status != RecoveryStatus.Success)
             return ValueTask.FromResult(false);
         entry.Journaled = true;
-        if (!Try(() => _hidHide.AddHiddenDevice(target))) return ValueTask.FromResult(false);
+        var reportedDeviceSuccess = Try(() => _hidHide.AddHiddenDevice(target));
         inspection = _hidHide.Inspect();
-        if (!inspection.IsConfigurationReadable || !(inspection.HiddenDeviceEntries ?? []).Any(value => string.Equals(value, target, StringComparison.OrdinalIgnoreCase)))
+        if (!inspection.IsConfigurationReadable)
+        {
+            entry.Ambiguous = true;
             return ValueTask.FromResult(false);
+        }
+        if (!(inspection.HiddenDeviceEntries ?? []).Any(value => string.Equals(value, target, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (_recovery.CompleteHidHideDeviceAddition(_sessionId, target).Status == RecoveryStatus.Success)
+                entry.Journaled = false;
+            return ValueTask.FromResult(false);
+        }
         entry.Owned = true;
-        return ValueTask.FromResult(true);
+        return ValueTask.FromResult(reportedDeviceSuccess);
     }
 
     public ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)

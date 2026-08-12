@@ -22,13 +22,14 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
     public RoutingStageKind Kind => RoutingStageKind.PhysicalInput;
     public MsiClawPhysicalInputIdentity? CurrentIdentity { get { lock (_sync) return _currentIdentity; } }
 
-    internal void ConfigureRuntimeRecovery(MsiClawPhysicalIsolationStage isolation, Func<ValueTask> terminalFaultHandler)
+    internal void ConfigureRuntimeRecovery(MsiClawPhysicalIsolationStage isolation, Func<bool> recoveryAllowed, Func<ValueTask> terminalFaultHandler)
     {
         if (_inputSource is not IMsiClawRuntimeRecoverableInputSource recoverable)
             return;
         recoverable.ConfigureRoutingRecovery(
             (descriptor, cancellationToken) => isolation.RearmAsync(descriptor, cancellationToken),
             PublishRecoveredIdentity,
+            recoveryAllowed,
             terminalFaultHandler);
     }
 

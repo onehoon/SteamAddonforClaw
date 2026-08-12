@@ -15,6 +15,8 @@ The normal Stock Center M routing path can create a recoverable embedded-VIIPER 
 
 The PID_1902 DirectInput layout is independently normalized into device-independent controller state for the Classic Steam Controller output path. The non-Gyro pipeline covers A/B/X/Y, 8-way D-pad, LB/RB, analog and full-pull LT/RT, Back/Start, L3/R3, both sticks, and M1/M2. The Claw right stick is represented as the Classic Steam Controller right pad; R3 is right-pad click, M2 is left grip, and M1 is right grip. Gyro and accelerometer input remain deferred. Native controller-mode switching, recoverable HidHide routing, and automatic RunningAppID-based Steam-session routing are implemented; Developer Test Mode remains a synthetic session source for development and tests only.
 
+During active routing, a DirectInput loss neutralizes input before same-handle reacquisition for `NotAcquired` or bounded exact PID_1902 rediscovery for `InputLost`. Rediscovery joins the current recovery journal for HidHide re-arm and rechecks the external-controller veto before re-arm and replacement acquisition. Successful recovery retains the existing Steam output; terminal recovery faults latch the current Steam session, while normal cancellation does not.
+
 This MVP path does not include gyro, accelerometer, rumble, haptics, Game Bar temporary Xbox360 routing, ClawTweaks production compatibility, or production auto-enable of the complete routing pipeline. Hardware success and Steam recognition remain subject to MSI Claw validation.
 
 > Unofficial project. Not affiliated with MSI or Valve.

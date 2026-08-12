@@ -19,6 +19,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     private Func<DirectInputDeviceDescriptor, CancellationToken, ValueTask<bool>>? _prepareRecoveredIsolation;
     private Action<DirectInputDeviceDescriptor>? _publishRecoveredIdentity;
     private Func<ValueTask>? _terminalRoutingFaultHandler;
+    private Func<bool>? _routingRecoveryAllowed;
     private const int MaxRoutingReopenAttempts = 3;
     private static readonly TimeSpan RoutingRecoveryRetryDelay = TimeSpan.FromMilliseconds(100);
 
@@ -39,10 +40,12 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     public void ConfigureRoutingRecovery(
         Func<DirectInputDeviceDescriptor, CancellationToken, ValueTask<bool>> prepareIsolation,
         Action<DirectInputDeviceDescriptor> publishIdentity,
+        Func<bool> recoveryAllowed,
         Func<ValueTask> terminalFaultHandler)
     {
         _prepareRecoveredIsolation = prepareIsolation ?? throw new ArgumentNullException(nameof(prepareIsolation));
         _publishRecoveredIdentity = publishIdentity ?? throw new ArgumentNullException(nameof(publishIdentity));
+        _routingRecoveryAllowed = recoveryAllowed ?? throw new ArgumentNullException(nameof(recoveryAllowed));
         _terminalRoutingFaultHandler = terminalFaultHandler ?? throw new ArgumentNullException(nameof(terminalFaultHandler));
     }
 
@@ -280,7 +283,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                     if (await TryRecoverRoutingInputAsync(session, exception.Kind).ConfigureAwait(false))
                         continue;
                     stopReason = MsiClawInputStopReason.ReadStateFailed;
-                    session.TerminalRoutingFault = true;
+                    session.TerminalRoutingFault = !session.Cancellation.IsCancellationRequested;
                     break;
                 }
                 catch (Exception exception)
@@ -397,7 +400,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
             catch { return false; }
         }
 
-        if (failure != DirectInputFailureKind.InputLost || _prepareRecoveredIsolation is null || _publishRecoveredIdentity is null)
+        if (failure != DirectInputFailureKind.InputLost || _prepareRecoveredIsolation is null || _publishRecoveredIdentity is null || _routingRecoveryAllowed is null)
             return false;
         for (var attempt = 1; attempt <= MaxRoutingReopenAttempts && !session.Cancellation.IsCancellationRequested; attempt++)
         {
@@ -409,12 +412,18 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                 enumerator = _enumeratorFactory();
                 var selection = MsiClawDirectInputDeviceSelector.Select(enumerator.EnumerateGameControllers());
                 if (!selection.IsSelected || selection.Descriptor is null) throw new InvalidOperationException("RecoveredPid1902SelectionFailed");
+                if (!_routingRecoveryAllowed()) throw new InvalidOperationException("RoutingMutationNotAllowed");
                 if (!await _prepareRecoveredIsolation(selection.Descriptor, session.Cancellation.Token).ConfigureAwait(false)) throw new InvalidOperationException("RecoveredIsolationFailed");
                 session.Cancellation.Token.ThrowIfCancellationRequested();
+                if (!_routingRecoveryAllowed()) throw new InvalidOperationException("RoutingMutationNotAllowed");
                 device = enumerator.CreateDevice(selection.Descriptor);
+                session.Cancellation.Token.ThrowIfCancellationRequested();
+                if (!_routingRecoveryAllowed()) throw new InvalidOperationException("RoutingMutationNotAllowed");
                 device.Acquire();
+                session.Cancellation.Token.ThrowIfCancellationRequested();
                 session.Replace(enumerator, device);
                 enumerator = null; device = null;
+                session.Cancellation.Token.ThrowIfCancellationRequested();
                 _publishRecoveredIdentity(selection.Descriptor);
                 AppLog.Debug("RoutingTrace", "Physical input reopen succeeded.", ("Event", "PhysicalInputRecoverySucceeded"), ("Mode", "Reopen"), ("Attempt", attempt), ("TestSession", session.Id));
                 return true;

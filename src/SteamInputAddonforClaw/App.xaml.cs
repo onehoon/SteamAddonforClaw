@@ -212,8 +212,11 @@ public partial class App : Application
                 pipelineSessionCoordinator,
                 [_msiClawNativeModeSession],
                 () => RoutingExperimentOptions.None);
-            physicalInputStage.ConfigureRuntimeRecovery(physicalIsolationStage, async () =>
+            physicalInputStage.ConfigureRuntimeRecovery(physicalIsolationStage,
+                () => recoverySafetyState.Current == RecoverySafety.Safe && CaptureExternalControllerAssessment().Status == ExternalControllerAssessmentStatus.Clear,
+                async () =>
             {
+                await _msiClawNativeModeSession.LatchRoutingFaultAsync("PhysicalInputRecoveryFailed").ConfigureAwait(false);
                 _routingRuntimeCoordinator.CancelInFlightTransition();
                 await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
             });
