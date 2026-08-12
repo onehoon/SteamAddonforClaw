@@ -34,7 +34,7 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         if (candidates.Count == 0)
             return new(NativeStateCaptureStatus.DeviceNotFound, null, "No known MSI Claw controller identity is present.");
 
-        var logicalCandidates = candidates.GroupBy(LogicalIdentity, StringComparer.OrdinalIgnoreCase)
+        var logicalCandidates = candidates.GroupBy(MsiClawLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderBy(device => device.InstanceId, StringComparer.OrdinalIgnoreCase).ToList()).ToList();
         if (logicalCandidates.Count != 1)
         {
@@ -43,7 +43,7 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
                 ("Reason", "MultipleLogicalMsiControllers"),
                 ("CandidateCount", candidates.Count),
                 ("LogicalGroupCount", logicalCandidates.Count),
-                ("LogicalGroupKeys", string.Join(" | ", logicalCandidates.Select(group => LogicalIdentity(group[0])))),
+                ("LogicalGroupKeys", string.Join(" | ", logicalCandidates.Select(group => MsiClawLogicalIdentity.GetLogicalKey(group[0])))),
                 ("Action", "Passive"));
             return new(NativeStateCaptureStatus.Indeterminate, null, "Multiple logical MSI controller candidates are present.");
         }
@@ -110,14 +110,6 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         _ => null
     };
 
-    private static string LogicalIdentity(ControllerDeviceInfo device)
-    {
-        if (MsiClawPhysicalIdentity.ResolvePhysicalRoot(device) is { } physicalRoot) return $"root:{physicalRoot.RawRootInstanceId}";
-        if (ControllerLogicalIdentity.IsUsableContainerId(device.ContainerId)) return $"container:{device.ContainerId:D}";
-        if (!string.IsNullOrWhiteSpace(device.ParentInstanceId)) return $"parent:{device.ParentInstanceId}";
-        return $"instance:{device.InstanceId}";
-    }
-
     private static bool PayloadMatchesOriginalState(MsiClawNativeStatePayload current, MsiClawNativeStatePayload original) =>
         current.Mode == original.Mode && current.ProductId == original.ProductId;
 
@@ -135,12 +127,31 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         {
             cancellationToken.ThrowIfCancellationRequested();
             current = CaptureSnapshot();
-            if (current.Status != NativeStateCaptureStatus.Indeterminate || !string.Equals(current.Reason, "Multiple logical MSI controller candidates are present.", StringComparison.Ordinal))
+            if (current.Status != NativeStateCaptureStatus.Indeterminate || !HasMixedNativeModeTopology())
                 return current;
             AppLog.Debug("NativeMode", "NativeModeRestoreWaitingForTopologySettle", ("Reason", current.Reason));
             if (Stopwatch.GetTimestamp() >= deadline) return current;
             await Task.Delay(_restoreSettlePollInterval, cancellationToken).ConfigureAwait(false);
         } while (Stopwatch.GetTimestamp() < deadline);
         return current;
+    }
+
+    private bool HasMixedNativeModeTopology()
+    {
+        try
+        {
+            var modes = deviceEnumerator.EnumeratePresentDevices()
+                .Where(device => device.Present && device.VendorId == MsiClawHardware.VendorId)
+                .Select(device => ModeFor(device.ProductId))
+                .Where(mode => mode is MsiClawNativeMode.XInput or MsiClawNativeMode.DirectInput)
+                .Distinct()
+                .ToArray();
+            return modes.Length == 2;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Debug("NativeMode", "NativeModeRestoreTopologyProbeFailed", ("Exception", exception.GetType().Name));
+            return false;
+        }
     }
 }

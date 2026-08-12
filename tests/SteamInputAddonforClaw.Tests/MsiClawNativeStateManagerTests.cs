@@ -227,7 +227,7 @@ public sealed class MsiClawNativeStateManagerTests
         var stale = Topology(0x1901, "ROOT_A");
         var current = Topology(0x1902, "ROOT_B");
         var controller = new RecordingSuccessModeController();
-        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([stale, current], [current], [Topology(0x1901, "ROOT_C")]), controller,
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([stale, current], [stale, current], [current], [Topology(0x1901, "ROOT_C")]), controller,
             TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         var restored = await manager.RestoreSnapshotAsync(Snapshot(new(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_A", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
@@ -243,7 +243,7 @@ public sealed class MsiClawNativeStateManagerTests
         var current = Topology(0x1902, "ROOT_B");
         var stale = Topology(0x1902, "ROOT_B");
         var restoredTarget = Topology(0x1901, "ROOT_C");
-        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([current], [stale, restoredTarget], [restoredTarget]), new RecordingSuccessModeController(),
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([current], [stale, restoredTarget], [stale, restoredTarget], [restoredTarget]), new RecordingSuccessModeController(),
             TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         var restored = await manager.RestoreSnapshotAsync(Snapshot(new MsiClawNativeStatePayload(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_A", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
@@ -257,6 +257,35 @@ public sealed class MsiClawNativeStateManagerTests
         var mixed = new[] { Topology(0x1901, "ROOT_A"), Topology(0x1902, "ROOT_B") };
         var controller = new RecordingSuccessModeController();
         var manager = new MsiClawNativeStateManager(new SequenceEnumerator(mixed), controller, TimeSpan.Zero, TimeSpan.Zero);
+
+        var restored = await manager.RestoreSnapshotAsync(Snapshot(new MsiClawNativeStatePayload(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_A", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Indeterminate, restored.Status);
+        Assert.Equal(0, controller.CallCount);
+    }
+
+    [Fact]
+    public async Task Restore_waits_when_mixed_modes_share_one_fallback_logical_identity()
+    {
+        var container = Guid.NewGuid();
+        var xinput = Device(0x1901, "HID\\XINPUT", container, parentInstanceId: "PARENT_SHARED");
+        var directInput = Device(0x1902, "HID\\DIRECT", container, parentInstanceId: "PARENT_SHARED");
+        var controller = new RecordingSuccessModeController();
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([xinput, directInput], [xinput, directInput], [directInput], [Topology(0x1901, "ROOT_C")]), controller,
+            TimeSpan.FromSeconds(1), TimeSpan.Zero);
+
+        var restored = await manager.RestoreSnapshotAsync(Snapshot(new MsiClawNativeStatePayload(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_A", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+        Assert.Equal(1, controller.CallCount);
+    }
+
+    [Fact]
+    public async Task Restore_rejects_independent_same_mode_controllers_without_settling()
+    {
+        var controller = new RecordingSuccessModeController();
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([Topology(0x1902, "ROOT_A"), Topology(0x1902, "ROOT_B")]), controller,
+            TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         var restored = await manager.RestoreSnapshotAsync(Snapshot(new MsiClawNativeStatePayload(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_A", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
 

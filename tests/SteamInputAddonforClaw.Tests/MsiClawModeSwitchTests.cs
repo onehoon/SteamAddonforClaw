@@ -330,6 +330,20 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public async Task Sentinel_target_aliases_under_same_physical_root_are_one_logical_target()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var root = "USB\\VID_0DB0&PID_1902\\ROOT_B";
+        var first = TargetAlias(root, "PARENT_MI_00", "HID\\TARGET_A");
+        var second = TargetAlias(root, "PARENT_MI_01", "HID\\TARGET_B");
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [first, second]), new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.TargetTopologyVerified);
+    }
+
+    [Fact]
     public async Task Transient_write_failure_re_resolves_and_retries_before_target_appears()
     {
         var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
@@ -360,6 +374,8 @@ public sealed class MsiClawModeSwitchTests
         var child = $"USB\\VID_0DB0&PID_{pid:X4}&MI_00\\{root[^1]}";
         return new(child, container, root, [root], "HID", [], [], "HIDClass", null, null, 0x0DB0, pid, true, UsagePage: pid == 0x1901 ? (ushort)0xFFA0 : (ushort)0xFFF0, Usage: pid == 0x1901 ? (ushort)1 : (ushort)0x40);
     }
+    private static ControllerDeviceInfo TargetAlias(string root, string parent, string instance) =>
+        new(instance, Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), parent, [root], "HID", [], [], "HIDClass", null, null, 0x0DB0, 0x1902, true, UsagePage: 0xFFF0, Usage: 0x0040);
 
     private sealed class SequenceEnumerator(params IReadOnlyList<ControllerDeviceInfo>[] states) : IControllerDeviceEnumerator
     { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Length - 1)]; }

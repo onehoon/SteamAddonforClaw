@@ -95,7 +95,7 @@ internal sealed class MsiClawModeController(
             var current = deviceEnumerator.EnumeratePresentDevices();
             oldGone = !current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == oldPid);
             var targets = current.Where(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId && d.UsagePage == targetTopology.UsagePage && d.Usage == targetTopology.Usage).ToArray();
-            var targetGroups = targets.GroupBy(ControllerLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase).ToArray();
+            var targetGroups = targets.GroupBy(MsiClawLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase).ToArray();
             targetSeen = targetGroups.Length > 0;
             if (targetGroups.Length == 1)
             {
