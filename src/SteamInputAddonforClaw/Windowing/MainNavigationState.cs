@@ -3,6 +3,7 @@ namespace SteamInputAddonforClaw.Windowing;
 internal enum MainNavigationPage
 {
     Status,
+    Controller,
     HowToUse,
     Settings,
     DeveloperMenu,
@@ -19,6 +20,7 @@ internal sealed class MainNavigationState
             ? MainNavigationPage.Settings
             : selectedTag switch
             {
+                "Controller" => MainNavigationPage.Controller,
                 "HowToUse" => MainNavigationPage.HowToUse,
                 _ => MainNavigationPage.Status
             };

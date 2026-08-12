@@ -24,6 +24,11 @@
                     <SymbolIcon Symbol="Help" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem Content="Controller" Tag="Controller">
+                <NavigationViewItem.Icon>
+                    <SymbolIcon Symbol="Repair" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
         </NavigationView.MenuItems>
 
         <Grid>
@@ -55,6 +60,13 @@
                 Spacing="12"
                 Visibility="Collapsed">
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="How to Use" />
+            </StackPanel>
+
+            <StackPanel
+                x:Name="ControllerContent"
+                Padding="32"
+                Visibility="Collapsed">
+                <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
             </StackPanel>
 
             <ScrollViewer
