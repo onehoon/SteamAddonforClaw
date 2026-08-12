@@ -9,97 +9,97 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class StartupCoordinatorTests
 {
     [Fact]
-    public async Task RecoveryRunsBeforeUpdateAndEnvironmentDetection()
+    public async Task LiveBaselineRunsAfterUpdateAndStableStockEnvironment()
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded));
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded), stockCenterMBaseline: new FakeBaseline(events));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.True(result.RecoverySafe);
-        Assert.Equal(["Recovery", "UpdateGate", "EnvironmentDetector", "EnvironmentWaiter"], events);
+        Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentWaiter", "Baseline", "Discard"], events);
     }
 
     [Fact]
-    public async Task SuccessfulIncompleteRecovery_AllowsStartupToContinue()
+    public async Task OldRecoveryPayloadIsNotReadAtStartup()
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Success));
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Success), stockCenterMBaseline: new FakeBaseline(events));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.True(result.RecoverySafe);
-        Assert.Contains("EnvironmentDetector", events);
+        Assert.DoesNotContain("Recovery", events);
+        Assert.Contains("Baseline", events);
     }
 
     [Fact]
-    public async Task RecoveryFailure_AllowsUpdateButBlocksUnsafeStartupWork()
+    public async Task BaselineFailure_BlocksRoutingButStartsPassiveRuntime()
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure));
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded), stockCenterMBaseline: new FakeBaseline(events, false));
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.False(result.RecoverySafe);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
-        Assert.Equal(["Recovery", "UpdateGate"], events);
+        Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
+        Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentWaiter", "Baseline"], events);
     }
 
     [Fact]
-    public async Task RecoveryFailure_AllowsUpdateRestartAndPreservesUnsafeRecoveryResult()
+    public async Task UpdateRestart_DoesNotRunBaselineOrJournalDiscard()
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
-            new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure));
+            new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure), stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.False(result.ShouldStartRuntime);
         Assert.False(result.RecoverySafe);
-        Assert.Equal(["Recovery", "UpdateGate"], events);
+        Assert.Equal(["UpdateGate"], events);
     }
 
     [Fact]
-    public async Task RecoveryException_AllowsUpdateButBlocksUnsafeStartupWork()
+    public async Task JournalDiscardFailure_PreservesLiveBaselineButBlocksRouting()
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(),
-            recoveryManager: new ThrowingRecoveryManager(events, new InvalidOperationException("PnP enumeration failed")));
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure), stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.True(result.ShouldStartRuntime);
         Assert.False(result.RecoverySafe);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
-        Assert.Equal(["Recovery", "UpdateGate"], events);
+        Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
+        Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentWaiter", "Baseline", "Discard"], events);
     }
 
     [Fact]
-    public async Task RecoveryException_AllowsUpdateRestartAndPreservesUnsafeRecoveryResult()
+    public async Task NonStockEnvironment_DoesNotRunBaselineOrJournalDiscard()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
-            new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(),
-            recoveryManager: new ThrowingRecoveryManager(events, new InvalidOperationException("PnP enumeration failed")));
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events, ClawTweaksState.InstalledInactive), new ThrowingEnvironmentWaiter(), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded), stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.False(result.ShouldStartRuntime);
-        Assert.False(result.RecoverySafe);
-        Assert.Equal(["Recovery", "UpdateGate"], events);
+        Assert.True(result.ShouldStartRuntime);
+        Assert.DoesNotContain("Baseline", events);
+        Assert.DoesNotContain("Discard", events);
     }
 
     [Fact]
-    public async Task RecoveryCancellation_PropagatesAndDoesNotRunUpdateGate()
+    public async Task CancellationDuringBaseline_Propagates()
     {
         var events = new List<string>();
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(),
-            recoveryManager: new ThrowingRecoveryManager(events, new OperationCanceledException(cancellation.Token)));
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded), stockCenterMBaseline: new ThrowingBaseline(events, new OperationCanceledException(cancellation.Token)));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coordinator.RunAsync(cancellation.Token));
 
-        Assert.Equal(["Recovery"], events);
+        Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentWaiter", "Baseline"], events);
     }
 
     [Fact]
@@ -115,6 +115,7 @@ public sealed class StartupCoordinatorTests
 
         Assert.True(result.ShouldStartRuntime);
         Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
+        Assert.False(result.RecoverySafe);
         Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentWaiter"], events);
     }
 
@@ -148,6 +149,7 @@ public sealed class StartupCoordinatorTests
 
         Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, result.EnvironmentReadiness);
         Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
+        Assert.False(result.RecoverySafe);
         Assert.Equal(["UpdateGate", "EnvironmentDetector"], events);
     }
 
@@ -166,6 +168,7 @@ public sealed class StartupCoordinatorTests
         Assert.True(result.ShouldStartRuntime);
         Assert.Equal(ControllerEnvironmentReadiness.NotApplicable, result.EnvironmentReadiness);
         Assert.Equal(ControllerEnvironmentMode.Unsupported, result.EnvironmentMode);
+        Assert.False(result.RecoverySafe);
         Assert.DoesNotContain("EnvironmentWaiter", events);
     }
 
@@ -182,6 +185,7 @@ public sealed class StartupCoordinatorTests
         var result = await coordinator.RunAsync(CancellationToken.None);
 
         Assert.Equal(ControllerEnvironmentMode.Unsupported, result.EnvironmentMode);
+        Assert.False(result.RecoverySafe);
         Assert.Empty(waiter.Modes);
     }
 
@@ -198,6 +202,7 @@ public sealed class StartupCoordinatorTests
 
         Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
         Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, result.EnvironmentReadiness);
+        Assert.False(result.RecoverySafe);
         Assert.DoesNotContain("EnvironmentWaiter", events);
     }
 
@@ -218,6 +223,11 @@ public sealed class StartupCoordinatorTests
             events.Add("Recovery");
             return Task.FromResult(new RecoveryResult(status, status == RecoveryStatus.Failure ? "unsafe" : "safe"));
         }
+        public RecoveryResult DiscardStaleStartupJournal()
+        {
+            events.Add("Discard");
+            return new(status, status == RecoveryStatus.Failure ? "discard failed" : "discarded");
+        }
     }
 
     private sealed class ThrowingRecoveryManager(List<string> events, Exception exception) : IRecoveryManager
@@ -227,6 +237,87 @@ public sealed class StartupCoordinatorTests
         {
             events.Add("Recovery");
             return Task.FromException<RecoveryResult>(exception);
+        }
+        public RecoveryResult DiscardStaleStartupJournal() => throw exception;
+    }
+
+    [Fact]
+    public async Task ClawTweaksMode_DoesNotRunStockBaselineOrJournalDiscard()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FixedEnvironmentDetector(events, new(ControllerEnvironmentMode.ClawTweaks, ClawTweaksState.Active)), new ThrowingEnvironmentWaiter(),
+            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded), stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentMode.ClawTweaks, result.EnvironmentMode);
+        Assert.False(result.RecoverySafe);
+        Assert.DoesNotContain("Baseline", events);
+        Assert.DoesNotContain("Discard", events);
+    }
+
+    [Fact]
+    public async Task CorruptStaleJournal_DoesNotPreventLiveBaselineAttempt()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure), stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Contains("Baseline", events);
+        Assert.False(result.RecoverySafe);
+    }
+
+    [Theory]
+    [InlineData((int)HardwareCompatibilityStatus.Unsupported)]
+    [InlineData((int)HardwareCompatibilityStatus.Indeterminate)]
+    public async Task NonSupportedHardware_DoesNotEstablishStartupBoundary(int statusValue)
+    {
+        var status = (HardwareCompatibilityStatus)statusValue;
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(),
+            new FakeProbeFactory(), new FixedHardwareEvaluator(status), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded), stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.False(result.RecoverySafe);
+        Assert.DoesNotContain("Baseline", events);
+        Assert.DoesNotContain("Discard", events);
+    }
+
+    [Fact]
+    public async Task StockReadinessIndeterminate_DoesNotEstablishStartupBoundary()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeEnvironmentDetector(events),
+            new FixedEnvironmentWaiter(events, ControllerEnvironmentReadiness.Indeterminate), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded), stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.False(result.RecoverySafe);
+        Assert.DoesNotContain("Baseline", events);
+        Assert.DoesNotContain("Discard", events);
+    }
+
+    private sealed class FakeBaseline(List<string> events, bool succeeded = true) : IStockCenterMStartupBaseline
+    {
+        public Task<StockCenterMStartupBaselineResult> EstablishAsync(CancellationToken cancellationToken)
+        {
+            events.Add("Baseline");
+            return Task.FromResult(new StockCenterMStartupBaselineResult(succeeded, false, succeeded ? "test" : "failed"));
+        }
+    }
+
+    private sealed class ThrowingBaseline(List<string> events, Exception exception) : IStockCenterMStartupBaseline
+    {
+        public Task<StockCenterMStartupBaselineResult> EstablishAsync(CancellationToken cancellationToken)
+        {
+            events.Add("Baseline");
+            return Task.FromException<StockCenterMStartupBaselineResult>(exception);
         }
     }
 
@@ -260,8 +351,26 @@ public sealed class StartupCoordinatorTests
         }
     }
 
+    private sealed class FixedEnvironmentWaiter(List<string> events, ControllerEnvironmentReadiness readiness) : IControllerEnvironmentWaiter
+    {
+        public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode mode, CancellationToken cancellationToken)
+        {
+            events.Add("EnvironmentWaiter");
+            return Task.FromResult(readiness);
+        }
+    }
+
+    private sealed class FixedEnvironmentDetector(List<string> events, ControllerEnvironment environment) : IControllerEnvironmentDetector
+    {
+        public ControllerEnvironment Detect() { events.Add("EnvironmentDetector"); return environment; }
+    }
+
     private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
     private sealed class FakeHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test"); }
+    private sealed class FixedHardwareEvaluator(HardwareCompatibilityStatus status) : IHardwareCompatibilityEvaluator
+    {
+        public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(status, null, null, "test");
+    }
     private sealed class ThrowingEnvironmentDetector : IControllerEnvironmentDetector { public ControllerEnvironment Detect() => throw new Xunit.Sdk.XunitException("Environment detection must not run after recovery failure."); }
     private sealed class ThrowingEnvironmentWaiter : IControllerEnvironmentWaiter { public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode _, CancellationToken __) => throw new Xunit.Sdk.XunitException("Environment wait must not run after recovery failure."); }
     private sealed class ThrowingProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => throw new Xunit.Sdk.XunitException("Hardware probe must not run after recovery failure."); }

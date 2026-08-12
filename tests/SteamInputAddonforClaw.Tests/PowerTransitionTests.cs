@@ -36,6 +36,26 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public async Task StartupUnsafeProcess_ResumeDoesNotReplayRecoveryAndRemainsPassive()
+    {
+        var gate = new PowerMutationGate(false);
+        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+        var recoveryCalls = 0;
+        var coordinator = new PowerTransitionCoordinator(gate, recovery, _ =>
+        {
+            Interlocked.Increment(ref recoveryCalls);
+            return Task.FromResult(true);
+        }, [], recoveryEnabled: false);
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, false));
+
+        Assert.Equal(0, recoveryCalls);
+        Assert.Equal(RecoverySafety.Unsafe, recovery.Current);
+        Assert.Equal(PowerTransitionState.Unsafe, coordinator.State);
+        Assert.False(gate.IsOpen);
+    }
+
+    [Fact]
     public async Task Resume_automatic_then_resume_suspend_reconciles_once()
     {
         var gate = new PowerMutationGate(true); var calls = 0;

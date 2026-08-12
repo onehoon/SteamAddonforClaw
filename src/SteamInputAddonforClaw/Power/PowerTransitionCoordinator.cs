@@ -10,6 +10,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly RecoverySafetyState _recovery;
     private readonly Func<CancellationToken, Task<bool>> _recover;
     private readonly Func<CancellationToken, Task<bool>>? _afterRecovery;
+    private readonly bool _recoveryEnabled;
     private readonly SemaphoreSlim _serial = new(1, 1);
     private readonly Channel<QueuedNotification> _notifications = Channel.CreateUnbounded<QueuedNotification>(new() { SingleReader = true, SingleWriter = false });
     private readonly CancellationTokenSource _shutdown = new();
@@ -19,9 +20,10 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
-    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null)
+    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true)
     {
         (_gate, _recovery, _recover, _participants, _afterRecovery) = (gate, recovery, recover, participants.ToArray(), afterRecovery);
+        _recoveryEnabled = recoveryEnabled;
         _reader = Task.Run(ProcessNotificationsAsync);
     }
     internal long NextSequence() => Interlocked.Increment(ref _sequence);
@@ -78,6 +80,13 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             if (observation.Signal is not (PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend)) return;
             if (State == PowerTransitionState.Recovering || (_cycle != 0 && _resumeCycle == _cycle)) { AppLog.Debug("Power.Coordinator", "Duplicate resume ignored.", ("Cycle", _cycle), ("Epoch", _gate.Epoch)); return; }
             if (!observation.BarrierApplied) _gate.TryEnterBarrier(out _, out _);
+            if (!_recoveryEnabled)
+            {
+                State = PowerTransitionState.Unsafe;
+                _recovery.Set(RecoverySafety.Unsafe);
+                AppLog.Warn("Power.Recovery", "Resume recovery is disabled because this process did not establish a safe startup boundary.", null, ("Action", "RemainPassive"));
+                return;
+            }
             State = PowerTransitionState.Recovering; _recovery.Set(RecoverySafety.Indeterminate);
             var cycleForResume = _cycle == 0 ? Interlocked.Increment(ref _cycle) : _cycle;
             _resumeCycle = cycleForResume;

@@ -96,13 +96,13 @@ This project is **not** intended to become:
 
 The addon should remain a small routing layer between the MSI Claw controller and Steam Input.
 
-## Native-state recovery
+## Startup baseline and recovery
 
-Native controller state is owned by the active handheld-device adapter. Recovery persists a device-neutral snapshot envelope with a stable device ID and an opaque device-specific payload, then selects the restoring adapter from that journaled ID rather than re-detecting the current handheld. The recovery core never interprets device-specific payloads.
+For the supported Stock MSI Center M environment, every new application process starts from the current physical controller state rather than a previous routing session. After the update gate, compatibility checks, supported-environment verification, and topology stabilization, the addon establishes the live MSI Claw baseline: XInput / PID_1901. If the safely identified live Claw is already PID_1901, no mode write occurs. If it is PID_1902, the existing MSI mode-switch primitive converges it to PID_1901 and verifies re-enumeration. Weak identity, PID_1903, unknown topology, and unsupported environments fail closed without a mode write.
 
-Recovery schema v4 can record multiple addon-owned mutations in one session. Mutation evidence is persisted before the corresponding change, each successful rollback clears only its own recorded mutation, and the journal is deleted only when empty. Crash/startup recovery first verifies that every journaled addon-owned virtual output is absent, then restores and checkpoints the exact native state, and only then restores PhysicalIsolation in the order HidHide Active state, hidden-device entries, and executable whitelist entries. A still-present journaled VIIPER device blocks all lower recovery; a failed native restore keeps all PhysicalIsolation evidence intact; and a later PhysicalIsolation failure retains its evidence while the already checkpointed native restore remains complete. Recovery never claims virtual-output ownership from VID/PID alone: for an unresolved creation intent, a new matching VID/PID candidate is treated conservatively as an unresolved recovery barrier. Temporary Xbox output mutations remain unsupported and fail closed.
+Previous journal state is not desired current state. Previous routing state is not the current routing decision. At application startup or restart, Stock MSI Center M does not resume or reconstruct a prior routing session, restore its exact native state, replay HidHide changes, or use earlier RunningAppID data. After the independently verified live XInput baseline, stale previous-process journal bookkeeping is discarded without interpreting or restoring its payload. If that discard fails, the verified physical controller remains XInput and new routing is passive.
 
-MSI Claw native-state restoration currently verifies an already-restored state only; active controller mode switching and restoration remain a later hardware PoC.
+The normal runtime then reads the current RunningAppID, applies the external-controller veto and all other current eligibility checks, and may create a completely new routing session. Recovery journaling remains in use for mutations made by an active runtime session and for power-transition handling; it is not the startup target authority.
 
 ## Power-transition safety
 
@@ -854,31 +854,19 @@ restore native state
 → clear recovery journal
 ```
 
-On application startup:
-
-```text
-recovery journal incomplete?
-    YES
-    → recover before normal routing/UI
-
-    NO
-    → continue normally
-```
+On Stock MSI Center M application startup, a stale journal is never replayed. The live physical controller is first converged to XInput / PID_1901, then stale bookkeeping is discarded and current-world routing eligibility is evaluated from scratch.
 
 A recovery session may contain multiple recorded mutations. Each mutation's
  recovery evidence is persisted before the corresponding change, and successful
- stage rollback clears only the mutation owned by that stage. The journal is
- deleted only after all recorded mutations have been cleared. Current mixed
- crash recovery first verifies SteamOutput absence, then restores the exact
- native snapshot (the terminated process has already released DirectInput),
- then restores PhysicalIsolation: HidHide Active state, hidden-device entries,
- and executable whitelist entries. A still-present journaled VIIPER device
- blocks every lower recovery step; native restoration failure keeps all
- PhysicalIsolation evidence intact; and a later PhysicalIsolation failure
- preserves its evidence after the native checkpoint. Recovery schema version 4
- is the current format.
-
-Crash recovery takes priority over normal controller initialization.
+ same-process rollback clears only the mutation owned by that stage. The journal
+ is deleted only after all recorded mutations have been cleared. During a safe
+ same-process power-transition recovery, virtual-output absence is verified
+ before the owned runtime mutations are rolled back in dependency order. A
+ still-present journaled VIIPER device blocks lower cleanup; a failed native
+ rollback keeps PhysicalIsolation evidence intact; and a later
+ PhysicalIsolation failure preserves its evidence after the native checkpoint.
+ Recovery schema version 4 is the current format. This is not an application
+ startup or crash-session reconstruction path.
 
 The addon must not leave the internal controller:
 

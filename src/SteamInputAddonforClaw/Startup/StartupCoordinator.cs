@@ -11,6 +11,7 @@ internal sealed class StartupCoordinator
     private readonly IControllerEnvironmentDetector _environmentDetector;
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
     private readonly IRecoveryManager? _recoveryManager;
+    private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
 
@@ -20,12 +21,14 @@ internal sealed class StartupCoordinator
         IControllerEnvironmentWaiter environmentWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
-        IRecoveryManager? recoveryManager = null)
+        IRecoveryManager? recoveryManager = null,
+        IStockCenterMStartupBaseline? stockCenterMBaseline = null)
     {
         _updateGate = updateGate;
         _environmentDetector = environmentDetector;
         _environmentWaiter = environmentWaiter;
         _recoveryManager = recoveryManager;
+        _stockCenterMBaseline = stockCenterMBaseline;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
     }
@@ -33,40 +36,14 @@ internal sealed class StartupCoordinator
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var recoverySafe = true;
-        if (_recoveryManager is not null)
-        {
-            try
-            {
-                var recoveryResult = await _recoveryManager.RecoverIncompleteSessionAsync(cancellationToken).ConfigureAwait(false);
-                if (!recoveryResult.IsSafeToContinue)
-                {
-                    recoverySafe = false;
-                    AppLog.Warn("Startup", "Normal routing blocked by incomplete recovery.", null, ("Action", "Passive"), ("Reason", recoveryResult.Reason));
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                recoverySafe = false;
-                AppLog.Warn("Startup", "Incomplete recovery threw; normal routing remains blocked while update is allowed.", exception,
-                    ("Action", "PassiveThenUpdate"), ("Reason", "RecoveryException:" + exception.GetType().Name));
-            }
-        }
         AppLog.Info("Startup", "Startup update gate entered.");
         var updateResult = await _updateGate.RunAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("Startup", "Update gate completed.", ("Result", updateResult), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         if (updateResult == UpdateGateResult.RestartScheduled)
         {
             AppLog.Info("Startup", "Runtime startup aborted because update restart was scheduled.", ("Action", "Exit"));
-            return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: recoverySafe);
+            return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: false);
         }
-
-        if (!recoverySafe)
-            return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: false);
 
         var hardware = EvaluateHardwareCompatibility();
         AppLog.Info("Hardware", "Startup hardware compatibility assessment completed.",
@@ -90,11 +67,43 @@ internal sealed class StartupCoordinator
             AppLog.Info("Environment", "Unsupported controller manager detected.", ("Manager", environment.Mode), ("Action", "Passive"), ("Reason", environment.Mode == ControllerEnvironmentMode.HHCManaged ? "HandheldCompanionNotSupportedByCurrentVersion" : "ClawTweaksNotSupportedByCurrentVersion"));
             return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.NotApplicable);
         }
+        if (environment.Mode != ControllerEnvironmentMode.StockCenterM)
+        {
+            AppLog.Warn("Environment", "Stock MSI Center M baseline is not permitted for this controller environment.", null,
+                ("Mode", environment.Mode), ("Action", "Passive"));
+            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.NotApplicable);
+        }
         var readinessStopwatch = Stopwatch.StartNew();
         AppLog.Info("Environment", "Controller environment readiness wait started.", ("Mode", environment.Mode));
         var readiness = await _environmentWaiter.WaitUntilStableAsync(environment.Mode, cancellationToken).ConfigureAwait(false);
         AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
-        return new StartupResult(true, environment.Mode, readiness);
+        if (readiness != ControllerEnvironmentReadiness.Stable)
+            return new StartupResult(true, environment.Mode, readiness);
+
+        if (_stockCenterMBaseline is null)
+        {
+            AppLog.Warn("Startup", "Stock MSI Center M baseline service is unavailable; routing remains passive.", null, ("Action", "Passive"));
+            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
+        }
+
+        var baseline = await _stockCenterMBaseline.EstablishAsync(cancellationToken).ConfigureAwait(false);
+        if (!baseline.Succeeded)
+            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
+
+        if (_recoveryManager is null)
+        {
+            AppLog.Warn("Startup", "Stock MSI Center M baseline completed but stale journal bookkeeping cannot be retired because recovery storage is unavailable; routing remains passive.", null, ("Action", "Passive"));
+            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
+        }
+
+        var discard = _recoveryManager.DiscardStaleStartupJournal();
+        if (!discard.IsSafeToContinue)
+        {
+            AppLog.Warn("Startup", "Stale startup journal could not be discarded after the live XInput baseline; routing remains passive.", null,
+                ("Action", "Passive"), ("Reason", discard.Reason));
+            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
+        }
+        return new StartupResult(true, environment.Mode, readiness, RecoverySafe: true);
     }
 
     private HardwareCompatibilityAssessment EvaluateHardwareCompatibility()
@@ -108,4 +117,4 @@ internal sealed class StartupCoordinator
     }
 }
 
-internal sealed record StartupResult(bool ShouldStartRuntime, ControllerEnvironmentMode EnvironmentMode, ControllerEnvironmentReadiness EnvironmentReadiness, bool RecoverySafe = true);
+internal sealed record StartupResult(bool ShouldStartRuntime, ControllerEnvironmentMode EnvironmentMode, ControllerEnvironmentReadiness EnvironmentReadiness, bool RecoverySafe = false);
