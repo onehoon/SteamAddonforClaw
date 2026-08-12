@@ -157,7 +157,7 @@ public sealed class MsiClawNativeStateManagerTests
     }
 
     [Fact]
-    public async Task Restore_RejectsLegacyUsableContainerSnapshotWithDifferentParent()
+    public async Task Restore_Allows_reenumerated_identity_with_different_parent()
     {
         var container = Guid.NewGuid();
         var devices = new MutableModeEnumerator(container) { Parent = "USB\\OTHER_PARENT" };
@@ -168,13 +168,12 @@ public sealed class MsiClawNativeStateManagerTests
 
         var restored = await manager.RestoreSnapshotAsync(legacySnapshot, CancellationToken.None);
 
-        Assert.Equal(NativeStateRestoreStatus.Indeterminate, restored.Status);
-        Assert.Equal("PhysicalIdentityMismatch", restored.Reason);
-        Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+        Assert.Equal(MsiClawNativeMode.XInput, devices.Mode);
     }
 
     [Fact]
-    public async Task Restore_RejectsLegacySentinelSnapshotWithoutPhysicalKey()
+    public async Task Restore_Allows_reenumerated_sentinel_identity()
     {
         var sentinel = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
         var devices = new MutableModeEnumerator(sentinel);
@@ -185,8 +184,40 @@ public sealed class MsiClawNativeStateManagerTests
 
         var restored = await manager.RestoreSnapshotAsync(legacySnapshot, CancellationToken.None);
 
-        Assert.Equal(NativeStateRestoreStatus.Indeterminate, restored.Status);
-        Assert.Equal("PhysicalIdentityMismatch", restored.Reason);
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+        Assert.Equal(MsiClawNativeMode.XInput, devices.Mode);
+    }
+
+    [Fact]
+    public async Task Restore_XInput_root_A_to_DirectInput_root_B_to_XInput_root_C_succeeds()
+    {
+        var container = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
+        var devices = new MutableModeEnumerator(container) { Mode = MsiClawNativeMode.DirectInput, Root = "ROOT_B" };
+        var controller = new ApplyingModeController(devices) { RestoredRoot = "ROOT_C" };
+        var manager = new MsiClawNativeStateManager(devices, controller);
+        var original = Snapshot(new(MsiClawNativeMode.XInput, "USB\\VID_0DB0&PID_1901&MI_00\\A", "PARENT_A", container,
+            MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong, "USB\\VID_0DB0\\ROOT_A"));
+
+        var restored = await manager.RestoreSnapshotAsync(original, CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+        Assert.Equal(MsiClawNativeMode.XInput, devices.Mode);
+        Assert.Equal("ROOT_C", devices.Root);
+        Assert.NotNull(controller.SourceIdentity);
+        Assert.Equal("USB\\VID_0DB0\\ROOT_B", controller.SourceIdentity!.PhysicalDeviceKey);
+    }
+
+    [Fact]
+    public async Task Restore_original_DirectInput_from_current_XInput_succeeds()
+    {
+        var devices = new MutableModeEnumerator(Guid.NewGuid()) { Mode = MsiClawNativeMode.XInput, Root = "ROOT_A" };
+        var manager = new MsiClawNativeStateManager(devices, new ApplyingModeController(devices));
+        var original = Snapshot(new(MsiClawNativeMode.DirectInput, "HID\\ORIGINAL", "PARENT_B", Guid.NewGuid(),
+            MsiClawHardware.DirectInputProductId, MsiClawIdentityConfidence.Strong));
+
+        var restored = await manager.RestoreSnapshotAsync(original, CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
         Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
     }
 
@@ -199,22 +230,27 @@ public sealed class MsiClawNativeStateManagerTests
     {
         public MsiClawNativeMode Mode { get; set; } = MsiClawNativeMode.XInput;
         public string Parent { get; set; } = "USB\\PARENT";
+        public string Root { get; set; } = "CLAW_A";
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
         {
             var productId = Mode == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId;
-            var root = $"USB\\VID_0DB0&PID_{productId:X4}\\CLAW_A";
+            var root = $"USB\\VID_0DB0&PID_{productId:X4}\\{Root}";
             return [Device(productId, $"USB\\VID_0DB0&PID_{productId:X4}&MI_00\\A", container, parentInstanceId: Parent, ancestors: [root])];
         }
     }
     private sealed class ApplyingModeController(MutableModeEnumerator devices) : IMsiClawModeController
     {
+        public string? RestoredRoot { get; set; }
+        public MsiClawPhysicalIdentity? SourceIdentity { get; private set; }
         public Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken)
         {
+            SourceIdentity = expectedIdentity;
             devices.Mode = target;
+            if (RestoredRoot is not null) devices.Root = RestoredRoot;
             return Task.FromResult(new MsiClawModeTransitionResult(MsiClawModeTransitionStatus.Succeeded,
                 target == MsiClawNativeMode.XInput ? MsiClawNativeMode.DirectInput : MsiClawNativeMode.XInput,
                 target, null, target == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId,
-                true, true, true, true, 1, "test"));
+                true, true, true, true, true, 1, "test"));
         }
     }
     private sealed class ThrowingEnumerator : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => throw new InvalidOperationException(); }

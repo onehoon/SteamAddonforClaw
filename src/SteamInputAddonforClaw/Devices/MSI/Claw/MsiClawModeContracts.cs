@@ -41,7 +41,7 @@ internal sealed record MsiClawPhysicalIdentity(Guid? ContainerId, string? Parent
         return null;
     }
 }
-internal sealed record MsiClawModeTransitionResult(MsiClawModeTransitionStatus Status, MsiClawNativeMode FromMode, MsiClawNativeMode TargetMode, ushort? FromPid, ushort? TargetPid, bool WriteSucceeded, bool OldPidDisappeared, bool TargetPidAppeared, bool IdentityVerified, long TotalMs, string Reason)
+internal sealed record MsiClawModeTransitionResult(MsiClawModeTransitionStatus Status, MsiClawNativeMode FromMode, MsiClawNativeMode TargetMode, ushort? FromPid, ushort? TargetPid, bool WriteSucceeded, bool OldPidDisappeared, bool TargetPidAppeared, bool SourceIdentityVerified, bool TargetTopologyVerified, long TotalMs, string Reason)
 {
     internal bool Succeeded => Status == MsiClawModeTransitionStatus.Succeeded;
 }
