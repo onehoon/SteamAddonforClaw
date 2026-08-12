@@ -114,11 +114,14 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         if (!prepared.OriginalActive)
         {
             var activationInspection = _hidHide.Inspect();
-            if (!activationInspection.IsConfigurationReadable || activationInspection.IsActive != prepared.OriginalActive || activationInspection.IsInverseWhitelist != prepared.OriginalInverse)
+            if (!IsTemporaryActivationStillSafe(activationInspection, prepared))
                 return ValueTask.FromResult(Failure("HidHideStateDriftBeforeActivation"));
             if (_recovery.RecordHidHideActiveStateMutation(_sessionId, false).Status != RecoveryStatus.Success)
                 return ValueTask.FromResult(Failure("ActiveStateJournalFailed"));
             _activeMutationJournaled = true;
+            activationInspection = _hidHide.Inspect();
+            if (!IsTemporaryActivationStillSafe(activationInspection, prepared))
+                return ValueTask.FromResult(Failure("ActiveStateEnableUnsafeForeignBlockedEntries"));
             var activationSucceeded = Try(() => _hidHide.SetActive(true));
             var verification = _hidHide.Inspect();
             if (!verification.IsConfigurationReadable || verification.IsInverseWhitelist || !verification.IsActive)
@@ -140,6 +143,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         {
             var inspection = _hidHide.Inspect();
             if (!inspection.IsConfigurationReadable) return ValueTask.FromResult(Failure("ActiveStateRestoreUnverified"));
+            if (inspection.IsInverseWhitelist) return ValueTask.FromResult(Failure("ActiveStateRestoreUnsafeInverseWhitelistDrift"));
             if (inspection.IsActive && !ContainsOnlySessionOwnedEntries(inspection))
                 return ValueTask.FromResult(Failure("ActiveStateRestoreUnsafeForeignBlockedEntries"));
             var restoreSucceeded = !inspection.IsActive || Try(() => _hidHide.SetActive(false));
@@ -203,6 +207,12 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     private bool ContainsOnlySessionOwnedEntries(HidHideInspection inspection) =>
         (inspection.HiddenDeviceEntries ?? []).All(current => _entries.Any(entry =>
             (entry.Owned || entry.Journaled) && string.Equals(entry.Value, current, StringComparison.OrdinalIgnoreCase)));
+    private bool IsTemporaryActivationStillSafe(HidHideInspection inspection, Prepared prepared) =>
+        inspection.IsConfigurationReadable &&
+        !inspection.IsInverseWhitelist &&
+        inspection.IsActive == prepared.OriginalActive &&
+        inspection.IsInverseWhitelist == prepared.OriginalInverse &&
+        ContainsOnlySessionOwnedEntries(inspection);
     private RoutingStageOperationResult Inspect(bool requireAvailable)
     { if (_input.CurrentIdentity is null) return Failure("PhysicalInputIdentityMissing"); var inspection = _hidHide.Inspect(); return requireAvailable && inspection.Status != HidHideInspectionStatus.Available ? Failure(inspection.Status.ToString()) : Success(inspection.Status.ToString()); }
     private static bool Try(Func<bool> mutation) { try { return mutation(); } catch { return false; } }

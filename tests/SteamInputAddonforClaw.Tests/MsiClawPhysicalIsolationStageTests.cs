@@ -180,8 +180,10 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
 
     [Theory]
     [InlineData("HID\\VID_0DB0&PID_1901&MI_00&COL01\\CHILD")]
+    [InlineData("HID\\VID_0DB0&PID_1902&MI_01&COL01\\CHILD")]
     [InlineData("HID\\VID_0DB0&PID_1902&MI_00&COL02\\CHILD")]
     [InlineData("USB\\VID_0DB0&PID_1902\\ROOT")]
+    [InlineData("HID\\VID_0DB0&PID_1902&MI_00&COL01\\")]
     [InlineData("")]
     public async Task InvalidIsolationTargetFailsBeforeAnyMutation(string pnpInstanceId)
     {
@@ -233,6 +235,41 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
+    public async Task ForeignEntryBeforeTemporaryActivationPreventsGlobalEnableAndRollsBackOwnedState()
+    {
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled, ForeignEntryAppearsBeforeActivation = true };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+
+        var execute = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(execute.Succeeded);
+        Assert.Equal("ActiveStateEnableUnsafeForeignBlockedEntries", execute.Reason);
+        Assert.False(hid.Active);
+        Assert.DoesNotContain("SetActive:True", hid.Trace);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(["HID\\FOREIGN"], hid.HiddenDevices);
+        Assert.Empty(hid.Applications);
+    }
+
+    [Fact]
+    public async Task InverseWhitelistDriftDuringTemporaryActiveLeasePreventsGlobalDisable()
+    {
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        hid.Inverse = true;
+
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.False(rollback.Succeeded);
+        Assert.Equal("ActiveStateRestoreUnsafeInverseWhitelistDrift", rollback.Reason);
+        Assert.DoesNotContain("SetActive:False", hid.Trace);
+        Assert.True(hid.Active);
+    }
+
+    [Fact]
     public async Task ActiveEnableReportedFailureButAppliedPreservesRollbackOwnership()
     {
         var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled, ReportActiveEnableFailureAfterApplying = true };
@@ -252,6 +289,8 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     [Theory]
     [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
     [InlineData((int)HidHideInspectionStatus.ConfigurationUnavailable)]
+    [InlineData((int)HidHideInspectionStatus.NotInstalled)]
+    [InlineData((int)HidHideInspectionStatus.AccessDenied)]
     public async Task NonAvailableHidHideCannotStartMutation(int status)
     {
         var hid = new FakeHidHide { Status = (HidHideInspectionStatus)status };
@@ -288,9 +327,17 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         public bool Active { get; set; } = true;
         public bool Inverse { get; set; }
         public bool DriftToInverseAfterDeviceAdd { get; set; }
+        public bool ForeignEntryAppearsBeforeActivation { get; set; }
+        private int _postDeviceAddInspectionCount;
         public HidHideInspection Inspect() => FailInspectionAfterDeviceMutation && Trace.Any(x => x.StartsWith("AddDevice"))
             ? new(HidHideInspectionStatus.ConfigurationUnavailable, new HashSet<string>(Applications), HiddenDevices, IsActive: Active, IsInverseWhitelist: Inverse)
-            : new(Status, new HashSet<string>(Applications), HiddenDevices, IsActive: Active, IsInverseWhitelist: Inverse);
+            : Inspection();
+        private HidHideInspection Inspection()
+        {
+            if (Trace.Any(x => x.StartsWith("AddDevice")) && ++_postDeviceAddInspectionCount == 3 && ForeignEntryAppearsBeforeActivation)
+                HiddenDevices.Add("HID\\FOREIGN");
+            return new(Status, new HashSet<string>(Applications), HiddenDevices, IsActive: Active, IsInverseWhitelist: Inverse);
+        }
         public bool ReportActiveEnableFailureAfterApplying { get; set; }
         public bool SetActive(bool active) { Trace.Add("SetActive:" + active); Active = active; return active && ReportActiveEnableFailureAfterApplying ? false : true; }
         public bool AddApplication(string path) { Trace.Add("AddApplication"); if (FailApplicationAddWithoutApplying) return false; Applications.Add(path); return true; }

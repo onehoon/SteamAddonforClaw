@@ -31,7 +31,8 @@ internal static class MsiClawHardware
 
     public static bool IsPrimaryDirectInputHidCollectionInstanceId(string? instanceId) =>
         !string.IsNullOrWhiteSpace(instanceId) &&
-        instanceId.StartsWith(DirectInputHidCollectionPrefix, StringComparison.OrdinalIgnoreCase);
+        instanceId.StartsWith(DirectInputHidCollectionPrefix, StringComparison.OrdinalIgnoreCase) &&
+        instanceId.Length > DirectInputHidCollectionPrefix.Length;
 
     public static IReadOnlyList<string> ResolveDirectInputHidInstanceIds(IEnumerable<ControllerDeviceInfo> devices) =>
         devices.Where(IsDirectInputHidCollection).Select(device => device.InstanceId).ToArray();

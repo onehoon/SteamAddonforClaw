@@ -373,6 +373,26 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task ActiveStateRecoveryWithInverseWhitelistDriftFailsWithoutDisablingHidHide()
+    {
+        var trace = new List<string>();
+        var hidHide = new FakeHidHide { Events = trace, Active = true, Status = HidHideInspectionStatus.InverseWhitelist };
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(OriginalHidHideActiveState: false, HidHideDeviceAdditions: ["HID\\ADDON_CHILD"]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        hidHide.HiddenEntries.Add("HID\\ADDON_CHILD");
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), hidHideClient: hidHide);
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.True(hidHide.Active);
+        Assert.Empty(trace);
+        Assert.True(File.Exists(PathName));
+    }
+
+    [Fact]
     public async Task ActiveStateRecoveryPreservesOldRecordedRootAndChildEntries()
     {
         var hidHide = new FakeHidHide { Active = true };

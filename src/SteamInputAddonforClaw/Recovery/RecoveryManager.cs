@@ -334,6 +334,8 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             var inspection = hidHideClient.Inspect();
             if (!inspection.IsConfigurationReadable)
                 return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state recovery inspection is unsafe.", journal), stopwatch);
+            if (!originalActive && inspection.IsActive && inspection.IsInverseWhitelist)
+                return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state restoration is unsafe because inverse-whitelist state drifted.", journal), stopwatch);
             if (!originalActive && inspection.IsActive && !ContainsOnlyJournaledHidHideEntries(inspection, journal))
                 return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state restoration is unsafe because foreign blocked entries are present.", journal), stopwatch);
             if (inspection.IsActive != originalActive && !hidHideClient.SetActive(originalActive))
