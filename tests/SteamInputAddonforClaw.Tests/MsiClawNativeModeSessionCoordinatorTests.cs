@@ -503,6 +503,40 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task DirectInputOriginalState_EntersAndRestoresWithoutAnyModeWrite()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.DirectInput);
+        var modeController = new FakeModeController(devices);
+        await using var coordinator = CreateCoordinator(devices, modeController);
+
+        Assert.True((await coordinator.InspectForPipelineAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        Assert.True(coordinator.IsActive);
+        Assert.True(coordinator.HasOwnedRecoveryBoundary);
+        Assert.Empty(modeController.Targets);
+
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.False(coordinator.IsActive);
+        Assert.False(coordinator.HasOwnedRecoveryBoundary);
+        Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
+        Assert.Empty(modeController.Targets);
+    }
+
+    [Fact]
+    public async Task OtherOriginalState_RemainsUnsupported()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.Other);
+        var modeController = new FakeModeController(devices);
+        await using var coordinator = CreateCoordinator(devices, modeController);
+
+        var result = await coordinator.InspectForPipelineAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("OriginalModeUnsupported", result.Reason);
+        Assert.Empty(modeController.Targets);
+    }
+
+    [Fact]
     public async Task PipelineEnterCarriesSentinelPhysicalDeviceKeyToModeSwitch()
     {
         var devices = new SentinelDeviceEnumerator();
@@ -561,7 +595,12 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
 
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
         [new("HID\\MSI_CLAW", _containerId, _parent, [], "HID", [], [], "HIDClass", null, null,
-            MsiClawHardware.VendorId, Mode == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId, true)];
+            MsiClawHardware.VendorId, Mode switch
+            {
+                MsiClawNativeMode.XInput => MsiClawHardware.XInputProductId,
+                MsiClawNativeMode.DirectInput => MsiClawHardware.DirectInputProductId,
+                _ => MsiClawHardware.TestingProductId
+            }, true)];
     }
 
     private sealed class FakeModeController(FakeDeviceEnumerator devices) : IMsiClawModeController

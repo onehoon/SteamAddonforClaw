@@ -189,8 +189,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (!captured.AllowsMutation) return MsiClawNativeModePreflightResult.Failure("SnapshotDoesNotAllowMutation");
         var original = captured.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
         if (original is null) return MsiClawNativeModePreflightResult.Failure("PayloadInvalid");
-        if (original.IdentityConfidence != MsiClawIdentityConfidence.Strong) return MsiClawNativeModePreflightResult.Failure("PhysicalIdentityNotStrong");
-        if (original.Mode != MsiClawNativeMode.XInput) return MsiClawNativeModePreflightResult.Failure("OriginalModeUnsupported");
+        if (ValidateOriginalState(original) is { } reason) return MsiClawNativeModePreflightResult.Failure(reason);
         return MsiClawNativeModePreflightResult.Success();
     }
 
@@ -203,16 +202,23 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (!captured.AllowsMutation || captured.Snapshot is null) return MsiClawNativeModeEnterResult.Failure(false, "SnapshotUnavailable");
         var original = captured.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
         if (original is null) return MsiClawNativeModeEnterResult.Failure(false, "PayloadInvalid");
-        if (original.Mode != MsiClawNativeMode.XInput) return MsiClawNativeModeEnterResult.Failure(false, "OriginalModeUnsupported");
+        if (ValidateOriginalState(original) is { } reason) return MsiClawNativeModeEnterResult.Failure(false, reason);
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(false, "PowerGateClosed");
         if (_recoverySafety.Current != RecoverySafety.Safe) return MsiClawNativeModeEnterResult.Failure(false, "RecoverySafetyNotSafe");
         var journal = _recovery.BeginDeviceNativeStateMutation(captured);
         if (journal.Status != RecoveryStatus.Success) return MsiClawNativeModeEnterResult.Failure(false, "RecoveryJournalUnavailable");
         _snapshot = captured.Snapshot;
         lock (_recoveryStateSync) { _recoveryBoundaryOwned = true; _recoverySessionId = journal.Journal!.RecoverySessionId; }
-        var identity = MsiClawPhysicalIdentity.FromPayload(original);
-        var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
-        if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
+        if (original.Mode == MsiClawNativeMode.DirectInput)
+        {
+            AppLog.Debug("NativeMode", "NativeModeAlreadyTarget", ("OriginalMode", original.Mode), ("TargetMode", MsiClawNativeMode.DirectInput), ("Action", "NoModeSwitch"));
+        }
+        else
+        {
+            var identity = MsiClawPhysicalIdentity.FromPayload(original);
+            var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
+            if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
+        }
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(true, "PowerGateChangedAfterModeSwitch");
         _active = true;
         _safetyMonitor = new CancellationTokenSource();
@@ -305,6 +311,12 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         _decisionGeneration++;
         _routingFaultLatched = true;
         AppLog.Debug("NativeMode", "RoutingFaultLatched", ("Reason", reason));
+    }
+
+    private static string? ValidateOriginalState(MsiClawNativeStatePayload original)
+    {
+        if (original.IdentityConfidence != MsiClawIdentityConfidence.Strong) return "PhysicalIdentityNotStrong";
+        return original.Mode is MsiClawNativeMode.XInput or MsiClawNativeMode.DirectInput ? null : "OriginalModeUnsupported";
     }
 
     private void MarkRecoveryUnsafe(string reason)
