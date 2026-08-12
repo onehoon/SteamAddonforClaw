@@ -20,6 +20,8 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private bool _recoveryBoundaryOwned;
     private Guid? _recoverySessionId;
     private readonly Func<bool>? _mutationAllowed;
+    private readonly Func<CancellationToken, Task> _safetyMonitorDelay;
+    private Func<Task>? _routingSafetyVetoHandler;
     private CancellationTokenSource? _safetyMonitor;
     private bool _vetoLatched;
     private long _decisionGeneration;
@@ -27,8 +29,12 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private bool _routingFaultLatched;
     private readonly Lock _recoveryStateSync = new();
 
-    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, RecoverySafetyState recoverySafety, Func<bool>? mutationAllowed = null)
-    { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _recoverySafety = recoverySafety; _mutationAllowed = mutationAllowed; }
+    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, RecoverySafetyState recoverySafety, Func<bool>? mutationAllowed = null, Func<Task>? routingSafetyVetoHandler = null, Func<CancellationToken, Task>? safetyMonitorDelay = null)
+    {
+        _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _recoverySafety = recoverySafety;
+        _mutationAllowed = mutationAllowed; _routingSafetyVetoHandler = routingSafetyVetoHandler;
+        _safetyMonitorDelay = safetyMonitorDelay ?? (token => Task.Delay(TimeSpan.FromMilliseconds(500), token));
+    }
 
     public string Name => "MsiClawNativeModeSession";
 
@@ -67,6 +73,9 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     public bool IsActive => _active;
     public bool HasOwnedRecoveryBoundary { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned; } }
     public Guid? CurrentRecoverySessionId { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned ? _recoverySessionId : null; } }
+
+    internal void SetRoutingSafetyVetoHandler(Func<Task> handler) =>
+        _routingSafetyVetoHandler = handler ?? throw new ArgumentNullException(nameof(handler));
 
     public async ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken)
     {
@@ -260,13 +269,16 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+                await _safetyMonitorDelay(cancellationToken).ConfigureAwait(false);
                 if (_mutationAllowed is not null && !_mutationAllowed())
                 {
                     _vetoLatched = true;
-                    AppLog.Warn("NativeMode", "External controller appeared during MSI native override; restoring original mode.", null);
-                    var restored = await StopAsync(cancellationToken).ConfigureAwait(false);
-                    if (!restored) AppLog.Error("NativeMode", "MSI native override restore failed after external controller hot-plug.", new InvalidOperationException("RecoveryUnsafe"));
+                    AppLog.Warn("NativeMode", "External controller appeared during active MSI native override; handing off to canonical routing fail-close.", null);
+                    var handler = _routingSafetyVetoHandler;
+                    if (handler is null)
+                        AppLog.Error("NativeMode", "No canonical routing fail-close handler is configured for an active-session external controller veto.", new InvalidOperationException("RoutingSafetyVetoHandlerMissing"));
+                    else
+                        await handler().ConfigureAwait(false);
                     return;
                 }
             }

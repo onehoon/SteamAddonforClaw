@@ -212,6 +212,11 @@ public partial class App : Application
                 pipelineSessionCoordinator,
                 [_msiClawNativeModeSession],
                 () => RoutingExperimentOptions.None);
+            _msiClawNativeModeSession.SetRoutingSafetyVetoHandler(async () =>
+            {
+                _routingRuntimeCoordinator.CancelInFlightTransition();
+                await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
+            });
             steamOutputStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false); });
         }
         _userTerminationGuard = new UserTerminationGuard(
@@ -291,11 +296,6 @@ public partial class App : Application
             catch (Exception rollbackException)
             {
                 AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback threw an exception.", rollbackException);
-            }
-            if (_msiClawNativeModeSession is not null)
-            {
-                try { await _msiClawNativeModeSession.FailClosedAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false); }
-                catch (Exception failClosedException) { AppLog.Error("NativeMode", "Failed to fail closed after routing reconciliation error.", failClosedException); }
             }
         }
     }
