@@ -128,7 +128,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         }
         lock (_sync) _prepared = null;
         AppLog.Debug("PhysicalIsolation", "PhysicalIsolation active", ("WhitelistPreExisting", prepared.WhitelistPreExisting), ("WhitelistAddonOwned", _ownedWhitelist), ("Entries", string.Join("|", _entries.Select(entry => $"{entry.Value};PreExisting={entry.PreExisting};AddonOwned={entry.Owned}"))));
-        AppLog.Debug("RoutingTrace", "Physical isolation completed.", ("Event", "PhysicalIsolationCompleted"), ("TotalMs", Elapsed(totalStarted)), ("EntryCount", _entries.Length), ("WhitelistAdded", _ownedWhitelist), ("HiddenEntriesAdded", _entries.Count(entry => entry.Owned)), ("ActiveStateChanged", _activeMutationOwned), ("Result", "Success"), ("Reason", "PhysicalIsolationActive"));
+        AppLog.Debug("RoutingTrace", "Physical isolation completed.", ("Event", "PhysicalIsolationCompleted"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("EntryCount", _entries.Length), ("WhitelistAdded", _ownedWhitelist), ("HiddenEntriesAdded", _entries.Count(entry => entry.Owned)), ("ActiveStateChanged", _activeMutationOwned), ("Result", "Success"), ("Reason", "PhysicalIsolationActive"));
         return ValueTask.FromResult(Success("PhysicalIsolationActive"));
     }
 
@@ -178,7 +178,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         }
         lock (_sync) _prepared = null;
         AppLog.Debug("PhysicalIsolation", "PhysicalIsolation restored", ("WhitelistAddonOwned", _ownedWhitelist), ("Entries", string.Join("|", _entries.Select(entry => $"{entry.Value};PreExisting={entry.PreExisting};AddonOwned={entry.Owned}"))));
-        AppLog.Debug("RoutingTrace", "Physical isolation rollback completed.", ("Event", "PhysicalIsolationRollbackCompleted"), ("TotalMs", Elapsed(totalStarted)), ("Result", "Success"), ("Reason", "PhysicalIsolationRestored"));
+        AppLog.Debug("RoutingTrace", "Physical isolation rollback completed.", ("Event", "PhysicalIsolationRollbackCompleted"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("Result", "Success"), ("Reason", "PhysicalIsolationRestored"));
         return ValueTask.FromResult(Success("PhysicalIsolationRestored"));
     }
 

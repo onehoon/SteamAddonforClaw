@@ -34,6 +34,19 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     private readonly IInputReportTickSource? _reportTicks;
     private Func<ValueTask>? _outputFaultHandler;
     private int _outputFaultReported;
+    private CreationTiming? _creationTiming;
+
+    private sealed class CreationTiming
+    {
+        internal long Started { get; } = Stopwatch.GetTimestamp();
+        internal long RuntimeStartMs { get; set; }
+        internal long CreateDeviceMs { get; set; }
+        internal long PnpResolveMs { get; set; }
+        internal long RecoveryCheckpointMs { get; set; }
+        internal long HidHideInspectionMs { get; set; }
+        internal long NeutralReportMs { get; set; }
+        internal long PublisherStartMs { get; set; }
+    }
 
     internal ClassicSteamControllerOutputStage(IViiperRuntime runtime, IControllerDeviceEnumerator enumerator,
         ViiperVirtualDeviceIdentityResolver resolver, AddonOwnedVirtualDeviceTracker tracker, RecoveryManager recovery,
@@ -105,8 +118,8 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
 
     public async ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
     {
-        var totalStarted = Stopwatch.GetTimestamp();
-        long runtimeStartMs = 0, createDeviceMs = 0, pnpResolveMs = 0, recoveryCheckpointMs = 0, hidHideInspectionMs = 0, neutralReportMs = 0, publisherStartMs = 0;
+        var timing = new CreationTiming();
+        _creationTiming = timing;
         await _serial.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -128,26 +141,26 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             _state = LifecycleState.Creating;
             var started = Stopwatch.GetTimestamp();
             _runtime.Start();
-            runtimeStartMs = Elapsed(started);
+            timing.RuntimeStartMs = Elapsed(started);
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             _deviceId = _runtime.CreateDevice();
-            createDeviceMs = Elapsed(started);
+            timing.CreateDeviceMs = Elapsed(started);
             _busId = _runtime.BusId;
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             var resolved = await WaitForIdentityAsync(_before, operationToken).ConfigureAwait(false);
-            pnpResolveMs = Elapsed(started);
+            timing.PnpResolveMs = Elapsed(started);
             if (!resolved.Succeeded) return await FailAndRollbackCoreAsync(resolved.Reason).ConfigureAwait(false);
             _owned = resolved.Devices;
             started = Stopwatch.GetTimestamp();
             var checkpoint = _recovery.ResolveAddonOwnedVirtualDeviceIdentity(session, _mutationId, _owned.Select(device => device.InstanceId));
-            recoveryCheckpointMs = Elapsed(started);
+            timing.RecoveryCheckpointMs = Elapsed(started);
             if (!checkpoint.IsSafeToContinue) return await FailAndRollbackCoreAsync("VirtualDeviceRecoveryCheckpointFailed").ConfigureAwait(false);
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             var hidHideInspection = _hidHide.Inspect();
-            hidHideInspectionMs = Elapsed(started);
+            timing.HidHideInspectionMs = Elapsed(started);
             if (!hidHideInspection.IsConfigurationReadable) return await FailAndRollbackCoreAsync("HidHideOutputInspectionUnavailable").ConfigureAwait(false);
             var ownedEntries = _owned.SelectMany(device => device.AncestorInstanceIds.Append(device.InstanceId).Append(device.ParentInstanceId ?? string.Empty))
                 .Where(value => !string.IsNullOrWhiteSpace(value)).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -157,16 +170,16 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             if (!_runtime.SetNeutral(_deviceId)) return await FailAndRollbackCoreAsync("NeutralReportRejected").ConfigureAwait(false);
-            neutralReportMs = Elapsed(started);
+            timing.NeutralReportMs = Elapsed(started);
             Interlocked.Exchange(ref _outputFaultReported, 0);
             _publisher = new ClassicSteamControllerInputPublisher(_snapshot, _runtime, _deviceId, _reportTicks,
                 fault: ReportOutputFault);
             started = Stopwatch.GetTimestamp();
             _publisher.Start();
-            publisherStartMs = Elapsed(started);
+            timing.PublisherStartMs = Elapsed(started);
             _state = LifecycleState.Active;
             AppLog.Debug("SteamOutput", "SteamOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{ViiperRuntimeManager.VendorId:X4}"), ("PID", $"{ViiperRuntimeManager.ProductId:X4}"), ("NeutralAccepted", true));
-            AppLog.Debug("RoutingTrace", "Steam output creation completed.", ("Event", "SteamOutputCreated"), ("TotalMs", Elapsed(totalStarted)), ("RuntimeStartMs", runtimeStartMs), ("CreateDeviceMs", createDeviceMs), ("PnPResolveMs", pnpResolveMs), ("RecoveryCheckpointMs", recoveryCheckpointMs), ("HidHideInspectionMs", hidHideInspectionMs), ("NeutralReportMs", neutralReportMs), ("PublisherStartMs", publisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
+            AppLog.Debug("RoutingTrace", "Steam output creation completed.", ("Event", "SteamOutputCreated"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(timing.Started)), ("RuntimeStartMs", timing.RuntimeStartMs), ("CreateDeviceMs", timing.CreateDeviceMs), ("PnPResolveMs", timing.PnpResolveMs), ("RecoveryCheckpointMs", timing.RecoveryCheckpointMs), ("HidHideInspectionMs", timing.HidHideInspectionMs), ("NeutralReportMs", timing.NeutralReportMs), ("PublisherStartMs", timing.PublisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
             return RoutingStageOperationResult.Success("ClassicSteamControllerCreated");
         }
         catch (OperationCanceledException)
@@ -178,7 +191,6 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         }
         catch (Exception exception)
         {
-            AppLog.Debug("RoutingTrace", "Steam output creation failed.", ("Event", "SteamOutputCreationFailed"), ("FailedOperation", exception.GetType().Name), ("ElapsedMs", Elapsed(totalStarted)), ("TotalMs", Elapsed(totalStarted)), ("Reason", exception.GetType().Name));
             return await FailAndRollbackCoreAsync(exception.GetType().Name).ConfigureAwait(false);
         }
         finally
@@ -235,7 +247,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
         if (!complete.IsSafeToContinue) return RoutingStageOperationResult.Failure("VirtualDeviceRecoveryCompletionFailed");
         AppLog.Debug("SteamOutput", "SteamOutput inactive", ("BusId", _busId), ("DeviceId", _deviceId), ("DeviceRemoved", removal.DeviceRemoved), ("BusRemoved", removal.BusRemoved), ("PnPAbsent", absent), ("RecoveryMutationCompleted", complete.IsSafeToContinue));
-        AppLog.Debug("RoutingTrace", "Steam output rollback completed.", ("Event", "SteamOutputRollbackCompleted"), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Success"), ("Reason", "ClassicSteamControllerRemoved"));
+        AppLog.Debug("RoutingTrace", "Steam output rollback completed.", ("Event", "SteamOutputRollbackCompleted"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Success"), ("Reason", "ClassicSteamControllerRemoved"));
         _deviceId = 0; _busId = 0; _owned = null; _before = null; _state = LifecycleState.Inactive; _runtime.StopIfUnused();
         return RoutingStageOperationResult.Success("ClassicSteamControllerRemoved");
     }
@@ -274,10 +286,21 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
 
     private async ValueTask<RoutingStageOperationResult> FailAndRollbackCoreAsync(string reason)
     {
-        AppLog.Debug("RoutingTrace", "Steam output creation failed.", ("Event", "SteamOutputCreationFailed"), ("FailedOperation", reason), ("Reason", reason));
+        var timing = _creationTiming;
+        AppLog.Debug("RoutingTrace", "Steam output creation failed.", ("Event", "SteamOutputCreationFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("FailedOperation", FailureOperation(reason)), ("TotalMs", timing is null ? 0 : Elapsed(timing.Started)), ("RuntimeStartMs", timing?.RuntimeStartMs ?? 0), ("CreateDeviceMs", timing?.CreateDeviceMs ?? 0), ("PnPResolveMs", timing?.PnpResolveMs ?? 0), ("RecoveryCheckpointMs", timing?.RecoveryCheckpointMs ?? 0), ("HidHideInspectionMs", timing?.HidHideInspectionMs ?? 0), ("NeutralReportMs", timing?.NeutralReportMs ?? 0), ("PublisherStartMs", timing?.PublisherStartMs ?? 0), ("Reason", reason));
         var rollback = await RollbackCoreAsync(CancellationToken.None).ConfigureAwait(false);
         return RoutingStageOperationResult.Failure($"{reason};Rollback={rollback.Reason}");
     }
+
+    private static string FailureOperation(string reason) => reason switch
+    {
+        "NoNewCandidate" => "PnPResolve",
+        "NeutralReportRejected" => "NeutralReport",
+        "VirtualDeviceRecoveryCheckpointFailed" => "RecoveryCheckpoint",
+        "HidHideOutputInspectionUnavailable" or "HidHideOutputAlreadyBlocked" => "HidHideInspection",
+        "VirtualDeviceRecoveryIntentFailed" => "RecoveryIntent",
+        _ => reason.Contains("Rollback", StringComparison.OrdinalIgnoreCase) ? "Rollback" : reason
+    };
 
     private static long Elapsed(long started) => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 }

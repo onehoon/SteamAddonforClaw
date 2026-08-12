@@ -79,6 +79,20 @@ public sealed class DiagnosticLoggingTests : IDisposable
     }
 
     [Fact]
+    public async Task RoutingTrace_ContextFlowsToStageDetailsWithoutDuplicateStageLog()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        var stage = new CorrelatedStage();
+        await new RoutingPipelineExecutor([stage]).ExecuteAsync(RoutingPipelinePlan.AllDisabled with { PhysicalInput = RoutingStageMode.ObserveOnly }, CancellationToken.None);
+
+        var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
+        Assert.Contains("StageDetail", log);
+        Assert.Contains("RoutingExecution=", log);
+        Assert.DoesNotContain("Stage operation", log);
+        Assert.Single(log.Split("StageDetail", StringSplitOptions.None).Skip(1));
+    }
+
+    [Fact]
     public async Task RoutingTrace_IsFilteredAtInfoLevel()
     {
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
@@ -92,5 +106,18 @@ public sealed class DiagnosticLoggingTests : IDisposable
         AppLog.DirectoryOverride = null;
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+    }
+
+    private sealed class CorrelatedStage : IRoutingPipelineStage
+    {
+        public RoutingStageKind Kind => RoutingStageKind.PhysicalInput;
+        public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)
+        {
+            AppLog.Debug("RoutingTrace", "StageDetail", ("RoutingExecution", RoutingTraceContext.Current));
+            return ValueTask.FromResult(RoutingStageOperationResult.Success());
+        }
+        public ValueTask<RoutingStageOperationResult> PrepareMutationAsync(CancellationToken cancellationToken) => ValueTask.FromResult(RoutingStageOperationResult.Success());
+        public ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken) => ValueTask.FromResult(RoutingStageOperationResult.Success());
+        public ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken) => ValueTask.FromResult(RoutingStageOperationResult.Success());
     }
 }

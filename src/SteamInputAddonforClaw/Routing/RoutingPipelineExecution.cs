@@ -103,6 +103,7 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
     {
         var executionId = Interlocked.Increment(ref _nextExecutionId);
         var totalStarted = Stopwatch.GetTimestamp();
+        using var traceScope = RoutingTraceContext.Begin(executionId);
         AppLog.Debug("RoutingTrace", "Routing activation started.", ("RoutingExecution", executionId));
         var rollbackCandidates = new List<(RoutingStageKind Kind, IRoutingPipelineStage? Stage)>();
         RoutingStageKind? currentStage = null;
@@ -175,6 +176,7 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
 
         var executionId = Interlocked.Increment(ref _nextExecutionId);
         var started = Stopwatch.GetTimestamp();
+        using var traceScope = RoutingTraceContext.Begin(executionId);
         var firstFailure = await RollbackStagesAsync(stages, executionId).ConfigureAwait(false);
         AppLog.Debug("RoutingTrace", "Routing rollback completed.", ("RoutingExecution", executionId), ("Result", firstFailure is null ? "Success" : "Failure"), ("Reason", firstFailure?.Reason ?? "Success"), ("TotalMs", Elapsed(started)));
         return firstFailure ?? new(true, null, "Success");
@@ -206,7 +208,6 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
             {
                 var started = Stopwatch.GetTimestamp();
                 var result = await entry.Stage.RollbackMutationAsync(CancellationToken.None).ConfigureAwait(false);
-                AppLog.Debug("Routing", "Stage operation", ("Stage", entry.Kind), ("Phase", "Rollback"), ("Result", result.Succeeded ? "Success" : "Failure"), ("Reason", result.Reason), ("ElapsedMs", Elapsed(started)));
                 AppLog.Debug("RoutingTrace", "Routing stage timing.", ("RoutingExecution", executionId), ("Stage", entry.Kind), ("Phase", "Rollback"), ("Result", result.Succeeded ? "Success" : "Failure"), ("Reason", result.Reason), ("ElapsedMs", Elapsed(started)));
                 if (!result.Succeeded)
                     firstFailure ??= new(false, entry.Kind, result.Reason);
@@ -224,7 +225,6 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
     private static void LogStage(int executionId, RoutingStageKind stage, string phase, RoutingStageOperationResult result, long started)
     {
         var elapsed = Elapsed(started);
-        AppLog.Debug("Routing", "Stage operation", ("Stage", stage), ("Phase", phase), ("Result", result.Succeeded ? "Success" : "Failure"), ("Reason", result.Reason), ("ElapsedMs", elapsed));
         AppLog.Debug("RoutingTrace", "Routing stage timing.", ("RoutingExecution", executionId), ("Stage", stage), ("Phase", phase), ("Result", result.Succeeded ? "Success" : "Failure"), ("Reason", result.Reason), ("ElapsedMs", elapsed));
     }
 }
