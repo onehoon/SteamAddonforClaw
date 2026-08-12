@@ -1,10 +1,19 @@
 using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
+using SteamInputAddonforClaw.Diagnostics;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests.ClawSensorProbe;
 
 public sealed class ClawSensorProbeTests
 {
+    [Fact] public void Workflow_StartsIdleAndReachesReadyBeforeSession()
+    {
+        var workflow = new ClawSensorProbeWorkflow();
+        Assert.Equal(ClawSensorProbeState.Idle, workflow.State);
+        workflow.Discovering(); workflow.Ready();
+        Assert.Equal(ClawSensorProbeState.Ready, workflow.State);
+        Assert.Empty(workflow.Visits);
+    }
     [Fact] public void Discovery_FailsClosedForAmbiguousCandidates()
     {
         var result = ClawSensorDiscovery.Select([new("Physical Gyrometer", "g1", "t", "c"), new("Physical Gyrometer", "g2", "t", "c"), new("Physical Accelerometer", "a1", "t", "c"), new("Other", "o", "t", "c")]);
@@ -14,6 +23,16 @@ public sealed class ClawSensorProbeTests
     {
         Assert.False(ClawSensorDiscovery.Select([new("Physical Gyrometer", "g", "t", "c")]).IsValid);
         Assert.False(ClawSensorDiscovery.Select([new("Physical Accelerometer", "a", "t", "c")]).IsValid);
+    }
+    [Fact] public void Discovery_PreservesAllMetadataForUnrelatedSensors()
+    {
+        var result = ClawSensorDiscovery.Select([
+            new("Physical Gyrometer", "g", "gyro-type", "gyro-category", "M", "G", "g-persist", "10", "usage-g"),
+            new("Physical Accelerometer", "a", "accel-type", "accel-category", "M", "A", "a-persist", "20", "usage-a"),
+            new("Magnetometer", "m", "mag-type", "mag-category", "M", "M", "m-persist", "30", "usage-m")]);
+        Assert.True(result.IsValid);
+        Assert.Equal("m-persist", result.Sensors.Single(x => x.SensorId == "m").PersistentUniqueId);
+        Assert.Equal("usage-g", result.Gyroscope?.CustomUsage);
     }
     [Fact] public void Candidate_UsesSensorIdAsDocumentedPersistentUniqueId()
     {
@@ -35,6 +54,8 @@ public sealed class ClawSensorProbeTests
         }
         var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
         Assert.Contains("TRANSITION", csv);
+        Assert.Contains("sensor_timestamp", csv.Split('\n')[0]);
+        Assert.Contains(",1,", csv);
         Assert.Contains("\"DroppedSampleCount\": 0", await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
         Directory.Delete(root, true);
     }
@@ -50,6 +71,70 @@ public sealed class ClawSensorProbeTests
         Assert.Contains("\"end_elapsed_ms\": 25", report);
         Directory.Delete(root, true);
     }
+    [Fact] public async Task Writer_PreservesRepeatedPhasePassesSeparately()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-repeated-phase-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
+            {
+                writer.WriteTransition(ClawSensorProbePhase.ROLL_LEFT, 1, 1);
+                writer.Write(new(1, DateTimeOffset.UtcNow, 2, ClawSensorProbePhase.ROLL_LEFT, 1, "GYRO", 1, 2, 3, 1));
+                writer.EndPhase(ClawSensorProbePhase.ROLL_LEFT, 1, 3);
+                writer.WriteTransition(ClawSensorProbePhase.ROLL_LEFT, 2, 4);
+                writer.Write(new(2, DateTimeOffset.UtcNow, 5, ClawSensorProbePhase.ROLL_LEFT, 2, "GYRO", 4, 5, 6, 1));
+            }
+
+            var report = await File.ReadAllTextAsync(Directory.GetFiles(root, "claw-sensor-report.json", SearchOption.AllDirectories).Single());
+            Assert.Contains("\"pass\": 1", report);
+            Assert.Contains("\"pass\": 2", report);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+    [Fact] public async Task Writer_ExcludesTransitionRowsFromSensorStatistics()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-transition-stats-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var writer = new ClawSensorProbeSessionWriter(root, "session");
+            await using (writer)
+            {
+                writer.WriteTransition(ClawSensorProbePhase.REST, 1, 1);
+                writer.Write(new(1, DateTimeOffset.UtcNow, 2, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 10));
+            }
+
+            Assert.Equal(1, writer.GyroscopeSummary.SampleCount);
+            Assert.Equal(0, writer.AccelerometerSummary.SampleCount);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+    [Fact] public async Task Writer_AssignsUniqueGlobalSequenceAcrossSensors()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-sequence-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1));
+                writer.Write(new(1, DateTimeOffset.UtcNow, 2, ClawSensorProbePhase.REST, 1, "ACCEL", 4, 5, 6, 1));
+                writer.WriteTransition(ClawSensorProbePhase.REST, 1, 3);
+            }
+
+            var lines = (await File.ReadAllLinesAsync(Path.Combine(root, "session", "claw-sensor-live.csv"))).Skip(1).ToArray();
+            Assert.Equal(3, lines.Length);
+            Assert.Equal(new[] { "1", "2", "3" }, lines.Select(line => line.Split(',')[0]).ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
     [Fact] public void Workflow_FailureIsTerminal()
     {
         var workflow = new ClawSensorProbeWorkflow(); workflow.Ready(); workflow.Start(); workflow.Fail();
@@ -62,6 +147,23 @@ public sealed class ClawSensorProbeTests
         foreach (var _ in Enumerable.Range(0, ClawSensorProbeWorkflow.Phases.Count - 1)) { workflow.Next(); workflow.BeginRecording(); }
         Assert.Equal(ClawSensorProbeWorkflow.Phases, workflow.Visits.Select(x => x.Phase));
         workflow.Next(); Assert.Equal(ClawSensorProbeState.Completed, workflow.State);
+    }
+    [Fact] public void Workflow_BackCreatesDistinctVisitPass()
+    {
+        var workflow = new ClawSensorProbeWorkflow(); workflow.Ready(); workflow.Start(); workflow.BeginRecording();
+        workflow.Next(); workflow.BeginRecording(); workflow.Back();
+        Assert.Equal(ClawSensorProbePhase.REST, workflow.Visits.Last().Phase);
+        Assert.Equal(2, workflow.Visits.Last().Pass);
+        Assert.Equal(ClawSensorProbeState.Countdown, workflow.State);
+    }
+
+    [Fact] public void Statistics_EmptyInputHasNoRateOrBounds()
+    {
+        var stats = new ClawSensorProbeStatistics();
+        Assert.Equal(0, stats.SampleCount);
+        Assert.Equal(0, stats.EffectiveHz);
+        Assert.Equal(0, stats.MinimumIntervalMs);
+        Assert.Equal(0, stats.MaximumIntervalMs);
     }
 
     [Fact] public async Task Writer_UsesInvariantSeparateRowsAndFinalizes()
@@ -86,5 +188,149 @@ public sealed class ClawSensorProbeTests
         await coordinator.DisposeAsync();
         Assert.True(File.Exists(Directory.GetFiles(root, "claw-sensor-report.json", SearchOption.AllDirectories).Single()));
         Directory.Delete(root, true);
+    }
+    [Fact] public async Task Coordinator_StopClosesActivePhaseInReport()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-stop-phase-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var coordinator = new ClawSensorProbeCoordinator();
+            coordinator.Prepare(); coordinator.Start(root); coordinator.BeginRecording();
+            coordinator.Write(new(1, DateTimeOffset.UtcNow, 10, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1));
+            await coordinator.StopAsync();
+            var report = await File.ReadAllTextAsync(Directory.GetFiles(root, "claw-sensor-report.json", SearchOption.AllDirectories).Single());
+            Assert.Contains("\"end_elapsed_ms\":", report);
+            await coordinator.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+    [Fact] public async Task Coordinator_FailFinalizesReportBeforeRecording()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-fail-before-recording-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var coordinator = new ClawSensorProbeCoordinator();
+            coordinator.Prepare(); coordinator.Start(root);
+            await coordinator.FailAsync("Sensor discovery failed.");
+            Assert.Equal(ClawSensorProbeState.Failed, coordinator.State);
+            var report = await File.ReadAllTextAsync(Directory.GetFiles(root, "claw-sensor-report.json", SearchOption.AllDirectories).Single());
+            Assert.Contains("Sensor discovery failed.", report);
+            await coordinator.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+    [Fact] public void Coordinator_DoesNotStartWhenOutputDirectoryCannotBeCreated()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-output-file-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(root, "not a directory");
+        try
+        {
+            var coordinator = new ClawSensorProbeCoordinator();
+            coordinator.Prepare();
+            Assert.Throws<IOException>(() => coordinator.Start(root));
+            Assert.Equal(ClawSensorProbeState.Ready, coordinator.State);
+        }
+        finally
+        {
+            if (File.Exists(root)) File.Delete(root);
+            else if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+    [Fact] public async Task Coordinator_ReportsOutputAvailabilityOnlyAfterFinalize()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-output-availability-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var coordinator = new ClawSensorProbeCoordinator();
+            coordinator.Prepare(); coordinator.Start(root);
+            Assert.False(coordinator.HasReport);
+            await coordinator.StopAsync();
+            Assert.True(coordinator.HasReport);
+            await coordinator.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+    [Fact] public async Task Writer_PreservesExplicitErrorsInFinalReport()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-errors-" + Guid.NewGuid().ToString("N"));
+        await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
+        {
+            writer.AddError("Sensor reader shutdown exceeded the bounded wait.");
+        }
+        var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+        Assert.Contains("Sensor reader shutdown exceeded the bounded wait", report);
+        Directory.Delete(root, true);
+    }
+    [Fact] public void Statistics_TracksDroppedSamples()
+    {
+        var stats = new ClawSensorProbeStatistics(); stats.AddDropped(); stats.AddDropped();
+        Assert.Equal(2, stats.DroppedSampleCount);
+    }
+    [Fact] public async Task Writer_RecordsShutdownTimeoutInReport()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-timeout-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
+            {
+                writer.MarkShutdownTimedOut();
+            }
+
+            var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+            Assert.Contains("\"ShutdownTimedOut\": true", report);
+            Assert.Contains("Sensor reader shutdown exceeded the bounded wait.", report);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+    [Fact] public async Task Writer_RecordsSensorTimestampAsInvariantValue()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-timestamp-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1, 123456789));
+            }
+
+            var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
+            Assert.Contains(",123456789\n", csv.Replace("\r\n", "\n", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+    [Fact] public async Task ProbeWriter_IsIndependentOfAppLogMinimumLevel()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-independent-" + Guid.NewGuid().ToString("N"));
+        var previousLevel = AppLog.MinimumLevelOverride;
+        try
+        {
+            AppLog.MinimumLevelOverride = AppLogLevel.Fatal;
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorProbePhase.REST, 1, "GYRO", 1.25, 2.5, 3.75, 1));
+            }
+            var directory = Path.Combine(root, "session");
+            Assert.Contains("GYRO,1.25,2.5,3.75", await File.ReadAllTextAsync(Path.Combine(directory, "claw-sensor-live.csv")));
+            Assert.True(File.Exists(Path.Combine(directory, "claw-sensor-report.json")));
+        }
+        finally
+        {
+            AppLog.MinimumLevelOverride = previousLevel;
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
     }
 }

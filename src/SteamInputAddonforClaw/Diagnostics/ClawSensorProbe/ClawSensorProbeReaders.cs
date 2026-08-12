@@ -12,8 +12,10 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
     private long _sequence;
     internal ClawSensorProbeLiveSnapshot Snapshot { get; } = new();
     internal ClawSensorDiscovery Discovery { get; }
-    internal IReadOnlyList<string> Errors => _errors;
+    internal IReadOnlyList<string> Errors { get { lock (_errors) return _errors.ToArray(); } }
     internal bool ShutdownTimedOut { get; private set; }
+    internal bool HasCompleted => _workers.All(x => x.IsCompleted);
+    internal Task Completion => Task.WhenAll(_workers);
     private readonly List<string> _errors = [];
     public ClawSensorProbeReaders(ClawSensorProbeSensorApi api, ClawSensorProbeSessionWriter writer, ClawSensorDiscovery discovery, ClawSensorProbePhase phase, int phasePass)
     {
@@ -50,7 +52,7 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
                     var interval = previous == 0 ? 0 : (now - previous) * 1000d / Stopwatch.Frequency;
                     previous = now;
                     var elapsed = now * 1000d / Stopwatch.Frequency;
-                    writer.Write(new(Interlocked.Increment(ref _sequence), DateTimeOffset.UtcNow, elapsed, phase, phasePass, sensorName, values.X, values.Y, values.Z, interval));
+                    writer.Write(new(Interlocked.Increment(ref _sequence), DateTimeOffset.UtcNow, elapsed, phase, phasePass, sensorName, values.X, values.Y, values.Z, interval, values.Timestamp));
                     Snapshot.Observe(sensorName, values.X, values.Y, values.Z, interval);
                 }
             }

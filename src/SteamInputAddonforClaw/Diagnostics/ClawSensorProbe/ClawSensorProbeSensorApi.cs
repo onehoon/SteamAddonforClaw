@@ -71,14 +71,25 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         var type = ReadGuid(sensor, SensorGetTypeSlot);
         return new(name, id, type.ToString("D"), category.ToString("D"));
     }
-    internal static (double X, double Y, double Z) ReadXYZ(IntPtr sensor)
+    internal static (double X, double Y, double Z, long? Timestamp) ReadXYZ(IntPtr sensor)
     {
         var vtable = Marshal.ReadIntPtr(sensor);
         var getData = Marshal.GetDelegateForFunctionPointer<GetReport>(Marshal.ReadIntPtr(vtable, SensorGetDataSlot * IntPtr.Size));
         var hr = getData(sensor, out var report);
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
         using var ownedReport = new OwnedComPointer(report);
-        return (ReadValue(ownedReport.Pointer, 7), ReadValue(ownedReport.Pointer, 8), ReadValue(ownedReport.Pointer, 9));
+        return (ReadValue(ownedReport.Pointer, 7), ReadValue(ownedReport.Pointer, 8), ReadValue(ownedReport.Pointer, 9), TryReadTimestamp(ownedReport.Pointer));
+    }
+    private static long? TryReadTimestamp(IntPtr report)
+    {
+        try
+        {
+            var vtable = Marshal.ReadIntPtr(report);
+            var call = Marshal.GetDelegateForFunctionPointer<GetTimestamp>(Marshal.ReadIntPtr(vtable, ReportGetTimestampSlot * IntPtr.Size));
+            var hr = call(report, out var timestamp);
+            return hr < 0 ? null : (long)timestamp;
+        }
+        catch { return null; }
     }
     internal static string ReadOptionalMetadata(IntPtr sensor, int slot) => TryReadString(sensor, slot);
     private static string TryReadString(IntPtr sensor, int slot)
@@ -91,12 +102,51 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         var baseCandidate = ReadMetadata(sensor);
         return baseCandidate with
         {
-            Manufacturer = "Unavailable: optional property not exposed by verified contract",
-            Model = "Unavailable: optional property not exposed by verified contract",
-            PersistentUniqueId = baseCandidate.SensorId,
-            MinimumReportInterval = "Unavailable: optional property not exposed by verified contract",
-            CustomUsage = "Unavailable: optional property not exposed by verified contract"
+            Manufacturer = ReadPropertyString(sensor, SensorPropertyManufacturer),
+            Model = ReadPropertyString(sensor, SensorPropertyModel),
+            PersistentUniqueId = ReadPropertyGuid(sensor, SensorPropertyPersistentUniqueId, baseCandidate.SensorId),
+            MinimumReportInterval = ReadPropertyUInt32(sensor, SensorPropertyMinReportInterval),
+            CustomUsage = ReadPropertyUInt32(sensor, SensorPropertyHidUsage)
         };
+    }
+    private static string ReadPropertyString(IntPtr sensor, int propertyId)
+    {
+        try
+        {
+            var value = ReadProperty(sensor, propertyId);
+            try { return value.VarType == 31 && value.Pointer != IntPtr.Zero ? Marshal.PtrToStringUni(value.Pointer) ?? "Unavailable" : "Unavailable"; }
+            finally { value.Dispose(); }
+        }
+        catch { return "Unavailable"; }
+    }
+    private static string ReadPropertyGuid(IntPtr sensor, int propertyId, string fallback)
+    {
+        try
+        {
+            var value = ReadProperty(sensor, propertyId);
+            try { return value.VarType == 72 && value.Pointer != IntPtr.Zero ? Marshal.PtrToStructure<Guid>(value.Pointer).ToString("D") : fallback; }
+            finally { value.Dispose(); }
+        }
+        catch { return fallback; }
+    }
+    private static string ReadPropertyUInt32(IntPtr sensor, int propertyId)
+    {
+        try
+        {
+            var value = ReadProperty(sensor, propertyId);
+            try { return value.VarType == 19 ? value.UInt32.ToString(System.Globalization.CultureInfo.InvariantCulture) : "Unavailable"; }
+            finally { value.Dispose(); }
+        }
+        catch { return "Unavailable"; }
+    }
+    private static PropVariant ReadProperty(IntPtr sensor, int propertyId)
+    {
+        var vtable = Marshal.ReadIntPtr(sensor);
+        var call = Marshal.GetDelegateForFunctionPointer<GetProperty>(Marshal.ReadIntPtr(vtable, SensorGetPropertySlot * IntPtr.Size));
+        var key = new PropertyKey(SensorPropertyCommonGuid, propertyId);
+        var hr = call(sensor, ref key, out var value);
+        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+        return value;
     }
     private static double ReadValue(IntPtr report, int pid)
     {
@@ -149,15 +199,19 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         return sensor;
     }
     // The returned Sensor API interfaces are intentionally consumed through the validated raw vtable slots.
-    internal const int CollectionGetAtSlot = 3, CollectionGetCountSlot = 4, SensorGetIdSlot = 3, SensorGetCategorySlot = 4, SensorGetTypeSlot = 5, SensorGetFriendlyNameSlot = 6, SensorGetDataSlot = 13, ReportGetTimestampSlot = 3, ReportGetSensorValueSlot = 4;
+    private static readonly Guid SensorPropertyCommonGuid = new("7F8383EC-D3EC-495C-A8CF-B8BBE85C2920");
+    private const int SensorPropertyPersistentUniqueId = 5, SensorPropertyManufacturer = 6, SensorPropertyModel = 7, SensorPropertyMinReportInterval = 12, SensorPropertyHidUsage = 22;
+    internal const int CollectionGetAtSlot = 3, CollectionGetCountSlot = 4, SensorGetIdSlot = 3, SensorGetCategorySlot = 4, SensorGetTypeSlot = 5, SensorGetFriendlyNameSlot = 6, SensorGetPropertySlot = 9, SensorGetDataSlot = 13, ReportGetTimestampSlot = 3, ReportGetSensorValueSlot = 4;
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetSensorsByCategory(IntPtr self, ref Guid category, out IntPtr collection);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetCount(IntPtr self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetAt(IntPtr self, int index, out IntPtr sensor);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetString(IntPtr self, out IntPtr value);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetGuid(IntPtr self, out Guid value);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetProperty(IntPtr self, ref PropertyKey key, out PropVariant value);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetReport(IntPtr self, out IntPtr report);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetSensorValue(IntPtr self, ref PropertyKey key, out PropVariant value);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetTimestamp(IntPtr self, out ulong timestamp);
 
     [StructLayout(LayoutKind.Sequential)] private struct PropertyKey(Guid formatId, int propertyId) { public Guid FormatId = formatId; public int PropertyId = propertyId; }
     [StructLayout(LayoutKind.Explicit, Size = 24)] private struct PropVariant

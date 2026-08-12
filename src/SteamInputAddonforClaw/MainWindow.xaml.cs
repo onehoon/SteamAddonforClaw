@@ -54,7 +54,7 @@ public sealed partial class MainWindow : Window
     private bool _windowActivatedForUser;
     private bool _setupPromptPendingActivation;
     private bool _prerequisiteSetupInProgress;
-    private readonly ClawSensorProbeCoordinator _clawSensorProbe = new();
+    private ClawSensorProbeCoordinator _clawSensorProbe = new();
     private DispatcherQueueTimer? _clawSensorProbeUiTimer;
 
     public MainWindow(
@@ -210,54 +210,147 @@ public sealed partial class MainWindow : Window
         ReturnToSettings("BackButton");
     }
 
-    private void ClawSensorProbeButton_Click(object sender, RoutedEventArgs args)
+    private async void ClawSensorProbeButton_Click(object sender, RoutedEventArgs args)
     {
+        if (_clawSensorProbe.State is ClawSensorProbeState.Completed or ClawSensorProbeState.Failed)
+        {
+            await _clawSensorProbe.DisposeAsync();
+            _clawSensorProbe = new ClawSensorProbeCoordinator();
+        }
         ShowPage(_navigationState.OpenClawSensorProbe());
         ClawSensorProbeStatusText.Text = "Ready. This diagnostic is read-only.";
     }
     private async void ClawSensorProbeBackButton_Click(object sender, RoutedEventArgs args)
     {
-        if (_clawSensorProbe.State is ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase)
-            await _clawSensorProbe.StopAsync();
+        if (_clawSensorProbe.State is ClawSensorProbeState.Starting or ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase)
+            await StopClawSensorProbeSafelyAsync();
         ShowPage(_navigationState.ReturnToDeveloperMenu());
     }
     private async void ClawSensorProbeStartButton_Click(object sender, RoutedEventArgs args)
     {
         try
         {
+            ClawSensorProbeStartButton.IsEnabled = false;
             _clawSensorProbe.Prepare();
+            ClawSensorProbeStatusText.Text = "Discovering Windows motion sensors...";
             _clawSensorProbe.Start();
             var device = _latestSystemStatus?.Device;
             _clawSensorProbe.SetDeviceIdentity(device?.Manufacturer ?? "Unavailable", device?.Model ?? "Unavailable", device?.BaseBoardProduct ?? "Unavailable", device?.Model ?? "Unknown / unresolved");
-            ClawSensorProbeStatusText.Text = "Get ready. 3"; _clawSensorProbe.WriteTransition(); await Task.Delay(1000, _clawSensorProbe.LifecycleCancellation); ClawSensorProbeStatusText.Text = "Get ready. 2"; _clawSensorProbe.WriteTransition(); await Task.Delay(1000, _clawSensorProbe.LifecycleCancellation); ClawSensorProbeStatusText.Text = "Get ready. 1"; _clawSensorProbe.WriteTransition(); await Task.Delay(1000, _clawSensorProbe.LifecycleCancellation);
+            var hardware = _latestSystemStatus?.HardwareCompatibility;
+            _clawSensorProbe.SetHardwareCompatibility(hardware?.Status.ToString() ?? "Indeterminate", hardware?.DeviceFamily?.Value ?? "Unavailable", hardware?.DeviceModel?.Value ?? "Unavailable", hardware?.Reason ?? "Not captured");
+            if (hardware?.Status == HardwareCompatibilityStatus.Unsupported)
+                throw new InvalidOperationException("This diagnostic is available only on an identified MSI Claw device.");
+            await _clawSensorProbe.CountdownAsync(status => { ClawSensorProbeStatusText.Text = status; return Task.CompletedTask; }, ClawSensorProbePhaseLabel, _clawSensorProbe.LifecycleCancellation);
             _clawSensorProbe.BeginRecording();
-            await _clawSensorProbe.StartCaptureAsync();
+            await _clawSensorProbe.StartCaptureAsync(_clawSensorProbe.LifecycleCancellation);
             var discovery = _clawSensorProbe.Discovery;
-            ClawSensorProbeGyroText.Text = discovery?.Gyroscope is { } gyro ? $"Gyroscope: {gyro.FriendlyName} | {gyro.SensorId} | {gyro.TypeGuid} | Ready" : "Gyroscope: Not available";
-            ClawSensorProbeAccelText.Text = discovery?.Accelerometer is { } accel ? $"Accelerometer: {accel.FriendlyName} | {accel.SensorId} | {accel.TypeGuid} | Ready" : "Accelerometer: Not available";
+            ClawSensorProbeGyroText.Text = discovery?.Gyroscope is { } gyro ? $"Gyroscope: {gyro.FriendlyName} | ID: {gyro.SensorId} | Type: {gyro.TypeGuid} | Category: {gyro.CategoryGuid} | Manufacturer: {gyro.Manufacturer} | Model: {gyro.Model} | Persistent ID: {gyro.PersistentUniqueId} | Min interval: {gyro.MinimumReportInterval} ms | HID usage: {gyro.CustomUsage} | Status: Ready" : "Gyroscope: Not available";
+            ClawSensorProbeAccelText.Text = discovery?.Accelerometer is { } accel ? $"Accelerometer: {accel.FriendlyName} | ID: {accel.SensorId} | Type: {accel.TypeGuid} | Category: {accel.CategoryGuid} | Manufacturer: {accel.Manufacturer} | Model: {accel.Model} | Persistent ID: {accel.PersistentUniqueId} | Min interval: {accel.MinimumReportInterval} ms | HID usage: {accel.CustomUsage} | Status: Ready" : "Accelerometer: Not available";
             StartClawSensorProbeUiTimer();
             UpdateClawSensorProbePhaseUi();
             ClawSensorProbeStatusText.Text = "Recording. Sensor discovery and capture are read-only.";
-            ClawSensorProbeStartButton.IsEnabled = false;
             ClawSensorProbeStopButton.IsEnabled = true;
             ClawSensorProbeNextPhaseButton.IsEnabled = true;
+        }
+        catch (OperationCanceledException)
+        {
+            await _clawSensorProbe.StopAsync();
+            _clawSensorProbeUiTimer?.Stop();
+            ClawSensorProbeStatusText.Text = "Test stopped. Output: " + _clawSensorProbe.OutputDirectory;
+            ClawSensorProbeStopButton.IsEnabled = false;
+            ClawSensorProbeNextPhaseButton.IsEnabled = false;
+            ClawSensorProbeDoneButton.IsEnabled = true;
+            ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
+            UpdateClawSensorProbeSummary("Test stopped");
         }
         catch (Exception exception)
         {
             await _clawSensorProbe.FailAsync(exception.Message);
-            ClawSensorProbeOpenFolderButton.IsEnabled = true;
+            ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
             ClawSensorProbeStatusText.Text = $"Test failed: {exception.Message}";
             ClawSensorProbeErrorText.Text = exception.Message;
             ClawSensorProbeDoneButton.IsEnabled = true;
+            UpdateClawSensorProbeSummary("Test failed");
         }
     }
-    private async void ClawSensorProbeNextPhaseButton_Click(object sender, RoutedEventArgs args) { if (_clawSensorProbe.State == ClawSensorProbeState.RecordingPhase) { _clawSensorProbe.EndCurrentPhase(); _clawSensorProbe.WriteTransition(); _clawSensorProbe.Next(); if (_clawSensorProbe.State == ClawSensorProbeState.Completed) { await _clawSensorProbe.StopAsync(); _clawSensorProbeUiTimer?.Stop(); ClawSensorProbeStatusText.Text = "Test completed. Output: " + _clawSensorProbe.OutputDirectory; ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeOpenFolderButton.IsEnabled = true; } else { ClawSensorProbeStatusText.Text = "Get ready. 3"; _clawSensorProbe.WriteTransition(); await Task.Delay(1000, _clawSensorProbe.LifecycleCancellation); ClawSensorProbeStatusText.Text = "Get ready. 2"; _clawSensorProbe.WriteTransition(); await Task.Delay(1000, _clawSensorProbe.LifecycleCancellation); ClawSensorProbeStatusText.Text = "Get ready. 1"; _clawSensorProbe.WriteTransition(); await Task.Delay(1000, _clawSensorProbe.LifecycleCancellation); _clawSensorProbe.BeginRecording(); await _clawSensorProbe.RestartPhaseCaptureAsync(); } UpdateClawSensorProbePhaseUi(); } }
-    private async void ClawSensorProbeBackPhaseButton_Click(object sender, RoutedEventArgs args) { if (_clawSensorProbe.State == ClawSensorProbeState.RecordingPhase) _clawSensorProbe.EndCurrentPhase(); _clawSensorProbe.Back(); if (_clawSensorProbe.State == ClawSensorProbeState.Countdown) { _clawSensorProbe.BeginRecording(); await _clawSensorProbe.RestartPhaseCaptureAsync(); } UpdateClawSensorProbePhaseUi(); }
-    private async void ClawSensorProbeStopButton_Click(object sender, RoutedEventArgs args) { await _clawSensorProbe.StopAsync(); _clawSensorProbeUiTimer?.Stop(); ClawSensorProbeStatusText.Text = "Test stopped. Output: " + _clawSensorProbe.OutputDirectory; ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeNextPhaseButton.IsEnabled = false; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = true; UpdateClawSensorProbeSummary(); }
-    private void ClawSensorProbeOpenFolderButton_Click(object sender, RoutedEventArgs args) { if (string.IsNullOrWhiteSpace(_clawSensorProbe.OutputDirectory)) return; Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_clawSensorProbe.OutputDirectory}\"") { UseShellExecute = true }); }
-    private async void ClawSensorProbeDoneButton_Click(object sender, RoutedEventArgs args) { if (_clawSensorProbe.State is ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase) await _clawSensorProbe.StopAsync(); ShowPage(_navigationState.ReturnToDeveloperMenu()); }
-    private void UpdateClawSensorProbeSummary() { var gyro = _clawSensorProbe.GyroscopeSummary; var accel = _clawSensorProbe.AccelerometerSummary; ClawSensorProbeSummaryText.Text = $"Test completed or stopped{Environment.NewLine}Gyroscope samples: {gyro?.SampleCount ?? 0}, average rate: {gyro?.EffectiveHz:0.0} Hz, interval: {gyro?.MinimumIntervalMs:0.###}-{gyro?.MaximumIntervalMs:0.###} ms{Environment.NewLine}Accelerometer samples: {accel?.SampleCount ?? 0}, average rate: {accel?.EffectiveHz:0.0} Hz, interval: {accel?.MinimumIntervalMs:0.###}-{accel?.MaximumIntervalMs:0.###} ms{Environment.NewLine}Dropped samples: {_clawSensorProbe.DroppedSampleCount}"; }
-    private void UpdateClawSensorProbePhaseUi() { var index = _clawSensorProbe.Workflow.CurrentIndex; var phase = index >= 0 ? _clawSensorProbe.Workflow.Visits.Last().Phase : ClawSensorProbePhase.REST; ClawSensorProbePhaseText.Text = index >= 0 ? $"Step: {index + 1} of {ClawSensorProbeWorkflow.Phases.Count} - {phase}" : "Step: Not started"; ClawSensorProbeInstructionText.Text = phase switch { ClawSensorProbePhase.REST => "Keep Still: Place the device on a flat surface and do not touch it.", ClawSensorProbePhase.ROLL_LEFT => "Roll Left: Slowly lower the left side, then return to the starting position.", ClawSensorProbePhase.ROLL_RIGHT => "Roll Right: Slowly lower the right side, then return to the starting position.", ClawSensorProbePhase.PITCH_UP => "Pitch Up: Slowly tilt the top upward, then return to the starting position.", ClawSensorProbePhase.PITCH_DOWN => "Pitch Down: Slowly tilt the top downward, then return to the starting position.", ClawSensorProbePhase.YAW_LEFT => "Yaw Left: Keep the device level and rotate it left, then return to center.", _ => "Yaw Right: Keep the device level and rotate it right, then return to center." }; ClawSensorProbeBackPhaseButton.IsEnabled = index > 0; ClawSensorProbeNextPhaseButton.Content = index == ClawSensorProbeWorkflow.Phases.Count - 1 ? "Finish Test" : "Next"; }
+    private async void ClawSensorProbeNextPhaseButton_Click(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            if (_clawSensorProbe.State != ClawSensorProbeState.RecordingPhase) return;
+            _clawSensorProbe.AdvancePhase();
+            if (_clawSensorProbe.State == ClawSensorProbeState.Completed)
+            {
+                await _clawSensorProbe.StopAsync(); _clawSensorProbeUiTimer?.Stop();
+                ClawSensorProbeStatusText.Text = "Test completed. Output: " + _clawSensorProbe.OutputDirectory;
+                ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
+                UpdateClawSensorProbeSummary("Test completed");
+            }
+            else
+            {
+                await _clawSensorProbe.CountdownAsync(status => { ClawSensorProbeStatusText.Text = status; return Task.CompletedTask; }, ClawSensorProbePhaseLabel, _clawSensorProbe.LifecycleCancellation);
+                _clawSensorProbe.BeginRecording(); await _clawSensorProbe.RestartPhaseCaptureAsync(_clawSensorProbe.LifecycleCancellation);
+            }
+            UpdateClawSensorProbePhaseUi();
+        }
+        catch (OperationCanceledException)
+        {
+            await _clawSensorProbe.StopAsync(); _clawSensorProbeUiTimer?.Stop();
+            ClawSensorProbeStatusText.Text = "Test stopped. Output: " + _clawSensorProbe.OutputDirectory;
+            ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeNextPhaseButton.IsEnabled = false; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
+            UpdateClawSensorProbeSummary("Test stopped");
+        }
+    }
+    private async void ClawSensorProbeBackPhaseButton_Click(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            _clawSensorProbe.RevisitPreviousPhase();
+            if (_clawSensorProbe.State == ClawSensorProbeState.Countdown)
+            {
+                await _clawSensorProbe.CountdownAsync(status => { ClawSensorProbeStatusText.Text = status; return Task.CompletedTask; }, ClawSensorProbePhaseLabel, _clawSensorProbe.LifecycleCancellation);
+                _clawSensorProbe.BeginRecording(); await _clawSensorProbe.RestartPhaseCaptureAsync(_clawSensorProbe.LifecycleCancellation);
+            }
+            UpdateClawSensorProbePhaseUi();
+        }
+        catch (OperationCanceledException)
+        {
+            await _clawSensorProbe.StopAsync(); _clawSensorProbeUiTimer?.Stop();
+            ClawSensorProbeStatusText.Text = "Test stopped. Output: " + _clawSensorProbe.OutputDirectory;
+            ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeNextPhaseButton.IsEnabled = false; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
+            UpdateClawSensorProbeSummary("Test stopped");
+        }
+    }
+    private async void ClawSensorProbeStopButton_Click(object sender, RoutedEventArgs args) { ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeNextPhaseButton.IsEnabled = false; ClawSensorProbeStatusText.Text = "Stopping sensor capture..."; await StopClawSensorProbeSafelyAsync(); _clawSensorProbeUiTimer?.Stop(); ClawSensorProbeStatusText.Text = "Test stopped. Output: " + _clawSensorProbe.OutputDirectory; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport; UpdateClawSensorProbeSummary(); }
+    private void ClawSensorProbeOpenFolderButton_Click(object sender, RoutedEventArgs args)
+    {
+        if (string.IsNullOrWhiteSpace(_clawSensorProbe.OutputDirectory))
+        {
+            ClawSensorProbeErrorText.Text = "The diagnostic output directory is unavailable.";
+            return;
+        }
+
+        try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_clawSensorProbe.OutputDirectory}\"") { UseShellExecute = true }); }
+        catch (Exception exception) { ClawSensorProbeErrorText.Text = $"The diagnostic log folder could not be opened: {exception.Message}"; }
+    }
+    private async void ClawSensorProbeDoneButton_Click(object sender, RoutedEventArgs args) { if (_clawSensorProbe.State is ClawSensorProbeState.Starting or ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase) await StopClawSensorProbeSafelyAsync(); ShowPage(_navigationState.ReturnToDeveloperMenu()); }
+    private async Task StopClawSensorProbeSafelyAsync()
+    {
+        try { await _clawSensorProbe.StopAsync(); }
+        catch (Exception exception) { ClawSensorProbeErrorText.Text = $"Probe shutdown warning: {exception.Message}"; }
+    }
+    private void UpdateClawSensorProbeSummary(string result = "Test stopped") { var gyro = _clawSensorProbe.GyroscopeSummary; var accel = _clawSensorProbe.AccelerometerSummary; ClawSensorProbeSummaryText.Text = $"{result}{Environment.NewLine}Output directory: {_clawSensorProbe.OutputDirectory ?? "Unavailable"}{Environment.NewLine}Gyroscope samples: {gyro?.SampleCount ?? 0}, average rate: {gyro?.EffectiveHz:0.0} Hz, interval: {gyro?.MinimumIntervalMs:0.###}-{gyro?.MaximumIntervalMs:0.###} ms, dropped: {_clawSensorProbe.DroppedGyroscopeCount}{Environment.NewLine}Accelerometer samples: {accel?.SampleCount ?? 0}, average rate: {accel?.EffectiveHz:0.0} Hz, interval: {accel?.MinimumIntervalMs:0.###}-{accel?.MaximumIntervalMs:0.###} ms, dropped: {_clawSensorProbe.DroppedAccelerometerCount}{Environment.NewLine}Dropped samples total: {_clawSensorProbe.DroppedSampleCount}"; }
+    private void UpdateClawSensorProbePhaseUi() { var index = _clawSensorProbe.Workflow.CurrentIndex; var phase = index >= 0 ? _clawSensorProbe.Workflow.Visits.Last().Phase : ClawSensorProbePhase.REST; ClawSensorProbePhaseText.Text = index >= 0 ? $"Step: {index + 1} of {ClawSensorProbeWorkflow.Phases.Count} - {ClawSensorProbePhaseLabel(phase)}" : "Step: Not started"; ClawSensorProbeInstructionText.Text = phase switch { ClawSensorProbePhase.REST => "Keep Still: Place the device on a flat surface and do not touch it.", ClawSensorProbePhase.ROLL_LEFT => "Roll Left: Slowly lower the left side, then return to the starting position.", ClawSensorProbePhase.ROLL_RIGHT => "Roll Right: Slowly lower the right side, then return to the starting position.", ClawSensorProbePhase.PITCH_UP => "Pitch Up: Slowly tilt the top upward, then return to the starting position.", ClawSensorProbePhase.PITCH_DOWN => "Pitch Down: Slowly tilt the top downward, then return to the starting position.", ClawSensorProbePhase.YAW_LEFT => "Yaw Left: Keep the device level and rotate it left, then return to center.", _ => "Yaw Right: Keep the device level and rotate it right, then return to center." }; ClawSensorProbeBackPhaseButton.IsEnabled = index > 0; ClawSensorProbeNextPhaseButton.Content = index == ClawSensorProbeWorkflow.Phases.Count - 1 ? "Finish Test" : "Next"; }
+    private static string ClawSensorProbePhaseLabel(ClawSensorProbePhase phase) => phase switch
+    {
+        ClawSensorProbePhase.REST => "Keep Still",
+        ClawSensorProbePhase.ROLL_LEFT => "Roll Left",
+        ClawSensorProbePhase.ROLL_RIGHT => "Roll Right",
+        ClawSensorProbePhase.PITCH_UP => "Pitch Up",
+        ClawSensorProbePhase.PITCH_DOWN => "Pitch Down",
+        ClawSensorProbePhase.YAW_LEFT => "Yaw Left",
+        _ => "Yaw Right"
+    };
     private void StartClawSensorProbeUiTimer()
     {
         _clawSensorProbeUiTimer ??= DispatcherQueue.GetForCurrentThread().CreateTimer();
@@ -270,15 +363,18 @@ public sealed partial class MainWindow : Window
     {
         var snapshot = _clawSensorProbe.LiveSnapshot;
         if (snapshot is null) return;
+        if (_clawSensorProbe.ReaderErrors.Count > 0)
+            ClawSensorProbeErrorText.Text = string.Join(Environment.NewLine, _clawSensorProbe.ReaderErrors);
         var gyro = snapshot.Gyro; var accel = snapshot.Accel;
-        ClawSensorProbeLiveText.Text = $"Gyroscope: {gyro.X:0.###}, {gyro.Y:0.###}, {gyro.Z:0.###} raw | {gyro.Hz:0.0} Hz | {gyro.Count} samples{Environment.NewLine}Accelerometer: {accel.X:0.###}, {accel.Y:0.###}, {accel.Z:0.###} raw | {accel.Hz:0.0} Hz | {accel.Count} samples";
+        ClawSensorProbeLiveText.Text = $"Status: Recording{Environment.NewLine}Gyroscope raw: X={gyro.X:0.###}, Y={gyro.Y:0.###}, Z={gyro.Z:0.###} | {gyro.Hz:0.0} Hz | {gyro.Count} samples{Environment.NewLine}Accelerometer raw: X={accel.X:0.###}, Y={accel.Y:0.###}, Z={accel.Z:0.###} | {accel.Hz:0.0} Hz | {accel.Count} samples";
     }
 
     private async void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        if (_clawSensorProbe.State is ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase)
-            await _clawSensorProbe.StopAsync();
-        await _clawSensorProbe.DisposeAsync();
+        if (_clawSensorProbe.State is ClawSensorProbeState.Starting or ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase)
+            await StopClawSensorProbeSafelyAsync();
+        try { await _clawSensorProbe.DisposeAsync(); }
+        catch (Exception exception) { AppLog.Warn("ClawSensorProbe", "Probe cleanup failed.", exception); }
     }
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
