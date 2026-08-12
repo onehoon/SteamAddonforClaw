@@ -215,7 +215,8 @@ public partial class App : Application
             _msiClawNativeModeSession.SetRoutingSafetyVetoHandler(async () =>
             {
                 _routingRuntimeCoordinator.CancelInFlightTransition();
-                await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
+                var result = await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
+                return result.Succeeded;
             });
             steamOutputStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false); });
         }
@@ -289,6 +290,8 @@ public partial class App : Application
             AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation failed; routing is being failed closed.", exception);
             try
             {
+                if (_msiClawNativeModeSession is not null)
+                    await _msiClawNativeModeSession.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
                 var rollback = await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
                 if (!rollback.Succeeded)
                     AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));

@@ -21,7 +21,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private Guid? _recoverySessionId;
     private readonly Func<bool>? _mutationAllowed;
     private readonly Func<CancellationToken, Task> _safetyMonitorDelay;
-    private Func<Task>? _routingSafetyVetoHandler;
+    private Func<Task<bool>>? _routingSafetyVetoHandler;
     private CancellationTokenSource? _safetyMonitor;
     private bool _vetoLatched;
     private long _decisionGeneration;
@@ -29,7 +29,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private bool _routingFaultLatched;
     private readonly Lock _recoveryStateSync = new();
 
-    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, RecoverySafetyState recoverySafety, Func<bool>? mutationAllowed = null, Func<Task>? routingSafetyVetoHandler = null, Func<CancellationToken, Task>? safetyMonitorDelay = null)
+    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, RecoverySafetyState recoverySafety, Func<bool>? mutationAllowed = null, Func<Task<bool>>? routingSafetyVetoHandler = null, Func<CancellationToken, Task>? safetyMonitorDelay = null)
     {
         _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _recoverySafety = recoverySafety;
         _mutationAllowed = mutationAllowed; _routingSafetyVetoHandler = routingSafetyVetoHandler;
@@ -74,8 +74,15 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     public bool HasOwnedRecoveryBoundary { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned; } }
     public Guid? CurrentRecoverySessionId { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned ? _recoverySessionId : null; } }
 
-    internal void SetRoutingSafetyVetoHandler(Func<Task> handler) =>
+    internal void SetRoutingSafetyVetoHandler(Func<Task<bool>> handler) =>
         _routingSafetyVetoHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+
+    internal async Task LatchRoutingFaultAsync(string reason, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { LatchRoutingFaultCore(reason); }
+        finally { _gate.Release(); }
+    }
 
     public async ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken)
     {
@@ -252,9 +259,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            _decisionGeneration++;
-            _routingFaultLatched = true;
-            AppLog.Debug("NativeMode", "RoutingFaultLatched", ("Reason", reason));
+            LatchRoutingFaultCore(reason);
             await StopCoreLockedAsync(cancellationToken, reportFailure: true).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
@@ -278,12 +283,28 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
                     if (handler is null)
                         AppLog.Error("NativeMode", "No canonical routing fail-close handler is configured for an active-session external controller veto.", new InvalidOperationException("RoutingSafetyVetoHandlerMissing"));
                     else
-                        await handler().ConfigureAwait(false);
-                    return;
+                    {
+                        try
+                        {
+                            if (await handler().ConfigureAwait(false)) return;
+                            AppLog.Error("NativeMode", "Canonical routing fail-close did not complete after an active-session external controller veto.", new InvalidOperationException("RoutingSafetyVetoCleanupFailed"));
+                        }
+                        catch (Exception exception)
+                        {
+                            AppLog.Error("NativeMode", "Canonical routing fail-close threw after an active-session external controller veto.", exception);
+                        }
+                    }
                 }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    private void LatchRoutingFaultCore(string reason)
+    {
+        _decisionGeneration++;
+        _routingFaultLatched = true;
+        AppLog.Debug("NativeMode", "RoutingFaultLatched", ("Reason", reason));
     }
 
     private void MarkRecoveryUnsafe(string reason)

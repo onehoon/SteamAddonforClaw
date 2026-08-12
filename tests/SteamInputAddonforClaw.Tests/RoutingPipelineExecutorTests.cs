@@ -205,6 +205,39 @@ public sealed class RoutingPipelineExecutorTests
     }
 
     [Fact]
+    public async Task MultiStageCancellation_UsesCanonicalDependencyRollbackOrder()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var trace = new List<string>();
+        var native = new FakeStage(RoutingStageKind.NativeMode, trace);
+        var input = new FakeStage(RoutingStageKind.PhysicalInput, trace);
+        var isolation = new FakeStage(RoutingStageKind.PhysicalIsolation, trace);
+        var output = new FakeStage(RoutingStageKind.SteamOutput, trace) { ThrowOnExecuteCancellation = cancellation };
+        var plan = new RoutingPipelinePlan(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new RoutingPipelineExecutor([native, input, isolation, output]).ExecuteAsync(plan, cancellation.Token).AsTask());
+
+        Assert.Equal(["NativeMode.Prepare", "NativeMode.Execute", "PhysicalInput.Prepare", "PhysicalInput.Execute", "PhysicalIsolation.Prepare", "PhysicalIsolation.Execute", "SteamOutput.Prepare", "SteamOutput.Execute", "SteamOutput.Rollback", "PhysicalInput.Rollback", "NativeMode.Rollback", "PhysicalIsolation.Rollback"], trace);
+    }
+
+    [Fact]
+    public async Task MultiStageException_UsesCanonicalDependencyRollbackOrder()
+    {
+        var trace = new List<string>();
+        var native = new FakeStage(RoutingStageKind.NativeMode, trace);
+        var input = new FakeStage(RoutingStageKind.PhysicalInput, trace);
+        var isolation = new FakeStage(RoutingStageKind.PhysicalIsolation, trace);
+        var output = new FakeStage(RoutingStageKind.SteamOutput, trace) { ThrowOnExecute = true };
+        var plan = new RoutingPipelinePlan(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled);
+
+        var result = await new RoutingPipelineExecutor([native, input, isolation, output]).ExecuteAsync(plan, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(RoutingStageKind.SteamOutput, result.FailedStage);
+        Assert.Equal(["NativeMode.Prepare", "NativeMode.Execute", "PhysicalInput.Prepare", "PhysicalInput.Execute", "PhysicalIsolation.Prepare", "PhysicalIsolation.Execute", "SteamOutput.Prepare", "SteamOutput.Execute", "SteamOutput.Rollback", "PhysicalInput.Rollback", "NativeMode.Rollback", "PhysicalIsolation.Rollback"], trace);
+    }
+
+    [Fact]
     public void DuplicateOrUnknownRegistrations_AreRejected()
     {
         Assert.Throws<ArgumentException>(() => new RoutingPipelineExecutor([new FakeStage(RoutingStageKind.NativeMode), new FakeStage(RoutingStageKind.NativeMode)]));
@@ -234,6 +267,7 @@ public sealed class RoutingPipelineExecutorTests
         public RoutingStageOperationResult ExecuteResult { get; init; } = RoutingStageOperationResult.Success();
         public RoutingStageOperationResult RollbackResult { get; init; } = RoutingStageOperationResult.Success();
         public bool ThrowOnPrepare { get; init; }
+        public bool ThrowOnExecute { get; init; }
         public CancellationTokenSource? ThrowOnExecuteCancellation { get; init; }
 
         public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)
@@ -260,6 +294,7 @@ public sealed class RoutingPipelineExecutorTests
                 ThrowOnExecuteCancellation.Cancel();
                 throw new OperationCanceledException(ThrowOnExecuteCancellation.Token);
             }
+            if (ThrowOnExecute) throw new InvalidOperationException("execute");
             return ValueTask.FromResult(ExecuteResult);
         }
 
