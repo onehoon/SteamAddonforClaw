@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
+using Microsoft.Win32.SafeHandles;
 
 namespace SteamInputAddonforClaw.Tests;
 
@@ -104,6 +105,102 @@ public sealed class MsiClawModeSwitchTests
         Assert.False(await writer.WriteAsync(unverified, MsiClawNativeMode.DirectInput, CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData((int)MsiClawNativeMode.XInput)]
+    [InlineData((int)MsiClawNativeMode.DirectInput)]
+    public async Task Windows_writer_passes_exact_command_to_raw_transport(int modeValue)
+    {
+        var mode = (MsiClawNativeMode)modeValue;
+        var container = Guid.NewGuid();
+        var device = Device(container, "USB\\ROOT", "HID\\MSI", 0x1901, 0xFFA0, 0x0001);
+        var expected = new MsiClawControlHidDevice(device, 0xFFA0, 0x0001, MsiClawPhysicalIdentity.From(device));
+        var transport = new RecordingRawTransport();
+        var writer = new WindowsMsiClawModeWriter(new FixedLookup(new("hid-path", device.InstanceId, container)), transport);
+
+        Assert.True(await writer.WriteAsync(expected, mode, CancellationToken.None));
+        Assert.Equal("hid-path", transport.DevicePath);
+        Assert.Equal(MsiClawModeCommand.Build(mode), transport.Bytes);
+    }
+
+    [Fact]
+    public async Task Windows_writer_propagates_transport_failure_and_rejects_empty_lookup()
+    {
+        var device = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1901, 0xFFA0, 0x0001);
+        var expected = new MsiClawControlHidDevice(device, 0xFFA0, 0x0001, MsiClawPhysicalIdentity.From(device));
+        var transport = new RecordingRawTransport { Result = false };
+        var writer = new WindowsMsiClawModeWriter(new FixedLookup(new("hid-path", device.InstanceId, device.ContainerId)), transport);
+        Assert.False(await writer.WriteAsync(expected, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.Equal(1, transport.CallCount);
+
+        var emptyTransport = new RecordingRawTransport();
+        var emptyWriter = new WindowsMsiClawModeWriter(new FixedLookup(new("", device.InstanceId, device.ContainerId)), emptyTransport);
+        Assert.False(await emptyWriter.WriteAsync(expected, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.Equal(1, emptyTransport.CallCount);
+    }
+
+    [Fact]
+    public async Task Windows_writer_supports_sentinel_identity_at_raw_transport_boundary()
+    {
+        var sentinel = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
+        var device = Topology(sentinel, "USB\\VID_0DB0&PID_1901\\CLAW_A", 0x1901);
+        var expected = new MsiClawControlHidDevice(device, 0xFFA0, 0x0001, MsiClawPhysicalIdentity.From(device));
+        var transport = new RecordingRawTransport();
+        var writer = new WindowsMsiClawModeWriter(new FixedLookup(new("hid-path", device.InstanceId, sentinel)), transport);
+
+        Assert.True(await writer.WriteAsync(expected, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.Equal(1, transport.CallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_requires_exact_full_write_and_handles_cancellation()
+    {
+        var fake = new FakeNativeHidApi { WriteResult = true, BytesWritten = 63 };
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+        Assert.False(await transport.WriteAsync("hid-path", new byte[64], CancellationToken.None));
+
+        fake.BytesWritten = 64;
+        Assert.True(await transport.WriteAsync("hid-path", new byte[64], CancellationToken.None));
+
+        var writesBeforeCancellation = fake.WriteCallCount;
+        var cancelled = new CancellationTokenSource();
+        fake.OnOpen = () => cancelled.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => transport.WriteAsync("hid-path", new byte[64], cancelled.Token));
+        Assert.Equal(writesBeforeCancellation, fake.WriteCallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_returns_false_when_open_fails()
+    {
+        var fake = new FakeNativeHidApi { OpenSucceeds = false };
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+
+        Assert.False(await transport.WriteAsync("hid-path", new byte[64], CancellationToken.None));
+        Assert.Equal(1, fake.OpenCallCount);
+        Assert.Equal(0, fake.WriteCallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_returns_false_when_native_write_fails()
+    {
+        var fake = new FakeNativeHidApi { WriteResult = false, BytesWritten = 0 };
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+
+        Assert.False(await transport.WriteAsync("hid-path", new byte[64], CancellationToken.None));
+        Assert.Equal(1, fake.OpenCallCount);
+        Assert.Equal(1, fake.WriteCallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_rejects_empty_path_before_native_io()
+    {
+        var fake = new FakeNativeHidApi();
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+
+        Assert.False(await transport.WriteAsync("", new byte[64], CancellationToken.None));
+        Assert.Equal(0, fake.OpenCallCount);
+        Assert.Equal(0, fake.WriteCallCount);
+    }
+
     [Fact]
     public async Task Mode_controller_requires_observed_old_and_target_devices()
     {
@@ -175,4 +272,43 @@ public sealed class MsiClawModeSwitchTests
     }
     private sealed class EmptyLookup : IMsiClawHidDeviceInformationLookup
     { public Task<IReadOnlyList<MsiClawHidDeviceInformation>> FindAsync(string selector, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MsiClawHidDeviceInformation>>([]); }
+    private sealed class FixedLookup(MsiClawHidDeviceInformation item) : IMsiClawHidDeviceInformationLookup
+    { public Task<IReadOnlyList<MsiClawHidDeviceInformation>> FindAsync(string selector, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MsiClawHidDeviceInformation>>([item]); }
+    private sealed class RecordingRawTransport : IMsiClawRawHidTransport
+    {
+        public string? DevicePath { get; private set; }
+        public byte[] Bytes { get; private set; } = [];
+        public bool Result { get; set; } = true;
+        public int CallCount { get; private set; }
+        public Task<bool> WriteAsync(string devicePath, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
+        {
+            DevicePath = devicePath;
+            Bytes = bytes.ToArray();
+            CallCount++;
+            return Task.FromResult(Result && !string.IsNullOrWhiteSpace(devicePath));
+        }
+    }
+
+    private sealed class FakeNativeHidApi : IMsiClawNativeHidApi
+    {
+        public bool WriteResult { get; set; }
+        public bool OpenSucceeds { get; set; } = true;
+        public uint BytesWritten { get; set; }
+        public int OpenCallCount { get; private set; }
+        public int WriteCallCount { get; private set; }
+        public Action? OnOpen { get; set; }
+        public int LastError => 123;
+        public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
+        {
+            OpenCallCount++;
+            OnOpen?.Invoke();
+            return new SafeFileHandle(new IntPtr(OpenSucceeds ? 1 : -1), ownsHandle: false);
+        }
+        public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
+        {
+            WriteCallCount++;
+            bytesWritten = BytesWritten;
+            return WriteResult;
+        }
+    }
 }
