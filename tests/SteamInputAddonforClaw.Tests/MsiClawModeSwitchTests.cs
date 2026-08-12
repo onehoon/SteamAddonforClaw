@@ -105,6 +105,20 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public async Task Windows_writer_passes_exact_command_to_raw_transport()
+    {
+        var container = Guid.NewGuid();
+        var device = Device(container, "USB\\ROOT", "HID\\MSI", 0x1901, 0xFFA0, 0x0001);
+        var expected = new MsiClawControlHidDevice(device, 0xFFA0, 0x0001, MsiClawPhysicalIdentity.From(device));
+        var transport = new RecordingRawTransport();
+        var writer = new WindowsMsiClawModeWriter(new FixedLookup(new("hid-path", device.InstanceId, container)), transport);
+
+        Assert.True(await writer.WriteAsync(expected, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.Equal("hid-path", transport.DevicePath);
+        Assert.Equal(MsiClawModeCommand.Build(MsiClawNativeMode.DirectInput), transport.Bytes);
+    }
+
+    [Fact]
     public async Task Mode_controller_requires_observed_old_and_target_devices()
     {
         var identity = Guid.NewGuid();
@@ -175,4 +189,17 @@ public sealed class MsiClawModeSwitchTests
     }
     private sealed class EmptyLookup : IMsiClawHidDeviceInformationLookup
     { public Task<IReadOnlyList<MsiClawHidDeviceInformation>> FindAsync(string selector, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MsiClawHidDeviceInformation>>([]); }
+    private sealed class FixedLookup(MsiClawHidDeviceInformation item) : IMsiClawHidDeviceInformationLookup
+    { public Task<IReadOnlyList<MsiClawHidDeviceInformation>> FindAsync(string selector, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MsiClawHidDeviceInformation>>([item]); }
+    private sealed class RecordingRawTransport : IMsiClawRawHidTransport
+    {
+        public string? DevicePath { get; private set; }
+        public byte[] Bytes { get; private set; } = [];
+        public Task<bool> WriteAsync(string devicePath, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
+        {
+            DevicePath = devicePath;
+            Bytes = bytes.ToArray();
+            return Task.FromResult(true);
+        }
+    }
 }

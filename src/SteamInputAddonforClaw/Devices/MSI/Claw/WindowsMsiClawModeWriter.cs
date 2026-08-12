@@ -1,8 +1,5 @@
-using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Devices.Enumeration;
 using Windows.Devices.HumanInterfaceDevice;
-using Windows.Storage.Streams;
-using Windows.Storage;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -10,7 +7,12 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
 {
     private readonly IMsiClawHidDeviceInformationLookup _lookup;
-    internal WindowsMsiClawModeWriter(IMsiClawHidDeviceInformationLookup? lookup = null) => _lookup = lookup ?? new WindowsMsiClawHidDeviceInformationLookup();
+    private readonly IMsiClawRawHidTransport _transport;
+    internal WindowsMsiClawModeWriter(IMsiClawHidDeviceInformationLookup? lookup = null, IMsiClawRawHidTransport? transport = null)
+    {
+        _lookup = lookup ?? new WindowsMsiClawHidDeviceInformationLookup();
+        _transport = transport ?? new WindowsMsiClawRawHidTransport();
+    }
     public async Task<bool> WriteAsync(MsiClawControlHidDevice device, MsiClawNativeMode mode, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -20,15 +22,9 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
         var infos = await _lookup.FindAsync(selector, cancellationToken).ConfigureAwait(false);
         var matching = SelectDeviceInformation(device, infos);
         if (matching is null) return false;
-        using var hid = await HidDevice.FromIdAsync(matching.Id, FileAccessMode.ReadWrite).AsTask(cancellationToken).ConfigureAwait(false);
-        if (hid is null) return false;
         var bytes = MsiClawModeCommand.Build(mode);
-        var report = hid.CreateOutputReport();
-        if (report.Data.Length != bytes.Length) return false;
-        var writer = new DataWriter();
-        writer.WriteBytes(bytes);
-        report.Data = writer.DetachBuffer();
-        await hid.SendOutputReportAsync(report).AsTask(cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(matching.Id)) return false;
+        if (!await _transport.WriteAsync(matching.Id, bytes, cancellationToken).ConfigureAwait(false)) return false;
         AppLog.Debug("NativeMode", "MSI Claw mode command written.", ("PID", device.Device.ProductId), ("UsagePage", device.UsagePage), ("Usage", device.Usage), ("ReportLength", bytes.Length), ("Mode", mode));
         return true;
     }
