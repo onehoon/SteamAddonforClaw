@@ -180,7 +180,7 @@ The addon should avoid persistent system-wide controller modifications whenever 
 
 ## Routing Pipeline Contract
 
-Routing eligibility, action planning, and pipeline configuration are separate concerns. `RoutingDecision` determines whether routing is eligible. The existing `RoutingActionPlan` determines whether the runtime should enter or exit override. `RoutingPipelinePlan` describes the fixed per-stage `Disabled`, `ObserveOnly`, or `Enabled` baseline for an environment-specific routing implementation.
+Routing eligibility and pipeline configuration are separate concerns. `RoutingDecision` determines whether routing is eligible. `RoutingPipelineSessionCoordinator` directly enters, exits, or retains the current session from that decision. `RoutingPipelinePlan` describes the fixed per-stage `Disabled`, `ObserveOnly`, or `Enabled` baseline for an environment-specific routing implementation.
 
 The initial pipeline stages are `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, `ThirdPartyIsolation`, `SteamOutput`, `XboxOutput`, and `GameBarRouting`. `RoutingPipelineSessionCoordinator` selects the fixed baseline plan directly from the already-classified controller-manager environment when a session enters. Recovery and external-controller veto are not optional stages; they remain mandatory cross-cutting safety requirements.
 
@@ -192,7 +192,7 @@ The plan does not infer stage dependencies. The generic executor uses an explici
 
 Plan selection does not authorize controller mutation. Routing eligibility, external-controller veto, recovery safety, prerequisite readiness, and compatibility policy remain separate mandatory gates. The current StockCenterM baseline enables `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, and `SteamOutput`; ClawTweaks retains every stage disabled. The enabled StockCenterM baseline is used only for an eligible real Steam session, and the all-disabled ClawTweaks framework plan does not make ClawTweaks supported by the current compatibility policy.
 
-`RoutingPipelineSessionCoordinator` owns routing-session orchestration. It selects and freezes the fixed `RoutingPipelinePlan` once when an override session enters. Repeated eligible observations do not rebuild or replace an active plan, and exit/failure cleanup uses the exact plan frozen at entry. If rollback fails, the active session and frozen plan are preserved so cleanup can be retried. Plan selection is not routing authorization.
+`RoutingPipelineSessionCoordinator` is the single runtime owner of routing-session state and serializes reconciliation. `ActiveSession == null` means Passive; `ActiveSession != null` means OverrideActive. It selects and freezes the fixed `RoutingPipelinePlan` once when an override session enters. Repeated eligible observations do not rebuild or replace an active plan, and exit/failure cleanup uses the exact plan frozen at entry. If rollback fails, the active session and frozen plan are preserved so cleanup can be retried. Pending cleanup records incomplete rollback work but does not create another operational-state authority. Plan selection is not routing authorization.
 
 The MSI Claw `NativeMode` stage now has a concrete pipeline adapter that reuses the existing `MsiClawNativeModeSessionCoordinator`. Observe and Prepare perform read-only preflight; Execute retains the existing recovery-before-mode-switch ordering; and rollback restores only a native session owned by the stage, retaining ownership when restore fails so cleanup can be retried.
 
