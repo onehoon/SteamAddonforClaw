@@ -33,13 +33,27 @@ internal sealed class StartupCoordinator
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
+        var recoverySafe = true;
         if (_recoveryManager is not null)
         {
-            var recoveryResult = await _recoveryManager.RecoverIncompleteSessionAsync(cancellationToken).ConfigureAwait(false);
-            if (!recoveryResult.IsSafeToContinue)
+            try
             {
-                AppLog.Warn("Startup", "Normal routing blocked by incomplete recovery.", null, ("Action", "Passive"), ("Reason", recoveryResult.Reason));
-                return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: false);
+                var recoveryResult = await _recoveryManager.RecoverIncompleteSessionAsync(cancellationToken).ConfigureAwait(false);
+                if (!recoveryResult.IsSafeToContinue)
+                {
+                    recoverySafe = false;
+                    AppLog.Warn("Startup", "Normal routing blocked by incomplete recovery.", null, ("Action", "Passive"), ("Reason", recoveryResult.Reason));
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                recoverySafe = false;
+                AppLog.Warn("Startup", "Incomplete recovery threw; normal routing remains blocked while update is allowed.", exception,
+                    ("Action", "PassiveThenUpdate"), ("Reason", "RecoveryException:" + exception.GetType().Name));
             }
         }
         AppLog.Info("Startup", "Startup update gate entered.");
@@ -48,8 +62,11 @@ internal sealed class StartupCoordinator
         if (updateResult == UpdateGateResult.RestartScheduled)
         {
             AppLog.Info("Startup", "Runtime startup aborted because update restart was scheduled.", ("Action", "Exit"));
-            return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
+            return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: recoverySafe);
         }
+
+        if (!recoverySafe)
+            return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: false);
 
         var hardware = EvaluateHardwareCompatibility();
         AppLog.Info("Hardware", "Startup hardware compatibility assessment completed.",
