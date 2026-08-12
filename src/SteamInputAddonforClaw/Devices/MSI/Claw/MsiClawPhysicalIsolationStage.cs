@@ -126,6 +126,8 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             var verification = _hidHide.Inspect();
             if (!verification.IsConfigurationReadable || verification.IsInverseWhitelist || !verification.IsActive)
                 return ValueTask.FromResult(Failure(activationSucceeded ? "ActiveStateEnableUnverified" : "ActiveStateEnableFailed"));
+            if (!ContainsOnlySessionOwnedEntries(verification))
+                return ValueTask.FromResult(Failure("ActiveStateEnableUnsafeForeignBlockedEntries"));
             _activeMutationOwned = true;
             if (!activationSucceeded) return ValueTask.FromResult(Failure("ActiveStateEnableReportedFailure"));
         }

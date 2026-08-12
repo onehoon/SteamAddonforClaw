@@ -253,6 +253,23 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
+    public async Task ForeignEntryImmediatelyAfterTemporaryActivationFailsClosedAndPreservesEvidence()
+    {
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled, ForeignEntryAppearsAfterActivation = true };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+
+        var execute = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(execute.Succeeded);
+        Assert.Equal("ActiveStateEnableUnsafeForeignBlockedEntries", execute.Reason);
+        Assert.True(hid.Active);
+        Assert.Contains("HID\\FOREIGN", hid.HiddenDevices);
+        Assert.Equal("ActiveStateRestoreUnsafeForeignBlockedEntries", (await stage.RollbackMutationAsync(CancellationToken.None)).Reason);
+        Assert.Contains("C:\\addon.exe", hid.Applications);
+    }
+
+    [Fact]
     public async Task InverseWhitelistDriftDuringTemporaryActiveLeasePreventsGlobalDisable()
     {
         var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
@@ -328,6 +345,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         public bool Inverse { get; set; }
         public bool DriftToInverseAfterDeviceAdd { get; set; }
         public bool ForeignEntryAppearsBeforeActivation { get; set; }
+        public bool ForeignEntryAppearsAfterActivation { get; set; }
         private int _postDeviceAddInspectionCount;
         public HidHideInspection Inspect() => FailInspectionAfterDeviceMutation && Trace.Any(x => x.StartsWith("AddDevice"))
             ? new(HidHideInspectionStatus.ConfigurationUnavailable, new HashSet<string>(Applications), HiddenDevices, IsActive: Active, IsInverseWhitelist: Inverse)
@@ -339,7 +357,13 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
             return new(Status, new HashSet<string>(Applications), HiddenDevices, IsActive: Active, IsInverseWhitelist: Inverse);
         }
         public bool ReportActiveEnableFailureAfterApplying { get; set; }
-        public bool SetActive(bool active) { Trace.Add("SetActive:" + active); Active = active; return active && ReportActiveEnableFailureAfterApplying ? false : true; }
+        public bool SetActive(bool active)
+        {
+            Trace.Add("SetActive:" + active);
+            Active = active;
+            if (active && ForeignEntryAppearsAfterActivation) HiddenDevices.Add("HID\\FOREIGN");
+            return active && ReportActiveEnableFailureAfterApplying ? false : true;
+        }
         public bool AddApplication(string path) { Trace.Add("AddApplication"); if (FailApplicationAddWithoutApplying) return false; Applications.Add(path); return true; }
         public bool RemoveApplication(string path) { Trace.Add("RemoveApplication"); Applications.RemoveAll(x => string.Equals(x, path, StringComparison.OrdinalIgnoreCase)); return true; }
         public bool AddHiddenDevice(string entry) { Trace.Add("AddDevice:" + entry); if (FailDeviceAddWithoutApplying) return false; HiddenDevices.Add(entry); if (DriftToInverseAfterDeviceAdd) Inverse = true; return !FailDeviceAdd && !ReportDeviceAddFailureAfterApplying; }
