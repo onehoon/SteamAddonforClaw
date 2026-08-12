@@ -27,7 +27,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.Equal(RoutingActionKind.ExitOverride, exited.Action);
         Assert.Single(executor.ExecutedPlans);
         Assert.Single(executor.RollbackPlans);
-        Assert.Equal(new StockCenterMRoutingStrategy().BuildBaselinePlan(), executor.ExecutedPlans.Single());
+        Assert.Equal(RoutingPipelinePlan.StockCenterM, executor.ExecutedPlans.Single());
         Assert.Equal(executor.ExecutedPlans.Single(), executor.RollbackPlans.Single());
     }
 
@@ -179,13 +179,15 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var bridge = Create(provider, executor);
 
         await bridge.Bridge.ReconcileAsync(CancellationToken.None);
-        var oldPlan = bridge.Session.ActiveSession!.Plan;
+        var oldSession = bridge.Session.ActiveSession!;
         Assert.True(await bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None));
+        var newSession = bridge.Session.ActiveSession!;
 
         Assert.Equal(2, executor.ExecutedPlans.Count);
         Assert.Single(executor.RollbackPlans);
-        Assert.Equal(oldPlan, executor.RollbackPlans[0]);
-        Assert.NotSame(oldPlan, bridge.Session.ActiveSession!.Plan);
+        Assert.Equal(oldSession.Plan, executor.RollbackPlans[0]);
+        Assert.NotSame(oldSession, newSession);
+        Assert.Equal(RoutingPipelinePlan.StockCenterM, newSession.Plan);
     }
 
     [Fact]
@@ -457,7 +459,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
 
     private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(FakeStatusProvider provider, FakeExecutor executor, params IRoutingRuntimeSessionBoundaryParticipant[] participants)
     {
-        var session = new RoutingPipelineSessionCoordinator(new RoutingEnvironmentStrategyResolver(), executor);
+        var session = new RoutingPipelineSessionCoordinator(executor);
         return (new RoutingPipelineRuntimeCoordinator(provider, session, participants), session);
     }
 

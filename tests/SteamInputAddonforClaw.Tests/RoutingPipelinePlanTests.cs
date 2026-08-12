@@ -26,6 +26,20 @@ public sealed class RoutingPipelinePlanTests
     }
 
     [Fact]
+    public void StockCenterM_HasTheFixedRoutingBaseline()
+    {
+        var plan = RoutingPipelinePlan.StockCenterM;
+
+        Assert.Equal(RoutingStageMode.Enabled, plan.NativeMode);
+        Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalInput);
+        Assert.Equal(RoutingStageMode.Enabled, plan.PhysicalIsolation);
+        Assert.Equal(RoutingStageMode.Disabled, plan.ThirdPartyIsolation);
+        Assert.Equal(RoutingStageMode.Enabled, plan.SteamOutput);
+        Assert.Equal(RoutingStageMode.Disabled, plan.XboxOutput);
+        Assert.Equal(RoutingStageMode.Disabled, plan.GameBarRouting);
+    }
+
+    [Fact]
     public void StageModes_HaveFailSafeNumericValues()
     {
         Assert.Equal(0, (int)RoutingStageMode.Disabled);

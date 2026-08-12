@@ -3,6 +3,13 @@ using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Routing;
 
+internal enum RoutingEnvironmentStrategyKind
+{
+    StockCenterM = 0,
+    ClawTweaks = 1,
+    Unsupported = 2
+}
+
 internal sealed record ActiveRoutingPipelineSession(
     RoutingEnvironmentStrategyKind StrategyKind,
     ControllerManagerClassification Classification,
@@ -21,18 +28,14 @@ internal sealed record RoutingPipelineSessionReconcileResult(
 internal sealed class RoutingPipelineSessionCoordinator
 {
     private readonly RoutingCoordinator _routingCoordinator = new();
-    private readonly IRoutingEnvironmentStrategyResolver _strategyResolver;
     private readonly IRoutingPipelineExecutor _pipelineExecutor;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _sessionSync = new();
     private ActiveRoutingPipelineSession? _activeSession;
     private PendingRoutingPipelineCleanup? _pendingCleanup;
 
-    internal RoutingPipelineSessionCoordinator(
-        IRoutingEnvironmentStrategyResolver strategyResolver,
-        IRoutingPipelineExecutor pipelineExecutor)
+    internal RoutingPipelineSessionCoordinator(IRoutingPipelineExecutor pipelineExecutor)
     {
-        _strategyResolver = strategyResolver ?? throw new ArgumentNullException(nameof(strategyResolver));
         _pipelineExecutor = pipelineExecutor ?? throw new ArgumentNullException(nameof(pipelineExecutor));
     }
 
@@ -94,12 +97,10 @@ internal sealed class RoutingPipelineSessionCoordinator
         if (ActiveSession is not null)
             return Failure(actionPlan.Action, "ActiveSessionAlreadyExists");
 
-        var strategy = _strategyResolver.Resolve(classification);
-        if (strategy.Kind == RoutingEnvironmentStrategyKind.Unsupported)
+        if (!TrySelectEnvironmentPlan(classification, out var environmentKind, out var plan))
             return Failure(actionPlan.Action, "UnsupportedEnvironmentStrategy");
 
-        var plan = strategy.BuildBaselinePlan();
-        var candidate = new ActiveRoutingPipelineSession(strategy.Kind, classification, plan);
+        var candidate = new ActiveRoutingPipelineSession(environmentKind, classification, plan);
         LogPlan("Enter candidate", candidate, actionPlan);
 
         RoutingPipelineExecutionResult execution;
@@ -224,6 +225,28 @@ internal sealed class RoutingPipelineSessionCoordinator
 
     private RoutingPipelineSessionReconcileResult Failure(RoutingActionKind action, string reason) =>
         new(false, CurrentState, action, reason);
+
+    private static bool TrySelectEnvironmentPlan(
+        ControllerManagerClassification classification,
+        out RoutingEnvironmentStrategyKind environmentKind,
+        out RoutingPipelinePlan plan)
+    {
+        switch (classification.Kind)
+        {
+            case ControllerManagerKind.None:
+                environmentKind = RoutingEnvironmentStrategyKind.StockCenterM;
+                plan = RoutingPipelinePlan.StockCenterM;
+                return true;
+            case ControllerManagerKind.ClawTweaks:
+                environmentKind = RoutingEnvironmentStrategyKind.ClawTweaks;
+                plan = RoutingPipelinePlan.AllDisabled;
+                return true;
+            default:
+                environmentKind = RoutingEnvironmentStrategyKind.Unsupported;
+                plan = RoutingPipelinePlan.AllDisabled;
+                return false;
+        }
+    }
 
     private static void LogPlan(string message, ActiveRoutingPipelineSession session, RoutingActionPlan actionPlan)
     {
