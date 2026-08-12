@@ -93,18 +93,20 @@ internal sealed class MsiClawModeController(
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = deviceEnumerator.EnumeratePresentDevices();
-            oldGone = !current.Any(d => d.Present && d.ProductId == oldPid);
+            oldGone = !current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == oldPid);
             var targets = current.Where(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId && d.UsagePage == targetTopology.UsagePage && d.Usage == targetTopology.Usage).ToArray();
-            targetSeen = targets.Length > 0;
-            if (targets.Length == 1)
+            var targetGroups = targets.GroupBy(ControllerLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase).ToArray();
+            targetSeen = targetGroups.Length > 0;
+            if (targetGroups.Length == 1)
             {
-                AppLog.Debug("NativeMode", "NativeModeTargetObserved", ("TargetPID", targetTopology.ProductId), ("TargetIdentityConfidence", MsiClawPhysicalIdentity.From(targets[0]).Confidence), ("CrossModeIdentityChanged", !expectedIdentity.StronglyMatches(MsiClawPhysicalIdentity.From(targets[0]))));
+                var observed = targetGroups[0].First();
+                AppLog.Debug("NativeMode", "NativeModeTargetObserved", ("TargetPID", targetTopology.ProductId), ("TargetIdentityConfidence", MsiClawPhysicalIdentity.From(observed).Confidence), ("CrossModeIdentityChanged", !expectedIdentity.StronglyMatches(MsiClawPhysicalIdentity.From(observed))));
                 AppLog.Debug("NativeMode", "NativeModeTransitionSucceeded", ("SourceMode", source.Mode), ("TargetMode", target), ("OldPidDisappeared", oldGone));
                 return Result(MsiClawModeTransitionStatus.Succeeded, source.Mode, target, started, "Native mode transition verified.", oldPid, true, oldGone, true, true, true);
             }
-            if (targets.Length > 1)
+            if (targetGroups.Length > 1)
             {
-                AppLog.Debug("NativeMode", "NativeModeTargetAmbiguous", ("TargetMode", target), ("CandidateCount", targets.Length));
+                AppLog.Debug("NativeMode", "NativeModeTargetAmbiguous", ("TargetMode", target), ("CandidateCount", targets.Length), ("LogicalCandidateCount", targetGroups.Length));
                 return Result(MsiClawModeTransitionStatus.AmbiguousDevice, source.Mode, target, started, "Target control HID was ambiguous.", oldPid, true, oldGone, true, true);
             }
             await Task.Delay(_pollInterval, cancellationToken).ConfigureAwait(false);

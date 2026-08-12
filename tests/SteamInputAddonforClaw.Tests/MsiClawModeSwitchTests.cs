@@ -316,6 +316,20 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public async Task Target_aliases_on_same_logical_device_are_not_ambiguous()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var targetContainer = Guid.NewGuid();
+        var target = Device(targetContainer, "USB\\TARGET_PARENT", "HID\\TARGET_A", 0x1902, 0xFFF0, 0x0040);
+        var alias = Device(targetContainer, "USB\\TARGET_PARENT", "HID\\TARGET_B", 0x1902, 0xFFF0, 0x0040);
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [target, alias]), new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.TargetTopologyVerified);
+    }
+
+    [Fact]
     public async Task Transient_write_failure_re_resolves_and_retries_before_target_appears()
     {
         var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);

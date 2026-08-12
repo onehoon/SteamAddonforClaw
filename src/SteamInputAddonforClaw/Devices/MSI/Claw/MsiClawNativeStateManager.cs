@@ -8,9 +8,11 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal enum MsiClawNativeMode { XInput, DirectInput, Other }
 
-internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator deviceEnumerator, IMsiClawModeController? modeController = null) : INativeControllerStateManager
+internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator deviceEnumerator, IMsiClawModeController? modeController = null, TimeSpan? restoreSettleTimeout = null, TimeSpan? restoreSettlePollInterval = null) : INativeControllerStateManager
 {
     internal const int SnapshotFormatVersion = 1;
+    private readonly TimeSpan _restoreSettleTimeout = restoreSettleTimeout ?? TimeSpan.FromSeconds(5);
+    private readonly TimeSpan _restoreSettlePollInterval = restoreSettlePollInterval ?? TimeSpan.FromMilliseconds(500);
     public HandheldDeviceId DeviceId { get; } = new("msi.claw");
     internal Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity identity, CancellationToken cancellationToken) =>
         modeController is null
@@ -78,7 +80,7 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         if (original is null || original.ProductId is null)
             return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "MalformedSnapshotPayload");
 
-        var current = CaptureSnapshot();
+        var current = await CaptureStableRestoreSnapshotAsync(cancellationToken).ConfigureAwait(false);
         if (!current.AllowsMutation || current.Snapshot is null)
             return new NativeStateRestoreResult(current.Status == NativeStateCaptureStatus.Indeterminate ? NativeStateRestoreStatus.Indeterminate : NativeStateRestoreStatus.Failed, current.Reason);
         var currentPayload = current.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
@@ -92,7 +94,7 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         var currentIdentity = MsiClawPhysicalIdentity.FromPayload(currentPayload);
         var result = await modeController.SwitchModeAsync(original.Mode, currentIdentity, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, result.Reason);
-        var restored = CaptureSnapshot();
+        var restored = await CaptureStableRestoreSnapshotAsync(cancellationToken).ConfigureAwait(false);
         if (!restored.AllowsMutation || restored.Snapshot is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "RestoredStateCouldNotBeVerified");
         var restoredPayload = restored.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
         return restoredPayload is not null && PayloadMatchesOriginalState(restoredPayload, original)
@@ -123,5 +125,22 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
     {
         AppLog.Debug("NativeMode", "NativeModeRestoreSucceeded");
         return new NativeStateRestoreResult(NativeStateRestoreStatus.Success, "NativeStateRestoredAndVerified");
+    }
+
+    private async Task<NativeStateCaptureResult> CaptureStableRestoreSnapshotAsync(CancellationToken cancellationToken)
+    {
+        var deadline = Stopwatch.GetTimestamp() + (long)(_restoreSettleTimeout.TotalSeconds * Stopwatch.Frequency);
+        NativeStateCaptureResult current;
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            current = CaptureSnapshot();
+            if (current.Status != NativeStateCaptureStatus.Indeterminate || !string.Equals(current.Reason, "Multiple logical MSI controller candidates are present.", StringComparison.Ordinal))
+                return current;
+            AppLog.Debug("NativeMode", "NativeModeRestoreWaitingForTopologySettle", ("Reason", current.Reason));
+            if (Stopwatch.GetTimestamp() >= deadline) return current;
+            await Task.Delay(_restoreSettlePollInterval, cancellationToken).ConfigureAwait(false);
+        } while (Stopwatch.GetTimestamp() < deadline);
+        return current;
     }
 }

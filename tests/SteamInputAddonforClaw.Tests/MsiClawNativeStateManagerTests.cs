@@ -221,11 +221,58 @@ public sealed class MsiClawNativeStateManagerTests
         Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
     }
 
+    [Fact]
+    public async Task Restore_waits_for_mixed_topology_to_settle_before_switching()
+    {
+        var stale = Topology(0x1901, "ROOT_A");
+        var current = Topology(0x1902, "ROOT_B");
+        var controller = new RecordingSuccessModeController();
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([stale, current], [current], [Topology(0x1901, "ROOT_C")]), controller,
+            TimeSpan.FromSeconds(1), TimeSpan.Zero);
+
+        var restored = await manager.RestoreSnapshotAsync(Snapshot(new(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_A", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+        Assert.Equal(1, controller.CallCount);
+        Assert.Equal(MsiClawHardware.DirectInputProductId, controller.SourceIdentity!.ProductId);
+    }
+
+    [Fact]
+    public async Task Restore_verification_waits_for_mixed_topology_to_settle_after_switch()
+    {
+        var current = Topology(0x1902, "ROOT_B");
+        var stale = Topology(0x1902, "ROOT_B");
+        var restoredTarget = Topology(0x1901, "ROOT_C");
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([current], [stale, restoredTarget], [restoredTarget]), new RecordingSuccessModeController(),
+            TimeSpan.FromSeconds(1), TimeSpan.Zero);
+
+        var restored = await manager.RestoreSnapshotAsync(Snapshot(new MsiClawNativeStatePayload(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_A", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+    }
+
+    [Fact]
+    public async Task Restore_fails_closed_when_mixed_topology_never_settles()
+    {
+        var mixed = new[] { Topology(0x1901, "ROOT_A"), Topology(0x1902, "ROOT_B") };
+        var controller = new RecordingSuccessModeController();
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator(mixed), controller, TimeSpan.Zero, TimeSpan.Zero);
+
+        var restored = await manager.RestoreSnapshotAsync(Snapshot(new MsiClawNativeStatePayload(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_A", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Indeterminate, restored.Status);
+        Assert.Equal(0, controller.CallCount);
+    }
+
     private static ControllerDeviceInfo Device(ushort productId, string instanceId = "MSI\\DEVICE", Guid? container = null, ushort vendorId = 0x0DB0, string? parentInstanceId = "MSI\\PARENT", IReadOnlyList<string>? ancestors = null) =>
         new(instanceId, container, parentInstanceId, ancestors ?? (parentInstanceId is null ? [] : [parentInstanceId]), "USB", [$"USB\\VID_{vendorId:X4}&PID_{productId:X4}"], [], "HIDClass", null, null, vendorId, productId, true);
     private static DeviceNativeStateSnapshot Snapshot(MsiClawNativeStatePayload payload) =>
         new(new HandheldDeviceId("msi.claw"), 1, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(payload));
+    private static ControllerDeviceInfo Topology(ushort productId, string root) =>
+        Device(productId, $"USB\\VID_0DB0&PID_{productId:X4}&MI_00\\{root}", Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), parentInstanceId: $"PARENT_{root}", ancestors: [$"USB\\VID_0DB0&PID_{productId:X4}\\{root}"]);
     private sealed class Enumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices; }
+    private sealed class SequenceEnumerator(params IReadOnlyList<ControllerDeviceInfo>[] states) : IControllerDeviceEnumerator
+    { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Length - 1)]; }
     private sealed class MutableModeEnumerator(Guid container) : IControllerDeviceEnumerator
     {
         public MsiClawNativeMode Mode { get; set; } = MsiClawNativeMode.XInput;
@@ -254,4 +301,15 @@ public sealed class MsiClawNativeStateManagerTests
         }
     }
     private sealed class ThrowingEnumerator : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => throw new InvalidOperationException(); }
+    private sealed class RecordingSuccessModeController : IMsiClawModeController
+    {
+        public int CallCount { get; private set; }
+        public MsiClawPhysicalIdentity? SourceIdentity { get; private set; }
+        public Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken)
+        {
+            CallCount++; SourceIdentity = expectedIdentity;
+            return Task.FromResult(new MsiClawModeTransitionResult(MsiClawModeTransitionStatus.Succeeded, MsiClawNativeMode.DirectInput, target, MsiClawHardware.DirectInputProductId,
+                target == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId, true, true, true, true, true, 1, "test"));
+        }
+    }
 }
