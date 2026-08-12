@@ -134,6 +134,24 @@ public sealed class MsiClawModeSwitchTests
         Assert.Equal("USB\\VID_0DB0\\CLAW_A", writer.Device?.VerifiedIdentity.PhysicalDeviceKey);
     }
 
+    [Fact]
+    public async Task Mode_controller_ignores_unrelated_sentinel_physical_root()
+    {
+        var sentinel = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
+        var clawA = Topology(sentinel, "USB\\VID_0DB0&PID_1901\\CLAW_A", 0x1901);
+        var clawB = Topology(sentinel, "USB\\VID_0DB0&PID_1901\\CLAW_B", 0x1901);
+        var targetA = Topology(sentinel, "USB\\VID_0DB0&PID_1902\\CLAW_A", 0x1902);
+        var targetB = Topology(sentinel, "USB\\VID_0DB0&PID_1902\\CLAW_B", 0x1902);
+        var enumerator = new SequenceEnumerator([clawA, clawB], [targetA, targetB]);
+        var writer = new RecordingWriter();
+        var result = await new MsiClawModeController(enumerator, new MsiClawControlHidResolver(), writer, TimeSpan.FromSeconds(1), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(clawA), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("USB\\VID_0DB0\\CLAW_A", writer.Device?.VerifiedIdentity.PhysicalDeviceKey);
+        Assert.Equal(clawA.InstanceId, writer.Device?.Device.InstanceId);
+    }
+
     private static ControllerDeviceInfo Device(Guid? container, string? parent, string instance, ushort pid = 0x1901, ushort usagePage = 0, ushort usage = 0) => new(instance, container, parent, parent is null ? [] : [parent], "HID", [], [], "HIDClass", null, null, 0x0DB0, pid, true, UsagePage: usagePage, Usage: usage);
 
     private static ControllerDeviceInfo Topology(Guid container, string root, ushort pid)

@@ -123,10 +123,6 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         var actual = MsiClawPhysicalIdentity.FromPayload(current);
         if (expected.Confidence != MsiClawIdentityConfidence.Strong || actual.Confidence != MsiClawIdentityConfidence.Strong)
             return false;
-        if (!string.IsNullOrWhiteSpace(expected.PhysicalDeviceKey))
-            return expected.StronglyMatches(actual);
-        return MsiClawPhysicalIdentity.IsUsableContainer(expected.ContainerId) &&
-            MsiClawPhysicalIdentity.IsUsableContainer(actual.ContainerId) &&
-            expected.ContainerId == actual.ContainerId;
+        return expected.StronglyMatches(actual);
     }
 }

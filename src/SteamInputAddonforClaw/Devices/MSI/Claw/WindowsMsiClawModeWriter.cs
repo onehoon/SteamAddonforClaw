@@ -15,6 +15,7 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (device.VerifiedIdentity.Confidence != MsiClawIdentityConfidence.Strong || (string.IsNullOrWhiteSpace(device.VerifiedIdentity.PhysicalDeviceKey) && !IsUsable(device.VerifiedIdentity.ContainerId))) return false;
+        if (!MsiClawPhysicalIdentity.From(device.Device).StronglyMatches(device.VerifiedIdentity)) return false;
         var selector = HidDevice.GetDeviceSelector(device.UsagePage, device.Usage, MsiClawHardware.VendorId, device.Device.ProductId ?? 0);
         var infos = await _lookup.FindAsync(selector, cancellationToken).ConfigureAwait(false);
         var matching = SelectDeviceInformation(device, infos);

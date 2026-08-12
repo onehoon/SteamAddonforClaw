@@ -157,6 +157,23 @@ public sealed class MsiClawNativeStateManagerTests
     }
 
     [Fact]
+    public async Task Restore_RejectsLegacyUsableContainerSnapshotWithDifferentParent()
+    {
+        var container = Guid.NewGuid();
+        var devices = new MutableModeEnumerator(container) { Parent = "USB\\OTHER_PARENT" };
+        devices.Mode = MsiClawNativeMode.DirectInput;
+        var manager = new MsiClawNativeStateManager(devices, new ApplyingModeController(devices));
+        var legacySnapshot = Snapshot(new(MsiClawNativeMode.XInput, "HID\\LEGACY", "USB\\EXPECTED_PARENT", container,
+            MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong));
+
+        var restored = await manager.RestoreSnapshotAsync(legacySnapshot, CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Indeterminate, restored.Status);
+        Assert.Equal("PhysicalIdentityMismatch", restored.Reason);
+        Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
+    }
+
+    [Fact]
     public async Task Restore_RejectsLegacySentinelSnapshotWithoutPhysicalKey()
     {
         var sentinel = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
@@ -181,11 +198,12 @@ public sealed class MsiClawNativeStateManagerTests
     private sealed class MutableModeEnumerator(Guid container) : IControllerDeviceEnumerator
     {
         public MsiClawNativeMode Mode { get; set; } = MsiClawNativeMode.XInput;
+        public string Parent { get; set; } = "USB\\PARENT";
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
         {
             var productId = Mode == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId;
             var root = $"USB\\VID_0DB0&PID_{productId:X4}\\CLAW_A";
-            return [Device(productId, $"USB\\VID_0DB0&PID_{productId:X4}&MI_00\\A", container, parentInstanceId: "USB\\PARENT", ancestors: [root])];
+            return [Device(productId, $"USB\\VID_0DB0&PID_{productId:X4}&MI_00\\A", container, parentInstanceId: Parent, ancestors: [root])];
         }
     }
     private sealed class ApplyingModeController(MutableModeEnumerator devices) : IMsiClawModeController
