@@ -53,13 +53,13 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
 
         var selected = selectedLogicalCandidate.First();
         var identity = MsiClawPhysicalIdentity.From(selected);
-        var payload = new MsiClawNativeStatePayload(mode, selected.InstanceId, selected.ParentInstanceId, selected.ContainerId, selected.ProductId, identity.Confidence);
+        var payload = new MsiClawNativeStatePayload(mode, selected.InstanceId, selected.ParentInstanceId, selected.ContainerId, selected.ProductId, identity.Confidence, identity.PhysicalDeviceKey);
         var snapshot = new DeviceNativeStateSnapshot(DeviceId, SnapshotFormatVersion, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(payload));
         AppLog.Info("NativeState", "MSI Claw native-state candidates grouped.",
             ("CandidateCount", candidates.Count),
             ("LogicalGroupCount", logicalCandidates.Count),
             ("Mode", mode),
-            ("ResolvedPhysicalRoot", MsiPhysicalRoot(selected) ?? "Unavailable"),
+            ("ResolvedPhysicalRoot", MsiClawPhysicalIdentity.ResolvePhysicalRoot(selected)?.RawRootInstanceId ?? "Unavailable"),
             ("IdentityConfidence", identity.Confidence),
             ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         return new(NativeStateCaptureStatus.Success, snapshot, "Snapshot captured.");
@@ -83,18 +83,17 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
             return new NativeStateRestoreResult(current.Status == NativeStateCaptureStatus.Indeterminate ? NativeStateRestoreStatus.Indeterminate : NativeStateRestoreStatus.Failed, current.Reason);
         var currentPayload = current.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
         if (currentPayload is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "MalformedCurrentPayload");
-        if (currentPayload == original)
+        if (currentPayload == original || PayloadMatchesOriginalState(currentPayload, original))
             return new NativeStateRestoreResult(NativeStateRestoreStatus.Success, "AlreadyOriginalState");
         if (modeController is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Unsupported, "ModeControllerUnavailable");
-        var expected = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
-        var currentIdentity = new MsiClawPhysicalIdentity(currentPayload.ContainerId, currentPayload.ParentInstanceId, currentPayload.InstanceId ?? string.Empty, MsiClawHardware.VendorId, currentPayload.ProductId, currentPayload.IdentityConfidence);
-        if (expected.Confidence != MsiClawIdentityConfidence.Strong || !expected.StronglyMatches(currentIdentity)) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "PhysicalIdentityMismatch");
+        var expected = MsiClawPhysicalIdentity.FromPayload(original);
+        if (!PayloadIdentitiesMatch(original, currentPayload)) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "PhysicalIdentityMismatch");
         var result = await modeController.SwitchModeAsync(original.Mode, expected, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, result.Reason);
         var restored = CaptureSnapshot();
         if (!restored.AllowsMutation || restored.Snapshot is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "RestoredStateCouldNotBeVerified");
         var restoredPayload = restored.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
-        return restoredPayload is not null && restoredPayload.Mode == original.Mode && restoredPayload.ProductId == original.ProductId && restoredPayload.ContainerId == original.ContainerId
+        return restoredPayload is not null && PayloadMatchesOriginalState(restoredPayload, original)
             ? new NativeStateRestoreResult(NativeStateRestoreStatus.Success, "NativeStateRestoredAndVerified")
             : new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "RestoredStateMismatch");
     }
@@ -109,18 +108,21 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
 
     private static string LogicalIdentity(ControllerDeviceInfo device)
     {
-        if (MsiPhysicalRoot(device) is { } physicalRoot) return $"root:{physicalRoot}";
+        if (MsiClawPhysicalIdentity.ResolvePhysicalRoot(device) is { } physicalRoot) return $"root:{physicalRoot.RawRootInstanceId}";
         if (ControllerLogicalIdentity.IsUsableContainerId(device.ContainerId)) return $"container:{device.ContainerId:D}";
         if (!string.IsNullOrWhiteSpace(device.ParentInstanceId)) return $"parent:{device.ParentInstanceId}";
         return $"instance:{device.InstanceId}";
     }
 
-    private static string? MsiPhysicalRoot(ControllerDeviceInfo device)
+    private static bool PayloadMatchesOriginalState(MsiClawNativeStatePayload current, MsiClawNativeStatePayload original) =>
+        current.Mode == original.Mode && current.ProductId == original.ProductId && PayloadIdentitiesMatch(original, current);
+
+    private static bool PayloadIdentitiesMatch(MsiClawNativeStatePayload original, MsiClawNativeStatePayload current)
     {
-        var prefix = $"USB\\VID_{device.VendorId:X4}&PID_{device.ProductId:X4}\\";
-        return new[] { device.InstanceId }.Concat(device.AncestorInstanceIds)
-            .FirstOrDefault(instanceId => instanceId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                && !instanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase)
-                && !instanceId.Contains("&IG_", StringComparison.OrdinalIgnoreCase));
+        var expected = MsiClawPhysicalIdentity.FromPayload(original);
+        var actual = MsiClawPhysicalIdentity.FromPayload(current);
+        if (expected.Confidence != MsiClawIdentityConfidence.Strong || actual.Confidence != MsiClawIdentityConfidence.Strong)
+            return false;
+        return expected.StronglyMatches(actual);
     }
 }
