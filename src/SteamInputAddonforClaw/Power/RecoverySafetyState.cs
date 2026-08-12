@@ -22,4 +22,22 @@ internal sealed class RecoverySafetyState(RecoverySafety initial) : IRecoverySaf
             return true;
         }
     }
+    internal bool TryClaimUnsafe(out long version)
+    {
+        lock (_sync)
+        {
+            if ((RecoverySafety)Volatile.Read(ref _current) != RecoverySafety.Safe)
+            {
+                version = _version;
+                return false;
+            }
+            Volatile.Write(ref _current, (int)RecoverySafety.Unsafe);
+            version = ++_version;
+            return true;
+        }
+    }
+    internal bool IsCurrent(long expectedVersion, RecoverySafety expected)
+    {
+        lock (_sync) return _version == expectedVersion && (RecoverySafety)Volatile.Read(ref _current) == expected;
+    }
 }

@@ -246,12 +246,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
             _decisionGeneration++;
             _routingFaultLatched = true;
             AppLog.Debug("NativeMode", "RoutingFaultLatched", ("Reason", reason));
-            try { await StopCoreLockedAsync(cancellationToken, reportFailure: true).ConfigureAwait(false); }
-            catch
-            {
-                MarkRecoveryUnsafe(reason);
-                throw;
-            }
+            await StopCoreLockedAsync(cancellationToken, reportFailure: true).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -281,7 +276,16 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
 
     private void MarkRecoveryUnsafe(string reason)
     {
-        _unsafeRecoveryVersion = _recoverySafety.Set(RecoverySafety.Unsafe);
+        if (_unsafeRecoveryVersion is { } ownedVersion && _recoverySafety.IsCurrent(ownedVersion, RecoverySafety.Unsafe))
+        {
+            AppLog.Debug("NativeMode", "NativeRecoveryUnsafeAlreadyOwned", ("Reason", reason));
+            return;
+        }
+        _unsafeRecoveryVersion = null;
+        if (_recoverySafety.TryClaimUnsafe(out var claimedVersion))
+            _unsafeRecoveryVersion = claimedVersion;
+        else
+            AppLog.Debug("NativeMode", "NativeRecoveryUnsafeOwnedByAnotherComponent", ("Reason", reason), ("RecoverySafety", _recoverySafety.Current));
         AppLog.Error("Recovery", "MSI native mode recovery became unsafe.", new InvalidOperationException(reason), ("Reason", reason));
     }
 }
