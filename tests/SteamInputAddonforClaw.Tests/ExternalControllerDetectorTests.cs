@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Diagnostics.SteamController1304;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -97,6 +98,24 @@ public sealed class ExternalControllerDetectorTests
         Assert.Equal(1, assessment.DetectedExternalControllerCount);
         Assert.Equal(ControllerDeviceClassification.ExternalPhysical, result.Classification);
         Assert.Equal("VerifiedSteamController1304PhysicalTopology", result.Reason);
+    }
+
+    [Fact]
+    public void Detect_WhenSteamController1304ReceiverOnly_IsNotExternalPresent()
+    {
+        var root = SteamController1304Root();
+        var collection = SteamController1304HidCollection([root.InstanceId, "USB\\ROOT_HUB30\\1"]);
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Clear, Detect([collection, root], probe: new FakeSteamProbe(SteamController1304ConnectionStatus.ReceiverOnly)).Status);
+    }
+
+    [Fact]
+    public void Detect_WhenSteamController1304ConnectionIsIndeterminate_FailsClosed()
+    {
+        var root = SteamController1304Root();
+        var collection = SteamController1304HidCollection([root.InstanceId, "USB\\ROOT_HUB30\\1"]);
+
+        Assert.Equal(ExternalControllerAssessmentStatus.Indeterminate, Detect([collection, root], probe: new FakeSteamProbe(SteamController1304ConnectionStatus.Indeterminate)).Status);
     }
 
     [Fact]
@@ -387,9 +406,9 @@ public sealed class ExternalControllerDetectorTests
         Assert.Equal("PhysicalGameControllerWithoutExclusion", result.Reason);
     }
 
-    private static ExternalControllerAssessment Detect(IReadOnlyList<ControllerDeviceInfo> devices, IControllerIdentityExclusionSource? exclusionSource = null)
+    private static ExternalControllerAssessment Detect(IReadOnlyList<ControllerDeviceInfo> devices, IControllerIdentityExclusionSource? exclusionSource = null, ISteamController1304ConnectionProbe? probe = null)
     {
-        return new ExternalControllerDetector(new FakeEnumerator(devices), new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher(), exclusionSource)).Detect();
+        return new ExternalControllerDetector(new FakeEnumerator(devices), new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher(), exclusionSource), probe ?? new FakeSteamProbe(SteamController1304ConnectionStatus.ControllerConnected)).Detect();
     }
 
     private static ControllerDeviceInfo GameController(
@@ -467,5 +486,10 @@ public sealed class ExternalControllerDetectorTests
     private sealed class ExclusionSource(params string[] instanceIds) : IControllerIdentityExclusionSource
     {
         public bool IsExcluded(ControllerDeviceInfo device) => instanceIds.Contains(device.InstanceId, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class FakeSteamProbe(SteamController1304ConnectionStatus status) : ISteamController1304ConnectionProbe
+    {
+        public SteamController1304ConnectionAssessment Probe(ControllerDeviceInfo receiver) => new(status, status.ToString(), receiver.InstanceId, "Test");
     }
 }
