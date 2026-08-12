@@ -100,7 +100,7 @@ The addon should remain a small routing layer between the MSI Claw controller an
 
 Native controller state is owned by the active handheld-device adapter. Recovery persists a device-neutral snapshot envelope with a stable device ID and an opaque device-specific payload, then selects the restoring adapter from that journaled ID rather than re-detecting the current handheld. The recovery core never interprets device-specific payloads.
 
-Recovery schema v4 can record multiple addon-owned mutations in one session. Mutation evidence is persisted before the corresponding change, each successful rollback clears only its own recorded mutation, and the journal is deleted only when empty. Current mixed crash recovery supports native device state, HidHide executable whitelist additions, HidHide physical-device additions, and structured addon-owned virtual-output evidence in reverse mutation order with progressive checkpoints. If a journaled VIIPER device is still present after a crash, recovery preserves that exact virtual-output evidence and remains unsafe/passive, but it still restores independently recoverable MSI Claw native-state and HidHide mutations first. Temporary Xbox output mutations remain unsupported and fail closed.
+Recovery schema v4 can record multiple addon-owned mutations in one session. Mutation evidence is persisted before the corresponding change, each successful rollback clears only its own recorded mutation, and the journal is deleted only when empty. Crash/startup recovery first verifies that every journaled addon-owned virtual output is absent, then restores and checkpoints the exact native state, and only then restores PhysicalIsolation in the order HidHide Active state, hidden-device entries, and executable whitelist entries. A still-present journaled VIIPER device blocks all lower recovery; a failed native restore keeps all PhysicalIsolation evidence intact; and a later PhysicalIsolation failure retains its evidence while the already checkpointed native restore remains complete. Recovery is journal-driven and never infers virtual-output ownership from VID/PID alone. Temporary Xbox output mutations remain unsupported and fail closed.
 
 MSI Claw native-state restoration currently verifies an already-restored state only; active controller mode switching and restoration remain a later hardware PoC.
 
@@ -869,12 +869,14 @@ A recovery session may contain multiple recorded mutations. Each mutation's
  recovery evidence is persisted before the corresponding change, and successful
  stage rollback clears only the mutation owned by that stage. The journal is
  deleted only after all recorded mutations have been cleared. Current mixed
- crash-recovery support covers native device state, HidHide executable
- whitelist additions, HidHide physical-device entries, and structured
- addon-owned virtual-output entries. If the recorded VIIPER device is still
- present, recovery preserves that virtual-output evidence and remains unsafe,
- but independently recoverable Claw native-state and HidHide mutations are
- still restored. Recovery schema version 4 is the current format.
+ crash recovery first verifies SteamOutput absence, then restores the exact
+ native snapshot (the terminated process has already released DirectInput),
+ then restores PhysicalIsolation: HidHide Active state, hidden-device entries,
+ and executable whitelist entries. A still-present journaled VIIPER device
+ blocks every lower recovery step; native restoration failure keeps all
+ PhysicalIsolation evidence intact; and a later PhysicalIsolation failure
+ preserves its evidence after the native checkpoint. Recovery schema version 4
+ is the current format.
 
 Crash recovery takes priority over normal controller initialization.
 

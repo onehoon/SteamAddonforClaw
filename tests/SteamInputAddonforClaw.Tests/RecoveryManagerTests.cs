@@ -134,7 +134,7 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task MixedCrashRecoveryRestoresNativeAndHidHideWhilePreservingStaleVirtualEvidence()
+    public async Task MixedCrashRecovery_StaleVirtualOutputBlocksNativeAndPhysicalIsolation()
     {
         var sessionId = Guid.NewGuid();
         var mutationId = Guid.NewGuid();
@@ -159,13 +159,13 @@ public sealed class RecoveryManagerTests : IDisposable
         var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
 
         Assert.Equal(RecoveryStatus.Failure, result.Status);
-        Assert.Empty(hidHide.HiddenEntries);
-        Assert.Empty(hidHide.Entries);
-        Assert.Equal(1, nativeState.RestoreCount);
+        Assert.Contains("HID\\MSI_CLAW", hidHide.HiddenEntries);
+        Assert.Contains("C:\\addon.exe", hidHide.Entries);
+        Assert.Equal(0, nativeState.RestoreCount);
         var remaining = manager.LoadJournal().Journal!;
-        Assert.False(remaining.Mutations.DeviceNativeStateChanged);
-        Assert.Empty(remaining.Mutations.HidHideDeviceAdditions!);
-        Assert.Empty(remaining.Mutations.ExecutableWhitelistAdditions!);
+        Assert.True(remaining.Mutations.DeviceNativeStateChanged);
+        Assert.Contains("HID\\MSI_CLAW", remaining.Mutations.HidHideDeviceAdditions!);
+        Assert.Contains("C:\\addon.exe", remaining.Mutations.ExecutableWhitelistAdditions!);
         Assert.Equal(mutationId, Assert.Single(remaining.Mutations.AddonOwnedVirtualDeviceEntries!).MutationId);
     }
 
@@ -294,7 +294,7 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task MixedNativeAndWhitelistRecoverInReverseWhitelistThenNativeOrder()
+    public async Task MixedNativeAndWhitelistRestoresNativeBeforeWhitelist()
     {
         var trace = new List<string>();
         var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success) { Events = trace };
@@ -309,12 +309,12 @@ public sealed class RecoveryManagerTests : IDisposable
 
         Assert.Equal(RecoveryStatus.Success, result.Status);
         Assert.Empty(hidHide.Entries);
-        Assert.Equal(["C:\\addon-b.exe", "C:\\addon-a.exe", "RestoreNative"], trace);
+        Assert.Equal(["RestoreNative", "C:\\addon-b.exe", "C:\\addon-a.exe"], trace);
         Assert.False(File.Exists(PathName));
     }
 
     [Fact]
-    public async Task DeviceThenWhitelistThenNativeRecoveryOrder()
+    public async Task NativeThenDeviceThenWhitelistRecoveryOrder()
     {
         var trace = new List<string>();
         var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success) { Events = trace };
@@ -329,7 +329,7 @@ public sealed class RecoveryManagerTests : IDisposable
         hidHide.Entries.UnionWith(["C:\\addon-a.exe", "C:\\addon-b.exe"]);
 
         Assert.Equal(RecoveryStatus.Success, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-        Assert.Equal(["HID\\B", "HID\\A", "C:\\addon-b.exe", "C:\\addon-a.exe", "RestoreNative"], trace);
+        Assert.Equal(["RestoreNative", "HID\\B", "HID\\A", "C:\\addon-b.exe", "C:\\addon-a.exe"], trace);
     }
 
     [Fact]
@@ -429,7 +429,7 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task WhitelistFailureStopsBeforeNativeRecovery()
+    public async Task WhitelistFailureOccursAfterNativeRecoveryAndPreservesWhitelistEvidence()
     {
         var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success);
         var hidHide = new FakeHidHide { RemoveSucceeds = false };
@@ -439,12 +439,13 @@ public sealed class RecoveryManagerTests : IDisposable
         hidHide.Entries.Add("C:\\addon.exe");
 
         Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-        Assert.Equal(0, nativeState.RestoreCount);
+        Assert.Equal(1, nativeState.RestoreCount);
+        Assert.Contains("C:\\addon.exe", manager.LoadJournal().Journal!.Mutations.ExecutableWhitelistAdditions!);
         Assert.True(File.Exists(PathName));
     }
 
     [Fact]
-    public async Task WhitelistCheckpointRemainsWhenNativeRecoveryFails()
+    public async Task NativeFailureDoesNotCheckpointWhitelist()
     {
         var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Failed);
         var hidHide = new FakeHidHide();
@@ -456,7 +457,89 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
         var checkpoint = manager.LoadJournal().Journal!;
         Assert.True(checkpoint.Mutations.DeviceNativeStateChanged);
-        Assert.Empty(checkpoint.Mutations.ExecutableWhitelistAdditions!);
+        Assert.Contains("C:\\addon.exe", checkpoint.Mutations.ExecutableWhitelistAdditions!);
+    }
+
+    [Fact]
+    public async Task NativeFailureBlocksAllPhysicalIsolationRecovery()
+    {
+        var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Failed);
+        var hidHide = new FakeHidHide { Active = true };
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), new HandheldDeviceRegistry([new FakeAdapter(DeviceId, nativeState)]), hidHide);
+        var native = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        manager.RecordHidHideActiveStateMutation(native.RecoverySessionId, false);
+        manager.RecordHidHideDeviceAddition(native.RecoverySessionId, "HID\\CLAW");
+        manager.RecordHidHideWhitelistAddition(native.RecoverySessionId, "C:\\addon.exe");
+        hidHide.HiddenEntries.Add("HID\\CLAW");
+        hidHide.Entries.Add("C:\\addon.exe");
+
+        Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
+        Assert.True(hidHide.Active);
+        Assert.Contains("HID\\CLAW", hidHide.HiddenEntries);
+        Assert.Contains("C:\\addon.exe", hidHide.Entries);
+        var remaining = manager.LoadJournal().Journal!;
+        Assert.True(remaining.Mutations.DeviceNativeStateChanged);
+        Assert.Equal(false, remaining.Mutations.OriginalHidHideActiveState);
+    }
+
+    [Fact]
+    public async Task NativeCheckpointFailureBlocksPhysicalIsolationRecovery()
+    {
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, Snapshot(),
+            new(DeviceNativeStateChanged: true, HidHideDeviceAdditions: ["HID\\CLAW"], ExecutableWhitelistAdditions: ["C:\\addon.exe"]));
+        var hidHide = new FakeHidHide();
+        hidHide.HiddenEntries.Add("HID\\CLAW");
+        hidHide.Entries.Add("C:\\addon.exe");
+        var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success);
+        var manager = new RecoveryManager(new FaultStore(journal, writeFails: true), new HandheldDeviceRegistry([new FakeAdapter(DeviceId, nativeState)]), hidHide);
+
+        Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
+        Assert.Equal(1, nativeState.RestoreCount);
+        Assert.Contains("HID\\CLAW", hidHide.HiddenEntries);
+        Assert.Contains("C:\\addon.exe", hidHide.Entries);
+    }
+
+    [Fact]
+    public async Task HidHideFailureOccursAfterNativeRecoveryAndPreservesPhysicalIsolationEvidence()
+    {
+        var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success);
+        var hidHide = new FakeHidHide { Status = HidHideInspectionStatus.ConfigurationUnavailable };
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), new HandheldDeviceRegistry([new FakeAdapter(DeviceId, nativeState)]), hidHide);
+        var native = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        manager.RecordHidHideDeviceAddition(native.RecoverySessionId, "HID\\CLAW");
+        manager.RecordHidHideWhitelistAddition(native.RecoverySessionId, "C:\\addon.exe");
+        hidHide.HiddenEntries.Add("HID\\CLAW");
+        hidHide.Entries.Add("C:\\addon.exe");
+
+        Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
+        Assert.Equal(1, nativeState.RestoreCount);
+        var remaining = manager.LoadJournal().Journal!;
+        Assert.False(remaining.Mutations.DeviceNativeStateChanged);
+        Assert.Contains("HID\\CLAW", remaining.Mutations.HidHideDeviceAdditions!);
+        Assert.Contains("C:\\addon.exe", remaining.Mutations.ExecutableWhitelistAdditions!);
+    }
+
+    [Fact]
+    public async Task MixedRecovery_RestoresDependenciesInOrderAfterVirtualOutputIsVerifiedAbsent()
+    {
+        var trace = new List<string>();
+        var nativeState = new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success) { Events = trace };
+        var hidHide = new FakeHidHide { Events = trace, Active = true };
+        hidHide.HiddenEntries.UnionWith(["HID\\A", "HID\\B"]);
+        hidHide.Entries.UnionWith(["C:\\addon-a.exe", "C:\\addon-b.exe"]);
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), new HandheldDeviceRegistry([new FakeAdapter(DeviceId, nativeState)]), hidHide, new FakeControllerEnumerator([]));
+        var session = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        manager.RecordHidHideActiveStateMutation(session.RecoverySessionId, false);
+        manager.RecordHidHideDeviceAddition(session.RecoverySessionId, "HID\\A");
+        manager.RecordHidHideDeviceAddition(session.RecoverySessionId, "HID\\B");
+        manager.RecordHidHideWhitelistAddition(session.RecoverySessionId, "C:\\addon-a.exe");
+        manager.RecordHidHideWhitelistAddition(session.RecoverySessionId, "C:\\addon-b.exe");
+        var virtualId = Guid.NewGuid();
+        manager.RecordAddonOwnedVirtualDeviceIntent(session.RecoverySessionId, virtualId, "steamcontroller", 0x28DE, 0x1102, []);
+
+        Assert.Equal(RecoveryStatus.Success, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
+        Assert.Equal(["RestoreNative", "SetActive:False", "HID\\B", "HID\\A", "C:\\addon-b.exe", "C:\\addon-a.exe"], trace);
+        Assert.False(File.Exists(PathName));
     }
 
     [Fact]
