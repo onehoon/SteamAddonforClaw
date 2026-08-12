@@ -35,3 +35,5 @@ internal sealed record RecoveryResult(RecoveryStatus Status, string Reason, Reco
 {
     public bool IsSafeToContinue => Status is RecoveryStatus.NoRecoveryNeeded or RecoveryStatus.Success;
 }
+
+internal sealed record StartupResidueCleanupResult(bool IsJournalValid, bool IsNonNativeResidueResolved, string Reason);

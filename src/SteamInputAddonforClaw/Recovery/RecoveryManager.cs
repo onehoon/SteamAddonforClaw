@@ -421,6 +421,98 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         return completed with { Journal = journal };
     }
 
+    // Startup deliberately does not restore OriginalDeviceState. The journal is ownership
+    // evidence here; native state is normalized separately to the Stock Center M baseline.
+    public Task<StartupResidueCleanupResult> CleanStartupResidueAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var loaded = LoadJournal();
+        if (loaded.Status == RecoveryStatus.NoRecoveryNeeded)
+            return Task.FromResult(new StartupResidueCleanupResult(true, true, "No startup residue journal exists."));
+        if (loaded.Status != RecoveryStatus.Success || loaded.Journal is not { } journal)
+            return Task.FromResult(new StartupResidueCleanupResult(false, false, loaded.Reason));
+        if (!ValidateRecoveryStructure(journal, out var structureReason))
+            return Task.FromResult(new StartupResidueCleanupResult(false, false, structureReason));
+
+        var failures = new List<string>();
+        foreach (var entry in (journal.Mutations.AddonOwnedVirtualDeviceEntries ?? []).Reverse())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryVerifyVirtualOutputAbsent(entry, out var reason))
+            {
+                failures.Add(reason);
+                continue;
+            }
+
+            var completion = CompleteAddonOwnedVirtualDeviceMutation(journal.RecoverySessionId, entry.MutationId);
+            if (completion.Status != RecoveryStatus.Success) failures.Add(completion.Reason);
+        }
+
+        journal = LoadJournal().Journal ?? journal;
+        if (journal.Mutations.OriginalHidHideActiveState is not null)
+        {
+            var restored = RecoverHidHideActiveState(journal);
+            if (restored.Status == RecoveryStatus.Success)
+            {
+                var completion = CompleteHidHideActiveStateMutation(journal.RecoverySessionId);
+                if (completion.Status != RecoveryStatus.Success) failures.Add(completion.Reason);
+            }
+            else failures.Add(restored.Reason);
+        }
+
+        journal = LoadJournal().Journal ?? journal;
+        foreach (var entry in (journal.Mutations.HidHideDeviceAdditions ?? []).Reverse())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var recovered = RecoverHidHideDeviceAddition(journal, entry);
+            if (recovered.Status != RecoveryStatus.Success) { failures.Add(recovered.Reason); continue; }
+            var completion = CompleteHidHideDeviceAddition(journal.RecoverySessionId, entry);
+            if (completion.Status != RecoveryStatus.Success) failures.Add(completion.Reason);
+        }
+
+        journal = LoadJournal().Journal ?? journal;
+        foreach (var path in (journal.Mutations.ExecutableWhitelistAdditions ?? []).Reverse())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var recovered = RecoverHidHideWhitelistAddition(journal, path);
+            if (recovered.Status != RecoveryStatus.Success) { failures.Add(recovered.Reason); continue; }
+            var completion = CompleteHidHideWhitelistAddition(journal.RecoverySessionId, path);
+            if (completion.Status != RecoveryStatus.Success) failures.Add(completion.Reason);
+        }
+
+        var remaining = LoadJournal();
+        if (remaining.Status == RecoveryStatus.NoRecoveryNeeded)
+            return Task.FromResult(new StartupResidueCleanupResult(true, failures.Count == 0, failures.Count == 0 ? "Startup residue was retired." : string.Join(" ", failures)));
+        if (remaining.Status != RecoveryStatus.Success || remaining.Journal is null)
+            return Task.FromResult(new StartupResidueCleanupResult(false, false, remaining.Reason));
+
+        var nonNativeResidueRemains = HasNonNativeStartupResidue(remaining.Journal);
+        return Task.FromResult(new StartupResidueCleanupResult(
+            true,
+            !nonNativeResidueRemains && failures.Count == 0,
+            failures.Count == 0 ? "Only native startup baseline retirement remains." : string.Join(" ", failures)));
+    }
+
+    public RecoveryResult RetireNativeStateForStartupBaseline(HandheldDeviceId deviceId)
+    {
+        var loaded = LoadJournal();
+        if (loaded.Status == RecoveryStatus.NoRecoveryNeeded) return loaded;
+        if (loaded.Status != RecoveryStatus.Success || loaded.Journal is not { } journal)
+            return loaded;
+        if (!journal.Mutations.DeviceNativeStateChanged) return new(RecoveryStatus.Success, "No native-state mutation requires startup retirement.", journal);
+        if (journal.OriginalDeviceState?.DeviceId != deviceId)
+            return new(RecoveryStatus.Failure, "The journaled native-state mutation does not belong to the verified MSI Claw.", journal);
+        return CompleteDeviceNativeStateMutation(journal.RecoverySessionId);
+    }
+
+    private static bool HasNonNativeStartupResidue(RecoveryJournal journal) =>
+        journal.Mutations.TemporaryXbox360OutputCreated ||
+        journal.Mutations.HidHideDeviceAdditions is { Count: > 0 } ||
+        journal.Mutations.ExecutableWhitelistAdditions is { Count: > 0 } ||
+        journal.Mutations.AddonOwnedVirtualDevices is { Count: > 0 } ||
+        journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } ||
+        journal.Mutations.OriginalHidHideActiveState is not null;
+
     private static bool ValidateRecoveryStructure(RecoveryJournal journal, out string reason)
     {
         if (!IsValidJournal(journal)) { reason = "Recovery journal is missing required state."; return false; }
@@ -459,6 +551,41 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         }
         reason = "All journaled virtual devices are absent.";
         return true;
+    }
+
+    private bool TryVerifyVirtualOutputAbsent(AddonOwnedVirtualDeviceRecoveryEntry entry, out string reason)
+    {
+        if (deviceEnumerator is null) { reason = "Virtual-device recovery enumeration is unavailable."; return false; }
+        IReadOnlyList<ControllerDeviceInfo> present;
+        try { present = deviceEnumerator.EnumeratePresentDevices(); }
+        catch (Exception exception) { reason = $"Virtual-device recovery enumeration failed: {exception.GetType().Name}."; return false; }
+        var ids = entry.ResolvedInstanceIds.Count > 0 ? entry.ResolvedInstanceIds :
+            present.Where(device => device.VendorId == entry.VendorId && device.ProductId == entry.ProductId &&
+                !entry.PreExistingMatchingInstanceIds.Contains(device.InstanceId, StringComparer.OrdinalIgnoreCase))
+                .Select(device => device.InstanceId).ToArray();
+        if (ids.Any(id => present.Any(device => string.Equals(device.InstanceId, id, StringComparison.OrdinalIgnoreCase))))
+        { reason = "A journaled virtual device is still present."; return false; }
+        reason = "The journaled virtual device is absent.";
+        return true;
+    }
+
+    private RecoveryResult RecoverHidHideActiveState(RecoveryJournal journal)
+    {
+        var originalActive = journal.Mutations.OriginalHidHideActiveState!.Value;
+        if (hidHideClient is null) return new(RecoveryStatus.Failure, "HidHide active-state recovery support is unavailable.", journal);
+        var inspection = hidHideClient.Inspect();
+        if (!inspection.IsConfigurationReadable)
+            return new(RecoveryStatus.Failure, "HidHide active-state recovery inspection is unsafe.", journal);
+        if (!originalActive && inspection.IsActive && inspection.IsInverseWhitelist)
+            return new(RecoveryStatus.Failure, "HidHide active-state restoration is unsafe because inverse-whitelist state drifted.", journal);
+        if (!originalActive && inspection.IsActive && !ContainsOnlyJournaledHidHideEntries(inspection, journal))
+            return new(RecoveryStatus.Failure, "HidHide active-state restoration is unsafe because foreign blocked entries are present.", journal);
+        if (inspection.IsActive != originalActive && !hidHideClient.SetActive(originalActive))
+            return new(RecoveryStatus.Failure, "HidHide active-state restoration could not be verified.", journal);
+        var verified = hidHideClient.Inspect();
+        return !verified.IsConfigurationReadable || verified.IsActive != originalActive
+            ? new(RecoveryStatus.Failure, "HidHide active-state restoration could not be verified.", journal)
+            : new(RecoveryStatus.Success, "HidHide active-state restored.", journal);
     }
 
     private async Task<RecoveryResult> RecoverNativeStateAsync(RecoveryJournal journal, CancellationToken cancellationToken)

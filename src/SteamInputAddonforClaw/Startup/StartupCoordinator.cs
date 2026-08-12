@@ -2,7 +2,6 @@ namespace SteamInputAddonforClaw.Startup;
 
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices;
 
 internal sealed class StartupCoordinator
@@ -10,7 +9,6 @@ internal sealed class StartupCoordinator
     private readonly IUpdateGate _updateGate;
     private readonly IControllerEnvironmentDetector _environmentDetector;
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
-    private readonly IRecoveryManager? _recoveryManager;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
     private readonly IStartupNativeBaselineValidator? _startupBaselineValidator;
@@ -21,13 +19,11 @@ internal sealed class StartupCoordinator
         IControllerEnvironmentWaiter environmentWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
-        IRecoveryManager? recoveryManager = null,
         IStartupNativeBaselineValidator? startupBaselineValidator = null)
     {
         _updateGate = updateGate;
         _environmentDetector = environmentDetector;
         _environmentWaiter = environmentWaiter;
-        _recoveryManager = recoveryManager;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
         _startupBaselineValidator = startupBaselineValidator;
@@ -36,40 +32,14 @@ internal sealed class StartupCoordinator
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var recoverySafe = true;
-        if (_recoveryManager is not null)
-        {
-            try
-            {
-                var recoveryResult = await _recoveryManager.RecoverIncompleteSessionAsync(cancellationToken).ConfigureAwait(false);
-                if (!recoveryResult.IsSafeToContinue)
-                {
-                    recoverySafe = false;
-                    AppLog.Warn("Startup", "Normal routing blocked by incomplete recovery.", null, ("Action", "Passive"), ("Reason", recoveryResult.Reason));
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                recoverySafe = false;
-                AppLog.Warn("Startup", "Incomplete recovery threw; normal routing remains blocked while update is allowed.", exception,
-                    ("Action", "PassiveThenUpdate"), ("Reason", "RecoveryException:" + exception.GetType().Name));
-            }
-        }
         AppLog.Info("Startup", "Startup update gate entered.");
         var updateResult = await _updateGate.RunAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("Startup", "Update gate completed.", ("Result", updateResult), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         if (updateResult == UpdateGateResult.RestartScheduled)
         {
             AppLog.Info("Startup", "Runtime startup aborted because update restart was scheduled.", ("Action", "Exit"));
-            return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: recoverySafe);
+            return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
         }
-
-        if (!recoverySafe)
-            return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: false);
 
         var hardware = EvaluateHardwareCompatibility();
         AppLog.Info("Hardware", "Startup hardware compatibility assessment completed.",

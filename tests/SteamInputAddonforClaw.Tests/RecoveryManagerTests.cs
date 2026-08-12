@@ -170,6 +170,35 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task StartupCleanReset_ContinuesOwnedHidHideCleanupWhenVirtualResidueRemains()
+    {
+        var sessionId = Guid.NewGuid();
+        var mutationId = Guid.NewGuid();
+        var hidHide = new FakeHidHide();
+        hidHide.HiddenEntries.Add("HID\\MSI_CLAW");
+        hidHide.Entries.Add("C:\\addon.exe");
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, sessionId, DateTimeOffset.UtcNow, Snapshot(),
+            new(DeviceNativeStateChanged: true, HidHideDeviceAdditions: ["HID\\MSI_CLAW"], ExecutableWhitelistAdditions: ["C:\\addon.exe"],
+                AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["owned-instance"])]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), hidHideClient: hidHide,
+            deviceEnumerator: new FakeControllerEnumerator([Device("owned-instance")]));
+
+        var result = await manager.CleanStartupResidueAsync(CancellationToken.None);
+
+        Assert.True(result.IsJournalValid);
+        Assert.False(result.IsNonNativeResidueResolved);
+        Assert.Empty(hidHide.HiddenEntries);
+        Assert.Empty(hidHide.Entries);
+        var remaining = manager.LoadJournal().Journal!;
+        Assert.True(remaining.Mutations.DeviceNativeStateChanged);
+        Assert.Equal(mutationId, Assert.Single(remaining.Mutations.AddonOwnedVirtualDeviceEntries!).MutationId);
+        Assert.Empty(remaining.Mutations.HidHideDeviceAdditions!);
+        Assert.Empty(remaining.Mutations.ExecutableWhitelistAdditions!);
+    }
+
+    [Fact]
     public async Task MixedCrashRecovery_OutputAbsenceRetryUsesSameJournalBeforeRecoveringDependencies()
     {
         var sessionId = Guid.NewGuid();

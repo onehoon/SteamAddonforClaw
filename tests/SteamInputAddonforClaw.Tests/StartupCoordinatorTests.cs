@@ -1,5 +1,4 @@
 using SteamInputAddonforClaw.Startup;
-using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
@@ -9,97 +8,14 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class StartupCoordinatorTests
 {
     [Fact]
-    public async Task RecoveryRunsBeforeUpdateAndEnvironmentDetection()
+    public async Task StartupDoesNotInvokeExactPowerRecovery()
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.NoRecoveryNeeded));
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator());
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.True(result.RecoverySafe);
-        Assert.Equal(["Recovery", "UpdateGate", "EnvironmentDetector", "EnvironmentWaiter"], events);
-    }
-
-    [Fact]
-    public async Task SuccessfulIncompleteRecovery_AllowsStartupToContinue()
-    {
-        var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Success));
-        var result = await coordinator.RunAsync(CancellationToken.None);
-        Assert.True(result.RecoverySafe);
-        Assert.Contains("EnvironmentDetector", events);
-    }
-
-    [Fact]
-    public async Task RecoveryFailure_AllowsUpdateButBlocksUnsafeStartupWork()
-    {
-        var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure));
-        var result = await coordinator.RunAsync(CancellationToken.None);
-        Assert.False(result.RecoverySafe);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
-        Assert.Equal(["Recovery", "UpdateGate"], events);
-    }
-
-    [Fact]
-    public async Task RecoveryFailure_AllowsUpdateRestartAndPreservesUnsafeRecoveryResult()
-    {
-        var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
-            new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure));
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.False(result.ShouldStartRuntime);
-        Assert.False(result.RecoverySafe);
-        Assert.Equal(["Recovery", "UpdateGate"], events);
-    }
-
-    [Fact]
-    public async Task RecoveryException_AllowsUpdateButBlocksUnsafeStartupWork()
-    {
-        var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(),
-            recoveryManager: new ThrowingRecoveryManager(events, new InvalidOperationException("PnP enumeration failed")));
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.True(result.ShouldStartRuntime);
-        Assert.False(result.RecoverySafe);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
-        Assert.Equal(["Recovery", "UpdateGate"], events);
-    }
-
-    [Fact]
-    public async Task RecoveryException_AllowsUpdateRestartAndPreservesUnsafeRecoveryResult()
-    {
-        var events = new List<string>();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
-            new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(),
-            recoveryManager: new ThrowingRecoveryManager(events, new InvalidOperationException("PnP enumeration failed")));
-
-        var result = await coordinator.RunAsync(CancellationToken.None);
-
-        Assert.False(result.ShouldStartRuntime);
-        Assert.False(result.RecoverySafe);
-        Assert.Equal(["Recovery", "UpdateGate"], events);
-    }
-
-    [Fact]
-    public async Task RecoveryCancellation_PropagatesAndDoesNotRunUpdateGate()
-    {
-        var events = new List<string>();
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(),
-            recoveryManager: new ThrowingRecoveryManager(events, new OperationCanceledException(cancellation.Token)));
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coordinator.RunAsync(cancellation.Token));
-
-        Assert.Equal(["Recovery"], events);
+        Assert.Equal(["UpdateGate", "EnvironmentDetector", "EnvironmentWaiter"], events);
     }
 
     [Fact]
@@ -247,26 +163,6 @@ public sealed class StartupCoordinatorTests
         {
             Calls++; events.Add("Baseline");
             return Task.FromResult(new StartupNativeBaselineResult(safe, safe ? "ok" : "failed"));
-        }
-    }
-
-    private sealed class FakeRecoveryManager(List<string> events, RecoveryStatus status) : IRecoveryManager
-    {
-        public bool HasIncompleteRecovery => status != RecoveryStatus.NoRecoveryNeeded;
-        public Task<RecoveryResult> RecoverIncompleteSessionAsync(CancellationToken cancellationToken)
-        {
-            events.Add("Recovery");
-            return Task.FromResult(new RecoveryResult(status, status == RecoveryStatus.Failure ? "unsafe" : "safe"));
-        }
-    }
-
-    private sealed class ThrowingRecoveryManager(List<string> events, Exception exception) : IRecoveryManager
-    {
-        public bool HasIncompleteRecovery => true;
-        public Task<RecoveryResult> RecoverIncompleteSessionAsync(CancellationToken cancellationToken)
-        {
-            events.Add("Recovery");
-            return Task.FromException<RecoveryResult>(exception);
         }
     }
 
