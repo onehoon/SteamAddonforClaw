@@ -17,6 +17,7 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     }
     internal static readonly Guid SensorCategoryAll = new("C317C286-C468-4288-9975-D4C4587C442C");
     internal static readonly Guid SensorDataTypeCustomGuid = new("B14C764F-07CF-41E8-9D82-EBE3D0776A6F");
+    private const int HResultFromWin32ErrorNoData = unchecked((int)0x800700E8);
     private static readonly Guid SensorManagerClass = new("77A1C827-FCD2-4689-8915-9D613CC5FA3E");
     private ISensorManager? _manager;
     public ClawSensorProbeSensorApi()
@@ -76,14 +77,15 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         var type = ReadGuid(sensor, SensorGetTypeSlot);
         return new(name, id, type.ToString("D"), category.ToString("D"));
     }
-    internal static (double X, double Y, double Z) ReadXYZ(IntPtr sensor)
+    internal static ClawSensorReportReadResult ReadXYZ(IntPtr sensor)
     {
         var vtable = Marshal.ReadIntPtr(sensor);
         var getData = Marshal.GetDelegateForFunctionPointer<GetReport>(Marshal.ReadIntPtr(vtable, SensorGetDataSlot * IntPtr.Size));
         var hr = getData(sensor, out var report);
+        if (hr == HResultFromWin32ErrorNoData) return ClawSensorReportReadResult.NoData();
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
         using var ownedReport = new OwnedComPointer(report);
-        return (ReadValue(ownedReport.Pointer, 7), ReadValue(ownedReport.Pointer, 8), ReadValue(ownedReport.Pointer, 9));
+        return ClawSensorReportReadResult.Data(ReadValue(ownedReport.Pointer, 7), ReadValue(ownedReport.Pointer, 8), ReadValue(ownedReport.Pointer, 9), ReadTimestamp(ownedReport.Pointer));
     }
     internal static ClawSensorProbeCandidate ReadCandidate(IntPtr sensor)
     {
@@ -158,6 +160,14 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         }
         finally { value.Dispose(); }
     }
+    private static DateTimeOffset ReadTimestamp(IntPtr report)
+    {
+        var vtable = Marshal.ReadIntPtr(report);
+        var getTimestamp = Marshal.GetDelegateForFunctionPointer<GetTimestamp>(Marshal.ReadIntPtr(vtable, ReportGetTimestampSlot * IntPtr.Size));
+        var hr = getTimestamp(report, out var timestamp);
+        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+        return timestamp.ToDateTimeOffset();
+    }
     private static Guid ReadSensorId(IntPtr sensor)
     {
         var vtable = Marshal.ReadIntPtr(sensor);
@@ -202,6 +212,7 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetProperty(IntPtr self, ref PropertyKey key, out PropVariant value);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetReport(IntPtr self, out IntPtr report);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetSensorValue(IntPtr self, ref PropertyKey key, out PropVariant value);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetTimestamp(IntPtr self, out SystemTime timestamp);
 
     [StructLayout(LayoutKind.Sequential)] private struct PropertyKey(Guid formatId, int propertyId) { public Guid FormatId = formatId; public int PropertyId = propertyId; }
     [StructLayout(LayoutKind.Explicit, Size = 24)] internal struct PropVariant
@@ -228,6 +239,13 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         _ => throw new InvalidOperationException($"Unsupported sensor value type {value.VarType}.")
     };
     [DllImport("oleaut32.dll")] private static extern int PropVariantClear(ref PropVariant value);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct SystemTime
+    {
+        private readonly ushort _year, _month, _dayOfWeek, _day, _hour, _minute, _second, _milliseconds;
+        public DateTimeOffset ToDateTimeOffset() => new(_year, _month, _day, _hour, _minute, _second, _milliseconds, TimeSpan.Zero);
+    }
 
     [ComImport]
     [Guid("BD77DB67-45A8-42DC-8D00-6DCF15F8377A")]

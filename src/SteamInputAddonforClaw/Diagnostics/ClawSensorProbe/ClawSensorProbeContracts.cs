@@ -34,15 +34,15 @@ internal sealed record ClawSensorDiscovery(IReadOnlyList<ClawSensorProbeCandidat
 }
 
 internal sealed record ClawSensorCaptureContext(ClawSensorCaptureMode Mode, ClawSensorProbePhase Phase, int Pass);
-internal sealed record ClawSensorProbeSample(long Sequence, DateTimeOffset UtcTimestamp, double ElapsedMs, ClawSensorCaptureMode CaptureMode, ClawSensorProbePhase Phase, int PhasePass, string Sensor, double X, double Y, double Z, double SampleIntervalMs)
+internal readonly record struct ClawSensorReportReadResult(bool HasData, double X, double Y, double Z, DateTimeOffset SensorTimestamp)
+{
+    public static ClawSensorReportReadResult NoData() => new(false, 0, 0, 0, default);
+    public static ClawSensorReportReadResult Data(double x, double y, double z, DateTimeOffset sensorTimestamp) => new(true, x, y, z, sensorTimestamp);
+}
+internal sealed record ClawSensorProbeSample(long Sequence, DateTimeOffset UtcTimestamp, double ElapsedMs, ClawSensorCaptureMode CaptureMode, ClawSensorProbePhase Phase, int PhasePass, string Sensor, double X, double Y, double Z, double SampleIntervalMs, DateTimeOffset? SensorTimestamp = null)
 {
     public ClawSensorProbeSample(long sequence, DateTimeOffset utcTimestamp, double elapsedMs, ClawSensorProbePhase phase, int phasePass, string sensor, double x, double y, double z, double sampleIntervalMs)
-        : this(sequence, utcTimestamp, elapsedMs, ClawSensorCaptureMode.Recording, phase, phasePass, sensor, x, y, z, sampleIntervalMs)
-    {
-    }
-
-    public ClawSensorProbeSample(long sequence, DateTimeOffset utcTimestamp, double elapsedMs, ClawSensorProbePhase phase, int phasePass, string sensor, double x, double y, double z, double sampleIntervalMs, long _)
-        : this(sequence, utcTimestamp, elapsedMs, ClawSensorCaptureMode.Recording, phase, phasePass, sensor, x, y, z, sampleIntervalMs)
+        : this(sequence, utcTimestamp, elapsedMs, ClawSensorCaptureMode.Recording, phase, phasePass, sensor, x, y, z, sampleIntervalMs, null)
     {
     }
 }
@@ -128,7 +128,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
         Directory.CreateDirectory(DirectoryPath);
         _reportPath = Path.Combine(DirectoryPath, "claw-sensor-report.json");
         _csv = new StreamWriter(Path.Combine(DirectoryPath, "claw-sensor-live.csv"), false, new UTF8Encoding(false)) { AutoFlush = false };
-        _csv.WriteLine("sequence,utc_timestamp,elapsed_ms,capture_mode,phase,phase_pass,sensor,x,y,z,sample_interval_ms");
+        _csv.WriteLine("sequence,utc_timestamp,elapsed_ms,capture_mode,phase,phase_pass,sensor,x,y,z,sample_interval_ms,sensor_timestamp");
         _writerTask = WriteLoopAsync();
     }
     public void Write(ClawSensorProbeSample sample)
@@ -166,7 +166,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     {
         await foreach (var sample in _channel.Reader.ReadAllAsync())
         {
-            _csv.WriteLine(string.Join(',', sample.Sequence.ToString(CultureInfo.InvariantCulture), sample.UtcTimestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture), sample.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture), sample.CaptureMode.ToString().ToUpperInvariant(), sample.Phase, sample.PhasePass, sample.Sensor, sample.X.ToString("R", CultureInfo.InvariantCulture), sample.Y.ToString("R", CultureInfo.InvariantCulture), sample.Z.ToString("R", CultureInfo.InvariantCulture), sample.SampleIntervalMs.ToString("0.###", CultureInfo.InvariantCulture)));
+            _csv.WriteLine(string.Join(',', sample.Sequence.ToString(CultureInfo.InvariantCulture), sample.UtcTimestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture), sample.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture), sample.CaptureMode.ToString().ToUpperInvariant(), sample.Phase, sample.PhasePass, sample.Sensor, sample.X.ToString("R", CultureInfo.InvariantCulture), sample.Y.ToString("R", CultureInfo.InvariantCulture), sample.Z.ToString("R", CultureInfo.InvariantCulture), sample.SampleIntervalMs.ToString("0.###", CultureInfo.InvariantCulture), sample.SensorTimestamp?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty));
             var isRecordingSensorSample = sample.CaptureMode == ClawSensorCaptureMode.Recording && sample.Sensor is "GYRO" or "ACCEL";
             if (isRecordingSensorSample) (sample.Sensor == "GYRO" ? _gyro : _accel).Add(sample.SampleIntervalMs);
             if (isRecordingSensorSample && sample.Phase == ClawSensorProbePhase.REST && sample.Sensor == "GYRO") _restGyro.Add((sample.X, sample.Y, sample.Z));

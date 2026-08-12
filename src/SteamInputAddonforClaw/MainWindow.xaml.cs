@@ -376,7 +376,7 @@ public sealed partial class MainWindow : Window
         ClawSensorProbeErrorText.Text = string.Empty;
     }
     private void UpdateClawSensorProbeSummary(string result = "Test stopped") { var gyro = _clawSensorProbe.GyroscopeSummary; var accel = _clawSensorProbe.AccelerometerSummary; ClawSensorProbeSummaryText.Text = $"{result}{Environment.NewLine}Output directory: {_clawSensorProbe.OutputDirectory ?? "Unavailable"}{Environment.NewLine}Gyroscope samples: {gyro?.SampleCount ?? 0}, average rate: {gyro?.EffectiveHz:0.0} Hz, interval: {gyro?.MinimumIntervalMs:0.###}-{gyro?.MaximumIntervalMs:0.###} ms, dropped: {_clawSensorProbe.DroppedGyroscopeCount}{Environment.NewLine}Accelerometer samples: {accel?.SampleCount ?? 0}, average rate: {accel?.EffectiveHz:0.0} Hz, interval: {accel?.MinimumIntervalMs:0.###}-{accel?.MaximumIntervalMs:0.###} ms, dropped: {_clawSensorProbe.DroppedAccelerometerCount}{Environment.NewLine}Dropped samples total: {_clawSensorProbe.DroppedSampleCount}"; }
-    private void UpdateClawSensorProbePhaseUi() { var index = _clawSensorProbe.Workflow.CurrentIndex; var phase = index >= 0 ? _clawSensorProbe.Workflow.Visits.Last().Phase : ClawSensorProbePhase.REST; ClawSensorProbePhaseText.Text = index >= 0 ? $"Step: {index + 1} of {ClawSensorProbeWorkflow.Phases.Count} - {ClawSensorProbePhaseLabel(phase)}" : "Step: Not started"; ClawSensorProbeInstructionText.Text = phase switch { ClawSensorProbePhase.REST => "Keep Still: Place the device on a flat surface and do not touch it.", ClawSensorProbePhase.ROLL_LEFT => "Roll Left: Slowly lower the left side, then return to the starting position.", ClawSensorProbePhase.ROLL_RIGHT => "Roll Right: Slowly lower the right side, then return to the starting position.", ClawSensorProbePhase.PITCH_UP => "Pitch Up: Slowly tilt the top upward, then return to the starting position.", ClawSensorProbePhase.PITCH_DOWN => "Pitch Down: Slowly tilt the top downward, then return to the starting position.", ClawSensorProbePhase.YAW_LEFT => "Yaw Left: Keep the device level and rotate it left, then return to center.", _ => "Yaw Right: Keep the device level and rotate it right, then return to center." }; ClawSensorProbeBackPhaseButton.IsEnabled = index > 0; ClawSensorProbeNextPhaseButton.Content = index == ClawSensorProbeWorkflow.Phases.Count - 1 ? "Finish Test" : "Next"; }
+    private void UpdateClawSensorProbePhaseUi() { var index = _clawSensorProbe.Workflow.CurrentIndex; var phase = index >= 0 ? _clawSensorProbe.Workflow.Visits.Last().Phase : ClawSensorProbePhase.REST; ClawSensorProbePhaseText.Text = index >= 0 ? $"Step: {index + 1} of {ClawSensorProbeWorkflow.Phases.Count} - {ClawSensorProbePhaseLabel(phase)}" : "Step: Not started"; ClawSensorProbeInstructionText.Text = phase switch { ClawSensorProbePhase.REST => "Keep Still: Place the device on a flat surface and do not touch it.", ClawSensorProbePhase.ROLL_LEFT => "Roll Left: Slowly lower the left side, then return to the starting position.", ClawSensorProbePhase.ROLL_RIGHT => "Roll Right: Slowly lower the right side, then return to the starting position.", ClawSensorProbePhase.PITCH_UP => "Pitch Up: Slowly tilt the top upward, then return to the starting position.", ClawSensorProbePhase.PITCH_DOWN => "Pitch Down: Slowly tilt the top downward, then return to the starting position.", ClawSensorProbePhase.YAW_LEFT => "Yaw Left: Keep the device level and rotate it left, then return to center.", _ => "Yaw Right: Keep the device level and rotate it right, then return to center." }; var recording = _clawSensorProbe.State == ClawSensorProbeState.RecordingPhase; ClawSensorProbeBackPhaseButton.IsEnabled = recording && index > 0; ClawSensorProbeNextPhaseButton.IsEnabled = recording; ClawSensorProbeNextPhaseButton.Content = index == ClawSensorProbeWorkflow.Phases.Count - 1 ? "Finish Test" : "Next"; }
     private static string ClawSensorProbePhaseLabel(ClawSensorProbePhase phase) => phase switch
     {
         ClawSensorProbePhase.REST => "Keep Still",
@@ -404,15 +404,23 @@ public sealed partial class MainWindow : Window
             ClawSensorProbeErrorText.Text = string.Join(Environment.NewLine, _clawSensorProbe.ReaderErrors);
             _ = DispatcherQueue.TryEnqueue(async () =>
             {
-                await _clawSensorProbe.FailOnReaderFaultAsync();
-                _clawSensorProbeUiTimer?.Stop();
-                ClawSensorProbeStatusText.Text = "Test failed: sensor reader stopped unexpectedly.";
-                ClawSensorProbeStopButton.IsEnabled = false;
-                ClawSensorProbeBackPhaseButton.IsEnabled = false;
-                ClawSensorProbeNextPhaseButton.IsEnabled = false;
-                ClawSensorProbeDoneButton.IsEnabled = true;
-                ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
-                UpdateClawSensorProbeSummary("Test failed");
+                try
+                {
+                    await _clawSensorProbe.FailOnReaderFaultAsync();
+                    _clawSensorProbeUiTimer?.Stop();
+                    ClawSensorProbeStatusText.Text = "Test failed: sensor reader stopped unexpectedly.";
+                    ClawSensorProbeStopButton.IsEnabled = false;
+                    ClawSensorProbeBackPhaseButton.IsEnabled = false;
+                    ClawSensorProbeNextPhaseButton.IsEnabled = false;
+                    ClawSensorProbeDoneButton.IsEnabled = true;
+                    ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
+                    UpdateClawSensorProbeSummary("Test failed");
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("ClawSensorProbe", "Automatic reader-fault cleanup failed.", exception);
+                    ClawSensorProbeErrorText.Text = $"Sensor reader failed and cleanup reported a warning: {exception.Message}";
+                }
             });
             return;
         }

@@ -19,7 +19,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly SemaphoreSlim _navigationGate = new(1, 1);
     private int _disposed;
-    private readonly ClawSensorProbeSessionClock _clock = new();
+    private ClawSensorProbeSessionClock? _clock;
     private readonly CancellationTokenSource _lifecycleCancellation = new();
     private ClawSensorCaptureContext _captureContext = new(ClawSensorCaptureMode.Transition, ClawSensorProbePhase.REST, 1);
     public CancellationToken LifecycleCancellation => _lifecycleCancellation.Token;
@@ -45,6 +45,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         root ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "logs", "ClawSensorProbe");
         var sessionId = $"{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff", System.Globalization.CultureInfo.InvariantCulture)}-{Guid.NewGuid():N}";
         _writer = new ClawSensorProbeSessionWriter(root, sessionId);
+        _clock = new ClawSensorProbeSessionClock();
         _workflow.Start();
     }
     public void SetDeviceIdentity(string manufacturer, string productName, string baseBoardProduct, string resolvedModel)
@@ -66,7 +67,8 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
             if (!discovery.IsValid) throw new InvalidOperationException(string.Join(" ", discovery.Errors));
             var visit = Workflow.Visits.Last();
             SetCaptureContext(ClawSensorCaptureMode.Transition, visit.Phase, visit.Pass);
-            _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, discovery, () => CaptureContext, _clock));
+            var clock = _clock ?? throw new InvalidOperationException("The probe session clock has not started.");
+            _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, discovery, () => CaptureContext, clock));
             cancellationToken.ThrowIfCancellationRequested();
             _writer.SetDiscovery(_readers.Discovery);
         }
@@ -83,7 +85,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     public void Next() => _workflow.Next();
     public void Back() => _workflow.Back();
     public void Write(ClawSensorProbeSample sample) => _writer?.Write(sample);
-    public double ElapsedMs => _clock.ElapsedMs;
+    public double ElapsedMs => _clock?.ElapsedMs ?? 0;
     public void WriteTransition() => _writer?.WriteTransition(Workflow.Visits.LastOrDefault().Phase, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public void EndCurrentPhase() => _writer?.EndPhase((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public void BeginPhaseTransition() => WriteTransition();

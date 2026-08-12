@@ -57,6 +57,7 @@ public sealed class ClawSensorProbeTests
         var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
         Assert.Contains("TRANSITION", csv);
         Assert.Contains("capture_mode", csv.Split('\n')[0]);
+        Assert.Contains("sensor_timestamp", csv.Split('\n')[0]);
         Assert.Contains(",1,", csv);
         Assert.Contains("\"DroppedSampleCount\": 0", await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
         Directory.Delete(root, true);
@@ -296,18 +297,18 @@ public sealed class ClawSensorProbeTests
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }
-    [Fact] public async Task Writer_RecordsSensorTimestampAsInvariantValue()
+    [Fact] public async Task Writer_RecordsSensorTimestampAsIsoUtcValue()
     {
         var root = Path.Combine(Path.GetTempPath(), "claw-probe-timestamp-" + Guid.NewGuid().ToString("N"));
         try
         {
             await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
             {
-                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1));
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1, DateTimeOffset.Parse("2026-08-12T01:02:03.004Z")));
             }
 
             var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
-            Assert.DoesNotContain("sensor_timestamp", csv.Split('\n')[0]);
+            Assert.Contains("2026-08-12T01:02:03.0040000Z", csv);
         }
         finally
         {
@@ -354,6 +355,15 @@ public sealed class ClawSensorProbeTests
         Thread.Sleep(2);
         var sample = ClawSensorProbeSessionClock.TicksToMilliseconds(clock.ElapsedTicks);
         Assert.True(sample >= marker);
+    }
+
+    [Fact] public void ReportReadResult_SupportsNoDataAndTimestampedDataContracts()
+    {
+        Assert.False(ClawSensorReportReadResult.NoData().HasData);
+        var timestamp = DateTimeOffset.Parse("2026-08-12T01:02:03Z");
+        var data = ClawSensorReportReadResult.Data(1, 2, 3, timestamp);
+        Assert.True(data.HasData);
+        Assert.Equal(timestamp, data.SensorTimestamp);
     }
 
     [Fact] public async Task AdvancePhase_ClearsRecordingContextBeforeMovingToNextPhase()
