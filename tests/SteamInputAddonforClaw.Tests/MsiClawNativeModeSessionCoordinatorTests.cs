@@ -332,7 +332,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     private sealed class WeakIdentityEnumerator : IControllerDeviceEnumerator
     {
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
-        [new("USB\\VID_0DB0&PID_1901&MI_00\\A", Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), "PARENT", ["USB\\VID_0DB0&PID_1901\\CLAW_A"], "USB", [], [], "HIDClass", null, null, MsiClawHardware.VendorId, MsiClawHardware.XInputProductId, true)];
+        [new("HID\\MSI_CLAW", Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), "PARENT", [], "HID", [], [], "HIDClass", null, null, MsiClawHardware.VendorId, MsiClawHardware.XInputProductId, true)];
     }
 
     private sealed class NeverModeController : IMsiClawModeController

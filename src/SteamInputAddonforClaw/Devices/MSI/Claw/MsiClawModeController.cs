@@ -2,7 +2,7 @@ using SteamInputAddonforClaw.Controllers.Detection;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal sealed record MsiClawControlHidDevice(ControllerDeviceInfo Device, ushort UsagePage, ushort Usage);
+internal sealed record MsiClawControlHidDevice(ControllerDeviceInfo Device, ushort UsagePage, ushort Usage, MsiClawPhysicalIdentity VerifiedIdentity);
 internal interface IMsiClawControlHidResolver
 {
     MsiClawControlHidDevice? Resolve(IReadOnlyList<ControllerDeviceInfo> devices, MsiClawNativeMode currentMode, MsiClawPhysicalIdentity expectedIdentity);
@@ -21,7 +21,7 @@ internal sealed class MsiClawControlHidResolver : IMsiClawControlHidResolver
         var usage = mode == MsiClawNativeMode.XInput ? (ushort)0x0001 : (ushort)0x0040;
         var candidates = devices.Where(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == pid && MsiClawPhysicalIdentity.From(d).StronglyMatches(expectedIdentity))
             .Where(d => d.UsagePage == usagePage && d.Usage == usage).ToArray();
-        return candidates.Length == 1 ? new(candidates[0], usagePage, usage) : null;
+        return candidates.Length == 1 ? new(candidates[0], usagePage, usage, MsiClawPhysicalIdentity.From(candidates[0])) : null;
     }
 }
 
