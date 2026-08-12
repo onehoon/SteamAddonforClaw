@@ -20,6 +20,7 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
         var candidates = FindCandidates(receiver);
         if (candidates is null || candidates.Count == 0) return null;
         var started = Stopwatch.GetTimestamp();
+        var timedOut = false;
         foreach (var candidate in candidates)
         {
             var remaining = timeout - Stopwatch.GetElapsedTime(started);
@@ -33,8 +34,13 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
                 var report = QueryCandidate(candidate, remaining);
                 if (report is not null) return report;
             }
-            catch (TimeoutException) when (Stopwatch.GetElapsedTime(started) < timeout) { }
+            catch (TimeoutException)
+            {
+                timedOut = true;
+                if (Stopwatch.GetElapsedTime(started) >= timeout) break;
+            }
         }
+        if (timedOut) throw new TimeoutException("Steam Controller receiver wireless-state query timed out.");
         return null;
     }
 
