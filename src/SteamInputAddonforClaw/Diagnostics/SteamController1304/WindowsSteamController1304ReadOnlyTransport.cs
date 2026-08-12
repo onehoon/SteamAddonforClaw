@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Diagnostics.SteamController1304;
 
@@ -16,36 +18,49 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
     public byte[]? RequestConnectionStatus(ControllerDeviceInfo receiver, TimeSpan timeout)
     {
         var candidates = FindCandidates(receiver);
-        if (candidates is null || candidates.Count != 1) return null;
-        using var handle = Open(candidates[0].Path);
-        if (handle.IsInvalid) return null;
-        if (!HidD_GetPreparsedData(handle, out var preparsed)) return null;
-        try
+        if (candidates is null || candidates.Count == 0) return null;
+        var started = Stopwatch.GetTimestamp();
+        foreach (var candidate in candidates)
         {
-            if (HidP_GetCaps(preparsed, out var caps) != HidpStatusSuccess || caps.InputReportByteLength == 0 || caps.FeatureReportByteLength == 0)
-                return null;
-            var input = new byte[caps.InputReportByteLength];
-            using var stream = new FileStream(handle, FileAccess.Read, input.Length, isAsync: true);
-            using var cancellation = new CancellationTokenSource(timeout);
-            var read = stream.ReadExactlyAsync(input, cancellation.Token).AsTask();
-            var feature = SteamController1304HidInteropContract.BuildWirelessStateFeatureReport(caps.FeatureReportByteLength);
-            if (feature is null) return null;
-            if (!HidD_SetFeature(handle, feature, feature.Length)) return null;
+            var remaining = timeout - Stopwatch.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero) break;
+            AppLog.Debug("SteamController1304", "Receiver HID candidate query started.",
+                ("HidInterface", candidate.Path), ("UsagePage", "0xFF00"), ("Usage", "0x0001"),
+                ("InputReportByteLength", candidate.InputReportByteLength), ("OutputReportByteLength", candidate.OutputReportByteLength),
+                ("FeatureReportByteLength", candidate.FeatureReportByteLength));
             try
             {
-                while (true)
-                {
-                    read.GetAwaiter().GetResult();
-                    var normalized = Normalize(input);
-                    if (normalized.Length == SteamController1304ConnectionReportParser.ReportLength && normalized[2] == SteamController1304ConnectionReportParser.MessageTypeWireless)
-                        return normalized;
-                    Array.Clear(input);
-                    read = stream.ReadExactlyAsync(input, cancellation.Token).AsTask();
-                }
+                var report = QueryCandidate(candidate, remaining);
+                if (report is not null) return report;
             }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw new TimeoutException("Steam Controller receiver wireless-state query timed out."); }
+            catch (TimeoutException) when (Stopwatch.GetElapsedTime(started) < timeout) { }
         }
-        finally { HidD_FreePreparsedData(preparsed); }
+        return null;
+    }
+
+    private static byte[]? QueryCandidate(Candidate candidate, TimeSpan timeout)
+    {
+        using var handle = Open(candidate.Path);
+        if (handle.IsInvalid) return null;
+        var input = new byte[candidate.InputReportByteLength];
+        using var stream = new FileStream(handle, FileAccess.Read, input.Length, isAsync: true);
+        using var cancellation = new CancellationTokenSource(timeout);
+        var read = stream.ReadExactlyAsync(input, cancellation.Token).AsTask();
+        var feature = SteamController1304HidInteropContract.BuildWirelessStateFeatureReport(candidate.FeatureReportByteLength);
+        if (feature is null || !HidD_SetFeature(handle, feature, feature.Length)) return null;
+        try
+        {
+            while (true)
+            {
+                read.GetAwaiter().GetResult();
+                var normalized = Normalize(input);
+                if (normalized.Length == SteamController1304ConnectionReportParser.ReportLength && normalized[2] == SteamController1304ConnectionReportParser.MessageTypeWireless)
+                    return normalized;
+                Array.Clear(input);
+                read = stream.ReadExactlyAsync(input, cancellation.Token).AsTask();
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw new TimeoutException("Steam Controller receiver wireless-state query timed out."); }
     }
 
     private static SafeFileHandle Open(string path) => CreateFile(path, 0xC0000000, FileShare.ReadWrite, IntPtr.Zero, FileMode.Open, FileOptions.Asynchronous, IntPtr.Zero);
@@ -86,7 +101,8 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
                 try
                 {
                     if (HidP_GetCaps(preparsed, out var caps) == HidpStatusSuccess && caps.UsagePage == 0xFF00 && caps.Usage == 0x0001)
-                        result.Add(new Candidate(path));
+                        if (caps.InputReportByteLength != 0 && caps.FeatureReportByteLength != 0)
+                            result.Add(new Candidate(path, caps.InputReportByteLength, caps.OutputReportByteLength, caps.FeatureReportByteLength));
                 }
                 finally { HidD_FreePreparsedData(preparsed); }
             }
@@ -108,7 +124,7 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
         return false;
     }
 
-    private sealed record Candidate(string Path);
+    private sealed record Candidate(string Path, ushort InputReportByteLength, ushort OutputReportByteLength, ushort FeatureReportByteLength);
     // HIDP_STATUS_SUCCESS is an HID parser NTSTATUS value, not a Win32 BOOL result.
     internal const int HidpStatusSuccess = 0x00110000;
     [StructLayout(LayoutKind.Sequential)] private struct SpDevinfoData { public int CbSize; public Guid ClassGuid; public uint DevInst; public IntPtr Reserved; }
