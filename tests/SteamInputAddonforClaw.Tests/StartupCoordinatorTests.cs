@@ -31,7 +31,7 @@ public sealed class StartupCoordinatorTests
     }
 
     [Fact]
-    public async Task RecoveryFailure_BlocksAllUnsafeStartupWork()
+    public async Task RecoveryFailure_AllowsUpdateButBlocksUnsafeStartupWork()
     {
         var events = new List<string>();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
@@ -39,7 +39,21 @@ public sealed class StartupCoordinatorTests
         var result = await coordinator.RunAsync(CancellationToken.None);
         Assert.False(result.RecoverySafe);
         Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
-        Assert.Equal(["Recovery"], events);
+        Assert.Equal(["Recovery", "UpdateGate"], events);
+    }
+
+    [Fact]
+    public async Task RecoveryFailure_AllowsUpdateRestartAndPreservesUnsafeRecoveryResult()
+    {
+        var events = new List<string>();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.RestartScheduled),
+            new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(), new ThrowingProbeFactory(), new ThrowingHardwareEvaluator(), recoveryManager: new FakeRecoveryManager(events, RecoveryStatus.Failure));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.False(result.ShouldStartRuntime);
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(["Recovery", "UpdateGate"], events);
     }
     [Fact]
     public async Task CanStartRuntimeAsync_WhenNoUpdateExists_WaitsForEnvironmentAfterUpdateGate()
@@ -191,6 +205,8 @@ public sealed class StartupCoordinatorTests
 
     private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
     private sealed class FakeHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test"); }
+    private sealed class ThrowingEnvironmentDetector : IControllerEnvironmentDetector { public ControllerEnvironment Detect() => throw new Xunit.Sdk.XunitException("Environment detection must not run after recovery failure."); }
+    private sealed class ThrowingEnvironmentWaiter : IControllerEnvironmentWaiter { public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode _, CancellationToken __) => throw new Xunit.Sdk.XunitException("Environment wait must not run after recovery failure."); }
     private sealed class ThrowingProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => throw new Xunit.Sdk.XunitException("Hardware probe must not run after recovery failure."); }
     private sealed class ThrowingHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => throw new Xunit.Sdk.XunitException("Hardware evaluator must not run after recovery failure."); }
 }

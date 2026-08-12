@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Updates;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Startup;
 
@@ -27,8 +28,14 @@ internal sealed class SilentUpdateGate : IUpdateGate
         {
             throw;
         }
-        catch (Exception)
+        catch (OperationCanceledException exception)
         {
+            AppLog.Warn("Update", "Silent update gate timed out.", exception, ("TimeoutMs", UpdateGateTimeout.TotalMilliseconds), ("Action", "Continue"));
+            return UpdateGateResult.Continue;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Update", "Silent update gate failed.", exception, ("Action", "Continue"));
             return UpdateGateResult.Continue;
         }
     }
