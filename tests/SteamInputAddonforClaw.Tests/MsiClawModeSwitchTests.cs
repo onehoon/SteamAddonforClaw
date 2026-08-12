@@ -105,18 +105,21 @@ public sealed class MsiClawModeSwitchTests
         Assert.False(await writer.WriteAsync(unverified, MsiClawNativeMode.DirectInput, CancellationToken.None));
     }
 
-    [Fact]
-    public async Task Windows_writer_passes_exact_command_to_raw_transport()
+    [Theory]
+    [InlineData((int)MsiClawNativeMode.XInput)]
+    [InlineData((int)MsiClawNativeMode.DirectInput)]
+    public async Task Windows_writer_passes_exact_command_to_raw_transport(int modeValue)
     {
+        var mode = (MsiClawNativeMode)modeValue;
         var container = Guid.NewGuid();
         var device = Device(container, "USB\\ROOT", "HID\\MSI", 0x1901, 0xFFA0, 0x0001);
         var expected = new MsiClawControlHidDevice(device, 0xFFA0, 0x0001, MsiClawPhysicalIdentity.From(device));
         var transport = new RecordingRawTransport();
         var writer = new WindowsMsiClawModeWriter(new FixedLookup(new("hid-path", device.InstanceId, container)), transport);
 
-        Assert.True(await writer.WriteAsync(expected, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.True(await writer.WriteAsync(expected, mode, CancellationToken.None));
         Assert.Equal("hid-path", transport.DevicePath);
-        Assert.Equal(MsiClawModeCommand.Build(MsiClawNativeMode.DirectInput), transport.Bytes);
+        Assert.Equal(MsiClawModeCommand.Build(mode), transport.Bytes);
     }
 
     [Fact]
@@ -163,6 +166,39 @@ public sealed class MsiClawModeSwitchTests
         fake.OnOpen = () => cancelled.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(() => transport.WriteAsync("hid-path", new byte[64], cancelled.Token));
         Assert.Equal(writesBeforeCancellation, fake.WriteCallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_returns_false_when_open_fails()
+    {
+        var fake = new FakeNativeHidApi { OpenSucceeds = false };
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+
+        Assert.False(await transport.WriteAsync("hid-path", new byte[64], CancellationToken.None));
+        Assert.Equal(1, fake.OpenCallCount);
+        Assert.Equal(0, fake.WriteCallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_returns_false_when_native_write_fails()
+    {
+        var fake = new FakeNativeHidApi { WriteResult = false, BytesWritten = 0 };
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+
+        Assert.False(await transport.WriteAsync("hid-path", new byte[64], CancellationToken.None));
+        Assert.Equal(1, fake.OpenCallCount);
+        Assert.Equal(1, fake.WriteCallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_rejects_empty_path_before_native_io()
+    {
+        var fake = new FakeNativeHidApi();
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+
+        Assert.False(await transport.WriteAsync("", new byte[64], CancellationToken.None));
+        Assert.Equal(0, fake.OpenCallCount);
+        Assert.Equal(0, fake.WriteCallCount);
     }
 
     [Fact]
@@ -256,14 +292,17 @@ public sealed class MsiClawModeSwitchTests
     private sealed class FakeNativeHidApi : IMsiClawNativeHidApi
     {
         public bool WriteResult { get; set; }
+        public bool OpenSucceeds { get; set; } = true;
         public uint BytesWritten { get; set; }
+        public int OpenCallCount { get; private set; }
         public int WriteCallCount { get; private set; }
         public Action? OnOpen { get; set; }
         public int LastError => 123;
         public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
         {
+            OpenCallCount++;
             OnOpen?.Invoke();
-            return new SafeFileHandle(new IntPtr(1), ownsHandle: false);
+            return new SafeFileHandle(new IntPtr(OpenSucceeds ? 1 : -1), ownsHandle: false);
         }
         public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
         {
