@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -7,7 +8,15 @@ namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 
 internal enum ClawSensorProbePhase { REST, ROLL_LEFT, ROLL_RIGHT, PITCH_UP, PITCH_DOWN, YAW_LEFT, YAW_RIGHT }
 internal enum ClawSensorProbeState { Idle, Discovering, Ready, Starting, Countdown, RecordingPhase, Stopping, Completed, Failed }
-internal enum ClawSensorCaptureMode { Transition, Recording }
+internal enum ClawSensorCaptureMode { Inactive, Transition, Recording }
+
+internal sealed class ClawSensorProbeSessionClock
+{
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    public long ElapsedTicks => _clock.ElapsedTicks;
+    public double ElapsedMs => TicksToMilliseconds(ElapsedTicks);
+    public static double TicksToMilliseconds(long ticks) => ticks * 1000d / Stopwatch.Frequency;
+}
 
 internal sealed record ClawSensorProbeCandidate(string FriendlyName, string SensorId, string TypeGuid, string CategoryGuid, string Manufacturer = "Unavailable", string Model = "Unavailable", string PersistentUniqueId = "Unavailable", string MinimumReportInterval = "Unavailable", string CustomUsage = "Unavailable");
 internal sealed record ClawSensorDiscovery(IReadOnlyList<ClawSensorProbeCandidate> Sensors, ClawSensorProbeCandidate? Gyroscope, ClawSensorProbeCandidate? Accelerometer, IReadOnlyList<string> Errors)

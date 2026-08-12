@@ -36,10 +36,10 @@ public sealed class ClawSensorProbeTests
         Assert.Equal("m-persist", result.Sensors.Single(x => x.SensorId == "m").PersistentUniqueId);
         Assert.Equal("usage-g", result.Gyroscope?.CustomUsage);
     }
-    [Fact] public void Candidate_UsesSensorIdAsDocumentedPersistentUniqueId()
+    [Fact] public void Candidate_DoesNotTreatSensorIdAsPersistentUniqueId()
     {
-        var result = ClawSensorDiscovery.Select([new("Physical Gyrometer", "persistent-id", "t", "c", PersistentUniqueId: "persistent-id"), new("Physical Accelerometer", "a", "t", "c")]);
-        Assert.Equal("persistent-id", result.Gyroscope?.PersistentUniqueId);
+        var result = ClawSensorDiscovery.Select([new("Physical Gyrometer", "sensor-id", "t", "c"), new("Physical Accelerometer", "a", "t", "c")]);
+        Assert.Equal("Unavailable", result.Gyroscope?.PersistentUniqueId);
     }
     [Fact] public void Statistics_CalculatesRateAndBounds()
     {
@@ -345,6 +345,36 @@ public sealed class ClawSensorProbeTests
         Assert.Equal(7, ClawSensorProbeSensorApi.SensorGetPropertySlot);
         Assert.Equal(13, ClawSensorProbeSensorApi.SensorGetDataSlot);
         Assert.Equal(4, ClawSensorProbeSensorApi.ReportGetSensorValueSlot);
+    }
+
+    [Fact] public void SessionClock_ProvidesOneMonotonicTimeDomainForMarkersAndSamples()
+    {
+        var clock = new ClawSensorProbeSessionClock();
+        var marker = clock.ElapsedMs;
+        Thread.Sleep(2);
+        var sample = ClawSensorProbeSessionClock.TicksToMilliseconds(clock.ElapsedTicks);
+        Assert.True(sample >= marker);
+    }
+
+    [Fact] public async Task AdvancePhase_ClearsRecordingContextBeforeMovingToNextPhase()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-context-" + Guid.NewGuid().ToString("N"));
+        var coordinator = new ClawSensorProbeCoordinator();
+        try
+        {
+            coordinator.Prepare();
+            coordinator.Start(root);
+            coordinator.BeginRecording();
+            Assert.Equal(ClawSensorCaptureMode.Recording, coordinator.CaptureContext.Mode);
+            coordinator.AdvancePhase();
+            Assert.Equal(ClawSensorCaptureMode.Transition, coordinator.CaptureContext.Mode);
+            Assert.Equal(ClawSensorProbePhase.ROLL_LEFT, coordinator.CaptureContext.Phase);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
     }
 
     [Fact] public void PropVariant_ConvertsOnlySupportedScalarSensorTypes()

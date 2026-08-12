@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
@@ -7,9 +6,10 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
 {
     private readonly ClawSensorProbeSensorApi _api;
     private readonly Func<ClawSensorCaptureContext> _contextProvider;
+    private readonly ClawSensorProbeSessionClock _clock;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task[] _workers;
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private int _stopDisposed;
     private long _sequence;
     internal ClawSensorProbeLiveSnapshot Snapshot { get; } = new();
     internal ClawSensorDiscovery Discovery { get; }
@@ -18,10 +18,11 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
     internal bool HasCompleted => _workers.All(x => x.IsCompleted);
     internal Task Completion => Task.WhenAll(_workers);
     private readonly List<string> _errors = [];
-    public ClawSensorProbeReaders(ClawSensorProbeSensorApi api, ClawSensorProbeSessionWriter writer, ClawSensorDiscovery discovery, Func<ClawSensorCaptureContext> contextProvider)
+    public ClawSensorProbeReaders(ClawSensorProbeSensorApi api, ClawSensorProbeSessionWriter writer, ClawSensorDiscovery discovery, Func<ClawSensorCaptureContext> contextProvider, ClawSensorProbeSessionClock clock)
     {
         _api = api;
         _contextProvider = contextProvider;
+        _clock = clock;
         Discovery = discovery;
         if (!discovery.IsValid) throw new InvalidOperationException(string.Join(" ", discovery.Errors));
         _workers = [RunAsync(discovery.Gyroscope!, "GYRO", writer), RunAsync(discovery.Accelerometer!, "ACCEL", writer)];
@@ -33,18 +34,7 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
             IntPtr sensor = IntPtr.Zero;
             try
             {
-                var collection = _api.GetAllSensors();
-                try
-                {
-                    for (var i = 0; i < ClawSensorProbeSensorApi.GetCollectionCount(collection); i++)
-                    {
-                        var item = ClawSensorProbeSensorApi.GetCollectionItem(collection, i);
-                        var metadata = ClawSensorProbeSensorApi.ReadMetadata(item);
-                        if (string.Equals(metadata.SensorId, candidate.SensorId, StringComparison.OrdinalIgnoreCase)) { sensor = item; break; }
-                        Marshal.Release(item);
-                    }
-                }
-                finally { Marshal.Release(collection); }
+                sensor = _api.GetSensorById(Guid.Parse(candidate.SensorId));
                 if (sensor == IntPtr.Zero) throw new InvalidOperationException($"Selected {sensorName} sensor was not available.");
                 var previous = 0L;
                 while (!_stop.IsCancellationRequested)
@@ -52,9 +42,9 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
                     var values = ClawSensorProbeSensorApi.ReadXYZ(sensor);
                     var context = _contextProvider();
                     var now = _clock.ElapsedTicks;
-                    var interval = previous == 0 ? 0 : (now - previous) * 1000d / Stopwatch.Frequency;
+                    var interval = previous == 0 ? 0 : ClawSensorProbeSessionClock.TicksToMilliseconds(now - previous);
                     previous = now;
-                    var elapsed = now * 1000d / Stopwatch.Frequency;
+                    var elapsed = ClawSensorProbeSessionClock.TicksToMilliseconds(now);
                     writer.Write(new(Interlocked.Increment(ref _sequence), DateTimeOffset.UtcNow, elapsed, context.Mode, context.Phase, context.Pass, sensorName, values.X, values.Y, values.Z, interval));
                     Snapshot.Observe(sensorName, values.X, values.Y, values.Z, interval);
                 }
@@ -67,7 +57,25 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _stop.Cancel();
-        try { await Task.WhenAll(_workers).WaitAsync(TimeSpan.FromSeconds(3)); } catch (TimeoutException) { ShutdownTimedOut = true; lock (_errors) _errors.Add("Sensor reader shutdown exceeded the bounded wait."); } catch { }
-        _stop.Dispose();
+        try
+        {
+            await Completion.WaitAsync(TimeSpan.FromSeconds(3));
+            DisposeStopSource();
+        }
+        catch (TimeoutException)
+        {
+            ShutdownTimedOut = true;
+            lock (_errors) _errors.Add("Sensor reader shutdown exceeded the bounded wait.");
+            _ = Completion.ContinueWith(_ => DisposeStopSource(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+        catch
+        {
+            DisposeStopSource();
+        }
+    }
+
+    private void DisposeStopSource()
+    {
+        if (Interlocked.Exchange(ref _stopDisposed, 1) == 0) _stop.Dispose();
     }
 }

@@ -34,6 +34,13 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
         return collection;
     }
+    internal IntPtr GetSensorById(Guid sensorId)
+    {
+        var manager = _manager ?? throw new ObjectDisposedException(nameof(ClawSensorProbeSensorApi));
+        var hr = manager.GetSensorByID(ref sensorId, out var sensor);
+        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+        return sensor;
+    }
     internal static int GetCollectionCount(IntPtr collection)
     {
         var vtable = Marshal.ReadIntPtr(collection);
@@ -85,7 +92,7 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         {
             Manufacturer = ReadPropertyString(sensor, SensorPropertyManufacturer),
             Model = ReadPropertyString(sensor, SensorPropertyModel),
-            PersistentUniqueId = ReadPropertyGuid(sensor, SensorPropertyPersistentUniqueId, baseCandidate.SensorId),
+            PersistentUniqueId = ReadPropertyGuid(sensor, SensorPropertyPersistentUniqueId),
             MinimumReportInterval = ReadPropertyUInt32(sensor, SensorPropertyMinReportInterval),
             CustomUsage = ReadPropertyUInt32(sensor, SensorPropertyHidUsage)
         };
@@ -100,15 +107,15 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         }
         catch { return "Unavailable"; }
     }
-    private static string ReadPropertyGuid(IntPtr sensor, int propertyId, string fallback)
+    private static string ReadPropertyGuid(IntPtr sensor, int propertyId)
     {
         try
         {
             var value = ReadProperty(sensor, propertyId);
-            try { return value.VarType == 72 && value.Pointer != IntPtr.Zero ? Marshal.PtrToStructure<Guid>(value.Pointer).ToString("D") : fallback; }
+            try { return value.VarType == 72 && value.Pointer != IntPtr.Zero ? Marshal.PtrToStructure<Guid>(value.Pointer).ToString("D") : "Unavailable"; }
             finally { value.Dispose(); }
         }
-        catch { return fallback; }
+        catch { return "Unavailable"; }
     }
     private static string ReadPropertyUInt32(IntPtr sensor, int propertyId)
     {
@@ -228,6 +235,8 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     private interface ISensorManager
     {
         [PreserveSig] int GetSensorsByCategory(ref Guid sensorCategory, out IntPtr sensorCollection);
+        [PreserveSig] int GetSensorsByType(ref Guid sensorType, out IntPtr sensorCollection);
+        [PreserveSig] int GetSensorByID(ref Guid sensorId, out IntPtr sensor);
     }
 
 }
