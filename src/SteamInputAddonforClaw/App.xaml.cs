@@ -74,11 +74,18 @@ public partial class App : Application
         var addonOwnedVirtualDeviceTracker = new AddonOwnedVirtualDeviceTracker();
         var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher, addonOwnedVirtualDeviceTracker);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
+        var controllerSoftwareProviders = new IControllerSoftwareStatusProvider[]
+        {
+            new MsiCenterMSoftwareStatusProvider(),
+            new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
+            new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
+        };
+        var controllerEnvironmentAssessmentProvider = new ControllerEnvironmentAssessmentProvider(controllerSoftwareProviders);
         _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
-            new ClawTweaksEnvironmentDetector(),
+            controllerEnvironmentAssessmentProvider,
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
             recoveryManager: _recoveryManager,
             stockCenterMBaseline: nativeState is null ? null : new StockCenterMStartupBaseline(nativeState),
@@ -95,7 +102,7 @@ public partial class App : Application
                 return;
             }
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, addonOwnedVirtualDeviceTracker, deviceRegistry, msiClawAdapter, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, addonOwnedVirtualDeviceTracker, deviceRegistry, msiClawAdapter, controllerEnvironmentAssessmentProvider, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
@@ -107,7 +114,7 @@ public partial class App : Application
         }
     }
 
-    private void StartNormalRuntime(ControllerDeviceClassifier classifier, AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
+    private void StartNormalRuntime(ControllerDeviceClassifier classifier, AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
@@ -164,11 +171,7 @@ public partial class App : Application
             new WindowsDeviceInformationProvider(),
             new WindowsDeviceProbeContextFactory(),
             new HardwareCompatibilityEvaluator(deviceRegistry),
-            [
-                new MsiCenterMSoftwareStatusProvider(),
-                new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
-                new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
-            ],
+            controllerEnvironmentAssessmentProvider,
             new RuntimePrerequisiteInspector(
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())),

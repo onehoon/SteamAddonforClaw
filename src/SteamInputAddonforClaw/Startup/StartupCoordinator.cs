@@ -4,11 +4,12 @@ using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Status;
 
 internal sealed class StartupCoordinator
 {
     private readonly IUpdateGate _updateGate;
-    private readonly IControllerEnvironmentDetector _environmentDetector;
+    private readonly IControllerEnvironmentAssessmentProvider _environmentAssessmentProvider;
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
     private readonly IRecoveryManager? _recoveryManager;
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
@@ -17,7 +18,7 @@ internal sealed class StartupCoordinator
 
     public StartupCoordinator(
         IUpdateGate updateGate,
-        IControllerEnvironmentDetector environmentDetector,
+        IControllerEnvironmentAssessmentProvider environmentAssessmentProvider,
         IControllerEnvironmentWaiter environmentWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
@@ -25,13 +26,14 @@ internal sealed class StartupCoordinator
         IStockCenterMStartupBaseline? stockCenterMBaseline = null)
     {
         _updateGate = updateGate;
-        _environmentDetector = environmentDetector;
+        _environmentAssessmentProvider = environmentAssessmentProvider;
         _environmentWaiter = environmentWaiter;
         _recoveryManager = recoveryManager;
         _stockCenterMBaseline = stockCenterMBaseline;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
     }
+
 
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
     {
@@ -55,7 +57,8 @@ internal sealed class StartupCoordinator
             return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
 
         AppLog.Info("Environment", "Initial environment detection started.");
-        var environment = _environmentDetector.Detect();
+        var assessment = _environmentAssessmentProvider.Capture();
+        var environment = StartupControllerEnvironmentMapper.Map(assessment);
         AppLog.Info("Environment", "Environment detection completed.", ("Mode", environment.Mode), ("ClawTweaksState", environment.ClawTweaksState));
         if (environment.Mode == ControllerEnvironmentMode.Indeterminate)
         {

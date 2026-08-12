@@ -174,9 +174,9 @@ public sealed class HandheldCompanionEnvironmentTests
         public Task<UpdateGateResult> RunAsync(CancellationToken cancellationToken) => Task.FromResult(UpdateGateResult.Continue);
     }
 
-    private sealed class HhcEnvironmentDetector : IControllerEnvironmentDetector
+    private sealed class HhcEnvironmentDetector : IControllerEnvironmentAssessmentProvider
     {
-        public ControllerEnvironment Detect() => new(ControllerEnvironmentMode.HHCManaged, ClawTweaksState.NotInstalled);
+        public ControllerEnvironmentAssessmentSnapshot Capture() => new([], new(ControllerManagerKind.HandheldCompanion, ControllerManagerClassificationReason.HandheldCompanionDetected), new(ControllerEnvironmentCompatibilityStatus.Unsupported, ControllerEnvironmentCompatibilityReason.HandheldCompanionNotSupportedByCurrentVersion));
     }
 
     private sealed class FakeWaiter : IControllerEnvironmentWaiter

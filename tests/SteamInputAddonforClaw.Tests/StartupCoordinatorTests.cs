@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Status;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -251,7 +252,7 @@ public sealed class StartupCoordinatorTests
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.Equal(ControllerEnvironmentMode.ClawTweaks, result.EnvironmentMode);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, result.EnvironmentMode);
         Assert.False(result.RecoverySafe);
         Assert.DoesNotContain("Baseline", events);
         Assert.DoesNotContain("Discard", events);
@@ -333,11 +334,11 @@ public sealed class StartupCoordinatorTests
         }
     }
 
-    private sealed class FakeEnvironmentDetector(List<string> events, params ClawTweaksState[] states) : IControllerEnvironmentDetector
+    private sealed class FakeEnvironmentDetector(List<string> events, params ClawTweaksState[] states) : IControllerEnvironmentAssessmentProvider
     {
         private readonly Queue<ClawTweaksState> _states = new(states.Length == 0 ? [ClawTweaksState.NotInstalled] : states);
 
-        public ControllerEnvironment Detect()
+        public ControllerEnvironmentAssessmentSnapshot Capture()
         {
             events.Add("EnvironmentDetector");
             var state = _states.Count > 1 ? _states.Dequeue() : _states.Peek();
@@ -347,7 +348,7 @@ public sealed class StartupCoordinatorTests
                 ClawTweaksState.NotInstalled => ControllerEnvironmentMode.StockCenterM,
                 _ => ControllerEnvironmentMode.Indeterminate
             };
-            return new ControllerEnvironment(mode, state);
+            return Assessment(mode);
         }
     }
 
@@ -360,9 +361,9 @@ public sealed class StartupCoordinatorTests
         }
     }
 
-    private sealed class FixedEnvironmentDetector(List<string> events, ControllerEnvironment environment) : IControllerEnvironmentDetector
+    private sealed class FixedEnvironmentDetector(List<string> events, ControllerEnvironment environment) : IControllerEnvironmentAssessmentProvider
     {
-        public ControllerEnvironment Detect() { events.Add("EnvironmentDetector"); return environment; }
+        public ControllerEnvironmentAssessmentSnapshot Capture() { events.Add("EnvironmentDetector"); return Assessment(environment.Mode); }
     }
 
     private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
@@ -371,8 +372,20 @@ public sealed class StartupCoordinatorTests
     {
         public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(status, null, null, "test");
     }
-    private sealed class ThrowingEnvironmentDetector : IControllerEnvironmentDetector { public ControllerEnvironment Detect() => throw new Xunit.Sdk.XunitException("Environment detection must not run after recovery failure."); }
+    private sealed class ThrowingEnvironmentDetector : IControllerEnvironmentAssessmentProvider { public ControllerEnvironmentAssessmentSnapshot Capture() => throw new Xunit.Sdk.XunitException("Environment assessment must not run."); }
     private sealed class ThrowingEnvironmentWaiter : IControllerEnvironmentWaiter { public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode _, CancellationToken __) => throw new Xunit.Sdk.XunitException("Environment wait must not run after recovery failure."); }
     private sealed class ThrowingProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => throw new Xunit.Sdk.XunitException("Hardware probe must not run after recovery failure."); }
     private sealed class ThrowingHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => throw new Xunit.Sdk.XunitException("Hardware evaluator must not run after recovery failure."); }
+
+    private static ControllerEnvironmentAssessmentSnapshot Assessment(ControllerEnvironmentMode mode)
+    {
+        var (manager, compatibility) = mode switch
+        {
+            ControllerEnvironmentMode.StockCenterM => (new ControllerManagerClassification(ControllerManagerKind.None, ControllerManagerClassificationReason.NoThirdPartyControllerManager), new ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported)),
+            ControllerEnvironmentMode.HHCManaged => (new ControllerManagerClassification(ControllerManagerKind.HandheldCompanion, ControllerManagerClassificationReason.HandheldCompanionDetected), new ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus.Unsupported, ControllerEnvironmentCompatibilityReason.HandheldCompanionNotSupportedByCurrentVersion)),
+            ControllerEnvironmentMode.Indeterminate => (new ControllerManagerClassification(ControllerManagerKind.Indeterminate, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate), new ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus.Indeterminate, ControllerEnvironmentCompatibilityReason.ControllerSoftwareStateIndeterminate)),
+            _ => (new ControllerManagerClassification(ControllerManagerKind.ClawTweaks, ControllerManagerClassificationReason.ClawTweaksDetected), new ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus.Unsupported, ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion))
+        };
+        return new([], manager, compatibility);
+    }
 }

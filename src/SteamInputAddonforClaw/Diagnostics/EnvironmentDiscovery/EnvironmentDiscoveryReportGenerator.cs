@@ -85,14 +85,13 @@ internal sealed class WindowsEnvironmentDiscoverySnapshotSource : IEnvironmentDi
 
     private static CurrentDetectionDiscoveryInfo CaptureCurrentDetection(IControllerDeviceEnumerator devices)
     {
-        var software = new IControllerSoftwareStatusProvider[]
-        {
+        var assessment = new ControllerEnvironmentAssessmentProvider(
+        [
             new MsiCenterMSoftwareStatusProvider(),
             new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
             new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
-        }.Select(provider => provider.Capture()).ToArray();
-        var environment = new ClawTweaksEnvironmentDetector().Detect();
-        return new CurrentDetectionDiscoveryInfo(software, environment, "NotEvaluated");
+        ]).Capture();
+        return new CurrentDetectionDiscoveryInfo(assessment.Software, StartupControllerEnvironmentMapper.Map(assessment), "NotEvaluated");
     }
 
     private static IReadOnlyList<ProcessDiscoveryInfo> CaptureProcesses() => Process.GetProcesses()

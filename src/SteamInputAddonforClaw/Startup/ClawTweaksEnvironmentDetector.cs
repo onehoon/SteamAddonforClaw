@@ -26,11 +26,6 @@ internal enum ControllerEnvironmentMode
 
 internal sealed record ControllerEnvironment(ControllerEnvironmentMode Mode, ClawTweaksState ClawTweaksState);
 
-internal interface IControllerEnvironmentDetector
-{
-    ControllerEnvironment Detect();
-}
-
 internal interface IHandheldCompanionRuntimeDetector
 {
     bool IsRunning();
@@ -104,7 +99,7 @@ internal sealed class HandheldCompanionRuntimeDetector : IHandheldCompanionRunti
     public bool IsRunning() => Process.GetProcessesByName("HandheldCompanion").Length > 0;
 }
 
-internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDetector
+internal sealed class ClawTweaksEnvironmentDetector
 {
     internal static readonly string[] KnownExecutablePaths =
     [
