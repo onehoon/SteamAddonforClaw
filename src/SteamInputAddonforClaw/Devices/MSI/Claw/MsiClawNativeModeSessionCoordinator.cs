@@ -13,6 +13,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private readonly MsiClawNativeStateManager _nativeState;
     private readonly RecoveryManager _recovery;
     private readonly PowerMutationGate _powerGate;
+    private readonly RecoverySafetyState _recoverySafety;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DeviceNativeStateSnapshot? _snapshot;
     private bool _active;
@@ -22,11 +23,12 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     private CancellationTokenSource? _safetyMonitor;
     private bool _vetoLatched;
     private long _decisionGeneration;
-    private readonly Action<string>? _markRecoveryUnsafe;
+    private long? _unsafeRecoveryVersion;
+    private bool _routingFaultLatched;
     private readonly Lock _recoveryStateSync = new();
 
-    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, Func<bool>? mutationAllowed = null, Action<string>? markRecoveryUnsafe = null)
-    { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _mutationAllowed = mutationAllowed; _markRecoveryUnsafe = markRecoveryUnsafe; }
+    internal MsiClawNativeModeSessionCoordinator(MsiClawNativeStateManager nativeState, RecoveryManager recovery, PowerMutationGate powerGate, RecoverySafetyState recoverySafety, Func<bool>? mutationAllowed = null)
+    { _nativeState = nativeState; _recovery = recovery; _powerGate = powerGate; _recoverySafety = recoverySafety; _mutationAllowed = mutationAllowed; }
 
     public string Name => "MsiClawNativeModeSession";
 
@@ -74,6 +76,8 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
             if (_active || _recoveryBoundaryOwned || _recovery.HasIncompleteRecovery)
                 return false;
             _vetoLatched = false;
+            _routingFaultLatched = false;
+            AppLog.Debug("NativeMode", "RoutingFaultLatchCleared", ("Reason", "SteamSessionEnded"));
             return true;
         }
         finally { _gate.Release(); }
@@ -155,7 +159,13 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     {
         if (_active) return MsiClawNativeModePreflightResult.Failure("AlreadyActive");
         if (_recoveryBoundaryOwned) return MsiClawNativeModePreflightResult.Failure("RecoveryBoundaryAlreadyOwned");
+        if (_routingFaultLatched) return MsiClawNativeModePreflightResult.Failure("RoutingFaultLatched");
         if (_vetoLatched) return MsiClawNativeModePreflightResult.Failure("SessionVetoLatched");
+        if (_recoverySafety.Current != RecoverySafety.Safe)
+        {
+            AppLog.Debug("NativeMode", "NativeForwardMutationDenied", ("RecoverySafety", _recoverySafety.Current));
+            return MsiClawNativeModePreflightResult.Failure("RecoverySafetyNotSafe");
+        }
         if (_mutationAllowed is not null && !_mutationAllowed()) return MsiClawNativeModePreflightResult.Failure("MutationNotAllowed");
         if (!_powerGate.IsOpen || !_powerGate.TryAcquire(out _)) return MsiClawNativeModePreflightResult.Failure("PowerGateClosed");
         var captured = _nativeState.CaptureSnapshot();
@@ -179,6 +189,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (original is null) return MsiClawNativeModeEnterResult.Failure(false, "PayloadInvalid");
         if (original.Mode != MsiClawNativeMode.XInput) return MsiClawNativeModeEnterResult.Failure(false, "OriginalModeUnsupported");
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(false, "PowerGateClosed");
+        if (_recoverySafety.Current != RecoverySafety.Safe) return MsiClawNativeModeEnterResult.Failure(false, "RecoverySafetyNotSafe");
         var journal = _recovery.BeginDeviceNativeStateMutation(captured);
         if (journal.Status != RecoveryStatus.Success) return MsiClawNativeModeEnterResult.Failure(false, "RecoveryJournalUnavailable");
         _snapshot = captured.Snapshot;
@@ -197,8 +208,18 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     {
         if (!_active && !_recoveryBoundaryOwned) return true;
         if (_snapshot is null) { if (reportFailure) MarkRecoveryUnsafe("NativeSnapshotMissingDuringRestore"); return false; }
-        if (!_powerGate.TryAcquire(out var token)) { if (reportFailure) MarkRecoveryUnsafe("PowerGateAcquireFailedDuringRestore"); return false; }
-        var restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false);
+        if (!_powerGate.TryAcquire(out var token))
+        {
+            AppLog.Debug("NativeMode", "NativeRecoveryDeferredByPowerGate", ("RecoveryBoundaryOwned", _recoveryBoundaryOwned));
+            return false;
+        }
+        NativeStateRestoreResult restored;
+        try { restored = await _nativeState.RestoreSnapshotAsync(_snapshot, cancellationToken).ConfigureAwait(false); }
+        catch
+        {
+            if (reportFailure) MarkRecoveryUnsafe("NativeRestoreFailed");
+            throw;
+        }
         if (!restored.Restored || !_powerGate.IsCurrent(token)) { if (reportFailure) MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
         if (_recoverySessionId is not { } recoverySessionId)
         {
@@ -209,6 +230,11 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (completed.Status != RecoveryStatus.Success) { if (reportFailure) MarkRecoveryUnsafe("RecoveryJournalCleanupFailed"); return false; }
         _safetyMonitor?.Cancel(); _safetyMonitor?.Dispose(); _safetyMonitor = null; _snapshot = null; _active = false;
         lock (_recoveryStateSync) { _recoveryBoundaryOwned = false; _recoverySessionId = null; }
+        var recoverySafetyCleared = false;
+        if (!_recovery.HasIncompleteRecovery && _unsafeRecoveryVersion is { } unsafeVersion &&
+            _powerGate.TryCommitMutation(token, () => recoverySafetyCleared = _recoverySafety.TrySet(unsafeVersion, RecoverySafety.Safe)) && recoverySafetyCleared)
+            _unsafeRecoveryVersion = null;
+        AppLog.Debug("NativeMode", "NativeRecoveryVerified", ("JournalRemaining", _recovery.HasIncompleteRecovery), ("RecoverySafety", _recoverySafety.Current));
         return true;
     }
 
@@ -218,15 +244,9 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         try
         {
             _decisionGeneration++;
-            bool restored;
-            try { restored = await StopCoreLockedAsync(cancellationToken, reportFailure: false).ConfigureAwait(false); }
-            catch
-            {
-                MarkRecoveryUnsafe(reason);
-                throw;
-            }
-            _powerGate.Close();
-            MarkRecoveryUnsafe(reason);
+            _routingFaultLatched = true;
+            AppLog.Debug("NativeMode", "RoutingFaultLatched", ("Reason", reason));
+            await StopCoreLockedAsync(cancellationToken, reportFailure: true).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -256,7 +276,16 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
 
     private void MarkRecoveryUnsafe(string reason)
     {
-        _powerGate.Close();
-        _markRecoveryUnsafe?.Invoke(reason);
+        if (_unsafeRecoveryVersion is { } ownedVersion && _recoverySafety.IsCurrent(ownedVersion, RecoverySafety.Unsafe))
+        {
+            AppLog.Debug("NativeMode", "NativeRecoveryUnsafeAlreadyOwned", ("Reason", reason));
+            return;
+        }
+        _unsafeRecoveryVersion = null;
+        if (_recoverySafety.TryClaimUnsafe(out var claimedVersion))
+            _unsafeRecoveryVersion = claimedVersion;
+        else
+            AppLog.Debug("NativeMode", "NativeRecoveryUnsafeOwnedByAnotherComponent", ("Reason", reason), ("RecoverySafety", _recoverySafety.Current));
+        AppLog.Error("Recovery", "MSI native mode recovery became unsafe.", new InvalidOperationException(reason), ("Reason", reason));
     }
 }
