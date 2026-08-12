@@ -54,8 +54,8 @@ public sealed class HandheldCompanionEnvironmentTests
 
         var environment = detector.Detect();
 
-        Assert.Equal(ClawTweaksState.Starting, environment.ClawTweaksState);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
+        Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
     }
 
     [Theory]
@@ -68,8 +68,8 @@ public sealed class HandheldCompanionEnvironmentTests
 
         var environment = detector.Detect();
 
-        Assert.Equal(ClawTweaksState.Starting, environment.ClawTweaksState);
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
+        Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class HandheldCompanionEnvironmentTests
         var environment = detector.Detect();
 
         Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
-        Assert.Equal(ControllerEnvironmentMode.ClawTweaks, environment.Mode);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public sealed class HandheldCompanionEnvironmentTests
 
         var environment = detector.Detect();
 
-        Assert.Equal(ControllerEnvironmentMode.ClawTweaks, environment.Mode);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
         Assert.Equal(ClawTweaksState.Active, environment.ClawTweaksState);
     }
 
@@ -116,8 +116,8 @@ public sealed class HandheldCompanionEnvironmentTests
 
         var environment = detector.Detect();
 
-        Assert.Equal(ControllerEnvironmentMode.Indeterminate, environment.Mode);
-        Assert.Equal(ClawTweaksState.Indeterminate, environment.ClawTweaksState);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
+        Assert.Equal(ClawTweaksState.InstalledInactive, environment.ClawTweaksState);
     }
 
     [Fact]
@@ -127,7 +127,7 @@ public sealed class HandheldCompanionEnvironmentTests
 
         var environment = detector.Detect();
 
-        Assert.Equal(ControllerEnvironmentMode.StockCenterM, environment.Mode);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, environment.Mode);
         Assert.Equal(ClawTweaksState.InstalledInactive, environment.ClawTweaksState);
     }
 

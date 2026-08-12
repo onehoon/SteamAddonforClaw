@@ -93,19 +93,6 @@ public partial class App : Application
                 return;
             }
 
-            var prerequisiteAssessment = new RuntimePrerequisiteInspector(
-                new HidHidePrerequisiteInspector(new HidHideDriverClient()),
-                new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(deviceEnumerator)),
-                new ViiperRuntimeInspector()).Inspect();
-            AppLog.Info("Prerequisite", "Prerequisite assessment completed.",
-                ("HidHide", prerequisiteAssessment.HidHide.Status),
-                ("HidHideReason", prerequisiteAssessment.HidHide.Reason),
-                ("UsbIpWin2", prerequisiteAssessment.UsbIpWin2.Status),
-                ("UsbIpWin2Reason", prerequisiteAssessment.UsbIpWin2.Reason),
-                ("Viiper", prerequisiteAssessment.Viiper.Status),
-                ("ViiperReason", prerequisiteAssessment.Viiper.Reason),
-                ("RoutingReady", prerequisiteAssessment.IsRoutingReady));
-
             _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(classifier, addonOwnedVirtualDeviceTracker, deviceRegistry, msiClawAdapter, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
@@ -121,7 +108,6 @@ public partial class App : Application
     private void StartNormalRuntime(ControllerDeviceClassifier classifier, AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
-        ClawTweaksCompatibilitySnapshotLogger.LogAtStartup(new WindowsControllerDeviceEnumerator());
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
         _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
         _developerTestModeState = new DeveloperTestModeState();

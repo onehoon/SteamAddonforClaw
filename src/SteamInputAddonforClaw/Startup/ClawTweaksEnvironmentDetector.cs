@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Windows.Management.Deployment;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Startup;
 
@@ -111,7 +112,6 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ClawTweaks", "ClawTweaks.exe"),
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClawTweaks", "ClawTweaks.exe")
     ];
-    private readonly IControllerDeviceEnumerator _deviceEnumerator;
     private readonly IHandheldCompanionRuntimeDetector _handheldCompanionRuntimeDetector;
     private readonly IClawTweaksRuntimeDetector _clawTweaksRuntimeDetector;
     private readonly IClawTweaksInstallationProbe _installationProbe;
@@ -122,7 +122,7 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
         IClawTweaksRuntimeDetector? clawTweaksRuntimeDetector = null,
         IClawTweaksInstallationProbe? installationProbe = null)
     {
-        _deviceEnumerator = deviceEnumerator;
+        _ = deviceEnumerator ?? throw new ArgumentNullException(nameof(deviceEnumerator));
         _handheldCompanionRuntimeDetector = handheldCompanionRuntimeDetector ?? new HandheldCompanionRuntimeDetector();
         _clawTweaksRuntimeDetector = clawTweaksRuntimeDetector ?? new ClawTweaksRuntimeDetector();
         _installationProbe = installationProbe ?? new ClawTweaksInstallationProbe();
@@ -133,7 +133,8 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
         try
         {
             AppLog.Debug("HHC", "HHC process lookup started.", ("ProcessName", "HandheldCompanion"));
-            if (_handheldCompanionRuntimeDetector.IsRunning())
+            var handheldCompanionInstalled = new HandheldCompanionInstallationProbe().Detect().Installed;
+            if (handheldCompanionInstalled || _handheldCompanionRuntimeDetector.IsRunning())
             {
                 AppLog.Info("HHC", "Environment owned by Handheld Companion.", ("Action", "Passive"));
                 return new ControllerEnvironment(ControllerEnvironmentMode.HHCManaged, ClawTweaksState.NotInstalled);
@@ -158,19 +159,8 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
                 return new ControllerEnvironment(ControllerEnvironmentMode.StockCenterM, ClawTweaksState.NotInstalled);
             }
 
-            var devices = _deviceEnumerator.EnumeratePresentDevices();
-            var topology = new ControllerTopologySnapshot(devices);
-            var virtualTopologyPresent = devices.Any(device => new ControllerDeviceClassifier().IsClawTweaksVirtualControllerCandidate(device, topology));
-
-            if (processRunning && virtualTopologyPresent)
-            {
-                AppLog.Info("Environment", "Environment decision.", ("Mode", ControllerEnvironmentMode.ClawTweaks), ("ClawTweaksState", ClawTweaksState.Active), ("Installed", installed), ("RuntimePresent", processRunning), ("VirtualTopologyPresent", virtualTopologyPresent), ("Reason", "PackageRuntimeAndVirtualTopologyPresent"));
-                return new ControllerEnvironment(ControllerEnvironmentMode.ClawTweaks, ClawTweaksState.Active);
-            }
-
-            if (processRunning) return LogDecision(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Starting, "RuntimePresentButRoutingTopologyMissing");
-            if (virtualTopologyPresent) return LogDecision(ControllerEnvironmentMode.Indeterminate, ClawTweaksState.Indeterminate, "VirtualTopologyPresentButRuntimeNotConfirmed");
-            return LogDecision(ControllerEnvironmentMode.StockCenterM, installed ? ClawTweaksState.InstalledInactive : ClawTweaksState.NotInstalled, installed ? "InstalledButInactive" : "ClawTweaksAbsent");
+            AppLog.Info("Environment", "Unsupported controller manager detected.", ("Manager", "ClawTweaks"), ("Installed", installed), ("Running", processRunning), ("Action", "Passive"), ("Reason", "ClawTweaksNotSupportedByCurrentVersion"));
+            return new ControllerEnvironment(ControllerEnvironmentMode.Unsupported, processRunning ? ClawTweaksState.Active : ClawTweaksState.InstalledInactive);
         }
         catch (Exception exception)
         {

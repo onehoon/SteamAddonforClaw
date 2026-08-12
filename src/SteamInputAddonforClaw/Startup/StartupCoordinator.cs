@@ -10,8 +10,6 @@ internal sealed class StartupCoordinator
     private readonly IUpdateGate _updateGate;
     private readonly IControllerEnvironmentDetector _environmentDetector;
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
-    private readonly TimeSpan _clawTweaksStartingTimeout;
-    private readonly TimeSpan _clawTweaksStartingCheckInterval;
     private readonly IRecoveryManager? _recoveryManager;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
@@ -22,15 +20,11 @@ internal sealed class StartupCoordinator
         IControllerEnvironmentWaiter environmentWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
-        TimeSpan? clawTweaksStartingTimeout = null,
-        TimeSpan? clawTweaksStartingCheckInterval = null,
         IRecoveryManager? recoveryManager = null)
     {
         _updateGate = updateGate;
         _environmentDetector = environmentDetector;
         _environmentWaiter = environmentWaiter;
-        _clawTweaksStartingTimeout = clawTweaksStartingTimeout ?? TimeSpan.FromSeconds(5);
-        _clawTweaksStartingCheckInterval = clawTweaksStartingCheckInterval ?? TimeSpan.FromMilliseconds(350);
         _recoveryManager = recoveryManager;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
@@ -66,34 +60,18 @@ internal sealed class StartupCoordinator
         if (hardware.Status == HardwareCompatibilityStatus.Indeterminate)
             return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
 
-        var deadline = DateTimeOffset.UtcNow + _clawTweaksStartingTimeout;
-        var environmentStopwatch = Stopwatch.StartNew();
-        var attempts = 0;
         AppLog.Info("Environment", "Initial environment detection started.");
         var environment = _environmentDetector.Detect();
         AppLog.Info("Environment", "Environment detection completed.", ("Mode", environment.Mode), ("ClawTweaksState", environment.ClawTweaksState));
-        while (environment.ClawTweaksState == ClawTweaksState.Starting)
-        {
-            attempts++;
-            if (DateTimeOffset.UtcNow >= deadline)
-            {
-                AppLog.Warn("ClawTweaks", "ClawTweaks startup stabilization timed out.", null, ("Attempts", attempts), ("ElapsedMs", environmentStopwatch.ElapsedMilliseconds), ("FinalState", environment.ClawTweaksState), ("Action", "Passive"), ("Reason", "TopologyNotReady"));
-                return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
-            }
-
-            AppLog.Debug("ClawTweaks", "ClawTweaks startup wait.", ("RemainingMs", (deadline - DateTimeOffset.UtcNow).TotalMilliseconds));
-            await Task.Delay(_clawTweaksStartingCheckInterval, cancellationToken).ConfigureAwait(false);
-            environment = _environmentDetector.Detect();
-        }
         if (environment.Mode == ControllerEnvironmentMode.Indeterminate)
         {
             AppLog.Warn("Environment", "Environment decision is indeterminate.", null, ("Action", "Passive"), ("Reason", "EnvironmentDetectionIndeterminate"));
             return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate);
         }
-        if (environment.Mode == ControllerEnvironmentMode.HHCManaged)
+        if (environment.Mode is ControllerEnvironmentMode.HHCManaged or ControllerEnvironmentMode.Unsupported)
         {
-            AppLog.Info("Environment", "Environment owned by Handheld Companion.", ("Action", "Passive"), ("Reason", "HandheldCompanionOwnsController"));
-            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate);
+            AppLog.Info("Environment", "Unsupported controller manager detected.", ("Manager", environment.Mode), ("Action", "Passive"), ("Reason", environment.Mode == ControllerEnvironmentMode.HHCManaged ? "HandheldCompanionNotSupportedByCurrentVersion" : "ClawTweaksNotSupportedByCurrentVersion"));
+            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.NotApplicable);
         }
         var readinessStopwatch = Stopwatch.StartNew();
         AppLog.Info("Environment", "Controller environment readiness wait started.", ("Mode", environment.Mode));
