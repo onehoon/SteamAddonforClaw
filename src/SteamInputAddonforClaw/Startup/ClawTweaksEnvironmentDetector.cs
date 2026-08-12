@@ -38,7 +38,7 @@ internal interface IHandheldCompanionRuntimeDetector
 
 internal interface IClawTweaksRuntimeDetector
 {
-    bool IsRunning();
+    bool IsRunning(ClawTweaksInstallationInfo installation);
 }
 
 internal sealed record ClawTweaksInstallationInfo(bool Installed, string? PackageFullName, string? InstallLocation, string DetectionSource);
@@ -73,10 +73,9 @@ internal sealed class ClawTweaksInstallationProbe : IClawTweaksInstallationProbe
 
 internal sealed class ClawTweaksRuntimeDetector : IClawTweaksRuntimeDetector
 {
-    public bool IsRunning()
+    public bool IsRunning(ClawTweaksInstallationInfo installation)
     {
         if (Process.GetProcessesByName("ClawTweaks").Length > 0) return true;
-        var installation = new ClawTweaksInstallationProbe().Detect();
         if (!installation.Installed || string.IsNullOrWhiteSpace(installation.InstallLocation)) return false;
 
         return Process.GetProcessesByName("XboxGamingBar")
@@ -117,23 +116,25 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
     private readonly IClawTweaksInstallationProbe _installationProbe;
 
     public ClawTweaksEnvironmentDetector(
-        IControllerDeviceEnumerator deviceEnumerator,
         IHandheldCompanionRuntimeDetector? handheldCompanionRuntimeDetector = null,
         IClawTweaksRuntimeDetector? clawTweaksRuntimeDetector = null,
-        IClawTweaksInstallationProbe? installationProbe = null)
+        IClawTweaksInstallationProbe? installationProbe = null,
+        IApplicationInstallationProbe? handheldCompanionInstallationProbe = null)
     {
-        _ = deviceEnumerator ?? throw new ArgumentNullException(nameof(deviceEnumerator));
         _handheldCompanionRuntimeDetector = handheldCompanionRuntimeDetector ?? new HandheldCompanionRuntimeDetector();
         _clawTweaksRuntimeDetector = clawTweaksRuntimeDetector ?? new ClawTweaksRuntimeDetector();
         _installationProbe = installationProbe ?? new ClawTweaksInstallationProbe();
+        _handheldCompanionInstallationProbe = handheldCompanionInstallationProbe ?? new HandheldCompanionInstallationProbe();
     }
+
+    private readonly IApplicationInstallationProbe _handheldCompanionInstallationProbe;
 
     public ControllerEnvironment Detect()
     {
         try
         {
             AppLog.Debug("HHC", "HHC process lookup started.", ("ProcessName", "HandheldCompanion"));
-            var handheldCompanionInstalled = new HandheldCompanionInstallationProbe().Detect().Installed;
+            var handheldCompanionInstalled = _handheldCompanionInstallationProbe.Detect().Installed;
             if (handheldCompanionInstalled || _handheldCompanionRuntimeDetector.IsRunning())
             {
                 AppLog.Info("HHC", "Environment owned by Handheld Companion.", ("Action", "Passive"));
@@ -151,7 +152,7 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
             var installation = _installationProbe.Detect();
             var installed = installation.Installed;
             AppLog.Info("ClawTweaks", "Installation detection completed.", ("Installed", installed), ("DetectionSource", installation.DetectionSource), ("PackageFullName", installation.PackageFullName), ("InstallLocation", installation.InstallLocation));
-            var processRunning = _clawTweaksRuntimeDetector.IsRunning();
+            var processRunning = _clawTweaksRuntimeDetector.IsRunning(installation);
             AppLog.Debug("ClawTweaks", "ClawTweaks process inspection completed.", ("Installed", installed), ("Running", processRunning));
             if (!installed && !processRunning)
             {
@@ -169,9 +170,4 @@ internal sealed class ClawTweaksEnvironmentDetector : IControllerEnvironmentDete
         }
     }
 
-    private static ControllerEnvironment LogDecision(ControllerEnvironmentMode mode, ClawTweaksState state, string reason)
-    {
-        AppLog.Info("Environment", "Environment decision.", ("Mode", mode), ("ClawTweaksState", state), ("Reason", reason));
-        return new ControllerEnvironment(mode, state);
-    }
 }

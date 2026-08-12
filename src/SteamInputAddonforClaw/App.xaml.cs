@@ -77,7 +77,7 @@ public partial class App : Application
         _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
-            new ClawTweaksEnvironmentDetector(deviceEnumerator),
+            new ClawTweaksEnvironmentDetector(),
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
             recoveryManager: _recoveryManager,
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),

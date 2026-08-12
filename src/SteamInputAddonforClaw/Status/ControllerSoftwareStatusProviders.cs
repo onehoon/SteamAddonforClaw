@@ -10,7 +10,7 @@ internal sealed class ClawTweaksSoftwareStatusProvider(IClawTweaksInstallationPr
         try
         {
             var installation = installationProbe.Detect();
-            var running = runtimeDetector.IsRunning();
+            var running = runtimeDetector.IsRunning(installation);
             return new(ControllerSoftwareKind.ClawTweaks, "ClawTweaks", installation.Installed ? SoftwareInstallationStatus.Installed : SoftwareInstallationStatus.NotInstalled,
                 running ? SoftwareRuntimeStatus.Running : SoftwareRuntimeStatus.NotRunning, running ? "ClawTweaksRunning" : installation.Installed ? "ClawTweaksInstalled" : "ClawTweaksNotInstalled");
         }
