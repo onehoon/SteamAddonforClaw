@@ -384,6 +384,11 @@ public sealed class ClawSensorProbeTests
         Assert.Equal([t1, t2], accepted.Select(x => x.SensorTimestamp).ToArray());
     }
 
+    [Fact] public void Reader_UsesBoundedFreshReportTimeout()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(5), ClawSensorProbeReaders.FreshReportTimeout);
+    }
+
     [Fact] public async Task AdvancePhase_ClearsRecordingContextBeforeMovingToNextPhase()
     {
         var root = Path.Combine(Path.GetTempPath(), "claw-probe-context-" + Guid.NewGuid().ToString("N"));
@@ -414,6 +419,12 @@ public sealed class ClawSensorProbeTests
         Assert.Equal(0, ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 11, VariantBool = 0 }));
         Assert.Equal(1, ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 11, VariantBool = -1 }));
         Assert.Throws<InvalidOperationException>(() => ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 31 }));
+    }
+
+    [Fact] public void PropVariantClear_UsesOle32EntryPoint()
+    {
+        var value = new ClawSensorProbeSensorApi.PropVariant();
+        Assert.Equal(0, ClawSensorProbeSensorApi.ClearPropVariantForTest(ref value));
     }
 
     [Theory]

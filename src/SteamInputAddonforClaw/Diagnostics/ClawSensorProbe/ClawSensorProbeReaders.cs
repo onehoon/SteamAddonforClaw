@@ -4,6 +4,7 @@ namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 
 internal sealed class ClawSensorProbeReaders : IAsyncDisposable
 {
+    internal static readonly TimeSpan FreshReportTimeout = TimeSpan.FromSeconds(5);
     private readonly ClawSensorProbeSensorApi _api;
     private readonly Func<ClawSensorCaptureContext> _contextProvider;
     private readonly ClawSensorProbeSessionClock _clock;
@@ -38,16 +39,20 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
                 if (sensor == IntPtr.Zero) throw new InvalidOperationException($"Selected {sensorName} sensor was not available.");
                 var previous = 0L;
                 var deduplicator = new ClawSensorReportDeduplicator();
+                var lastFreshReport = _clock.ElapsedTicks;
                 while (!_stop.IsCancellationRequested)
                 {
                     var values = ClawSensorProbeSensorApi.ReadXYZ(sensor);
+                    var now = _clock.ElapsedTicks;
                     if (!deduplicator.ShouldAccept(values))
                     {
+                        if (ClawSensorProbeSessionClock.TicksToMilliseconds(now - lastFreshReport) >= FreshReportTimeout.TotalMilliseconds)
+                            throw new TimeoutException($"No fresh {sensorName} sensor reports were received for {FreshReportTimeout.TotalSeconds:0} seconds.");
                         Thread.Sleep(1);
                         continue;
                     }
+                    lastFreshReport = now;
                     var context = _contextProvider();
-                    var now = _clock.ElapsedTicks;
                     var interval = previous == 0 ? 0 : ClawSensorProbeSessionClock.TicksToMilliseconds(now - previous);
                     previous = now;
                     var elapsed = ClawSensorProbeSessionClock.TicksToMilliseconds(now);

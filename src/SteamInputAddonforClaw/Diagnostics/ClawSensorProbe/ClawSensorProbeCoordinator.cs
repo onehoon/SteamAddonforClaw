@@ -81,7 +81,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         }
         finally { _lifecycleGate.Release(); }
     }
-    public void BeginRecording() { ThrowIfReaderFaulted(); _workflow.BeginRecording(); var visit = Workflow.Visits.Last(); SetCaptureContext(ClawSensorCaptureMode.Recording, visit.Phase, visit.Pass); _writer?.BeginRecordingPhase(visit.Phase, visit.Pass, ElapsedMs); }
+    public void BeginRecording() { ThrowIfReaderFaulted(); _workflow.BeginRecording(); var visit = Workflow.Visits.Last(); _writer?.BeginRecordingPhase(visit.Phase, visit.Pass, ElapsedMs); SetCaptureContext(ClawSensorCaptureMode.Recording, visit.Phase, visit.Pass); }
     public void Next() => _workflow.Next();
     public void Back() => _workflow.Back();
     public void Write(ClawSensorProbeSample sample) => _writer?.Write(sample);

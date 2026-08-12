@@ -238,7 +238,8 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         19 => value.UInt32,
         _ => throw new InvalidOperationException($"Unsupported sensor value type {value.VarType}.")
     };
-    [DllImport("oleaut32.dll")] private static extern int PropVariantClear(ref PropVariant value);
+    internal static int ClearPropVariantForTest(ref PropVariant value) => PropVariantClear(ref value);
+    [DllImport("ole32.dll")] private static extern int PropVariantClear(ref PropVariant value);
 
     [StructLayout(LayoutKind.Sequential)]
     private readonly struct SystemTime
