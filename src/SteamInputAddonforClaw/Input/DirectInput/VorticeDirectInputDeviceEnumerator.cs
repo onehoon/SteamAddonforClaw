@@ -1,3 +1,4 @@
+using Vortice;
 using Vortice.DirectInput;
 using SteamInputAddonforClaw.Controllers.Detection;
 
@@ -66,12 +67,25 @@ public sealed class VorticeDirectInputDeviceEnumerator : IDirectInputDeviceEnume
 
     private sealed class VorticeDirectInputDevice(IDirectInputDevice8 device) : IDirectInputDevice
     {
-        public void Acquire() => device.Acquire();
+        public void Acquire()
+        {
+            var result = device.Acquire();
+            if (result == ResultCode.NotAcquired)
+                throw new DirectInputOperationException(DirectInputFailureKind.NotAcquired, new InvalidOperationException(ResultCode.NotAcquired.ToString()));
+            if (result == ResultCode.InputLost)
+                throw new DirectInputOperationException(DirectInputFailureKind.InputLost, new InvalidOperationException(ResultCode.InputLost.ToString()));
+            result.CheckError();
+        }
         public void Unacquire() => device.Unacquire();
 
         public DirectInputState ReadState()
         {
-            device.Poll();
+            var result = device.Poll();
+            if (result == ResultCode.NotAcquired)
+                throw new DirectInputOperationException(DirectInputFailureKind.NotAcquired, new InvalidOperationException(ResultCode.NotAcquired.ToString()));
+            if (result == ResultCode.InputLost)
+                throw new DirectInputOperationException(DirectInputFailureKind.InputLost, new InvalidOperationException(ResultCode.InputLost.ToString()));
+            result.CheckError();
             var state = device.GetCurrentJoystickState();
             return new DirectInputState(state.Buttons, state.X, state.Y, state.Z, state.RotationX, state.RotationY, state.RotationZ, state.PointOfViewControllers);
         }

@@ -6,7 +6,7 @@ using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerStateSnapshotSource
+public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerStateSnapshotSource, IMsiClawRuntimeRecoverableInputSource
 {
     private static readonly int M1AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M1);
     private static readonly int M2AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M2);
@@ -16,6 +16,11 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     private InputSession? _currentSession;
     private int _testSession;
     private bool _disposed;
+    private Func<DirectInputDeviceDescriptor, CancellationToken, ValueTask<bool>>? _prepareRecoveredIsolation;
+    private Action<DirectInputDeviceDescriptor>? _publishRecoveredIdentity;
+    private Func<ValueTask>? _terminalRoutingFaultHandler;
+    private const int MaxRoutingReopenAttempts = 3;
+    private static readonly TimeSpan RoutingRecoveryRetryDelay = TimeSpan.FromMilliseconds(100);
 
     public MsiClawInputSource(Func<IDirectInputDeviceEnumerator> enumeratorFactory)
     {
@@ -30,6 +35,16 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     public event EventHandler<ControllerState>? StateChanged;
     public event EventHandler? IndependentVerified;
     public event EventHandler<MsiClawInputTestSummary>? TestCompleted;
+
+    public void ConfigureRoutingRecovery(
+        Func<DirectInputDeviceDescriptor, CancellationToken, ValueTask<bool>> prepareIsolation,
+        Action<DirectInputDeviceDescriptor> publishIdentity,
+        Func<ValueTask> terminalFaultHandler)
+    {
+        _prepareRecoveredIsolation = prepareIsolation ?? throw new ArgumentNullException(nameof(prepareIsolation));
+        _publishRecoveredIdentity = publishIdentity ?? throw new ArgumentNullException(nameof(publishIdentity));
+        _terminalRoutingFaultHandler = terminalFaultHandler ?? throw new ArgumentNullException(nameof(terminalFaultHandler));
+    }
 
     private sealed class StateBox(ControllerState value) { internal ControllerState Value { get; } = value; }
     private static ControllerState NeutralState() => new(new AuxiliaryButtonState(Enumerable.Repeat(false, MsiClawControls.Catalog.Count).ToArray()));
@@ -108,7 +123,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                 ("PnpInstanceId", selection.Descriptor.PnpInstanceId),
                 ("PhysicalIdentity", selection.Descriptor.PhysicalIdentity),
                 ("SelectionReason", selection.Reason));
-            return StartCoreLocked(enumerator, selection.Descriptor!, nextSession, "Diagnostics");
+            return StartCoreLocked(enumerator, selection.Descriptor!, nextSession, "Diagnostics", routing: false);
         }
     }
 
@@ -132,11 +147,11 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                 return new(MsiClawInputStartStatus.InitializationFailed, "DirectInput initialization failed. No controller settings were changed.");
             }
 
-            return StartCoreLocked(enumerator, descriptor, _testSession + 1, "Routing");
+            return StartCoreLocked(enumerator, descriptor, _testSession + 1, "Routing", routing: true);
         }
     }
 
-    private MsiClawInputStartResult StartCoreLocked(IDirectInputDeviceEnumerator enumerator, DirectInputDeviceDescriptor descriptor, int sessionId, string logCategory)
+    private MsiClawInputStartResult StartCoreLocked(IDirectInputDeviceEnumerator enumerator, DirectInputDeviceDescriptor descriptor, int sessionId, string logCategory, bool routing)
     {
         IDirectInputDevice? device = null;
         try
@@ -150,7 +165,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
             return new(MsiClawInputStartStatus.CreateDeviceFailed, "DirectInput device creation failed. No controller settings were changed.");
         }
 
-        var session = new InputSession(++_testSession, enumerator, device, new CancellationTokenSource());
+        var session = new InputSession(++_testSession, enumerator, device, new CancellationTokenSource(), routing);
         try
         {
             AppLog.Info("DirectInput", "Device acquire started.", ("TestSession", session.Id), ("InstanceGuid", descriptor.InstanceGuid));
@@ -258,12 +273,22 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                 {
                     input = session.Device.ReadState();
                 }
+                catch (DirectInputOperationException exception) when (session.Routing && exception.Kind is DirectInputFailureKind.NotAcquired or DirectInputFailureKind.InputLost)
+                {
+                    readFailures++;
+                    Volatile.Write(ref _latestState, new StateBox(NeutralState()));
+                    if (await TryRecoverRoutingInputAsync(session, exception.Kind).ConfigureAwait(false))
+                        continue;
+                    stopReason = MsiClawInputStopReason.ReadStateFailed;
+                    session.TerminalRoutingFault = true;
+                    break;
+                }
                 catch (Exception exception)
                 {
                     readFailures++;
                     stopReason = MsiClawInputStopReason.ReadStateFailed;
-                    AppLog.Warn("DirectInput", "Controller state read failed.", exception, ("TestSession", session.Id), ("Attempt", readFailures), ("Reason", "ReadStateFailed"), ("Action", "StopDiagnostic"));
-                    AppLog.Debug("RoutingTrace", "Physical input read failed.", ("Event", "PhysicalInputReadFailed"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TestSession", session.Id), ("SessionAgeMs", Elapsed(session.StartedAt)), ("LastSuccessfulReadAgeMs", session.LastSuccessfulReadAt is { } last ? Elapsed(last) : -1), ("SuccessfulReadCount", session.SuccessfulReadCount), ("ReadFailures", readFailures), ("ExceptionType", exception.GetType().Name));
+                    AppLog.Warn("DirectInput", "Controller state read failed.", exception, ("TestSession", session.Id), ("Attempt", readFailures), ("Reason", "ReadStateFailed"), ("Action", session.Routing ? "FailClosed" : "StopDiagnostic"));
+                    if (session.Routing) session.TerminalRoutingFault = true;
                     break;
                 }
 
@@ -341,7 +366,87 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
             session.Cancellation.Dispose();
             AppLog.Info("Diagnostics", "M1/M2 input diagnostic completed.", ("TestSession", summary.TestSession), ("DurationMs", summary.DurationMs), ("M1Observed", summary.M1Observed), ("M2Observed", summary.M2Observed), ("Independent", summary.Independent), ("ReadFailures", summary.ReadFailures), ("CleanupSucceeded", summary.CleanupSucceeded), ("StopReason", summary.StopReason));
             TestCompleted?.Invoke(this, summary);
+            if (session.TerminalRoutingFault && _terminalRoutingFaultHandler is { } faultHandler)
+                _ = Task.Run(async () =>
+                {
+                    try { await faultHandler().ConfigureAwait(false); }
+                    catch (Exception exception) { AppLog.Error("Routing.Runtime", "Physical input terminal fault handoff failed.", exception); }
+                });
         }
+    }
+
+    private async Task<bool> TryRecoverRoutingInputAsync(InputSession session, DirectInputFailureKind failure)
+    {
+        if (session.Cancellation.IsCancellationRequested) return false;
+        if (failure == DirectInputFailureKind.NotAcquired)
+        {
+            try
+            {
+                session.Device.Acquire();
+                AppLog.Debug("RoutingTrace", "Physical input same-handle reacquire succeeded.", ("Event", "PhysicalInputRecoverySucceeded"), ("Mode", "SameHandle"), ("TestSession", session.Id));
+                return true;
+            }
+            catch (DirectInputOperationException exception) when (exception.Kind == DirectInputFailureKind.NotAcquired)
+            {
+                return false;
+            }
+            catch (DirectInputOperationException exception) when (exception.Kind == DirectInputFailureKind.InputLost)
+            {
+                failure = exception.Kind;
+            }
+            catch { return false; }
+        }
+
+        if (failure != DirectInputFailureKind.InputLost || _prepareRecoveredIsolation is null || _publishRecoveredIdentity is null)
+            return false;
+        for (var attempt = 1; attempt <= MaxRoutingReopenAttempts && !session.Cancellation.IsCancellationRequested; attempt++)
+        {
+            CleanupCurrentDevice(session);
+            IDirectInputDeviceEnumerator? enumerator = null;
+            IDirectInputDevice? device = null;
+            try
+            {
+                enumerator = _enumeratorFactory();
+                var selection = MsiClawDirectInputDeviceSelector.Select(enumerator.EnumerateGameControllers());
+                if (!selection.IsSelected || selection.Descriptor is null) throw new InvalidOperationException("RecoveredPid1902SelectionFailed");
+                if (!await _prepareRecoveredIsolation(selection.Descriptor, session.Cancellation.Token).ConfigureAwait(false)) throw new InvalidOperationException("RecoveredIsolationFailed");
+                session.Cancellation.Token.ThrowIfCancellationRequested();
+                device = enumerator.CreateDevice(selection.Descriptor);
+                device.Acquire();
+                session.Replace(enumerator, device);
+                enumerator = null; device = null;
+                _publishRecoveredIdentity(selection.Descriptor);
+                AppLog.Debug("RoutingTrace", "Physical input reopen succeeded.", ("Event", "PhysicalInputRecoverySucceeded"), ("Mode", "Reopen"), ("Attempt", attempt), ("TestSession", session.Id));
+                return true;
+            }
+            catch (OperationCanceledException) when (session.Cancellation.IsCancellationRequested)
+            {
+                return false;
+            }
+            catch (Exception exception)
+            {
+                AppLog.Debug("RoutingTrace", "Physical input reopen attempt failed.", ("Event", "PhysicalInputRecoveryFailed"), ("Attempt", attempt), ("ExceptionType", exception.GetType().Name), ("TestSession", session.Id));
+            }
+            finally
+            {
+                try { device?.Unacquire(); } catch { }
+                try { device?.Dispose(); } catch { }
+                try { enumerator?.Dispose(); } catch { }
+            }
+            if (attempt < MaxRoutingReopenAttempts)
+            {
+                try { await Task.Delay(RoutingRecoveryRetryDelay, session.Cancellation.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return false; }
+            }
+        }
+        return false;
+    }
+
+    private static void CleanupCurrentDevice(InputSession session)
+    {
+        try { session.Device.Unacquire(); } catch { }
+        try { session.Device.Dispose(); } catch { }
+        try { session.Enumerator.Dispose(); } catch { }
     }
 
     private static bool TryMapState(DirectInputState input, out ControllerState state)
@@ -423,18 +528,21 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     private static long Elapsed(long started) => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
     private static long ElapsedBetween(long started, long ended) => (long)Stopwatch.GetElapsedTime(started, ended).TotalMilliseconds;
 
-    private sealed class InputSession(int id, IDirectInputDeviceEnumerator enumerator, IDirectInputDevice device, CancellationTokenSource cancellation)
+    private sealed class InputSession(int id, IDirectInputDeviceEnumerator enumerator, IDirectInputDevice device, CancellationTokenSource cancellation, bool routing = false)
     {
         public int Id { get; } = id;
-        public IDirectInputDeviceEnumerator Enumerator { get; } = enumerator;
-        public IDirectInputDevice Device { get; } = device;
+        public IDirectInputDeviceEnumerator Enumerator { get; private set; } = enumerator;
+        public IDirectInputDevice Device { get; private set; } = device;
         public CancellationTokenSource Cancellation { get; } = cancellation;
+        public bool Routing { get; } = routing;
+        public bool TerminalRoutingFault { get; set; }
         public Task? PollingTask { get; set; }
         public long StartedAt { get; } = Stopwatch.GetTimestamp();
         public long AcquiredAt { get; set; }
         public long AcquireDurationMs { get; set; }
         public long? LastSuccessfulReadAt { get; set; }
         public int SuccessfulReadCount { get; set; }
+        public void Replace(IDirectInputDeviceEnumerator enumerator, IDirectInputDevice device) { Enumerator = enumerator; Device = device; }
     }
 
 }

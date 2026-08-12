@@ -236,6 +236,58 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
+    public async Task RoutingNotAcquired_ReacquiresSameHandleWithoutEnumerationOrIsolationRearm()
+    {
+        var descriptor = Device(0x0DB0, 0x1902);
+        var device = new FakeDevice(new DirectInputOperationException(DirectInputFailureKind.NotAcquired, new InvalidOperationException()), State());
+        var initial = new FakeEnumerator([], device);
+        var factoryCalls = 0;
+        var source = new MsiClawInputSource(() => { factoryCalls++; return initial; });
+        var rearmCalls = 0;
+        var terminalCalls = 0;
+        var read = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        device.ReadPerformed += count => { if (count >= 2) read.TrySetResult(); };
+        source.ConfigureRoutingRecovery((_, _) => { rearmCalls++; return ValueTask.FromResult(true); }, _ => { }, () => { terminalCalls++; return ValueTask.CompletedTask; });
+
+        Assert.True(source.StartPrepared(descriptor).Started);
+        await read.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await source.StopAsync();
+
+        Assert.Equal(1, factoryCalls);
+        Assert.Equal(2, device.AcquireCount);
+        Assert.Equal(0, rearmCalls);
+        Assert.Equal(0, terminalCalls);
+    }
+
+    [Fact]
+    public async Task RoutingInputLost_ReopensExactDescriptorRearmsIsolationAndKeepsRoutingAlive()
+    {
+        var original = Device(0x0DB0, 0x1902);
+        var replacement = Device(0x0DB0, 0x1902, physicalIdentity: "USB\\MSI_REPLACEMENT");
+        var firstDevice = new FakeDevice(new DirectInputOperationException(DirectInputFailureKind.InputLost, new InvalidOperationException()));
+        var secondDevice = new FakeDevice(State());
+        var initial = new FakeEnumerator([], firstDevice);
+        var reopened = new FakeEnumerator([replacement], secondDevice);
+        var enumerators = new Queue<FakeEnumerator>([initial, reopened]);
+        var source = new MsiClawInputSource(() => enumerators.Dequeue());
+        DirectInputDeviceDescriptor? rearmed = null;
+        DirectInputDeviceDescriptor? published = null;
+        var recoveredRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        secondDevice.ReadPerformed += _ => recoveredRead.TrySetResult();
+        source.ConfigureRoutingRecovery((descriptor, _) => { rearmed = descriptor; return ValueTask.FromResult(true); }, descriptor => published = descriptor, () => ValueTask.CompletedTask);
+
+        Assert.True(source.StartPrepared(original).Started);
+        await recoveredRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await source.StopAsync();
+
+        Assert.Equal(replacement, reopened.CreatedDescriptor);
+        Assert.Equal(replacement, rearmed);
+        Assert.Equal(replacement, published);
+        Assert.Equal(1, firstDevice.UnacquireCount);
+        Assert.Equal(1, firstDevice.DisposeCount);
+    }
+
+    [Fact]
     public async Task PollingReadFailure_StopsAndCleansUp()
     {
         var device = new FakeDevice(State(), State(), new InvalidOperationException("Read failed"));

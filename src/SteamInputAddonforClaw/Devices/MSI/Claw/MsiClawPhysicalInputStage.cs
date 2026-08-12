@@ -22,6 +22,25 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
     public RoutingStageKind Kind => RoutingStageKind.PhysicalInput;
     public MsiClawPhysicalInputIdentity? CurrentIdentity { get { lock (_sync) return _currentIdentity; } }
 
+    internal void ConfigureRuntimeRecovery(MsiClawPhysicalIsolationStage isolation, Func<ValueTask> terminalFaultHandler)
+    {
+        if (_inputSource is not IMsiClawRuntimeRecoverableInputSource recoverable)
+            return;
+        recoverable.ConfigureRoutingRecovery(
+            (descriptor, cancellationToken) => isolation.RearmAsync(descriptor, cancellationToken),
+            PublishRecoveredIdentity,
+            terminalFaultHandler);
+    }
+
+    private void PublishRecoveredIdentity(DirectInputDeviceDescriptor descriptor)
+    {
+        lock (_sync)
+        {
+            if (_ownsInputSession)
+                _currentIdentity = new(descriptor.InstanceGuid, descriptor.DevicePath!, descriptor.PnpInstanceId!, descriptor.PhysicalIdentity!);
+        }
+    }
+
     public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

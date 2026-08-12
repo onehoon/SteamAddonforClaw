@@ -41,6 +41,14 @@ internal interface IMsiClawPreparedInputSource : IAsyncDisposable
     Task StopAsync();
 }
 
+internal interface IMsiClawRuntimeRecoverableInputSource
+{
+    void ConfigureRoutingRecovery(
+        Func<DirectInputDeviceDescriptor, CancellationToken, ValueTask<bool>> prepareIsolation,
+        Action<DirectInputDeviceDescriptor> publishIdentity,
+        Func<ValueTask> terminalFaultHandler);
+}
+
 internal interface IControllerStateSnapshotSource
 {
     ControllerState LatestState { get; }

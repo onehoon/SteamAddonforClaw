@@ -212,6 +212,11 @@ public partial class App : Application
                 pipelineSessionCoordinator,
                 [_msiClawNativeModeSession],
                 () => RoutingExperimentOptions.None);
+            physicalInputStage.ConfigureRuntimeRecovery(physicalIsolationStage, async () =>
+            {
+                _routingRuntimeCoordinator.CancelInFlightTransition();
+                await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
+            });
             _msiClawNativeModeSession.SetRoutingSafetyVetoHandler(async () =>
             {
                 _routingRuntimeCoordinator.CancelInFlightTransition();

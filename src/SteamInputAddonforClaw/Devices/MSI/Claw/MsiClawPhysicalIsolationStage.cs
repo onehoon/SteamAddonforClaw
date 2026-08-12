@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Input.DirectInput;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -17,7 +18,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     private Prepared? _prepared;
     private Guid _sessionId;
     private string? _executablePath;
-    private EntryState[] _entries = [];
+    private List<EntryState> _entries = [];
     private bool _ownedWhitelist;
     private bool _ambiguousWhitelist;
     private bool _journaledWhitelist;
@@ -73,7 +74,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         var currentInspection = _hidHide.Inspect();
         if (!CanPrepareIsolation(currentInspection, out _) || currentInspection.IsActive != prepared.OriginalActive || currentInspection.IsInverseWhitelist != prepared.OriginalInverse)
             return ValueTask.FromResult(Failure("HidHideStateDrift"));
-        _sessionId = prepared.SessionId; _executablePath = prepared.ExecutablePath; _entries = prepared.Entries;
+        _sessionId = prepared.SessionId; _executablePath = prepared.ExecutablePath; _entries = [.. prepared.Entries];
 
         if (!prepared.WhitelistPreExisting)
         {
@@ -133,8 +134,53 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         }
         lock (_sync) _prepared = null;
         AppLog.Debug("PhysicalIsolation", "PhysicalIsolation active", ("WhitelistPreExisting", prepared.WhitelistPreExisting), ("WhitelistAddonOwned", _ownedWhitelist), ("Entries", string.Join("|", _entries.Select(entry => $"{entry.Value};PreExisting={entry.PreExisting};AddonOwned={entry.Owned}"))));
-        AppLog.Debug("RoutingTrace", "Physical isolation completed.", ("Event", "PhysicalIsolationCompleted"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("EntryCount", _entries.Length), ("WhitelistAdded", _ownedWhitelist), ("HiddenEntriesAdded", _entries.Count(entry => entry.Owned)), ("ActiveStateChanged", _activeMutationOwned), ("Result", "Success"), ("Reason", "PhysicalIsolationActive"));
+        AppLog.Debug("RoutingTrace", "Physical isolation completed.", ("Event", "PhysicalIsolationCompleted"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("EntryCount", _entries.Count), ("WhitelistAdded", _ownedWhitelist), ("HiddenEntriesAdded", _entries.Count(entry => entry.Owned)), ("ActiveStateChanged", _activeMutationOwned), ("Result", "Success"), ("Reason", "PhysicalIsolationActive"));
         return ValueTask.FromResult(Success("PhysicalIsolationActive"));
+    }
+
+    internal ValueTask<bool> RearmAsync(DirectInputDeviceDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!MsiClawDirectInputDeviceSelector.Select([descriptor]).IsSelected ||
+            !MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(descriptor.PnpInstanceId))
+            return ValueTask.FromResult(false);
+
+        if (_session.CurrentRecoverySessionId != _sessionId || string.IsNullOrWhiteSpace(_executablePath))
+            return ValueTask.FromResult(false);
+        var inspection = _hidHide.Inspect();
+        if (!inspection.IsConfigurationReadable || inspection.IsInverseWhitelist || !inspection.IsActive)
+            return ValueTask.FromResult(false);
+
+        if (!inspection.ApplicationWhitelist.Contains(_executablePath, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!_journaledWhitelist && _recovery.RecordHidHideWhitelistAddition(_sessionId, _executablePath).Status != RecoveryStatus.Success)
+                return ValueTask.FromResult(false);
+            _journaledWhitelist = true;
+            if (!Try(() => _hidHide.AddApplication(_executablePath))) return ValueTask.FromResult(false);
+            inspection = _hidHide.Inspect();
+            if (!inspection.IsConfigurationReadable || !inspection.ApplicationWhitelist.Contains(_executablePath, StringComparer.OrdinalIgnoreCase))
+                return ValueTask.FromResult(false);
+            _ownedWhitelist = true;
+        }
+
+        var target = descriptor.PnpInstanceId!.Trim();
+        var entry = _entries.FirstOrDefault(candidate => string.Equals(candidate.Value, target, StringComparison.OrdinalIgnoreCase));
+        var present = (inspection.HiddenDeviceEntries ?? []).Any(value => string.Equals(value, target, StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            entry = new EntryState(target, present);
+            _entries.Add(entry);
+        }
+        if (present) return ValueTask.FromResult(true);
+        if (!entry.Journaled && _recovery.RecordHidHideDeviceAddition(_sessionId, target).Status != RecoveryStatus.Success)
+            return ValueTask.FromResult(false);
+        entry.Journaled = true;
+        if (!Try(() => _hidHide.AddHiddenDevice(target))) return ValueTask.FromResult(false);
+        inspection = _hidHide.Inspect();
+        if (!inspection.IsConfigurationReadable || !(inspection.HiddenDeviceEntries ?? []).Any(value => string.Equals(value, target, StringComparison.OrdinalIgnoreCase)))
+            return ValueTask.FromResult(false);
+        entry.Owned = true;
+        return ValueTask.FromResult(true);
     }
 
     public ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
@@ -157,7 +203,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             _activeMutationJournaled = false;
         }
         if (_ambiguousWhitelist || _entries.Any(entry => entry.Ambiguous)) return ValueTask.FromResult(Failure("AmbiguousMutationPending"));
-        foreach (var entry in _entries.Reverse().Where(entry => entry.Owned))
+        foreach (var entry in _entries.AsEnumerable().Reverse().Where(entry => entry.Owned))
         {
             if (!Try(() => _hidHide.RemoveHiddenDevice(entry.Value))) return ValueTask.FromResult(Failure("DeviceRemoveFailed"));
             var verification = _hidHide.Inspect();
@@ -165,7 +211,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             if (_recovery.CompleteHidHideDeviceAddition(_sessionId, entry.Value).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("DeviceJournalCompletionFailed"));
             entry.Owned = false; entry.Journaled = false;
         }
-        foreach (var entry in _entries.Reverse().Where(entry => entry.Journaled && !entry.Owned))
+        foreach (var entry in _entries.AsEnumerable().Reverse().Where(entry => entry.Journaled && !entry.Owned))
         {
             if (_recovery.CompleteHidHideDeviceAddition(_sessionId, entry.Value).Status != RecoveryStatus.Success)
                 return ValueTask.FromResult(Failure("DeviceJournalCompletionFailed"));

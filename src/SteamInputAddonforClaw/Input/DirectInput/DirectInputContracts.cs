@@ -1,5 +1,12 @@
 namespace SteamInputAddonforClaw.Input.DirectInput;
 
+public enum DirectInputFailureKind { NotAcquired, InputLost, Unrecoverable }
+
+public sealed class DirectInputOperationException(DirectInputFailureKind kind, Exception innerException) : Exception("DirectInput operation failed.", innerException)
+{
+    public DirectInputFailureKind Kind { get; } = kind;
+}
+
 public sealed record DirectInputDeviceDescriptor(
     Guid InstanceGuid,
     Guid ProductGuid,
