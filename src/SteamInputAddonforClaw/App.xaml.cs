@@ -209,9 +209,7 @@ public partial class App : Application
                 new HidHideDriverClient(), _physicalInputSource);
             steamOutputPowerParticipant = steamOutputStage;
             var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage, steamOutputStage]);
-            var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(
-                new RoutingEnvironmentStrategyResolver(),
-                pipelineExecutor);
+            var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(pipelineExecutor);
             _routingRuntimeCoordinator = new RoutingPipelineRuntimeCoordinator(
                 statusProvider,
                 pipelineSessionCoordinator,

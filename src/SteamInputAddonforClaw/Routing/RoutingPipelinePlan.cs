@@ -28,6 +28,15 @@ internal sealed record RoutingPipelinePlan(
     RoutingStageMode XboxOutput,
     RoutingStageMode GameBarRouting)
 {
+    internal static RoutingPipelinePlan StockCenterM { get; } = new(
+        RoutingStageMode.Enabled,
+        RoutingStageMode.Enabled,
+        RoutingStageMode.Enabled,
+        RoutingStageMode.Disabled,
+        RoutingStageMode.Enabled,
+        RoutingStageMode.Disabled,
+        RoutingStageMode.Disabled);
+
     internal static RoutingPipelinePlan AllDisabled { get; } = new(
         RoutingStageMode.Disabled,
         RoutingStageMode.Disabled,

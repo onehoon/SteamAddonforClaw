@@ -10,8 +10,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     public async Task PassiveDecisionDoesNotExecutePipeline()
     {
         var executor = new FakeExecutor();
-        var resolver = new FakeResolver();
-        var coordinator = Create(resolver, executor);
+        var coordinator = Create(executor);
 
         var result = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.WaitingForSteam), Classification(ControllerManagerKind.None), CancellationToken.None);
 
@@ -19,14 +18,15 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         Assert.Equal(RoutingOperationalState.Passive, result.State);
         Assert.Empty(executor.ExecutedPlans);
         Assert.Empty(executor.RollbackPlans);
-        Assert.Equal(0, resolver.ResolveCount);
+        Assert.Null(coordinator.ActiveSession);
+        Assert.Null(coordinator.PendingCleanup);
     }
 
     [Fact]
     public async Task EligibleStockCreatesFrozenSession()
     {
         var executor = new FakeExecutor();
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
         var classification = Classification(ControllerManagerKind.None);
 
         var result = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), classification, CancellationToken.None);
@@ -37,6 +37,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         Assert.NotNull(session);
         Assert.Equal(RoutingEnvironmentStrategyKind.StockCenterM, session.StrategyKind);
         Assert.Equal(classification, session.Classification);
+        Assert.Equal(RoutingPipelinePlan.StockCenterM, executor.ExecutedPlans.Single());
         Assert.Equal(executor.ExecutedPlans.Single(), session.Plan);
     }
 
@@ -44,7 +45,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     public async Task ActiveEligibleDoesNotRebuildOrReplaceFrozenPlan()
     {
         var executor = new FakeExecutor();
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
         var original = Classification(ControllerManagerKind.None);
 
         await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), original, CancellationToken.None);
@@ -62,7 +63,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     public async Task ExitUsesFrozenPlanWhenEnvironmentChanges()
     {
         var executor = new FakeExecutor();
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
         await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None);
         var frozen = coordinator.ActiveSession;
         Assert.NotNull(frozen);
@@ -79,7 +80,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     public async Task FailedEnterDoesNotPublishSession()
     {
         var executor = new FakeExecutor { ExecuteResult = new(false, RoutingStageKind.NativeMode, "Failed", true) };
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
 
         var result = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None);
 
@@ -95,7 +96,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         {
             ExecuteResult = new(false, RoutingStageKind.PhysicalIsolation, "StageFailed", false)
         };
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
 
         var failed = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None);
 
@@ -119,7 +120,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     public async Task FailedExitPreservesFrozenSessionAndRetryUsesSamePlan()
     {
         var executor = new FakeExecutor();
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
         await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None);
         var frozen = coordinator.ActiveSession;
         Assert.NotNull(frozen);
@@ -144,7 +145,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     public async Task PendingExitCleanupPrecedesEligibleDecision()
     {
         var executor = new FakeExecutor();
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
         await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None);
         var frozen = coordinator.ActiveSession;
         Assert.NotNull(frozen);
@@ -167,10 +168,17 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     [Fact]
     public async Task UnsupportedStrategiesFailClosed()
     {
-        foreach (var kind in new[] { ControllerManagerKind.HandheldCompanion, ControllerManagerKind.Winhanced, ControllerManagerKind.Multiple, ControllerManagerKind.Indeterminate })
+        foreach (var kind in new[]
+                 {
+                     ControllerManagerKind.HandheldCompanion,
+                     ControllerManagerKind.Winhanced,
+                     ControllerManagerKind.Multiple,
+                     ControllerManagerKind.Indeterminate,
+                     (ControllerManagerKind)999
+                 })
         {
             var executor = new FakeExecutor();
-            var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+            var coordinator = Create(executor);
             var result = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(kind), CancellationToken.None);
 
             Assert.False(result.Succeeded);
@@ -184,7 +192,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     public async Task ClawTweaksIsAValidFrameworkStrategy()
     {
         var executor = new FakeExecutor();
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
 
         var result = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.ClawTweaks), CancellationToken.None);
 
@@ -199,7 +207,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     public async Task CancellationDuringEnterDoesNotPublishSession()
     {
         var executor = new FakeExecutor { ThrowCancellation = true };
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None));
         Assert.Equal(RoutingOperationalState.Passive, coordinator.CurrentState);
@@ -210,7 +218,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     public async Task CancellationRollbackFailurePreservesPendingCleanup()
     {
         var executor = new FakeExecutor { CancellationRollback = new(false, RoutingStageKind.NativeMode, "CleanupFailed") };
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await coordinator.ReconcileAsync(
             Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None));
@@ -235,7 +243,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
             ExecuteStarted = () => entered.TrySetResult(),
             WaitForExecuteRelease = () => release.Task
         };
-        var coordinator = Create(new RoutingEnvironmentStrategyResolver(), executor);
+        var coordinator = Create(executor);
 
         var first = coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None).AsTask();
         await entered.Task;
@@ -248,23 +256,12 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         Assert.Equal(1, executor.MaxConcurrentExecutions);
     }
 
-    private static RoutingPipelineSessionCoordinator Create(IRoutingEnvironmentStrategyResolver resolver, FakeExecutor executor) =>
-        new(resolver, executor);
+    private static RoutingPipelineSessionCoordinator Create(FakeExecutor executor) => new(executor);
 
     private static RoutingDecision Decision(RoutingDecisionKind kind) => new(kind, RoutingDecisionReason.Eligible);
 
     private static ControllerManagerClassification Classification(ControllerManagerKind kind) =>
         new(kind, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate);
-
-    private sealed class FakeResolver : IRoutingEnvironmentStrategyResolver
-    {
-        internal int ResolveCount { get; private set; }
-        public IRoutingEnvironmentStrategy Resolve(ControllerManagerClassification classification)
-        {
-            ResolveCount++;
-            return new RoutingEnvironmentStrategyResolver().Resolve(classification);
-        }
-    }
 
     private sealed class FakeExecutor : IRoutingPipelineExecutor
     {
