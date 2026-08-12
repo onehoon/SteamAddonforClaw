@@ -294,7 +294,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
 
     private static string FailureOperation(string reason) => reason switch
     {
-        "NoNewCandidate" => "PnPResolve",
+        "VirtualDeviceDidNotAppear" or "AmbiguousVirtualDeviceIdentity" => "PnPResolve",
         "NeutralReportRejected" => "NeutralReport",
         "VirtualDeviceRecoveryCheckpointFailed" => "RecoveryCheckpoint",
         "HidHideOutputInspectionUnavailable" or "HidHideOutputAlreadyBlocked" => "HidHideInspection",

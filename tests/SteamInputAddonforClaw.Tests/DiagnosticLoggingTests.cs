@@ -93,6 +93,19 @@ public sealed class DiagnosticLoggingTests : IDisposable
     }
 
     [Fact]
+    public async Task RoutingTrace_ContextFlowsAcrossAsyncPollingContinuation()
+    {
+        using var scope = RoutingTraceContext.Begin(1234);
+        var observed = await Task.Run(async () =>
+        {
+            await Task.Yield();
+            return RoutingTraceContext.Current;
+        });
+
+        Assert.Equal(1234, observed);
+    }
+
+    [Fact]
     public async Task RoutingTrace_IsFilteredAtInfoLevel()
     {
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
