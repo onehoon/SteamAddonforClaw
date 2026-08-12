@@ -15,9 +15,12 @@ internal sealed record ActiveRoutingPipelineSession(
     ControllerManagerClassification Classification,
     RoutingPipelinePlan Plan);
 
+internal enum RoutingOperationalState { Passive, OverrideActive }
+internal enum RoutingActionKind { None, EnterOverride, ExitOverride }
+
 internal sealed record PendingRoutingPipelineCleanup(
     ActiveRoutingPipelineSession Session,
-    RoutingActionPlan ActionPlan);
+    RoutingActionKind OriginAction);
 
 internal sealed record RoutingPipelineSessionReconcileResult(
     bool Succeeded,
@@ -27,7 +30,6 @@ internal sealed record RoutingPipelineSessionReconcileResult(
 
 internal sealed class RoutingPipelineSessionCoordinator
 {
-    private readonly RoutingCoordinator _routingCoordinator = new();
     private readonly IRoutingPipelineExecutor _pipelineExecutor;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _sessionSync = new();
@@ -39,7 +41,9 @@ internal sealed class RoutingPipelineSessionCoordinator
         _pipelineExecutor = pipelineExecutor ?? throw new ArgumentNullException(nameof(pipelineExecutor));
     }
 
-    internal RoutingOperationalState CurrentState => _routingCoordinator.CurrentState;
+    internal RoutingOperationalState CurrentState => ActiveSession is null
+        ? RoutingOperationalState.Passive
+        : RoutingOperationalState.OverrideActive;
 
     internal ActiveRoutingPipelineSession? ActiveSession
     {
@@ -72,16 +76,20 @@ internal sealed class RoutingPipelineSessionCoordinator
                 return cleanupResult;
             }
 
-            var actionPlan = _routingCoordinator.Plan(decision);
-            if (actionPlan.Action == RoutingActionKind.None)
-                return Success(actionPlan.Action, actionPlan.Reason.ToString());
-
-            return actionPlan.Action switch
+            if (ActiveSession is null)
             {
-                RoutingActionKind.EnterOverride => await EnterAsync(actionPlan, classification, cancellationToken).ConfigureAwait(false),
-                RoutingActionKind.ExitOverride => await ExitAsync(actionPlan, cancellationToken).ConfigureAwait(false),
-                _ => Failure(actionPlan.Action, "UnknownRoutingAction")
-            };
+                if (decision.Kind != RoutingDecisionKind.Eligible)
+                    return Success(RoutingActionKind.None, "AlreadyPassive");
+
+                LogAction(RoutingActionKind.EnterOverride, decision);
+                return await EnterAsync(classification, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (decision.Kind == RoutingDecisionKind.Eligible)
+                return Success(RoutingActionKind.None, "AlreadyActive");
+
+            LogAction(RoutingActionKind.ExitOverride, decision);
+            return await ExitAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -90,18 +98,17 @@ internal sealed class RoutingPipelineSessionCoordinator
     }
 
     private async ValueTask<RoutingPipelineSessionReconcileResult> EnterAsync(
-        RoutingActionPlan actionPlan,
         ControllerManagerClassification classification,
         CancellationToken cancellationToken)
     {
         if (ActiveSession is not null)
-            return Failure(actionPlan.Action, "ActiveSessionAlreadyExists");
+            return Failure(RoutingActionKind.EnterOverride, "ActiveSessionAlreadyExists");
 
         if (!TrySelectEnvironmentPlan(classification, out var environmentKind, out var plan))
-            return Failure(actionPlan.Action, "UnsupportedEnvironmentStrategy");
+            return Failure(RoutingActionKind.EnterOverride, "UnsupportedEnvironmentStrategy");
 
         var candidate = new ActiveRoutingPipelineSession(environmentKind, classification, plan);
-        LogPlan("Enter candidate", candidate, actionPlan);
+        LogPlan("Enter candidate", candidate, RoutingActionKind.EnterOverride);
 
         RoutingPipelineExecutionResult execution;
         try
@@ -111,7 +118,7 @@ internal sealed class RoutingPipelineSessionCoordinator
         catch (OperationCanceledException exception)
         {
             if (RoutingPipelineCancellationMetadata.TryGet(exception, out var rollback) && !rollback.Succeeded)
-                SetPendingCleanup(new(candidate, actionPlan));
+                SetPendingCleanup(new(candidate, RoutingActionKind.EnterOverride));
             else
                 ClearActiveSession();
             throw;
@@ -120,60 +127,43 @@ internal sealed class RoutingPipelineSessionCoordinator
         if (!execution.Succeeded)
         {
             if (!execution.RollbackSucceeded)
-                SetPendingCleanup(new(candidate, actionPlan));
+                SetPendingCleanup(new(candidate, RoutingActionKind.EnterOverride));
             else
                 ClearActiveSession();
-            return Failure(actionPlan.Action, $"PipelineEnterFailed:{execution.Reason}");
-        }
-
-        if (!_routingCoordinator.TryCommit(actionPlan))
-        {
-            var rollback = await _pipelineExecutor.RollbackAsync(plan, CancellationToken.None).ConfigureAwait(false);
-            if (!rollback.Succeeded)
-                SetPendingCleanup(new(candidate, actionPlan));
-            ClearActiveSession();
-            return Failure(actionPlan.Action, "RoutingCommitFailedAfterEnter");
+            return Failure(RoutingActionKind.EnterOverride, $"PipelineEnterFailed:{execution.Reason}");
         }
 
         SetActiveSession(candidate);
         AppLog.Info("Routing.Session", "Routing session entered.",
-            ("Action", actionPlan.Action), ("Result", "Active"), ("Strategy", candidate.StrategyKind),
+            ("Action", RoutingActionKind.EnterOverride), ("Result", "Active"), ("Strategy", candidate.StrategyKind),
             ("Classification", candidate.Classification.Kind));
-        return Success(actionPlan.Action, "EnteredOverride");
+        return Success(RoutingActionKind.EnterOverride, "EnteredOverride");
     }
 
     private async ValueTask<RoutingPipelineSessionReconcileResult> ExitAsync(
-        RoutingActionPlan actionPlan,
         CancellationToken cancellationToken)
     {
         var session = ActiveSession;
         if (session is null)
-            return Failure(actionPlan.Action, "ActiveSessionMissing");
+            return Failure(RoutingActionKind.ExitOverride, "ActiveSessionMissing");
 
         AppLog.Info("Routing.Session", "Routing session exit started.",
-            ("Action", actionPlan.Action), ("Strategy", session.StrategyKind), ("PlanSource", "FrozenSession"));
+            ("Action", RoutingActionKind.ExitOverride), ("Strategy", session.StrategyKind), ("PlanSource", "FrozenSession"));
 
         var rollback = await _pipelineExecutor.RollbackAsync(session.Plan, cancellationToken).ConfigureAwait(false);
         if (!rollback.Succeeded)
         {
-            SetPendingCleanup(new(session, actionPlan));
+            SetPendingCleanup(new(session, RoutingActionKind.ExitOverride));
             AppLog.Warn("Routing.Session", "Routing session rollback failed.", fields:
-                [("Action", actionPlan.Action), ("Result", "RollbackFailed"), ("FailedStage", rollback.FailedStage),
+                [("Action", RoutingActionKind.ExitOverride), ("Result", "RollbackFailed"), ("FailedStage", rollback.FailedStage),
                  ("Reason", rollback.Reason), ("SessionPreserved", true)]);
-            return Failure(actionPlan.Action, $"PipelineRollbackFailed:{rollback.Reason}");
-        }
-
-        if (!_routingCoordinator.TryCommit(actionPlan))
-        {
-            AppLog.Error("Routing.Session", "Routing commit failed after rollback.",
-                new InvalidOperationException("Routing state commit failed after successful pipeline rollback."));
-            return Failure(actionPlan.Action, "RoutingCommitFailedAfterRollback");
+            return Failure(RoutingActionKind.ExitOverride, $"PipelineRollbackFailed:{rollback.Reason}");
         }
 
         ClearActiveSession();
         AppLog.Info("Routing.Session", "Routing session exited.",
-            ("Action", actionPlan.Action), ("Result", "Passive"));
-        return Success(actionPlan.Action, "ExitedOverride");
+            ("Action", RoutingActionKind.ExitOverride), ("Result", "Passive"));
+        return Success(RoutingActionKind.ExitOverride, "ExitedOverride");
     }
 
     private void SetActiveSession(ActiveRoutingPipelineSession session)
@@ -203,25 +193,17 @@ internal sealed class RoutingPipelineSessionCoordinator
 
         var rollback = await _pipelineExecutor.RollbackAsync(pending.Session.Plan, CancellationToken.None).ConfigureAwait(false);
         if (!rollback.Succeeded)
-            return Failure(pending.ActionPlan.Action, $"PendingCleanupFailed:{rollback.Reason}");
+            return Failure(pending.OriginAction, $"PendingCleanupFailed:{rollback.Reason}");
 
-        if (pending.ActionPlan.Action == RoutingActionKind.ExitOverride && !_routingCoordinator.TryCommit(pending.ActionPlan))
-            return Failure(pending.ActionPlan.Action, "RoutingCommitFailedAfterPendingCleanup");
-
-        if (pending.ActionPlan.Action == RoutingActionKind.ExitOverride)
+        if (pending.OriginAction == RoutingActionKind.ExitOverride)
             ClearActiveSession();
 
         ClearPendingCleanup();
-        return new(true, CurrentState, pending.ActionPlan.Action, "PendingCleanupCompleted");
+        return new(true, CurrentState, pending.OriginAction, "PendingCleanupCompleted");
     }
 
     private RoutingPipelineSessionReconcileResult Success(RoutingActionKind action, string reason) =>
-        new(true, action switch
-        {
-            RoutingActionKind.EnterOverride => RoutingOperationalState.OverrideActive,
-            RoutingActionKind.ExitOverride => RoutingOperationalState.Passive,
-            _ => CurrentState
-        }, action, reason);
+        new(true, CurrentState, action, reason);
 
     private RoutingPipelineSessionReconcileResult Failure(RoutingActionKind action, string reason) =>
         new(false, CurrentState, action, reason);
@@ -248,11 +230,35 @@ internal sealed class RoutingPipelineSessionCoordinator
         }
     }
 
-    private static void LogPlan(string message, ActiveRoutingPipelineSession session, RoutingActionPlan actionPlan)
+    private static void LogAction(RoutingActionKind action, RoutingDecision decision)
+    {
+        AppLog.Info("Routing", "Routing action planned.",
+            ("Current", action == RoutingActionKind.EnterOverride ? RoutingOperationalState.Passive : RoutingOperationalState.OverrideActive),
+            ("Action", action),
+            ("Target", action == RoutingActionKind.EnterOverride ? RoutingOperationalState.OverrideActive : RoutingOperationalState.Passive),
+            ("Decision", decision.Kind),
+            ("Reason", ActionReason(decision, action)));
+    }
+
+    private static string ActionReason(RoutingDecision decision, RoutingActionKind action) => action switch
+    {
+        RoutingActionKind.EnterOverride => "RoutingBecameEligible",
+        RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.VetoedForSession => "ExternalControllerVeto",
+        RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.WaitingForSteam => "SteamSessionEnded",
+        RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.SetupRequired => "SetupRequired",
+        RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.Indeterminate && decision.Reason == RoutingDecisionReason.RecoveryUnsafe => "RecoveryUnsafe",
+        RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.Indeterminate => "IndeterminateState",
+        RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.Passive && decision.Reason == RoutingDecisionReason.ControllerEnvironmentUnsupported => "ControllerEnvironmentUnsupported",
+        RoutingActionKind.ExitOverride when decision.Kind == RoutingDecisionKind.Passive && decision.Reason == RoutingDecisionReason.ExternalControllerPresent => "ExternalControllerVeto",
+        RoutingActionKind.ExitOverride => "RoutingNoLongerEligible",
+        _ => "AlreadyPassive"
+    };
+
+    private static void LogPlan(string message, ActiveRoutingPipelineSession session, RoutingActionKind action)
     {
         var plan = session.Plan;
         AppLog.Info("Routing.Session", message,
-            ("Action", actionPlan.Action), ("Strategy", session.StrategyKind),
+            ("Action", action), ("Strategy", session.StrategyKind),
             ("Classification", session.Classification.Kind), ("NativeMode", plan.NativeMode),
             ("PhysicalInput", plan.PhysicalInput), ("PhysicalIsolation", plan.PhysicalIsolation),
             ("ThirdPartyIsolation", plan.ThirdPartyIsolation), ("SteamOutput", plan.SteamOutput),

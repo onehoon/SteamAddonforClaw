@@ -22,6 +22,30 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         Assert.Null(coordinator.PendingCleanup);
     }
 
+    [Theory]
+    [InlineData((int)RoutingDecisionKind.WaitingForSteam, (int)RoutingDecisionReason.SteamInactive)]
+    [InlineData((int)RoutingDecisionKind.VetoedForSession, (int)RoutingDecisionReason.ExternalControllerSessionLatched)]
+    [InlineData((int)RoutingDecisionKind.SetupRequired, (int)RoutingDecisionReason.PrerequisitesNotReady)]
+    [InlineData((int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.RecoveryUnsafe)]
+    [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ControllerEnvironmentUnsupported)]
+    public async Task PassiveNonEligibleDecisionRemainsPassive(int kindValue, int reasonValue)
+    {
+        var executor = new FakeExecutor();
+        var coordinator = Create(executor);
+
+        var result = await coordinator.ReconcileAsync(
+            Decision((RoutingDecisionKind)kindValue, (RoutingDecisionReason)reasonValue),
+            Classification(ControllerManagerKind.None),
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(RoutingActionKind.None, result.Action);
+        Assert.Equal("AlreadyPassive", result.Reason);
+        Assert.Equal(RoutingOperationalState.Passive, result.State);
+        Assert.Empty(executor.ExecutedPlans);
+        Assert.Empty(executor.RollbackPlans);
+    }
+
     [Fact]
     public async Task EligibleStockCreatesFrozenSession()
     {
@@ -55,6 +79,8 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         var changed = await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.ClawTweaks), CancellationToken.None);
 
         Assert.True(changed.Succeeded);
+        Assert.Equal(RoutingActionKind.None, changed.Action);
+        Assert.Equal("AlreadyActive", changed.Reason);
         Assert.Single(executor.ExecutedPlans);
         Assert.Equal(frozen, coordinator.ActiveSession);
     }
@@ -139,6 +165,57 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         Assert.Equal(frozen.Plan, executor.RollbackPlans[0]);
         Assert.Equal(frozen.Plan, executor.RollbackPlans[1]);
         Assert.Null(coordinator.ActiveSession);
+    }
+
+    [Theory]
+    [InlineData((int)RoutingDecisionKind.WaitingForSteam, (int)RoutingDecisionReason.SteamInactive)]
+    [InlineData((int)RoutingDecisionKind.VetoedForSession, (int)RoutingDecisionReason.ExternalControllerSessionLatched)]
+    [InlineData((int)RoutingDecisionKind.SetupRequired, (int)RoutingDecisionReason.PrerequisitesNotReady)]
+    [InlineData((int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.RecoveryUnsafe)]
+    [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ControllerEnvironmentUnsupported)]
+    [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ExternalControllerPresent)]
+    public async Task ActiveNonEligibleDecisionExitsFrozenSession(int kindValue, int reasonValue)
+    {
+        var executor = new FakeExecutor();
+        var coordinator = Create(executor);
+        await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None);
+        var frozen = coordinator.ActiveSession!;
+
+        var result = await coordinator.ReconcileAsync(
+            Decision((RoutingDecisionKind)kindValue, (RoutingDecisionReason)reasonValue),
+            Classification(ControllerManagerKind.ClawTweaks),
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(RoutingActionKind.ExitOverride, result.Action);
+        Assert.Equal("ExitedOverride", result.Reason);
+        Assert.Equal(frozen.Plan, executor.RollbackPlans.Single());
+        Assert.Null(coordinator.ActiveSession);
+        Assert.Equal(RoutingOperationalState.Passive, coordinator.CurrentState);
+    }
+
+    [Fact]
+    public async Task CurrentStateIsDerivedFromActiveSessionDuringCleanup()
+    {
+        var executor = new FakeExecutor();
+        var coordinator = Create(executor);
+
+        Assert.Equal(RoutingOperationalState.Passive, coordinator.CurrentState);
+        await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.Eligible), Classification(ControllerManagerKind.None), CancellationToken.None);
+        Assert.NotNull(coordinator.ActiveSession);
+        Assert.Equal(RoutingOperationalState.OverrideActive, coordinator.CurrentState);
+
+        executor.RollbackResults.Enqueue(new(false, RoutingStageKind.NativeMode, "CleanupFailed"));
+        await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.WaitingForSteam), Classification(ControllerManagerKind.None), CancellationToken.None);
+        Assert.NotNull(coordinator.ActiveSession);
+        Assert.NotNull(coordinator.PendingCleanup);
+        Assert.Equal(RoutingOperationalState.OverrideActive, coordinator.CurrentState);
+
+        executor.RollbackResults.Enqueue(new(true, null, "Success"));
+        await coordinator.ReconcileAsync(Decision(RoutingDecisionKind.WaitingForSteam), Classification(ControllerManagerKind.None), CancellationToken.None);
+        Assert.Null(coordinator.ActiveSession);
+        Assert.Null(coordinator.PendingCleanup);
+        Assert.Equal(RoutingOperationalState.Passive, coordinator.CurrentState);
     }
 
     [Fact]
@@ -259,6 +336,8 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     private static RoutingPipelineSessionCoordinator Create(FakeExecutor executor) => new(executor);
 
     private static RoutingDecision Decision(RoutingDecisionKind kind) => new(kind, RoutingDecisionReason.Eligible);
+
+    private static RoutingDecision Decision(RoutingDecisionKind kind, RoutingDecisionReason reason) => new(kind, reason);
 
     private static ControllerManagerClassification Classification(ControllerManagerKind kind) =>
         new(kind, ControllerManagerClassificationReason.ControllerManagerStateIndeterminate);
