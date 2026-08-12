@@ -241,8 +241,14 @@ public sealed class MsiClawInputSourceTests
         var device = new FakeDevice(State(), State(), new InvalidOperationException("Read failed"));
         var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
         var summaryTask = ObserveSummary(source);
+        var thirdReadAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        device.ReadAttempted += count =>
+        {
+            if (count >= 3) thirdReadAttempt.TrySetResult();
+        };
 
         Assert.True(source.Start().Started);
+        await thirdReadAttempt.Task.WaitAsync(TimeSpan.FromSeconds(2));
         var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.Equal(MsiClawInputStopReason.ReadStateFailed, summary.StopReason);
@@ -461,6 +467,7 @@ public sealed class MsiClawInputSourceTests
         public Exception? UnacquireException { get; init; }
         public Exception? DisposeException { get; init; }
         public event Action<int>? ReadPerformed;
+        public event Action<int>? ReadAttempted;
         public void Acquire()
         {
             AcquireCount++;
@@ -474,6 +481,7 @@ public sealed class MsiClawInputSourceTests
         public DirectInputState ReadState()
         {
             ReadCount++;
+            ReadAttempted?.Invoke(ReadCount);
             if (_reads.Count > 0)
             {
                 var next = _reads.Dequeue();
