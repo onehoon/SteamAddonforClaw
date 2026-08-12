@@ -36,11 +36,24 @@ internal sealed class StartupCoordinator
         var recoverySafe = true;
         if (_recoveryManager is not null)
         {
-            var recoveryResult = await _recoveryManager.RecoverIncompleteSessionAsync(cancellationToken).ConfigureAwait(false);
-            if (!recoveryResult.IsSafeToContinue)
+            try
+            {
+                var recoveryResult = await _recoveryManager.RecoverIncompleteSessionAsync(cancellationToken).ConfigureAwait(false);
+                if (!recoveryResult.IsSafeToContinue)
+                {
+                    recoverySafe = false;
+                    AppLog.Warn("Startup", "Normal routing blocked by incomplete recovery.", null, ("Action", "Passive"), ("Reason", recoveryResult.Reason));
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
             {
                 recoverySafe = false;
-                AppLog.Warn("Startup", "Normal routing blocked by incomplete recovery.", null, ("Action", "Passive"), ("Reason", recoveryResult.Reason));
+                AppLog.Warn("Startup", "Incomplete recovery threw; normal routing remains blocked while update is allowed.", exception,
+                    ("Action", "PassiveThenUpdate"), ("Reason", "RecoveryException:" + exception.GetType().Name));
             }
         }
         AppLog.Info("Startup", "Startup update gate entered.");
