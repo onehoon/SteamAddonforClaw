@@ -118,7 +118,7 @@ The current MVP supports **Stock MSI Center M only**. It requires MSI Center M t
 
 Hardware support is currently limited to **MSI Claw 8 EX AI+ CG3EM**. Compatibility is determined from the exact `Win32_BaseBoard.Product` value `MS-1T91`; another board model is unsupported, and an unavailable board identity is treated as indeterminate without routing or setup mutation.
 
-Controller environment detection and support policy are separate. Detection and classification record the controller-management environment that is observed; support policy decides whether the current addon version may mutate controller state in that environment. Stock MSI Center M and ClawTweaks are intentionally separate future routing strategies. Handheld Companion and Winhanced are unsupported owner environments; when positively detected, the addon remains passive. An indeterminate controller-management environment always fails closed to passive behavior.
+Startup and runtime use the same controller-software assessment. It captures the current MSI Center M, ClawTweaks, and Handheld Companion status, derives the controller-manager classification, then applies the current compatibility policy. The only supported mutation environment is operational Stock MSI Center M with no unsupported third-party controller manager. ClawTweaks, Handheld Companion, other unsupported managers, and indeterminate software state remain passive. Environment detection does not use separate startup and runtime decision engines.
 
 This classification boundary does not add production Winhanced detection. Reliable Winhanced installation, runtime, and ownership detection is a separate follow-up.
 
