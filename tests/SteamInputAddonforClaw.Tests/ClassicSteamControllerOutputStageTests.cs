@@ -4,10 +4,12 @@ using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Diagnostics;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("AppLog")]
 public sealed class ClassicSteamControllerOutputStageTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "ClawSteamOutputTests", Guid.NewGuid().ToString("N"));
@@ -206,6 +208,23 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task NeutralRejectionRetainsFailureOperationTimingAndLogsOnce()
+    {
+        var runtime = new FakeRuntime { NeutralAccepted = false };
+        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Equal(1, log.Split("Event=SteamOutputCreationFailed", StringSplitOptions.None).Length - 1);
+        Assert.Contains("FailedOperation=NeutralReport", log);
+        Assert.Contains("NeutralReportMs=", log);
+        Assert.Equal(1, runtime.RemovedDevices);
+    }
+
+    [Fact]
     public async Task LivePublisherFaultRequestsOneFailClosedNotification()
     {
         var runtime = new FakeRuntime { InputAccepted = false };
@@ -230,7 +249,19 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     }
 
     private static ControllerDeviceInfo Device(string id) => new(id, Guid.Empty, null, [], "VIIPER", ["HID\\VID_28DE&PID_1102"], [], "HIDClass", null, "VIIPER", 0x28DE, 0x1102, true);
-    public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
+    public ClassicSteamControllerOutputStageTests()
+    {
+        Directory.CreateDirectory(_directory);
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+    }
+
+    public void Dispose()
+    {
+        AppLog.DirectoryOverride = null;
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+    }
 
     private sealed class FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states) : IControllerDeviceEnumerator
     { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Count - 1)]; }

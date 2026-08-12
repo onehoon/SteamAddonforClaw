@@ -140,27 +140,30 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             operationToken.ThrowIfCancellationRequested();
             _state = LifecycleState.Creating;
             var started = Stopwatch.GetTimestamp();
-            _runtime.Start();
-            timing.RuntimeStartMs = Elapsed(started);
+            try { _runtime.Start(); }
+            finally { timing.RuntimeStartMs = Elapsed(started); }
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
-            _deviceId = _runtime.CreateDevice();
-            timing.CreateDeviceMs = Elapsed(started);
+            try { _deviceId = _runtime.CreateDevice(); }
+            finally { timing.CreateDeviceMs = Elapsed(started); }
             _busId = _runtime.BusId;
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
-            var resolved = await WaitForIdentityAsync(_before, operationToken).ConfigureAwait(false);
-            timing.PnpResolveMs = Elapsed(started);
+            ViiperVirtualDeviceResolution resolved;
+            try { resolved = await WaitForIdentityAsync(_before, operationToken).ConfigureAwait(false); }
+            finally { timing.PnpResolveMs = Elapsed(started); }
             if (!resolved.Succeeded) return await FailAndRollbackCoreAsync(resolved.Reason).ConfigureAwait(false);
             _owned = resolved.Devices;
             started = Stopwatch.GetTimestamp();
-            var checkpoint = _recovery.ResolveAddonOwnedVirtualDeviceIdentity(session, _mutationId, _owned.Select(device => device.InstanceId));
-            timing.RecoveryCheckpointMs = Elapsed(started);
+            RecoveryResult checkpoint;
+            try { checkpoint = _recovery.ResolveAddonOwnedVirtualDeviceIdentity(session, _mutationId, _owned.Select(device => device.InstanceId)); }
+            finally { timing.RecoveryCheckpointMs = Elapsed(started); }
             if (!checkpoint.IsSafeToContinue) return await FailAndRollbackCoreAsync("VirtualDeviceRecoveryCheckpointFailed").ConfigureAwait(false);
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
-            var hidHideInspection = _hidHide.Inspect();
-            timing.HidHideInspectionMs = Elapsed(started);
+            HidHideInspection hidHideInspection;
+            try { hidHideInspection = _hidHide.Inspect(); }
+            finally { timing.HidHideInspectionMs = Elapsed(started); }
             if (!hidHideInspection.IsConfigurationReadable) return await FailAndRollbackCoreAsync("HidHideOutputInspectionUnavailable").ConfigureAwait(false);
             var ownedEntries = _owned.SelectMany(device => device.AncestorInstanceIds.Append(device.InstanceId).Append(device.ParentInstanceId ?? string.Empty))
                 .Where(value => !string.IsNullOrWhiteSpace(value)).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -169,14 +172,16 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             _tracker.ResolveOwnership(_owned);
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
-            if (!_runtime.SetNeutral(_deviceId)) return await FailAndRollbackCoreAsync("NeutralReportRejected").ConfigureAwait(false);
-            timing.NeutralReportMs = Elapsed(started);
+            bool neutralAccepted;
+            try { neutralAccepted = _runtime.SetNeutral(_deviceId); }
+            finally { timing.NeutralReportMs = Elapsed(started); }
+            if (!neutralAccepted) return await FailAndRollbackCoreAsync("NeutralReportRejected").ConfigureAwait(false);
             Interlocked.Exchange(ref _outputFaultReported, 0);
             _publisher = new ClassicSteamControllerInputPublisher(_snapshot, _runtime, _deviceId, _reportTicks,
                 fault: ReportOutputFault);
             started = Stopwatch.GetTimestamp();
-            _publisher.Start();
-            timing.PublisherStartMs = Elapsed(started);
+            try { _publisher.Start(); }
+            finally { timing.PublisherStartMs = Elapsed(started); }
             _state = LifecycleState.Active;
             AppLog.Debug("SteamOutput", "SteamOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{ViiperRuntimeManager.VendorId:X4}"), ("PID", $"{ViiperRuntimeManager.ProductId:X4}"), ("NeutralAccepted", true));
             AppLog.Debug("RoutingTrace", "Steam output creation completed.", ("Event", "SteamOutputCreated"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(timing.Started)), ("RuntimeStartMs", timing.RuntimeStartMs), ("CreateDeviceMs", timing.CreateDeviceMs), ("PnPResolveMs", timing.PnpResolveMs), ("RecoveryCheckpointMs", timing.RecoveryCheckpointMs), ("HidHideInspectionMs", timing.HidHideInspectionMs), ("NeutralReportMs", timing.NeutralReportMs), ("PublisherStartMs", timing.PublisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
@@ -232,14 +237,17 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         if (_deviceId != 0)
         {
             var removeStarted = Stopwatch.GetTimestamp();
-            removal = _runtime.RemoveDevice(_busId, _deviceId);
-            removeMs = Elapsed(removeStarted);
+            try { removal = _runtime.RemoveDevice(_busId, _deviceId); }
+            finally { removeMs = Elapsed(removeStarted); }
             if (!removal.DeviceRemoved) return RoutingStageOperationResult.Failure("VirtualDeviceRemoveFailed");
             var absenceStarted = Stopwatch.GetTimestamp();
-            absent = hadResolvedIdentity
-                ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
-                : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
-            pnpAbsenceMs = Elapsed(absenceStarted);
+            try
+            {
+                absent = hadResolvedIdentity
+                    ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
+                    : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally { pnpAbsenceMs = Elapsed(absenceStarted); }
             if (!absent) return RoutingStageOperationResult.Failure("VirtualDevicePnPStillPresent");
         }
         if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new ViiperVirtualDeviceIdentityPolicy(), _before, _owned))
