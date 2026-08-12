@@ -57,7 +57,6 @@ internal sealed class RoutingPipelineSessionCoordinator
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileAsync(
         RoutingDecision decision,
         ControllerManagerClassification classification,
-        RoutingExperimentOptions experimentOptions,
         CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -76,7 +75,7 @@ internal sealed class RoutingPipelineSessionCoordinator
 
             return actionPlan.Action switch
             {
-                RoutingActionKind.EnterOverride => await EnterAsync(actionPlan, classification, experimentOptions, cancellationToken).ConfigureAwait(false),
+                RoutingActionKind.EnterOverride => await EnterAsync(actionPlan, classification, cancellationToken).ConfigureAwait(false),
                 RoutingActionKind.ExitOverride => await ExitAsync(actionPlan, cancellationToken).ConfigureAwait(false),
                 _ => Failure(actionPlan.Action, "UnknownRoutingAction")
             };
@@ -90,7 +89,6 @@ internal sealed class RoutingPipelineSessionCoordinator
     private async ValueTask<RoutingPipelineSessionReconcileResult> EnterAsync(
         RoutingActionPlan actionPlan,
         ControllerManagerClassification classification,
-        RoutingExperimentOptions experimentOptions,
         CancellationToken cancellationToken)
     {
         if (ActiveSession is not null)
@@ -100,7 +98,7 @@ internal sealed class RoutingPipelineSessionCoordinator
         if (strategy.Kind == RoutingEnvironmentStrategyKind.Unsupported)
             return Failure(actionPlan.Action, "UnsupportedEnvironmentStrategy");
 
-        var plan = RoutingExperimentPlanBuilder.Build(strategy, experimentOptions);
+        var plan = strategy.BuildBaselinePlan();
         var candidate = new ActiveRoutingPipelineSession(strategy.Kind, classification, plan);
         LogPlan("Enter candidate", candidate, actionPlan);
 

@@ -55,9 +55,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     {
         var executor = new FakeExecutor();
         var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
-        var bridge = CreateWithOptions(provider, executor, () => new RoutingExperimentOptions(
-            new(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled),
-            RoutingStageExperimentOptions.None));
+        var bridge = Create(provider, executor);
 
         Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
         var result = await bridge.Bridge.FailClosedAsync();
@@ -72,9 +70,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     {
         var executor = new FakeExecutor();
         var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
-        var bridge = CreateWithOptions(provider, executor, () => new RoutingExperimentOptions(
-            new(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, SteamOutput: RoutingStageMode.Enabled),
-            RoutingStageExperimentOptions.None));
+        var bridge = Create(provider, executor);
         Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
 
         var ticks = new PublisherManualTicks();
@@ -463,12 +459,6 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     {
         var session = new RoutingPipelineSessionCoordinator(new RoutingEnvironmentStrategyResolver(), executor);
         return (new RoutingPipelineRuntimeCoordinator(provider, session, participants), session);
-    }
-
-    private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) CreateWithOptions(FakeStatusProvider provider, FakeExecutor executor, Func<RoutingExperimentOptions> options)
-    {
-        var session = new RoutingPipelineSessionCoordinator(new RoutingEnvironmentStrategyResolver(), executor);
-        return (new RoutingPipelineRuntimeCoordinator(provider, session, experimentOptionsProvider: options), session);
     }
 
     private static IReadOnlyList<ControllerSoftwareStatus> Software() =>

@@ -215,8 +215,7 @@ public partial class App : Application
             _routingRuntimeCoordinator = new RoutingPipelineRuntimeCoordinator(
                 statusProvider,
                 pipelineSessionCoordinator,
-                [_msiClawNativeModeSession],
-                () => RoutingExperimentOptions.None);
+                [_msiClawNativeModeSession]);
             _msiClawNativeModeSession.SetRoutingSafetyVetoHandler(async () =>
             {
                 _routingRuntimeCoordinator.CancelInFlightTransition();
