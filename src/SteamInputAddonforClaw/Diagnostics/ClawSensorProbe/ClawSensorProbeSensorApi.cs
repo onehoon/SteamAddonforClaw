@@ -4,6 +4,17 @@ namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 
 internal sealed class ClawSensorProbeSensorApi : IDisposable
 {
+    private sealed class OwnedComPointer : IDisposable
+    {
+        public IntPtr Pointer { get; private set; }
+        public OwnedComPointer(IntPtr pointer) => Pointer = pointer;
+        public void Dispose()
+        {
+            if (Pointer == IntPtr.Zero) return;
+            Marshal.Release(Pointer);
+            Pointer = IntPtr.Zero;
+        }
+    }
     internal static readonly Guid SensorCategoryAll = new("C317C286-C468-4288-9975-D4C4587C442C");
     internal static readonly Guid SensorDataTypeCustomGuid = new("B14C764F-07CF-41E8-9D82-EBE3D0776A6F");
     private static readonly Guid SensorManagerClass = new("77A1C827-FCD2-4689-8915-9D613CC5FA3E");
@@ -36,17 +47,20 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
     internal ClawSensorDiscovery Discover()
     {
         var sensors = new List<ClawSensorProbeCandidate>();
-        var collection = GetAllSensors();
-        try
+        using var ownedCollection = new OwnedComPointer(GetAllSensors());
+        var collection = ownedCollection.Pointer;
+        for (var i = 0; i < GetCollectionCount(collection); i++)
         {
-            for (var i = 0; i < GetCollectionCount(collection); i++)
+            var sensor = GetCollectionItem(collection, i);
+            try { sensors.Add(ReadCandidate(sensor)); }
+            finally
             {
-                var sensor = GetCollectionItem(collection, i);
-                try { sensors.Add(ReadCandidate(sensor)); }
-                finally { if (sensor != IntPtr.Zero) Marshal.Release(sensor); }
+                if (sensor != IntPtr.Zero)
+                {
+                    using var ownedSensor = new OwnedComPointer(sensor);
+                }
             }
         }
-        finally { if (collection != IntPtr.Zero) Marshal.Release(collection); }
         return ClawSensorDiscovery.Select(sensors);
     }
     internal static ClawSensorProbeCandidate ReadMetadata(IntPtr sensor)
@@ -63,8 +77,8 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         var getData = Marshal.GetDelegateForFunctionPointer<GetReport>(Marshal.ReadIntPtr(vtable, SensorGetDataSlot * IntPtr.Size));
         var hr = getData(sensor, out var report);
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
-        try { return (ReadValue(report, 7), ReadValue(report, 8), ReadValue(report, 9)); }
-        finally { if (report != IntPtr.Zero) Marshal.Release(report); }
+        using var ownedReport = new OwnedComPointer(report);
+        return (ReadValue(ownedReport.Pointer, 7), ReadValue(ownedReport.Pointer, 8), ReadValue(ownedReport.Pointer, 9));
     }
     internal static string ReadOptionalMetadata(IntPtr sensor, int slot) => TryReadString(sensor, slot);
     private static string TryReadString(IntPtr sensor, int slot)
@@ -79,7 +93,7 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         {
             Manufacturer = "Unavailable: optional property not exposed by verified contract",
             Model = "Unavailable: optional property not exposed by verified contract",
-            PersistentUniqueId = "Unavailable: optional property not exposed by verified contract",
+            PersistentUniqueId = baseCandidate.SensorId,
             MinimumReportInterval = "Unavailable: optional property not exposed by verified contract",
             CustomUsage = "Unavailable: optional property not exposed by verified contract"
         };
@@ -107,7 +121,7 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
                 _ => throw new InvalidOperationException($"Unsupported sensor value type {value.VarType}.")
             };
         }
-        finally { PropVariantClear(ref value); }
+        finally { value.Dispose(); }
     }
     private static string ReadString(IntPtr sensor, int slot)
     {
@@ -155,7 +169,8 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         [FieldOffset(8)] public ulong UInt64;
         [FieldOffset(8)] public double Double;
         [FieldOffset(8)] public IntPtr Pointer;
-        public bool Bool => Marshal.ReadInt16(Pointer) != 0;
+        public bool Bool => Pointer != IntPtr.Zero && Marshal.ReadInt16(Pointer) != 0;
+        public void Dispose() => _ = PropVariantClear(ref this);
     }
     [DllImport("oleaut32.dll")] private static extern int PropVariantClear(ref PropVariant value);
 

@@ -23,7 +23,7 @@ internal sealed record ClawSensorDiscovery(IReadOnlyList<ClawSensorProbeCandidat
     }
 }
 
-internal sealed record ClawSensorProbeSample(long Sequence, DateTimeOffset UtcTimestamp, double ElapsedMs, ClawSensorProbePhase Phase, int PhasePass, string Sensor, double X, double Y, double Z, double SampleIntervalMs);
+internal sealed record ClawSensorProbeSample(long Sequence, DateTimeOffset UtcTimestamp, double ElapsedMs, ClawSensorProbePhase Phase, int PhasePass, string Sensor, double X, double Y, double Z, double SampleIntervalMs, long? SensorTimestamp = null);
 internal sealed record ClawSensorProbePhaseLog(string name, int pass, double start_elapsed_ms, double end_elapsed_ms);
 internal sealed record ClawSensorProbeError(string Code, string Message);
 
@@ -69,6 +69,8 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     private readonly ClawSensorProbeStatistics _accel = new();
     private readonly List<ClawSensorProbePhaseLog> _phases = [];
     private readonly Dictionary<string, int> _phaseRows = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _pendingPhaseEnds = new(StringComparer.Ordinal);
+    private readonly object _phaseGate = new();
     private ClawSensorDiscovery? _discovery;
     private object _device = new { Manufacturer = "Unavailable", ProductName = "Unavailable", BaseBoardProduct = "Unavailable", ResolvedAddonDevice = "MSI Claw", ResolvedAddonModel = "Unknown / unresolved" };
     private readonly List<string> _errors = [];
@@ -91,7 +93,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
         Directory.CreateDirectory(DirectoryPath);
         _reportPath = Path.Combine(DirectoryPath, "claw-sensor-report.json");
         _csv = new StreamWriter(Path.Combine(DirectoryPath, "claw-sensor-live.csv"), false, new UTF8Encoding(false)) { AutoFlush = false };
-        _csv.WriteLine("sequence,utc_timestamp,elapsed_ms,phase,phase_pass,sensor,x,y,z,sample_interval_ms");
+        _csv.WriteLine("sequence,utc_timestamp,elapsed_ms,phase,phase_pass,sensor,x,y,z,sample_interval_ms,sensor_timestamp");
         _writerTask = WriteLoopAsync();
     }
     public void Write(ClawSensorProbeSample sample)
@@ -102,16 +104,28 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     public void EndPhase(ClawSensorProbePhase phase, int pass, double elapsedMs)
     {
         var key = $"{phase}:{pass}";
-        if (_phaseRows.TryGetValue(key, out var index)) _phases[index] = _phases[index] with { end_elapsed_ms = elapsedMs };
+        lock (_phaseGate)
+        {
+            if (_phaseRows.TryGetValue(key, out var index)) _phases[index] = _phases[index] with { end_elapsed_ms = elapsedMs };
+            else _pendingPhaseEnds[key] = elapsedMs;
+        }
     }
     private async Task WriteLoopAsync()
     {
         await foreach (var sample in _channel.Reader.ReadAllAsync())
         {
-            _csv.WriteLine(string.Join(',', sample.Sequence.ToString(CultureInfo.InvariantCulture), sample.UtcTimestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture), sample.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture), sample.Phase, sample.PhasePass, sample.Sensor, sample.X.ToString("R", CultureInfo.InvariantCulture), sample.Y.ToString("R", CultureInfo.InvariantCulture), sample.Z.ToString("R", CultureInfo.InvariantCulture), sample.SampleIntervalMs.ToString("0.###", CultureInfo.InvariantCulture)));
+            _csv.WriteLine(string.Join(',', sample.Sequence.ToString(CultureInfo.InvariantCulture), sample.UtcTimestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture), sample.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture), sample.Phase, sample.PhasePass, sample.Sensor, sample.X.ToString("R", CultureInfo.InvariantCulture), sample.Y.ToString("R", CultureInfo.InvariantCulture), sample.Z.ToString("R", CultureInfo.InvariantCulture), sample.SampleIntervalMs.ToString("0.###", CultureInfo.InvariantCulture), sample.SensorTimestamp?.ToString(CultureInfo.InvariantCulture) ?? string.Empty));
             if (sample.Sensor is "GYRO" or "ACCEL") (sample.Sensor == "GYRO" ? _gyro : _accel).Add(sample.SampleIntervalMs);
             var key = $"{sample.Phase}:{sample.PhasePass}";
-            if (!_phaseRows.ContainsKey(key)) { _phaseRows[key] = _phases.Count; _phases.Add(new(sample.Phase.ToString(), sample.PhasePass, sample.ElapsedMs, sample.ElapsedMs)); }
+            lock (_phaseGate)
+            {
+                if (!_phaseRows.ContainsKey(key))
+                {
+                    _phaseRows[key] = _phases.Count;
+                    var end = _pendingPhaseEnds.TryGetValue(key, out var pendingEnd) ? pendingEnd : sample.ElapsedMs;
+                    _phases.Add(new(sample.Phase.ToString(), sample.PhasePass, sample.ElapsedMs, end));
+                }
+            }
         }
     }
     public async ValueTask FinalizeAsync(CancellationToken cancellationToken = default)
@@ -123,7 +137,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
         await _csv.FlushAsync(cancellationToken);
         await _csv.DisposeAsync();
         string[] errors; lock (_errors) errors = (_discovery?.Errors ?? []).Concat(_errors).Distinct(StringComparer.Ordinal).ToArray();
-        var report = new { SchemaVersion = 1, SessionId = Path.GetFileName(DirectoryPath), StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, Backend = "Windows Sensor API / ISensorManager", SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, DataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, Errors = errors, Warnings = DroppedSampleCount == 0 ? Array.Empty<string>() : new[] { "The diagnostic writer queue was full and samples were dropped." } };
+        var report = new { SchemaVersion = 1, SessionId = Path.GetFileName(DirectoryPath), AppVersion = typeof(ClawSensorProbeSessionWriter).Assembly.GetName().Version?.ToString() ?? "Unknown", StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, Backend = "Windows Sensor API / ISensorManager", SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, DataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, RestSummary = new { Gyroscope = "Not computed", Accelerometer = "Not computed" }, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, Errors = errors, Warnings = DroppedSampleCount == 0 ? Array.Empty<string>() : new[] { "The diagnostic writer queue was full and samples were dropped." } };
         await File.WriteAllTextAsync(_reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, cancellationToken);
     }
     public ValueTask DisposeAsync() => new(FinalizeAsync().AsTask());

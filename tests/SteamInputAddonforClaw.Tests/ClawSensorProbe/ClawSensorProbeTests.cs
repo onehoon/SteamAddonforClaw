@@ -15,6 +15,11 @@ public sealed class ClawSensorProbeTests
         Assert.False(ClawSensorDiscovery.Select([new("Physical Gyrometer", "g", "t", "c")]).IsValid);
         Assert.False(ClawSensorDiscovery.Select([new("Physical Accelerometer", "a", "t", "c")]).IsValid);
     }
+    [Fact] public void Candidate_UsesSensorIdAsDocumentedPersistentUniqueId()
+    {
+        var result = ClawSensorDiscovery.Select([new("Physical Gyrometer", "persistent-id", "t", "c", PersistentUniqueId: "persistent-id"), new("Physical Accelerometer", "a", "t", "c")]);
+        Assert.Equal("persistent-id", result.Gyroscope?.PersistentUniqueId);
+    }
     [Fact] public void Statistics_CalculatesRateAndBounds()
     {
         var stats = new ClawSensorProbeStatistics(); stats.Add(10); stats.Add(20);
@@ -31,6 +36,18 @@ public sealed class ClawSensorProbeTests
         var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
         Assert.Contains("TRANSITION", csv);
         Assert.Contains("\"DroppedSampleCount\": 0", await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
+        Directory.Delete(root, true);
+    }
+    [Fact] public async Task Writer_RecordsPhaseEndEvenWhenEndArrivesBeforeQueuedSample()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-phase-" + Guid.NewGuid().ToString("N"));
+        await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
+        {
+            writer.EndPhase(ClawSensorProbePhase.ROLL_LEFT, 1, 25);
+            writer.Write(new(1, DateTimeOffset.UtcNow, 10, ClawSensorProbePhase.ROLL_LEFT, 1, "GYRO", 1, 2, 3, 1));
+        }
+        var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+        Assert.Contains("\"end_elapsed_ms\": 25", report);
         Directory.Delete(root, true);
     }
     [Fact] public void Workflow_FailureIsTerminal()

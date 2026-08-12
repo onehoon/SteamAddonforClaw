@@ -9,6 +9,8 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private ClawSensorProbeReaders? _readers;
     private int _disposed;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private readonly CancellationTokenSource _lifecycleCancellation = new();
+    public CancellationToken LifecycleCancellation => _lifecycleCancellation.Token;
     public ClawSensorProbeState State => _workflow.State;
     public ClawSensorProbeWorkflow Workflow => _workflow;
     public string? OutputDirectory => _writer?.DirectoryPath;
@@ -62,6 +64,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     public void EndCurrentPhase() => _writer?.EndPhase((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        _lifecycleCancellation.Cancel();
         _workflow.Stop();
         if (_readers is not null) { await _readers.DisposeAsync(); _readers = null; }
         _api?.Dispose(); _api = null;
@@ -78,8 +81,10 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _lifecycleCancellation.Cancel();
         if (_readers is not null) { await _readers.DisposeAsync(); foreach (var error in _readers.Errors) _writer?.AddError(error); }
         _api?.Dispose();
         if (_writer is not null) await _writer.FinalizeAsync();
+        _lifecycleCancellation.Dispose();
     }
 }
