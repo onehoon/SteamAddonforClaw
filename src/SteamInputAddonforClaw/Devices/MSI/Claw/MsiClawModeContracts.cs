@@ -5,6 +5,16 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 internal enum MsiClawModeTransitionStatus { Succeeded, WriteFailed, OldDeviceDidNotDisappear, TargetDeviceDidNotAppear, IdentityMismatch, AmbiguousDevice, UnsupportedDevice, Cancelled, StaleGeneration, TimedOut, RecoveryUnsafe }
 internal enum MsiClawIdentityConfidence { Strong, Weak, Indeterminate }
 internal sealed record MsiClawPhysicalRootResolution(string RawRootInstanceId, string PhysicalDeviceKey);
+internal static class MsiClawLogicalIdentity
+{
+    internal static string GetLogicalKey(ControllerDeviceInfo device)
+    {
+        if (MsiClawPhysicalIdentity.ResolvePhysicalRoot(device) is { } root) return $"root:{root.RawRootInstanceId}";
+        if (ControllerLogicalIdentity.IsUsableContainerId(device.ContainerId)) return $"container:{device.ContainerId:D}";
+        if (!string.IsNullOrWhiteSpace(device.ParentInstanceId)) return $"parent:{device.ParentInstanceId}";
+        return $"instance:{device.InstanceId}";
+    }
+}
 internal sealed record MsiClawPhysicalIdentity(Guid? ContainerId, string? ParentInstanceId, string InstanceId, ushort? VendorId, ushort? ProductId, MsiClawIdentityConfidence Confidence, string? PhysicalDeviceKey = null)
 {
     internal static MsiClawPhysicalIdentity From(ControllerDeviceInfo device)
@@ -41,7 +51,7 @@ internal sealed record MsiClawPhysicalIdentity(Guid? ContainerId, string? Parent
         return null;
     }
 }
-internal sealed record MsiClawModeTransitionResult(MsiClawModeTransitionStatus Status, MsiClawNativeMode FromMode, MsiClawNativeMode TargetMode, ushort? FromPid, ushort? TargetPid, bool WriteSucceeded, bool OldPidDisappeared, bool TargetPidAppeared, bool IdentityVerified, long TotalMs, string Reason)
+internal sealed record MsiClawModeTransitionResult(MsiClawModeTransitionStatus Status, MsiClawNativeMode FromMode, MsiClawNativeMode TargetMode, ushort? FromPid, ushort? TargetPid, bool WriteSucceeded, bool OldPidDisappeared, bool TargetPidAppeared, bool SourceIdentityVerified, bool TargetTopologyVerified, long TotalMs, string Reason)
 {
     internal bool Succeeded => Status == MsiClawModeTransitionStatus.Succeeded;
 }

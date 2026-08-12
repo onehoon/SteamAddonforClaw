@@ -339,7 +339,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
             devices.Mode = target;
             return new(MsiClawModeTransitionStatus.Succeeded, target == MsiClawNativeMode.XInput ? MsiClawNativeMode.DirectInput : MsiClawNativeMode.XInput,
                 target, null, target == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId,
-                true, true, true, true, 1, "test");
+                true, true, true, true, true, 1, "test");
         }
 
         public void ReleaseFirstSwitch() => _releaseFirstSwitch.SetResult();
@@ -371,7 +371,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
             return Task.FromResult(new MsiClawModeTransitionResult(MsiClawModeTransitionStatus.Succeeded,
                 MsiClawNativeMode.XInput, target, MsiClawHardware.XInputProductId,
                 target == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId,
-                true, true, true, true, 1, "test"));
+                true, true, true, true, true, 1, "test"));
         }
     }
 

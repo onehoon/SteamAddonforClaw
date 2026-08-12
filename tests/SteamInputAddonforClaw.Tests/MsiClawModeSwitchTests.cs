@@ -211,7 +211,7 @@ public sealed class MsiClawModeSwitchTests
         var writer = new RecordingWriter();
         var controller = new MsiClawModeController(enumerator, new MsiClawControlHidResolver(), writer, TimeSpan.FromSeconds(1), TimeSpan.Zero);
         var result = await controller.SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(oldDevice), CancellationToken.None);
-        Assert.True(result.Succeeded); Assert.True(result.OldPidDisappeared); Assert.True(result.TargetPidAppeared); Assert.True(result.IdentityVerified); Assert.Equal(MsiClawNativeMode.DirectInput, writer.Mode);
+        Assert.True(result.Succeeded); Assert.True(result.OldPidDisappeared); Assert.True(result.TargetPidAppeared); Assert.True(result.SourceIdentityVerified); Assert.True(result.TargetTopologyVerified); Assert.Equal(MsiClawNativeMode.DirectInput, writer.Mode);
     }
 
     [Fact]
@@ -227,12 +227,13 @@ public sealed class MsiClawModeSwitchTests
         var result = await controller.SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(oldDevice), CancellationToken.None);
 
         Assert.True(result.Succeeded);
-        Assert.True(result.IdentityVerified);
+        Assert.True(result.SourceIdentityVerified);
+        Assert.True(result.TargetTopologyVerified);
         Assert.Equal("USB\\VID_0DB0\\CLAW_A", writer.Device?.VerifiedIdentity.PhysicalDeviceKey);
     }
 
     [Fact]
-    public async Task Mode_controller_ignores_unrelated_sentinel_physical_root()
+    public async Task Mode_controller_rejects_multiple_independent_target_roots()
     {
         var sentinel = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
         var clawA = Topology(sentinel, "USB\\VID_0DB0&PID_1901\\CLAW_A", 0x1901);
@@ -244,9 +245,126 @@ public sealed class MsiClawModeSwitchTests
         var result = await new MsiClawModeController(enumerator, new MsiClawControlHidResolver(), writer, TimeSpan.FromSeconds(1), TimeSpan.Zero)
             .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(clawA), CancellationToken.None);
 
-        Assert.True(result.Succeeded);
+        Assert.Equal(MsiClawModeTransitionStatus.AmbiguousDevice, result.Status);
         Assert.Equal("USB\\VID_0DB0\\CLAW_A", writer.Device?.VerifiedIdentity.PhysicalDeviceKey);
         Assert.Equal(clawA.InstanceId, writer.Device?.Device.InstanceId);
+    }
+
+    [Fact]
+    public async Task XInput_to_DirectInput_succeeds_when_target_has_a_new_root_and_old_pid_remains()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var target = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1902\\ROOT_B", 0x1902);
+        var writer = new RecordingWriter();
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [source, target]), new MsiClawControlHidResolver(), writer, TimeSpan.FromSeconds(1), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.False(result.OldPidDisappeared);
+        Assert.True(result.SourceIdentityVerified);
+        Assert.True(result.TargetTopologyVerified);
+    }
+
+    [Fact]
+    public async Task DirectInput_to_XInput_succeeds_when_target_has_a_new_root_and_old_pid_remains()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1902\\ROOT_B", 0x1902);
+        var target = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_C", 0x1901);
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [source, target]), new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.XInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.False(result.OldPidDisappeared);
+        Assert.True(result.TargetTopologyVerified);
+    }
+
+    [Fact]
+    public async Task Target_Other_does_not_invoke_writer()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var writer = new RecordingWriter();
+        var result = await new MsiClawModeController(new SequenceEnumerator([source]), new MsiClawControlHidResolver(), writer)
+            .SwitchModeAsync(MsiClawNativeMode.Other, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.Equal(MsiClawModeTransitionStatus.UnsupportedDevice, result.Status);
+        Assert.Equal(0, writer.CallCount);
+        Assert.Null(result.TargetPid);
+    }
+
+    [Fact]
+    public async Task Current_Other_does_not_invoke_writer()
+    {
+        var source = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1903, 0, 0);
+        var writer = new RecordingWriter();
+        var result = await new MsiClawModeController(new SequenceEnumerator([source]), new MsiClawControlHidResolver(), writer)
+            .SwitchModeAsync(MsiClawNativeMode.XInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.Equal(MsiClawModeTransitionStatus.UnsupportedDevice, result.Status);
+        Assert.Equal(0, writer.CallCount);
+    }
+
+    [Fact]
+    public async Task Ambiguous_target_topology_fails_closed()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var first = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1902\\ROOT_B", 0x1902);
+        var second = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1902\\ROOT_C", 0x1902);
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [first, second]), new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.Equal(MsiClawModeTransitionStatus.AmbiguousDevice, result.Status);
+    }
+
+    [Fact]
+    public async Task Target_aliases_on_same_logical_device_are_not_ambiguous()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var targetContainer = Guid.NewGuid();
+        var target = Device(targetContainer, "USB\\TARGET_PARENT", "HID\\TARGET_A", 0x1902, 0xFFF0, 0x0040);
+        var alias = Device(targetContainer, "USB\\TARGET_PARENT", "HID\\TARGET_B", 0x1902, 0xFFF0, 0x0040);
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [target, alias]), new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.TargetTopologyVerified);
+    }
+
+    [Fact]
+    public async Task Sentinel_target_aliases_under_same_physical_root_are_one_logical_target()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var root = "USB\\VID_0DB0&PID_1902\\ROOT_B";
+        var first = TargetAlias(root, "PARENT_MI_00", "HID\\TARGET_A");
+        var second = TargetAlias(root, "PARENT_MI_01", "HID\\TARGET_B");
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [first, second]), new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromSeconds(1), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.TargetTopologyVerified);
+    }
+
+    [Fact]
+    public async Task Transient_write_failure_re_resolves_and_retries_before_target_appears()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var target = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1902\\ROOT_B", 0x1902);
+        var writer = new RecordingWriter { FailuresRemaining = 1 };
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [source], [target]), new MsiClawControlHidResolver(), writer, TimeSpan.FromSeconds(1), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(2, writer.CallCount);
+    }
+
+    [Fact]
+    public async Task Wrong_target_usage_is_not_accepted()
+    {
+        var source = Topology(Guid.NewGuid(), "USB\\VID_0DB0&PID_1901\\ROOT_A", 0x1901);
+        var wrongTarget = Device(Guid.NewGuid(), "USB\\ROOT_B", "HID\\TARGET", 0x1902, 0xFFF0, 0x0001);
+        var result = await new MsiClawModeController(new SequenceEnumerator([source], [wrongTarget]), new MsiClawControlHidResolver(), new RecordingWriter(), TimeSpan.FromMilliseconds(10), TimeSpan.Zero)
+            .SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
+
+        Assert.Equal(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, result.Status);
     }
 
     private static ControllerDeviceInfo Device(Guid? container, string? parent, string instance, ushort pid = 0x1901, ushort usagePage = 0, ushort usage = 0) => new(instance, container, parent, parent is null ? [] : [parent], "HID", [], [], "HIDClass", null, null, 0x0DB0, pid, true, UsagePage: usagePage, Usage: usage);
@@ -256,17 +374,23 @@ public sealed class MsiClawModeSwitchTests
         var child = $"USB\\VID_0DB0&PID_{pid:X4}&MI_00\\{root[^1]}";
         return new(child, container, root, [root], "HID", [], [], "HIDClass", null, null, 0x0DB0, pid, true, UsagePage: pid == 0x1901 ? (ushort)0xFFA0 : (ushort)0xFFF0, Usage: pid == 0x1901 ? (ushort)1 : (ushort)0x40);
     }
+    private static ControllerDeviceInfo TargetAlias(string root, string parent, string instance) =>
+        new(instance, Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), parent, [root], "HID", [], [], "HIDClass", null, null, 0x0DB0, 0x1902, true, UsagePage: 0xFFF0, Usage: 0x0040);
 
     private sealed class SequenceEnumerator(params IReadOnlyList<ControllerDeviceInfo>[] states) : IControllerDeviceEnumerator
     { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Length - 1)]; }
     private sealed class RecordingWriter : IMsiClawModeWriter
     {
+        public int CallCount { get; private set; }
+        public int FailuresRemaining { get; set; }
         public MsiClawNativeMode Mode { get; private set; }
         public MsiClawControlHidDevice? Device { get; private set; }
         public Task<bool> WriteAsync(MsiClawControlHidDevice device, MsiClawNativeMode mode, CancellationToken cancellationToken)
         {
+            CallCount++;
             Device = device;
             Mode = mode;
+            if (FailuresRemaining > 0) { FailuresRemaining--; return Task.FromResult(false); }
             return Task.FromResult(true);
         }
     }
