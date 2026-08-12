@@ -21,13 +21,13 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
     {
         var candidates = FindCandidates(receiver);
         if (candidates is null || candidates.Count == 0) return null;
-        return SteamController1304CandidateIteration.Query(candidates, candidate =>
+        return SteamController1304CandidateIteration.Query(candidates, timeout, CandidateTimeout, (candidate, candidateBudget) =>
         {
             AppLog.Debug("SteamController1304", "Receiver HID candidate query started.",
                 ("HidInterface", candidate.Path), ("UsagePage", "0xFF00"), ("Usage", "0x0001"),
                 ("InputReportByteLength", candidate.InputReportByteLength), ("OutputReportByteLength", candidate.OutputReportByteLength),
                 ("FeatureReportByteLength", candidate.FeatureReportByteLength));
-            return QueryCandidate(candidate, CandidateTimeout);
+            return QueryCandidate(candidate, candidateBudget);
         });
     }
 
@@ -146,15 +146,25 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
 
 internal static class SteamController1304CandidateIteration
 {
-    internal static TReport? Query<TCandidate, TReport>(IReadOnlyList<TCandidate> candidates, Func<TCandidate, TReport?> query)
+    internal static TReport? Query<TCandidate, TReport>(IReadOnlyList<TCandidate> candidates, TimeSpan overallTimeout, TimeSpan candidateTimeoutCap, Func<TCandidate, TimeSpan, TReport?> query)
         where TReport : class
     {
+        var deadline = Stopwatch.GetTimestamp() + (long)(overallTimeout.TotalSeconds * Stopwatch.Frequency);
+        var allocatedTicks = 0L;
+        var overallTicks = (long)(overallTimeout.TotalSeconds * Stopwatch.Frequency);
+        var capTicks = Math.Max(1L, (long)(candidateTimeoutCap.TotalSeconds * Stopwatch.Frequency));
         var timedOut = false;
-        foreach (var candidate in candidates)
+        for (var index = 0; index < candidates.Count; index++)
         {
+            var remainingCandidates = candidates.Count - index;
+            var remainingTicks = deadline - Stopwatch.GetTimestamp();
+            if (remainingTicks <= 0) { timedOut = true; break; }
+            var budgetTicks = Math.Max(1, Math.Min(capTicks, (overallTicks - allocatedTicks) / remainingCandidates));
+            allocatedTicks += budgetTicks;
+            var candidateBudget = TimeSpan.FromSeconds((double)budgetTicks / Stopwatch.Frequency);
             try
             {
-                var report = query(candidate);
+                var report = query(candidates[index], candidateBudget);
                 if (report is not null) return report;
             }
             catch (TimeoutException) { timedOut = true; }

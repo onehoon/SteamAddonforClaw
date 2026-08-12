@@ -35,7 +35,7 @@ public sealed class SteamController1304HidInteropTests
     public void CandidateTimeoutsDoNotPreventLaterCandidateFromSucceeding()
     {
         var queried = new List<int>();
-        var result = SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], candidate =>
+        var result = SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(100), (candidate, _) =>
         {
             queried.Add(candidate);
             if (candidate < 3) throw new TimeoutException();
@@ -51,7 +51,7 @@ public sealed class SteamController1304HidInteropTests
     {
         var queried = new List<int>();
 
-        Assert.Throws<TimeoutException>(() => SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], candidate =>
+        Assert.Throws<TimeoutException>(() => SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(100), (candidate, _) =>
         {
             queried.Add(candidate);
             throw new TimeoutException();
@@ -65,6 +65,21 @@ public sealed class SteamController1304HidInteropTests
     {
         Assert.Equal(TimeSpan.FromMilliseconds(100), WindowsSteamController1304ReadOnlyTransport.CandidateTimeoutForTests);
         Assert.True(WindowsSteamController1304ReadOnlyTransport.CandidateTimeoutForTests < TimeSpan.FromMilliseconds(250));
+    }
+
+    [Fact]
+    public void CandidateBudgetsArePositiveCappedAndFitOverallTimeout()
+    {
+        var budgets = new List<TimeSpan>();
+        Assert.Throws<TimeoutException>(() => SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3, 4], TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(100), (_, budget) =>
+        {
+            budgets.Add(budget);
+            throw new TimeoutException();
+        }));
+
+        Assert.Equal(4, budgets.Count);
+        Assert.All(budgets, budget => Assert.True(budget > TimeSpan.Zero && budget <= TimeSpan.FromMilliseconds(100)));
+        Assert.True(budgets.Aggregate(TimeSpan.Zero, (total, budget) => total + budget) <= TimeSpan.FromMilliseconds(250));
     }
 
     [Fact]
