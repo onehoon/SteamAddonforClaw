@@ -317,8 +317,8 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         var journal = loaded.Journal!;
         AppLog.Info("Recovery", "Incomplete recovery journal detected.", ("SessionId", journal.RecoverySessionId), ("SchemaVersion", journal.SchemaVersion),
             ("DeviceId", journal.OriginalDeviceState?.DeviceId), ("RecordedMutations", journal.Mutations.HasRecordedMutations));
-        if (!CanRecoverRecordedMutations(journal, includeVirtualOutput: false, out var capabilityReason))
-            return LogFailure(new(RecoveryStatus.Failure, capabilityReason, journal), stopwatch);
+        if (!ValidateRecoveryStructure(journal, out var structureReason))
+            return LogFailure(new(RecoveryStatus.Failure, structureReason, journal), stopwatch);
 
         if (!journal.Mutations.HasRecordedMutations)
         {
@@ -326,6 +326,40 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             if (emptyCompletion.Status == RecoveryStatus.Success)
                 AppLog.Info("Recovery", "Empty recovery journal completed.", ("SessionId", journal.RecoverySessionId), ("JournalDeleted", true));
             return emptyCompletion with { Journal = journal };
+        }
+
+        if (!TryVerifyVirtualOutputAbsent(journal, out var virtualReason))
+            return LogFailure(new(RecoveryStatus.Failure, virtualReason, journal), stopwatch);
+        if (journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } virtualEntries)
+        {
+            foreach (var entry in virtualEntries.Reverse())
+            {
+                var completion = CompleteAddonOwnedVirtualDeviceMutation(journal.RecoverySessionId, entry.MutationId);
+                if (completion.Status != RecoveryStatus.Success) return LogFailure(completion with { Journal = journal }, stopwatch);
+                journal = completion.Journal ?? journal with
+                {
+                    Mutations = journal.Mutations with
+                    {
+                        AddonOwnedVirtualDeviceEntries = journal.Mutations.AddonOwnedVirtualDeviceEntries?.Where(current => current.MutationId != entry.MutationId).ToArray()
+                    }
+                };
+            }
+        }
+
+        if (journal.Mutations.DeviceNativeStateChanged)
+        {
+            RecoveryResult recovered;
+            try { recovered = await RecoverNativeStateAsync(journal, cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) { return LogFailure(new(RecoveryStatus.Failure, $"Native-state recovery failed: {exception.GetType().Name}", journal), stopwatch); }
+            if (recovered.Status != RecoveryStatus.Success) return LogFailure(recovered, stopwatch);
+            var nativeCompletion = CompleteDeviceNativeStateMutation(journal.RecoverySessionId);
+            if (nativeCompletion.Status != RecoveryStatus.Success) return LogFailure(nativeCompletion with { Journal = journal }, stopwatch);
+            journal = nativeCompletion.Journal ?? journal with
+            {
+                OriginalDeviceState = null,
+                Mutations = journal.Mutations with { DeviceNativeStateChanged = false }
+            };
         }
 
         if (journal.Mutations.OriginalHidHideActiveState is { } originalActive)
@@ -346,25 +380,6 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             var completion = CompleteHidHideActiveStateMutation(journal.RecoverySessionId);
             if (completion.Status != RecoveryStatus.Success) return LogFailure(completion with { Journal = journal }, stopwatch);
             journal = completion.Journal ?? journal with { Mutations = journal.Mutations with { OriginalHidHideActiveState = null } };
-        }
-
-        if (journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } virtualEntries)
-        {
-            for (var index = virtualEntries.Count - 1; index >= 0; index--)
-            {
-                var entry = virtualEntries[index];
-                if (IsJournaledVirtualDeviceStillPresent(entry))
-                    continue;
-                var completion = CompleteAddonOwnedVirtualDeviceMutation(journal.RecoverySessionId, entry.MutationId);
-                if (completion.Status != RecoveryStatus.Success) return LogFailure(completion with { Journal = journal }, stopwatch);
-                journal = completion.Journal ?? journal with
-                {
-                    Mutations = journal.Mutations with
-                    {
-                        AddonOwnedVirtualDeviceEntries = virtualEntries.Take(index).ToArray()
-                    }
-                };
-            }
         }
 
         var deviceAdditions = journal.Mutations.HidHideDeviceAdditions ?? [];
@@ -398,18 +413,6 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
                 }
             };
         }
-        if (journal.Mutations.DeviceNativeStateChanged)
-        {
-            var recovered = await RecoverNativeStateAsync(journal, cancellationToken).ConfigureAwait(false);
-            if (recovered.Status != RecoveryStatus.Success) return LogFailure(recovered, stopwatch);
-            var nativeCompletion = CompleteDeviceNativeStateMutation(journal.RecoverySessionId);
-            if (nativeCompletion.Status != RecoveryStatus.Success) return LogFailure(nativeCompletion with { Journal = journal }, stopwatch);
-            journal = nativeCompletion.Journal ?? journal with
-            {
-                OriginalDeviceState = null,
-                Mutations = journal.Mutations with { DeviceNativeStateChanged = false }
-            };
-        }
         var completed = LoadJournal().Status == RecoveryStatus.NoRecoveryNeeded
             ? new RecoveryResult(RecoveryStatus.Success, "Recovery journal deleted.", journal)
             : new RecoveryResult(RecoveryStatus.Failure, "Recovery journal remains after recoverable mutations were restored.", journal);
@@ -418,50 +421,14 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         return completed with { Journal = journal };
     }
 
-    private bool CanRecoverRecordedMutations(RecoveryJournal journal, bool includeVirtualOutput, out string reason)
+    private static bool ValidateRecoveryStructure(RecoveryJournal journal, out string reason)
     {
         if (!IsValidJournal(journal)) { reason = "Recovery journal is missing required state."; return false; }
         if (journal.Mutations.AddonOwnedVirtualDevices is { Count: > 0 }) { reason = "Recorded virtual-device mutations are unsupported."; return false; }
-        if (includeVirtualOutput && journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } entries)
-        {
-            if (deviceEnumerator is null) { reason = "Virtual-device recovery enumeration is unavailable."; return false; }
-            var present = deviceEnumerator.EnumeratePresentDevices();
-            foreach (var entry in entries)
-            {
-                var ids = entry.ResolvedInstanceIds.Count > 0 ? entry.ResolvedInstanceIds :
-                    present.Where(device => device.VendorId == entry.VendorId && device.ProductId == entry.ProductId &&
-                        !entry.PreExistingMatchingInstanceIds.Contains(device.InstanceId, StringComparer.OrdinalIgnoreCase))
-                        .Select(device => device.InstanceId).ToArray();
-                if (ids.Any(id => present.Any(device => string.Equals(device.InstanceId, id, StringComparison.OrdinalIgnoreCase))))
-                { reason = "A journaled virtual device is still present."; return false; }
-            }
-        }
         if (journal.Mutations.TemporaryXbox360OutputCreated) { reason = "Recorded Xbox output mutations are unsupported."; return false; }
-        if (journal.Mutations.ExecutableWhitelistAdditions is { Count: > 0 } || journal.Mutations.HidHideDeviceAdditions is { Count: > 0 })
-        {
-            if (hidHideClient is null) { reason = "HidHide recovery support is unavailable."; return false; }
-            var inspection = hidHideClient.Inspect();
-            if (!inspection.IsConfigurationReadable)
-            { reason = $"HidHide recovery inspection is unsafe: {inspection.Status}."; return false; }
-        }
         if (journal.Mutations.HidHideDeviceAdditions is { Count: > 0 } &&
             journal.Mutations.HidHideDeviceAdditions.Any(string.IsNullOrWhiteSpace))
         { reason = "The journaled HidHide device entry is invalid."; return false; }
-        if (journal.Mutations.DeviceNativeStateChanged && (deviceRegistry is null || journal.OriginalDeviceState is null))
-        { reason = "Native-state recovery support is unavailable."; return false; }
-        if (journal.Mutations.DeviceNativeStateChanged)
-        {
-            if (!deviceRegistry!.TryGetById(journal.OriginalDeviceState!.DeviceId, out var adapter))
-            { reason = "The journaled handheld device adapter is unavailable."; return false; }
-            if (adapter.NativeState is null || adapter.NativeState.DeviceId != journal.OriginalDeviceState.DeviceId)
-            { reason = "The journaled handheld device native-state manager is unavailable."; return false; }
-        }
-        if (journal.Mutations.OriginalHidHideActiveState is not null)
-        {
-            if (hidHideClient is null) { reason = "HidHide active-state recovery support is unavailable."; return false; }
-            var inspection = hidHideClient.Inspect();
-            if (!inspection.IsConfigurationReadable) { reason = "HidHide active-state recovery inspection is unsafe."; return false; }
-        }
         reason = "Recoverable recorded mutations.";
         return true;
     }
@@ -473,15 +440,25 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             journaledEntries.Any(recorded => string.Equals(recorded, current, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private bool IsJournaledVirtualDeviceStillPresent(AddonOwnedVirtualDeviceRecoveryEntry entry)
+    private bool TryVerifyVirtualOutputAbsent(RecoveryJournal journal, out string reason)
     {
-        if (deviceEnumerator is null) return true;
-        var present = deviceEnumerator.EnumeratePresentDevices();
-        var ids = entry.ResolvedInstanceIds.Count > 0 ? entry.ResolvedInstanceIds :
-            present.Where(device => device.VendorId == entry.VendorId && device.ProductId == entry.ProductId &&
-                !entry.PreExistingMatchingInstanceIds.Contains(device.InstanceId, StringComparer.OrdinalIgnoreCase))
-                .Select(device => device.InstanceId).ToArray();
-        return ids.Any(id => present.Any(device => string.Equals(device.InstanceId, id, StringComparison.OrdinalIgnoreCase)));
+        var entries = journal.Mutations.AddonOwnedVirtualDeviceEntries;
+        if (entries is not { Count: > 0 }) { reason = "No journaled virtual output."; return true; }
+        if (deviceEnumerator is null) { reason = "Virtual-device recovery enumeration is unavailable."; return false; }
+        IReadOnlyList<ControllerDeviceInfo> present;
+        try { present = deviceEnumerator.EnumeratePresentDevices(); }
+        catch (Exception exception) { reason = $"Virtual-device recovery enumeration failed: {exception.GetType().Name}."; return false; }
+        foreach (var entry in entries)
+        {
+            var ids = entry.ResolvedInstanceIds.Count > 0 ? entry.ResolvedInstanceIds :
+                present.Where(device => device.VendorId == entry.VendorId && device.ProductId == entry.ProductId &&
+                    !entry.PreExistingMatchingInstanceIds.Contains(device.InstanceId, StringComparer.OrdinalIgnoreCase))
+                    .Select(device => device.InstanceId).ToArray();
+            if (ids.Any(id => present.Any(device => string.Equals(device.InstanceId, id, StringComparison.OrdinalIgnoreCase))))
+            { reason = "A journaled virtual device is still present."; return false; }
+        }
+        reason = "All journaled virtual devices are absent.";
+        return true;
     }
 
     private async Task<RecoveryResult> RecoverNativeStateAsync(RecoveryJournal journal, CancellationToken cancellationToken)
