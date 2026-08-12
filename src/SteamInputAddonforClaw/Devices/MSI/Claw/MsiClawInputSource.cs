@@ -2,6 +2,7 @@ using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
+using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -155,6 +156,8 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
             AppLog.Info("DirectInput", "Device acquire started.", ("TestSession", session.Id), ("InstanceGuid", descriptor.InstanceGuid));
             var stopwatch = Stopwatch.StartNew();
             device.Acquire();
+            session.AcquiredAt = Stopwatch.GetTimestamp();
+            session.AcquireDurationMs = stopwatch.ElapsedMilliseconds;
             AppLog.Info("DirectInput", "Device acquire succeeded.", ("TestSession", session.Id), ("ElapsedMs", stopwatch.ElapsedMilliseconds));
         }
         catch (Exception exception)
@@ -244,6 +247,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         var readFailures = 0;
         var cleanupSucceeded = true;
         var stopReason = MsiClawInputStopReason.Stopped;
+        var firstReadLogged = false;
 
         try
         {
@@ -259,6 +263,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                     readFailures++;
                     stopReason = MsiClawInputStopReason.ReadStateFailed;
                     AppLog.Warn("DirectInput", "Controller state read failed.", exception, ("TestSession", session.Id), ("Attempt", readFailures), ("Reason", "ReadStateFailed"), ("Action", "StopDiagnostic"));
+                    AppLog.Debug("RoutingTrace", "Physical input read failed.", ("Event", "PhysicalInputReadFailed"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TestSession", session.Id), ("SessionAgeMs", Elapsed(session.StartedAt)), ("LastSuccessfulReadAgeMs", session.LastSuccessfulReadAt is { } last ? Elapsed(last) : -1), ("SuccessfulReadCount", session.SuccessfulReadCount), ("ReadFailures", readFailures), ("ExceptionType", exception.GetType().Name));
                     break;
                 }
 
@@ -269,7 +274,15 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                     break;
                 }
 
+                var successfulReadAt = Stopwatch.GetTimestamp();
                 Volatile.Write(ref _latestState, new StateBox(current));
+                session.SuccessfulReadCount++;
+                session.LastSuccessfulReadAt = successfulReadAt;
+                if (!firstReadLogged)
+                {
+                    firstReadLogged = true;
+                    AppLog.Debug("RoutingTrace", "Physical input first read succeeded.", ("Event", "PhysicalInputFirstRead"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TestSession", session.Id), ("AcquireElapsedMs", session.AcquireDurationMs), ("FirstReadAfterAcquireMs", ElapsedBetween(session.AcquiredAt, successfulReadAt)), ("SessionAgeMs", Elapsed(session.StartedAt)));
+                }
 
                 if (!hasPrevious)
                 {
@@ -407,6 +420,9 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         AppLog.Debug("MsiInput", "ControllerState changed.", ("TestSession", session), ("M1", $"{IsM1Pressed(previous)}->{IsM1Pressed(current)}"), ("M2", $"{IsM2Pressed(previous)}->{IsM2Pressed(current)}"));
     }
 
+    private static long Elapsed(long started) => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+    private static long ElapsedBetween(long started, long ended) => (long)Stopwatch.GetElapsedTime(started, ended).TotalMilliseconds;
+
     private sealed class InputSession(int id, IDirectInputDeviceEnumerator enumerator, IDirectInputDevice device, CancellationTokenSource cancellation)
     {
         public int Id { get; } = id;
@@ -414,6 +430,11 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         public IDirectInputDevice Device { get; } = device;
         public CancellationTokenSource Cancellation { get; } = cancellation;
         public Task? PollingTask { get; set; }
+        public long StartedAt { get; } = Stopwatch.GetTimestamp();
+        public long AcquiredAt { get; set; }
+        public long AcquireDurationMs { get; set; }
+        public long? LastSuccessfulReadAt { get; set; }
+        public int SuccessfulReadCount { get; set; }
     }
 
 }

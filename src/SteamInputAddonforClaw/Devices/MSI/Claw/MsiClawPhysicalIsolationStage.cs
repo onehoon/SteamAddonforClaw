@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
@@ -66,6 +67,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
 
     public ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
     {
+        var totalStarted = Stopwatch.GetTimestamp();
         cancellationToken.ThrowIfCancellationRequested(); Prepared? prepared; lock (_sync) prepared = _prepared;
         if (prepared is null) return ValueTask.FromResult(Failure("PhysicalIsolationNotPrepared"));
         if (!Matches(prepared)) return ValueTask.FromResult(Failure("PhysicalIsolationDrift"));
@@ -126,11 +128,13 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         }
         lock (_sync) _prepared = null;
         AppLog.Debug("PhysicalIsolation", "PhysicalIsolation active", ("WhitelistPreExisting", prepared.WhitelistPreExisting), ("WhitelistAddonOwned", _ownedWhitelist), ("Entries", string.Join("|", _entries.Select(entry => $"{entry.Value};PreExisting={entry.PreExisting};AddonOwned={entry.Owned}"))));
+        AppLog.Debug("RoutingTrace", "Physical isolation completed.", ("Event", "PhysicalIsolationCompleted"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("EntryCount", _entries.Length), ("WhitelistAdded", _ownedWhitelist), ("HiddenEntriesAdded", _entries.Count(entry => entry.Owned)), ("ActiveStateChanged", _activeMutationOwned), ("Result", "Success"), ("Reason", "PhysicalIsolationActive"));
         return ValueTask.FromResult(Success("PhysicalIsolationActive"));
     }
 
     public ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
     {
+        var totalStarted = Stopwatch.GetTimestamp();
         cancellationToken.ThrowIfCancellationRequested();
         if (_activeMutationOwned || _activeMutationJournaled)
         {
@@ -174,6 +178,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         }
         lock (_sync) _prepared = null;
         AppLog.Debug("PhysicalIsolation", "PhysicalIsolation restored", ("WhitelistAddonOwned", _ownedWhitelist), ("Entries", string.Join("|", _entries.Select(entry => $"{entry.Value};PreExisting={entry.PreExisting};AddonOwned={entry.Owned}"))));
+        AppLog.Debug("RoutingTrace", "Physical isolation rollback completed.", ("Event", "PhysicalIsolationRollbackCompleted"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("Result", "Success"), ("Reason", "PhysicalIsolationRestored"));
         return ValueTask.FromResult(Success("PhysicalIsolationRestored"));
     }
 
@@ -183,4 +188,5 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     private static bool Try(Func<bool> mutation) { try { return mutation(); } catch { return false; } }
     private static RoutingStageOperationResult Success(string reason) => RoutingStageOperationResult.Success(reason);
     private static RoutingStageOperationResult Failure(string reason) => RoutingStageOperationResult.Failure(reason);
+    private static long Elapsed(long started) => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 }
