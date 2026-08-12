@@ -42,7 +42,7 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
             for (var i = 0; i < GetCollectionCount(collection); i++)
             {
                 var sensor = GetCollectionItem(collection, i);
-                try { sensors.Add(ReadMetadata(sensor)); }
+                try { sensors.Add(ReadCandidate(sensor)); }
                 finally { if (sensor != IntPtr.Zero) Marshal.Release(sensor); }
             }
         }
@@ -65,6 +65,24 @@ internal sealed class ClawSensorProbeSensorApi : IDisposable
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
         try { return (ReadValue(report, 7), ReadValue(report, 8), ReadValue(report, 9)); }
         finally { if (report != IntPtr.Zero) Marshal.Release(report); }
+    }
+    internal static string ReadOptionalMetadata(IntPtr sensor, int slot) => TryReadString(sensor, slot);
+    private static string TryReadString(IntPtr sensor, int slot)
+    {
+        try { return ReadString(sensor, slot); }
+        catch { return "Unavailable"; }
+    }
+    internal static ClawSensorProbeCandidate ReadCandidate(IntPtr sensor)
+    {
+        var baseCandidate = ReadMetadata(sensor);
+        return baseCandidate with
+        {
+            Manufacturer = "Unavailable: optional property not exposed by verified contract",
+            Model = "Unavailable: optional property not exposed by verified contract",
+            PersistentUniqueId = "Unavailable: optional property not exposed by verified contract",
+            MinimumReportInterval = "Unavailable: optional property not exposed by verified contract",
+            CustomUsage = "Unavailable: optional property not exposed by verified contract"
+        };
     }
     private static double ReadValue(IntPtr report, int pid)
     {

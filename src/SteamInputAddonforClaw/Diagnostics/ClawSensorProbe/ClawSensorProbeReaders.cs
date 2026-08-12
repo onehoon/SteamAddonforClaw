@@ -12,6 +12,9 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
     private long _sequence;
     internal ClawSensorProbeLiveSnapshot Snapshot { get; } = new();
     internal ClawSensorDiscovery Discovery { get; }
+    internal IReadOnlyList<string> Errors => _errors;
+    internal bool ShutdownTimedOut { get; private set; }
+    private readonly List<string> _errors = [];
     public ClawSensorProbeReaders(ClawSensorProbeSensorApi api, ClawSensorProbeSessionWriter writer, ClawSensorDiscovery discovery, ClawSensorProbePhase phase, int phasePass)
     {
         _api = api;
@@ -52,13 +55,14 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
                 }
             }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+            catch (Exception exception) { lock (_errors) _errors.Add($"{sensorName} reader failed: {exception.Message}"); }
             finally { if (sensor != IntPtr.Zero) Marshal.Release(sensor); }
         }, _stop.Token);
     }
     public async ValueTask DisposeAsync()
     {
         _stop.Cancel();
-        try { await Task.WhenAll(_workers).WaitAsync(TimeSpan.FromSeconds(3)); } catch { }
+        try { await Task.WhenAll(_workers).WaitAsync(TimeSpan.FromSeconds(3)); } catch (TimeoutException) { ShutdownTimedOut = true; lock (_errors) _errors.Add("Sensor reader shutdown exceeded the bounded wait."); } catch { }
         _stop.Dispose();
     }
 }

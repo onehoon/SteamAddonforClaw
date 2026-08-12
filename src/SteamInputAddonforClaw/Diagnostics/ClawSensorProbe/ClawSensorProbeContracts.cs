@@ -24,6 +24,8 @@ internal sealed record ClawSensorDiscovery(IReadOnlyList<ClawSensorProbeCandidat
 }
 
 internal sealed record ClawSensorProbeSample(long Sequence, DateTimeOffset UtcTimestamp, double ElapsedMs, ClawSensorProbePhase Phase, int PhasePass, string Sensor, double X, double Y, double Z, double SampleIntervalMs);
+internal sealed record ClawSensorProbePhaseLog(string name, int pass, double start_elapsed_ms, double end_elapsed_ms);
+internal sealed record ClawSensorProbeError(string Code, string Message);
 
 internal sealed class ClawSensorProbeStatistics
 {
@@ -65,17 +67,24 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     private readonly string _reportPath;
     private readonly ClawSensorProbeStatistics _gyro = new();
     private readonly ClawSensorProbeStatistics _accel = new();
-    private readonly List<object> _phases = [];
+    private readonly List<ClawSensorProbePhaseLog> _phases = [];
+    private readonly Dictionary<string, int> _phaseRows = new(StringComparer.Ordinal);
     private ClawSensorDiscovery? _discovery;
     private object _device = new { Manufacturer = "Unavailable", ProductName = "Unavailable", BaseBoardProduct = "Unavailable", ResolvedAddonDevice = "MSI Claw", ResolvedAddonModel = "Unknown / unresolved" };
+    private readonly List<string> _errors = [];
     private bool _finalized;
     private long _dropped;
+    private long _droppedGyro;
+    private long _droppedAccel;
     public long DroppedSampleCount => Interlocked.Read(ref _dropped);
+    public long DroppedGyroscopeCount => Interlocked.Read(ref _droppedGyro);
+    public long DroppedAccelerometerCount => Interlocked.Read(ref _droppedAccel);
     public string DirectoryPath { get; }
     public ClawSensorProbeStatistics GyroscopeSummary => _gyro;
     public ClawSensorProbeStatistics AccelerometerSummary => _accel;
     public void SetDiscovery(ClawSensorDiscovery discovery) => _discovery = discovery;
     public void SetDevice(object device) => _device = device;
+    public void AddError(string error) { lock (_errors) _errors.Add(error); }
     public ClawSensorProbeSessionWriter(string root, string sessionId)
     {
         DirectoryPath = Path.Combine(root, sessionId);
@@ -87,17 +96,22 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
     }
     public void Write(ClawSensorProbeSample sample)
     {
-        if (_finalized || !_channel.Writer.TryWrite(sample)) Interlocked.Increment(ref _dropped);
+        if (_finalized || !_channel.Writer.TryWrite(sample)) { Interlocked.Increment(ref _dropped); if (sample.Sensor == "GYRO") Interlocked.Increment(ref _droppedGyro); if (sample.Sensor == "ACCEL") Interlocked.Increment(ref _droppedAccel); }
     }
     public void WriteTransition(ClawSensorProbePhase phase, int pass, double elapsedMs) => Write(new(0, DateTimeOffset.UtcNow, elapsedMs, phase, pass, "TRANSITION", 0, 0, 0, 0));
+    public void EndPhase(ClawSensorProbePhase phase, int pass, double elapsedMs)
+    {
+        var key = $"{phase}:{pass}";
+        if (_phaseRows.TryGetValue(key, out var index)) _phases[index] = _phases[index] with { end_elapsed_ms = elapsedMs };
+    }
     private async Task WriteLoopAsync()
     {
         await foreach (var sample in _channel.Reader.ReadAllAsync())
         {
             _csv.WriteLine(string.Join(',', sample.Sequence.ToString(CultureInfo.InvariantCulture), sample.UtcTimestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture), sample.ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture), sample.Phase, sample.PhasePass, sample.Sensor, sample.X.ToString("R", CultureInfo.InvariantCulture), sample.Y.ToString("R", CultureInfo.InvariantCulture), sample.Z.ToString("R", CultureInfo.InvariantCulture), sample.SampleIntervalMs.ToString("0.###", CultureInfo.InvariantCulture)));
             if (sample.Sensor is "GYRO" or "ACCEL") (sample.Sensor == "GYRO" ? _gyro : _accel).Add(sample.SampleIntervalMs);
-            var phase = _phases.FirstOrDefault(x => x.ToString()!.StartsWith($"{sample.Phase}:{sample.PhasePass}", StringComparison.Ordinal));
-            if (phase is null) _phases.Add(new { name = sample.Phase.ToString(), pass = sample.PhasePass, start_elapsed_ms = sample.ElapsedMs, end_elapsed_ms = sample.ElapsedMs });
+            var key = $"{sample.Phase}:{sample.PhasePass}";
+            if (!_phaseRows.ContainsKey(key)) { _phaseRows[key] = _phases.Count; _phases.Add(new(sample.Phase.ToString(), sample.PhasePass, sample.ElapsedMs, sample.ElapsedMs)); }
         }
     }
     public async ValueTask FinalizeAsync(CancellationToken cancellationToken = default)
@@ -108,7 +122,8 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
         await _writerTask;
         await _csv.FlushAsync(cancellationToken);
         await _csv.DisposeAsync();
-        var report = new { SchemaVersion = 1, SessionId = Path.GetFileName(DirectoryPath), StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, Backend = "Windows Sensor API / ISensorManager", SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, DataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, DroppedSampleCount = DroppedSampleCount, Errors = _discovery?.Errors ?? [], Warnings = DroppedSampleCount == 0 ? Array.Empty<string>() : new[] { "The diagnostic writer queue was full and samples were dropped." } };
+        string[] errors; lock (_errors) errors = (_discovery?.Errors ?? []).Concat(_errors).Distinct(StringComparer.Ordinal).ToArray();
+        var report = new { SchemaVersion = 1, SessionId = Path.GetFileName(DirectoryPath), StartUtc = Directory.GetCreationTimeUtc(DirectoryPath), EndUtc = DateTime.UtcNow, Device = _device, Backend = "Windows Sensor API / ISensorManager", SensorDiscovery = _discovery?.Sensors, SelectedGyroscope = _discovery?.Gyroscope, SelectedAccelerometer = _discovery?.Accelerometer, DataKeys = new { Guid = "B14C764F-07CF-41E8-9D82-EBE3D0776A6F", X = 7, Y = 8, Z = 9 }, Phases = _phases, GyroscopeSummary = _gyro, AccelerometerSummary = _accel, DroppedSampleCount = DroppedSampleCount, DroppedGyroscopeCount = DroppedGyroscopeCount, DroppedAccelerometerCount = DroppedAccelerometerCount, Errors = errors, Warnings = DroppedSampleCount == 0 ? Array.Empty<string>() : new[] { "The diagnostic writer queue was full and samples were dropped." } };
         await File.WriteAllTextAsync(_reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, cancellationToken);
     }
     public ValueTask DisposeAsync() => new(FinalizeAsync().AsTask());

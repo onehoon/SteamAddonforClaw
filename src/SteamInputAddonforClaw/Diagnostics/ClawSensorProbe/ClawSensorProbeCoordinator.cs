@@ -1,4 +1,5 @@
 namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
+using System.Diagnostics;
 
 internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
 {
@@ -7,6 +8,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private ClawSensorProbeSensorApi? _api;
     private ClawSensorProbeReaders? _readers;
     private int _disposed;
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
     public ClawSensorProbeState State => _workflow.State;
     public ClawSensorProbeWorkflow Workflow => _workflow;
     public string? OutputDirectory => _writer?.DirectoryPath;
@@ -14,8 +16,10 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     public ClawSensorProbeStatistics? GyroscopeSummary => _writer?.GyroscopeSummary;
     public ClawSensorProbeStatistics? AccelerometerSummary => _writer?.AccelerometerSummary;
     public long DroppedSampleCount => _writer?.DroppedSampleCount ?? 0;
+    public IReadOnlyList<string> ReaderErrors => _readers?.Errors ?? [];
+    public ClawSensorDiscovery? Discovery => _readers?.Discovery;
 
-    public void Prepare() => _workflow.Ready();
+    public void Prepare() { _workflow.Discovering(); _workflow.Ready(); }
     public void Start(string? root = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
@@ -41,7 +45,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     }
     public async Task RestartPhaseCaptureAsync()
     {
-        if (_readers is not null) { await _readers.DisposeAsync(); _readers = null; }
+        if (_readers is not null) { await _readers.DisposeAsync(); foreach (var error in _readers.Errors) _writer?.AddError(error); _readers = null; }
         if (_api is null || _writer is null) throw new InvalidOperationException("The probe session is not active.");
         var api = _api ?? throw new InvalidOperationException("The sensor API is unavailable.");
         var discovery = await Task.Run(api.Discover);
@@ -53,7 +57,9 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     public void Next() => _workflow.Next();
     public void Back() => _workflow.Back();
     public void Write(ClawSensorProbeSample sample) => _writer?.Write(sample);
-    public void WriteTransition() => _writer?.WriteTransition((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, 0);
+    public double ElapsedMs => _clock.Elapsed.TotalMilliseconds;
+    public void WriteTransition() => _writer?.WriteTransition((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
+    public void EndCurrentPhase() => _writer?.EndPhase((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         _workflow.Stop();
@@ -61,10 +67,18 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         _api?.Dispose(); _api = null;
         if (_writer is not null) await _writer.FinalizeAsync(cancellationToken);
     }
+    public async Task FailAsync(string error, CancellationToken cancellationToken = default)
+    {
+        _workflow.Fail();
+        _writer?.AddError(error);
+        if (_readers is not null) { await _readers.DisposeAsync(); foreach (var readerError in _readers.Errors) _writer?.AddError(readerError); _readers = null; }
+        _api?.Dispose(); _api = null;
+        if (_writer is not null) await _writer.FinalizeAsync(cancellationToken);
+    }
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        if (_readers is not null) await _readers.DisposeAsync();
+        if (_readers is not null) { await _readers.DisposeAsync(); foreach (var error in _readers.Errors) _writer?.AddError(error); }
         _api?.Dispose();
         if (_writer is not null) await _writer.FinalizeAsync();
     }
