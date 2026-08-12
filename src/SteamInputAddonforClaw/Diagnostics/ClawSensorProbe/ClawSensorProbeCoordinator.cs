@@ -81,7 +81,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         }
         finally { _lifecycleGate.Release(); }
     }
-    public void BeginRecording() { ThrowIfReaderFaulted(); _workflow.BeginRecording(); var visit = Workflow.Visits.Last(); SetCaptureContext(ClawSensorCaptureMode.Recording, visit.Phase, visit.Pass); }
+    public void BeginRecording() { ThrowIfReaderFaulted(); _workflow.BeginRecording(); var visit = Workflow.Visits.Last(); SetCaptureContext(ClawSensorCaptureMode.Recording, visit.Phase, visit.Pass); _writer?.BeginRecordingPhase(visit.Phase, visit.Pass, ElapsedMs); }
     public void Next() => _workflow.Next();
     public void Back() => _workflow.Back();
     public void Write(ClawSensorProbeSample sample) => _writer?.Write(sample);
@@ -140,7 +140,6 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         var errors = _readers.Errors;
         if (errors.Count == 0) return;
         foreach (var error in errors) { lock (_readerErrors) if (!_readerErrors.Contains(error, StringComparer.Ordinal)) _readerErrors.Add(error); _writer?.AddError(error); }
-        _workflow.Fail();
         throw new InvalidOperationException(string.Join(" ", errors));
     }
     public async Task FailOnReaderFaultAsync(CancellationToken cancellationToken = default)
@@ -207,6 +206,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     }
     private async Task FailCoreAsync(string error, CancellationToken cancellationToken)
     {
+        _lifecycleCancellation.Cancel();
         if (_workflow.State == ClawSensorProbeState.RecordingPhase)
         {
             var current = Workflow.Visits.Last();

@@ -70,8 +70,8 @@ public sealed class ClawSensorProbeTests
             writer.EndPhase(ClawSensorProbePhase.ROLL_LEFT, 1, 25);
             writer.Write(new(1, DateTimeOffset.UtcNow, 10, ClawSensorProbePhase.ROLL_LEFT, 1, "GYRO", 1, 2, 3, 1));
         }
-        var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
-        Assert.Contains("\"end_elapsed_ms\": 25", report);
+            var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+            Assert.Contains("\"end_elapsed_ms\": 25", report);
         Directory.Delete(root, true);
     }
     [Fact] public async Task Writer_PreservesRepeatedPhasePassesSeparately()
@@ -364,6 +364,24 @@ public sealed class ClawSensorProbeTests
         var data = ClawSensorReportReadResult.Data(1, 2, 3, timestamp);
         Assert.True(data.HasData);
         Assert.Equal(timestamp, data.SensorTimestamp);
+    }
+
+    [Fact] public void ReportDeduplicator_AcceptsOnlyNewTimestampedReports()
+    {
+        var deduplicator = new ClawSensorReportDeduplicator();
+        var t1 = DateTimeOffset.Parse("2026-08-12T01:02:03Z");
+        var t2 = DateTimeOffset.Parse("2026-08-12T01:02:03.010Z");
+        var accepted = new[]
+        {
+            ClawSensorReportReadResult.NoData(),
+            ClawSensorReportReadResult.Data(1, 2, 3, t1),
+            ClawSensorReportReadResult.Data(4, 5, 6, t1),
+            ClawSensorReportReadResult.NoData(),
+            ClawSensorReportReadResult.Data(7, 8, 9, t2)
+        }.Where(deduplicator.ShouldAccept).ToArray();
+
+        Assert.Equal(2, accepted.Length);
+        Assert.Equal([t1, t2], accepted.Select(x => x.SensorTimestamp).ToArray());
     }
 
     [Fact] public async Task AdvancePhase_ClearsRecordingContextBeforeMovingToNextPhase()

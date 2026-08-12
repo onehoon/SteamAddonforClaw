@@ -37,21 +37,15 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
                 sensor = _api.GetSensorById(Guid.Parse(candidate.SensorId));
                 if (sensor == IntPtr.Zero) throw new InvalidOperationException($"Selected {sensorName} sensor was not available.");
                 var previous = 0L;
-                DateTimeOffset? previousSensorTimestamp = null;
+                var deduplicator = new ClawSensorReportDeduplicator();
                 while (!_stop.IsCancellationRequested)
                 {
                     var values = ClawSensorProbeSensorApi.ReadXYZ(sensor);
-                    if (!values.HasData)
+                    if (!deduplicator.ShouldAccept(values))
                     {
                         Thread.Sleep(1);
                         continue;
                     }
-                    if (previousSensorTimestamp == values.SensorTimestamp)
-                    {
-                        Thread.Sleep(1);
-                        continue;
-                    }
-                    previousSensorTimestamp = values.SensorTimestamp;
                     var context = _contextProvider();
                     var now = _clock.ElapsedTicks;
                     var interval = previous == 0 ? 0 : ClawSensorProbeSessionClock.TicksToMilliseconds(now - previous);

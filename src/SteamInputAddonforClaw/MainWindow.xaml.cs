@@ -225,6 +225,7 @@ public sealed partial class MainWindow : Window
     {
         if (_clawSensorProbe.State is ClawSensorProbeState.Starting or ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase)
             await StopClawSensorProbeSafelyAsync();
+        _clawSensorProbeUiTimer?.Stop();
         ShowPage(_navigationState.ReturnToDeveloperMenu());
     }
     private async void ClawSensorProbeStartButton_Click(object sender, RoutedEventArgs args)

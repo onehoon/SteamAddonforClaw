@@ -39,6 +39,17 @@ internal readonly record struct ClawSensorReportReadResult(bool HasData, double 
     public static ClawSensorReportReadResult NoData() => new(false, 0, 0, 0, default);
     public static ClawSensorReportReadResult Data(double x, double y, double z, DateTimeOffset sensorTimestamp) => new(true, x, y, z, sensorTimestamp);
 }
+internal sealed class ClawSensorReportDeduplicator
+{
+    private DateTimeOffset? _previousSensorTimestamp;
+    public bool ShouldAccept(ClawSensorReportReadResult result)
+    {
+        if (!result.HasData) return false;
+        if (_previousSensorTimestamp == result.SensorTimestamp) return false;
+        _previousSensorTimestamp = result.SensorTimestamp;
+        return true;
+    }
+}
 internal sealed record ClawSensorProbeSample(long Sequence, DateTimeOffset UtcTimestamp, double ElapsedMs, ClawSensorCaptureMode CaptureMode, ClawSensorProbePhase Phase, int PhasePass, string Sensor, double X, double Y, double Z, double SampleIntervalMs, DateTimeOffset? SensorTimestamp = null)
 {
     public ClawSensorProbeSample(long sequence, DateTimeOffset utcTimestamp, double elapsedMs, ClawSensorProbePhase phase, int phasePass, string sensor, double x, double y, double z, double sampleIntervalMs)
@@ -46,7 +57,7 @@ internal sealed record ClawSensorProbeSample(long Sequence, DateTimeOffset UtcTi
     {
     }
 }
-internal sealed record ClawSensorProbePhaseLog(string name, int pass, double start_elapsed_ms, double end_elapsed_ms, long sample_count, string capture_status);
+internal sealed record ClawSensorProbePhaseLog(string name, int pass, double transition_start_elapsed_ms, double recording_start_elapsed_ms, double end_elapsed_ms, long sample_count, string capture_status);
 internal sealed record ClawSensorProbeError(string Code, string Message);
 
 internal sealed class ClawSensorProbeStatistics
@@ -150,7 +161,18 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
             if (_phaseRows.ContainsKey(key)) return;
             _phaseRows[key] = _phases.Count;
             var end = _pendingPhaseEnds.TryGetValue(key, out var pendingEnd) ? pendingEnd : elapsedMs;
-            _phases.Add(new(phase.ToString(), pass, elapsedMs, end, 0, "TransitionOnly"));
+            _phases.Add(new(phase.ToString(), pass, elapsedMs, 0, end, 0, "TransitionOnly"));
+        }
+    }
+    public void BeginRecordingPhase(ClawSensorProbePhase phase, int pass, double elapsedMs)
+    {
+        EnsurePhaseStarted(phase, pass, elapsedMs);
+        var key = $"{phase}:{pass}";
+        lock (_phaseGate)
+        {
+            var index = _phaseRows[key];
+            var phaseLog = _phases[index];
+            _phases[index] = phaseLog with { recording_start_elapsed_ms = elapsedMs };
         }
     }
     public void EndPhase(ClawSensorProbePhase phase, int pass, double elapsedMs)
@@ -178,7 +200,7 @@ internal sealed class ClawSensorProbeSessionWriter : IAsyncDisposable
                 {
                     _phaseRows[key] = _phases.Count;
                     var end = _pendingPhaseEnds.TryGetValue(key, out var pendingEnd) ? pendingEnd : sample.ElapsedMs;
-                    _phases.Add(new(sample.Phase.ToString(), sample.PhasePass, sample.ElapsedMs, end, 0, "TransitionOnly"));
+                    _phases.Add(new(sample.Phase.ToString(), sample.PhasePass, sample.ElapsedMs, sample.CaptureMode == ClawSensorCaptureMode.Recording ? sample.ElapsedMs : 0, end, 0, "TransitionOnly"));
                 }
                 if (isRecordingSensorSample)
                 {
