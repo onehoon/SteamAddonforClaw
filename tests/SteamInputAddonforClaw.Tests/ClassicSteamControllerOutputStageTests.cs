@@ -225,6 +225,24 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoveDeviceFailureLogsRollbackTimingAndPreservesFailureResult()
+    {
+        var runtime = new FakeRuntime { Removal = new(false, false) };
+        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("VirtualDeviceRemoveFailed", result.Reason);
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Equal(1, log.Split("Event=SteamOutputRollbackFailed", StringSplitOptions.None).Length - 1);
+        Assert.Contains("Reason=VirtualDeviceRemoveFailed", log);
+        Assert.Contains("RemoveDeviceMs=", log);
+    }
+
+    [Fact]
     public async Task LivePublisherFaultRequestsOneFailClosedNotification()
     {
         var runtime = new FakeRuntime { InputAccepted = false };
@@ -268,7 +286,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     private sealed class FakeRuntime : IViiperRuntime
     {
         public List<string> Trace { get; } = [];
-        public int NeutralReports; public int RemovedDevices; public int CreatedDevices; public bool CancelAfterStart; public bool BusRemoved = true; public bool NeutralAccepted = true; public bool InputAccepted = true; public bool BlockInput;
+        public int NeutralReports; public int RemovedDevices; public int CreatedDevices; public bool CancelAfterStart; public bool BusRemoved = true; public bool NeutralAccepted = true; public bool InputAccepted = true; public bool BlockInput; public ViiperDeviceRemovalResult Removal = new(true, true);
         public TaskCompletionSource InputEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseInput { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public IReadOnlyCollection<uint> OwnedDeviceIds => CreatedDevices > RemovedDevices ? [7] : [];
@@ -277,7 +295,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         public uint CreateDevice() { CreatedDevices++; return 7; }
         public bool SetNeutral(uint id) { Trace.Add("Neutral"); NeutralReports++; return NeutralAccepted; }
         public bool SetInput(uint id, byte[] report) { Trace.Add("Input"); InputEntered.TrySetResult(); if (BlockInput) ReleaseInput.Task.GetAwaiter().GetResult(); return InputAccepted; }
-        public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) { Trace.Add("Remove"); RemovedDevices++; return new(true, BusRemoved); }
+        public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) { Trace.Add("Remove"); RemovedDevices++; return Removal with { BusRemoved = BusRemoved }; }
         public void StopIfUnused() { }
         public void Dispose() { }
     }

@@ -217,6 +217,11 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     {
         var totalStarted = Stopwatch.GetTimestamp();
         long removeMs = 0, pnpAbsenceMs = 0;
+        RoutingStageOperationResult RollbackFailure(string reason)
+        {
+            AppLog.Debug("RoutingTrace", "Steam output rollback failed.", ("Event", "SteamOutputRollbackFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Failure"), ("Reason", reason));
+            return RoutingStageOperationResult.Failure(reason);
+        }
         if (_state == LifecycleState.Inactive) return RoutingStageOperationResult.Success("SteamOutputAlreadyInactive");
         if (_state == LifecycleState.Prepared)
         {
@@ -230,7 +235,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             await _publisher.StopAsync().ConfigureAwait(false);
             _publisher = null;
         }
-        if (_sessionId() is not { } session) return RoutingStageOperationResult.Failure("RecoverySessionUnavailable");
+        if (_sessionId() is not { } session) return RollbackFailure("RecoverySessionUnavailable");
         var hadResolvedIdentity = _owned is { Count: > 0 };
         var removal = ViiperDeviceRemovalResult.Failed;
         var absent = false;
@@ -239,7 +244,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             var removeStarted = Stopwatch.GetTimestamp();
             try { removal = _runtime.RemoveDevice(_busId, _deviceId); }
             finally { removeMs = Elapsed(removeStarted); }
-            if (!removal.DeviceRemoved) return RoutingStageOperationResult.Failure("VirtualDeviceRemoveFailed");
+            if (!removal.DeviceRemoved) return RollbackFailure("VirtualDeviceRemoveFailed");
             var absenceStarted = Stopwatch.GetTimestamp();
             try
             {
@@ -248,12 +253,12 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
                     : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
             }
             finally { pnpAbsenceMs = Elapsed(absenceStarted); }
-            if (!absent) return RoutingStageOperationResult.Failure("VirtualDevicePnPStillPresent");
+            if (!absent) return RollbackFailure("VirtualDevicePnPStillPresent");
         }
         if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new ViiperVirtualDeviceIdentityPolicy(), _before, _owned))
-            return RoutingStageOperationResult.Failure("UnrelatedMatchingVirtualDeviceStillPresent");
+            return RollbackFailure("UnrelatedMatchingVirtualDeviceStillPresent");
         var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
-        if (!complete.IsSafeToContinue) return RoutingStageOperationResult.Failure("VirtualDeviceRecoveryCompletionFailed");
+        if (!complete.IsSafeToContinue) return RollbackFailure("VirtualDeviceRecoveryCompletionFailed");
         AppLog.Debug("SteamOutput", "SteamOutput inactive", ("BusId", _busId), ("DeviceId", _deviceId), ("DeviceRemoved", removal.DeviceRemoved), ("BusRemoved", removal.BusRemoved), ("PnPAbsent", absent), ("RecoveryMutationCompleted", complete.IsSafeToContinue));
         AppLog.Debug("RoutingTrace", "Steam output rollback completed.", ("Event", "SteamOutputRollbackCompleted"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Success"), ("Reason", "ClassicSteamControllerRemoved"));
         _deviceId = 0; _busId = 0; _owned = null; _before = null; _state = LifecycleState.Inactive; _runtime.StopIfUnused();
