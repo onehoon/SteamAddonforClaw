@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
+using Microsoft.Win32.SafeHandles;
 
 namespace SteamInputAddonforClaw.Tests;
 
@@ -119,6 +120,52 @@ public sealed class MsiClawModeSwitchTests
     }
 
     [Fact]
+    public async Task Windows_writer_propagates_transport_failure_and_rejects_empty_lookup()
+    {
+        var device = Device(Guid.NewGuid(), "USB\\ROOT", "HID\\MSI", 0x1901, 0xFFA0, 0x0001);
+        var expected = new MsiClawControlHidDevice(device, 0xFFA0, 0x0001, MsiClawPhysicalIdentity.From(device));
+        var transport = new RecordingRawTransport { Result = false };
+        var writer = new WindowsMsiClawModeWriter(new FixedLookup(new("hid-path", device.InstanceId, device.ContainerId)), transport);
+        Assert.False(await writer.WriteAsync(expected, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.Equal(1, transport.CallCount);
+
+        var emptyTransport = new RecordingRawTransport();
+        var emptyWriter = new WindowsMsiClawModeWriter(new FixedLookup(new("", device.InstanceId, device.ContainerId)), emptyTransport);
+        Assert.False(await emptyWriter.WriteAsync(expected, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.Equal(1, emptyTransport.CallCount);
+    }
+
+    [Fact]
+    public async Task Windows_writer_supports_sentinel_identity_at_raw_transport_boundary()
+    {
+        var sentinel = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
+        var device = Topology(sentinel, "USB\\VID_0DB0&PID_1901\\CLAW_A", 0x1901);
+        var expected = new MsiClawControlHidDevice(device, 0xFFA0, 0x0001, MsiClawPhysicalIdentity.From(device));
+        var transport = new RecordingRawTransport();
+        var writer = new WindowsMsiClawModeWriter(new FixedLookup(new("hid-path", device.InstanceId, sentinel)), transport);
+
+        Assert.True(await writer.WriteAsync(expected, MsiClawNativeMode.DirectInput, CancellationToken.None));
+        Assert.Equal(1, transport.CallCount);
+    }
+
+    [Fact]
+    public async Task Raw_transport_requires_exact_full_write_and_handles_cancellation()
+    {
+        var fake = new FakeNativeHidApi { WriteResult = true, BytesWritten = 63 };
+        var transport = new WindowsMsiClawRawHidTransport(fake);
+        Assert.False(await transport.WriteAsync("hid-path", new byte[64], CancellationToken.None));
+
+        fake.BytesWritten = 64;
+        Assert.True(await transport.WriteAsync("hid-path", new byte[64], CancellationToken.None));
+
+        var writesBeforeCancellation = fake.WriteCallCount;
+        var cancelled = new CancellationTokenSource();
+        fake.OnOpen = () => cancelled.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => transport.WriteAsync("hid-path", new byte[64], cancelled.Token));
+        Assert.Equal(writesBeforeCancellation, fake.WriteCallCount);
+    }
+
+    [Fact]
     public async Task Mode_controller_requires_observed_old_and_target_devices()
     {
         var identity = Guid.NewGuid();
@@ -195,11 +242,34 @@ public sealed class MsiClawModeSwitchTests
     {
         public string? DevicePath { get; private set; }
         public byte[] Bytes { get; private set; } = [];
+        public bool Result { get; set; } = true;
+        public int CallCount { get; private set; }
         public Task<bool> WriteAsync(string devicePath, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
         {
             DevicePath = devicePath;
             Bytes = bytes.ToArray();
-            return Task.FromResult(true);
+            CallCount++;
+            return Task.FromResult(Result && !string.IsNullOrWhiteSpace(devicePath));
+        }
+    }
+
+    private sealed class FakeNativeHidApi : IMsiClawNativeHidApi
+    {
+        public bool WriteResult { get; set; }
+        public uint BytesWritten { get; set; }
+        public int WriteCallCount { get; private set; }
+        public Action? OnOpen { get; set; }
+        public int LastError => 123;
+        public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
+        {
+            OnOpen?.Invoke();
+            return new SafeFileHandle(new IntPtr(1), ownsHandle: false);
+        }
+        public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
+        {
+            WriteCallCount++;
+            bytesWritten = BytesWritten;
+            return WriteResult;
         }
     }
 }

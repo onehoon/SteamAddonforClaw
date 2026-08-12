@@ -17,6 +17,10 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
     private const uint ShareWrite = 0x00000002;
     private const uint OpenExisting = 3;
 
+    private readonly IMsiClawNativeHidApi _api;
+
+    internal WindowsMsiClawRawHidTransport(IMsiClawNativeHidApi? api = null) => _api = api ?? new WindowsMsiClawNativeHidApi();
+
     public Task<bool> WriteAsync(string devicePath, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -26,19 +30,19 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
             return Task.FromResult(false);
         }
 
-        using var handle = CreateFileW(devicePath, GenericRead | GenericWrite, ShareRead | ShareWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+        using var handle = _api.Open(devicePath, GenericRead | GenericWrite, ShareRead | ShareWrite, OpenExisting);
         if (handle.IsInvalid)
         {
-            var error = Marshal.GetLastWin32Error();
+            var error = _api.LastError;
             AppLog.Debug("NativeMode", "Raw MSI HID open failed.", ("Operation", "Open"), ("Win32Error", error), ("RequestedLength", bytes.Length));
             return Task.FromResult(false);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
         var buffer = bytes.ToArray();
-        if (!WriteFile(handle, buffer, (uint)buffer.Length, out var written, IntPtr.Zero))
+        if (!_api.Write(handle, buffer, out var written))
         {
-            var error = Marshal.GetLastWin32Error();
+            var error = _api.LastError;
             AppLog.Debug("NativeMode", "Raw MSI HID write failed.", ("Operation", "Write"), ("BytesWritten", written), ("Win32Error", error), ("RequestedLength", buffer.Length));
             return Task.FromResult(false);
         }
@@ -53,9 +57,35 @@ internal sealed class WindowsMsiClawRawHidTransport : IMsiClawRawHidTransport
         return Task.FromResult(true);
     }
 
+}
+
+internal interface IMsiClawNativeHidApi
+{
+    int LastError { get; }
+    SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition);
+    bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten);
+}
+
+internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
+{
+    public int LastError { get; private set; }
+
+    public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
+    {
+        var handle = CreateFileW(devicePath, desiredAccess, shareMode, IntPtr.Zero, creationDisposition, 0, IntPtr.Zero);
+        LastError = handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
+        return handle;
+    }
+
+    public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
+    {
+        var result = WriteFile(handle, buffer, (uint)buffer.Length, out bytesWritten, IntPtr.Zero);
+        LastError = result ? 0 : Marshal.GetLastWin32Error();
+        return result;
+    }
+
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess, uint shareMode, IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
-
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WriteFile(SafeFileHandle file, byte[] buffer, uint numberOfBytesToWrite, out uint numberOfBytesWritten, IntPtr overlapped);
