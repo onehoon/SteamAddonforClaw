@@ -2119,8 +2119,8 @@ Lifecycle:
   - resume may recreate through fresh identity resolution
 
 Production safety:
-  - RoutingExperimentOptions.None does not execute SteamOutput
-  - normal production remains NativeMode-only
+  - the current Stock baseline executes NativeMode, PhysicalInput,
+    PhysicalIsolation, and SteamOutput
   - unsupported environments remain passive
   - external-controller veto prevents creation
 
