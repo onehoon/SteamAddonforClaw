@@ -19,29 +19,14 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
     {
         var candidates = FindCandidates(receiver);
         if (candidates is null || candidates.Count == 0) return null;
-        var started = Stopwatch.GetTimestamp();
-        var timedOut = false;
-        foreach (var candidate in candidates)
+        return SteamController1304CandidateIteration.Query(candidates, timeout, candidate =>
         {
-            var remaining = timeout - Stopwatch.GetElapsedTime(started);
-            if (remaining <= TimeSpan.Zero) break;
             AppLog.Debug("SteamController1304", "Receiver HID candidate query started.",
                 ("HidInterface", candidate.Path), ("UsagePage", "0xFF00"), ("Usage", "0x0001"),
                 ("InputReportByteLength", candidate.InputReportByteLength), ("OutputReportByteLength", candidate.OutputReportByteLength),
                 ("FeatureReportByteLength", candidate.FeatureReportByteLength));
-            try
-            {
-                var report = QueryCandidate(candidate, remaining);
-                if (report is not null) return report;
-            }
-            catch (TimeoutException)
-            {
-                timedOut = true;
-                if (Stopwatch.GetElapsedTime(started) >= timeout) break;
-            }
-        }
-        if (timedOut) throw new TimeoutException("Steam Controller receiver wireless-state query timed out.");
-        return null;
+            return QueryCandidate(candidate, timeout);
+        });
     }
 
     private static byte[]? QueryCandidate(Candidate candidate, TimeSpan timeout)
@@ -155,6 +140,26 @@ internal sealed class WindowsSteamController1304ReadOnlyTransport : ISteamContro
     [DllImport("hid.dll", SetLastError = true)] private static extern bool HidD_FreePreparsedData(IntPtr data);
     [DllImport("hid.dll", SetLastError = true)] private static extern bool HidD_SetFeature(SafeFileHandle handle, byte[] report, int length);
     [DllImport("hid.dll")] private static extern int HidP_GetCaps(IntPtr data, out HidpCaps caps);
+}
+
+internal static class SteamController1304CandidateIteration
+{
+    internal static TReport? Query<TCandidate, TReport>(IReadOnlyList<TCandidate> candidates, TimeSpan candidateTimeout, Func<TCandidate, TReport?> query)
+        where TReport : class
+    {
+        var timedOut = false;
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var report = query(candidate);
+                if (report is not null) return report;
+            }
+            catch (TimeoutException) { timedOut = true; }
+        }
+        if (timedOut) throw new TimeoutException("Steam Controller receiver wireless-state query timed out.");
+        return null;
+    }
 }
 
 internal static class SteamController1304HidInteropContract

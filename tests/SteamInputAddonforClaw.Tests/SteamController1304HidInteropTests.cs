@@ -32,6 +32,35 @@ public sealed class SteamController1304HidInteropTests
     }
 
     [Fact]
+    public void CandidateTimeoutsDoNotPreventLaterCandidateFromSucceeding()
+    {
+        var queried = new List<int>();
+        var result = SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], TimeSpan.FromMilliseconds(1), candidate =>
+        {
+            queried.Add(candidate);
+            if (candidate < 3) throw new TimeoutException();
+            return [0x03];
+        });
+
+        Assert.Equal([1, 2, 3], queried);
+        Assert.Equal([0x03], result);
+    }
+
+    [Fact]
+    public void AllCandidateTimeoutsProduceOneFinalTimeout()
+    {
+        var queried = new List<int>();
+
+        Assert.Throws<TimeoutException>(() => SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3], TimeSpan.FromMilliseconds(1), candidate =>
+        {
+            queried.Add(candidate);
+            throw new TimeoutException();
+        }));
+
+        Assert.Equal([1, 2, 3], queried);
+    }
+
+    [Fact]
     public void HidpCapsNativeLayoutIsFourteenWords()
     {
         // HIDP_CAPS is 32 USHORT fields in the Windows HID parser ABI.
