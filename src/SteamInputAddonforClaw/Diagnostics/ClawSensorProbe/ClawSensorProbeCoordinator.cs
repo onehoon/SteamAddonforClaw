@@ -24,13 +24,19 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         _writer = new ClawSensorProbeSessionWriter(root, DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture));
         _workflow.Start();
     }
+    public void SetDeviceIdentity(string manufacturer, string productName, string baseBoardProduct, string resolvedModel)
+    {
+        _writer?.SetDevice(new { Manufacturer = manufacturer, ProductName = productName, BaseBoardProduct = baseBoardProduct, ResolvedAddonDevice = "MSI Claw", ResolvedAddonModel = resolvedModel });
+    }
     public async Task StartCaptureAsync()
     {
         if (_writer is null) throw new InvalidOperationException("The probe session has not started.");
         await Task.Run(() => _api = new ClawSensorProbeSensorApi());
         var api = _api ?? throw new InvalidOperationException("The sensor API is unavailable.");
-        _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, (ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.Last().Pass));
-        _writer.SetDiscovery(_readers.Discovery);
+        var discovery = await Task.Run(api.Discover);
+        _writer.SetDiscovery(discovery);
+        if (!discovery.IsValid) { await _writer.FinalizeAsync(); throw new InvalidOperationException(string.Join(" ", discovery.Errors)); }
+        _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, discovery, (ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.Last().Pass));
         _writer.SetDiscovery(_readers.Discovery);
     }
     public async Task RestartPhaseCaptureAsync()
@@ -38,12 +44,16 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         if (_readers is not null) { await _readers.DisposeAsync(); _readers = null; }
         if (_api is null || _writer is null) throw new InvalidOperationException("The probe session is not active.");
         var api = _api ?? throw new InvalidOperationException("The sensor API is unavailable.");
-        _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, (ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.Last().Pass));
+        var discovery = await Task.Run(api.Discover);
+        _writer.SetDiscovery(discovery);
+        if (!discovery.IsValid) throw new InvalidOperationException(string.Join(" ", discovery.Errors));
+        _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, discovery, (ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.Last().Pass));
     }
     public void BeginRecording() => _workflow.BeginRecording();
     public void Next() => _workflow.Next();
     public void Back() => _workflow.Back();
     public void Write(ClawSensorProbeSample sample) => _writer?.Write(sample);
+    public void WriteTransition() => _writer?.WriteTransition((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, 0);
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         _workflow.Stop();

@@ -12,10 +12,9 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
     private long _sequence;
     internal ClawSensorProbeLiveSnapshot Snapshot { get; } = new();
     internal ClawSensorDiscovery Discovery { get; }
-    public ClawSensorProbeReaders(ClawSensorProbeSensorApi api, ClawSensorProbeSessionWriter writer, ClawSensorProbePhase phase, int phasePass)
+    public ClawSensorProbeReaders(ClawSensorProbeSensorApi api, ClawSensorProbeSessionWriter writer, ClawSensorDiscovery discovery, ClawSensorProbePhase phase, int phasePass)
     {
         _api = api;
-        var discovery = api.Discover();
         Discovery = discovery;
         if (!discovery.IsValid) throw new InvalidOperationException(string.Join(" ", discovery.Errors));
         _workers = [RunAsync(discovery.Gyroscope!, "GYRO", writer, phase, phasePass), RunAsync(discovery.Accelerometer!, "ACCEL", writer, phase, phasePass)];
