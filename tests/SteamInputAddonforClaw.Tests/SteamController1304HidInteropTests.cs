@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics.SteamController1304;
 using Xunit;
 
@@ -74,6 +75,8 @@ public sealed class SteamController1304HidInteropTests
         Assert.Throws<TimeoutException>(() => SteamController1304CandidateIteration.Query<int, byte[]>([1, 2, 3, 4], TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(100), (_, budget) =>
         {
             budgets.Add(budget);
+            var end = Stopwatch.GetTimestamp() + (long)(budget.TotalSeconds * Stopwatch.Frequency);
+            while (Stopwatch.GetTimestamp() < end) Thread.SpinWait(100);
             throw new TimeoutException();
         }));
 

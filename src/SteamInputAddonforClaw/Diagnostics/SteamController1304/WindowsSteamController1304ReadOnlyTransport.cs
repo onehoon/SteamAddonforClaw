@@ -150,8 +150,6 @@ internal static class SteamController1304CandidateIteration
         where TReport : class
     {
         var deadline = Stopwatch.GetTimestamp() + (long)(overallTimeout.TotalSeconds * Stopwatch.Frequency);
-        var allocatedTicks = 0L;
-        var overallTicks = (long)(overallTimeout.TotalSeconds * Stopwatch.Frequency);
         var capTicks = Math.Max(1L, (long)(candidateTimeoutCap.TotalSeconds * Stopwatch.Frequency));
         var timedOut = false;
         for (var index = 0; index < candidates.Count; index++)
@@ -159,9 +157,8 @@ internal static class SteamController1304CandidateIteration
             var remainingCandidates = candidates.Count - index;
             var remainingTicks = deadline - Stopwatch.GetTimestamp();
             if (remainingTicks <= 0) { timedOut = true; break; }
-            var budgetTicks = Math.Max(1, Math.Min(capTicks, (overallTicks - allocatedTicks) / remainingCandidates));
-            allocatedTicks += budgetTicks;
-            var candidateBudget = TimeSpan.FromSeconds((double)budgetTicks / Stopwatch.Frequency);
+            var budgetTicks = Math.Max(1L, Math.Min(capTicks, remainingTicks / remainingCandidates));
+            var candidateBudget = TimeSpan.FromTicks((long)((double)budgetTicks * TimeSpan.TicksPerSecond / Stopwatch.Frequency));
             try
             {
                 var report = query(candidates[index], candidateBudget);
