@@ -179,12 +179,8 @@ public partial class App : Application
             nativeState,
             _recoveryManager!,
             powerGate,
-            () => CaptureExternalControllerAssessment().Status == ExternalControllerAssessmentStatus.Clear,
-            reason =>
-            {
-                recoverySafetyState.Set(RecoverySafety.Unsafe);
-                AppLog.Error("Recovery", "MSI native mode recovery became unsafe.", new InvalidOperationException(reason), ("Reason", reason));
-            });
+            recoverySafetyState,
+            () => CaptureExternalControllerAssessment().Status == ExternalControllerAssessmentStatus.Clear);
         IPowerTransitionParticipant? steamOutputPowerParticipant = null;
         if (_msiClawNativeModeSession is not null)
         {

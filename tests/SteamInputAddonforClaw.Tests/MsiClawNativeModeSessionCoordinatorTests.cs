@@ -43,36 +43,110 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task FailClosedRestoresAndClosesGateWhenRestoreFails()
+    public async Task FailClosed_restore_failure_keeps_power_gate_open_and_marks_recovery_unsafe()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
         var modeController = new FakeModeController(devices) { FailRestore = true };
-        var unsafeReason = string.Empty;
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
         var gate = new PowerMutationGate(initiallyOpen: true);
-        await using var coordinator = CreateCoordinator(devices, modeController, gate, reason => unsafeReason = reason);
+        await using var coordinator = CreateCoordinator(devices, modeController, gate, recoverySafety);
 
         Assert.True(await coordinator.ObserveRoutingDecisionAsync(Eligible(), 1));
         await Assert.ThrowsAsync<IOException>(() => coordinator.FailClosedAsync("CanonicalRoutingReconciliationFailed"));
 
-        Assert.False(gate.IsOpen);
-        Assert.Equal("CanonicalRoutingReconciliationFailed", unsafeReason);
+        Assert.True(gate.IsOpen);
+        Assert.Equal(RecoverySafety.Unsafe, recoverySafety.Current);
         Assert.Contains(MsiClawNativeMode.XInput, modeController.Targets);
     }
 
     [Fact]
-    public async Task FailClosedWithSuccessfulRestoreClosesGateAndMarksSafetyUnsafe()
+    public async Task FailClosedWithSuccessfulRestore_keeps_power_gate_and_recovery_safety_open()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
-        var unsafeReasons = new List<string>();
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
         var gate = new PowerMutationGate(initiallyOpen: true);
-        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices), gate, unsafeReasons.Add);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices), gate, recoverySafety);
 
         Assert.True(await coordinator.ObserveRoutingDecisionAsync(Eligible(), 1));
         await coordinator.FailClosedAsync("CanonicalRoutingReconciliationFailed");
 
         Assert.Equal(MsiClawNativeMode.XInput, devices.Mode);
-        Assert.False(gate.IsOpen);
-        Assert.Equal(["CanonicalRoutingReconciliationFailed"], unsafeReasons);
+        Assert.True(gate.IsOpen);
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+    }
+
+    [Theory]
+    [InlineData((int)RecoverySafety.Unsafe)]
+    [InlineData((int)RecoverySafety.Indeterminate)]
+    public async Task Recovery_safety_not_safe_blocks_new_forward_mutation(int safetyValue)
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices);
+        var recoverySafety = new RecoverySafetyState((RecoverySafety)safetyValue);
+        await using var coordinator = CreateCoordinator(devices, modeController, recoverySafety: recoverySafety);
+
+        var result = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("RecoverySafetyNotSafe", result.Reason);
+        Assert.Empty(modeController.Targets);
+        Assert.False(coordinator.HasOwnedRecoveryBoundary);
+    }
+
+    [Fact]
+    public async Task Failed_restore_remains_retryable_without_closing_power_gate()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var gate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        await using var coordinator = CreateCoordinator(devices, modeController, gate, recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.True(gate.IsOpen);
+        Assert.Equal(RecoverySafety.Unsafe, recoverySafety.Current);
+        Assert.True(coordinator.HasOwnedRecoveryBoundary);
+
+        modeController.FailRestore = false;
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.True(gate.IsOpen);
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+        Assert.False(coordinator.HasOwnedRecoveryBoundary);
+        Assert.Equal([MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput, MsiClawNativeMode.XInput], modeController.Targets);
+    }
+
+    [Fact]
+    public async Task Native_recovery_does_not_clear_an_unrelated_recovery_safety_change()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        await using var coordinator = CreateCoordinator(devices, modeController, recoverySafety: recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.ExitForPipelineAsync(CancellationToken.None));
+        recoverySafety.Set(RecoverySafety.Unsafe);
+        modeController.FailRestore = false;
+
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.Equal(RecoverySafety.Unsafe, recoverySafety.Current);
+    }
+
+    [Fact]
+    public async Task Successful_fail_close_latches_forward_mutation_until_steam_session_ends()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices));
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await coordinator.FailClosedAsync("PipelineFailure");
+
+        var blocked = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+        Assert.False(blocked.Succeeded);
+        Assert.Equal("RoutingFaultLatched", blocked.Reason);
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
@@ -153,7 +227,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         var recovery = new RecoveryManager(store);
         var gate = new PowerMutationGate(initiallyOpen: true);
         var native = new MsiClawNativeStateManager(devices, modeController);
-        await using var coordinator = new MsiClawNativeModeSessionCoordinator(native, recovery, gate);
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(native, recovery, gate, new RecoverySafetyState(RecoverySafety.Safe));
 
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
         Assert.NotNull(coordinator.CurrentRecoverySessionId);
@@ -176,7 +250,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         var recovery = new RecoveryManager(store);
         var gate = new PowerMutationGate(initiallyOpen: true);
         var native = new MsiClawNativeStateManager(devices, modeController);
-        await using var coordinator = new MsiClawNativeModeSessionCoordinator(native, recovery, gate);
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(native, recovery, gate, new RecoverySafetyState(RecoverySafety.Safe));
 
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
         Assert.NotNull(coordinator.CurrentRecoverySessionId);
@@ -265,19 +339,19 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         FakeDeviceEnumerator devices,
         FakeModeController modeController,
         PowerMutationGate? gate = null,
-        Action<string>? markUnsafe = null,
+        RecoverySafetyState? recoverySafety = null,
         Func<bool>? mutationAllowed = null)
     {
         var store = new MemoryJournalStore();
         var recovery = new RecoveryManager(store);
         var native = new MsiClawNativeStateManager(devices, modeController);
-        return new(native, recovery, gate ?? new PowerMutationGate(initiallyOpen: true), mutationAllowed: mutationAllowed, markRecoveryUnsafe: markUnsafe);
+        return new(native, recovery, gate ?? new PowerMutationGate(initiallyOpen: true), recoverySafety ?? new RecoverySafetyState(RecoverySafety.Safe), mutationAllowed: mutationAllowed);
     }
 
     private static MsiClawNativeModeSessionCoordinator CreateCoordinatorFor(IControllerDeviceEnumerator devices, IMsiClawModeController modeController)
     {
         var recovery = new RecoveryManager(new MemoryJournalStore());
-        return new(new MsiClawNativeStateManager(devices, modeController), recovery, new PowerMutationGate(initiallyOpen: true));
+        return new(new MsiClawNativeStateManager(devices, modeController), recovery, new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
