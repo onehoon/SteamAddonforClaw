@@ -1,5 +1,7 @@
 using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests.ClawSensorProbe;
@@ -54,7 +56,7 @@ public sealed class ClawSensorProbeTests
         }
         var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
         Assert.Contains("TRANSITION", csv);
-        Assert.Contains("sensor_timestamp", csv.Split('\n')[0]);
+        Assert.Contains("capture_mode", csv.Split('\n')[0]);
         Assert.Contains(",1,", csv);
         Assert.Contains("\"DroppedSampleCount\": 0", await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json")));
         Directory.Delete(root, true);
@@ -301,11 +303,11 @@ public sealed class ClawSensorProbeTests
         {
             await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
             {
-                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1, 123456789));
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorProbePhase.REST, 1, "GYRO", 1, 2, 3, 1));
             }
 
             var csv = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-live.csv"));
-            Assert.Contains(",123456789\n", csv.Replace("\r\n", "\n", StringComparison.Ordinal));
+            Assert.DoesNotContain("sensor_timestamp", csv.Split('\n')[0]);
         }
         finally
         {
@@ -330,6 +332,67 @@ public sealed class ClawSensorProbeTests
         finally
         {
             AppLog.MinimumLevelOverride = previousLevel;
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact] public void SensorApi_DeclaresVerifiedComSlots()
+    {
+        Assert.Equal(3, ClawSensorProbeSensorApi.SensorGetIdSlot);
+        Assert.Equal(4, ClawSensorProbeSensorApi.SensorGetCategorySlot);
+        Assert.Equal(5, ClawSensorProbeSensorApi.SensorGetTypeSlot);
+        Assert.Equal(6, ClawSensorProbeSensorApi.SensorGetFriendlyNameSlot);
+        Assert.Equal(7, ClawSensorProbeSensorApi.SensorGetPropertySlot);
+        Assert.Equal(13, ClawSensorProbeSensorApi.SensorGetDataSlot);
+        Assert.Equal(4, ClawSensorProbeSensorApi.ReportGetSensorValueSlot);
+    }
+
+    [Fact] public void PropVariant_ConvertsOnlySupportedScalarSensorTypes()
+    {
+        Assert.Equal(-2, ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 3, Int32 = -2 }));
+        Assert.Equal(4u, ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 19, UInt32 = 4 }));
+        Assert.Equal(1.25, ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 4, Float = 1.25f }), 6);
+        Assert.Equal(2.5, ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 5, Double = 2.5 }), 6);
+        Assert.Equal(0, ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 11, VariantBool = 0 }));
+        Assert.Equal(1, ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 11, VariantBool = -1 }));
+        Assert.Throws<InvalidOperationException>(() => ClawSensorProbeSensorApi.ConvertPropVariantForTest(new() { VarType = 31 }));
+    }
+
+    [Theory]
+    [InlineData((int)HardwareCompatibilityStatus.Supported, true)]
+    [InlineData((int)HardwareCompatibilityStatus.Unsupported, true)]
+    [InlineData((int)HardwareCompatibilityStatus.Indeterminate, true)]
+    public void DiagnosticEligibility_AllowsRecognizedClawFamilyRegardlessOfProductionModelStatus(int status, bool expected)
+    {
+        var hardware = new HardwareCompatibilityAssessment((HardwareCompatibilityStatus)status, new HandheldDeviceId("msi.claw"), null, "test");
+        Assert.Equal(expected, ClawSensorProbeCoordinator.AllowsReadOnlyDiagnostic(hardware));
+    }
+
+    [Fact] public void DiagnosticEligibility_RejectsNonClawHardware()
+    {
+        var hardware = new HardwareCompatibilityAssessment(HardwareCompatibilityStatus.Unsupported, null, null, "No handheld-device adapter matched.");
+        Assert.False(ClawSensorProbeCoordinator.AllowsReadOnlyDiagnostic(hardware));
+    }
+
+    [Fact] public async Task Writer_DoesNotLetTransitionSamplesContaminateRestSummary()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-rest-transition-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var writer = new ClawSensorProbeSessionWriter(root, "session"))
+            {
+                writer.Write(new(1, DateTimeOffset.UtcNow, 1, ClawSensorCaptureMode.Recording, ClawSensorProbePhase.REST, 1, "GYRO", 1, 1, 1, 1));
+                writer.Write(new(2, DateTimeOffset.UtcNow, 2, ClawSensorCaptureMode.Transition, ClawSensorProbePhase.ROLL_LEFT, 1, "GYRO", 100, 100, 100, 1));
+            }
+
+            var report = await File.ReadAllTextAsync(Path.Combine(root, "session", "claw-sensor-report.json"));
+            Assert.Contains("\"SampleCount\": 1", report);
+            Assert.DoesNotContain("\"X\": 100", report);
+            Assert.DoesNotContain("\"Y\": 100", report);
+            Assert.DoesNotContain("\"Z\": 100", report);
+        }
+        finally
+        {
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }

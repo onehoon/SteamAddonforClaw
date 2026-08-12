@@ -1,8 +1,11 @@
 namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using System.Diagnostics;
+using SteamInputAddonforClaw.Devices;
 
 internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
 {
+    internal static bool AllowsReadOnlyDiagnostic(HardwareCompatibilityAssessment? hardware) =>
+        string.Equals(hardware?.DeviceFamily?.Value, "msi.claw", StringComparison.OrdinalIgnoreCase);
     private readonly ClawSensorProbeWorkflow _workflow = new();
     private ClawSensorProbeSessionWriter? _writer;
     private ClawSensorProbeSensorApi? _api;
@@ -18,6 +21,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     private int _disposed;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly CancellationTokenSource _lifecycleCancellation = new();
+    private ClawSensorCaptureContext _captureContext = new(ClawSensorCaptureMode.Transition, ClawSensorProbePhase.REST, 1);
     public CancellationToken LifecycleCancellation => _lifecycleCancellation.Token;
     public ClawSensorProbeState State => _workflow.State;
     public ClawSensorProbeWorkflow Workflow => _workflow;
@@ -31,6 +35,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     public long DroppedAccelerometerCount => _writer?.DroppedAccelerometerCount ?? 0;
     public IReadOnlyList<string> ReaderErrors { get { if (_readers is not null) return _readers.Errors; lock (_readerErrors) return _readerErrors.ToArray(); } }
     public ClawSensorDiscovery? Discovery => _readers?.Discovery;
+    public ClawSensorCaptureContext CaptureContext => Volatile.Read(ref _captureContext);
 
     public void Prepare() { _workflow.Discovering(); _workflow.Ready(); }
     public void Start(string? root = null)
@@ -58,7 +63,9 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             _writer.SetDiscovery(discovery);
             if (!discovery.IsValid) throw new InvalidOperationException(string.Join(" ", discovery.Errors));
-            _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, discovery, (ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.Last().Pass));
+            var visit = Workflow.Visits.Last();
+            SetCaptureContext(ClawSensorCaptureMode.Transition, visit.Phase, visit.Pass);
+            _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, discovery, () => CaptureContext));
             cancellationToken.ThrowIfCancellationRequested();
             _writer.SetDiscovery(_readers.Discovery);
         }
@@ -79,61 +86,66 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
             throw;
         }
     }
-    public async Task RestartPhaseCaptureAsync(CancellationToken cancellationToken = default)
+    public Task RestartPhaseCaptureAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            if (_readers is not null) { var readers = _readers; await readers.DisposeAsync(); foreach (var error in readers.Errors) { lock (_readerErrors) _readerErrors.Add(error); _writer?.AddError(error); } if (readers.ShutdownTimedOut) { _writer?.MarkShutdownTimedOut(); _apiReleaseDeferred = true; } _readers = null; }
-            if (_api is null || _writer is null) throw new InvalidOperationException("The probe session is not active.");
-            var api = _api;
-            var discovery = await Task.Run(api.Discover);
-            cancellationToken.ThrowIfCancellationRequested();
-            _writer.SetDiscovery(discovery);
-            if (!discovery.IsValid) throw new InvalidOperationException(string.Join(" ", discovery.Errors));
-            _readers = await Task.Run(() => new ClawSensorProbeReaders(api, _writer, discovery, (ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.Last().Pass));
-            cancellationToken.ThrowIfCancellationRequested();
-            _writer.SetDiscovery(_readers.Discovery);
-        }
-        catch (Exception exception)
-        {
-            if (exception is not OperationCanceledException) _workflow.Fail();
-            if (_writer is not null)
-            {
-                _writer.AddError(exception.Message);
-                if (_readers is not null)
-                {
-                    var readers = _readers;
-                    await readers.DisposeAsync();
-                    foreach (var error in readers.Errors) { lock (_readerErrors) _readerErrors.Add(error); _writer.AddError(error); }
-                    if (readers.ShutdownTimedOut) { _writer.MarkShutdownTimedOut(); _apiReleaseDeferred = true; }
-                    _readers = null;
-                }
-                if (_apiReleaseDeferred && _readers is not null && _api is not null) DeferApiRelease(_readers, _api);
-                else if (!_apiReleaseDeferred) { _api?.Dispose(); _api = null; }
-                await _writer.FinalizeAsync(CancellationToken.None);
-            }
-            throw;
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_readers is null) throw new InvalidOperationException("The persistent sensor readers are not active.");
+        ThrowIfReaderFaulted();
+        return Task.CompletedTask;
     }
-    public void BeginRecording() => _workflow.BeginRecording();
+    public void BeginRecording() { _workflow.BeginRecording(); var visit = Workflow.Visits.Last(); SetCaptureContext(ClawSensorCaptureMode.Recording, visit.Phase, visit.Pass); }
     public void Next() => _workflow.Next();
     public void Back() => _workflow.Back();
     public void Write(ClawSensorProbeSample sample) => _writer?.Write(sample);
     public double ElapsedMs => _clock.Elapsed.TotalMilliseconds;
-    public void WriteTransition() => _writer?.WriteTransition((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
+    public void WriteTransition() => _writer?.WriteTransition(Workflow.Visits.LastOrDefault().Phase, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public void EndCurrentPhase() => _writer?.EndPhase((ClawSensorProbePhase)Workflow.CurrentIndex, Workflow.Visits.LastOrDefault().Pass, ElapsedMs);
     public void BeginPhaseTransition() => WriteTransition();
-    public void AdvancePhase() { EndCurrentPhase(); WriteTransition(); Next(); WriteTransition(); }
-    public void RevisitPreviousPhase() { if (State == ClawSensorProbeState.RecordingPhase) { EndCurrentPhase(); WriteTransition(); } Back(); if (State == ClawSensorProbeState.Countdown) WriteTransition(); }
+    public void AdvancePhase()
+    {
+        ThrowIfReaderFaulted();
+        EndCurrentPhase();
+        Next();
+        if (State == ClawSensorProbeState.Countdown)
+        {
+            var visit = Workflow.Visits.Last();
+            SetCaptureContext(ClawSensorCaptureMode.Transition, visit.Phase, visit.Pass);
+            WriteTransition();
+        }
+    }
+    public void RevisitPreviousPhase()
+    {
+        ThrowIfReaderFaulted();
+        if (State == ClawSensorProbeState.RecordingPhase) EndCurrentPhase();
+        Back();
+        if (State == ClawSensorProbeState.Countdown)
+        {
+            var visit = Workflow.Visits.Last();
+            SetCaptureContext(ClawSensorCaptureMode.Transition, visit.Phase, visit.Pass);
+            WriteTransition();
+        }
+    }
     public async Task CountdownAsync(Func<string, Task> updateStatus, Func<ClawSensorProbePhase, string> phaseLabel, CancellationToken cancellationToken)
     {
         var label = phaseLabel(Workflow.Visits.Last().Phase);
+        var visit = Workflow.Visits.Last();
+        SetCaptureContext(ClawSensorCaptureMode.Transition, visit.Phase, visit.Pass);
         for (var count = 3; count >= 1; count--)
         {
             BeginPhaseTransition();
             await updateStatus($"Get ready for {label}. {count}");
             await Task.Delay(1000, cancellationToken);
         }
+    }
+    private void SetCaptureContext(ClawSensorCaptureMode mode, ClawSensorProbePhase phase, int pass) => Volatile.Write(ref _captureContext, new(mode, phase, pass));
+    public void ThrowIfReaderFaulted()
+    {
+        if (_readers is null) return;
+        var errors = _readers.Errors;
+        if (errors.Count == 0) return;
+        foreach (var error in errors) { lock (_readerErrors) if (!_readerErrors.Contains(error, StringComparer.Ordinal)) _readerErrors.Add(error); _writer?.AddError(error); }
+        _workflow.Fail();
+        throw new InvalidOperationException(string.Join(" ", errors));
     }
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {

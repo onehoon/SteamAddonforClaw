@@ -6,6 +6,7 @@ namespace SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 internal sealed class ClawSensorProbeReaders : IAsyncDisposable
 {
     private readonly ClawSensorProbeSensorApi _api;
+    private readonly Func<ClawSensorCaptureContext> _contextProvider;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task[] _workers;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
@@ -17,14 +18,15 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
     internal bool HasCompleted => _workers.All(x => x.IsCompleted);
     internal Task Completion => Task.WhenAll(_workers);
     private readonly List<string> _errors = [];
-    public ClawSensorProbeReaders(ClawSensorProbeSensorApi api, ClawSensorProbeSessionWriter writer, ClawSensorDiscovery discovery, ClawSensorProbePhase phase, int phasePass)
+    public ClawSensorProbeReaders(ClawSensorProbeSensorApi api, ClawSensorProbeSessionWriter writer, ClawSensorDiscovery discovery, Func<ClawSensorCaptureContext> contextProvider)
     {
         _api = api;
+        _contextProvider = contextProvider;
         Discovery = discovery;
         if (!discovery.IsValid) throw new InvalidOperationException(string.Join(" ", discovery.Errors));
-        _workers = [RunAsync(discovery.Gyroscope!, "GYRO", writer, phase, phasePass), RunAsync(discovery.Accelerometer!, "ACCEL", writer, phase, phasePass)];
+        _workers = [RunAsync(discovery.Gyroscope!, "GYRO", writer), RunAsync(discovery.Accelerometer!, "ACCEL", writer)];
     }
-    private Task RunAsync(ClawSensorProbeCandidate candidate, string sensorName, ClawSensorProbeSessionWriter writer, ClawSensorProbePhase phase, int phasePass)
+    private Task RunAsync(ClawSensorProbeCandidate candidate, string sensorName, ClawSensorProbeSessionWriter writer)
     {
         return Task.Run(() =>
         {
@@ -48,11 +50,12 @@ internal sealed class ClawSensorProbeReaders : IAsyncDisposable
                 while (!_stop.IsCancellationRequested)
                 {
                     var values = ClawSensorProbeSensorApi.ReadXYZ(sensor);
+                    var context = _contextProvider();
                     var now = _clock.ElapsedTicks;
                     var interval = previous == 0 ? 0 : (now - previous) * 1000d / Stopwatch.Frequency;
                     previous = now;
                     var elapsed = now * 1000d / Stopwatch.Frequency;
-                    writer.Write(new(Interlocked.Increment(ref _sequence), DateTimeOffset.UtcNow, elapsed, phase, phasePass, sensorName, values.X, values.Y, values.Z, interval, values.Timestamp));
+                    writer.Write(new(Interlocked.Increment(ref _sequence), DateTimeOffset.UtcNow, elapsed, context.Mode, context.Phase, context.Pass, sensorName, values.X, values.Y, values.Z, interval));
                     Snapshot.Observe(sensorName, values.X, values.Y, values.Z, interval);
                 }
             }

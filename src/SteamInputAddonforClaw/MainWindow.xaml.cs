@@ -238,16 +238,16 @@ public sealed partial class MainWindow : Window
             _clawSensorProbe.SetDeviceIdentity(device?.Manufacturer ?? "Unavailable", device?.Model ?? "Unavailable", device?.BaseBoardProduct ?? "Unavailable", device?.Model ?? "Unknown / unresolved");
             var hardware = _latestSystemStatus?.HardwareCompatibility;
             _clawSensorProbe.SetHardwareCompatibility(hardware?.Status.ToString() ?? "Indeterminate", hardware?.DeviceFamily?.Value ?? "Unavailable", hardware?.DeviceModel?.Value ?? "Unavailable", hardware?.Reason ?? "Not captured");
-            if (hardware?.Status == HardwareCompatibilityStatus.Unsupported)
+            if (!ClawSensorProbeCoordinator.AllowsReadOnlyDiagnostic(hardware))
                 throw new InvalidOperationException("This diagnostic is available only on an identified MSI Claw device.");
-            await _clawSensorProbe.CountdownAsync(status => { ClawSensorProbeStatusText.Text = status; return Task.CompletedTask; }, ClawSensorProbePhaseLabel, _clawSensorProbe.LifecycleCancellation);
-            _clawSensorProbe.BeginRecording();
             await _clawSensorProbe.StartCaptureAsync(_clawSensorProbe.LifecycleCancellation);
             var discovery = _clawSensorProbe.Discovery;
             ClawSensorProbeGyroText.Text = discovery?.Gyroscope is { } gyro ? $"Gyroscope: {gyro.FriendlyName} | ID: {gyro.SensorId} | Type: {gyro.TypeGuid} | Category: {gyro.CategoryGuid} | Manufacturer: {gyro.Manufacturer} | Model: {gyro.Model} | Persistent ID: {gyro.PersistentUniqueId} | Min interval: {gyro.MinimumReportInterval} ms | HID usage: {gyro.CustomUsage} | Status: Ready" : "Gyroscope: Not available";
             ClawSensorProbeAccelText.Text = discovery?.Accelerometer is { } accel ? $"Accelerometer: {accel.FriendlyName} | ID: {accel.SensorId} | Type: {accel.TypeGuid} | Category: {accel.CategoryGuid} | Manufacturer: {accel.Manufacturer} | Model: {accel.Model} | Persistent ID: {accel.PersistentUniqueId} | Min interval: {accel.MinimumReportInterval} ms | HID usage: {accel.CustomUsage} | Status: Ready" : "Accelerometer: Not available";
             StartClawSensorProbeUiTimer();
             UpdateClawSensorProbePhaseUi();
+            await _clawSensorProbe.CountdownAsync(status => { ClawSensorProbeStatusText.Text = status; return Task.CompletedTask; }, ClawSensorProbePhaseLabel, _clawSensorProbe.LifecycleCancellation);
+            _clawSensorProbe.BeginRecording();
             ClawSensorProbeStatusText.Text = "Recording. Sensor discovery and capture are read-only.";
             ClawSensorProbeStopButton.IsEnabled = true;
             ClawSensorProbeNextPhaseButton.IsEnabled = true;
