@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
@@ -104,6 +105,8 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
 
     public async ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
     {
+        var totalStarted = Stopwatch.GetTimestamp();
+        long runtimeStartMs = 0, createDeviceMs = 0, pnpResolveMs = 0, recoveryCheckpointMs = 0, hidHideInspectionMs = 0, neutralReportMs = 0, publisherStartMs = 0;
         await _serial.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -123,18 +126,28 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
 
             operationToken.ThrowIfCancellationRequested();
             _state = LifecycleState.Creating;
+            var started = Stopwatch.GetTimestamp();
             _runtime.Start();
+            runtimeStartMs = Elapsed(started);
             operationToken.ThrowIfCancellationRequested();
+            started = Stopwatch.GetTimestamp();
             _deviceId = _runtime.CreateDevice();
+            createDeviceMs = Elapsed(started);
             _busId = _runtime.BusId;
             operationToken.ThrowIfCancellationRequested();
+            started = Stopwatch.GetTimestamp();
             var resolved = await WaitForIdentityAsync(_before, operationToken).ConfigureAwait(false);
+            pnpResolveMs = Elapsed(started);
             if (!resolved.Succeeded) return await FailAndRollbackCoreAsync(resolved.Reason).ConfigureAwait(false);
             _owned = resolved.Devices;
+            started = Stopwatch.GetTimestamp();
             var checkpoint = _recovery.ResolveAddonOwnedVirtualDeviceIdentity(session, _mutationId, _owned.Select(device => device.InstanceId));
+            recoveryCheckpointMs = Elapsed(started);
             if (!checkpoint.IsSafeToContinue) return await FailAndRollbackCoreAsync("VirtualDeviceRecoveryCheckpointFailed").ConfigureAwait(false);
             operationToken.ThrowIfCancellationRequested();
+            started = Stopwatch.GetTimestamp();
             var hidHideInspection = _hidHide.Inspect();
+            hidHideInspectionMs = Elapsed(started);
             if (!hidHideInspection.IsConfigurationReadable) return await FailAndRollbackCoreAsync("HidHideOutputInspectionUnavailable").ConfigureAwait(false);
             var ownedEntries = _owned.SelectMany(device => device.AncestorInstanceIds.Append(device.InstanceId).Append(device.ParentInstanceId ?? string.Empty))
                 .Where(value => !string.IsNullOrWhiteSpace(value)).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -142,13 +155,18 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
                 return await FailAndRollbackCoreAsync("HidHideOutputAlreadyBlocked").ConfigureAwait(false);
             _tracker.ResolveOwnership(_owned);
             operationToken.ThrowIfCancellationRequested();
+            started = Stopwatch.GetTimestamp();
             if (!_runtime.SetNeutral(_deviceId)) return await FailAndRollbackCoreAsync("NeutralReportRejected").ConfigureAwait(false);
+            neutralReportMs = Elapsed(started);
             Interlocked.Exchange(ref _outputFaultReported, 0);
             _publisher = new ClassicSteamControllerInputPublisher(_snapshot, _runtime, _deviceId, _reportTicks,
                 fault: ReportOutputFault);
+            started = Stopwatch.GetTimestamp();
             _publisher.Start();
+            publisherStartMs = Elapsed(started);
             _state = LifecycleState.Active;
             AppLog.Debug("SteamOutput", "SteamOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{ViiperRuntimeManager.VendorId:X4}"), ("PID", $"{ViiperRuntimeManager.ProductId:X4}"), ("NeutralAccepted", true));
+            AppLog.Debug("RoutingTrace", "Steam output creation completed.", ("Event", "SteamOutputCreated"), ("TotalMs", Elapsed(totalStarted)), ("RuntimeStartMs", runtimeStartMs), ("CreateDeviceMs", createDeviceMs), ("PnPResolveMs", pnpResolveMs), ("RecoveryCheckpointMs", recoveryCheckpointMs), ("HidHideInspectionMs", hidHideInspectionMs), ("NeutralReportMs", neutralReportMs), ("PublisherStartMs", publisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
             return RoutingStageOperationResult.Success("ClassicSteamControllerCreated");
         }
         catch (OperationCanceledException)
@@ -158,7 +176,11 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             if (cancellationToken.IsCancellationRequested) throw;
             return RoutingStageOperationResult.Failure("SteamOutputCreationCancelled");
         }
-        catch (Exception exception) { return await FailAndRollbackCoreAsync(exception.GetType().Name).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Debug("RoutingTrace", "Steam output creation failed.", ("Event", "SteamOutputCreationFailed"), ("FailedOperation", exception.GetType().Name), ("ElapsedMs", Elapsed(totalStarted)), ("TotalMs", Elapsed(totalStarted)), ("Reason", exception.GetType().Name));
+            return await FailAndRollbackCoreAsync(exception.GetType().Name).ConfigureAwait(false);
+        }
         finally
         {
             _creationCancellation?.Dispose();
@@ -176,6 +198,8 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
 
     private async ValueTask<RoutingStageOperationResult> RollbackCoreAsync(CancellationToken cancellationToken)
     {
+        var totalStarted = Stopwatch.GetTimestamp();
+        long removeMs = 0, pnpAbsenceMs = 0;
         if (_state == LifecycleState.Inactive) return RoutingStageOperationResult.Success("SteamOutputAlreadyInactive");
         if (_state == LifecycleState.Prepared)
         {
@@ -195,11 +219,15 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         var absent = false;
         if (_deviceId != 0)
         {
+            var removeStarted = Stopwatch.GetTimestamp();
             removal = _runtime.RemoveDevice(_busId, _deviceId);
+            removeMs = Elapsed(removeStarted);
             if (!removal.DeviceRemoved) return RoutingStageOperationResult.Failure("VirtualDeviceRemoveFailed");
+            var absenceStarted = Stopwatch.GetTimestamp();
             absent = hadResolvedIdentity
                 ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
                 : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
+            pnpAbsenceMs = Elapsed(absenceStarted);
             if (!absent) return RoutingStageOperationResult.Failure("VirtualDevicePnPStillPresent");
         }
         if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new ViiperVirtualDeviceIdentityPolicy(), _before, _owned))
@@ -207,6 +235,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
         if (!complete.IsSafeToContinue) return RoutingStageOperationResult.Failure("VirtualDeviceRecoveryCompletionFailed");
         AppLog.Debug("SteamOutput", "SteamOutput inactive", ("BusId", _busId), ("DeviceId", _deviceId), ("DeviceRemoved", removal.DeviceRemoved), ("BusRemoved", removal.BusRemoved), ("PnPAbsent", absent), ("RecoveryMutationCompleted", complete.IsSafeToContinue));
+        AppLog.Debug("RoutingTrace", "Steam output rollback completed.", ("Event", "SteamOutputRollbackCompleted"), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Success"), ("Reason", "ClassicSteamControllerRemoved"));
         _deviceId = 0; _busId = 0; _owned = null; _before = null; _state = LifecycleState.Inactive; _runtime.StopIfUnused();
         return RoutingStageOperationResult.Success("ClassicSteamControllerRemoved");
     }
@@ -244,5 +273,11 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     }
 
     private async ValueTask<RoutingStageOperationResult> FailAndRollbackCoreAsync(string reason)
-    { var rollback = await RollbackCoreAsync(CancellationToken.None).ConfigureAwait(false); return RoutingStageOperationResult.Failure($"{reason};Rollback={rollback.Reason}"); }
+    {
+        AppLog.Debug("RoutingTrace", "Steam output creation failed.", ("Event", "SteamOutputCreationFailed"), ("FailedOperation", reason), ("Reason", reason));
+        var rollback = await RollbackCoreAsync(CancellationToken.None).ConfigureAwait(false);
+        return RoutingStageOperationResult.Failure($"{reason};Rollback={rollback.Reason}");
+    }
+
+    private static long Elapsed(long started) => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 }

@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Routing;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -59,6 +60,31 @@ public sealed class DiagnosticLoggingTests : IDisposable
         Assert.Equal(3, log.Split("Session completed", StringSplitOptions.None).Length - 1);
         Assert.Contains("EffectiveSource=DeveloperTest", log);
         Assert.Contains("RawRunningAppID=123", log);
+    }
+
+    [Fact]
+    public async Task RoutingTrace_IsDebugOnlyAndCorrelatesExecutions()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
+        await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
+
+        var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
+        var executions = System.Text.RegularExpressions.Regex.Matches(log, @"RoutingExecution=(\d+)")
+            .Select(match => match.Groups[1].Value).Distinct().ToArray();
+        Assert.True(executions.Length >= 2);
+        Assert.Contains("[DEBUG] [P", log);
+        Assert.Contains("[RoutingTrace] Routing activation started.", log);
+        Assert.Contains("[RoutingTrace] Routing activation completed.", log);
+    }
+
+    [Fact]
+    public async Task RoutingTrace_IsFilteredAtInfoLevel()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
+
+        Assert.False(Directory.Exists(_directory) && Directory.GetFiles(_directory).Any(file => File.ReadAllText(file).Contains("[RoutingTrace]", StringComparison.Ordinal)));
     }
 
     public void Dispose()
