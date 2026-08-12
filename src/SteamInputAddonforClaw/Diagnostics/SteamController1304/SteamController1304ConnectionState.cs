@@ -39,6 +39,8 @@ internal static class SteamController1304ConnectionReportParser
     public static SteamController1304ConnectionAssessment Parse(ControllerDeviceInfo receiver, byte[]? report)
     {
         if (report is null) return Indeterminate(receiver, "ConnectionStatusReadFailed", "No response");
+        if (report.Length == ReportLength + 1 && report[1] == ProtocolMarker && report[2] == 0)
+            report = report[1..];
         if (report.Length != ReportLength || report[0] != ProtocolMarker || report[1] != 0)
             return Indeterminate(receiver, "ConnectionStatusMalformedReport", $"Length={report.Length}");
         if (report[2] != MessageTypeWireless)

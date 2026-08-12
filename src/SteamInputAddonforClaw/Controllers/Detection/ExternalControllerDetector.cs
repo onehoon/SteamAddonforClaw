@@ -2,16 +2,22 @@ namespace SteamInputAddonforClaw.Controllers.Detection;
 
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.SteamController1304;
 
 public sealed class ExternalControllerDetector
 {
     private readonly IControllerDeviceEnumerator _deviceEnumerator;
     private readonly ControllerDeviceClassifier _classifier;
+    private readonly ISteamController1304ConnectionProbe _steamController1304Probe;
 
     public ExternalControllerDetector(IControllerDeviceEnumerator deviceEnumerator, ControllerDeviceClassifier classifier)
+        : this(deviceEnumerator, classifier, null) { }
+
+    internal ExternalControllerDetector(IControllerDeviceEnumerator deviceEnumerator, ControllerDeviceClassifier classifier, ISteamController1304ConnectionProbe? steamController1304Probe)
     {
         _deviceEnumerator = deviceEnumerator ?? throw new ArgumentNullException(nameof(deviceEnumerator));
         _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
+        _steamController1304Probe = steamController1304Probe ?? new WindowsSteamController1304ConnectionProbe(new WindowsSteamController1304ReadOnlyTransport());
     }
 
     public ExternalControllerAssessment Detect()
@@ -28,13 +34,17 @@ public sealed class ExternalControllerDetector
             var devices = _deviceEnumerator.EnumeratePresentDevices();
             var topology = new ControllerTopologySnapshot(devices);
             AppLog.Debug("PnP", "Controller device enumeration completed.", ("DeviceCount", devices.Count));
+            var steamReceiverAssessments = devices
+                .Where(device => device.Present && device.VendorId == 0x28DE && device.ProductId == 0x1304 && string.Equals(device.EnumeratorName, "USB", StringComparison.OrdinalIgnoreCase) && string.Equals(device.Service, "usbccgp", StringComparison.OrdinalIgnoreCase) && device.InstanceId.StartsWith("USB\\VID_28DE&PID_1304\\", StringComparison.OrdinalIgnoreCase))
+                .Select(receiver => (receiver.InstanceId, Assessment: _steamController1304Probe.Probe(receiver)))
+                .ToArray();
             var groups = devices
                 .GroupBy(GetLogicalControllerKey)
                 .Select(group => new
                 {
                     Key = group.Key,
                     Devices = group.ToArray(),
-                    Classifications = group.Select(device => _classifier.ClassifyDetailed(device, topology)).ToArray()
+                    Classifications = ApplySteamController1304ConnectionState(group.ToArray(), group.Select(device => _classifier.ClassifyDetailed(device, topology)).ToArray(), steamReceiverAssessments)
                 })
                 .ToArray();
 
@@ -75,6 +85,23 @@ public sealed class ExternalControllerDetector
             AppLog.Warn("ExternalController", "External controller detection failed.", exception, ("Action", "Passive"), ("Reason", "EnumerationOrClassificationException"));
             return new ExternalControllerAssessment(ExternalControllerAssessmentStatus.Indeterminate, 0, []);
         }
+    }
+
+    private static ControllerClassificationResult[] ApplySteamController1304ConnectionState(ControllerDeviceInfo[] devices, ControllerClassificationResult[] classifications, IReadOnlyList<(string InstanceId, SteamController1304ConnectionAssessment Assessment)> assessments)
+    {
+        var receiverAssessment = assessments.FirstOrDefault(item => devices.Any(device => string.Equals(device.InstanceId, item.InstanceId, StringComparison.OrdinalIgnoreCase) || device.AncestorInstanceIds.Contains(item.InstanceId, StringComparer.OrdinalIgnoreCase)));
+        if (receiverAssessment == default) return classifications;
+        if (!classifications.Any(result => result.Classification == ControllerDeviceClassification.ExternalPhysical || result.Reason == "SteamController1304PhysicalRootUnverified"))
+            return classifications;
+        var assessment = receiverAssessment.Assessment;
+        AppLog.Debug("ExternalController", "Steam Controller receiver connection assessed.",
+            ("InstanceId", assessment.ReceiverInstanceId), ("ConnectionStatus", assessment.Status), ("ConnectionReason", assessment.Reason), ("Evidence", assessment.Evidence));
+        return assessment.Status switch
+        {
+            SteamController1304ConnectionStatus.ReceiverOnly => classifications.Select((_, index) => new ControllerClassificationResult(ControllerDeviceClassification.NotController, "SteamController1304ReceiverOnly")).ToArray(),
+            SteamController1304ConnectionStatus.Indeterminate => classifications.Select((_, index) => new ControllerClassificationResult(ControllerDeviceClassification.Indeterminate, $"SteamController1304ConnectionIndeterminate:{assessment.Reason}")).ToArray(),
+            _ => classifications
+        };
     }
 
     private static string GetLogicalControllerKey(ControllerDeviceInfo device)

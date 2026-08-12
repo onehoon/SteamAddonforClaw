@@ -17,7 +17,7 @@ internal sealed class WindowsSteamController1304StateProbe : ISteamController130
     public WindowsSteamController1304StateProbe(Func<IReadOnlyList<ControllerDeviceInfo>>? enumerateDevices = null, ISteamController1304ConnectionProbe? connectionProbe = null)
     {
         _enumerateDevices = enumerateDevices ?? new WindowsControllerDeviceEnumerator().EnumeratePresentDevices;
-        _connectionProbe = connectionProbe ?? new WindowsSteamController1304ConnectionProbe();
+        _connectionProbe = connectionProbe ?? new WindowsSteamController1304ConnectionProbe(new WindowsSteamController1304ReadOnlyTransport());
     }
 
     public SteamController1304DiagnosticSnapshot Capture()

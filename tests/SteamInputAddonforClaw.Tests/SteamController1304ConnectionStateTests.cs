@@ -37,6 +37,16 @@ public sealed class SteamController1304ConnectionStateTests
     }
 
     [Fact]
+    public void LeadingReportId_IsNormalized()
+    {
+        var payload = Report(0x02);
+        var framed = new byte[payload.Length + 1];
+        payload.CopyTo(framed, 1);
+
+        Assert.Equal(SteamController1304ConnectionStatus.ControllerConnected, SteamController1304ConnectionReportParser.Parse(Receiver(), framed).Status);
+    }
+
+    [Fact]
     public void MissingTransport_IsIndeterminateWithoutMutation()
     {
         var result = new WindowsSteamController1304ConnectionProbe().Probe(Receiver());
