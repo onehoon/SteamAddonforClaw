@@ -14,12 +14,12 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
     public async Task<bool> WriteAsync(MsiClawControlHidDevice device, MsiClawNativeMode mode, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (device.VerifiedIdentity.Confidence != MsiClawIdentityConfidence.Strong || (device.VerifiedIdentity.PhysicalDeviceKey is null && !IsUsable(device.VerifiedIdentity.ContainerId))) return false;
+        if (device.VerifiedIdentity.Confidence != MsiClawIdentityConfidence.Strong || (string.IsNullOrWhiteSpace(device.VerifiedIdentity.PhysicalDeviceKey) && !IsUsable(device.VerifiedIdentity.ContainerId))) return false;
         var selector = HidDevice.GetDeviceSelector(device.UsagePage, device.Usage, MsiClawHardware.VendorId, device.Device.ProductId ?? 0);
         var infos = await _lookup.FindAsync(selector, cancellationToken).ConfigureAwait(false);
-        var matching = infos.Where(info => MatchesIdentity(info, device)).ToArray();
-        if (matching.Length != 1) return false;
-        using var hid = await HidDevice.FromIdAsync(matching[0].Id, FileAccessMode.ReadWrite).AsTask(cancellationToken).ConfigureAwait(false);
+        var matching = SelectDeviceInformation(device, infos);
+        if (matching is null) return false;
+        using var hid = await HidDevice.FromIdAsync(matching.Id, FileAccessMode.ReadWrite).AsTask(cancellationToken).ConfigureAwait(false);
         if (hid is null) return false;
         var bytes = MsiClawModeCommand.Build(mode);
         var report = hid.CreateOutputReport();
@@ -30,6 +30,12 @@ internal sealed class WindowsMsiClawModeWriter : IMsiClawModeWriter
         await hid.SendOutputReportAsync(report).AsTask(cancellationToken).ConfigureAwait(false);
         AppLog.Debug("NativeMode", "MSI Claw mode command written.", ("PID", device.Device.ProductId), ("UsagePage", device.UsagePage), ("Usage", device.Usage), ("ReportLength", bytes.Length), ("Mode", mode));
         return true;
+    }
+
+    internal static MsiClawHidDeviceInformation? SelectDeviceInformation(MsiClawControlHidDevice expected, IReadOnlyList<MsiClawHidDeviceInformation> candidates)
+    {
+        var matching = candidates.Where(info => MatchesIdentity(info, expected)).ToArray();
+        return matching.Length == 1 ? matching[0] : null;
     }
 
     private static bool MatchesIdentity(MsiClawHidDeviceInformation info, MsiClawControlHidDevice expected)

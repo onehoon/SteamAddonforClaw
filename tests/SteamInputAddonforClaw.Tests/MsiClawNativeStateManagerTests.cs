@@ -140,8 +140,64 @@ public sealed class MsiClawNativeStateManagerTests
         Assert.Equal(NativeStateRestoreStatus.Failed, (await source.RestoreSnapshotAsync(malformed, CancellationToken.None)).Status);
     }
 
+    [Fact]
+    public async Task Restore_AllowsLegacyUsableContainerSnapshotWithoutPhysicalKey()
+    {
+        var container = Guid.NewGuid();
+        var devices = new MutableModeEnumerator(container);
+        devices.Mode = MsiClawNativeMode.DirectInput;
+        var manager = new MsiClawNativeStateManager(devices, new ApplyingModeController(devices));
+        var legacySnapshot = Snapshot(new(MsiClawNativeMode.XInput, "HID\\LEGACY", "USB\\PARENT", container,
+            MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong));
+
+        var restored = await manager.RestoreSnapshotAsync(legacySnapshot, CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+        Assert.Equal(MsiClawNativeMode.XInput, devices.Mode);
+    }
+
+    [Fact]
+    public async Task Restore_RejectsLegacySentinelSnapshotWithoutPhysicalKey()
+    {
+        var sentinel = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
+        var devices = new MutableModeEnumerator(sentinel);
+        devices.Mode = MsiClawNativeMode.DirectInput;
+        var manager = new MsiClawNativeStateManager(devices, new ApplyingModeController(devices));
+        var legacySnapshot = Snapshot(new(MsiClawNativeMode.XInput, "HID\\LEGACY", "USB\\PARENT", sentinel,
+            MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong));
+
+        var restored = await manager.RestoreSnapshotAsync(legacySnapshot, CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Indeterminate, restored.Status);
+        Assert.Equal("PhysicalIdentityMismatch", restored.Reason);
+        Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
+    }
+
     private static ControllerDeviceInfo Device(ushort productId, string instanceId = "MSI\\DEVICE", Guid? container = null, ushort vendorId = 0x0DB0, string? parentInstanceId = "MSI\\PARENT", IReadOnlyList<string>? ancestors = null) =>
         new(instanceId, container, parentInstanceId, ancestors ?? (parentInstanceId is null ? [] : [parentInstanceId]), "USB", [$"USB\\VID_{vendorId:X4}&PID_{productId:X4}"], [], "HIDClass", null, null, vendorId, productId, true);
+    private static DeviceNativeStateSnapshot Snapshot(MsiClawNativeStatePayload payload) =>
+        new(new HandheldDeviceId("msi.claw"), 1, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(payload));
     private sealed class Enumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => devices; }
+    private sealed class MutableModeEnumerator(Guid container) : IControllerDeviceEnumerator
+    {
+        public MsiClawNativeMode Mode { get; set; } = MsiClawNativeMode.XInput;
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            var productId = Mode == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId;
+            var root = $"USB\\VID_0DB0&PID_{productId:X4}\\CLAW_A";
+            return [Device(productId, $"USB\\VID_0DB0&PID_{productId:X4}&MI_00\\A", container, parentInstanceId: "USB\\PARENT", ancestors: [root])];
+        }
+    }
+    private sealed class ApplyingModeController(MutableModeEnumerator devices) : IMsiClawModeController
+    {
+        public Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken)
+        {
+            devices.Mode = target;
+            return Task.FromResult(new MsiClawModeTransitionResult(MsiClawModeTransitionStatus.Succeeded,
+                target == MsiClawNativeMode.XInput ? MsiClawNativeMode.DirectInput : MsiClawNativeMode.XInput,
+                target, null, target == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId,
+                true, true, true, true, 1, "test"));
+        }
+    }
     private sealed class ThrowingEnumerator : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => throw new InvalidOperationException(); }
 }

@@ -4,6 +4,7 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal enum MsiClawModeTransitionStatus { Succeeded, WriteFailed, OldDeviceDidNotDisappear, TargetDeviceDidNotAppear, IdentityMismatch, AmbiguousDevice, UnsupportedDevice, Cancelled, StaleGeneration, TimedOut, RecoveryUnsafe }
 internal enum MsiClawIdentityConfidence { Strong, Weak, Indeterminate }
+internal sealed record MsiClawPhysicalRootResolution(string RawRootInstanceId, string PhysicalDeviceKey);
 internal sealed record MsiClawPhysicalIdentity(Guid? ContainerId, string? ParentInstanceId, string InstanceId, ushort? VendorId, ushort? ProductId, MsiClawIdentityConfidence Confidence, string? PhysicalDeviceKey = null)
 {
     internal static MsiClawPhysicalIdentity From(ControllerDeviceInfo device)
@@ -14,12 +15,16 @@ internal sealed record MsiClawPhysicalIdentity(Guid? ContainerId, string? Parent
         return new(device.ContainerId, device.ParentInstanceId, device.InstanceId, device.VendorId, device.ProductId,
             strong ? MsiClawIdentityConfidence.Strong : MsiClawIdentityConfidence.Indeterminate, physicalDeviceKey);
     }
-    private static bool IsUsableContainer(Guid? containerId) => containerId is Guid value && value != Guid.Empty && value != new Guid("00000000-0000-0000-ffff-ffffffffffff");
+    internal static MsiClawPhysicalIdentity FromPayload(MsiClawNativeStatePayload payload) =>
+        new(payload.ContainerId, payload.ParentInstanceId, payload.InstanceId ?? string.Empty, MsiClawHardware.VendorId, payload.ProductId, payload.IdentityConfidence, payload.PhysicalDeviceKey);
+    internal static bool IsUsableContainer(Guid? containerId) => containerId is Guid value && value != Guid.Empty && value != new Guid("00000000-0000-0000-ffff-ffffffffffff");
     internal bool StronglyMatches(MsiClawPhysicalIdentity other) => Confidence == MsiClawIdentityConfidence.Strong && other.Confidence == MsiClawIdentityConfidence.Strong && VendorId == other.VendorId &&
         (IsUsableContainer(ContainerId) && IsUsableContainer(other.ContainerId)
             ? ContainerId == other.ContainerId && string.Equals(ParentInstanceId, other.ParentInstanceId, StringComparison.OrdinalIgnoreCase)
-            : string.Equals(PhysicalDeviceKey, other.PhysicalDeviceKey, StringComparison.OrdinalIgnoreCase));
-    internal static string? ResolvePhysicalDeviceKey(ControllerDeviceInfo device)
+            : !string.IsNullOrWhiteSpace(PhysicalDeviceKey) && !string.IsNullOrWhiteSpace(other.PhysicalDeviceKey) &&
+                string.Equals(PhysicalDeviceKey, other.PhysicalDeviceKey, StringComparison.OrdinalIgnoreCase));
+    internal static string? ResolvePhysicalDeviceKey(ControllerDeviceInfo device) => ResolvePhysicalRoot(device)?.PhysicalDeviceKey;
+    internal static MsiClawPhysicalRootResolution? ResolvePhysicalRoot(ControllerDeviceInfo device)
     {
         var ids = new[] { device.InstanceId }.Concat(device.AncestorInstanceIds);
         foreach (var id in ids)
@@ -31,7 +36,7 @@ internal sealed record MsiClawPhysicalIdentity(Guid? ContainerId, string? Parent
             if (prefix.Length != 2 || !prefix[0].StartsWith("VID_", StringComparison.OrdinalIgnoreCase) || !prefix[1].StartsWith("PID_", StringComparison.OrdinalIgnoreCase) ||
                 !ushort.TryParse(prefix[0][4..], System.Globalization.NumberStyles.HexNumber, null, out var vid) || !ushort.TryParse(prefix[1][4..], System.Globalization.NumberStyles.HexNumber, null, out var pid) ||
                 !MsiClawHardware.IsKnownController(vid, pid) || string.IsNullOrWhiteSpace(parts[2])) continue;
-            return $"USB\\VID_{vid:X4}\\{parts[2]}";
+            return new(id, $"USB\\VID_{vid:X4}\\{parts[2]}");
         }
         return null;
     }

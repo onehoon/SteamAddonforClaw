@@ -183,7 +183,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
         if (journal.Status != RecoveryStatus.Success) return MsiClawNativeModeEnterResult.Failure(false, "RecoveryJournalUnavailable");
         _snapshot = captured.Snapshot;
         lock (_recoveryStateSync) { _recoveryBoundaryOwned = true; _recoverySessionId = journal.Journal!.RecoverySessionId; }
-        var identity = new MsiClawPhysicalIdentity(original.ContainerId, original.ParentInstanceId, original.InstanceId ?? string.Empty, MsiClawHardware.VendorId, original.ProductId, original.IdentityConfidence);
+        var identity = MsiClawPhysicalIdentity.FromPayload(original);
         var result = await _nativeState.SwitchModeAsync(MsiClawNativeMode.DirectInput, identity, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return MsiClawNativeModeEnterResult.Failure(true, result.Reason);
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(true, "PowerGateChangedAfterModeSwitch");

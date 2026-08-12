@@ -245,6 +245,22 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.False(coordinator.HasOwnedRecoveryBoundary);
     }
 
+    [Fact]
+    public async Task PipelineEnterCarriesSentinelPhysicalDeviceKeyToModeSwitch()
+    {
+        var devices = new SentinelDeviceEnumerator();
+        var modeController = new RecordingModeController();
+        await using var coordinator = CreateCoordinatorFor(devices, modeController);
+
+        Assert.True((await coordinator.InspectForPipelineAsync(CancellationToken.None)).Succeeded);
+        var result = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Single(modeController.Identities);
+        Assert.Equal("USB\\VID_0DB0\\CLAW_A", modeController.Identities[0].PhysicalDeviceKey);
+        Assert.Equal(MsiClawIdentityConfidence.Strong, modeController.Identities[0].Confidence);
+    }
+
     private static MsiClawNativeModeSessionCoordinator CreateCoordinator(
         FakeDeviceEnumerator devices,
         FakeModeController modeController,
@@ -333,6 +349,30 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     {
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
         [new("HID\\MSI_CLAW", Guid.Parse("00000000-0000-0000-ffff-ffffffffffff"), "PARENT", [], "HID", [], [], "HIDClass", null, null, MsiClawHardware.VendorId, MsiClawHardware.XInputProductId, true)];
+    }
+
+    private sealed class SentinelDeviceEnumerator : IControllerDeviceEnumerator
+    {
+        private static readonly Guid Sentinel = Guid.Parse("00000000-0000-0000-ffff-ffffffffffff");
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
+        [
+            new("USB\\VID_0DB0&PID_1901&MI_00\\A", Sentinel, "USB\\PARENT", ["USB\\VID_0DB0&PID_1901\\CLAW_A"],
+                "HID", [], [], "HIDClass", null, null, MsiClawHardware.VendorId, MsiClawHardware.XInputProductId, true,
+                UsagePage: 0xFFA0, Usage: 0x0001)
+        ];
+    }
+
+    private sealed class RecordingModeController : IMsiClawModeController
+    {
+        public List<MsiClawPhysicalIdentity> Identities { get; } = [];
+        public Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken)
+        {
+            Identities.Add(expectedIdentity);
+            return Task.FromResult(new MsiClawModeTransitionResult(MsiClawModeTransitionStatus.Succeeded,
+                MsiClawNativeMode.XInput, target, MsiClawHardware.XInputProductId,
+                target == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId,
+                true, true, true, true, 1, "test"));
+        }
     }
 
     private sealed class NeverModeController : IMsiClawModeController
