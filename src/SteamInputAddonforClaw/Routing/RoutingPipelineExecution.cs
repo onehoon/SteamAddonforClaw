@@ -37,10 +37,13 @@ internal static class RoutingPipelineStageOrder
         RoutingStageKind.XboxOutput,
         RoutingStageKind.SteamOutput,
         RoutingStageKind.ThirdPartyIsolation,
-        RoutingStageKind.PhysicalIsolation,
         RoutingStageKind.PhysicalInput,
-        RoutingStageKind.NativeMode
+        RoutingStageKind.NativeMode,
+        RoutingStageKind.PhysicalIsolation
     ];
+
+    internal static bool IsRollbackFailureBarrier(RoutingStageKind kind) =>
+        kind is RoutingStageKind.SteamOutput or RoutingStageKind.PhysicalInput or RoutingStageKind.NativeMode;
 }
 
 internal sealed record RoutingPipelineExecutionResult(
@@ -191,7 +194,16 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
     }
 
     private async ValueTask<RoutingPipelineRollbackResult> RollbackCandidatesAsync(IReadOnlyList<(RoutingStageKind Kind, IRoutingPipelineStage? Stage)> candidates, int? executionId)
-        => await RollbackStagesAsync(candidates.Reverse().ToList(), executionId).ConfigureAwait(false) ?? new(true, null, "Success");
+        => await RollbackStagesAsync(OrderForRollback(candidates), executionId).ConfigureAwait(false) ?? new(true, null, "Success");
+
+    private static List<(RoutingStageKind Kind, IRoutingPipelineStage? Stage)> OrderForRollback(IReadOnlyList<(RoutingStageKind Kind, IRoutingPipelineStage? Stage)> candidates)
+    {
+        var byKind = candidates.ToDictionary(entry => entry.Kind);
+        return RoutingPipelineStageOrder.Rollback
+            .Where(byKind.ContainsKey)
+            .Select(kind => byKind[kind])
+            .ToList();
+    }
 
     private async ValueTask<RoutingPipelineRollbackResult?> RollbackStagesAsync(IReadOnlyList<(RoutingStageKind Kind, IRoutingPipelineStage? Stage)> stages, int? executionId)
     {
@@ -201,6 +213,7 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
             if (entry.Stage is null)
             {
                 firstFailure ??= new(false, entry.Kind, "StageImplementationMissing");
+                if (RoutingPipelineStageOrder.IsRollbackFailureBarrier(entry.Kind)) break;
                 continue;
             }
 
@@ -210,11 +223,15 @@ internal sealed class RoutingPipelineExecutor : IRoutingPipelineExecutor
                 var result = await entry.Stage.RollbackMutationAsync(CancellationToken.None).ConfigureAwait(false);
                 AppLog.Debug("RoutingTrace", "Routing stage timing.", ("RoutingExecution", executionId), ("Stage", entry.Kind), ("Phase", "Rollback"), ("Result", result.Succeeded ? "Success" : "Failure"), ("Reason", result.Reason), ("ElapsedMs", Elapsed(started)));
                 if (!result.Succeeded)
+                {
                     firstFailure ??= new(false, entry.Kind, result.Reason);
+                    if (RoutingPipelineStageOrder.IsRollbackFailureBarrier(entry.Kind)) break;
+                }
             }
             catch (Exception exception)
             {
                 firstFailure ??= new(false, entry.Kind, exception.GetType().Name);
+                if (RoutingPipelineStageOrder.IsRollbackFailureBarrier(entry.Kind)) break;
             }
         }
 

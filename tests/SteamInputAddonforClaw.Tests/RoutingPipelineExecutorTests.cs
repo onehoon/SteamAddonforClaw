@@ -6,10 +6,10 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class RoutingPipelineExecutorTests
 {
     [Fact]
-    public void StageOrder_IsExplicitAndReversedForRollback()
+    public void StageOrder_IsExplicitAndDependencyAwareForRollback()
     {
         Assert.Equal([RoutingStageKind.NativeMode, RoutingStageKind.PhysicalInput, RoutingStageKind.PhysicalIsolation, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.SteamOutput, RoutingStageKind.XboxOutput, RoutingStageKind.GameBarRouting], RoutingPipelineStageOrder.Forward);
-        Assert.Equal([RoutingStageKind.GameBarRouting, RoutingStageKind.XboxOutput, RoutingStageKind.SteamOutput, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.PhysicalIsolation, RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode], RoutingPipelineStageOrder.Rollback);
+        Assert.Equal([RoutingStageKind.GameBarRouting, RoutingStageKind.XboxOutput, RoutingStageKind.SteamOutput, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalIsolation], RoutingPipelineStageOrder.Rollback);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public sealed class RoutingPipelineExecutorTests
     }
 
     [Fact]
-    public async Task MultiStageFailure_RollsBackCurrentAndPreviousInReverseOrder()
+    public async Task MultiStageFailure_UsesCanonicalDependencyRollbackOrder()
     {
         var trace = new List<string>();
         var native = new FakeStage(RoutingStageKind.NativeMode, trace);
@@ -66,7 +66,7 @@ public sealed class RoutingPipelineExecutorTests
         var isolation = new FakeStage(RoutingStageKind.PhysicalIsolation, trace) { ExecuteResult = RoutingStageOperationResult.Failure("execute") };
         var result = await Execute(new(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled), native, physical, isolation);
         Assert.False(result.Succeeded);
-        Assert.Equal(["NativeMode.Prepare", "NativeMode.Execute", "PhysicalInput.Prepare", "PhysicalInput.Execute", "PhysicalIsolation.Prepare", "PhysicalIsolation.Execute", "PhysicalIsolation.Rollback", "PhysicalInput.Rollback", "NativeMode.Rollback"], trace);
+        Assert.Equal(["NativeMode.Prepare", "NativeMode.Execute", "PhysicalInput.Prepare", "PhysicalInput.Execute", "PhysicalIsolation.Prepare", "PhysicalIsolation.Execute", "PhysicalInput.Rollback", "NativeMode.Rollback", "PhysicalIsolation.Rollback"], trace);
         Assert.Equal(["Prepare", "Execute", "Rollback"], isolation.Calls);
         Assert.Equal(["Prepare", "Execute", "Rollback"], physical.Calls);
         Assert.Equal(["Prepare", "Execute", "Rollback"], native.Calls);
@@ -105,7 +105,7 @@ public sealed class RoutingPipelineExecutorTests
     }
 
     [Fact]
-    public async Task PublicRollback_UsesReverseOrderAndIgnoresNonEnabled()
+    public async Task PublicRollback_UsesDependencyOrderAndIgnoresNonEnabled()
     {
         var native = new FakeStage(RoutingStageKind.NativeMode);
         var observe = new FakeStage(RoutingStageKind.PhysicalInput);
@@ -120,25 +120,69 @@ public sealed class RoutingPipelineExecutorTests
     }
 
     [Fact]
-    public async Task RollbackFailure_ContinuesWithRemainingStages()
+    public async Task SteamOutputRollbackFailure_BlocksDependentNativeTeardown()
     {
         var native = new FakeStage(RoutingStageKind.NativeMode);
         var output = new FakeStage(RoutingStageKind.SteamOutput) { RollbackResult = RoutingStageOperationResult.Failure("rollback") };
         var result = await new RoutingPipelineExecutor([native, output]).RollbackAsync(new(RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled), CancellationToken.None);
         Assert.False(result.Succeeded);
         Assert.Equal(["Rollback"], output.Calls);
+        Assert.Empty(native.Calls);
+    }
+
+    [Fact]
+    public async Task ThirdPartyIsolationRollbackFailure_ContinuesWithIndependentTeardown()
+    {
+        var native = new FakeStage(RoutingStageKind.NativeMode);
+        var thirdParty = new FakeStage(RoutingStageKind.ThirdPartyIsolation) { RollbackResult = RoutingStageOperationResult.Failure("rollback") };
+        var result = await new RoutingPipelineExecutor([native, thirdParty]).RollbackAsync(
+            new(RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled),
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(["Rollback"], thirdParty.Calls);
         Assert.Equal(["Rollback"], native.Calls);
     }
 
     [Fact]
-    public async Task PublicRollback_MissingImplementationFailsAndContinues()
+    public async Task PhysicalInputRollbackFailure_BlocksNativeAndPhysicalIsolationTeardown()
+    {
+        var input = new FakeStage(RoutingStageKind.PhysicalInput) { RollbackResult = RoutingStageOperationResult.Failure("rollback") };
+        var native = new FakeStage(RoutingStageKind.NativeMode);
+        var isolation = new FakeStage(RoutingStageKind.PhysicalIsolation);
+        var result = await new RoutingPipelineExecutor([native, input, isolation]).RollbackAsync(
+            new(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled),
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(["Rollback"], input.Calls);
+        Assert.Empty(native.Calls);
+        Assert.Empty(isolation.Calls);
+    }
+
+    [Fact]
+    public async Task NativeModeRollbackFailure_BlocksPhysicalIsolationTeardown()
+    {
+        var native = new FakeStage(RoutingStageKind.NativeMode) { RollbackResult = RoutingStageOperationResult.Failure("rollback") };
+        var isolation = new FakeStage(RoutingStageKind.PhysicalIsolation);
+        var result = await new RoutingPipelineExecutor([native, isolation]).RollbackAsync(
+            new(RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled),
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(["Rollback"], native.Calls);
+        Assert.Empty(isolation.Calls);
+    }
+
+    [Fact]
+    public async Task PublicRollback_MissingSteamOutputImplementationBlocksDependentTeardown()
     {
         var native = new FakeStage(RoutingStageKind.NativeMode);
         var plan = new RoutingPipelinePlan(RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled);
         var result = await new RoutingPipelineExecutor([native]).RollbackAsync(plan, CancellationToken.None);
         Assert.False(result.Succeeded);
         Assert.Equal(RoutingStageKind.SteamOutput, result.FailedStage);
-        Assert.Equal(["Rollback"], native.Calls);
+        Assert.Empty(native.Calls);
     }
 
     [Fact]
@@ -158,6 +202,39 @@ public sealed class RoutingPipelineExecutorTests
         var stage = new FakeStage(RoutingStageKind.NativeMode) { ThrowOnExecuteCancellation = cancellation };
         await Assert.ThrowsAsync<OperationCanceledException>(() => Execute(Plan(RoutingStageKind.NativeMode, RoutingStageMode.Enabled), cancellation.Token, stage).AsTask());
         Assert.Equal(["Prepare", "Execute", "Rollback"], stage.Calls);
+    }
+
+    [Fact]
+    public async Task MultiStageCancellation_UsesCanonicalDependencyRollbackOrder()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var trace = new List<string>();
+        var native = new FakeStage(RoutingStageKind.NativeMode, trace);
+        var input = new FakeStage(RoutingStageKind.PhysicalInput, trace);
+        var isolation = new FakeStage(RoutingStageKind.PhysicalIsolation, trace);
+        var output = new FakeStage(RoutingStageKind.SteamOutput, trace) { ThrowOnExecuteCancellation = cancellation };
+        var plan = new RoutingPipelinePlan(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new RoutingPipelineExecutor([native, input, isolation, output]).ExecuteAsync(plan, cancellation.Token).AsTask());
+
+        Assert.Equal(["NativeMode.Prepare", "NativeMode.Execute", "PhysicalInput.Prepare", "PhysicalInput.Execute", "PhysicalIsolation.Prepare", "PhysicalIsolation.Execute", "SteamOutput.Prepare", "SteamOutput.Execute", "SteamOutput.Rollback", "PhysicalInput.Rollback", "NativeMode.Rollback", "PhysicalIsolation.Rollback"], trace);
+    }
+
+    [Fact]
+    public async Task MultiStageException_UsesCanonicalDependencyRollbackOrder()
+    {
+        var trace = new List<string>();
+        var native = new FakeStage(RoutingStageKind.NativeMode, trace);
+        var input = new FakeStage(RoutingStageKind.PhysicalInput, trace);
+        var isolation = new FakeStage(RoutingStageKind.PhysicalIsolation, trace);
+        var output = new FakeStage(RoutingStageKind.SteamOutput, trace) { ThrowOnExecute = true };
+        var plan = new RoutingPipelinePlan(RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Enabled, RoutingStageMode.Disabled, RoutingStageMode.Disabled);
+
+        var result = await new RoutingPipelineExecutor([native, input, isolation, output]).ExecuteAsync(plan, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(RoutingStageKind.SteamOutput, result.FailedStage);
+        Assert.Equal(["NativeMode.Prepare", "NativeMode.Execute", "PhysicalInput.Prepare", "PhysicalInput.Execute", "PhysicalIsolation.Prepare", "PhysicalIsolation.Execute", "SteamOutput.Prepare", "SteamOutput.Execute", "SteamOutput.Rollback", "PhysicalInput.Rollback", "NativeMode.Rollback", "PhysicalIsolation.Rollback"], trace);
     }
 
     [Fact]
@@ -190,6 +267,7 @@ public sealed class RoutingPipelineExecutorTests
         public RoutingStageOperationResult ExecuteResult { get; init; } = RoutingStageOperationResult.Success();
         public RoutingStageOperationResult RollbackResult { get; init; } = RoutingStageOperationResult.Success();
         public bool ThrowOnPrepare { get; init; }
+        public bool ThrowOnExecute { get; init; }
         public CancellationTokenSource? ThrowOnExecuteCancellation { get; init; }
 
         public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)
@@ -216,6 +294,7 @@ public sealed class RoutingPipelineExecutorTests
                 ThrowOnExecuteCancellation.Cancel();
                 throw new OperationCanceledException(ThrowOnExecuteCancellation.Token);
             }
+            if (ThrowOnExecute) throw new InvalidOperationException("execute");
             return ValueTask.FromResult(ExecuteResult);
         }
 

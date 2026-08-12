@@ -212,6 +212,12 @@ public partial class App : Application
                 pipelineSessionCoordinator,
                 [_msiClawNativeModeSession],
                 () => RoutingExperimentOptions.None);
+            _msiClawNativeModeSession.SetRoutingSafetyVetoHandler(async () =>
+            {
+                _routingRuntimeCoordinator.CancelInFlightTransition();
+                var result = await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
+                return result.Succeeded;
+            });
             steamOutputStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false); });
         }
         _userTerminationGuard = new UserTerminationGuard(
@@ -284,6 +290,8 @@ public partial class App : Application
             AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation failed; routing is being failed closed.", exception);
             try
             {
+                if (_msiClawNativeModeSession is not null)
+                    await _msiClawNativeModeSession.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
                 var rollback = await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
                 if (!rollback.Succeeded)
                     AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));
@@ -291,11 +299,6 @@ public partial class App : Application
             catch (Exception rollbackException)
             {
                 AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback threw an exception.", rollbackException);
-            }
-            if (_msiClawNativeModeSession is not null)
-            {
-                try { await _msiClawNativeModeSession.FailClosedAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false); }
-                catch (Exception failClosedException) { AppLog.Error("NativeMode", "Failed to fail closed after routing reconciliation error.", failClosedException); }
             }
         }
     }
