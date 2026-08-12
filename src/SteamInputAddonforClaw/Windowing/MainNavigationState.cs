@@ -5,7 +5,8 @@ internal enum MainNavigationPage
     Status,
     HowToUse,
     Settings,
-    DeveloperMenu
+    DeveloperMenu,
+    ClawSensorProbe
 }
 
 internal sealed class MainNavigationState
@@ -36,4 +37,7 @@ internal sealed class MainNavigationState
         CurrentPage = MainNavigationPage.Settings;
         return CurrentPage;
     }
+
+    internal MainNavigationPage OpenClawSensorProbe() => CurrentPage = MainNavigationPage.ClawSensorProbe;
+    internal MainNavigationPage ReturnToDeveloperMenu() => CurrentPage = MainNavigationPage.DeveloperMenu;
 }
