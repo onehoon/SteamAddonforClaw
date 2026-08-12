@@ -47,20 +47,19 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         cancellationToken.ThrowIfCancellationRequested();
         var identity = _input.CurrentIdentity;
         if (identity is null) return ValueTask.FromResult(Failure("PhysicalInputIdentityMissing"));
-        if (string.IsNullOrWhiteSpace(identity.PnpInstanceId) || string.IsNullOrWhiteSpace(identity.PhysicalIdentity)) return ValueTask.FromResult(Failure("PhysicalInputIdentityInvalid"));
+        if (!MsiClawHardware.IsPrimaryDirectInputHidCollectionInstanceId(identity.PnpInstanceId)) return ValueTask.FromResult(Failure("PhysicalIsolationTargetInvalid"));
         var sessionId = _session.CurrentRecoverySessionId;
         if (sessionId is not { } id) return ValueTask.FromResult(Failure("RecoverySessionMissing"));
         var path = _executablePathProvider();
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)) return ValueTask.FromResult(Failure("ExecutablePathInvalid"));
         var inspection = _hidHide.Inspect();
-        if (!inspection.CanPrepareRouting) return ValueTask.FromResult(Failure(inspection.Status.ToString()));
+        if (!CanPrepareIsolation(inspection, out var admissionFailure)) return ValueTask.FromResult(Failure(admissionFailure));
 
         var executablePath = Path.GetFullPath(path);
-        var values = new[] { identity.PhysicalIdentity.Trim(), identity.PnpInstanceId.Trim() }
-            .Where(value => value.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(value => new EntryState(value, (inspection.HiddenDeviceEntries ?? []).Any(existing => string.Equals(existing, value, StringComparison.OrdinalIgnoreCase))))
-            .ToArray();
+        var values = new[]
+        {
+            new EntryState(identity.PnpInstanceId.Trim(), (inspection.HiddenDeviceEntries ?? []).Any(existing => string.Equals(existing, identity.PnpInstanceId, StringComparison.OrdinalIgnoreCase)))
+        };
         lock (_sync) _prepared = new(identity, id, executablePath, inspection.ApplicationWhitelist.Contains(executablePath), values, inspection.IsActive, inspection.IsInverseWhitelist);
         return ValueTask.FromResult(Success("Ready"));
     }
@@ -72,7 +71,7 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         if (prepared is null) return ValueTask.FromResult(Failure("PhysicalIsolationNotPrepared"));
         if (!Matches(prepared)) return ValueTask.FromResult(Failure("PhysicalIsolationDrift"));
         var currentInspection = _hidHide.Inspect();
-        if (!currentInspection.IsConfigurationReadable || currentInspection.IsActive != prepared.OriginalActive || currentInspection.IsInverseWhitelist != prepared.OriginalInverse)
+        if (!CanPrepareIsolation(currentInspection, out _) || currentInspection.IsActive != prepared.OriginalActive || currentInspection.IsInverseWhitelist != prepared.OriginalInverse)
             return ValueTask.FromResult(Failure("HidHideStateDrift"));
         _sessionId = prepared.SessionId; _executablePath = prepared.ExecutablePath; _entries = prepared.Entries;
 
@@ -120,11 +119,12 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             if (_recovery.RecordHidHideActiveStateMutation(_sessionId, false).Status != RecoveryStatus.Success)
                 return ValueTask.FromResult(Failure("ActiveStateJournalFailed"));
             _activeMutationJournaled = true;
-            if (!_hidHide.SetActive(true)) return ValueTask.FromResult(Failure("ActiveStateEnableFailed"));
+            var activationSucceeded = Try(() => _hidHide.SetActive(true));
             var verification = _hidHide.Inspect();
             if (!verification.IsConfigurationReadable || verification.IsInverseWhitelist || !verification.IsActive)
-                return ValueTask.FromResult(Failure("ActiveStateEnableUnverified"));
+                return ValueTask.FromResult(Failure(activationSucceeded ? "ActiveStateEnableUnverified" : "ActiveStateEnableFailed"));
             _activeMutationOwned = true;
+            if (!activationSucceeded) return ValueTask.FromResult(Failure("ActiveStateEnableReportedFailure"));
         }
         lock (_sync) _prepared = null;
         AppLog.Debug("PhysicalIsolation", "PhysicalIsolation active", ("WhitelistPreExisting", prepared.WhitelistPreExisting), ("WhitelistAddonOwned", _ownedWhitelist), ("Entries", string.Join("|", _entries.Select(entry => $"{entry.Value};PreExisting={entry.PreExisting};AddonOwned={entry.Owned}"))));
@@ -140,9 +140,12 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
         {
             var inspection = _hidHide.Inspect();
             if (!inspection.IsConfigurationReadable) return ValueTask.FromResult(Failure("ActiveStateRestoreUnverified"));
-            if (inspection.IsActive && !_hidHide.SetActive(false)) return ValueTask.FromResult(Failure("ActiveStateRestoreFailed"));
+            if (inspection.IsActive && !ContainsOnlySessionOwnedEntries(inspection))
+                return ValueTask.FromResult(Failure("ActiveStateRestoreUnsafeForeignBlockedEntries"));
+            var restoreSucceeded = !inspection.IsActive || Try(() => _hidHide.SetActive(false));
             var verification = _hidHide.Inspect();
-            if (!verification.IsConfigurationReadable || verification.IsActive) return ValueTask.FromResult(Failure("ActiveStateRestoreUnverified"));
+            if (!verification.IsConfigurationReadable || verification.IsActive)
+                return ValueTask.FromResult(Failure(restoreSucceeded ? "ActiveStateRestoreUnverified" : "ActiveStateRestoreFailed"));
             if (_recovery.CompleteHidHideActiveStateMutation(_sessionId).Status != RecoveryStatus.Success) return ValueTask.FromResult(Failure("ActiveStateJournalCompletionFailed"));
             _activeMutationOwned = false;
             _activeMutationJournaled = false;
@@ -183,6 +186,23 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
     }
 
     private bool Matches(Prepared prepared) => _session.CurrentRecoverySessionId == prepared.SessionId && _input.CurrentIdentity is { } current && current == prepared.Identity;
+    private static bool CanPrepareIsolation(HidHideInspection inspection, out string reason)
+    {
+        if (!inspection.IsConfigurationReadable) { reason = inspection.Status.ToString(); return false; }
+        if (inspection.Status == HidHideInspectionStatus.InverseWhitelist || inspection.IsInverseWhitelist) { reason = "InverseWhitelist"; return false; }
+        if (inspection.Status == HidHideInspectionStatus.Available && inspection.IsActive) { reason = "Ready"; return true; }
+        if (inspection.Status == HidHideInspectionStatus.Disabled && !inspection.IsActive)
+        {
+            if ((inspection.HiddenDeviceEntries ?? []).Count == 0) { reason = "ReadyTemporaryActiveLease"; return true; }
+            reason = "HidHideDisabledWithExistingBlockedEntries";
+            return false;
+        }
+        reason = inspection.Status.ToString();
+        return false;
+    }
+    private bool ContainsOnlySessionOwnedEntries(HidHideInspection inspection) =>
+        (inspection.HiddenDeviceEntries ?? []).All(current => _entries.Any(entry =>
+            (entry.Owned || entry.Journaled) && string.Equals(entry.Value, current, StringComparison.OrdinalIgnoreCase)));
     private RoutingStageOperationResult Inspect(bool requireAvailable)
     { if (_input.CurrentIdentity is null) return Failure("PhysicalInputIdentityMissing"); var inspection = _hidHide.Inspect(); return requireAvailable && inspection.Status != HidHideInspectionStatus.Available ? Failure(inspection.Status.ToString()) : Success(inspection.Status.ToString()); }
     private static bool Try(Func<bool> mutation) { try { return mutation(); } catch { return false; } }

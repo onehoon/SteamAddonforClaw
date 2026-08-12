@@ -100,7 +100,7 @@ The addon should remain a small routing layer between the MSI Claw controller an
 
 Native controller state is owned by the active handheld-device adapter. Recovery persists a device-neutral snapshot envelope with a stable device ID and an opaque device-specific payload, then selects the restoring adapter from that journaled ID rather than re-detecting the current handheld. The recovery core never interprets device-specific payloads.
 
-Recovery schema v3 can record multiple addon-owned mutations in one session. Mutation evidence is persisted before the corresponding change, each successful rollback clears only its own recorded mutation, and the journal is deleted only when empty. Current mixed crash recovery supports native device state, HidHide executable whitelist additions, HidHide physical-device additions, and structured addon-owned virtual-output evidence in reverse mutation order with progressive checkpoints. If a journaled VIIPER device is still present after a crash, recovery preserves that exact virtual-output evidence and remains unsafe/passive, but it still restores independently recoverable MSI Claw native-state and HidHide mutations first. Temporary Xbox output mutations remain unsupported and fail closed.
+Recovery schema v4 can record multiple addon-owned mutations in one session. Mutation evidence is persisted before the corresponding change, each successful rollback clears only its own recorded mutation, and the journal is deleted only when empty. Current mixed crash recovery supports native device state, HidHide executable whitelist additions, HidHide physical-device additions, and structured addon-owned virtual-output evidence in reverse mutation order with progressive checkpoints. If a journaled VIIPER device is still present after a crash, recovery preserves that exact virtual-output evidence and remains unsafe/passive, but it still restores independently recoverable MSI Claw native-state and HidHide mutations first. Temporary Xbox output mutations remain unsupported and fail closed.
 
 MSI Claw native-state restoration currently verifies an already-restored state only; active controller mode switching and restoration remain a later hardware PoC.
 
@@ -207,6 +207,8 @@ User-initiated Exit and Restart are disabled while the addon owns live routing m
 Unsupported, Handheld Companion, Winhanced, multiple-manager, indeterminate, and unknown environment strategies cannot be enabled through experiment options. Experiment options do not bypass compatibility, routing eligibility, external-controller veto, recovery safety, or prerequisite gates. Stock Center M enables `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, and `SteamOutput` as its production baseline. Developer Test Mode is a synthetic Steam-session source for quickly starting and stopping that same production path; it does not supply separate stage overrides or bypass safety gates.
 
 The Stock MSI Claw `PhysicalInput` stage has a concrete PID_1902 implementation and publishes only its exact owned immutable identity. The production StockCenterM plan now runs `NativeMode`, `PhysicalInput`, recoverable `PhysicalIsolation`, and `SteamOutput` for an eligible session. PID_1902 selection is not based on VID/PID count alone: the DirectInput interface must resolve to a verified MSI gamepad PnP interface and MSI physical root. Multiple descriptors are accepted only when they share the same verified physical identity and PnP instance; otherwise acquisition fails closed.
+
+When enabled, `PhysicalIsolation` adds only the already-acquired PID_1902 primary gamepad collection (`HID\VID_0DB0&PID_1902&MI_00&COL01\...`) to HidHide. The MSI physical root remains topology evidence and is never a HidHide target. PID_1901 and sibling PID_1902 collections are never hidden. The addon first acquires its exact executable whitelist lease, preserves all foreign HidHide entries, and may temporarily activate HidHide only from a verified disabled configuration with an empty blocked-device list. If foreign blocked entries would be affected by restoring HidHide to inactive, recovery remains passive and retains its evidence.
 
 For this stage, ObserveOnly and Enabled Prepare perform enumeration and identity verification only. Enabled Execute acquires the exact descriptor approved during Prepare. Rollback only unacquires and disposes a session owned by the stage. PhysicalInput does not switch MSI native mode or mutate HidHide. The existing normalized `ControllerState` and independent M1/M2 mapping remain in use (`Buttons[15]` and `Buttons[16]`).
 
@@ -872,7 +874,7 @@ A recovery session may contain multiple recorded mutations. Each mutation's
  addon-owned virtual-output entries. If the recorded VIIPER device is still
  present, recovery preserves that virtual-output evidence and remains unsafe,
  but independently recoverable Claw native-state and HidHide mutations are
- still restored. Recovery schema version 3 is the current format.
+ still restored. Recovery schema version 4 is the current format.
 
 Crash recovery takes priority over normal controller initialization.
 

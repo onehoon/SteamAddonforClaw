@@ -13,31 +13,33 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     private string JournalPath => Path.Combine(_directory, "recovery.json");
 
     [Fact]
-    public async Task AddsBaseAndChildInOrderAndRollsBackInReverse()
+    public async Task AddsOnlyAcquiredPrimaryChildAndRollsBack()
     {
         var hid = new FakeHidHide();
         var stage = Create(hid);
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal(["AddApplication", "AddDevice:USB\\MSI_ROOT", "AddDevice:HID\\CHILD"], hid.Trace);
+        Assert.Equal(["AddApplication", "AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD"], hid.Trace);
+        Assert.DoesNotContain(hid.Trace, entry => entry.Contains("USB\\MSI_ROOT", StringComparison.OrdinalIgnoreCase));
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal(["AddApplication", "AddDevice:USB\\MSI_ROOT", "AddDevice:HID\\CHILD", "RemoveDevice:HID\\CHILD", "RemoveDevice:USB\\MSI_ROOT", "RemoveApplication"], hid.Trace);
+        Assert.Equal(["AddApplication", "AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "RemoveDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "RemoveApplication"], hid.Trace);
     }
 
     [Fact]
-    public async Task CaseInsensitiveDuplicateIsOnlyMutatedOnce()
+    public async Task PhysicalIdentityIsNeverHidden()
     {
         var hid = new FakeHidHide();
-        var stage = Create(hid, physicalIdentity: "hid\\child");
+        var stage = Create(hid, physicalIdentity: "USB\\VID_0DB0&PID_1902\\ROOT");
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Single(hid.HiddenDevices);
+        Assert.DoesNotContain(hid.HiddenDevices, value => value.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
     public async Task InactiveHidHideIsEnabledLastAndRestoredFirst()
     {
-        var hid = new FakeHidHide { Active = false };
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
         var stage = Create(hid);
 
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
@@ -46,14 +48,14 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.True(hid.Active);
 
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal("SetActive:False", hid.Trace[4]);
+        Assert.Equal("SetActive:False", hid.Trace[3]);
         Assert.False(hid.Active);
     }
 
     [Fact]
     public async Task HidHideInverseDriftStopsBeforeAnyMutation()
     {
-        var hid = new FakeHidHide { Active = false };
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
         var stage = Create(hid);
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -69,7 +71,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     [Fact]
     public async Task HidHideActiveDriftStopsBeforeAnyMutation()
     {
-        var hid = new FakeHidHide { Active = false };
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
         var stage = Create(hid);
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -84,7 +86,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     [Fact]
     public async Task HidHideInverseDriftBeforeActivationDoesNotEnableOrOwnGlobalState()
     {
-        var hid = new FakeHidHide { Active = false, DriftToInverseAfterDeviceAdd = true };
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled, DriftToInverseAfterDeviceAdd = true };
         var stage = Create(hid);
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -104,14 +106,29 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     [Fact]
     public async Task PreExistingEntriesArePreserved()
     {
-        var hid = new FakeHidHide { HiddenDevices = ["USB\\MSI_ROOT", "HID\\CHILD"], Applications = ["C:\\addon.exe"] };
+        var hid = new FakeHidHide { HiddenDevices = ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD"], Applications = ["C:\\addon.exe"] };
         var stage = Create(hid);
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Empty(hid.Trace);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal(["USB\\MSI_ROOT", "HID\\CHILD"], hid.HiddenDevices);
+        Assert.Equal(["HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD"], hid.HiddenDevices);
         Assert.Contains("C:\\addon.exe", hid.Applications);
+    }
+
+    [Fact]
+    public async Task ActiveHidHidePreservesForeignBlockedEntries()
+    {
+        var hid = new FakeHidHide { HiddenDevices = ["HID\\FOREIGN_A", "HID\\FOREIGN_B"] };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.Equal(["HID\\FOREIGN_A", "HID\\FOREIGN_B"], hid.HiddenDevices);
+        Assert.DoesNotContain("SetActive:True", hid.Trace);
+        Assert.DoesNotContain("SetActive:False", hid.Trace);
     }
 
     [Fact]
@@ -156,9 +173,80 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Equal("DeviceAddReportedFailure", (await stage.ExecuteMutationAsync(CancellationToken.None)).Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.DoesNotContain(hid.HiddenDevices, x => string.Equals(x, "USB\\MSI_ROOT", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("RemoveDevice:USB\\MSI_ROOT", hid.Trace);
+        Assert.DoesNotContain(hid.HiddenDevices, x => string.Equals(x, "HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("RemoveDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", hid.Trace);
         Assert.DoesNotContain(hid.Applications, x => string.Equals(x, "C:\\addon.exe", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("HID\\VID_0DB0&PID_1901&MI_00&COL01\\CHILD")]
+    [InlineData("HID\\VID_0DB0&PID_1902&MI_00&COL02\\CHILD")]
+    [InlineData("USB\\VID_0DB0&PID_1902\\ROOT")]
+    [InlineData("")]
+    public async Task InvalidIsolationTargetFailsBeforeAnyMutation(string pnpInstanceId)
+    {
+        var hid = new FakeHidHide();
+        var stage = Create(hid, pnpInstanceId: pnpInstanceId);
+
+        var result = await stage.PrepareMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("PhysicalIsolationTargetInvalid", result.Reason);
+        Assert.Empty(hid.Trace);
+    }
+
+    [Fact]
+    public async Task DisabledHidHideWithForeignBlockedEntryFailsBeforeAnyMutation()
+    {
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled, HiddenDevices = ["HID\\FOREIGN"] };
+        var stage = Create(hid);
+
+        var result = await stage.PrepareMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("HidHideDisabledWithExistingBlockedEntries", result.Reason);
+        Assert.Empty(hid.Trace);
+    }
+
+    [Fact]
+    public async Task ForeignEntryDuringTemporaryActiveLeasePreservesRecoveryEvidence()
+    {
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        hid.HiddenDevices.Add("HID\\FOREIGN");
+
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.False(rollback.Succeeded);
+        Assert.Equal("ActiveStateRestoreUnsafeForeignBlockedEntries", rollback.Reason);
+        Assert.DoesNotContain("SetActive:False", hid.Trace);
+        Assert.Contains("C:\\addon.exe", hid.Applications);
+        Assert.Contains("HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", hid.HiddenDevices);
+
+        hid.HiddenDevices.Remove("HID\\FOREIGN");
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.False(hid.Active);
+        Assert.Empty(hid.HiddenDevices);
+        Assert.Empty(hid.Applications);
+    }
+
+    [Fact]
+    public async Task ActiveEnableReportedFailureButAppliedPreservesRollbackOwnership()
+    {
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled, ReportActiveEnableFailureAfterApplying = true };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+
+        var execute = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(execute.Succeeded);
+        Assert.Equal("ActiveStateEnableReportedFailure", execute.Reason);
+        Assert.True(hid.Active);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.False(hid.Active);
+        Assert.Empty(hid.HiddenDevices);
     }
 
     [Theory]
@@ -172,14 +260,14 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         Assert.Empty(hid.Trace);
     }
 
-    private MsiClawPhysicalIsolationStage Create(FakeHidHide hid, string physicalIdentity = "USB\\MSI_ROOT", IRecoveryJournalStore? store = null)
+    private MsiClawPhysicalIsolationStage Create(FakeHidHide hid, string physicalIdentity = "USB\\MSI_ROOT", IRecoveryJournalStore? store = null, string pnpInstanceId = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD")
     {
         Directory.CreateDirectory(_directory);
         var recovery = new RecoveryManager(store ?? new RecoveryJournalStore(JournalPath));
         recovery.BeginDeviceNativeStateMutation(new(NativeStateCaptureStatus.Success,
             new(new("test"), 1, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(new { Mode = "XInput" })), "captured"));
         var sessionId = recovery.LoadJournal().Journal!.RecoverySessionId;
-        return new(new FakeInput(new(Guid.NewGuid(), "path", "HID\\CHILD", physicalIdentity)), new FakeSession(sessionId), recovery, hid, () => "C:\\addon.exe");
+        return new(new FakeInput(new(Guid.NewGuid(), "path", pnpInstanceId, physicalIdentity)), new FakeSession(sessionId), recovery, hid, () => "C:\\addon.exe");
     }
 
     public void Dispose() { try { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); } catch { } }
@@ -203,7 +291,8 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         public HidHideInspection Inspect() => FailInspectionAfterDeviceMutation && Trace.Any(x => x.StartsWith("AddDevice"))
             ? new(HidHideInspectionStatus.ConfigurationUnavailable, new HashSet<string>(Applications), HiddenDevices, IsActive: Active, IsInverseWhitelist: Inverse)
             : new(Status, new HashSet<string>(Applications), HiddenDevices, IsActive: Active, IsInverseWhitelist: Inverse);
-        public bool SetActive(bool active) { Trace.Add("SetActive:" + active); Active = active; return true; }
+        public bool ReportActiveEnableFailureAfterApplying { get; set; }
+        public bool SetActive(bool active) { Trace.Add("SetActive:" + active); Active = active; return active && ReportActiveEnableFailureAfterApplying ? false : true; }
         public bool AddApplication(string path) { Trace.Add("AddApplication"); if (FailApplicationAddWithoutApplying) return false; Applications.Add(path); return true; }
         public bool RemoveApplication(string path) { Trace.Add("RemoveApplication"); Applications.RemoveAll(x => string.Equals(x, path, StringComparison.OrdinalIgnoreCase)); return true; }
         public bool AddHiddenDevice(string entry) { Trace.Add("AddDevice:" + entry); if (FailDeviceAddWithoutApplying) return false; HiddenDevices.Add(entry); if (DriftToInverseAfterDeviceAdd) Inverse = true; return !FailDeviceAdd && !ReportDeviceAddFailureAfterApplying; }

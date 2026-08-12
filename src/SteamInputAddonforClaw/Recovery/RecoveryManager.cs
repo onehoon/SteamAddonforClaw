@@ -334,6 +334,8 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             var inspection = hidHideClient.Inspect();
             if (!inspection.IsConfigurationReadable)
                 return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state recovery inspection is unsafe.", journal), stopwatch);
+            if (!originalActive && inspection.IsActive && !ContainsOnlyJournaledHidHideEntries(inspection, journal))
+                return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state restoration is unsafe because foreign blocked entries are present.", journal), stopwatch);
             if (inspection.IsActive != originalActive && !hidHideClient.SetActive(originalActive))
                 return LogFailure(new(RecoveryStatus.Failure, "HidHide active-state restoration could not be verified.", journal), stopwatch);
             var verified = hidHideClient.Inspect();
@@ -460,6 +462,13 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         }
         reason = "Recoverable recorded mutations.";
         return true;
+    }
+
+    private static bool ContainsOnlyJournaledHidHideEntries(HidHideInspection inspection, RecoveryJournal journal)
+    {
+        var journaledEntries = journal.Mutations.HidHideDeviceAdditions ?? [];
+        return (inspection.HiddenDeviceEntries ?? []).All(current =>
+            journaledEntries.Any(recorded => string.Equals(recorded, current, StringComparison.OrdinalIgnoreCase)));
     }
 
     private bool IsJournaledVirtualDeviceStillPresent(AddonOwnedVirtualDeviceRecoveryEntry entry)

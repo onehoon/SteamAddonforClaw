@@ -351,6 +351,43 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.False(hidHide.Active);
     }
 
+    [Fact]
+    public async Task ActiveStateRecoveryWithForeignBlockedEntryFailsWithoutDisablingHidHide()
+    {
+        var trace = new List<string>();
+        var hidHide = new FakeHidHide { Events = trace, Active = true };
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(OriginalHidHideActiveState: false, HidHideDeviceAdditions: ["HID\\ADDON_CHILD"]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        hidHide.HiddenEntries.UnionWith(["HID\\ADDON_CHILD", "HID\\FOREIGN"]);
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), hidHideClient: hidHide);
+
+        var result = await manager.RecoverIncompleteSessionAsync(CancellationToken.None);
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.True(hidHide.Active);
+        Assert.Empty(trace);
+        Assert.True(File.Exists(PathName));
+        Assert.Contains("HID\\FOREIGN", hidHide.HiddenEntries);
+    }
+
+    [Fact]
+    public async Task ActiveStateRecoveryPreservesOldRecordedRootAndChildEntries()
+    {
+        var hidHide = new FakeHidHide { Active = true };
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(OriginalHidHideActiveState: false, HidHideDeviceAdditions: ["USB\\OLD_ROOT", "HID\\OLD_CHILD"]));
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
+        hidHide.HiddenEntries.UnionWith(["USB\\OLD_ROOT", "HID\\OLD_CHILD"]);
+        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), hidHideClient: hidHide);
+
+        Assert.Equal(RecoveryStatus.Success, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
+        Assert.Empty(hidHide.HiddenEntries);
+        Assert.False(hidHide.Active);
+    }
+
     [Theory]
     [InlineData((int)HidHideInspectionStatus.Disabled)]
     [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
