@@ -12,6 +12,7 @@ internal interface IRecoveryManager
 {
     bool HasIncompleteRecovery { get; }
     Task<RecoveryResult> RecoverIncompleteSessionAsync(CancellationToken cancellationToken);
+    RecoveryResult DiscardStaleStartupJournal();
 }
 
 internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDeviceRegistry? deviceRegistry = null, IHidHideClient? hidHideClient = null, IControllerDeviceEnumerator? deviceEnumerator = null) : IRecoveryManager
@@ -554,6 +555,12 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             AppLog.Error("Recovery", "Recovery journal cleanup failed.", exception, ("JournalPath", store.JournalPath), ("Action", "Passive"));
             return new(RecoveryStatus.Failure, exception.Message);
         }
+    }
+
+    public RecoveryResult DiscardStaleStartupJournal()
+    {
+        AppLog.Info("Recovery", "Discarding stale startup journal without replay.", ("JournalPath", store.JournalPath), ("Action", "DiscardOnly"));
+        return CompleteRecoverySession();
     }
 
     private static RecoveryResult LogFailure(RecoveryResult result, Stopwatch stopwatch)

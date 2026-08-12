@@ -75,11 +75,13 @@ public partial class App : Application
         var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher, addonOwnedVirtualDeviceTracker);
         var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
         _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
+        var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             new ClawTweaksEnvironmentDetector(),
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
             recoveryManager: _recoveryManager,
+            stockCenterMBaseline: nativeState is null ? null : new StockCenterMStartupBaseline(nativeState),
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
             hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
 
@@ -157,6 +159,7 @@ public partial class App : Application
 
         var recoverySafetyState = new RecoverySafetyState(recoverySafe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
         var powerGate = new PowerMutationGate();
+        var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         var statusProvider = new SystemStatusProvider(
             new WindowsDeviceInformationProvider(),
             new WindowsDeviceProbeContextFactory(),
@@ -174,7 +177,6 @@ public partial class App : Application
             CaptureExternalControllerAssessment,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             routingSessionStateMachine: _routingSessionStateMachine);
-        var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         _msiClawNativeModeSession = nativeState is null ? null : new MsiClawNativeModeSessionCoordinator(
             nativeState,
             _recoveryManager!,
@@ -239,7 +241,7 @@ public partial class App : Application
         {
             if (_routingRuntimeCoordinator is null) return true;
             return await _routingRuntimeCoordinator.ReconcileAfterRecoveryAsync(token).ConfigureAwait(false);
-        });
+        }, recoveryEnabled: recoverySafe);
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
             () => _routingRuntimeCoordinator?.CancelInFlightTransition());
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
