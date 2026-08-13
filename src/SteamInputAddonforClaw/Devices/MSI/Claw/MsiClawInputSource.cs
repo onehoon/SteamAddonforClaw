@@ -40,6 +40,10 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     internal static bool IsM1Pressed(ControllerState state) => state.Auxiliary[M1AuxiliaryIndex];
     internal static bool IsM2Pressed(ControllerState state) => state.Auxiliary[M2AuxiliaryIndex];
 
+    // Empty PointOfViewControllers is a legitimate, if uncommon, DirectInput read shape;
+    // -1 matches the mapper's own neutral-POV convention.
+    internal static int ResolvePov(DirectInputState input) => input.PointOfViewControllers.Count == 0 ? -1 : input.PointOfViewControllers[0];
+
     public bool IsRunning
     {
         get
@@ -306,8 +310,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                     break;
                 }
 
-                var pov = input.PointOfViewControllers.Count == 0 ? -1 : input.PointOfViewControllers[0];
-                ControllerStateDiagnostics.LogPovIfChanged(session.Id, pov);
+                ControllerStateDiagnostics.LogPovIfChanged(session.Id, ResolvePov(input));
 
                 var successfulReadAt = Stopwatch.GetTimestamp();
                 Volatile.Write(ref _latestState, new StateBox(current));

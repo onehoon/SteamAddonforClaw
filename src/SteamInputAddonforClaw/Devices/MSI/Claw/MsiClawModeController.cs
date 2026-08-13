@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
 
@@ -88,15 +89,30 @@ internal sealed class MsiClawModeController(
             control = source.Control;
         }
 
-        var oldPid = source.ProductId; var oldGone = false; var targetSeen = false;
+        var oldPid = source.ProductId; var oldGone = false; var targetSeen = false; var poll = 0;
         while (_now() < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            poll++;
+            var enumerationStarted = Stopwatch.GetTimestamp();
             var current = deviceEnumerator.EnumeratePresentDevices();
+            var enumerationMs = Stopwatch.GetElapsedTime(enumerationStarted).TotalMilliseconds;
             oldGone = !current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == oldPid);
+            // TargetPidPresent: any present node with the target PID, regardless of topology --
+            // distinguishes "PID_1902 hasn't appeared yet" from "PID_1902 is present but the
+            // strict control-HID candidate below hasn't shown up yet".
+            var targetPidPresent = current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId);
             var targets = current.Where(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId && d.UsagePage == targetTopology.UsagePage && d.Usage == targetTopology.Usage).ToArray();
             var targetGroups = targets.GroupBy(MsiClawLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase).ToArray();
             targetSeen = targetGroups.Length > 0;
+            AppLog.Debug("NativeMode", "NativeModeTransitionPoll",
+                ("Poll", poll),
+                ("ElapsedMs", (long)(_now() - started).TotalMilliseconds),
+                ("EnumerationMs", (long)enumerationMs),
+                ("OldPidPresent", !oldGone),
+                ("TargetPidPresent", targetPidPresent),
+                ("TargetControlCandidateCount", targets.Length),
+                ("LogicalCandidateCount", targetGroups.Length));
             if (targetGroups.Length == 1)
             {
                 var observed = targetGroups[0].First();

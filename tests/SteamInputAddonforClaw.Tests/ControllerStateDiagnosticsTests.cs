@@ -20,7 +20,10 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
     {
         AppLog.DirectoryOverride = null;
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
-        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+        // Best-effort cleanup: a concurrently-running test in a different, non-serialized
+        // collection can transiently hold this directory's log file open. That does not
+        // invalidate this test's already-passed assertions.
+        try { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); } catch (IOException) { }
     }
 
     [Fact]
