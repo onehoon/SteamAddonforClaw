@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
 
@@ -11,6 +12,32 @@ public sealed class ClassicSteamControllerReportBuilderTests
         var report = new byte[64];
         ClassicSteamControllerReportBuilder.Write(report, 0, new(false, false));
         Assert.Equal(NeutralGolden, report);
+    }
+
+    [Theory]
+    [InlineData(short.MinValue, (short)0)]
+    [InlineData((short)0, short.MinValue)]
+    [InlineData(short.MinValue, short.MinValue)]
+    [InlineData(short.MaxValue, short.MaxValue)]
+    public void FullDeflectionRightStickDoesNotThrow(short x, short y)
+    {
+        var report = new byte[64];
+        var input = new ClassicSteamControllerInput(default, default, new StickState(x, y), default, false, false);
+
+        var exception = Record.Exception(() => ClassicSteamControllerReportBuilder.Write(report, 0, input));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void RightStickAtShortMinValueIsReportedAsActive()
+    {
+        var report = new byte[64];
+        var input = new ClassicSteamControllerInput(default, default, new StickState(short.MinValue, short.MinValue), default, false, false);
+
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        Assert.Equal(0x10, report[10] & 0x10);
     }
 
     [Theory]

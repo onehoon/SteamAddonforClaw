@@ -22,7 +22,10 @@ internal static class ClassicSteamControllerReportBuilder
         report.Clear(); report[0] = 1; report[2] = 1; report[3] = 0x3C; BinaryPrimitives.WriteUInt32LittleEndian(report[4..8], frame);
         var b = input.Buttons; report[8] = (byte)((b.A ? 0x80 : 0) | (b.X ? 0x40 : 0) | (b.B ? 0x20 : 0) | (b.Y ? 0x10 : 0) | (b.LeftBumper ? 8 : 0) | (b.RightBumper ? 4 : 0) | (b.LeftTriggerFull ? 2 : 0) | (b.RightTriggerFull ? 1 : 0));
         report[9] = (byte)((b.DPadUp ? 1 : 0) | (b.DPadRight ? 2 : 0) | (b.DPadLeft ? 4 : 0) | (b.DPadDown ? 8 : 0) | (b.Back ? 0x10 : 0) | (b.Start ? 0x40 : 0) | (input.LeftGrip ? 0x80 : 0));
-        var active = (Math.Abs(input.RightPad.X) > 1 || Math.Abs(input.RightPad.Y) > 1) || b.RightStickClick; report[10] = (byte)((input.RightGrip ? 1 : 0) | (b.RightStickClick ? 4 : 0) | (active ? 0x10 : 0) | (b.LeftStickClick ? 0x40 : 0));
+        // Math.Abs(short) throws OverflowException for short.MinValue (-32768), which a
+        // full-deflection analog stick reaches routinely; widen to int before taking the
+        // absolute value.
+        var active = (Math.Abs((int)input.RightPad.X) > 1 || Math.Abs((int)input.RightPad.Y) > 1) || b.RightStickClick; report[10] = (byte)((input.RightGrip ? 1 : 0) | (b.RightStickClick ? 4 : 0) | (active ? 0x10 : 0) | (b.LeftStickClick ? 0x40 : 0));
         var leftRaw = EffectiveRawTrigger(input.Triggers.Left, b.LeftTriggerFull);
         var rightRaw = EffectiveRawTrigger(input.Triggers.Right, b.RightTriggerFull);
         report[11] = RawTriggerToByte(leftRaw); report[12] = RawTriggerToByte(rightRaw); WriteStick(report[16..20], input.LeftStick); WriteStick(report[20..24], input.RightPad); WriteRawTrigger(report[24..26], leftRaw); WriteRawTrigger(report[26..28], rightRaw); WriteRawTrigger(report[50..52], leftRaw); WriteRawTrigger(report[52..54], rightRaw); WriteStick(report[54..58], input.LeftStick); BinaryPrimitives.WriteUInt16LittleEndian(report[40..42], 0x4000); BinaryPrimitives.WriteUInt16LittleEndian(report[62..64], 3000);
