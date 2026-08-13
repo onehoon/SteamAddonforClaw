@@ -3,14 +3,28 @@ using SteamInputAddonforClaw.Input;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
-internal readonly record struct ClassicSteamControllerInput(GamepadButtons Buttons, StickState LeftStick, StickState RightPad, TriggerState Triggers, bool LeftGrip, bool RightGrip)
+internal readonly record struct ClassicSteamControllerInput(GamepadButtons Buttons, StickState LeftStick, StickState RightPad, TriggerState Triggers, bool LeftGrip, bool RightGrip, bool RightPadPress, bool RightPadTouch)
 {
-    internal ClassicSteamControllerInput(bool leftGrip, bool rightGrip) : this(default, default, default, default, leftGrip, rightGrip) { }
+    internal ClassicSteamControllerInput(bool leftGrip, bool rightGrip) : this(default, default, default, default, leftGrip, rightGrip, default, default) { }
 }
 
 internal static class ClassicSteamControllerInputMapper
 {
-    internal static ClassicSteamControllerInput Map(ControllerState state) => new(state.Buttons, state.LeftStick, state.RightStick, state.Triggers, state.Auxiliary[(int)AuxiliaryButtonSlot.LeftRear], state.Auxiliary[(int)AuxiliaryButtonSlot.RightRear]);
+    // HHC's established Steam Controller path uses this noise threshold for automatic
+    // pad-touch activation, filtering real analog stick drift while leaving RightPad
+    // coordinates themselves untouched -- deadzone/sensitivity remain Steam Input's job.
+    private const short RightPadTouchThreshold = 500;
+
+    internal static ClassicSteamControllerInput Map(ControllerState state)
+    {
+        var rightPad = state.RightStick;
+        var press = state.Buttons.RightStickClick;
+        // Math.Abs(short) throws OverflowException for short.MinValue (-32768), which a
+        // full-deflection analog stick reaches routinely; widen to int before taking the
+        // absolute value.
+        var touch = press || Math.Abs((int)rightPad.X) > RightPadTouchThreshold || Math.Abs((int)rightPad.Y) > RightPadTouchThreshold;
+        return new(state.Buttons, state.LeftStick, rightPad, state.Triggers, state.Auxiliary[(int)AuxiliaryButtonSlot.LeftRear], state.Auxiliary[(int)AuxiliaryButtonSlot.RightRear], press, touch);
+    }
 }
 
 internal static class ClassicSteamControllerReportBuilder
@@ -22,10 +36,7 @@ internal static class ClassicSteamControllerReportBuilder
         report.Clear(); report[0] = 1; report[2] = 1; report[3] = 0x3C; BinaryPrimitives.WriteUInt32LittleEndian(report[4..8], frame);
         var b = input.Buttons; report[8] = (byte)((b.A ? 0x80 : 0) | (b.X ? 0x40 : 0) | (b.B ? 0x20 : 0) | (b.Y ? 0x10 : 0) | (b.LeftBumper ? 8 : 0) | (b.RightBumper ? 4 : 0) | (b.LeftTriggerFull ? 2 : 0) | (b.RightTriggerFull ? 1 : 0));
         report[9] = (byte)((b.DPadUp ? 1 : 0) | (b.DPadRight ? 2 : 0) | (b.DPadLeft ? 4 : 0) | (b.DPadDown ? 8 : 0) | (b.Back ? 0x10 : 0) | (b.Start ? 0x40 : 0) | (input.LeftGrip ? 0x80 : 0));
-        // Math.Abs(short) throws OverflowException for short.MinValue (-32768), which a
-        // full-deflection analog stick reaches routinely; widen to int before taking the
-        // absolute value.
-        var active = (Math.Abs((int)input.RightPad.X) > 1 || Math.Abs((int)input.RightPad.Y) > 1) || b.RightStickClick; report[10] = (byte)((input.RightGrip ? 1 : 0) | (b.RightStickClick ? 4 : 0) | (active ? 0x10 : 0) | (b.LeftStickClick ? 0x40 : 0));
+        report[10] = (byte)((input.RightGrip ? 1 : 0) | (input.RightPadPress ? 4 : 0) | (input.RightPadTouch ? 0x10 : 0) | (b.LeftStickClick ? 0x40 : 0));
         var leftRaw = EffectiveRawTrigger(input.Triggers.Left);
         var rightRaw = EffectiveRawTrigger(input.Triggers.Right);
         report[11] = RawTriggerToByte(leftRaw); report[12] = RawTriggerToByte(rightRaw); WriteStick(report[16..20], input.LeftStick); WriteStick(report[20..24], input.RightPad); WriteRawTrigger(report[24..26], leftRaw); WriteRawTrigger(report[26..28], rightRaw); WriteRawTrigger(report[50..52], leftRaw); WriteRawTrigger(report[52..54], rightRaw); WriteStick(report[54..58], input.LeftStick); BinaryPrimitives.WriteUInt16LittleEndian(report[40..42], 0x4000); BinaryPrimitives.WriteUInt16LittleEndian(report[62..64], 3000);

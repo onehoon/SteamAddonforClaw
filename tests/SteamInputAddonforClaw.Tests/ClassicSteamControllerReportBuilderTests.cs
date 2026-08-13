@@ -95,7 +95,7 @@ public sealed class ClassicSteamControllerReportBuilderTests
 
     private static ClassicSteamControllerInput TriggerInput(byte left, bool leftFull, byte right, bool rightFull) =>
         new(new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, leftFull, rightFull),
-            default, default, new TriggerState(left, right), false, false);
+            default, default, new TriggerState(left, right), false, false, false, false);
 
     [Theory]
     [InlineData(short.MinValue, (short)0)]
@@ -105,7 +105,7 @@ public sealed class ClassicSteamControllerReportBuilderTests
     public void FullDeflectionRightStickDoesNotThrow(short x, short y)
     {
         var report = new byte[64];
-        var input = new ClassicSteamControllerInput(default, default, new StickState(x, y), default, false, false);
+        var input = ClassicSteamControllerInputMapper.Map(new ControllerState(default, default, new StickState(x, y), default, new([false, false])));
 
         var exception = Record.Exception(() => ClassicSteamControllerReportBuilder.Write(report, 0, input));
 
@@ -116,11 +116,28 @@ public sealed class ClassicSteamControllerReportBuilderTests
     public void RightStickAtShortMinValueIsReportedAsActive()
     {
         var report = new byte[64];
-        var input = new ClassicSteamControllerInput(default, default, new StickState(short.MinValue, short.MinValue), default, false, false);
+        var input = ClassicSteamControllerInputMapper.Map(new ControllerState(default, default, new StickState(short.MinValue, short.MinValue), default, new([false, false])));
 
         ClassicSteamControllerReportBuilder.Write(report, 0, input);
 
         Assert.Equal(0x10, report[10] & 0x10);
+    }
+
+    [Fact]
+    public void BuilderDoesNotDeriveTouchOrPressFromRightPadCoordinatesItself()
+    {
+        // RightPadTouch/RightPadPress must come entirely from the already-decided logical
+        // input; the builder only serializes them. A RightPad coordinate past the mapper's
+        // touch threshold must NOT flip byte 10 bits here if the logical flags say untouched --
+        // guards against the threshold check regressing back into the report builder.
+        var report = new byte[64];
+        var input = new ClassicSteamControllerInput(default, default, new StickState(501, 0), default, false, false, false, false);
+
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        Assert.Equal(501, BitConverter.ToInt16(report, 20));
+        Assert.Equal(0, report[10] & 0x10);
+        Assert.Equal(0, report[10] & 0x04);
     }
 
     [Theory]

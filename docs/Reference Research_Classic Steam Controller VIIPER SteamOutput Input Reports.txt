@@ -1493,29 +1493,38 @@ Battery:
 40. RIGHT-PAD TOUCH DERIVATION
 ===============================================================================
 
-CURRENT TARGET BUILDER:
+CURRENT TARGET BUILDER (ClassicSteamControllerInputMapper.Map):
+
+RightPad.X/Y preserve the source RightStick coordinates unchanged -- no addon
+deadzone or rescaling is applied to them.
 
 RightPadTouch is derived when:
 
-  abs(RightPad.X) > 1
+  abs(RightPad.X) > 500
   OR
-  abs(RightPad.Y) > 1
+  abs(RightPad.Y) > 500
   OR
+  RightStickClick
+
+RightPadPress is derived when:
+
   RightStickClick
 
 PROJECT DECISION:
 
 Keep the concept that the physical right stick must make the emulated Gordon
-right pad "active".
+right pad "active", but suppress real analog stick noise/drift before it does.
 
-However the exact threshold is not considered hardware-proven.
+The original threshold (>1) only filtered center quantization and was too
+sensitive to real analog drift, so the addon adopts HHC's established
+pad-touch noise threshold of 500 for automatic touch activation. This is a
+touch-activation threshold only: it does not clamp, scale, or otherwise
+reshape the RightPad X/Y coordinates, and it is evaluated per-axis, not as a
+radial/vector-length threshold.
 
-HARDWARE VALIDATION REQUIRED:
-
-Measure actual normalized idle noise and test Steam Input.
-
-If threshold >1 produces persistent touch due to stick noise, adjust only the
-minimal activation rule required to represent the physical stick reliably.
+Do NOT adopt HHC's newer 5% scaled radial deadzone for RightStick -> RightPad
+coordinates -- gameplay deadzone, sensitivity, and response curves remain
+Steam Input's responsibility, not the addon's.
 
 Do not introduce a general deadzone editor.
 
