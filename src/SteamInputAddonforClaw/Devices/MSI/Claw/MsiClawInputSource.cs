@@ -248,6 +248,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         var cleanupSucceeded = true;
         var stopReason = MsiClawInputStopReason.Stopped;
         var firstReadLogged = false;
+        var invalidInitialStateSkipped = false;
 
         try
         {
@@ -267,10 +268,22 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                     break;
                 }
 
+                if (!firstReadLogged && MsiClawControllerStateMapper.IsKnownInvalidInitialState(input))
+                {
+                    if (!invalidInitialStateSkipped)
+                    {
+                        invalidInitialStateSkipped = true;
+                        AppLog.Debug("MsiInput", "Known invalid DirectInput initial state was ignored.", ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("Action", "AwaitNextState"), ("Reason", "KnownInvalidInitialState"));
+                    }
+                    await Task.Delay(PollInterval, session.Cancellation.Token).ConfigureAwait(false);
+                    continue;
+                }
+
                 if (!TryMapState(input, out var current))
                 {
                     stopReason = MsiClawInputStopReason.InvalidButtonLayout;
-                    AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", "InsufficientButtonCount"));
+                    var reason = input.Buttons.Count < MsiClawHardware.RequiredDirectInputButtonCount ? "InsufficientButtonCount" : "KnownInvalidState";
+                    AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", reason));
                     break;
                 }
 

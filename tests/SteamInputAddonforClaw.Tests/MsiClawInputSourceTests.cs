@@ -275,6 +275,29 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
+    public async Task KnownInvalidInitialState_IsSkippedUntilTheFirstValidState()
+    {
+        var device = new FakeDevice(InvalidInitialState(), State(15));
+        var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
+        var summaryTask = ObserveSummary(source);
+        var validStateObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.StateChanged += (_, state) =>
+        {
+            if (state == new ControllerState(new AuxiliaryButtonState([false, true]))) validStateObserved.TrySetResult();
+        };
+
+        Assert.True(source.Start().Started);
+        await validStateObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, true])), source.LatestState);
+        await source.StopAsync();
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(MsiClawInputStopReason.Stopped, summary.StopReason);
+        Assert.True(device.ReadCount >= 2);
+        Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
+    }
+
+    [Fact]
     public async Task Start_WhenAlreadyRunning_DoesNotCreateOrAcquireAnotherDevice()
     {
         var device = new FakeDevice(State());
@@ -428,6 +451,7 @@ public sealed class MsiClawInputSourceTests
         foreach (var button in pressedButtons) buttons[button] = true;
         return new DirectInputState(buttons);
     }
+    private static DirectInputState InvalidInitialState() => new(new bool[128], 32767, 32767, 32767, 32767, 32767, 32767, [-1]);
 
     private sealed class FakeEnumerator(IReadOnlyList<DirectInputDeviceDescriptor> devices, FakeDevice? device = null) : IDirectInputDeviceEnumerator
     {
