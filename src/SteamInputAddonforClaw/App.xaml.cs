@@ -36,7 +36,7 @@ public partial class App : Application
     private readonly SingleInstanceGate _singleInstanceGate;
     private DeveloperTestModeState? _developerTestModeState;
     private EffectiveSteamSessionSource? _effectiveSteamSessionSource;
-    private int _resumeFreshReconcileOwned;
+    private readonly ResumeFreshReconcileSuppression _resumeFreshReconcileSuppression = new();
     private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
@@ -209,14 +209,20 @@ public partial class App : Application
         }, powerParticipants, async token =>
         {
             if (_routingRuntimeCoordinator is null) return true;
-            Interlocked.Exchange(ref _resumeFreshReconcileOwned, 1);
+            _resumeFreshReconcileSuppression.Begin();
             try
             {
-                _steamSessionWatcher?.Refresh();
-                _effectiveSteamSessionSource?.Refresh();
+                _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() =>
+                {
+                    _steamSessionWatcher?.Refresh();
+                    _effectiveSteamSessionSource?.Refresh();
+                });
                 return await _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).ConfigureAwait(false);
             }
-            finally { Volatile.Write(ref _resumeFreshReconcileOwned, 0); }
+            finally
+            {
+                if (_resumeFreshReconcileSuppression.Complete()) _ = ReconcileRoutingAsync();
+            }
         }, recoveryEnabled: recoverySafe,
         hasIncompleteRecovery: () => _recoveryManager?.HasIncompleteRecovery == true,
         establishBaseline: async token =>
@@ -254,7 +260,7 @@ public partial class App : Application
     {
         _diagnosticSessions.Observe(_runningAppIdSource?.GetRunningAppId() ?? 0, args.Current.RunningAppId, args.Current.Source.ToString());
         _mainWindow?.UpdateSteamSessionState(args.Current);
-        if (Volatile.Read(ref _resumeFreshReconcileOwned) == 0) _ = ReconcileRoutingAsync();
+        if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) _ = ReconcileRoutingAsync();
     }
 
     private async Task ReconcileRoutingAsync(CancellationToken cancellationToken = default)
@@ -443,5 +449,51 @@ public partial class App : Application
         AppLog.Info("Update shutdown requested.");
         _startupCancellationTokenSource.Cancel();
         Exit();
+    }
+}
+
+internal sealed class ResumeFreshReconcileSuppression
+{
+    private readonly Lock _sync = new();
+    private int _owned;
+    private int _pending;
+
+    public void Begin()
+    {
+        lock (_sync)
+        {
+            _pending = 0;
+            _owned = 1;
+        }
+    }
+
+    public bool TrySuppressStateChange()
+    {
+        lock (_sync)
+        {
+            if (_owned == 0) return false;
+            _pending = 1;
+            return true;
+        }
+    }
+
+    public void ExecuteExplicitRefresh(Action refresh)
+    {
+        lock (_sync)
+        {
+            refresh();
+            _pending = 0;
+        }
+    }
+
+    public bool Complete()
+    {
+        lock (_sync)
+        {
+            _owned = 0;
+            var pending = _pending != 0;
+            _pending = 0;
+            return pending;
+        }
     }
 }
