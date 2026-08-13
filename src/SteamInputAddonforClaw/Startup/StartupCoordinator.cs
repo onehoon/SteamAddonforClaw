@@ -11,7 +11,7 @@ internal sealed class StartupCoordinator
     private readonly IUpdateGate _updateGate;
     private readonly IControllerEnvironmentAssessmentProvider _environmentAssessmentProvider;
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
-    private readonly IRecoveryManager? _recoveryManager;
+    private readonly IRecoveryJournalStore _recoveryJournalStore;
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
@@ -22,13 +22,13 @@ internal sealed class StartupCoordinator
         IControllerEnvironmentWaiter environmentWaiter,
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
-        IRecoveryManager? recoveryManager = null,
+        IRecoveryJournalStore recoveryJournalStore,
         IStockCenterMStartupBaseline? stockCenterMBaseline = null)
     {
         _updateGate = updateGate;
         _environmentAssessmentProvider = environmentAssessmentProvider;
         _environmentWaiter = environmentWaiter;
-        _recoveryManager = recoveryManager;
+        _recoveryJournalStore = recoveryJournalStore ?? throw new ArgumentNullException(nameof(recoveryJournalStore));
         _stockCenterMBaseline = stockCenterMBaseline;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
@@ -93,20 +93,41 @@ internal sealed class StartupCoordinator
         if (!baseline.Succeeded)
             return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
 
-        if (_recoveryManager is null)
-        {
-            AppLog.Warn("Startup", "Stock MSI Center M baseline completed but stale journal bookkeeping cannot be retired because recovery storage is unavailable; routing remains passive.", null, ("Action", "Passive"));
-            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
-        }
-
-        var discard = _recoveryManager.DiscardStaleStartupJournal();
-        if (!discard.IsSafeToContinue)
+        if (!TryDiscardStaleStartupJournal(out var reason))
         {
             AppLog.Warn("Startup", "Stale startup journal could not be discarded after the live XInput baseline; routing remains passive.", null,
-                ("Action", "Passive"), ("Reason", discard.Reason));
+                ("Action", "Passive"), ("Reason", reason));
             return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
         }
         return new StartupResult(true, environment.Mode, readiness, RecoverySafe: true);
+    }
+
+    private bool TryDiscardStaleStartupJournal(out string reason)
+    {
+        try
+        {
+            if (!_recoveryJournalStore.Exists())
+            {
+                reason = "Recovery journal does not exist.";
+                return true;
+            }
+            AppLog.Info("Recovery", "Stale startup journal retirement started.", ("JournalPath", _recoveryJournalStore.JournalPath), ("Action", "DiscardOnly"));
+            _recoveryJournalStore.Delete();
+            if (_recoveryJournalStore.Exists())
+            {
+                reason = "Recovery journal still exists after deletion.";
+                return false;
+            }
+            AppLog.Info("Recovery", "Stale startup journal discarded.", ("JournalPath", _recoveryJournalStore.JournalPath), ("JournalDeleted", true));
+            reason = "Stale startup journal discarded.";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Recovery", "Stale startup journal could not be discarded.", exception, ("JournalPath", _recoveryJournalStore.JournalPath), ("Action", "Passive"));
+            reason = exception.Message;
+            return false;
+        }
     }
 
     private HardwareCompatibilityAssessment EvaluateHardwareCompatibility()

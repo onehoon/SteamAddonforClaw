@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Recovery;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -46,7 +47,7 @@ public sealed class HandheldCompanionEnvironmentTests
     public async Task RunAsync_WhenHandheldCompanionOwnsControllers_SkipsReadinessWait()
     {
         var waiter = new FakeWaiter();
-        var coordinator = new StartupCoordinator(new ContinueUpdateGate(), new HhcEnvironmentDetector(), waiter, new FakeProbeFactory(), new FakeHardwareEvaluator());
+        var coordinator = new StartupCoordinator(new ContinueUpdateGate(), new HhcEnvironmentDetector(), waiter, new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: new NoOpRecoveryJournalStore());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -191,4 +192,13 @@ public sealed class HandheldCompanionEnvironmentTests
 
     private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
     private sealed class FakeHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test"); }
+    private sealed class NoOpRecoveryJournalStore : IRecoveryJournalStore
+    {
+        public string JournalPath => "noop-recovery-journal.json";
+        public bool Exists() => false;
+        public string ReadText() => throw new NotSupportedException();
+        public void WriteNew(RecoveryJournal journal) => throw new NotSupportedException();
+        public void ReplaceExisting(RecoveryJournal journal) => throw new NotSupportedException();
+        public void Delete() => throw new NotSupportedException();
+    }
 }
