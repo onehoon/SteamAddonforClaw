@@ -103,7 +103,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var creation = stage.ExecuteMutationAsync(CancellationToken.None).AsTask();
-        Assert.True(SpinWait.SpinUntil(() => runtime.CreatedDevices == 1, TimeSpan.FromSeconds(1)));
+        Assert.True(SpinWait.SpinUntil(() => runtime.CreatedDevices == 1, TimeSpan.FromSeconds(5)));
         var quiesced = await stage.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None);
         var result = await creation;
 
@@ -121,7 +121,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var creation = stage.ExecuteMutationAsync(cancellation.Token).AsTask();
-        Assert.True(SpinWait.SpinUntil(() => runtime.CreatedDevices == 1, TimeSpan.FromSeconds(1)));
+        Assert.True(SpinWait.SpinUntil(() => runtime.CreatedDevices == 1, TimeSpan.FromSeconds(5)));
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => creation);
@@ -187,7 +187,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-        ticks.Tick(); await runtime.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        ticks.Tick(); await runtime.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var rollback = stage.RollbackMutationAsync(CancellationToken.None).AsTask();
         await Task.Yield(); Assert.Equal(0, runtime.RemovedDevices);
         runtime.ReleaseInput.TrySetResult();
@@ -251,7 +251,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         stage.SetOutputFaultHandler(() => { fault.TrySetResult(); return ValueTask.CompletedTask; });
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-        await fault.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await fault.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 

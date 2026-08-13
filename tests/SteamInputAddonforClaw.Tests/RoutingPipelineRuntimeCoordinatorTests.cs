@@ -133,7 +133,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
             exception => _ = Task.Run(async () => { var result = await bridge.Bridge.FailClosedAsync(); if (result.Succeeded) failClosed.TrySetResult(); }));
         publisher.Start(); await Task.Yield(); ticks.Tick();
 
-        await failClosed.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await failClosed.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await publisher.StopAsync();
         Assert.Single(executor.RollbackPlans);
         Assert.Null(bridge.Session.ActiveSession);

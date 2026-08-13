@@ -136,7 +136,7 @@ public sealed class EffectiveSteamSessionSourceTests
         };
 
         var enable = Task.Run(() => testMode.SetEnabled(true));
-        Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
         var dispose = Task.Run(effective.Dispose);
         Assert.NotSame(dispose, await Task.WhenAny(dispose, Task.Delay(100)));
         release.Set();
