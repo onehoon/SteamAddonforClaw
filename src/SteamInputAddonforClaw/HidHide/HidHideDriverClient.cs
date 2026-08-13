@@ -21,6 +21,9 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
     private const uint GenericWrite = 0x40000000;
     private const uint DeviceType = 32769;
     private const uint FileReadData = 0x0001;
+    // HidHide exposes one exclusive control device. This must be shared by every
+    // client instance in this process, but does not coordinate other processes.
+    private static readonly object ControlDeviceGate = new();
     private readonly IHidHideNativeApi _nativeApi = nativeApi ?? new HidHideNativeApi();
     private readonly IHidHidePathConverter _pathConverter = pathConverter ?? new HidHidePathConverter();
 
@@ -28,11 +31,18 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
     {
         try
         {
-            using var device = _nativeApi.Open(GenericRead);
-            var active = ReadBoolean(device, Ioctl(2052));
-            var inverse = ReadBoolean(device, Ioctl(2054));
-            var rawWhitelist = ReadMultiString(device, Ioctl(2048));
-            var blacklist = ReadMultiString(device, Ioctl(2050));
+            bool active;
+            bool inverse;
+            List<string> rawWhitelist;
+            List<string> blacklist;
+            lock (ControlDeviceGate)
+            {
+                using var device = _nativeApi.Open(GenericRead);
+                active = ReadBoolean(device, Ioctl(2052));
+                inverse = ReadBoolean(device, Ioctl(2054));
+                rawWhitelist = ReadMultiString(device, Ioctl(2048));
+                blacklist = ReadMultiString(device, Ioctl(2050));
+            }
             var normalizedWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var fullImageName in rawWhitelist)
             {
@@ -66,8 +76,11 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
     {
         try
         {
-            using var device = _nativeApi.Open(GenericRead | GenericWrite);
-            Invoke(device, Ioctl(2053), [active ? (byte)1 : (byte)0], null, out _);
+            lock (ControlDeviceGate)
+            {
+                using var device = _nativeApi.Open(GenericRead | GenericWrite);
+                Invoke(device, Ioctl(2053), [active ? (byte)1 : (byte)0], null, out _);
+            }
             var inspection = Inspect();
             return inspection.IsConfigurationReadable && inspection.IsActive == active;
         }
@@ -91,8 +104,11 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
             if (add) entries.Add(deviceEntry);
             else entries.RemoveAt(index);
 
-            using var device = _nativeApi.Open(GenericRead | GenericWrite);
-            WriteMultiString(device, Ioctl(2051), entries);
+            lock (ControlDeviceGate)
+            {
+                using var device = _nativeApi.Open(GenericRead | GenericWrite);
+                WriteMultiString(device, Ioctl(2051), entries);
+            }
             var verification = Inspect();
             if (!verification.IsConfigurationReadable) return false;
             var present = (verification.HiddenDeviceEntries ?? [])
@@ -112,14 +128,17 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
         try
         {
             var fullImageName = _pathConverter.ToFullImageName(executablePath);
-            using var device = _nativeApi.Open(GenericRead);
-            var entries = ReadMultiString(device, Ioctl(2048));
-            var changed = add
-                ? !entries.Contains(fullImageName, StringComparer.OrdinalIgnoreCase)
-                : entries.RemoveAll(entry => string.Equals(entry, fullImageName, StringComparison.OrdinalIgnoreCase)) > 0;
-            if (!changed) return true;
-            if (add) entries.Add(fullImageName);
-            WriteMultiString(device, Ioctl(2049), entries);
+            lock (ControlDeviceGate)
+            {
+                using var device = _nativeApi.Open(GenericRead);
+                var entries = ReadMultiString(device, Ioctl(2048));
+                var changed = add
+                    ? !entries.Contains(fullImageName, StringComparer.OrdinalIgnoreCase)
+                    : entries.RemoveAll(entry => string.Equals(entry, fullImageName, StringComparison.OrdinalIgnoreCase)) > 0;
+                if (!changed) return true;
+                if (add) entries.Add(fullImageName);
+                WriteMultiString(device, Ioctl(2049), entries);
+            }
             return true;
         }
         catch (Exception exception)

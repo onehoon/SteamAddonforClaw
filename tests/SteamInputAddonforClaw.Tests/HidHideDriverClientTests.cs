@@ -186,6 +186,150 @@ public sealed class HidHideDriverClientTests
         Assert.Empty(device.Blacklist);
     }
 
+    [Fact]
+    public void AddHiddenDevice_ClosesMutationHandleBeforeVerification()
+    {
+        var device = new FakeDevice([], ["Foreign"]) { Active = true };
+        var native = new ExclusiveFakeNative(device);
+
+        Assert.True(new HidHideDriverClient(native, Converter()).AddHiddenDevice("Addon"));
+
+        Assert.Equal(["Foreign", "Addon"], device.Blacklist);
+        Assert.Equal(3, native.OpenCount);
+        Assert.Equal(1, native.MaximumLiveHandleCount);
+        Assert.Equal(0, native.LiveHandleCount);
+    }
+
+    [Fact]
+    public void RemoveHiddenDevice_ClosesMutationHandleBeforeVerification()
+    {
+        var device = new FakeDevice([], ["Foreign", "Addon"]) { Active = true };
+        var native = new ExclusiveFakeNative(device);
+
+        Assert.True(new HidHideDriverClient(native, Converter()).RemoveHiddenDevice("Addon"));
+
+        Assert.Equal(["Foreign"], device.Blacklist);
+        Assert.Equal(3, native.OpenCount);
+        Assert.Equal(1, native.MaximumLiveHandleCount);
+        Assert.Equal(0, native.LiveHandleCount);
+    }
+
+    [Fact]
+    public void SetActive_ClosesMutationHandleBeforeVerification()
+    {
+        var device = new FakeDevice([], []) { Active = false };
+        var native = new ExclusiveFakeNative(device);
+
+        Assert.True(new HidHideDriverClient(native, Converter()).SetActive(true));
+
+        Assert.True(device.Active);
+        Assert.Equal(2, native.OpenCount);
+        Assert.Equal(1, native.MaximumLiveHandleCount);
+        Assert.Equal(0, native.LiveHandleCount);
+    }
+
+    [Fact]
+    public void UpdateWhitelist_WithExclusiveHandlePreservesForeignEntries()
+    {
+        var foreign = @"\Device\HarddiskVolume3\Apps\Foreign.exe";
+        var device = new FakeDevice([foreign], []);
+        var native = new ExclusiveFakeNative(device);
+        var client = new HidHideDriverClient(native, Converter());
+
+        Assert.True(client.AddApplication(AddonDos));
+
+        Assert.Equal([foreign, AddonNt], device.Whitelist);
+        Assert.Equal(1, native.MaximumLiveHandleCount);
+        Assert.Equal(0, native.LiveHandleCount);
+    }
+
+    [Fact]
+    public async Task SameClient_ConcurrentInspectsShareTheProcessWideGate()
+    {
+        var device = new FakeDevice([], []) { Active = true };
+        var native = new ExclusiveFakeNative(device) { BlockFirstOpen = true };
+        var client = new HidHideDriverClient(native, Converter());
+        var secondOperationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var first = Task.Run(client.Inspect);
+        await native.FirstHandleOpened.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = Task.Run(() =>
+        {
+            secondOperationStarted.SetResult();
+            return client.Inspect();
+        });
+        await secondOperationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(second.IsCompleted);
+        Assert.Equal(1, native.OpenCount);
+        native.AllowFirstHandleDispose.SetResult();
+
+        var inspections = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.All(inspections, inspection => Assert.Equal(HidHideInspectionStatus.Available, inspection.Status));
+        Assert.Equal(2, native.OpenCount);
+        Assert.Equal(1, native.MaximumLiveHandleCount);
+        Assert.Equal(0, native.LiveHandleCount);
+    }
+
+    [Fact]
+    public async Task DifferentClients_ConcurrentInspectsShareTheProcessWideGate()
+    {
+        var device = new FakeDevice([], []) { Active = true };
+        var native = new ExclusiveFakeNative(device) { BlockFirstOpen = true };
+        var clientA = new HidHideDriverClient(native, Converter());
+        var clientB = new HidHideDriverClient(native, Converter());
+        var secondOperationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var first = Task.Run(clientA.Inspect);
+        await native.FirstHandleOpened.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var second = Task.Run(() =>
+        {
+            secondOperationStarted.SetResult();
+            return clientB.Inspect();
+        });
+        await secondOperationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(second.IsCompleted);
+        Assert.Equal(1, native.OpenCount);
+        native.AllowFirstHandleDispose.SetResult();
+
+        var inspections = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.All(inspections, inspection => Assert.Equal(HidHideInspectionStatus.Available, inspection.Status));
+        Assert.Equal(2, native.OpenCount);
+        Assert.Equal(1, native.MaximumLiveHandleCount);
+        Assert.Equal(0, native.LiveHandleCount);
+    }
+
+    [Fact]
+    public async Task DifferentClients_ConcurrentInspectAndMutationAreSerialized()
+    {
+        var device = new FakeDevice([], ["Foreign"]) { Active = true };
+        var native = new ExclusiveFakeNative(device) { BlockFirstOpen = true };
+        var inspector = new HidHideDriverClient(native, Converter());
+        var mutator = new HidHideDriverClient(native, Converter());
+        var mutationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var inspect = Task.Run(inspector.Inspect);
+        await native.FirstHandleOpened.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var mutation = Task.Run(() =>
+        {
+            mutationStarted.SetResult();
+            return mutator.AddHiddenDevice("Addon");
+        });
+        await mutationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(mutation.IsCompleted);
+        Assert.Equal(1, native.OpenCount);
+        native.AllowFirstHandleDispose.SetResult();
+
+        Assert.Equal(HidHideInspectionStatus.Available, (await inspect.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+        Assert.True(await mutation.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(["Foreign", "Addon"], device.Blacklist);
+        Assert.Equal(1, native.MaximumLiveHandleCount);
+        Assert.Equal(0, native.LiveHandleCount);
+    }
+
     private static HidHidePathConverter Converter() => new(new FakeDosDevices());
 
     private sealed class FakeDosDevices : IDosDeviceNameResolver
@@ -198,6 +342,59 @@ public sealed class HidHideDriverClientTests
         public uint DesiredAccess { get; private set; }
         public uint WriteDesiredAccess { get; private set; }
         public IHidHideControlDevice Open(uint desiredAccess) { DesiredAccess = desiredAccess; if ((desiredAccess & 0x40000000u) != 0) WriteDesiredAccess = desiredAccess; return device; }
+    }
+
+    private sealed class ExclusiveFakeNative(FakeDevice device) : IHidHideNativeApi
+    {
+        private readonly object _sync = new();
+        public bool BlockFirstOpen { get; init; }
+        public int LiveHandleCount { get; private set; }
+        public int MaximumLiveHandleCount { get; private set; }
+        public int OpenCount { get; private set; }
+        public TaskCompletionSource FirstHandleOpened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource AllowFirstHandleDispose { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IHidHideControlDevice Open(uint desiredAccess)
+        {
+            bool block;
+            lock (_sync)
+            {
+                if (LiveHandleCount != 0) throw new System.ComponentModel.Win32Exception(5);
+                LiveHandleCount++;
+                MaximumLiveHandleCount = Math.Max(MaximumLiveHandleCount, LiveHandleCount);
+                OpenCount++;
+                block = BlockFirstOpen && OpenCount == 1;
+            }
+
+            if (block)
+            {
+                FirstHandleOpened.TrySetResult();
+                AllowFirstHandleDispose.Task.GetAwaiter().GetResult();
+            }
+
+            return new ExclusiveFakeControlDevice(this, device);
+        }
+
+        private void Release()
+        {
+            lock (_sync)
+            {
+                LiveHandleCount--;
+            }
+        }
+
+        private sealed class ExclusiveFakeControlDevice(ExclusiveFakeNative native, FakeDevice device) : IHidHideControlDevice
+        {
+            private int _disposed;
+
+            public bool DeviceIoControl(uint code, byte[]? input, byte[]? output, out uint bytesReturned, out int errorCode)
+                => device.DeviceIoControl(code, input, output, out bytesReturned, out errorCode);
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 0) native.Release();
+            }
+        }
     }
 
     private sealed class FakeDevice(List<string> whitelist, List<string> blacklist) : IHidHideControlDevice
