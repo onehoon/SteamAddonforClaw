@@ -6,9 +6,8 @@ namespace SteamInputAddonforClaw.Power;
 internal sealed class PowerTransitionCoordinator : IAsyncDisposable
 {
     private readonly PowerMutationGate _gate;
-    private readonly IReadOnlyList<IPowerTransitionParticipant> _participants;
+    private readonly IReadOnlyList<IPowerSuspendParticipant> _participants;
     private readonly RecoverySafetyState _recovery;
-    private readonly Func<CancellationToken, Task<bool>> _recover;
     private readonly Func<bool> _hasIncompleteRecovery;
     private readonly Func<CancellationToken, Task<bool>> _establishBaseline;
     private readonly Func<CancellationToken, Task<bool>>? _afterRecovery;
@@ -25,9 +24,9 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
-    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Func<bool>? hasResidualRoutingCleanup = null, Func<CancellationToken, Task<bool>>? retryResidualRoutingCleanup = null)
+    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, IEnumerable<IPowerSuspendParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Func<bool>? hasResidualRoutingCleanup = null, Func<CancellationToken, Task<bool>>? retryResidualRoutingCleanup = null)
     {
-        (_gate, _recovery, _recover, _participants, _afterRecovery) = (gate, recovery, recover, participants.ToArray(), afterRecovery);
+        (_gate, _recovery, _participants, _afterRecovery) = (gate, recovery, participants.ToArray(), afterRecovery);
         _recoveryEnabled = recoveryEnabled;
         _hasIncompleteRecovery = hasIncompleteRecovery ?? (() => true);
         _establishBaseline = establishBaseline ?? (_ => Task.FromResult(true));
@@ -121,7 +120,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             var recoveryManagerStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var recoveryElapsedMs = 0d;
             var recoveryCompleted = false;
-            var ownershipReconcileElapsedMs = 0d;
             var safe = false;
             try
             {
@@ -156,25 +154,26 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                     }
                 }
 
-                var fallbackRequired = _hasIncompleteRecovery();
-                AppLog.Info("Power.Resume", "Resume recovery fallback evaluated.", ("RecoveryFallbackRequired", fallbackRequired));
-                safe = !fallbackRequired || await _recover(cancellationToken).ConfigureAwait(false);
+                if (_hasIncompleteRecovery())
+                {
+                    // Residual routing cleanup above (if any) already retried the current
+                    // process's own canonical pipeline teardown. A journal still remaining at
+                    // this point is not state to replay -- it is fail-closed evidence that
+                    // cleanup is incomplete or ambiguous.
+                    AppLog.Warn("Power.Resume", "Recovery journal remains after canonical cleanup; failing closed instead of replaying it.", null, ("Cycle", cycleForResume), ("Epoch", recoveryEpoch));
+                    recoveryCompleted = true;
+                    _gate.TryCommitRecovery(recoveryEpoch, openGate: false, () =>
+                    {
+                        _recovery.Set(RecoverySafety.Unsafe);
+                        State = PowerTransitionState.Unsafe;
+                    });
+                    return;
+                }
+                safe = await _establishBaseline(cancellationToken).ConfigureAwait(false);
+                AppLog.Info("Power.Resume", "Resume Stock baseline completed.", ("Action", "EstablishStockBaseline"), ("Result", safe ? "Succeeded" : "Failed"));
                 recoveryElapsedMs = recoveryManagerStopwatch.Elapsed.TotalMilliseconds;
                 recoveryCompleted = true;
                 if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
-                if (safe)
-                {
-                    safe = await _establishBaseline(cancellationToken).ConfigureAwait(false);
-                    AppLog.Info("Power.Resume", "Resume Stock baseline completed.", ("Action", "EstablishStockBaseline"), ("Result", safe ? "Succeeded" : "Failed"));
-                }
-                if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
-                if (safe) foreach (var participant in _participants)
-                {
-                    var participantStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-                    try { safe &= await participant.ReconcileAfterResumeAsync(cycleForResume, recoveryEpoch, cancellationToken).ConfigureAwait(false); }
-                    finally { ownershipReconcileElapsedMs += System.Diagnostics.Stopwatch.GetElapsedTime(participantStarted).TotalMilliseconds; }
-                    if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
-                }
             }
             catch (Exception e) { if (!recoveryCompleted) recoveryElapsedMs = recoveryManagerStopwatch.Elapsed.TotalMilliseconds; AppLog.Error("Power.Recovery", "Resume reconciliation failed.", e, ("Cycle", cycleForResume), ("Epoch", _gate.Epoch)); safe = false; }
             if (_gate.Epoch != recoveryEpoch) return;
@@ -201,7 +200,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                     }
                 }
             }
-            AppLog.Info("Power.Recovery", "Resume reconciliation completed.", ("Cycle", cycleForResume), ("Epoch", _gate.Epoch), ("Outcome", safe ? "Succeeded" : "Failed"), ("PowerGateOpened", _gate.IsOpen), ("FinalPowerState", State), ("ResumeObservedUtc", observation.ObservedUtc), ("ResumeDispatchDelayMs", (resumeStartedUtc - observation.ObservedUtc).TotalMilliseconds), ("RecoveryElapsedMs", recoveryElapsedMs), ("OwnershipReconcileElapsedMs", ownershipReconcileElapsedMs), ("ResumeToGateReadyMs", (DateTimeOffset.UtcNow - observation.ObservedUtc).TotalMilliseconds));
+            AppLog.Info("Power.Recovery", "Resume reconciliation completed.", ("Cycle", cycleForResume), ("Epoch", _gate.Epoch), ("Outcome", safe ? "Succeeded" : "Failed"), ("PowerGateOpened", _gate.IsOpen), ("FinalPowerState", State), ("ResumeObservedUtc", observation.ObservedUtc), ("ResumeDispatchDelayMs", (resumeStartedUtc - observation.ObservedUtc).TotalMilliseconds), ("RecoveryElapsedMs", recoveryElapsedMs), ("ResumeToGateReadyMs", (DateTimeOffset.UtcNow - observation.ObservedUtc).TotalMilliseconds));
         }
         finally { _serial.Release(); }
     }

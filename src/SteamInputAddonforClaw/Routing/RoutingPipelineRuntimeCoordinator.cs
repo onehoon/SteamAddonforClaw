@@ -14,7 +14,7 @@ internal interface IRoutingRuntimeSessionBoundaryParticipant
     ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken);
 }
 
-internal sealed class RoutingPipelineRuntimeCoordinator : IPowerTransitionParticipant
+internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipant
 {
     private static readonly RoutingDecision RecoveryResetDecision =
         new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.RecoveryUnsafe);
@@ -216,8 +216,6 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerTransitionPartic
         }
         finally { _transitionGate.Release(); }
     }
-
-    public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken) => Task.FromResult(true);
 
     private CancellationTokenSource CreateTransitionCancellation(CancellationToken cancellationToken)
     {

@@ -2,14 +2,13 @@ using System.Diagnostics;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
-using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
-internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage, IPowerTransitionParticipant
+internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
 {
     private enum LifecycleState { Inactive, Prepared, IntentRecorded, Creating, Active, RollingBack }
     private readonly IViiperRuntime _runtime;
@@ -70,21 +69,6 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         AppLog.Error("SteamOutput", "Live Classic Steam Controller publishing failed.", exception);
         if (_outputFaultHandler is { } handler)
             _ = Task.Run(async () => await handler().ConfigureAwait(false));
-    }
-
-    public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
-    {
-        // RoutingPipelineRuntimeCoordinator owns complete suspend teardown through the canonical
-        // frozen-plan pipeline rollback (which includes this stage). Independently rolling back
-        // here as well was a duplicate suspend-ownership path; this stage now stays passive
-        // during suspend and lets the pipeline rollback remove Gordon.
-        return Task.FromResult(true);
-    }
-
-    public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_deviceId == 0 && _owned is null);
     }
 
     public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)

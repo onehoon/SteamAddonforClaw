@@ -314,8 +314,11 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task ResumeAfterRecoveryClearsOwnershipAndAllowsFreshNativeEntry()
+    public async Task CanonicalCleanupAfterResumeClearsOwnershipAndAllowsFreshNativeEntry()
     {
+        // The canonical pipeline rollback (ExitForPipelineAsync), not a resume-only recovery
+        // replay hook, is now what a residual-cleanup retry on resume invokes to retire a
+        // pre-suspend NativeMode session and clear ownership for fresh re-entry.
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
         var modeController = new FakeModeController(devices);
         var store = new MemoryJournalStore();
@@ -326,34 +329,33 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
 
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
         Assert.NotNull(coordinator.CurrentRecoverySessionId);
-        devices.Mode = MsiClawNativeMode.XInput;
-        Assert.Equal(RecoveryStatus.Success, recovery.CompleteRecoverySession().Status);
-        Assert.True(await coordinator.ReconcileAfterResumeAsync(1, gate.Epoch, CancellationToken.None));
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
         Assert.False(coordinator.HasOwnedRecoveryBoundary);
         Assert.Null(coordinator.CurrentRecoverySessionId);
+        Assert.False(recovery.HasIncompleteRecovery);
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal([MsiClawNativeMode.DirectInput, MsiClawNativeMode.DirectInput], modeController.Targets);
+        Assert.Equal([MsiClawNativeMode.DirectInput, MsiClawNativeMode.XInput, MsiClawNativeMode.DirectInput], modeController.Targets);
         Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
     }
 
     [Fact]
-    public async Task ResumeWithIncompleteRecoveryPreservesOwnershipAndBlocksEntry()
+    public async Task CanonicalCleanupFailureAfterResumePreservesOwnershipAndBlocksEntry()
     {
+        // If the canonical cleanup retry itself cannot retire the owned session (e.g. the
+        // native restore fails), ownership must remain latched so a journal still exists as
+        // fail-closed evidence -- there is no separate resume replay path to fall back on.
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
-        var modeController = new FakeModeController(devices);
-        var store = new MemoryJournalStore();
-        var recovery = new RecoveryManager(store);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
         var gate = new PowerMutationGate(initiallyOpen: true);
-        var native = new MsiClawNativeStateManager(devices, modeController);
-        await using var coordinator = new MsiClawNativeModeSessionCoordinator(native, recovery, gate, new RecoverySafetyState(RecoverySafety.Safe));
+        await using var coordinator = CreateCoordinator(devices, modeController, gate);
 
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
         Assert.NotNull(coordinator.CurrentRecoverySessionId);
-        Assert.False(await coordinator.ReconcileAfterResumeAsync(1, gate.Epoch, CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => coordinator.ExitForPipelineAsync(CancellationToken.None));
         Assert.True(coordinator.HasOwnedRecoveryBoundary);
         var reentry = await coordinator.EnterForPipelineAsync(CancellationToken.None);
         Assert.False(reentry.Succeeded);
-        Assert.Equal("RecoveryBoundaryAlreadyOwned", reentry.Reason);
+        Assert.Equal("AlreadyActive", reentry.Reason);
     }
 
     [Fact]
