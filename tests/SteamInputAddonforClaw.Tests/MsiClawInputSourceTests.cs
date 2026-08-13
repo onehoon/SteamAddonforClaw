@@ -291,6 +291,26 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
+    public async Task EmptyPointOfViewCollectionDoesNotThrowAndIsTreatedAsNeutral()
+    {
+        // Match State()'s implicit (null) axis values so this does not introduce an analog
+        // change event -- that would perturb ControllerStateDiagnostics' shared, process-wide
+        // analog-log throttle and could race with other tests exercising it concurrently.
+        var emptyPov = new DirectInputState(new bool[17], pointOfViewControllers: []);
+        var device = new FakeDevice(emptyPov, State(15));
+        var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
+        var validStateObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.StateChanged += (_, state) =>
+        {
+            if (state == new ControllerState(new AuxiliaryButtonState([false, true]))) validStateObserved.TrySetResult();
+        };
+
+        Assert.True(source.Start().Started);
+        await validStateObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await source.StopAsync();
+    }
+
+    [Fact]
     public async Task KnownInvalidInitialState_IsSkippedUntilTheFirstValidState()
     {
         var device = new FakeDevice(InvalidInitialState(), State(15));

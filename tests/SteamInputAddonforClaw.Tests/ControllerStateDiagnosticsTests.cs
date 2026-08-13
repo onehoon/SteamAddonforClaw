@@ -86,6 +86,20 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
         Assert.Equal(1, log.Split("POV=18000", StringSplitOptions.None).Length - 1);
     }
 
+    [Fact]
+    public void NewInputSessionAlwaysLogsAnInitialPovEvenIfItMatchesThePreviousSessionsLastValue()
+    {
+        // Session identity, not just the value, gates the "already logged" suppression -- a
+        // brand new input session must never be silently skipped just because the physical
+        // stick happens to already be at the same neutral/direction value as the last session.
+        ControllerStateDiagnostics.LogPovIfChanged(session: 601, pov: 0);
+        ControllerStateDiagnostics.LogPovIfChanged(session: 602, pov: 0);
+
+        var lines = File.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        Assert.Contains(lines, line => line.Contains("TestSession=601") && line.Contains("POV=0"));
+        Assert.Contains(lines, line => line.Contains("TestSession=602") && line.Contains("POV=0"));
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]

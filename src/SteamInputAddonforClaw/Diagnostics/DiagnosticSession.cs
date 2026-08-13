@@ -36,6 +36,7 @@ internal static class ControllerStateDiagnostics
     private static ControllerState _lastAnalogState;
     private static bool _hasAnalogState;
     private static readonly Lock PovSync = new();
+    private static int? _lastPovSession;
     private static int? _lastPov;
 
     internal static void LogChanges(ControllerState oldState, ControllerState state, int session)
@@ -61,7 +62,11 @@ internal static class ControllerStateDiagnostics
     {
         lock (PovSync)
         {
-            if (_lastPov == pov) return;
+            // Track session alongside the value: a new input session must always produce an
+            // initial POV log, even if that value happens to match the previous session's last
+            // observed POV (e.g. both sessions start neutral at -1).
+            if (_lastPovSession == session && _lastPov == pov) return;
+            _lastPovSession = session;
             _lastPov = pov;
         }
         AppLog.Debug("Input", "DirectInput POV changed", ("TestSession", session), ("POV", pov));
