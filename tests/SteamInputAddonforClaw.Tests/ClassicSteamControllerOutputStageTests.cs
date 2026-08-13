@@ -82,6 +82,46 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task IdentityFailureRollbackFailsWhenPotentialGordonNodeStaysPresentAfterRemoval()
+    {
+        // The usbip-win2 host ancestor record is missing from the snapshot, so identity
+        // resolution correctly fails closed (MissingUsbIpWin2Ancestor). But the 28DE:1102 node
+        // that appeared during the attempt does NOT actually disappear after RemoveDevice() in
+        // this fixture -- rollback's absence verification must catch that using the exact
+        // InstanceId observed at failure time, not by re-running the same strict ownership
+        // predicate that already rejected it (which would trivially report "no matching
+        // candidate" -> false-positive absence).
+        var gordon = Device("USB\\VID_28DE&PID_1102\\STAYS");
+        var enumerator = new GordonPresenceEnumerator(gordon);
+        var runtime = new FakeRuntime();
+        var stage = Create(runtime, enumerator, new FakeHidHide(), TimeSpan.FromMilliseconds(50));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("VirtualDevicePnPStillPresent", result.Reason);
+        Assert.Equal(1, runtime.RemovedDevices);
+    }
+
+    [Fact]
+    public async Task IdentityFailureRollbackSucceedsAfterPotentialGordonNodeDisappears()
+    {
+        var gordon = Device("USB\\VID_28DE&PID_1102\\DISAPPEARS");
+        var enumerator = new GordonPresenceEnumerator(gordon);
+        var runtime = new FakeRuntime { OnRemoveDeviceCalled = () => enumerator.DeviceRemoved = true };
+        var stage = Create(runtime, enumerator, new FakeHidHide(), TimeSpan.FromMilliseconds(50));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("Rollback=ClassicSteamControllerRemoved", result.Reason);
+        Assert.DoesNotContain("VirtualDevicePnPStillPresent", result.Reason);
+        Assert.Equal(1, runtime.RemovedDevices);
+    }
+
+    [Fact]
     public async Task SuccessfulResolutionEmitsNoIdentityDiagnosticDump()
     {
         var runtime = new FakeRuntime();
@@ -286,7 +326,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
-    private ClassicSteamControllerOutputStage Create(FakeRuntime runtime, FakeEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null)
+    private ClassicSteamControllerOutputStage Create(FakeRuntime runtime, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null)
     {
         Directory.CreateDirectory(_directory);
         var store = new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"));
@@ -316,10 +356,23 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
 
     private sealed class FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states) : IControllerDeviceEnumerator
     { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Count - 1)]; }
+    // Returns [] for the very first call (the "before" snapshot) and thereafter either [gordon]
+    // or [] depending on DeviceRemoved, regardless of how many times WaitForIdentityAsync polls.
+    private sealed class GordonPresenceEnumerator(ControllerDeviceInfo gordon) : IControllerDeviceEnumerator
+    {
+        private bool _beforeCallConsumed;
+        public bool DeviceRemoved { get; set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            if (!_beforeCallConsumed) { _beforeCallConsumed = true; return []; }
+            return DeviceRemoved ? [] : [gordon];
+        }
+    }
     private sealed class FakeRuntime : IViiperRuntime
     {
         public List<string> Trace { get; } = [];
         public int NeutralReports; public int RemovedDevices; public int CreatedDevices; public bool CancelAfterStart; public bool BusRemoved = true; public bool NeutralAccepted = true; public bool InputAccepted = true; public bool BlockInput; public ViiperDeviceRemovalResult Removal = new(true, true);
+        public Action? OnRemoveDeviceCalled;
         public TaskCompletionSource InputEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseInput { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public IReadOnlyCollection<uint> OwnedDeviceIds => CreatedDevices > RemovedDevices ? [7] : [];
@@ -328,7 +381,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         public uint CreateDevice() { CreatedDevices++; return 7; }
         public bool SetNeutral(uint id) { Trace.Add("Neutral"); NeutralReports++; return NeutralAccepted; }
         public bool SetInput(uint id, byte[] report) { Trace.Add("Input"); InputEntered.TrySetResult(); if (BlockInput) ReleaseInput.Task.GetAwaiter().GetResult(); return InputAccepted; }
-        public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) { Trace.Add("Remove"); RemovedDevices++; return Removal with { BusRemoved = BusRemoved }; }
+        public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) { Trace.Add("Remove"); RemovedDevices++; OnRemoveDeviceCalled?.Invoke(); return Removal with { BusRemoved = BusRemoved }; }
         public void StopIfUnused() { }
         public void Dispose() { }
     }
