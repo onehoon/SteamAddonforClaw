@@ -65,6 +65,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                 var suspendEpoch = observation.EpochAfter;
                 var deadline = observation.ObservedUtc.AddMilliseconds(1200);
                 var success = true;
+                var cleanupSealed = false;
                 try
                 {
                     foreach (var participant in _participants)
@@ -77,7 +78,13 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                         catch (Exception e) { AppLog.Error("Power.Participant", "Power participant quiesce failed.", e, ("Participant", participant.Name), ("Cycle", cycle), ("Epoch", suspendEpoch)); success = false; }
                     }
                 }
-                finally { _gate.TrySealSuspendCleanup(suspendEpoch); }
+                finally { cleanupSealed = _gate.TrySealSuspendCleanup(suspendEpoch); }
+                if (!cleanupSealed)
+                {
+                    AppLog.Warn("Power.Coordinator", "Suspend completion ignored because a newer power epoch is authoritative.", null,
+                        ("Cycle", cycle), ("SuspendEpoch", suspendEpoch), ("CurrentEpoch", _gate.Epoch));
+                    return;
+                }
                 State = success ? PowerTransitionState.Suspended : PowerTransitionState.Unsafe;
                 AppLog.Info("Power.Coordinator", "Suspend quiesce completed.", ("Cycle", cycle), ("Epoch", _gate.Epoch), ("Outcome", success ? "Succeeded" : "TimedOutOrFailed"), ("GateState", _gate.IsOpen ? "Open" : "Closed"), ("FinalPowerState", State));
                 return;

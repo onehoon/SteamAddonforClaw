@@ -76,6 +76,27 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public async Task Stale_suspend_completion_does_not_commit_over_newer_quiescing_state()
+    {
+        var gate = new PowerMutationGate(true);
+        var participant = new ControllableParticipant();
+        var coordinator = Coordinator(gate, participant);
+        gate.EnterNewCycleBarrier(out _, out var suspendEpoch);
+
+        var suspend = coordinator.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, suspendEpoch, true));
+        await participant.Started.Task;
+
+        gate.EnterNewCycleBarrier(out _, out var newerEpoch);
+        coordinator.InvalidateForBarrier();
+        participant.Release.TrySetResult(true);
+        await suspend;
+
+        Assert.Equal(newerEpoch, gate.Epoch);
+        Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
+        Assert.True(gate.TryAcquireCleanup(out _));
+    }
+
+    [Fact]
     public async Task Resume_failure_keeps_gate_closed_and_recovery_unsafe()
     {
         var gate = new PowerMutationGate(true); var recovery = new RecoverySafetyState(RecoverySafety.Safe);
@@ -202,6 +223,18 @@ public sealed class PowerTransitionTests
     {
         public string Name => "counting"; public int QuiesceCount;
         public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken) { Interlocked.Increment(ref QuiesceCount); return Task.FromResult(true); }
+        public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken) => Task.FromResult(true);
+    }
+    private sealed class ControllableParticipant : IPowerTransitionParticipant
+    {
+        public string Name => "controllable";
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            return await Release.Task;
+        }
         public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken) => Task.FromResult(true);
     }
     private sealed class FailingParticipant : IPowerTransitionParticipant
