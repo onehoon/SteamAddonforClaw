@@ -82,7 +82,7 @@ public partial class App : Application
         };
         var controllerEnvironmentAssessmentProvider = new ControllerEnvironmentAssessmentProvider(controllerSoftwareProviders);
         var recoveryJournalStore = new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath);
-        _recoveryManager = new RecoveryManager(recoveryJournalStore, deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
+        _recoveryManager = new RecoveryManager(recoveryJournalStore);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         var stockCenterMBaseline = nativeState is null ? null : new StockCenterMStartupBaseline(nativeState);
         var coordinator = new StartupCoordinator(
@@ -162,7 +162,6 @@ public partial class App : Application
             _recoveryManager!,
             powerGate,
             recoverySafetyState);
-        IPowerTransitionParticipant? steamOutputPowerParticipant = null;
         if (_msiClawNativeModeSession is not null)
         {
             var nativeModeStage = new MsiClawNativeModeStage(_msiClawNativeModeSession);
@@ -183,7 +182,6 @@ public partial class App : Application
                 _recoveryManager!,
                 () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
                 new HidHideDriverClient(), _physicalInputSource);
-            steamOutputPowerParticipant = steamOutputStage;
             var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage, steamOutputStage]);
             var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(pipelineExecutor);
             _routingRuntimeCoordinator = new RoutingPipelineRuntimeCoordinator(
@@ -197,16 +195,9 @@ public partial class App : Application
             () => _msiClawNativeModeSession?.IsActive == true,
             () => _msiClawNativeModeSession?.HasOwnedRecoveryBoundary == true,
             () => recoverySafetyState.Current == RecoverySafety.Safe && _recoveryManager?.HasIncompleteRecovery == true);
-        var powerParticipants = new List<IPowerTransitionParticipant>();
-        if (_msiClawNativeModeSession is not null) powerParticipants.Add(_msiClawNativeModeSession);
-        if (steamOutputPowerParticipant is not null) powerParticipants.Add(steamOutputPowerParticipant);
+        var powerParticipants = new List<IPowerSuspendParticipant>();
         if (_routingRuntimeCoordinator is not null) powerParticipants.Add(_routingRuntimeCoordinator);
-        _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, async token =>
-        {
-            if (_recoveryManager is null) return false;
-            var result = await _recoveryManager.RecoverIncompleteSessionAsync(token).ConfigureAwait(false);
-            return result.Status is RecoveryStatus.Success or RecoveryStatus.NoRecoveryNeeded;
-        }, powerParticipants, async token =>
+        _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants, async token =>
         {
             if (_routingRuntimeCoordinator is null) return true;
             var freshSucceeded = false;

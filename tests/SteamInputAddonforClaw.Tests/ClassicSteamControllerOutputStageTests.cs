@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -167,23 +168,6 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task CreationAndSuspendAreSerializedWithInFlightCancellation()
-    {
-        var runtime = new FakeRuntime();
-        var stage = Create(runtime, new FakeEnumerator([[], []]), new FakeHidHide(), TimeSpan.FromSeconds(5));
-        await stage.PrepareMutationAsync(CancellationToken.None);
-
-        var creation = stage.ExecuteMutationAsync(CancellationToken.None).AsTask();
-        Assert.True(SpinWait.SpinUntil(() => runtime.CreatedDevices == 1, TimeSpan.FromSeconds(5)));
-        var quiesced = await stage.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None);
-        var result = await creation;
-
-        Assert.True(quiesced);
-        Assert.False(result.Succeeded);
-        Assert.Equal(1, runtime.RemovedDevices);
-    }
-
-    [Fact]
     public async Task CallerCancellationDuringPnPWaitRollsBackIntentAndDevice()
     {
         var runtime = new FakeRuntime();
@@ -212,32 +196,23 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task QuiesceForSuspendIsANoOpThatDoesNotTouchViiperOrThePipelinesOwnedState()
+    public async Task StageExposesNoIndependentPowerHooksAndOnlyThePipelineRollbackRemovesGordon()
     {
         // RoutingPipelineRuntimeCoordinator owns complete suspend teardown through the canonical
-        // frozen-plan pipeline rollback. This stage must no longer independently remove Gordon
-        // during suspend -- that would be a duplicate suspend-ownership path racing the pipeline
-        // rollback that also targets this stage.
+        // frozen-plan pipeline rollback. This stage must not independently participate in
+        // suspend/resume power notifications -- that would be a duplicate suspend-ownership path
+        // racing the pipeline rollback that also targets this stage. The only removal path is the
+        // canonical pipeline rollback (RollbackMutationAsync).
+        Assert.False(typeof(IPowerSuspendParticipant).IsAssignableFrom(typeof(ClassicSteamControllerOutputStage)));
+
         var runtime = new FakeRuntime();
         var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
-        var quiesced = await stage.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None);
-
-        Assert.True(quiesced);
-        Assert.Equal(0, runtime.RemovedDevices);
-        // ReconcileAfterResumeAsync's fail-closed sanity check confirms the stage is still
-        // considered active (owned device state was never cleared by the no-op quiesce) --
-        // it is the canonical pipeline rollback's job to actually remove it.
-        Assert.False(await stage.ReconcileAfterResumeAsync(1, 1, CancellationToken.None));
-
-        // The canonical pipeline rollback path (RollbackMutationAsync) still removes Gordon and
-        // verifies absence normally, independent of suspend.
         var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
         Assert.True(rollback.Succeeded, rollback.Reason);
         Assert.Equal(1, runtime.RemovedDevices);
-        Assert.True(await stage.ReconcileAfterResumeAsync(1, 1, CancellationToken.None));
     }
 
     [Fact]
@@ -347,7 +322,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     {
         Directory.CreateDirectory(_directory);
         var store = new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"));
-        var recovery = new RecoveryManager(storeWriteFailsAfterSeed ? new FailingReplaceStore(store) : store, deviceEnumerator: enumerator, hidHideClient: hid);
+        var recovery = new RecoveryManager(storeWriteFailsAfterSeed ? new FailingReplaceStore(store) : store);
         // The stage requires an existing recovery session; seed a valid empty session directly.
         var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, _session, DateTimeOffset.UtcNow, null, new());
         File.WriteAllText(Path.Combine(_directory, "recovery.json"), System.Text.Json.JsonSerializer.Serialize(journal));

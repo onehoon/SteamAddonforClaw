@@ -8,7 +8,7 @@ using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IPowerTransitionParticipant, IMsiClawNativeModeStageSession, IRoutingRuntimeSessionBoundaryParticipant, IRoutingRecoverySessionProvider
+internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IMsiClawNativeModeStageSession, IRoutingRuntimeSessionBoundaryParticipant, IRoutingRecoverySessionProvider
 {
     private readonly MsiClawNativeStateManager _nativeState;
     private readonly RecoveryManager _recovery;
@@ -30,29 +30,6 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     }
 
     public string Name => "MsiClawNativeModeSession";
-
-    public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
-    {
-        // The canonical routing runtime owns complete suspend teardown through the pipeline.
-        // NativeMode must not independently restore around pipeline rollback barriers.
-        return Task.FromResult(true);
-    }
-
-    public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken)
-    {
-        // RecoveryManager may have restored the original snapshot. Force the next effective
-        // session observation to perform a fresh capture and transition.
-        _active = false;
-        if (_recoveryBoundaryOwned)
-        {
-            if (_recovery.HasIncompleteRecovery) return Task.FromResult(false);
-            // RecoveryManager restored the journaled state and deleted the journal before
-            // participant reconciliation. The next entry must capture a fresh snapshot.
-            _snapshot = null;
-            lock (_recoveryStateSync) { _recoveryBoundaryOwned = false; _recoverySessionId = null; }
-        }
-        return Task.FromResult(true);
-    }
 
     internal Task<bool> ObserveRoutingDecisionAsync(RoutingDecision decision, long generation, CancellationToken cancellationToken = default)
         => ObserveRoutingDecisionCoreAsync(decision, generation, cancellationToken);

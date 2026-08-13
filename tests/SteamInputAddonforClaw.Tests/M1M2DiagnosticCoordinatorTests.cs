@@ -239,68 +239,8 @@ public sealed class M1M2DiagnosticCoordinatorTests
         Assert.True(store.Exists());
     }
 
-    [Fact]
-    public async Task CrashRecovery_RemovesOnlyRecordedAddonEntryAndPreservesOthers()
-    {
-        var store = new MemoryStore();
-        var hidHide = new FakeHidHide(@"C:\Apps\ClawTweaks.exe", @"C:\Apps\Other.exe");
-        var manager = new RecoveryManager(store, hidHideClient: hidHide);
-        Assert.Equal(RecoveryStatus.Success, manager.BeginHidHideWhitelistLease(AddonPath).Status);
-        Assert.True(hidHide.AddApplication(AddonPath));
-
-        Assert.Equal(RecoveryStatus.Success, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-
-        Assert.DoesNotContain(AddonPath, hidHide.Entries, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains(@"C:\Apps\ClawTweaks.exe", hidHide.Entries, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains(@"C:\Apps\Other.exe", hidHide.Entries, StringComparer.OrdinalIgnoreCase);
-        Assert.False(store.Exists());
-    }
-
-    [Fact]
-    public async Task CrashRecovery_WhenEntryAlreadyAbsent_ClearsOnlyAfterReadableInspection()
-    {
-        var store = new MemoryStore();
-        var hidHide = new FakeHidHide();
-        var manager = new RecoveryManager(store, hidHideClient: hidHide);
-        Assert.Equal(RecoveryStatus.Success, manager.BeginHidHideWhitelistLease(AddonPath).Status);
-
-        Assert.Equal(RecoveryStatus.Success, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-        Assert.False(store.Exists());
-    }
-
-    [Theory]
-    [InlineData((int)HidHideInspectionStatus.Disabled)]
-    [InlineData((int)HidHideInspectionStatus.InverseWhitelist)]
-    public async Task CrashRecovery_WhenConfigurationIsReadable_RemovesExactEntryAndDeletesJournal(int statusValue)
-    {
-        var store = new MemoryStore();
-        var hidHide = new FakeHidHide(@"C:\Apps\ClawTweaks.exe") { Status = (HidHideInspectionStatus)statusValue };
-        var manager = new RecoveryManager(store, hidHideClient: hidHide);
-        Assert.Equal(RecoveryStatus.Success, manager.BeginHidHideWhitelistLease(AddonPath).Status);
-        Assert.True(hidHide.AddApplication(AddonPath));
-
-        Assert.Equal(RecoveryStatus.Success, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-        Assert.DoesNotContain(AddonPath, hidHide.Entries, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains(@"C:\Apps\ClawTweaks.exe", hidHide.Entries, StringComparer.OrdinalIgnoreCase);
-        Assert.False(store.Exists());
-    }
-
-    [Fact]
-    public async Task CrashRecovery_WhenConfigurationUnavailable_PreservesJournalWithoutMutation()
-    {
-        var store = new MemoryStore();
-        var hidHide = new FakeHidHide(AddonPath) { Status = HidHideInspectionStatus.ConfigurationUnavailable };
-        var manager = new RecoveryManager(store, hidHideClient: hidHide);
-        Assert.Equal(RecoveryStatus.Success, manager.BeginHidHideWhitelistLease(AddonPath).Status);
-
-        Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-        Assert.Contains(AddonPath, hidHide.Entries, StringComparer.OrdinalIgnoreCase);
-        Assert.Equal(0, hidHide.RemoveCount);
-        Assert.True(store.Exists());
-    }
-
     private static M1M2DiagnosticCoordinator Create(FakeInput input, FakeHidHide hidHide, MemoryStore store) =>
-        new(input, hidHide, new RecoveryManager(store, hidHideClient: hidHide), AddonPath, () => ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST"]);
+        new(input, hidHide, new RecoveryManager(store), AddonPath, () => ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST"]);
 
     private static HandheldDeviceId DeviceIdForTest() => new("test.device");
 
