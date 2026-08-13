@@ -59,6 +59,23 @@ public sealed class ClassicSteamControllerInputPublisherTests
     }
 
     [Fact]
+    public async Task RightStickAtShortMinValueDoesNotFaultThePublisher()
+    {
+        var state = new ControllerState(default, default, new StickState(short.MinValue, short.MinValue), default, new AuxiliaryButtonState([false, false]));
+        var runtime = new FakeRuntime(); var ticks = new ManualTicks(); var faults = 0;
+        var publisher = new ClassicSteamControllerInputPublisher(new Snapshot(state), runtime, 7, ticks, _ => faults++);
+
+        publisher.Start(); await ticks.TickAsync();
+        // Bound the wait: on a regression, Write() throws before SetInput ever runs, so
+        // runtime.Reports never grows -- an unbounded wait for a report count would hang.
+        Assert.True(SpinWait.SpinUntil(() => faults > 0 || runtime.Reports.Count > 0, TimeSpan.FromSeconds(5)));
+        await publisher.StopAsync();
+
+        Assert.Equal(0, faults);
+        Assert.Single(runtime.Reports);
+    }
+
+    [Fact]
     public async Task DuplicateStartIsRejectedAndStopIsIdempotent()
     {
         var publisher = new ClassicSteamControllerInputPublisher(new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))), new FakeRuntime(), 7, new ManualTicks());
