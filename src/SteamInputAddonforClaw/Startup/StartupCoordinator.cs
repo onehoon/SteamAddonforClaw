@@ -12,6 +12,8 @@ internal sealed class StartupCoordinator
     private readonly IControllerEnvironmentAssessmentProvider _environmentAssessmentProvider;
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
     private readonly IRecoveryJournalStore _recoveryJournalStore;
+    private readonly RecoveryManager _recoveryManager;
+    private readonly IStartupHidHideRecoveryCleaner? _hidHideRecoveryCleaner;
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
@@ -27,6 +29,7 @@ internal sealed class StartupCoordinator
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
         IRecoveryJournalStore recoveryJournalStore,
         IStockCenterMStartupBaseline? stockCenterMBaseline = null,
+        IStartupHidHideRecoveryCleaner? hidHideRecoveryCleaner = null,
         TimeSpan? hardwareProbePollInterval = null,
         TimeSpan? hardwareProbeTimeout = null,
         Func<TimeSpan, CancellationToken, Task>? hardwareProbeDelay = null)
@@ -35,6 +38,8 @@ internal sealed class StartupCoordinator
         _environmentAssessmentProvider = environmentAssessmentProvider;
         _environmentWaiter = environmentWaiter;
         _recoveryJournalStore = recoveryJournalStore ?? throw new ArgumentNullException(nameof(recoveryJournalStore));
+        _recoveryManager = new RecoveryManager(_recoveryJournalStore);
+        _hidHideRecoveryCleaner = hidHideRecoveryCleaner;
         _stockCenterMBaseline = stockCenterMBaseline;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
@@ -102,13 +107,51 @@ internal sealed class StartupCoordinator
         if (!baseline.Succeeded)
             return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
 
+        var recoverySafe = ResolveStaleRecovery();
+        return new StartupResult(true, environment.Mode, readiness, RecoverySafe: recoverySafe);
+    }
+
+    /// <summary>
+    /// Uses the validated stale recovery journal only as immutable ownership evidence for
+    /// removing persistent HidHide mutations proven addon-owned. Previous routing/native/VIIPER
+    /// state is never replayed. The journal is discarded only after any required HidHide cleanup
+    /// has been independently verified to succeed.
+    /// </summary>
+    private bool ResolveStaleRecovery()
+    {
+        var loaded = _recoveryManager.LoadJournal();
+        switch (loaded.Status)
+        {
+            case RecoveryStatus.NoRecoveryNeeded:
+                return true;
+            case RecoveryStatus.Failure:
+                AppLog.Warn("Recovery", "Stale startup journal could not be validated; routing remains passive.", null,
+                    ("Action", "Passive"), ("Reason", loaded.Reason));
+                return false;
+        }
+
+        var journal = loaded.Journal!;
+        if (StartupHidHideRecoveryCleaner.RequiresCleanup(journal))
+        {
+            if (_hidHideRecoveryCleaner is null)
+            {
+                AppLog.Warn("Recovery", "Stale startup journal requires HidHide cleanup, but no cleaner is configured; routing remains passive.", null, ("Action", "Passive"));
+                return false;
+            }
+            if (!_hidHideRecoveryCleaner.TryClean(journal, out var cleanupReason))
+            {
+                AppLog.Warn("Recovery", "Stale startup HidHide cleanup failed; routing remains passive.", null, ("Action", "Passive"), ("Reason", cleanupReason));
+                return false;
+            }
+        }
+
         if (!TryRetireStaleStartupJournal(out var reason))
         {
             AppLog.Warn("Startup", "Stale startup journal could not be discarded after the live XInput baseline; routing remains passive.", null,
                 ("Action", "Passive"), ("Reason", reason));
-            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
+            return false;
         }
-        return new StartupResult(true, environment.Mode, readiness, RecoverySafe: true);
+        return true;
     }
 
     private bool TryRetireStaleStartupJournal(out string reason)

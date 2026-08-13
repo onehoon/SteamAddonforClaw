@@ -91,6 +91,7 @@ public partial class App : Application
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
             recoveryJournalStore: recoveryJournalStore,
             stockCenterMBaseline: stockCenterMBaseline,
+            hidHideRecoveryCleaner: new StartupHidHideRecoveryCleaner(new HidHideDriverClient()),
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
             hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
 
