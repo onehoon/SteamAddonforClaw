@@ -1,14 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
-using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.HidHide;
-using SteamInputAddonforClaw.Controllers.Detection;
 
 namespace SteamInputAddonforClaw.Recovery;
 
-internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDeviceRegistry? deviceRegistry = null, IHidHideClient? hidHideClient = null, IControllerDeviceEnumerator? deviceEnumerator = null)
+internal sealed class RecoveryManager(IRecoveryJournalStore store)
 {
     internal const int CurrentSchemaVersion = 5;
     public bool HasIncompleteRecovery
@@ -282,19 +279,4 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         }
     }
 
-    public RecoveryResult CompleteRecoverySession()
-    {
-        try
-        {
-            if (!store.Exists()) return new(RecoveryStatus.NoRecoveryNeeded, "Recovery journal does not exist.");
-            store.Delete();
-            if (store.Exists()) return new(RecoveryStatus.Failure, "Recovery journal still exists after deletion.");
-            return new(RecoveryStatus.Success, "Recovery journal deleted.");
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("Recovery", "Recovery journal cleanup failed.", exception, ("JournalPath", store.JournalPath), ("Action", "Passive"));
-            return new(RecoveryStatus.Failure, exception.Message);
-        }
-    }
 }

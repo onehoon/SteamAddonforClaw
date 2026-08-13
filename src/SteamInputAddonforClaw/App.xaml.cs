@@ -82,7 +82,7 @@ public partial class App : Application
         };
         var controllerEnvironmentAssessmentProvider = new ControllerEnvironmentAssessmentProvider(controllerSoftwareProviders);
         var recoveryJournalStore = new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath);
-        _recoveryManager = new RecoveryManager(recoveryJournalStore, deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
+        _recoveryManager = new RecoveryManager(recoveryJournalStore);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         var stockCenterMBaseline = nativeState is null ? null : new StockCenterMStartupBaseline(nativeState);
         var coordinator = new StartupCoordinator(

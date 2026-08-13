@@ -240,7 +240,7 @@ public sealed class M1M2DiagnosticCoordinatorTests
     }
 
     private static M1M2DiagnosticCoordinator Create(FakeInput input, FakeHidHide hidHide, MemoryStore store) =>
-        new(input, hidHide, new RecoveryManager(store, hidHideClient: hidHide), AddonPath, () => ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST"]);
+        new(input, hidHide, new RecoveryManager(store), AddonPath, () => ["HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST"]);
 
     private static HandheldDeviceId DeviceIdForTest() => new("test.device");
 

@@ -1,7 +1,5 @@
 using System.Text.Json;
-using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
-using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
 using Xunit;
 
@@ -272,7 +270,7 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.True(File.Exists(PathName));
     }
 
-    private RecoveryManager Manager(HandheldDeviceRegistry? registry = null) => new(new RecoveryJournalStore(PathName), registry);
+    private RecoveryManager Manager() => new(new RecoveryJournalStore(PathName));
     public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
 
     private sealed class SpyStore(IRecoveryJournalStore inner) : IRecoveryJournalStore
