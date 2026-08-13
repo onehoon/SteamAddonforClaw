@@ -1,3 +1,5 @@
+using System.Net.Http;
+using System.Net.Sockets;
 using SteamInputAddonforClaw.Updates;
 using Xunit;
 
@@ -81,6 +83,110 @@ public sealed class SilentUpdateServiceTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => operation);
         Assert.Equal(0, client.ApplyCount);
+    }
+
+    [Fact]
+    public async Task CheckDownloadAndScheduleAsync_TransientFailureThenSuccess_RetriesExactlyOnce()
+    {
+        var client = new SequencedCheckUpdateClient([new HttpRequestException("transient")], updateAvailable: false);
+        var delay = new RecordingDelay();
+
+        var scheduled = await new SilentUpdateService(client, delay.DelayAsync).CheckDownloadAndScheduleAsync(CancellationToken.None);
+
+        Assert.False(scheduled);
+        Assert.Equal(2, client.CheckCount);
+        Assert.Equal([TimeSpan.FromSeconds(2)], delay.Delays);
+    }
+
+    [Fact]
+    public async Task CheckDownloadAndScheduleAsync_MultipleTransientFailuresThenSuccess_UsesTwoAndFiveSecondBackoff()
+    {
+        var client = new SequencedCheckUpdateClient([new HttpRequestException("first"), new SocketException()], updateAvailable: true);
+        var delay = new RecordingDelay();
+
+        var scheduled = await new SilentUpdateService(client, delay.DelayAsync).CheckDownloadAndScheduleAsync(CancellationToken.None);
+
+        Assert.True(scheduled);
+        Assert.Equal(3, client.CheckCount);
+        Assert.Equal([TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5)], delay.Delays);
+        Assert.Equal(1, client.DownloadCount);
+        Assert.Equal(1, client.ApplyCount);
+    }
+
+    [Fact]
+    public async Task CheckDownloadAndScheduleAsync_TransientFailuresExhausted_PropagatesAfterBoundedAttempts()
+    {
+        var client = new SequencedCheckUpdateClient([new HttpRequestException("1"), new HttpRequestException("2"), new HttpRequestException("3")]);
+        var delay = new RecordingDelay();
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => new SilentUpdateService(client, delay.DelayAsync).CheckDownloadAndScheduleAsync(CancellationToken.None));
+
+        Assert.Equal(3, client.CheckCount);
+        Assert.Equal([TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5)], delay.Delays);
+        Assert.Equal(0, client.DownloadCount);
+    }
+
+    [Fact]
+    public async Task CheckDownloadAndScheduleAsync_NonTransientException_DoesNotRetry()
+    {
+        var client = new SequencedCheckUpdateClient([new InvalidOperationException("not transient")]);
+        var delay = new RecordingDelay();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new SilentUpdateService(client, delay.DelayAsync).CheckDownloadAndScheduleAsync(CancellationToken.None));
+
+        Assert.Equal(1, client.CheckCount);
+        Assert.Empty(delay.Delays);
+    }
+
+    [Fact]
+    public async Task CheckDownloadAndScheduleAsync_ApplicationCancellationDuringCheck_DoesNotRetry()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var client = new SequencedCheckUpdateClient([new OperationCanceledException(cancellation.Token)]);
+        var delay = new RecordingDelay();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new SilentUpdateService(client, delay.DelayAsync).CheckDownloadAndScheduleAsync(cancellation.Token));
+
+        Assert.Equal(1, client.CheckCount);
+        Assert.Empty(delay.Delays);
+    }
+
+    private sealed class RecordingDelay
+    {
+        public List<TimeSpan> Delays { get; } = [];
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            Delays.Add(delay);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class SequencedCheckUpdateClient : IUpdateClient
+    {
+        private readonly Queue<Exception> _checkFailures;
+        private readonly bool _updateAvailable;
+
+        public SequencedCheckUpdateClient(IEnumerable<Exception> checkFailures, bool updateAvailable = true)
+        {
+            _checkFailures = new Queue<Exception>(checkFailures);
+            _updateAvailable = updateAvailable;
+        }
+
+        public bool IsInstalled => true;
+        public int CheckCount { get; private set; }
+        public int DownloadCount { get; private set; }
+        public int ApplyCount { get; private set; }
+
+        public Task<bool> CheckForUpdatesAsync(CancellationToken cancellationToken)
+        {
+            CheckCount++;
+            if (_checkFailures.Count > 0) throw _checkFailures.Dequeue();
+            return Task.FromResult(_updateAvailable);
+        }
+
+        public Task DownloadUpdatesAsync(CancellationToken cancellationToken) { DownloadCount++; return Task.CompletedTask; }
+        public void WaitExitThenApplyUpdates(string[]? restartArguments) => ApplyCount++;
     }
 
     private sealed class FakeUpdateClient(bool isInstalled, bool updateAvailable = false) : IUpdateClient
