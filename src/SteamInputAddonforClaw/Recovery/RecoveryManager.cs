@@ -268,31 +268,12 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
             using var document = JsonDocument.Parse(json);
             if (!document.RootElement.TryGetProperty("SchemaVersion", out var schemaElement) || !schemaElement.TryGetInt32(out var schema))
                 return new(RecoveryStatus.Failure, "Recovery journal schema is missing.");
-            if (schema == CurrentSchemaVersion)
-            {
-                var journal = JsonSerializer.Deserialize<RecoveryJournal>(json) ?? throw new InvalidDataException("The recovery journal contains no recovery state.");
-                if (!IsValidJournal(journal))
-                    return new(RecoveryStatus.Failure, "Recovery journal is missing required state.", journal);
-                return new(RecoveryStatus.Success, "Recovery journal loaded.", journal);
-            }
-            if (schema == 1) return TranslateLegacyV1(json);
-            if (schema == 3)
-            {
-                var legacy = JsonSerializer.Deserialize<RecoveryJournal>(json) ?? throw new InvalidDataException("The legacy recovery journal contains no state.");
-                return new(RecoveryStatus.Success, "Legacy schema v3 recovery journal loaded.", legacy with { SchemaVersion = CurrentSchemaVersion });
-            }
-            if (schema == 2)
-            {
-                var legacy = JsonSerializer.Deserialize<RecoveryJournal>(json) ?? throw new InvalidDataException("The legacy recovery journal contains no state.");
-                using var legacyDocument = JsonDocument.Parse(json);
-                var virtualProperty = legacyDocument.RootElement.GetProperty("Mutations").GetProperty("AddonOwnedVirtualDevices");
-                if (virtualProperty.ValueKind is not JsonValueKind.Null and not JsonValueKind.Array)
-                    return new(RecoveryStatus.Failure, "Legacy virtual-device recovery evidence cannot be translated safely.", legacy);
-                if (virtualProperty.ValueKind == JsonValueKind.Array && virtualProperty.GetArrayLength() > 0)
-                    return new(RecoveryStatus.Failure, "Legacy virtual-device recovery evidence cannot be translated safely.", legacy);
-                return new(RecoveryStatus.Success, "Legacy schema v2 recovery journal loaded.", legacy with { SchemaVersion = CurrentSchemaVersion });
-            }
-            return new(RecoveryStatus.Failure, $"Unsupported recovery schema {schema}.");
+            if (schema != CurrentSchemaVersion)
+                return new(RecoveryStatus.Failure, $"Unsupported recovery schema {schema}.");
+            var journal = JsonSerializer.Deserialize<RecoveryJournal>(json) ?? throw new InvalidDataException("The recovery journal contains no recovery state.");
+            if (!IsValidJournal(journal))
+                return new(RecoveryStatus.Failure, "Recovery journal is missing required state.", journal);
+            return new(RecoveryStatus.Success, "Recovery journal loaded.", journal);
         }
         catch (Exception exception)
         {
@@ -466,19 +447,6 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         return restored.Restored
             ? new(RecoveryStatus.Success, restored.Reason, journal)
             : new(RecoveryStatus.Failure, $"Native-state recovery failed: {restored.Reason}", journal);
-    }
-
-    private static RecoveryResult TranslateLegacyV1(string json)
-    {
-        var legacy = JsonSerializer.Deserialize<LegacyRecoveryJournalV1>(json) ?? throw new InvalidDataException("The legacy recovery journal contains no state.");
-        var mutations = legacy.Mutations ?? throw new InvalidDataException("The legacy recovery journal mutations are missing.");
-        var unsupported = mutations.ControllerModeChanged || mutations.TemporaryXbox360OutputCreated ||
-            mutations.HidHideDeviceAdditions is { Count: > 0 } || mutations.AddonOwnedVirtualDevices is { Count: > 0 };
-        if (legacy.RecoverySessionId == Guid.Empty || unsupported || mutations.ExecutableWhitelistAdditions is { Count: > 1 })
-            return new(RecoveryStatus.Failure, "Legacy recovery journal cannot be restored safely.");
-        var journal = new RecoveryJournal(CurrentSchemaVersion, legacy.RecoverySessionId, legacy.CreatedAt, null,
-            new(ExecutableWhitelistAdditions: mutations.ExecutableWhitelistAdditions));
-        return new(RecoveryStatus.Success, "Recoverable legacy recovery journal loaded.", journal);
     }
 
     private RecoveryResult RecoverHidHideWhitelistAddition(RecoveryJournal journal, string executablePath)
