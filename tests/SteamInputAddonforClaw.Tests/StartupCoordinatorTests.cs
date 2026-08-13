@@ -373,6 +373,40 @@ public sealed class StartupCoordinatorTests
         Assert.Equal(0, store.DeleteCallCount);
     }
 
+    [Fact]
+    public async Task CompatibilityDoesNotAllowMutation_DoesNotEstablishStartupBoundaryEvenWhenTopologyIsStable()
+    {
+        // Mode/Readiness (topology) and Compatibility are two separate systems. Prove the
+        // additional AND-gate: a Mode==StockCenterM environment with Readiness==Stable must
+        // still not reach baseline mutation if the fresh assessment's own compatibility result
+        // (e.g. Center M still Starting) does not allow it.
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: true);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FixedCompatibilityEnvironmentDetector(events, ControllerEnvironmentCompatibilityStatus.Indeterminate, ControllerEnvironmentCompatibilityReason.MsiCenterMStarting),
+            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.ShouldStartRuntime);
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
+        Assert.Equal(ControllerEnvironmentReadiness.Stable, result.EnvironmentReadiness);
+        Assert.DoesNotContain("Baseline", events);
+        Assert.DoesNotContain("Discard", events);
+        Assert.Equal(0, store.DeleteCallCount);
+    }
+
+    private sealed class FixedCompatibilityEnvironmentDetector(List<string> events, ControllerEnvironmentCompatibilityStatus status, ControllerEnvironmentCompatibilityReason reason) : IControllerEnvironmentAssessmentProvider
+    {
+        public ControllerEnvironmentAssessmentSnapshot Capture()
+        {
+            events.Add("EnvironmentDetector");
+            return new([], new(ControllerManagerKind.None, ControllerManagerClassificationReason.NoThirdPartyControllerManager), new(status, reason));
+        }
+    }
+
     private sealed class FakeBaseline(List<string> events, bool succeeded = true) : IStockCenterMStartupBaseline
     {
         public Task<StockCenterMStartupBaselineResult> EstablishAsync(CancellationToken cancellationToken)

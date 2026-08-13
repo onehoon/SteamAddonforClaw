@@ -9,12 +9,13 @@ using SteamInputAddonforClaw.Status;
 internal sealed class StartupCoordinator
 {
     private readonly IUpdateGate _updateGate;
-    private readonly IControllerEnvironmentAssessmentProvider _environmentAssessmentProvider;
     private readonly IControllerEnvironmentWaiter _environmentWaiter;
     private readonly IRecoveryJournalStore _recoveryJournalStore;
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
+    private readonly IStartupControllerEnvironmentReadinessWaiter _readinessWaiter;
+    private readonly bool _isBackgroundStartup;
 
     public StartupCoordinator(
         IUpdateGate updateGate,
@@ -23,15 +24,18 @@ internal sealed class StartupCoordinator
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
         IRecoveryJournalStore recoveryJournalStore,
-        IStockCenterMStartupBaseline? stockCenterMBaseline = null)
+        IStockCenterMStartupBaseline? stockCenterMBaseline = null,
+        bool isBackgroundStartup = false,
+        IStartupControllerEnvironmentReadinessWaiter? readinessWaiter = null)
     {
         _updateGate = updateGate;
-        _environmentAssessmentProvider = environmentAssessmentProvider;
         _environmentWaiter = environmentWaiter;
         _recoveryJournalStore = recoveryJournalStore ?? throw new ArgumentNullException(nameof(recoveryJournalStore));
         _stockCenterMBaseline = stockCenterMBaseline;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
+        _isBackgroundStartup = isBackgroundStartup;
+        _readinessWaiter = readinessWaiter ?? new StartupControllerEnvironmentReadinessWaiter(environmentAssessmentProvider);
     }
 
 
@@ -57,7 +61,7 @@ internal sealed class StartupCoordinator
             return new StartupResult(true, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate);
 
         AppLog.Info("Environment", "Initial environment detection started.");
-        var assessment = _environmentAssessmentProvider.Capture();
+        var assessment = await _readinessWaiter.WaitForReadyAssessmentAsync(_isBackgroundStartup, cancellationToken).ConfigureAwait(false);
         var environment = StartupControllerEnvironmentMapper.Map(assessment);
         AppLog.Info("Environment", "Environment detection completed.", ("Mode", environment.Mode), ("ClawTweaksState", environment.ClawTweaksState));
         if (environment.Mode == ControllerEnvironmentMode.Indeterminate)
@@ -82,6 +86,13 @@ internal sealed class StartupCoordinator
         AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
         if (readiness != ControllerEnvironmentReadiness.Stable)
             return new StartupResult(true, environment.Mode, readiness);
+
+        if (!assessment.Compatibility.AllowsMutation)
+        {
+            AppLog.Warn("Startup", "Stock MSI Center M baseline is not permitted because the current environment compatibility does not allow mutation.", null,
+                ("CompatibilityStatus", assessment.Compatibility.Status), ("CompatibilityReason", assessment.Compatibility.Reason), ("Action", "Passive"));
+            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
+        }
 
         if (_stockCenterMBaseline is null)
         {
