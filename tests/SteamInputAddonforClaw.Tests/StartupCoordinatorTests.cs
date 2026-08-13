@@ -373,26 +373,44 @@ public sealed class StartupCoordinatorTests
         Assert.Equal(0, store.DeleteCallCount);
     }
 
-    [Fact]
-    public async Task CompatibilityDoesNotAllowMutation_DoesNotEstablishStartupBoundaryEvenWhenTopologyIsStable()
+    [Theory]
+    [InlineData((int)ControllerEnvironmentCompatibilityStatus.Indeterminate, (int)ControllerEnvironmentCompatibilityReason.MsiCenterMStarting)]
+    [InlineData((int)ControllerEnvironmentCompatibilityStatus.Unsupported, (int)ControllerEnvironmentCompatibilityReason.MsiCenterMNotOperational)]
+    public async Task StockEnvironment_ReachesBaselineRegardlessOfCenterMRuntimeState(int statusValue, int reasonValue)
     {
-        // Mode/Readiness (topology) and Compatibility are two separate systems. Prove the
-        // additional AND-gate: a Mode==StockCenterM environment with Readiness==Stable must
-        // still not reach baseline mutation if the fresh assessment's own compatibility result
-        // (e.g. Center M still Starting) does not allow it.
+        // Policy: MSI Center M being fully Running is NOT a prerequisite for controller
+        // ownership. When no conflicting controller manager is present (Mode == StockCenterM)
+        // and the actual MSI hardware topology is Stable, startup must proceed to baseline even
+        // if Center M itself is still Starting or NotRunning -- that is a Center M process-state
+        // fact, not a controller ownership conflict, and must not gate hardware access.
         var events = new List<string>();
-        var store = new FakeRecoveryJournalStore(events, exists: true);
+        var store = new FakeRecoveryJournalStore(events, exists: false);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
-            new FixedCompatibilityEnvironmentDetector(events, ControllerEnvironmentCompatibilityStatus.Indeterminate, ControllerEnvironmentCompatibilityReason.MsiCenterMStarting),
+            new FixedCompatibilityEnvironmentDetector(events, (ControllerEnvironmentCompatibilityStatus)statusValue, (ControllerEnvironmentCompatibilityReason)reasonValue),
             new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
             recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.True(result.ShouldStartRuntime);
-        Assert.False(result.RecoverySafe);
         Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
         Assert.Equal(ControllerEnvironmentReadiness.Stable, result.EnvironmentReadiness);
+        Assert.Contains("Baseline", events);
+        Assert.True(result.RecoverySafe);
+    }
+
+    [Fact]
+    public async Task HandheldCompanionDetected_DoesNotRunStockBaselineOrJournalDiscard()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: true);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FixedEnvironmentDetector(events, new(ControllerEnvironmentMode.HHCManaged, ClawTweaksState.NotInstalled)), new ThrowingEnvironmentWaiter(),
+            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentMode.HHCManaged, result.EnvironmentMode);
+        Assert.False(result.RecoverySafe);
         Assert.DoesNotContain("Baseline", events);
         Assert.DoesNotContain("Discard", events);
         Assert.Equal(0, store.DeleteCallCount);

@@ -92,8 +92,7 @@ public partial class App : Application
             recoveryJournalStore: recoveryJournalStore,
             stockCenterMBaseline: stockCenterMBaseline,
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
-            hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry),
-            isBackgroundStartup: !_showMainWindow);
+            hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
 
         try
         {
