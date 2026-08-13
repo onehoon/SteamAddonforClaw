@@ -275,6 +275,22 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
+    public async Task ShortButtonArray_WithKnownInvalidRotations_StopsImmediatelyAsInsufficientButtonCount()
+    {
+        var device = new FakeDevice(InvalidInitialState(buttonCount: 16));
+        var source = new MsiClawInputSource(new FakeEnumerator([Device(0x0DB0, 0x1902)], device));
+        var summaryTask = ObserveSummary(source);
+
+        Assert.True(source.Start().Started);
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(MsiClawInputStopReason.InvalidButtonLayout, summary.StopReason);
+        Assert.Equal(1, device.ReadCount);
+        Assert.Equal(1, device.UnacquireCount);
+        Assert.Equal(1, device.DisposeCount);
+    }
+
+    [Fact]
     public async Task KnownInvalidInitialState_IsSkippedUntilTheFirstValidState()
     {
         var device = new FakeDevice(InvalidInitialState(), State(15));
@@ -486,7 +502,7 @@ public sealed class MsiClawInputSourceTests
         foreach (var button in pressedButtons) buttons[button] = true;
         return new DirectInputState(buttons);
     }
-    private static DirectInputState InvalidInitialState() => new(new bool[128], 32767, 32767, 32767, 32767, 32767, 32767, [-1]);
+    private static DirectInputState InvalidInitialState(int buttonCount = 128) => new(new bool[buttonCount], 32767, 32767, 32767, 32767, 32767, 32767, [-1]);
 
     private sealed class FakeEnumerator(IReadOnlyList<DirectInputDeviceDescriptor> devices, FakeDevice? device = null) : IDirectInputDeviceEnumerator
     {

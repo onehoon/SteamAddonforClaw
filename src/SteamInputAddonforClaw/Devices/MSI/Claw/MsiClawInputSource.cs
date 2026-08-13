@@ -276,6 +276,13 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                     break;
                 }
 
+                if (input.Buttons.Count < MsiClawHardware.RequiredDirectInputButtonCount)
+                {
+                    stopReason = MsiClawInputStopReason.InvalidButtonLayout;
+                    AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", "InsufficientButtonCount"));
+                    break;
+                }
+
                 if (!firstReadLogged && MsiClawControllerStateMapper.IsKnownInvalidInitialState(input))
                 {
                     invalidInitialStateCount++;
@@ -295,8 +302,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                 if (!TryMapState(input, out var current))
                 {
                     stopReason = MsiClawInputStopReason.InvalidButtonLayout;
-                    var reason = input.Buttons.Count < MsiClawHardware.RequiredDirectInputButtonCount ? "InsufficientButtonCount" : "KnownInvalidState";
-                    AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", reason));
+                    AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", "KnownInvalidState"));
                     break;
                 }
 
