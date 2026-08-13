@@ -16,6 +16,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: windows-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -46,11 +47,22 @@ jobs:
           }
 
           foreach ($testProject in $testProjects) {
-            dotnet test $testProject.FullName -c Release --no-restore
+            dotnet test $testProject.FullName -c Release --no-restore `
+              --blame-hang-timeout 3m --blame-hang-dump-type full `
+              --results-directory artifacts/TestResults
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
             }
           }
+
+      - name: Upload test hang diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-hang-diagnostics
+          path: artifacts/TestResults
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Test release metadata
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/release-metadata.tests.ps1
