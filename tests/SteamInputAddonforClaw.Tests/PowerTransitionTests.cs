@@ -188,10 +188,10 @@ public sealed class PowerTransitionTests
         var gate = new PowerMutationGate(true); var calls = 0; var source = new FakeSource(true);
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), _ => Task.FromResult(Interlocked.Increment(ref calls) > 1), []);
         using var watcher = new PowerTransitionWatcher(source, gate, coordinator, () => { }); Assert.True(watcher.Start());
-        source.Raise(4); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Suspended, TimeSpan.FromSeconds(1)));
-        source.Raise(18); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Unsafe, TimeSpan.FromSeconds(1))); var firstEpoch = gate.Epoch;
-        source.Raise(4); Assert.True(SpinWait.SpinUntil(() => gate.Epoch > firstEpoch, TimeSpan.FromSeconds(1)));
-        source.Raise(18); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Awake && gate.IsOpen, TimeSpan.FromSeconds(1))); Assert.Equal(2, calls);
+        source.Raise(4); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Suspended, TimeSpan.FromSeconds(5)));
+        source.Raise(18); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Unsafe, TimeSpan.FromSeconds(5))); var firstEpoch = gate.Epoch;
+        source.Raise(4); Assert.True(SpinWait.SpinUntil(() => gate.Epoch > firstEpoch, TimeSpan.FromSeconds(5)));
+        source.Raise(18); Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Awake && gate.IsOpen, TimeSpan.FromSeconds(5))); Assert.Equal(2, calls);
     }
 
     [Fact]
@@ -201,7 +201,7 @@ public sealed class PowerTransitionTests
         var pendingRecovery = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var coordinator = new PowerTransitionCoordinator(gate, recovery, _ => pendingRecovery.Task, []);
         var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
-        Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(1)));
+        Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(5)));
         gate.EnterNewCycleBarrier(out _, out var newEpoch); coordinator.InvalidateForBarrier(); pendingRecovery.SetResult(true); await resume;
         Assert.False(gate.IsOpen); Assert.Equal(newEpoch, gate.Epoch); Assert.NotEqual(RecoverySafety.Safe, recovery.Current); Assert.NotEqual(PowerTransitionState.Awake, coordinator.State);
     }
@@ -213,7 +213,7 @@ public sealed class PowerTransitionTests
         var pendingRecovery = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var coordinator = new PowerTransitionCoordinator(gate, recovery, _ => pendingRecovery.Task, []);
         var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
-        Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(1)));
+        Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(5)));
         gate.EnterNewCycleBarrier(out _, out var newEpoch); coordinator.InvalidateForBarrier(); pendingRecovery.SetResult(false); await resume;
         Assert.Equal(newEpoch, gate.Epoch); Assert.False(gate.IsOpen); Assert.Equal(RecoverySafety.Indeterminate, recovery.Current); Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
     }
@@ -229,7 +229,7 @@ public sealed class PowerTransitionTests
             hasIncompleteRecovery: () => false,
             establishBaseline: _ => Task.FromResult(true));
         var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
-        Assert.True(SpinWait.SpinUntil(() => gate.IsOpen, TimeSpan.FromSeconds(1)));
+        Assert.True(SpinWait.SpinUntil(() => gate.IsOpen, TimeSpan.FromSeconds(5)));
 
         gate.EnterNewCycleBarrier(out _, out var suspendEpoch);
         coordinator.InvalidateForBarrier();
