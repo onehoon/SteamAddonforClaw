@@ -151,6 +151,57 @@ public sealed class SilentUpdateServiceTests
         Assert.Empty(delay.Delays);
     }
 
+    [Fact]
+    public async Task CheckDownloadAndScheduleAsync_DownloadTransientFailureThenSuccess_RetriesAndSchedulesApply()
+    {
+        var client = new SequencedDownloadUpdateClient([new HttpRequestException("transient")]);
+        var delay = new RecordingDelay();
+
+        var scheduled = await new SilentUpdateService(client, delay.DelayAsync).CheckDownloadAndScheduleAsync(CancellationToken.None);
+
+        Assert.True(scheduled);
+        Assert.Equal(1, client.CheckCount);
+        Assert.Equal(2, client.DownloadCount);
+        Assert.Equal([TimeSpan.FromSeconds(2)], delay.Delays);
+        Assert.Equal(1, client.ApplyCount);
+    }
+
+    [Fact]
+    public async Task CheckDownloadAndScheduleAsync_DownloadTransientFailuresExhausted_DoesNotScheduleApply()
+    {
+        var client = new SequencedDownloadUpdateClient([new HttpRequestException("1"), new HttpRequestException("2"), new HttpRequestException("3")]);
+        var delay = new RecordingDelay();
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => new SilentUpdateService(client, delay.DelayAsync).CheckDownloadAndScheduleAsync(CancellationToken.None));
+
+        Assert.Equal(3, client.DownloadCount);
+        Assert.Equal([TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5)], delay.Delays);
+        Assert.Equal(0, client.ApplyCount);
+    }
+
+    private sealed class SequencedDownloadUpdateClient : IUpdateClient
+    {
+        private readonly Queue<Exception> _downloadFailures;
+
+        public SequencedDownloadUpdateClient(IEnumerable<Exception> downloadFailures) => _downloadFailures = new Queue<Exception>(downloadFailures);
+
+        public bool IsInstalled => true;
+        public int CheckCount { get; private set; }
+        public int DownloadCount { get; private set; }
+        public int ApplyCount { get; private set; }
+
+        public Task<bool> CheckForUpdatesAsync(CancellationToken cancellationToken) { CheckCount++; return Task.FromResult(true); }
+
+        public Task DownloadUpdatesAsync(CancellationToken cancellationToken)
+        {
+            DownloadCount++;
+            if (_downloadFailures.Count > 0) throw _downloadFailures.Dequeue();
+            return Task.CompletedTask;
+        }
+
+        public void WaitExitThenApplyUpdates(string[]? restartArguments) => ApplyCount++;
+    }
+
     private sealed class RecordingDelay
     {
         public List<TimeSpan> Delays { get; } = [];
