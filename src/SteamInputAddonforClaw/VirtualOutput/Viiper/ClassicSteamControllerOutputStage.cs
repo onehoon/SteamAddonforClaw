@@ -150,9 +150,14 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             ViiperVirtualDeviceResolution resolved;
-            try { resolved = await WaitForIdentityAsync(_before, operationToken).ConfigureAwait(false); }
+            IReadOnlyList<ControllerDeviceInfo> identitySnapshot;
+            try { (resolved, identitySnapshot) = await WaitForIdentityAsync(_before, operationToken).ConfigureAwait(false); }
             finally { timing.PnpResolveMs = Elapsed(started); }
-            if (!resolved.Succeeded) return await FailAndRollbackCoreAsync(resolved.Reason).ConfigureAwait(false);
+            if (!resolved.Succeeded)
+            {
+                ViiperVirtualDeviceIdentityDiagnostics.LogOnFailure(_before, identitySnapshot, _resolver.Policy, resolved, _busId, _deviceId);
+                return await FailAndRollbackCoreAsync(resolved.Reason).ConfigureAwait(false);
+            }
             _owned = resolved.Devices;
             started = Stopwatch.GetTimestamp();
             RecoveryResult checkpoint;
@@ -265,13 +270,20 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         return RoutingStageOperationResult.Success("ClassicSteamControllerRemoved");
     }
 
-    private async ValueTask<ViiperVirtualDeviceResolution> WaitForIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, CancellationToken token)
+    private async ValueTask<(ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> WaitForIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, CancellationToken token)
     {
         var deadline = DateTime.UtcNow + _pnPTimeout;
         ViiperVirtualDeviceResolution result;
-        do { result = _resolver.Resolve(before, _enumerator.EnumeratePresentDevices()); if (result.Status != ViiperVirtualDeviceResolutionStatus.NoNewCandidate) return result; await Task.Delay(_pollInterval, token).ConfigureAwait(false); }
+        IReadOnlyList<ControllerDeviceInfo> snapshot;
+        do
+        {
+            snapshot = _enumerator.EnumeratePresentDevices();
+            result = _resolver.Resolve(before, snapshot);
+            if (result.Status != ViiperVirtualDeviceResolutionStatus.NoNewCandidate) return (result, snapshot);
+            await Task.Delay(_pollInterval, token).ConfigureAwait(false);
+        }
         while (DateTime.UtcNow < deadline);
-        return result;
+        return (result, snapshot);
     }
 
     private async ValueTask<bool> WaitForAbsenceAsync(IEnumerable<string> ids, CancellationToken token)
