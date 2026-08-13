@@ -72,25 +72,13 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             _ = Task.Run(async () => await handler().ConfigureAwait(false));
     }
 
-    public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
+    public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
     {
-        try { _creationCancellation?.Cancel(); } catch (ObjectDisposedException) { }
-        var remaining = deadline - DateTimeOffset.UtcNow;
-        if (remaining <= TimeSpan.Zero) return _state == LifecycleState.Inactive;
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(remaining);
-        await _serial.WaitAsync(timeout.Token).ConfigureAwait(false);
-        try
-        {
-            if (_state == LifecycleState.Inactive) return true;
-            var result = await RollbackCoreAsync(timeout.Token).ConfigureAwait(false);
-            return result.Succeeded;
-        }
-        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
-        {
-            return false;
-        }
-        finally { _serial.Release(); }
+        // RoutingPipelineRuntimeCoordinator owns complete suspend teardown through the canonical
+        // frozen-plan pipeline rollback (which includes this stage). Independently rolling back
+        // here as well was a duplicate suspend-ownership path; this stage now stays passive
+        // during suspend and lets the pipeline rollback remove Gordon.
+        return Task.FromResult(true);
     }
 
     public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken)
