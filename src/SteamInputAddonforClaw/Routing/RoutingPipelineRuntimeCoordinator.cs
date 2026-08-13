@@ -80,6 +80,47 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerTransitionPartic
         }
     }
 
+    /// <summary>
+    /// True while the current process still owns an active routing session, a pending cleanup
+    /// from the frozen suspend-time plan, or an in-flight transition still holding
+    /// _transitionGate (e.g. a routing Enter that was still running when suspend cancelled it
+    /// and quiesce timed out before that transition released the gate). All three mean
+    /// current-process routing cleanup has not been retired yet. Used on resume to decide
+    /// whether canonical pipeline cleanup should be retried before falling back to recovery
+    /// journal replay -- an in-flight transition must still gate the journal fallback even
+    /// though it hasn't reached the point of recording ActiveSession/PendingCleanup yet.
+    /// </summary>
+    internal bool HasResidualSessionState =>
+        Volatile.Read(ref _transitionOperationCount) > 0
+        || _sessionCoordinator.ActiveSession is not null
+        || _sessionCoordinator.PendingCleanup is not null;
+
+    /// <summary>
+    /// Retries the canonical frozen-plan pipeline cleanup for whatever routing session/pending
+    /// cleanup the current process still owns from before suspend. This does not capture
+    /// SystemStatus, does not evaluate RunningAppID, and does not create a new routing session --
+    /// it only retires the existing one. Intended to run on resume, before recovery journal
+    /// replay, while forward mutation permission is still closed.
+    /// </summary>
+    internal async ValueTask<bool> RetryResidualCleanupForResumeAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _transitionOperationCount);
+        var acquired = false;
+        try
+        {
+            if (IsShutdownRequested) return false;
+            await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquired = true;
+            if (IsShutdownRequested) return false;
+            return await RetireResidualSessionCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (acquired) _transitionGate.Release();
+            Interlocked.Decrement(ref _transitionOperationCount);
+        }
+    }
+
     internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedAsync()
     {
         Interlocked.Increment(ref _transitionOperationCount);
@@ -202,17 +243,28 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerTransitionPartic
     {
         // RecoveryManager restores hardware before this boundary. Retire the old frozen
         // pipeline session first; never reuse it for post-recovery re-entry.
-        var retirement = await _sessionCoordinator.ReconcileAsync(
-            RecoveryResetDecision,
-            IndeterminateClassification,
-            CancellationToken.None).ConfigureAwait(false);
-        if (!retirement.Succeeded || _sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null)
+        if (!await RetireResidualSessionCoreAsync(CancellationToken.None).ConfigureAwait(false))
             return false;
 
         var result = await ReconcileCoreAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("Routing.Runtime", "Post-recovery routing reconciliation completed.",
             ("Succeeded", result.Succeeded), ("Action", result.Action), ("Reason", result.Reason));
         return result.Succeeded;
+    }
+
+    /// <summary>
+    /// Retires whatever routing session/pending cleanup the process currently owns by
+    /// reconciling to the recovery-reset decision against the existing frozen plan. Shared by
+    /// <see cref="ReconcileFreshAfterResumeCoreAsync"/> (post-journal-recovery re-entry) and
+    /// <see cref="RetryResidualCleanupForResumeAsync"/> (pre-journal-recovery residual cleanup).
+    /// </summary>
+    private async ValueTask<bool> RetireResidualSessionCoreAsync(CancellationToken cancellationToken)
+    {
+        var result = await _sessionCoordinator.ReconcileAsync(
+            RecoveryResetDecision,
+            IndeterminateClassification,
+            cancellationToken).ConfigureAwait(false);
+        return result.Succeeded && _sessionCoordinator.ActiveSession is null && _sessionCoordinator.PendingCleanup is null;
     }
 
     private async ValueTask<RoutingPipelineSessionReconcileResult> ApplySessionBoundaryAsync(RoutingPipelineSessionReconcileResult result)

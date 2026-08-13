@@ -231,6 +231,12 @@ public partial class App : Application
         {
             if (stockCenterMBaseline is null) return false;
             return (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
+        },
+        hasResidualRoutingCleanup: () => _routingRuntimeCoordinator?.HasResidualSessionState == true,
+        retryResidualRoutingCleanup: async token =>
+        {
+            if (_routingRuntimeCoordinator is null) return true;
+            return await _routingRuntimeCoordinator.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false);
         });
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
             () => _routingRuntimeCoordinator?.CancelInFlightTransition());

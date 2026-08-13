@@ -102,6 +102,89 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task RetryResidualCleanupForResumeRollsBackTheFrozenPlanWithoutCapturingStatus()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var frozen = bridge.Session.ActiveSession!;
+        var captures = provider.CaptureCount;
+
+        Assert.True(bridge.Bridge.HasResidualSessionState);
+        var retried = await bridge.Bridge.RetryResidualCleanupForResumeAsync(CancellationToken.None);
+
+        Assert.True(retried);
+        Assert.Equal(captures, provider.CaptureCount);
+        Assert.Equal(frozen.Plan, executor.RollbackPlans.Single());
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Null(bridge.Session.PendingCleanup);
+        Assert.False(bridge.Bridge.HasResidualSessionState);
+    }
+
+    [Fact]
+    public async Task RetryResidualCleanupForResumeFailurePreservesRoutingCleanupState()
+    {
+        var executor = new FakeExecutor();
+        executor.RollbackResults.Enqueue(new(false, RoutingStageKind.NativeMode, "Failed"));
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.False(await bridge.Bridge.RetryResidualCleanupForResumeAsync(CancellationToken.None));
+
+        Assert.NotNull(bridge.Session.ActiveSession);
+        Assert.NotNull(bridge.Session.PendingCleanup);
+        Assert.True(bridge.Bridge.HasResidualSessionState);
+    }
+
+    [Fact]
+    public async Task HasResidualSessionState_TrueForInFlightTransitionEvenBeforeActiveSessionIsRecorded()
+    {
+        // A routing Enter can still be mid-flight (holding _transitionGate) when suspend cancels
+        // it and quiesce's own deadline expires before that transition has released the gate --
+        // at that point ActiveSession/PendingCleanup are both still null, but the process still
+        // owns in-progress cleanup work that must be retried before falling back to journal
+        // recovery, not skipped just because nothing has been recorded yet.
+        var executor = new FakeExecutor { BlockNextExecute = true };
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        var enter = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteStarted.Task;
+
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Null(bridge.Session.PendingCleanup);
+        Assert.True(bridge.Bridge.HasResidualSessionState);
+
+        // _transitionGate is a SemaphoreSlim(1,1) still held by `enter`, so this genuinely
+        // serializes behind it rather than racing a session/cleanup snapshot that doesn't exist
+        // yet.
+        var retry = bridge.Bridge.RetryResidualCleanupForResumeAsync(CancellationToken.None).AsTask();
+
+        bridge.Bridge.CancelInFlightTransition();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => enter);
+
+        Assert.True(await retry);
+        Assert.False(bridge.Bridge.HasResidualSessionState);
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Null(bridge.Session.PendingCleanup);
+    }
+
+    [Fact]
+    public async Task HasResidualSessionStateIsFalseWhenPassive()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        Assert.False(bridge.Bridge.HasResidualSessionState);
+        Assert.True(await bridge.Bridge.RetryResidualCleanupForResumeAsync(CancellationToken.None));
+        Assert.Empty(executor.RollbackPlans);
+        Assert.Equal(0, provider.CaptureCount);
+    }
+
+    [Fact]
     public async Task SuspendQuiesceWhenPassiveDoesNotCaptureStatusOrEnterRouting()
     {
         var executor = new FakeExecutor();

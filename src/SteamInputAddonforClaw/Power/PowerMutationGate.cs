@@ -56,6 +56,29 @@ internal sealed class PowerMutationGate
             return true;
         }
     }
+    /// <summary>
+    /// Opens a cleanup-only permission window during resume so the process's own residual
+    /// routing/pipeline state can be retried before falling back to journal recovery. This does
+    /// NOT open normal forward mutation permission (<see cref="IsOpen"/> stays false).
+    /// </summary>
+    internal bool TryOpenResumeCleanup(long expectedEpoch)
+    {
+        lock (_sync)
+        {
+            if (_epoch != expectedEpoch || _open) return false;
+            _suspendCleanupAllowed = true;
+            return true;
+        }
+    }
+    internal bool TrySealResumeCleanup(long expectedEpoch)
+    {
+        lock (_sync)
+        {
+            if (_epoch != expectedEpoch) return false;
+            _suspendCleanupAllowed = false;
+            return true;
+        }
+    }
     internal void OpenAfterRecovery() { lock (_sync) { _open = true; _suspendCleanupAllowed = false; } }
     internal bool TryOpenAfterRecovery(long expectedEpoch)
     {
