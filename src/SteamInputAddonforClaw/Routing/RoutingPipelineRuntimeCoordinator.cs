@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Routing;
@@ -13,7 +14,7 @@ internal interface IRoutingRuntimeSessionBoundaryParticipant
     ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken);
 }
 
-internal sealed class RoutingPipelineRuntimeCoordinator
+internal sealed class RoutingPipelineRuntimeCoordinator : IPowerTransitionParticipant
 {
     private static readonly RoutingDecision RecoveryResetDecision =
         new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.RecoveryUnsafe);
@@ -138,6 +139,44 @@ internal sealed class RoutingPipelineRuntimeCoordinator
             _transitionCancellation = new CancellationTokenSource();
         }
     }
+
+    public string Name => "RoutingPipelineRuntime";
+
+    public async Task<bool> QuiesceForSuspendAsync(
+        DateTimeOffset deadline,
+        long cycle,
+        long epoch,
+        CancellationToken cancellationToken)
+    {
+        CancelInFlightTransition();
+        AppLog.Info("Routing.Power", "Routing suspend teardown started.",
+            ("Action", "SuspendTeardown"), ("ActiveSession", _sessionCoordinator.ActiveSession is not null),
+            ("PendingCleanup", _sessionCoordinator.PendingCleanup is not null), ("Epoch", epoch));
+
+        await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var result = await _sessionCoordinator.ReconcileAsync(
+                RecoveryResetDecision,
+                IndeterminateClassification,
+                CancellationToken.None).ConfigureAwait(false);
+            var retired = result.Succeeded && _sessionCoordinator.ActiveSession is null && _sessionCoordinator.PendingCleanup is null;
+            AppLog.Info("Routing.Power", "Routing suspend teardown completed.",
+                ("Action", "SuspendTeardown"), ("Result", retired ? "Passive" : "Failed"),
+                ("FrozenPlanRetired", retired), ("ActiveSession", _sessionCoordinator.ActiveSession is not null),
+                ("PendingCleanup", _sessionCoordinator.PendingCleanup is not null), ("Epoch", epoch));
+            return retired;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Routing.Power", "Routing suspend teardown failed.", exception,
+                ("Action", "SuspendTeardown"), ("Epoch", epoch));
+            return false;
+        }
+        finally { _transitionGate.Release(); }
+    }
+
+    public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken) => Task.FromResult(true);
 
     private CancellationTokenSource CreateTransitionCancellation(CancellationToken cancellationToken)
     {

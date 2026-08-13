@@ -62,16 +62,28 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             {
                 if (!observation.BarrierApplied) { AppLog.Debug("Power.Coordinator", "Duplicate suspend ignored.", ("Cycle", _cycle), ("Epoch", _gate.Epoch)); return; }
                 var cycle = Interlocked.Increment(ref _cycle); _resumeCycle = -1; State = PowerTransitionState.Quiescing;
+                var suspendEpoch = observation.EpochAfter;
                 var deadline = observation.ObservedUtc.AddMilliseconds(1200);
                 var success = true;
-                foreach (var participant in _participants)
+                var cleanupSealed = false;
+                try
                 {
-                    var remaining = deadline - DateTimeOffset.UtcNow;
-                    if (remaining <= TimeSpan.Zero) { success = false; break; }
-                    using var timeout = new CancellationTokenSource(remaining);
-                    try { success &= await participant.QuiesceForSuspendAsync(deadline, cycle, _gate.Epoch, timeout.Token).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { success = false; }
-                    catch (Exception e) { AppLog.Error("Power.Participant", "Power participant quiesce failed.", e, ("Participant", participant.Name), ("Cycle", cycle), ("Epoch", _gate.Epoch)); success = false; }
+                    foreach (var participant in _participants)
+                    {
+                        var remaining = deadline - DateTimeOffset.UtcNow;
+                        if (remaining <= TimeSpan.Zero) { success = false; break; }
+                        using var timeout = new CancellationTokenSource(remaining);
+                        try { success &= await participant.QuiesceForSuspendAsync(deadline, cycle, suspendEpoch, timeout.Token).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { success = false; }
+                        catch (Exception e) { AppLog.Error("Power.Participant", "Power participant quiesce failed.", e, ("Participant", participant.Name), ("Cycle", cycle), ("Epoch", suspendEpoch)); success = false; }
+                    }
+                }
+                finally { cleanupSealed = _gate.TrySealSuspendCleanup(suspendEpoch); }
+                if (!cleanupSealed)
+                {
+                    AppLog.Warn("Power.Coordinator", "Suspend completion ignored because a newer power epoch is authoritative.", null,
+                        ("Cycle", cycle), ("SuspendEpoch", suspendEpoch), ("CurrentEpoch", _gate.Epoch));
+                    return;
                 }
                 State = success ? PowerTransitionState.Suspended : PowerTransitionState.Unsafe;
                 AppLog.Info("Power.Coordinator", "Suspend quiesce completed.", ("Cycle", cycle), ("Epoch", _gate.Epoch), ("Outcome", success ? "Succeeded" : "TimedOutOrFailed"), ("GateState", _gate.IsOpen ? "Open" : "Closed"), ("FinalPowerState", State));

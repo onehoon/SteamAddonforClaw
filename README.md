@@ -106,7 +106,7 @@ The normal runtime then reads the current RunningAppID, applies the current elig
 
 ## Power-transition safety
 
-Suspend and hibernate close the addon mutation gate before controller cleanup. In-flight operations are invalidated by a power epoch. Resume performs recovery and fresh environment detection before mutations are allowed again; pre-suspend device handles and virtual-controller state are never trusted or automatically recreated.
+Suspend and hibernate immediately close the forward-mutation gate and invalidate in-flight routing by a power epoch. A narrowly scoped teardown-only window then rolls back the current frozen routing session before sleep; it cannot admit a new routing entry and is sealed after participant processing. Resume still performs the existing journal-recovery fallback and fresh environment detection before forward mutations are allowed again; pre-suspend device handles and virtual-controller state are never trusted or automatically recreated.
 
 ---
 

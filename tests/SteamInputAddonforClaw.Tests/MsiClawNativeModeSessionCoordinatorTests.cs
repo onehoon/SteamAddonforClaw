@@ -152,7 +152,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task Real_power_barrier_blocks_owned_native_recovery_io()
+    public async Task Suspend_cleanup_window_allows_owned_native_restore_without_forward_permission()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
         var modeController = new FakeModeController(devices);
@@ -163,9 +163,26 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         var writesBeforeBarrier = modeController.Targets.Count;
         gate.EnterNewCycleBarrier(out _, out _);
 
-        Assert.False(await coordinator.ExitForPipelineAsync(CancellationToken.None));
-        Assert.Equal(writesBeforeBarrier, modeController.Targets.Count);
-        Assert.True(coordinator.HasOwnedRecoveryBoundary);
+        Assert.False((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.True(modeController.Targets.Count > writesBeforeBarrier);
+        Assert.False(coordinator.HasOwnedRecoveryBoundary);
+    }
+
+    [Fact]
+    public async Task Suspend_cleanup_window_does_not_allow_new_native_entry()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices);
+        var gate = new PowerMutationGate(initiallyOpen: true);
+        gate.EnterNewCycleBarrier(out _, out _);
+        await using var coordinator = CreateCoordinator(devices, modeController, gate);
+
+        var result = await coordinator.EnterForPipelineAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("PowerGateClosed", result.Reason);
+        Assert.Empty(modeController.Targets);
     }
 
     [Fact]

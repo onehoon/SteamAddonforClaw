@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Power;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -63,6 +64,57 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.True(result.Succeeded);
         Assert.Single(executor.RollbackPlans);
         Assert.Null(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task SuspendQuiesceRollsBackFrozenSessionWithoutCapturingStatusOrEndingSteamSession()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var boundary = new SuspendBoundaryParticipant();
+        var bridge = Create(provider, executor, boundary);
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var frozen = bridge.Session.ActiveSession!;
+        var captures = provider.CaptureCount;
+
+        Assert.True(await bridge.Bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+
+        Assert.Equal(captures, provider.CaptureCount);
+        Assert.Equal(frozen.Plan, executor.RollbackPlans.Single());
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Null(bridge.Session.PendingCleanup);
+        Assert.Equal(0, boundary.CallCount);
+    }
+
+    [Fact]
+    public async Task SuspendQuiesceFailurePreservesRoutingCleanupState()
+    {
+        var executor = new FakeExecutor();
+        executor.RollbackResults.Enqueue(new(false, RoutingStageKind.NativeMode, "Failed"));
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.False(await bridge.Bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+
+        Assert.NotNull(bridge.Session.ActiveSession);
+        Assert.NotNull(bridge.Session.PendingCleanup);
+    }
+
+    [Fact]
+    public async Task SuspendQuiesceWhenPassiveDoesNotCaptureStatusOrEnterRouting()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        Assert.True(await bridge.Bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+
+        Assert.Equal(0, provider.CaptureCount);
+        Assert.Empty(executor.ExecutedPlans);
+        Assert.Empty(executor.RollbackPlans);
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Null(bridge.Session.PendingCleanup);
     }
 
     [Fact]
@@ -500,6 +552,16 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
                 throw new OperationCanceledException(cancellationToken);
             }
             return _snapshots.Count > 0 ? _snapshots.Dequeue() : snapshots[^1];
+        }
+    }
+
+    private sealed class SuspendBoundaryParticipant : IRoutingRuntimeSessionBoundaryParticipant
+    {
+        internal int CallCount { get; private set; }
+        public ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return ValueTask.FromResult(true);
         }
     }
 
