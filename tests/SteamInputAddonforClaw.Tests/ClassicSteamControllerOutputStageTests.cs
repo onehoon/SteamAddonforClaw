@@ -212,15 +212,32 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task SuspendQuiescesOutputAndResumeRequiresFreshRecreation()
+    public async Task QuiesceForSuspendIsANoOpThatDoesNotTouchViiperOrThePipelinesOwnedState()
     {
+        // RoutingPipelineRuntimeCoordinator owns complete suspend teardown through the canonical
+        // frozen-plan pipeline rollback. This stage must no longer independently remove Gordon
+        // during suspend -- that would be a duplicate suspend-ownership path racing the pipeline
+        // rollback that also targets this stage.
         var runtime = new FakeRuntime();
         var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.True(await stage.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
-        Assert.True(await stage.ReconcileAfterResumeAsync(1, 1, CancellationToken.None));
+
+        var quiesced = await stage.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None);
+
+        Assert.True(quiesced);
+        Assert.Equal(0, runtime.RemovedDevices);
+        // ReconcileAfterResumeAsync's fail-closed sanity check confirms the stage is still
+        // considered active (owned device state was never cleared by the no-op quiesce) --
+        // it is the canonical pipeline rollback's job to actually remove it.
+        Assert.False(await stage.ReconcileAfterResumeAsync(1, 1, CancellationToken.None));
+
+        // The canonical pipeline rollback path (RollbackMutationAsync) still removes Gordon and
+        // verifies absence normally, independent of suspend.
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+        Assert.True(rollback.Succeeded, rollback.Reason);
         Assert.Equal(1, runtime.RemovedDevices);
+        Assert.True(await stage.ReconcileAfterResumeAsync(1, 1, CancellationToken.None));
     }
 
     [Fact]
