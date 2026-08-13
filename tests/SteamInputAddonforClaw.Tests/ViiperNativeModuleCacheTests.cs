@@ -37,22 +37,38 @@ public sealed class ViiperNativeModuleCacheTests
     [Fact]
     public async Task ConcurrentRequestsForTheSamePathLoadExactlyOnce()
     {
+        const int concurrency = 16;
         var path = UniquePath();
         var loadCount = 0;
-        var gate = new ManualResetEventSlim(false);
+        var ready = new CountdownEvent(concurrency);
+        var start = new ManualResetEventSlim(false);
+        var loaderEntered = new ManualResetEventSlim(false);
+        var loaderGate = new ManualResetEventSlim(false);
         nint Load(string p)
         {
             Interlocked.Increment(ref loadCount);
-            gate.Wait();
+            loaderEntered.Set();
+            loaderGate.Wait();
             return new nint(1);
         }
 
-        var tasks = new Task<nint>[16];
+        var tasks = new Task<nint>[concurrency];
         for (var i = 0; i < tasks.Length; i++)
-            tasks[i] = Task.Run(() => ViiperNativeModuleCache.GetOrLoad(path, Load));
+        {
+            tasks[i] = Task.Run(() =>
+            {
+                ready.Signal();
+                start.Wait();
+                return ViiperNativeModuleCache.GetOrLoad(path, Load);
+            });
+        }
 
-        await Task.Delay(50);
-        gate.Set();
+        // Wait for every task to reach the starting line before releasing them together,
+        // so the loader is guaranteed to observe genuinely concurrent GetOrLoad entrants.
+        ready.Wait();
+        start.Set();
+        loaderEntered.Wait();
+        loaderGate.Set();
         await Task.WhenAll(tasks);
 
         Assert.Equal(1, loadCount);
