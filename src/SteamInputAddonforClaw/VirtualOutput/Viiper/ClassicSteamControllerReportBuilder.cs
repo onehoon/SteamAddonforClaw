@@ -26,12 +26,15 @@ internal static class ClassicSteamControllerReportBuilder
         // full-deflection analog stick reaches routinely; widen to int before taking the
         // absolute value.
         var active = (Math.Abs((int)input.RightPad.X) > 1 || Math.Abs((int)input.RightPad.Y) > 1) || b.RightStickClick; report[10] = (byte)((input.RightGrip ? 1 : 0) | (b.RightStickClick ? 4 : 0) | (active ? 0x10 : 0) | (b.LeftStickClick ? 0x40 : 0));
-        var leftRaw = EffectiveRawTrigger(input.Triggers.Left, b.LeftTriggerFull);
-        var rightRaw = EffectiveRawTrigger(input.Triggers.Right, b.RightTriggerFull);
+        var leftRaw = EffectiveRawTrigger(input.Triggers.Left);
+        var rightRaw = EffectiveRawTrigger(input.Triggers.Right);
         report[11] = RawTriggerToByte(leftRaw); report[12] = RawTriggerToByte(rightRaw); WriteStick(report[16..20], input.LeftStick); WriteStick(report[20..24], input.RightPad); WriteRawTrigger(report[24..26], leftRaw); WriteRawTrigger(report[26..28], rightRaw); WriteRawTrigger(report[50..52], leftRaw); WriteRawTrigger(report[52..54], rightRaw); WriteStick(report[54..58], input.LeftStick); BinaryPrimitives.WriteUInt16LittleEndian(report[40..42], 0x4000); BinaryPrimitives.WriteUInt16LittleEndian(report[62..64], 3000);
     }
     private static void WriteStick(Span<byte> target, StickState value) { BinaryPrimitives.WriteInt16LittleEndian(target, value.X); BinaryPrimitives.WriteInt16LittleEndian(target[2..], value.Y); }
-    private static int EffectiveRawTrigger(byte value, bool full) => full ? 26000 : value * 26000 / 255;
+    // Analog magnitude always comes from the trigger axis, never from the digital full-pull
+    // button bit -- the MSI Claw's TriggerFull button can latch true while the analog axis is
+    // still near the start of travel, and forcing 26000 here destroyed that travel.
+    private static int EffectiveRawTrigger(byte value) => value * 26000 / 255;
     private static byte RawTriggerToByte(int raw) => (byte)Math.Clamp(raw * 255 / 26000, 0, 255);
     private static void WriteRawTrigger(Span<byte> target, int value) => BinaryPrimitives.WriteUInt16LittleEndian(target, (ushort)value);
 }

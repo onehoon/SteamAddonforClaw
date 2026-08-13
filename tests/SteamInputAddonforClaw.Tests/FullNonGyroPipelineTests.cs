@@ -87,8 +87,12 @@ public sealed class FullNonGyroPipelineTests
     }
 
     [Fact]
-    public void Trigger_full_click_survives_viiper_round_trip_semantics()
+    public void Digital_trigger_full_click_flag_does_not_force_viiper_full_click_derivation()
     {
+        // VIIPER derives its own host-visible full-click bits purely from the raw analog
+        // magnitude reaching the top of travel (see RebuildHostVisibleTriggerBits below) -- our
+        // local TriggerFull button flag must not force the raw value to max on top of that, or
+        // partial physical travel would be reported to Steam as a full pull.
         var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true);
         var input = new ClassicSteamControllerInput(buttons, default, default, new(0, 100), false, false);
         var report = new byte[64];
@@ -96,10 +100,12 @@ public sealed class FullNonGyroPipelineTests
 
         var hostVisible = RebuildHostVisibleTriggerBits(report);
 
-        Assert.Equal(26000, BitConverter.ToUInt16(report, 24));
-        Assert.Equal(26000, BitConverter.ToUInt16(report, 26));
-        Assert.True(hostVisible.leftFull);
-        Assert.True(hostVisible.rightFull);
+        Assert.Equal(0, BitConverter.ToUInt16(report, 24));
+        Assert.Equal(100 * 26000 / 255, BitConverter.ToUInt16(report, 26));
+        Assert.False(hostVisible.leftFull);
+        Assert.False(hostVisible.rightFull);
+        // Our own local digital button bit is still passed through unchanged.
+        Assert.Equal(0x03, report[8] & 0x03);
     }
 
     [Fact]
