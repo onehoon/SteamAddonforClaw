@@ -14,10 +14,8 @@ internal sealed class SystemStatusProvider(
     IRuntimePrerequisiteInspector prerequisiteInspector,
     Func<SteamSessionState> steamStateProvider,
     Func<bool> recoverySafeProvider,
-    Func<bool>? addonOwnedOutputIdentityUncertainProvider = null) : ISystemStatusProvider
+    Func<bool> addonOwnedOutputIdentityUncertainProvider) : ISystemStatusProvider
 {
-    private readonly Func<bool> _addonOwnedOutputIdentityUncertainProvider = addonOwnedOutputIdentityUncertainProvider ?? (() => false);
-
     internal SystemStatusProvider(
         IDeviceInformationProvider deviceInformationProvider,
         IWindowsDeviceProbeContextFactory deviceProbeContextFactory,
@@ -26,7 +24,7 @@ internal sealed class SystemStatusProvider(
         IRuntimePrerequisiteInspector prerequisiteInspector,
         Func<SteamSessionState> steamStateProvider,
         Func<bool> recoverySafeProvider,
-        Func<bool>? addonOwnedOutputIdentityUncertainProvider = null)
+        Func<bool> addonOwnedOutputIdentityUncertainProvider)
         : this(deviceInformationProvider, deviceProbeContextFactory, hardwareCompatibilityEvaluator,
             new ControllerEnvironmentAssessmentProvider(softwareProviders), prerequisiteInspector, steamStateProvider,
             recoverySafeProvider, addonOwnedOutputIdentityUncertainProvider)
@@ -51,10 +49,10 @@ internal sealed class SystemStatusProvider(
         var decision = RoutingEligibilityPolicy.Evaluate(new RoutingPolicyInput(steam, hardwareCompatibility, compatibility, prerequisites, recoverySafe, addonOwnedOutputIdentityUncertain));
         var addon = AddonStatusEvaluator.Map(decision, compatibility);
         AppLog.Debug("Status", "System status snapshot refreshed.", ("HidHide", prerequisites.HidHide.Status), ("UsbIpWin2", prerequisites.UsbIpWin2.Status), ("Viiper", prerequisites.Viiper.Status), ("AddonStatus", addon.Status));
-        return new SystemStatusSnapshot(device, hardwareCompatibility, software, compatibility, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId, steam.Source), decision, addon, recoverySafe);
+        return new SystemStatusSnapshot(device, hardwareCompatibility, software, compatibility, prerequisites, new SteamStatusSnapshot(steam.IsActive, steam.RunningAppId, steam.Source), decision, addon, recoverySafe, addonOwnedOutputIdentityUncertain);
     }
 
     private SteamSessionState TrySteamState() { try { return steamStateProvider(); } catch { return SteamSessionState.FromRunningAppId(0); } }
     private bool TryRecoverySafety() { try { return recoverySafeProvider(); } catch { return false; } }
-    private bool TryAddonOwnedOutputIdentityUncertain() { try { return _addonOwnedOutputIdentityUncertainProvider(); } catch { return true; } }
+    private bool TryAddonOwnedOutputIdentityUncertain() { try { return addonOwnedOutputIdentityUncertainProvider(); } catch { return true; } }
 }

@@ -567,7 +567,7 @@ public sealed partial class MainWindow : Window
         var hidInstallation = ComponentInstallationAssessmentPolicy.AssessHidHide(hidPackage, snapshot.Prerequisites.HidHide, HidHidePackageMetadata.BundledVersion.ToString());
         var usbInstallation = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
         return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
-            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe,
+            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.AddonOwnedOutputIdentityUncertain,
             SteamSessionState.FromRunningAppId(snapshot.Steam.IsActive ? snapshot.Steam.RunningAppId : 0),
             snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstallation, usbInstallation, new(hidHideState, usbIpState, hidBootChanged, usbBootChanged)));
     }
@@ -686,7 +686,11 @@ public sealed partial class MainWindow : Window
         new HardwareCompatibilityEvaluator(new HandheldDeviceRegistry([adapter])),
         [new MsiCenterMSoftwareStatusProvider(), new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()), new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())],
         new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices)), new ViiperRuntimeInspector()),
-        () => SteamSessionState.FromRunningAppId(0), () => true);
+        // This fallback path has no real AddonOwnedVirtualDeviceTracker to observe (it is only reached by
+        // the public parameterless-provider MainWindow constructor, which App.xaml.cs never uses in
+        // production; the real runtime always supplies the tracker-backed provider explicitly). Fail safe
+        // (uncertain = true) rather than silently fail open.
+        () => SteamSessionState.FromRunningAppId(0), () => true, () => true);
     }
 
     private void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)

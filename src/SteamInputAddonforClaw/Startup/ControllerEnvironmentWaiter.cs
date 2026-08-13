@@ -91,9 +91,14 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
     {
         var devices = _deviceEnumerator.EnumeratePresentDevices();
         var topology = new ControllerTopologySnapshot(devices);
+        // Stability tracking must be scoped to the MSI Claw's own internal-controller topology only.
+        // Any device that merely looks like a generic game controller (an Xbox controller, DualSense,
+        // a real Steam Controller, etc.) must never be part of this snapshot: connecting/disconnecting
+        // one during startup must not reset the stable-poll counter or push readiness into
+        // Indeterminate. See ControllerDeviceClassification.InternalHandheld / MsiClawInternalControllerMatcher.
         var relevantDevices = mode == ControllerEnvironmentMode.ClawTweaks
             ? devices.Where(device => _classifier.IsClawTweaksVirtualControllerCandidate(device, topology)).ToArray()
-            : devices.Where(_classifier.IsRelevantTopologyDevice).ToArray();
+            : devices.Where(device => _classifier.Classify(device, topology) == ControllerDeviceClassification.InternalHandheld).ToArray();
         var snapshot = string.Join('\n', relevantDevices
             .Select(device => string.Join('|',
                 device.InstanceId,
@@ -102,7 +107,7 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
             .OrderBy(identity => identity, StringComparer.OrdinalIgnoreCase));
         var ready = mode switch
         {
-            ControllerEnvironmentMode.StockCenterM => devices.Any(device => _classifier.Classify(device) == ControllerDeviceClassification.InternalHandheld),
+            ControllerEnvironmentMode.StockCenterM => relevantDevices.Length > 0,
             ControllerEnvironmentMode.ClawTweaks => relevantDevices.Length > 0,
             _ => false
         };

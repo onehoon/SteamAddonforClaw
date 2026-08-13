@@ -37,6 +37,20 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.False(result.CanInstallRequiredComponents);
     }
 
+    // Regression: addon-owned VIIPER output identity uncertainty must block (re)installation even when
+    // prerequisites are Missing and would otherwise be installable. This mirrors RoutingEligibilityPolicy's
+    // AddonOwnedOutputIdentityUncertain gate and must not depend on external-controller detection, which
+    // does not exist anywhere in this policy.
+    [Fact]
+    public void AddonOwnedOutputIdentityUncertain_BlocksInstallEvenWhenComponentsAreMissing()
+    {
+        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Missing, addonOwnedOutputIdentityUncertain: true));
+
+        Assert.Equal(FirstTimeSetupStatus.Blocked, result.Status);
+        Assert.Equal(FirstTimeSetupReason.AddonOwnedOutputIdentityUncertain, result.Reason);
+        Assert.False(result.CanInstallRequiredComponents);
+    }
+
     [Fact]
     public void LegacyReadyHidHide_AllowsUsbIpProvisioning() => Assert.True(FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Missing) with { Provisioning = new(ComponentProvisioningState.Legacy, ComponentProvisioningState.None) }).CanInstallRequiredComponents);
 
@@ -301,9 +315,9 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.Equal((ProvisioningReconciliationAction)expectedAction, result.Action);
     }
 
-    private static FirstTimeSetupInput Input(PrerequisiteStatus hidHide, PrerequisiteStatus usbIp) => new(
+    private static FirstTimeSetupInput Input(PrerequisiteStatus hidHide, PrerequisiteStatus usbIp, bool addonOwnedOutputIdentityUncertain = false) => new(
         new(HardwareCompatibilityStatus.Supported, new HandheldDeviceId("msi.claw"), new HandheldDeviceModelId("msi.claw.cg3em"), "test"),
-        new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported), true,
+        new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported), true, addonOwnedOutputIdentityUncertain,
         SteamSessionState.FromRunningAppId(0),
         new(PrerequisiteKind.HidHide, hidHide, "test"), new(PrerequisiteKind.UsbIpWin2, usbIp, "test"),
         Installation(hidHide, PrerequisiteKind.HidHide), Installation(usbIp, PrerequisiteKind.UsbIpWin2),

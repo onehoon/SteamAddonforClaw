@@ -19,7 +19,7 @@ internal sealed record RoutingPolicyInput(
     ControllerEnvironmentCompatibilityAssessment Compatibility,
     RuntimePrerequisiteAssessment Prerequisites,
     bool RecoverySafe,
-    bool AddonOwnedOutputIdentityUncertain = false);
+    bool AddonOwnedOutputIdentityUncertain);
 
 internal static class RoutingEligibilityPolicy
 {

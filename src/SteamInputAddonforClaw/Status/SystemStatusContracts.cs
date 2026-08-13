@@ -24,7 +24,11 @@ internal sealed record SystemStatusSnapshot(
     SteamStatusSnapshot Steam,
     RoutingDecision RoutingDecision,
     AddonStatusSnapshot Addon,
-    bool RecoverySafe = true);
+    bool RecoverySafe = true,
+    // Raw addon-owned VIIPER output identity safety signal (AddonOwnedVirtualDeviceTracker.HasUncertainOwnership),
+    // preserved independently of RoutingDecision so it is inspectable/testable, and consumed directly by
+    // FirstTimeSetupPolicy so prerequisite (re)installation stays blocked while ownership is unverifiable.
+    bool AddonOwnedOutputIdentityUncertain = false);
 
 internal interface IDeviceInformationProvider { DeviceStatusSnapshot Capture(DeviceProbeContext context); }
 internal interface ISystemStatusProvider { Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default); }

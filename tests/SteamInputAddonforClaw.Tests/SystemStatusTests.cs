@@ -86,7 +86,7 @@ public sealed class SystemStatusTests
     public async Task SystemStatusProvider_ReusesPrerequisiteAssessmentAndBuildsOneSnapshot()
     {
         var prerequisites = Prerequisites(PrerequisiteStatus.Missing);
-        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))], new FakePrerequisiteInspector(prerequisites), () => SteamSessionState.FromRunningAppId(0), () => true);
+        var provider = new SystemStatusProvider(new FakeDeviceProvider(), SupportedProbeFactory(), SupportedHardware(), [new FakeSoftwareProvider(Software(ControllerSoftwareKind.MsiCenterM, SoftwareInstallationStatus.Installed, SoftwareRuntimeStatus.Running)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.ClawTweaks, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning)), new FakeSoftwareProvider(Software(ControllerSoftwareKind.HandheldCompanion, SoftwareInstallationStatus.NotInstalled, SoftwareRuntimeStatus.NotRunning))], new FakePrerequisiteInspector(prerequisites), () => SteamSessionState.FromRunningAppId(0), () => true, () => false);
 
         var snapshot = await provider.CaptureAsync();
 
@@ -95,6 +95,7 @@ public sealed class SystemStatusTests
         Assert.Equal(RoutingDecisionKind.SetupRequired, snapshot.RoutingDecision.Kind);
         Assert.Equal(AddonOperationalStatus.SetupRequired, snapshot.Addon.Status);
         Assert.True(snapshot.RecoverySafe);
+        Assert.False(snapshot.AddonOwnedOutputIdentityUncertain);
     }
 
     [Fact]
@@ -111,6 +112,7 @@ public sealed class SystemStatusTests
             ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => SteamSessionState.FromRunningAppId(1),
+            () => false,
             () => false);
 
         var snapshot = await provider.CaptureAsync();
@@ -170,6 +172,9 @@ public sealed class SystemStatusTests
 
         Assert.Equal(new RoutingDecision(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.AddonOwnedOutputIdentityUncertain), snapshot.RoutingDecision);
         Assert.Equal(AddonOperationalStatus.Indeterminate, snapshot.Addon.Status);
+        // The raw signal must also be independently inspectable on the snapshot, not just folded into
+        // the routing decision.
+        Assert.True(snapshot.AddonOwnedOutputIdentityUncertain);
     }
 
     [Fact]
@@ -186,7 +191,8 @@ public sealed class SystemStatusTests
             ],
             new FakePrerequisiteInspector(Prerequisites(PrerequisiteStatus.Ready)),
             () => SteamSessionState.FromRunningAppId(1),
-            () => true);
+            () => true,
+            () => false);
 
         var snapshot = await provider.CaptureAsync();
 

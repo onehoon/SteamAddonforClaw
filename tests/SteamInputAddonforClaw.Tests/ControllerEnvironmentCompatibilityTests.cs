@@ -171,7 +171,7 @@ public sealed class ControllerEnvironmentCompatibilityTests
     public void UnsupportedCompatibility_MakesRoutingPassive()
     {
         var compatibility = new ControllerEnvironmentCompatibilityAssessment(ControllerEnvironmentCompatibilityStatus.Unsupported, ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion);
-        var input = new RoutingPolicyInput(SteamSessionState.FromRunningAppId(1), SupportedHardware(), compatibility, ReadyPrerequisites(), true);
+        var input = new RoutingPolicyInput(SteamSessionState.FromRunningAppId(1), SupportedHardware(), compatibility, ReadyPrerequisites(), true, false);
         Assert.Equal(new RoutingDecision(RoutingDecisionKind.Passive, RoutingDecisionReason.ControllerEnvironmentUnsupported), RoutingEligibilityPolicy.Evaluate(input));
         var supported = input with { Compatibility = new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported) };
         Assert.Equal(RoutingDecisionKind.Eligible, RoutingEligibilityPolicy.Evaluate(supported).Kind);
