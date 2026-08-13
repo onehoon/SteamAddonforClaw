@@ -776,6 +776,8 @@ A recovery session may contain multiple recorded mutations. Each mutation's
  Recovery schema version 4 is the current format. This is not an application
  startup or crash-session reconstruction path.
 
+Previous-process journal files are retired by startup without payload interpretation. Runtime `RecoveryManager` accepts only the current journal schema because runtime recovery applies to mutation evidence created by the current process.
+
 The addon must not leave the internal controller:
 
 * hidden;

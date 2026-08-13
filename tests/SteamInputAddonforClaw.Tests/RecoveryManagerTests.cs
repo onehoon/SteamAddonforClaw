@@ -120,7 +120,7 @@ public sealed class RecoveryManagerTests : IDisposable
     {
         var sessionId = Guid.NewGuid();
         var mutationId = Guid.NewGuid();
-        var journal = new RecoveryJournal(3, sessionId, DateTimeOffset.UtcNow, null,
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, sessionId, DateTimeOffset.UtcNow, null,
             new(AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["owned-instance"])]));
         Directory.CreateDirectory(_directory);
         File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
@@ -201,7 +201,7 @@ public sealed class RecoveryManagerTests : IDisposable
     public async Task StartupRecoveryCompletesUnresolvedIntentWhenNoNewDeviceExists()
     {
         var sessionId = Guid.NewGuid();
-        var journal = new RecoveryJournal(3, sessionId, DateTimeOffset.UtcNow, null,
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, sessionId, DateTimeOffset.UtcNow, null,
             new(AddonOwnedVirtualDeviceEntries: [new(Guid.NewGuid(), "steamcontroller", 0x28DE, 0x1102, [], [])]));
         Directory.CreateDirectory(_directory);
         File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
@@ -216,7 +216,7 @@ public sealed class RecoveryManagerTests : IDisposable
     [Fact]
     public async Task StartupRecoveryFailsClosedWhenUnresolvedIntentHasNewDevice()
     {
-        var journal = new RecoveryJournal(3, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
             new(AddonOwnedVirtualDeviceEntries: [new(Guid.NewGuid(), "steamcontroller", 0x28DE, 0x1102, [], [])]));
         Directory.CreateDirectory(_directory);
         File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
@@ -232,7 +232,7 @@ public sealed class RecoveryManagerTests : IDisposable
     public async Task StartupRecoveryDoesNotClaimPreExistingMatchingDeviceForUnresolvedIntent()
     {
         var preExisting = "pre-existing-instance";
-        var journal = new RecoveryJournal(3, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
             new(AddonOwnedVirtualDeviceEntries: [new(Guid.NewGuid(), "steamcontroller", 0x28DE, 0x1102, [preExisting], [])]));
         Directory.CreateDirectory(_directory);
         File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
@@ -794,24 +794,25 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.True(File.Exists(PathName));
     }
 
-    [Fact]
-    public async Task LegacyWhitelistOnlyJournal_IsRecoveredWithoutRewrite()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(5)]
+    public void LoadJournal_UnsupportedSchema_FailsClosedWithoutMutatingJournal(int schema)
     {
         Directory.CreateDirectory(_directory);
-        var legacy = "{\"SchemaVersion\":1,\"RecoverySessionId\":\"" + Guid.NewGuid() + "\",\"CreatedAt\":\"2026-01-01T00:00:00+00:00\",\"OriginalControllerState\":{},\"Mutations\":{\"ControllerModeChanged\":false,\"ExecutableWhitelistAdditions\":[\"C:\\\\addon.exe\"]}}";
-        File.WriteAllText(PathName, legacy);
-        var hidHide = new FakeHidHide();
-        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), hidHideClient: hidHide);
-        Assert.Equal(RecoveryStatus.Success, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-        Assert.False(File.Exists(PathName));
-    }
+        File.WriteAllText(PathName, "{\"SchemaVersion\":" + schema + ",\"RecoverySessionId\":\"" + Guid.NewGuid() + "\",\"CreatedAt\":\"2026-01-01T00:00:00+00:00\",\"OriginalControllerState\":null,\"Mutations\":{}}");
+        var store = new SpyStore(new RecoveryJournalStore(PathName));
+        var manager = new RecoveryManager(store);
 
-    [Fact]
-    public async Task LegacyNoMutationJournal_IsDeleted()
-    {
-        WriteLegacy("{\"ControllerModeChanged\":false}");
-        Assert.Equal(RecoveryStatus.Success, (await Manager().RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-        Assert.False(File.Exists(PathName));
+        var result = manager.LoadJournal();
+
+        Assert.Equal(RecoveryStatus.Failure, result.Status);
+        Assert.Contains("Unsupported recovery schema", result.Reason);
+        Assert.True(store.Exists());
+        Assert.False(store.DeleteCalled);
+        Assert.False(store.ReplaceExistingCalled);
     }
 
     [Fact]
@@ -887,6 +888,18 @@ public sealed class RecoveryManagerTests : IDisposable
         public bool AddHiddenDevice(string deviceEntry) => HiddenEntries.Add(deviceEntry);
         public bool RemoveHiddenDevice(string deviceEntry) { RemoveCount++; Events?.Add(deviceEntry); if (!RemoveSucceeds) return false; return HiddenEntries.Remove(deviceEntry); }
     }
+    private sealed class SpyStore(IRecoveryJournalStore inner) : IRecoveryJournalStore
+    {
+        public bool DeleteCalled { get; private set; }
+        public bool ReplaceExistingCalled { get; private set; }
+        public string JournalPath => inner.JournalPath;
+        public bool Exists() => inner.Exists();
+        public string ReadText() => inner.ReadText();
+        public void WriteNew(RecoveryJournal journal) => inner.WriteNew(journal);
+        public void ReplaceExisting(RecoveryJournal journal) { ReplaceExistingCalled = true; inner.ReplaceExisting(journal); }
+        public void Delete() { DeleteCalled = true; inner.Delete(); }
+    }
+
     private sealed class FaultStore(RecoveryJournal? journal = null, bool writeFails = false, bool deleteFails = false) : IRecoveryJournalStore
     {
         public string JournalPath => "fault";
