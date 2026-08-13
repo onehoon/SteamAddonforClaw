@@ -71,7 +71,9 @@ internal static class ViiperVirtualDeviceIdentityDiagnostics
         foreach (var device in after)
         {
             if (!coreSeen.Add(device.InstanceId)) continue;
-            if (IsNew(device) || (VidMatch(device) && PidMatch(device)) || FindBroaderTopologyEvidenceFields(device).Count > 0)
+            if (IsNew(device) || (VidMatch(device) && PidMatch(device))
+                || ViiperVirtualDeviceIdentityPolicy.HasCurrentTopologyEvidence(device)
+                || FindBroaderTopologyEvidenceFields(device).Count > 0)
                 coreInteresting.Add(device);
         }
 
@@ -137,8 +139,10 @@ internal static class ViiperVirtualDeviceIdentityDiagnostics
                 related.Add($"ChildOf:{other.InstanceId}");
             if (!string.IsNullOrWhiteSpace(other.ParentInstanceId) && string.Equals(other.ParentInstanceId, device.InstanceId, StringComparison.OrdinalIgnoreCase))
                 related.Add($"ParentOf:{other.InstanceId}");
+            // device.AncestorInstanceIds containing other.InstanceId means other is an ancestor
+            // of device, i.e. device descends from other -- not the other way around.
             if (device.AncestorInstanceIds.Any(id => string.Equals(id, other.InstanceId, StringComparison.OrdinalIgnoreCase)))
-                related.Add($"AncestorOf:{other.InstanceId}");
+                related.Add($"DescendantOf:{other.InstanceId}");
             if (ControllerLogicalIdentity.IsUsableContainerId(device.ContainerId) && device.ContainerId == other.ContainerId)
                 related.Add($"SameContainerAs:{other.InstanceId}");
         }

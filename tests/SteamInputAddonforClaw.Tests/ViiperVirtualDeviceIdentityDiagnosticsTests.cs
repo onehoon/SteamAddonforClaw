@@ -32,18 +32,12 @@ public sealed class ViiperVirtualDeviceIdentityDiagnosticsTests
     [Fact]
     public void GordonLeafAndUsbipParentAreBothIncludedWithRelationshipVisible()
     {
-        // The parent's InstanceId carries no USBIP/VIIPER token -- only its Service field does.
-        // Current policy only inspects the leaf's own InstanceId/AncestorInstanceIds/Service, so
-        // the parent's Service text is invisible to it: the leaf is still rejected even though a
-        // related node clearly carries USBIP evidence. That split is exactly the scenario this
-        // diagnostic exists to surface, without changing the policy's decision.
-        var parent = Device("ROOT\\GENERIC\\PARENT001", vendorId: null, productId: null, service: "usbipw2co");
+        // The parent carries no USBIP/VIIPER token anywhere and is pre-existing, so it does not
+        // independently match categories A/B/C. It must still show up purely because it is an
+        // ancestor of the interesting leaf (category D) -- isolating that pull-in path.
+        var parent = Device("ROOT\\GENERIC\\PARENT001", vendorId: null, productId: null, service: null);
         var leaf = Device("USB\\VID_28DE&PID_1102\\LEAF", vendorId: 0x28DE, productId: 0x1102, service: "unrelated", parentInstanceId: parent.InstanceId, ancestorInstanceIds: [parent.InstanceId]);
         var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
-        // The USBIP parent is already present before routing starts (it is the host-side
-        // usbip-win2 device, not something VIIPER creates); only the leaf is new. The parent
-        // must still show up in diagnostics purely because it is an ancestor of an interesting
-        // node (category D), not because it independently matches A/B/C.
         var resolution = resolver.Resolve([parent], [leaf, parent]);
 
         Assert.Equal(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, resolution.Status);
@@ -54,7 +48,35 @@ public sealed class ViiperVirtualDeviceIdentityDiagnosticsTests
         var parentEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == parent.InstanceId);
         Assert.Contains($"ChildOf:{parent.InstanceId}", leafEvidence.RelatedInterestingNodes);
         Assert.Contains($"ParentOf:{leaf.InstanceId}", parentEvidence.RelatedInterestingNodes);
+        Assert.Contains($"DescendantOf:{parent.InstanceId}", leafEvidence.RelatedInterestingNodes);
+        Assert.DoesNotContain(leafEvidence.RelatedInterestingNodes, r => r.StartsWith("AncestorOf:", StringComparison.Ordinal));
         Assert.False(leafEvidence.CurrentPolicyMatches);
+    }
+
+    [Fact]
+    public void PreExistingUsbipNodeSharingContainerIdWithNewGordonIsIncludedViaSameContainer()
+    {
+        // The USBIP node is pre-existing, has no VID/PID, and has no parent/ancestor relationship
+        // to the new Gordon leaf -- the only link is a shared ContainerId. It DOES carry the same
+        // narrow topology token the production policy checks (Service), so it must be pulled into
+        // the interesting set independently of the new-Gordon leaf, not merely alongside it.
+        var container = Guid.NewGuid();
+        var usbipNode = Device("ROOT\\USB\\HOST_CONTROLLER", vendorId: null, productId: null, service: "usbipw2co");
+        usbipNode = usbipNode with { ContainerId = container };
+        var gordon = Device("USB\\VID_28DE&PID_1102\\NEW", vendorId: 0x28DE, productId: 0x1102, service: "unrelated");
+        gordon = gordon with { ContainerId = container };
+
+        var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
+        var resolution = resolver.Resolve([usbipNode], [usbipNode, gordon]);
+
+        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([usbipNode], [usbipNode, gordon], Policy, resolution);
+        Assert.Equal(2, evidence.Devices.Count);
+        var usbipEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == usbipNode.InstanceId);
+        var gordonEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == gordon.InstanceId);
+        Assert.True(usbipEvidence.HasCurrentViiperTopologyEvidence);
+        Assert.False(usbipEvidence.IsNewSinceBefore);
+        Assert.Contains($"SameContainerAs:{gordon.InstanceId}", usbipEvidence.RelatedInterestingNodes);
+        Assert.Contains($"SameContainerAs:{usbipNode.InstanceId}", gordonEvidence.RelatedInterestingNodes);
     }
 
     [Fact]
