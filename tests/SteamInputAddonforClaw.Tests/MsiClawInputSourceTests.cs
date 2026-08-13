@@ -291,6 +291,21 @@ public sealed class MsiClawInputSourceTests
     }
 
     [Fact]
+    public void EmptyPointOfViewCollectionDoesNotThrowAndIsTreatedAsNeutral()
+    {
+        // Unit-level rather than a full background-loop integration test: exercising the real
+        // async poll loop end-to-end for this pulled in a race against
+        // ControllerStateDiagnostics' shared, process-wide static throttle/tracking state from
+        // other, non-serialized test collections, which was flaky (and once hung) in CI.
+        var emptyPov = new DirectInputState(new bool[17], pointOfViewControllers: []);
+
+        var exception = Record.Exception(() => MsiClawInputSource.ResolvePov(emptyPov));
+
+        Assert.Null(exception);
+        Assert.Equal(-1, MsiClawInputSource.ResolvePov(emptyPov));
+    }
+
+    [Fact]
     public async Task KnownInvalidInitialState_IsSkippedUntilTheFirstValidState()
     {
         var device = new FakeDevice(InvalidInitialState(), State(15));

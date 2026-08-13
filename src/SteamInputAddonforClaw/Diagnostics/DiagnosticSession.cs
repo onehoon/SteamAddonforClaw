@@ -35,6 +35,9 @@ internal static class ControllerStateDiagnostics
     private static long _lastAnalogTimestamp;
     private static ControllerState _lastAnalogState;
     private static bool _hasAnalogState;
+    private static readonly Lock PovSync = new();
+    private static int? _lastPovSession;
+    private static int? _lastPov;
 
     internal static void LogChanges(ControllerState oldState, ControllerState state, int session)
     {
@@ -42,10 +45,31 @@ internal static class ControllerStateDiagnostics
         Add(fields, "A", oldState.Buttons.A, state.Buttons.A); Add(fields, "B", oldState.Buttons.B, state.Buttons.B); Add(fields, "X", oldState.Buttons.X, state.Buttons.X); Add(fields, "Y", oldState.Buttons.Y, state.Buttons.Y);
         Add(fields, "LB", oldState.Buttons.LeftBumper, state.Buttons.LeftBumper); Add(fields, "RB", oldState.Buttons.RightBumper, state.Buttons.RightBumper); Add(fields, "Back", oldState.Buttons.Back, state.Buttons.Back); Add(fields, "Start", oldState.Buttons.Start, state.Buttons.Start);
         Add(fields, "L3", oldState.Buttons.LeftStickClick, state.Buttons.LeftStickClick); Add(fields, "R3", oldState.Buttons.RightStickClick, state.Buttons.RightStickClick); Add(fields, "LTFull", oldState.Buttons.LeftTriggerFull, state.Buttons.LeftTriggerFull); Add(fields, "RTFull", oldState.Buttons.RightTriggerFull, state.Buttons.RightTriggerFull);
+        Add(fields, "DPadUp", oldState.Buttons.DPadUp, state.Buttons.DPadUp); Add(fields, "DPadRight", oldState.Buttons.DPadRight, state.Buttons.DPadRight); Add(fields, "DPadDown", oldState.Buttons.DPadDown, state.Buttons.DPadDown); Add(fields, "DPadLeft", oldState.Buttons.DPadLeft, state.Buttons.DPadLeft);
         Add(fields, "M1", oldState.Auxiliary[1], state.Auxiliary[1]); Add(fields, "M2", oldState.Auxiliary[0], state.Auxiliary[0]);
         var analogChanged = oldState.LeftStick != state.LeftStick || oldState.RightStick != state.RightStick || oldState.Triggers != state.Triggers;
         if (analogChanged && ShouldLogAnalog(state)) fields.Add(("Analog", $"LX={state.LeftStick.X},LY={state.LeftStick.Y},RX={state.RightStick.X},RY={state.RightStick.Y},LT={state.Triggers.Left},RT={state.Triggers.Right}"));
         if (fields.Count > 0) AppLog.Debug("Input", "ControllerState changed", fields.Append(("TestSession", session)).ToArray());
+    }
+
+    /// <summary>
+    /// Logs the raw DirectInput POV value whenever it changes, independent of whether the
+    /// mapped ControllerState changed. This is diagnostic-only and exists to distinguish:
+    /// raw POV never changing (A), POV changing but the mapped D-pad not following (B), or
+    /// both being correct while Steam/Gordon output still does not respond (C).
+    /// </summary>
+    internal static void LogPovIfChanged(int session, int pov)
+    {
+        lock (PovSync)
+        {
+            // Track session alongside the value: a new input session must always produce an
+            // initial POV log, even if that value happens to match the previous session's last
+            // observed POV (e.g. both sessions start neutral at -1).
+            if (_lastPovSession == session && _lastPov == pov) return;
+            _lastPovSession = session;
+            _lastPov = pov;
+        }
+        AppLog.Debug("Input", "DirectInput POV changed", ("TestSession", session), ("POV", pov));
     }
     private static bool ShouldLogAnalog(ControllerState state)
     {
