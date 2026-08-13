@@ -35,6 +35,8 @@ public sealed class ClassicSteamControllerInputMapperTests
     [Theory]
     [InlineData((short)500, false)]
     [InlineData((short)501, true)]
+    [InlineData((short)-500, false)]
+    [InlineData((short)-501, true)]
     public void Y_axis_touch_activation_boundary(short y, bool expectedTouch)
     {
         var mapped = Map(0, y, click: false);

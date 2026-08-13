@@ -123,6 +123,23 @@ public sealed class ClassicSteamControllerReportBuilderTests
         Assert.Equal(0x10, report[10] & 0x10);
     }
 
+    [Fact]
+    public void BuilderDoesNotDeriveTouchOrPressFromRightPadCoordinatesItself()
+    {
+        // RightPadTouch/RightPadPress must come entirely from the already-decided logical
+        // input; the builder only serializes them. A RightPad coordinate past the mapper's
+        // touch threshold must NOT flip byte 10 bits here if the logical flags say untouched --
+        // guards against the threshold check regressing back into the report builder.
+        var report = new byte[64];
+        var input = new ClassicSteamControllerInput(default, default, new StickState(501, 0), default, false, false, false, false);
+
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        Assert.Equal(501, BitConverter.ToInt16(report, 20));
+        Assert.Equal(0, report[10] & 0x10);
+        Assert.Equal(0, report[10] & 0x04);
+    }
+
     [Theory]
     [MemberData(nameof(GripVectors))]
     public void Grip_reports_match_complete_golden_vectors(bool leftGrip, bool rightGrip, byte[] expected)
