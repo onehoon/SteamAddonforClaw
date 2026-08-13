@@ -264,7 +264,16 @@ public sealed class PowerTransitionTests
         Assert.False(tracker.ClearUncertaintyAfterVerifiedAbsence([usbIpHost, candidate], policy)); Assert.True(tracker.HasUncertainOwnership);
     }
 
-    private static PowerTransitionCoordinator Coordinator(PowerMutationGate gate, params IPowerTransitionParticipant[] participants) => new(gate, new RecoverySafetyState(RecoverySafety.Safe), _ => Task.FromResult(true), participants);
+    // Suspend notifications raised through PowerTransitionWatcher/FakeSource flow through the
+    // coordinator's async channel and a background Task.Run reader, so there is real (if
+    // normally small) scheduling delay between the notification's ObservedUtc and when
+    // HandleAsync actually starts processing it. Production's 1200ms quiesce budget is tight
+    // enough that CI thread-pool contention can burn through it before any participant is even
+    // invoked, well before the fake (already-synchronous) participant would ever time out on its
+    // own. Widen it here -- it's an upper bound, not an expected duration, so this does not slow
+    // down passing runs.
+    private static readonly TimeSpan TestSuspendQuiesceBudget = TimeSpan.FromSeconds(10);
+    private static PowerTransitionCoordinator Coordinator(PowerMutationGate gate, params IPowerTransitionParticipant[] participants) => new(gate, new RecoverySafetyState(RecoverySafety.Safe), _ => Task.FromResult(true), participants, suspendQuiesceBudget: TestSuspendQuiesceBudget);
     private sealed class FakeSource(bool succeeds) : IPowerSuspendResumeNotificationSource
     {
         public event Action<uint>? Notification;
