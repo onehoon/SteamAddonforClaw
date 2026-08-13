@@ -65,12 +65,15 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void CreateTaskConfiguration_UsesCurrentUserAndThreeMinuteDelay()
+    public void CreateTaskConfiguration_UsesCurrentUserWithoutAnyLogonDelay()
     {
+        // ScheduledTaskConfiguration no longer carries a Delay field at all -- the addon must
+        // launch immediately at logon, not after any fixed grace period. The absence of the
+        // field is itself the regression guard: a future reintroduction of a fixed delay would
+        // require a compile-time change here, not just a value change.
         var configuration = WindowsTaskSchedulerStartupManager.CreateTaskConfiguration(@"C:\Custom Install\SteamInputAddonforClaw.exe", "DOMAIN\\User");
 
         Assert.Equal("DOMAIN\\User", configuration.UserId);
-        Assert.Equal("PT3M", configuration.Delay);
     }
 
     [Fact]

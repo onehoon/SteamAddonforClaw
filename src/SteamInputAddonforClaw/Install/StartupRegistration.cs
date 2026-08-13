@@ -21,7 +21,6 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
     private const int TaskCreateOrUpdate = 6;
     private const int TaskLogonInteractiveToken = 3;
     private const int FileNotFoundHResult = unchecked((int)0x80070002);
-    private const string LogonDelay = "PT3M";
     private readonly Func<string> _stableExecutablePathProvider;
     private readonly Func<string> _currentUserIdentityProvider;
 
@@ -36,7 +35,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
     public StartupRegistrationResult Synchronize(bool enabled)
     {
         var stableExecutablePath = _stableExecutablePathProvider();
-        AppLog.Info("TaskScheduler", "Startup task synchronization started.", ("Enabled", enabled), ("TaskName", TaskName), ("ExecutablePath", stableExecutablePath), ("Arguments", "--background"), ("Delay", LogonDelay));
+        AppLog.Info("TaskScheduler", "Startup task synchronization started.", ("Enabled", enabled), ("TaskName", TaskName), ("ExecutablePath", stableExecutablePath), ("Arguments", "--background"));
         if (!File.Exists(stableExecutablePath))
         {
             AppLog.Warn("TaskScheduler", "Startup task synchronization skipped.", null, ("Reason", "StableExecutableMissing"));
@@ -64,7 +63,6 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
 
             dynamic logonTrigger = taskDefinition.Triggers.Create(TaskTriggerLogon);
             logonTrigger.UserId = configuration.UserId;
-            logonTrigger.Delay = configuration.Delay;
 
             dynamic action = taskDefinition.Actions.Create(TaskActionExec);
             action.Path = configuration.ExecutablePath;
@@ -108,7 +106,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
     }
 
     internal static ScheduledTaskConfiguration CreateTaskConfiguration(string stableExecutablePath, string currentUserId) =>
-        new(TaskName, stableExecutablePath, currentUserId, LogonDelay);
+        new(TaskName, stableExecutablePath, currentUserId);
 
     private static dynamic ConnectToTaskService()
     {
@@ -138,7 +136,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
     }
 }
 
-internal sealed record ScheduledTaskConfiguration(string TaskName, string ExecutablePath, string UserId, string Delay);
+internal sealed record ScheduledTaskConfiguration(string TaskName, string ExecutablePath, string UserId);
 
 public sealed record StartupRegistrationResult(bool Success, string Message)
 {
