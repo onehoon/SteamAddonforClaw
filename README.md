@@ -23,7 +23,11 @@ This MVP path does not include gyro, accelerometer, rumble, haptics, Game Bar te
 
 * **Platform:** Windows 11 24H2 or later
 * **Device family:** MSI Claw handheld PCs
-* **Current supported model:** MSI Claw 8 EX AI+ CG3EM (`Win32_BaseBoard.Product = MS-1T91`)
+* **Current supported models:**
+  * MSI Claw 7 AI+ A2VM / A2VMX (`Win32_BaseBoard.Product = MS-1T42`)
+  * MSI Claw 8 AI+ A2VM (`Win32_BaseBoard.Product = MS-1T52`)
+  * MSI Claw 8 EX AI+ CG3EM (`Win32_BaseBoard.Product = MS-1T91`)
+  * A2VM controller routing support is source-backed (HHC/ClawTweaks); physical hardware validation is pending. Gyro/IMU routing is not enabled for A2VM.
 * **Architecture:** x64
 * **Application:** WinUI 3 / .NET 10
 * **Distribution:** Velopack
@@ -116,7 +120,7 @@ Suspend and hibernate immediately close the forward-mutation gate and invalidate
 
 The current MVP supports **Stock MSI Center M only**. It requires MSI Center M to be installed and operational, with neither ClawTweaks nor Handheld Companion installed. Other controller-management environments are shown as unsupported and the addon remains passive.
 
-Hardware support is currently limited to **MSI Claw 8 EX AI+ CG3EM**. Compatibility is determined from the exact `Win32_BaseBoard.Product` value `MS-1T91`; another board model is unsupported, and an unavailable board identity is treated as indeterminate without routing or setup mutation.
+Hardware support is currently limited to the MSI Claw family, identified by an exact `Win32_BaseBoard.Product` match: **MSI Claw 7 AI+ A2VM / A2VMX** (`MS-1T42`), **MSI Claw 8 AI+ A2VM** (`MS-1T52`), and **MSI Claw 8 EX AI+ CG3EM** (`MS-1T91`). All three models share the same physical MSI Claw controller (VID/PID) contract and route through the same non-gyro controller pipeline. Another board model is unsupported, and an unavailable board identity is treated as indeterminate without routing or setup mutation. A2VM controller routing support is source-backed by HHC/ClawTweaks; physical hardware validation is pending, and gyro/IMU routing is not enabled for A2VM.
 
 Startup and runtime use the same controller-software assessment. It captures the current MSI Center M, ClawTweaks, and Handheld Companion status, derives the controller-manager classification, then applies the current compatibility policy. The only supported mutation environment is operational Stock MSI Center M with no unsupported third-party controller manager. ClawTweaks, Handheld Companion, other unsupported managers, and indeterminate software state remain passive. Environment detection does not use separate startup and runtime decision engines.
 

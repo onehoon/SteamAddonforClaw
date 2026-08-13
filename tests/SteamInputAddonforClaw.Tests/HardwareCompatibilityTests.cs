@@ -19,6 +19,32 @@ public sealed class HardwareCompatibilityTests
         Assert.Equal("msi.claw.cg3em", assessment.DeviceModel?.Value);
     }
 
+    [Theory]
+    [InlineData("MS-1T42", "msi.claw.a2vm.7")]
+    [InlineData("MS-1T52", "msi.claw.a2vm.8")]
+    public void ExactMsiClawA2vmBoardAndKnownController_AreSupported(string baseBoardProduct, string expectedModelId)
+    {
+        var assessment = Evaluate(new(DeviceProbeCaptureStatus.Success,
+            new DeviceProbeContext([new DeviceProbePnpDevice("HID\\MSI", vendorId: 0x0DB0, productId: 0x1902)], baseBoardProduct: baseBoardProduct), "Captured"));
+
+        Assert.Equal(HardwareCompatibilityStatus.Supported, assessment.Status);
+        Assert.Equal(expectedModelId, assessment.DeviceModel?.Value);
+        Assert.Equal("msi.claw", assessment.DeviceFamily?.Value);
+    }
+
+    [Theory]
+    [InlineData("MS-1T42")]
+    [InlineData("MS-1T52")]
+    public void A2vmBoardWithoutRecognizedController_IsNotSupported(string baseBoardProduct)
+    {
+        // BaseBoard identity alone must never be sufficient -- the MSI Claw family probe
+        // requires actual PnP evidence of the 0x0DB0 controller before model resolution runs.
+        var assessment = Evaluate(new(DeviceProbeCaptureStatus.Success,
+            new DeviceProbeContext([], baseBoardProduct: baseBoardProduct), "Captured"));
+
+        Assert.NotEqual(HardwareCompatibilityStatus.Supported, assessment.Status);
+    }
+
     [Fact]
     public void DifferentMsiClawBoard_IsUnsupported()
     {
@@ -75,6 +101,48 @@ public sealed class HardwareCompatibilityTests
         Assert.False(result.AllowsProvisioning);
         Assert.Equal(0, storageCalls);
         Assert.Null(result.Storage);
+    }
+
+    [Theory]
+    [InlineData("MS-1T42", "msi.claw.a2vm.7")]
+    [InlineData("MS-1T52", "msi.claw.a2vm.8")]
+    [InlineData("MS-1T91", "msi.claw.cg3em")]
+    public void Resolver_MatchesKnownBoardToExpectedModelAndFamily(string baseBoardProduct, string expectedModelId)
+    {
+        var resolution = new MsiClawDeviceModelResolver().Resolve(new DeviceProbeContext(baseBoardProduct: baseBoardProduct));
+
+        Assert.Equal(HandheldDeviceModelResolutionStatus.Matched, resolution.Status);
+        Assert.Equal(expectedModelId, resolution.Model?.Id.Value);
+        Assert.Equal("msi.claw", resolution.Model?.FamilyId.Value);
+    }
+
+    [Theory]
+    [InlineData("ms-1t42")]
+    [InlineData("  MS-1T42  ")]
+    public void Resolver_IsCaseInsensitiveAndTrimsWhitespace(string baseBoardProduct)
+    {
+        var resolution = new MsiClawDeviceModelResolver().Resolve(new DeviceProbeContext(baseBoardProduct: baseBoardProduct));
+
+        Assert.Equal(HandheldDeviceModelResolutionStatus.Matched, resolution.Status);
+        Assert.Equal("msi.claw.a2vm.7", resolution.Model?.Id.Value);
+    }
+
+    [Fact]
+    public void Resolver_UnknownBoard_IsUnsupported()
+    {
+        var resolution = new MsiClawDeviceModelResolver().Resolve(new DeviceProbeContext(baseBoardProduct: "MS-UNKNOWN"));
+
+        Assert.Equal(HandheldDeviceModelResolutionStatus.Unsupported, resolution.Status);
+        Assert.Null(resolution.Model);
+    }
+
+    [Fact]
+    public void Resolver_MissingBoard_IsIndeterminate()
+    {
+        var resolution = new MsiClawDeviceModelResolver().Resolve(new DeviceProbeContext(baseBoardProduct: null));
+
+        Assert.Equal(HandheldDeviceModelResolutionStatus.Indeterminate, resolution.Status);
+        Assert.Equal("BaseBoardProductUnavailable", resolution.Reason);
     }
 
     private static HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture capture) =>
