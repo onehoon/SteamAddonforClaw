@@ -93,7 +93,7 @@ internal sealed class StartupCoordinator
         if (!baseline.Succeeded)
             return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
 
-        if (!TryDiscardStaleStartupJournal(out var reason))
+        if (!TryRetireStaleStartupJournal(out var reason))
         {
             AppLog.Warn("Startup", "Stale startup journal could not be discarded after the live XInput baseline; routing remains passive.", null,
                 ("Action", "Passive"), ("Reason", reason));
@@ -102,7 +102,7 @@ internal sealed class StartupCoordinator
         return new StartupResult(true, environment.Mode, readiness, RecoverySafe: true);
     }
 
-    private bool TryDiscardStaleStartupJournal(out string reason)
+    private bool TryRetireStaleStartupJournal(out string reason)
     {
         try
         {
