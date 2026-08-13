@@ -195,11 +195,10 @@ public partial class App : Application
             () => _msiClawNativeModeSession?.IsActive == true,
             () => _msiClawNativeModeSession?.HasOwnedRecoveryBoundary == true,
             () => recoverySafetyState.Current == RecoverySafety.Safe && _recoveryManager?.HasIncompleteRecovery == true);
-        var powerParticipants = _msiClawNativeModeSession is null
-            ? Array.Empty<IPowerTransitionParticipant>()
-            : steamOutputPowerParticipant is null
-                ? new IPowerTransitionParticipant[] { _msiClawNativeModeSession }
-                : new IPowerTransitionParticipant[] { _msiClawNativeModeSession, steamOutputPowerParticipant };
+        var powerParticipants = new List<IPowerTransitionParticipant>();
+        if (_msiClawNativeModeSession is not null) powerParticipants.Add(_msiClawNativeModeSession);
+        if (steamOutputPowerParticipant is not null) powerParticipants.Add(steamOutputPowerParticipant);
+        if (_routingRuntimeCoordinator is not null) powerParticipants.Add(_routingRuntimeCoordinator);
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, async token =>
         {
             if (_recoveryManager is null) return false;

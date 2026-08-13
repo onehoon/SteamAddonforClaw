@@ -8,6 +8,35 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class PowerTransitionTests
 {
     [Fact]
+    public void Suspend_barrier_denies_forward_mutation_and_allows_cleanup_until_sealed()
+    {
+        var gate = new PowerMutationGate(true);
+        gate.EnterNewCycleBarrier(out _, out var epoch);
+
+        Assert.False(gate.IsOpen);
+        Assert.False(gate.TryAcquire(out _));
+        Assert.True(gate.TryAcquireCleanup(out var cleanup));
+        Assert.True(gate.IsCurrentCleanup(cleanup));
+        Assert.True(gate.TrySealSuspendCleanup(epoch));
+        Assert.False(gate.TryAcquire(out _));
+        Assert.False(gate.TryAcquireCleanup(out _));
+    }
+
+    [Fact]
+    public void Generic_barrier_and_stale_suspend_seal_do_not_grant_cleanup_permission()
+    {
+        var gate = new PowerMutationGate(true);
+        gate.EnterNewCycleBarrier(out _, out var suspendEpoch);
+        gate.OpenAfterRecovery();
+        Assert.True(gate.TryEnterBarrier(out _, out var newerEpoch));
+
+        Assert.False(gate.TrySealSuspendCleanup(suspendEpoch));
+        Assert.Equal(newerEpoch, gate.Epoch);
+        Assert.False(gate.TryAcquire(out _));
+        Assert.False(gate.TryAcquireCleanup(out _));
+    }
+
+    [Fact]
     public void Registration_failure_fails_closed()
     {
         var gate = new PowerMutationGate(true); var source = new FakeSource(false);
@@ -24,6 +53,26 @@ public sealed class PowerTransitionTests
         Assert.True(watcher.Start()); var before = gate.Epoch;
         source.Raise(4);
         Assert.False(gate.IsOpen); Assert.True(gate.Epoch > before); Assert.Equal(1, cancelled); Assert.False(participant.Completed.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Suspend_seals_cleanup_window_after_success_and_failure()
+    {
+        var successGate = new PowerMutationGate(true);
+        var success = Coordinator(successGate, new CountingParticipant());
+        successGate.EnterNewCycleBarrier(out _, out var successEpoch);
+        await success.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, successEpoch, true));
+        Assert.Equal(PowerTransitionState.Suspended, success.State);
+        Assert.False(successGate.IsOpen);
+        Assert.False(successGate.TryAcquireCleanup(out _));
+
+        var failureGate = new PowerMutationGate(true);
+        var failure = Coordinator(failureGate, new FailingParticipant());
+        failureGate.EnterNewCycleBarrier(out _, out var failureEpoch);
+        await failure.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, failureEpoch, true));
+        Assert.Equal(PowerTransitionState.Unsafe, failure.State);
+        Assert.False(failureGate.IsOpen);
+        Assert.False(failureGate.TryAcquireCleanup(out _));
     }
 
     [Fact]
@@ -153,6 +202,12 @@ public sealed class PowerTransitionTests
     {
         public string Name => "counting"; public int QuiesceCount;
         public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken) { Interlocked.Increment(ref QuiesceCount); return Task.FromResult(true); }
+        public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken) => Task.FromResult(true);
+    }
+    private sealed class FailingParticipant : IPowerTransitionParticipant
+    {
+        public string Name => "failing";
+        public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken) => Task.FromResult(false);
         public Task<bool> ReconcileAfterResumeAsync(long cycle, long epoch, CancellationToken cancellationToken) => Task.FromResult(true);
     }
 }

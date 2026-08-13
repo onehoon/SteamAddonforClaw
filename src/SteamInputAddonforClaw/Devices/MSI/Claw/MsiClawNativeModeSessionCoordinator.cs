@@ -33,8 +33,8 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
 
     public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
     {
-        // Keep the in-memory session intent. Recovery restores the journaled native snapshot,
-        // and the post-resume reconciliation re-enters DirectInput when Test Mode is still on.
+        // The canonical routing runtime owns complete suspend teardown through the pipeline.
+        // NativeMode must not independently restore around pipeline rollback barriers.
         return Task.FromResult(true);
     }
 
@@ -204,7 +204,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
     {
         if (!_active && !_recoveryBoundaryOwned) return true;
         if (_snapshot is null) { if (reportFailure) MarkRecoveryUnsafe("NativeSnapshotMissingDuringRestore"); return false; }
-        if (!_powerGate.TryAcquire(out var token))
+        if (!_powerGate.TryAcquireCleanup(out var token))
         {
             AppLog.Debug("NativeMode", "NativeRecoveryDeferredByPowerGate", ("RecoveryBoundaryOwned", _recoveryBoundaryOwned));
             return false;
@@ -216,7 +216,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IP
             if (reportFailure) MarkRecoveryUnsafe("NativeRestoreFailed");
             throw;
         }
-        if (!restored.Restored || !_powerGate.IsCurrent(token)) { if (reportFailure) MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
+        if (!restored.Restored || !_powerGate.IsCurrentCleanup(token)) { if (reportFailure) MarkRecoveryUnsafe("NativeRestoreFailed"); return false; }
         if (_recoverySessionId is not { } recoverySessionId)
         {
             if (reportFailure) MarkRecoveryUnsafe("RecoverySessionIdMissingDuringRestore");
