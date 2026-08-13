@@ -81,13 +81,19 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerTransitionPartic
     }
 
     /// <summary>
-    /// True while the current process still owns an active routing session or a pending
-    /// cleanup from the frozen suspend-time plan -- i.e. current-process routing cleanup has not
-    /// been retired yet. Used on resume to decide whether canonical pipeline cleanup should be
-    /// retried before falling back to recovery journal replay.
+    /// True while the current process still owns an active routing session, a pending cleanup
+    /// from the frozen suspend-time plan, or an in-flight transition still holding
+    /// _transitionGate (e.g. a routing Enter that was still running when suspend cancelled it
+    /// and quiesce timed out before that transition released the gate). All three mean
+    /// current-process routing cleanup has not been retired yet. Used on resume to decide
+    /// whether canonical pipeline cleanup should be retried before falling back to recovery
+    /// journal replay -- an in-flight transition must still gate the journal fallback even
+    /// though it hasn't reached the point of recording ActiveSession/PendingCleanup yet.
     /// </summary>
     internal bool HasResidualSessionState =>
-        _sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null;
+        Volatile.Read(ref _transitionOperationCount) > 0
+        || _sessionCoordinator.ActiveSession is not null
+        || _sessionCoordinator.PendingCleanup is not null;
 
     /// <summary>
     /// Retries the canonical frozen-plan pipeline cleanup for whatever routing session/pending

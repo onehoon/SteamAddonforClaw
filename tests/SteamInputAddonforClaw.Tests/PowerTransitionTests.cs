@@ -157,6 +157,9 @@ public sealed class PowerTransitionTests
         Assert.False(gate.IsOpen);
         Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
         Assert.Equal(RecoverySafety.Indeterminate, recovery.Current);
+        // The newer suspend cycle's own cleanup permission must still be intact -- the stale
+        // resume's failed TrySealResumeCleanup must not have closed it.
+        Assert.True(gate.TryAcquireCleanup(out _));
     }
 
     [Fact]
