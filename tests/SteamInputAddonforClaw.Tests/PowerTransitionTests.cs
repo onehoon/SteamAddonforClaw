@@ -8,6 +8,39 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class PowerTransitionTests
 {
     [Fact]
+    public async Task CleanResume_SkipsRecoveryFallbackAndEstablishesBaseline()
+    {
+        var gate = new PowerMutationGate(false);
+        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+        var fallbackCalls = 0;
+        var baselineCalls = 0;
+        var coordinator = new PowerTransitionCoordinator(gate, recovery,
+            _ => { fallbackCalls++; throw new InvalidOperationException(); }, [],
+            hasIncompleteRecovery: () => false,
+            establishBaseline: _ => { baselineCalls++; return Task.FromResult(true); });
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+
+        Assert.Equal(0, fallbackCalls);
+        Assert.Equal(1, baselineCalls);
+        Assert.True(gate.IsOpen);
+        Assert.Equal(RecoverySafety.Safe, recovery.Current);
+    }
+
+    [Fact]
+    public async Task IncompleteRecovery_UsesFallbackBeforeBaseline()
+    {
+        var calls = new List<string>();
+        var coordinator = new PowerTransitionCoordinator(new PowerMutationGate(false), new RecoverySafetyState(RecoverySafety.Unsafe),
+            _ => { calls.Add("Fallback"); return Task.FromResult(true); }, [],
+            hasIncompleteRecovery: () => true,
+            establishBaseline: _ => { calls.Add("Baseline"); return Task.FromResult(true); });
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+
+        Assert.Equal(["Fallback", "Baseline"], calls);
+    }
+    [Fact]
     public void Suspend_barrier_denies_forward_mutation_and_allows_cleanup_until_sealed()
     {
         var gate = new PowerMutationGate(true);

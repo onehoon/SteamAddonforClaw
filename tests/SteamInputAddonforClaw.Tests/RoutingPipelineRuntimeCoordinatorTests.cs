@@ -214,7 +214,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var bridge = Create(provider, executor, participant);
 
         await bridge.Bridge.ReconcileAsync(CancellationToken.None);
-        Assert.True(await bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None));
+        Assert.True(await bridge.Bridge.ReconcileFreshAfterResumeAsync(CancellationToken.None));
 
         Assert.Equal(1, participant.CallCount);
         Assert.Null(bridge.Session.ActiveSession);
@@ -232,7 +232,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
 
         await bridge.Bridge.ReconcileAsync(CancellationToken.None);
         var oldSession = bridge.Session.ActiveSession!;
-        Assert.True(await bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None));
+        Assert.True(await bridge.Bridge.ReconcileFreshAfterResumeAsync(CancellationToken.None));
         var newSession = bridge.Session.ActiveSession!;
 
         Assert.Equal(2, executor.ExecutedPlans.Count);
@@ -251,7 +251,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var bridge = Create(provider, executor);
 
         await bridge.Bridge.ReconcileAsync(CancellationToken.None);
-        Assert.False(await bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None));
+        Assert.False(await bridge.Bridge.ReconcileFreshAfterResumeAsync(CancellationToken.None));
 
         Assert.Equal(1, provider.CaptureCount);
         Assert.Single(executor.ExecutedPlans);
@@ -269,13 +269,13 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         await bridge.Bridge.ReconcileAsync(CancellationToken.None);
         var frozenPlan = bridge.Session.ActiveSession!.Plan;
 
-        Assert.False(await bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None));
+        Assert.False(await bridge.Bridge.ReconcileFreshAfterResumeAsync(CancellationToken.None));
         Assert.NotNull(bridge.Session.PendingCleanup);
         Assert.Equal(1, provider.CaptureCount);
         Assert.Single(executor.ExecutedPlans);
 
         executor.RollbackResults.Enqueue(new(true, null, "Success"));
-        Assert.True(await bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None));
+        Assert.True(await bridge.Bridge.ReconcileFreshAfterResumeAsync(CancellationToken.None));
 
         Assert.Null(bridge.Session.PendingCleanup);
         Assert.NotNull(bridge.Session.ActiveSession);
@@ -446,7 +446,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var bridge = Create(provider, executor);
         await bridge.Bridge.ReconcileAsync(CancellationToken.None);
 
-        var recovery = bridge.Bridge.ReconcileAfterRecoveryAsync(CancellationToken.None).AsTask();
+        var recovery = bridge.Bridge.ReconcileFreshAfterResumeAsync(CancellationToken.None).AsTask();
         await executor.RollbackStarted.Task;
         var normal = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
         await Task.Delay(10);
@@ -506,7 +506,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         await bridge.Bridge.ReconcileAsync(CancellationToken.None);
         provider.ThrowOnNextCapture = true;
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => bridge.Bridge.ReconcileAfterRecoveryAsync(new CancellationToken(true)).AsTask());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => bridge.Bridge.ReconcileFreshAfterResumeAsync(new CancellationToken(true)).AsTask());
     }
 
     private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(FakeStatusProvider provider, FakeExecutor executor, params IRoutingRuntimeSessionBoundaryParticipant[] participants)

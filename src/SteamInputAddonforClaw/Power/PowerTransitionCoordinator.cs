@@ -9,6 +9,8 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly IReadOnlyList<IPowerTransitionParticipant> _participants;
     private readonly RecoverySafetyState _recovery;
     private readonly Func<CancellationToken, Task<bool>> _recover;
+    private readonly Func<bool> _hasIncompleteRecovery;
+    private readonly Func<CancellationToken, Task<bool>> _establishBaseline;
     private readonly Func<CancellationToken, Task<bool>>? _afterRecovery;
     private readonly bool _recoveryEnabled;
     private readonly SemaphoreSlim _serial = new(1, 1);
@@ -20,10 +22,12 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
-    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true)
+    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null)
     {
         (_gate, _recovery, _recover, _participants, _afterRecovery) = (gate, recovery, recover, participants.ToArray(), afterRecovery);
         _recoveryEnabled = recoveryEnabled;
+        _hasIncompleteRecovery = hasIncompleteRecovery ?? (() => true);
+        _establishBaseline = establishBaseline ?? (_ => Task.FromResult(true));
         _reader = Task.Run(ProcessNotificationsAsync);
     }
     internal long NextSequence() => Interlocked.Increment(ref _sequence);
@@ -111,11 +115,18 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             var safe = false;
             try
             {
-                safe = await _recover(cancellationToken).ConfigureAwait(false);
+                var fallbackRequired = _hasIncompleteRecovery();
+                AppLog.Info("Power.Resume", "Resume recovery fallback evaluated.", ("RecoveryFallbackRequired", fallbackRequired));
+                safe = !fallbackRequired || await _recover(cancellationToken).ConfigureAwait(false);
                 recoveryElapsedMs = recoveryManagerStopwatch.Elapsed.TotalMilliseconds;
                 recoveryCompleted = true;
                 if (_gate.Epoch != recoveryEpoch) { AppLog.Warn("Power.Recovery", "Resume reconciliation invalidated by a newer power barrier.", null, ("Cycle", cycleForResume), ("CapturedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch)); return; }
-                foreach (var participant in _participants)
+                if (safe)
+                {
+                    safe = await _establishBaseline(cancellationToken).ConfigureAwait(false);
+                    AppLog.Info("Power.Resume", "Resume Stock baseline completed.", ("Action", "EstablishStockBaseline"), ("Result", safe ? "Succeeded" : "Failed"));
+                }
+                if (safe) foreach (var participant in _participants)
                 {
                     var participantStarted = System.Diagnostics.Stopwatch.GetTimestamp();
                     try { safe &= await participant.ReconcileAfterResumeAsync(cycleForResume, recoveryEpoch, cancellationToken).ConfigureAwait(false); }

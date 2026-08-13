@@ -83,12 +83,13 @@ public partial class App : Application
         var recoveryJournalStore = new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath);
         _recoveryManager = new RecoveryManager(recoveryJournalStore, deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
+        var stockCenterMBaseline = nativeState is null ? null : new StockCenterMStartupBaseline(nativeState);
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             controllerEnvironmentAssessmentProvider,
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
             recoveryJournalStore: recoveryJournalStore,
-            stockCenterMBaseline: nativeState is null ? null : new StockCenterMStartupBaseline(nativeState),
+            stockCenterMBaseline: stockCenterMBaseline,
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
             hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
 
@@ -102,7 +103,7 @@ public partial class App : Application
                 return;
             }
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(addonOwnedVirtualDeviceTracker, deviceRegistry, msiClawAdapter, controllerEnvironmentAssessmentProvider, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(addonOwnedVirtualDeviceTracker, deviceRegistry, msiClawAdapter, controllerEnvironmentAssessmentProvider, stockCenterMBaseline, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
@@ -114,7 +115,7 @@ public partial class App : Application
         }
     }
 
-    private void StartNormalRuntime(AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
+    private void StartNormalRuntime(AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, IStockCenterMStartupBaseline? stockCenterMBaseline, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
@@ -207,8 +208,16 @@ public partial class App : Application
         }, powerParticipants, async token =>
         {
             if (_routingRuntimeCoordinator is null) return true;
-            return await _routingRuntimeCoordinator.ReconcileAfterRecoveryAsync(token).ConfigureAwait(false);
-        }, recoveryEnabled: recoverySafe);
+            _steamSessionWatcher?.Refresh();
+            _effectiveSteamSessionSource?.Refresh();
+            return await _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).ConfigureAwait(false);
+        }, recoveryEnabled: recoverySafe,
+        hasIncompleteRecovery: () => _recoveryManager?.HasIncompleteRecovery == true,
+        establishBaseline: async token =>
+        {
+            if (stockCenterMBaseline is null) return false;
+            return (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
+        });
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
             () => _routingRuntimeCoordinator?.CancelInFlightTransition());
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));

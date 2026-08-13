@@ -53,6 +53,46 @@ public sealed class SteamSessionWatcherTests
     }
 
     [Fact]
+    public void Refresh_RereadsCurrentValueWithoutRegistryNotification()
+    {
+        var source = new FakeRunningAppIdSource(123);
+        using var watcher = new SteamSessionWatcher(source);
+        var notifications = 0;
+        watcher.StateChanged += (_, _) => notifications++;
+        watcher.Start();
+        source.SetWithoutNotification(0);
+
+        watcher.Refresh();
+
+        Assert.Equal(0u, watcher.State.RunningAppId);
+        Assert.False(watcher.State.IsActive);
+        Assert.Equal(1, notifications);
+    }
+
+    [Fact]
+    public void Refresh_BeforeStartAndAfterStop_IsNoOp()
+    {
+        var source = new FakeRunningAppIdSource(123);
+        using var watcher = new SteamSessionWatcher(source);
+        watcher.Refresh();
+        Assert.Equal(0, source.ReadCount);
+        watcher.Start();
+        watcher.Stop();
+        source.SetWithoutNotification(0);
+        watcher.Refresh();
+        Assert.Equal(1, source.ReadCount);
+        Assert.Equal(123u, watcher.State.RunningAppId);
+    }
+
+    [Fact]
+    public void Refresh_AfterDispose_Throws()
+    {
+        var watcher = new SteamSessionWatcher(new FakeRunningAppIdSource(0));
+        watcher.Dispose();
+        Assert.Throws<ObjectDisposedException>(watcher.Refresh);
+    }
+
+    [Fact]
     public void Start_WhenCalledMultipleTimes_DoesNotDuplicateSourceSubscriptions()
     {
         var source = new FakeRunningAppIdSource(0);
@@ -118,7 +158,8 @@ public sealed class SteamSessionWatcherTests
 
         public event EventHandler? Changed;
 
-        public uint GetRunningAppId() => _runningAppId;
+        public int ReadCount { get; private set; }
+        public uint GetRunningAppId() { ReadCount++; return _runningAppId; }
 
         public void SetRunningAppId(uint runningAppId)
         {
@@ -127,5 +168,6 @@ public sealed class SteamSessionWatcherTests
         }
 
         public void NotifyChanged() => Changed?.Invoke(this, EventArgs.Empty);
+        public void SetWithoutNotification(uint runningAppId) => _runningAppId = runningAppId;
     }
 }
