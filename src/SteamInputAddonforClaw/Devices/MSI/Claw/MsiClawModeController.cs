@@ -71,11 +71,13 @@ internal sealed class MsiClawModeController(
 
         var deadline = started + _timeout;
         MsiClawControlHidDevice? control = source.Control;
+        var commandWrittenAt = Stopwatch.GetTimestamp();
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (await writer.WriteAsync(control!, target, cancellationToken).ConfigureAwait(false))
             {
+                commandWrittenAt = Stopwatch.GetTimestamp();
                 AppLog.Debug("NativeMode", "NativeModeCommandWriteSucceeded", ("TargetMode", target));
                 break;
             }
@@ -108,6 +110,7 @@ internal sealed class MsiClawModeController(
             AppLog.Debug("NativeMode", "NativeModeTransitionPoll",
                 ("Poll", poll),
                 ("ElapsedMs", (long)(_now() - started).TotalMilliseconds),
+                ("SinceCommandWriteMs", (long)Stopwatch.GetElapsedTime(commandWrittenAt).TotalMilliseconds),
                 ("EnumerationMs", (long)enumerationMs),
                 ("OldPidPresent", !oldGone),
                 ("TargetPidPresent", targetPidPresent),
