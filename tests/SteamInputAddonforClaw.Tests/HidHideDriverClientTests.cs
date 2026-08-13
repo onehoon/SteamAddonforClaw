@@ -11,6 +11,15 @@ public sealed class HidHideDriverClientTests
     private const string AddonDos = @"C:\Apps\SteamInputAddonforClaw.exe";
     private const string AddonNt = @"\Device\HarddiskVolume3\Apps\SteamInputAddonforClaw.exe";
 
+    // The concurrent-gate tests below coordinate background Task.Run operations through
+    // TaskCompletionSources with a bounded wait. 5 seconds was tight enough that a contended
+    // CI thread pool could burn through it before the background task was even scheduled --
+    // and because these tests don't cancel the background Task.Run on timeout, a false
+    // timeout here left it running forever, holding the process-wide ControlDeviceGate lock
+    // and hanging every later test that touches it. Widen the bound for CI headroom; it's an
+    // upper bound, not an expected duration, so passing runs are unaffected.
+    private static readonly TimeSpan GateWait = TimeSpan.FromSeconds(20);
+
     [Fact]
     public void NativeDeviceIoControl_BindsToKernel32DeviceIoControlExport()
     {
@@ -252,19 +261,19 @@ public sealed class HidHideDriverClientTests
         var secondOperationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var first = Task.Run(client.Inspect);
-        await native.FirstHandleOpened.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await native.FirstHandleOpened.Task.WaitAsync(GateWait);
         var second = Task.Run(() =>
         {
             secondOperationStarted.SetResult();
             return client.Inspect();
         });
-        await secondOperationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondOperationStarted.Task.WaitAsync(GateWait);
 
         Assert.False(second.IsCompleted);
         Assert.Equal(1, native.OpenCount);
         native.AllowFirstHandleDispose.SetResult();
 
-        var inspections = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        var inspections = await Task.WhenAll(first, second).WaitAsync(GateWait);
         Assert.All(inspections, inspection => Assert.Equal(HidHideInspectionStatus.Available, inspection.Status));
         Assert.Equal(2, native.OpenCount);
         Assert.Equal(1, native.MaximumLiveHandleCount);
@@ -281,20 +290,20 @@ public sealed class HidHideDriverClientTests
         var secondOperationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var first = Task.Run(clientA.Inspect);
-        await native.FirstHandleOpened.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await native.FirstHandleOpened.Task.WaitAsync(GateWait);
 
         var second = Task.Run(() =>
         {
             secondOperationStarted.SetResult();
             return clientB.Inspect();
         });
-        await secondOperationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondOperationStarted.Task.WaitAsync(GateWait);
 
         Assert.False(second.IsCompleted);
         Assert.Equal(1, native.OpenCount);
         native.AllowFirstHandleDispose.SetResult();
 
-        var inspections = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        var inspections = await Task.WhenAll(first, second).WaitAsync(GateWait);
         Assert.All(inspections, inspection => Assert.Equal(HidHideInspectionStatus.Available, inspection.Status));
         Assert.Equal(2, native.OpenCount);
         Assert.Equal(1, native.MaximumLiveHandleCount);
@@ -311,20 +320,20 @@ public sealed class HidHideDriverClientTests
         var mutationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var inspect = Task.Run(inspector.Inspect);
-        await native.FirstHandleOpened.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await native.FirstHandleOpened.Task.WaitAsync(GateWait);
         var mutation = Task.Run(() =>
         {
             mutationStarted.SetResult();
             return mutator.AddHiddenDevice("Addon");
         });
-        await mutationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await mutationStarted.Task.WaitAsync(GateWait);
 
         Assert.False(mutation.IsCompleted);
         Assert.Equal(1, native.OpenCount);
         native.AllowFirstHandleDispose.SetResult();
 
-        Assert.Equal(HidHideInspectionStatus.Available, (await inspect.WaitAsync(TimeSpan.FromSeconds(5))).Status);
-        Assert.True(await mutation.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(HidHideInspectionStatus.Available, (await inspect.WaitAsync(GateWait)).Status);
+        Assert.True(await mutation.WaitAsync(GateWait));
         Assert.Equal(["Foreign", "Addon"], device.Blacklist);
         Assert.Equal(1, native.MaximumLiveHandleCount);
         Assert.Equal(0, native.LiveHandleCount);
