@@ -39,10 +39,17 @@ public sealed class HardwareCompatibilityTests
     {
         // BaseBoard identity alone must never be sufficient -- the MSI Claw family probe
         // requires actual PnP evidence of the 0x0DB0 controller before model resolution runs.
+        // Pin the exact fail-closed outcome (Unsupported, no family/model, the registry's
+        // no-match reason) rather than just NotEqual(Supported), so a future regression that
+        // turns this into Indeterminate would still be caught.
         var assessment = Evaluate(new(DeviceProbeCaptureStatus.Success,
             new DeviceProbeContext([], baseBoardProduct: baseBoardProduct), "Captured"));
 
-        Assert.NotEqual(HardwareCompatibilityStatus.Supported, assessment.Status);
+        Assert.Equal(HardwareCompatibilityStatus.Unsupported, assessment.Status);
+        Assert.Null(assessment.DeviceFamily);
+        Assert.Null(assessment.DeviceModel);
+        Assert.Equal("No handheld-device adapter matched.", assessment.Reason);
+        Assert.False(assessment.AllowsMutation);
     }
 
     [Fact]
@@ -136,10 +143,13 @@ public sealed class HardwareCompatibilityTests
         Assert.Null(resolution.Model);
     }
 
-    [Fact]
-    public void Resolver_MissingBoard_IsIndeterminate()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Resolver_MissingBoard_IsIndeterminate(string? baseBoardProduct)
     {
-        var resolution = new MsiClawDeviceModelResolver().Resolve(new DeviceProbeContext(baseBoardProduct: null));
+        var resolution = new MsiClawDeviceModelResolver().Resolve(new DeviceProbeContext(baseBoardProduct: baseBoardProduct));
 
         Assert.Equal(HandheldDeviceModelResolutionStatus.Indeterminate, resolution.Status);
         Assert.Equal("BaseBoardProductUnavailable", resolution.Reason);
