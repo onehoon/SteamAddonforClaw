@@ -773,7 +773,10 @@ A recovery session may contain multiple recorded mutations. Each mutation's
  still-present journaled VIIPER device blocks lower cleanup; a failed native
  rollback keeps PhysicalIsolation evidence intact; and a later
  PhysicalIsolation failure preserves its evidence after the native checkpoint.
- Recovery schema version 4 is the current format. This is not an application
+ Recovery schema version 5 is the current format. Schema 5 records only
+ current mutation evidence: the native-state mutation; HidHide device and
+ executable-whitelist additions and temporary active-state ownership; and
+ structured addon-owned VIIPER device entries. This is not an application
  startup or crash-session reconstruction path.
 
 Previous-process journal files are retired by startup without payload interpretation. Runtime `RecoveryManager` accepts only the current journal schema because runtime recovery applies to mutation evidence created by the current process.

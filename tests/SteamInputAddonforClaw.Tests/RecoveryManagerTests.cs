@@ -107,11 +107,52 @@ public sealed class RecoveryManagerTests : IDisposable
 
         var loaded = manager.LoadJournal().Journal!;
         var entry = Assert.Single(loaded.Mutations.AddonOwnedVirtualDeviceEntries!);
-        Assert.Equal(4, loaded.SchemaVersion);
+        Assert.Equal(RecoveryManager.CurrentSchemaVersion, loaded.SchemaVersion);
         Assert.Equal(mutationId, entry.MutationId);
         Assert.Equal("steamcontroller", entry.DeviceType);
         Assert.Equal((ushort)0x28DE, entry.VendorId);
         Assert.Equal((ushort)0x1102, entry.ProductId);
+        Assert.Equal("USB\\VID_28DE&PID_1102\\owned", Assert.Single(entry.ResolvedInstanceIds));
+    }
+
+    [Fact]
+    public void SerializedJournal_DoesNotContainObsoleteMutationPropertyNames()
+    {
+        var mutationId = Guid.NewGuid();
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, Snapshot(),
+            new(DeviceNativeStateChanged: true, HidHideDeviceAdditions: ["HID\\Claw"], ExecutableWhitelistAdditions: ["C:\\addon.exe"],
+                AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["USB\\VID_28DE&PID_1102\\owned"])]));
+
+        var json = JsonSerializer.Serialize(journal);
+
+        Assert.DoesNotContain("AddonOwnedVirtualDevices\"", json);
+        Assert.DoesNotContain("TemporaryXbox360OutputCreated", json);
+        Assert.Contains("AddonOwnedVirtualDeviceEntries", json);
+    }
+
+    [Fact]
+    public void CurrentSchemaJournal_RoundTripsThroughStoreWithoutLegacyConversion()
+    {
+        var manager = Manager();
+        var native = manager.BeginDeviceNativeStateMutation(Capture()).Journal!;
+        manager.RecordHidHideWhitelistAddition(native.RecoverySessionId, "C:\\addon.exe");
+        manager.RecordHidHideDeviceAddition(native.RecoverySessionId, "HID\\Claw");
+        var mutationId = Guid.NewGuid();
+        manager.RecordAddonOwnedVirtualDeviceIntent(native.RecoverySessionId, mutationId, "steamcontroller", 0x28DE, 0x1102, []);
+        manager.ResolveAddonOwnedVirtualDeviceIdentity(native.RecoverySessionId, mutationId, ["USB\\VID_28DE&PID_1102\\owned"]);
+
+        var loaded = manager.LoadJournal();
+
+        Assert.Equal(RecoveryStatus.Success, loaded.Status);
+        var journal = loaded.Journal!;
+        Assert.Equal(RecoveryManager.CurrentSchemaVersion, journal.SchemaVersion);
+        Assert.Equal(native.RecoverySessionId, journal.RecoverySessionId);
+        Assert.Equal(DeviceId, journal.OriginalDeviceState!.DeviceId);
+        Assert.True(journal.Mutations.DeviceNativeStateChanged);
+        Assert.Contains("C:\\addon.exe", journal.Mutations.ExecutableWhitelistAdditions!);
+        Assert.Contains("HID\\Claw", journal.Mutations.HidHideDeviceAdditions!);
+        var entry = Assert.Single(journal.Mutations.AddonOwnedVirtualDeviceEntries!);
+        Assert.Equal(mutationId, entry.MutationId);
         Assert.Equal("USB\\VID_28DE&PID_1102\\owned", Assert.Single(entry.ResolvedInstanceIds));
     }
 
@@ -673,26 +714,11 @@ public sealed class RecoveryManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task UnsupportedVirtualMutationFailsBeforePartialRecovery()
-    {
-        var hidHide = new FakeHidHide();
-        var native = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, Snapshot(),
-            new(true, null, ["C:\\addon.exe"], ["virtual"], false));
-        Directory.CreateDirectory(_directory);
-        File.WriteAllText(PathName, JsonSerializer.Serialize(native));
-        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), new HandheldDeviceRegistry([new FakeAdapter(DeviceId, new FakeNativeStateManager(DeviceId, NativeStateRestoreStatus.Success))]), hidHide);
-
-        Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-        Assert.Equal(0, hidHide.RemoveCount);
-        Assert.True(File.Exists(PathName));
-    }
-
-    [Fact]
     public async Task MixedRecoveryUnknownDeviceFailsBeforeWhitelistMutation()
     {
         var hidHide = new FakeHidHide();
         var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, Snapshot(),
-            new(true, null, ["C:\\addon.exe"], null, false));
+            new(DeviceNativeStateChanged: true, ExecutableWhitelistAdditions: ["C:\\addon.exe"]));
         Directory.CreateDirectory(_directory);
         File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
         var manager = new RecoveryManager(new RecoveryJournalStore(PathName), new HandheldDeviceRegistry([]), hidHide);
@@ -707,31 +733,10 @@ public sealed class RecoveryManagerTests : IDisposable
     {
         var hidHide = new FakeHidHide();
         var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, Snapshot(),
-            new(true, null, ["C:\\addon.exe"], null, false));
+            new(DeviceNativeStateChanged: true, ExecutableWhitelistAdditions: ["C:\\addon.exe"]));
         Directory.CreateDirectory(_directory);
         File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
         var manager = new RecoveryManager(new RecoveryJournalStore(PathName), new HandheldDeviceRegistry([new FakeAdapter(DeviceId, null)]), hidHide);
-
-        Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
-        Assert.Equal(0, hidHide.RemoveCount);
-        Assert.True(File.Exists(PathName));
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    public async Task UnsupportedV2MutationFailsBeforeAnyRecovery(int unsupportedKind)
-    {
-        var hidHide = new FakeHidHide();
-        var mutations = unsupportedKind switch
-        {
-            1 => new RecoveryMutationState(AddonOwnedVirtualDevices: ["virtual"]),
-            _ => new RecoveryMutationState(TemporaryXbox360OutputCreated: true)
-        };
-        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null, mutations);
-        Directory.CreateDirectory(_directory);
-        File.WriteAllText(PathName, JsonSerializer.Serialize(journal));
-        var manager = new RecoveryManager(new RecoveryJournalStore(PathName), hidHideClient: hidHide);
 
         Assert.Equal(RecoveryStatus.Failure, (await manager.RecoverIncompleteSessionAsync(CancellationToken.None)).Status);
         Assert.Equal(0, hidHide.RemoveCount);
@@ -798,7 +803,8 @@ public sealed class RecoveryManagerTests : IDisposable
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
-    [InlineData(5)]
+    [InlineData(4)]
+    [InlineData(6)]
     public void LoadJournal_UnsupportedSchema_FailsClosedWithoutMutatingJournal(int schema)
     {
         Directory.CreateDirectory(_directory);

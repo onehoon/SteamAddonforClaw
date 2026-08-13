@@ -10,7 +10,7 @@ namespace SteamInputAddonforClaw.Recovery;
 
 internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDeviceRegistry? deviceRegistry = null, IHidHideClient? hidHideClient = null, IControllerDeviceEnumerator? deviceEnumerator = null)
 {
-    internal const int CurrentSchemaVersion = 4;
+    internal const int CurrentSchemaVersion = 5;
     public bool HasIncompleteRecovery
     {
         get
@@ -80,8 +80,8 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
         var loaded = LoadJournal();
         if (loaded.Status != RecoveryStatus.Success || loaded.Journal is not { } journal)
             return null;
-        if (journal.Mutations.DeviceNativeStateChanged || journal.Mutations.TemporaryXbox360OutputCreated ||
-            journal.Mutations.HidHideDeviceAdditions is { Count: > 0 } || journal.Mutations.AddonOwnedVirtualDevices is { Count: > 0 } ||
+        if (journal.Mutations.DeviceNativeStateChanged ||
+            journal.Mutations.HidHideDeviceAdditions is { Count: > 0 } ||
             journal.Mutations.AddonOwnedVirtualDeviceEntries is { Count: > 0 } ||
             journal.Mutations.ExecutableWhitelistAdditions is not { Count: 1 })
             return null;
@@ -399,8 +399,6 @@ internal sealed class RecoveryManager(IRecoveryJournalStore store, HandheldDevic
     private static bool ValidateRecoveryStructure(RecoveryJournal journal, out string reason)
     {
         if (!IsValidJournal(journal)) { reason = "Recovery journal is missing required state."; return false; }
-        if (journal.Mutations.AddonOwnedVirtualDevices is { Count: > 0 }) { reason = "Recorded virtual-device mutations are unsupported."; return false; }
-        if (journal.Mutations.TemporaryXbox360OutputCreated) { reason = "Recorded Xbox output mutations are unsupported."; return false; }
         if (journal.Mutations.HidHideDeviceAdditions is { Count: > 0 } &&
             journal.Mutations.HidHideDeviceAdditions.Any(string.IsNullOrWhiteSpace))
         { reason = "The journaled HidHide device entry is invalid."; return false; }

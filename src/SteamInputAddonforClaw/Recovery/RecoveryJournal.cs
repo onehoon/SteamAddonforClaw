@@ -6,13 +6,11 @@ internal sealed record RecoveryMutationState(
     bool DeviceNativeStateChanged = false,
     IReadOnlyList<string>? HidHideDeviceAdditions = null,
     IReadOnlyList<string>? ExecutableWhitelistAdditions = null,
-    IReadOnlyList<string>? AddonOwnedVirtualDevices = null,
-    bool TemporaryXbox360OutputCreated = false,
     IReadOnlyList<AddonOwnedVirtualDeviceRecoveryEntry>? AddonOwnedVirtualDeviceEntries = null,
     bool? OriginalHidHideActiveState = null)
 {
-    public bool HasRecordedMutations => DeviceNativeStateChanged || TemporaryXbox360OutputCreated ||
-        HidHideDeviceAdditions is { Count: > 0 } || ExecutableWhitelistAdditions is { Count: > 0 } || AddonOwnedVirtualDevices is { Count: > 0 } || AddonOwnedVirtualDeviceEntries is { Count: > 0 } || OriginalHidHideActiveState is not null;
+    public bool HasRecordedMutations => DeviceNativeStateChanged ||
+        HidHideDeviceAdditions is { Count: > 0 } || ExecutableWhitelistAdditions is { Count: > 0 } || AddonOwnedVirtualDeviceEntries is { Count: > 0 } || OriginalHidHideActiveState is not null;
 }
 
 internal sealed record AddonOwnedVirtualDeviceRecoveryEntry(
