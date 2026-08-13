@@ -95,10 +95,11 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
         // Any device that merely looks like a generic game controller (an Xbox controller, DualSense,
         // a real Steam Controller, etc.) must never be part of this snapshot: connecting/disconnecting
         // one during startup must not reset the stable-poll counter or push readiness into
-        // Indeterminate. See ControllerDeviceClassification.InternalHandheld / MsiClawInternalControllerMatcher.
+        // Indeterminate. Uses the narrow IsInternalHandheld predicate ("is this the MSI Claw?") rather
+        // than the general classifier, so non-Claw devices are never classified at all here.
         var relevantDevices = mode == ControllerEnvironmentMode.ClawTweaks
             ? devices.Where(device => _classifier.IsClawTweaksVirtualControllerCandidate(device, topology)).ToArray()
-            : devices.Where(device => _classifier.Classify(device, topology) == ControllerDeviceClassification.InternalHandheld).ToArray();
+            : devices.Where(device => _classifier.IsInternalHandheld(device, topology)).ToArray();
         var snapshot = string.Join('\n', relevantDevices
             .Select(device => string.Join('|',
                 device.InstanceId,

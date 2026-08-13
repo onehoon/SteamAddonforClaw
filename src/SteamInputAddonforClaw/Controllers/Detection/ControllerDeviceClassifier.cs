@@ -8,7 +8,6 @@ public enum ControllerDeviceClassification
     InternalHandheld,
     AddonOwnedVirtual,
     KnownVirtual,
-    ExternalPhysical,
     Indeterminate
 }
 
@@ -54,8 +53,19 @@ public sealed class ControllerDeviceClassifier
 
     internal bool HasUncertainIdentityOwnership => _identityExclusionSource.HasUncertainOwnership;
 
-    internal ControllerDeviceClassification Classify(ControllerDeviceInfo device, ControllerTopologySnapshot topology)
-        => ClassifyDetailed(device, topology).Classification;
+    /// <summary>
+    /// Narrow predicate for "is this the MSI Claw's own internal-controller topology?" Deliberately does
+    /// not go through the general classifier (and therefore never computes or discards an
+    /// external-physical-controller verdict for non-Claw devices) — it only runs the internal-controller
+    /// matcher. Callers that just need to find/ignore the Claw (e.g. startup topology stabilization)
+    /// should use this instead of <see cref="ClassifyDetailed(ControllerDeviceInfo, ControllerTopologySnapshot?)"/>.
+    /// </summary>
+    internal bool IsInternalHandheld(ControllerDeviceInfo device, ControllerTopologySnapshot? topology = null)
+    {
+        return device.Present
+            && IsGameControllerCandidate(device)
+            && MatchInternalController(device, topology).Status == InternalControllerMatchStatus.Match;
+    }
 
     internal ControllerClassificationResult ClassifyDetailed(ControllerDeviceInfo device)
         => ClassifyDetailed(device, topology: null);
@@ -104,7 +114,12 @@ public sealed class ControllerDeviceClassifier
             return new ControllerClassificationResult(ControllerDeviceClassification.Indeterminate, "UnverifiedVirtualInstanceIdentity");
         }
 
-        return new ControllerClassificationResult(ControllerDeviceClassification.ExternalPhysical, "PhysicalGameControllerWithoutExclusion");
+        // A physical game controller that is neither the MSI Claw nor a known/addon-owned virtual device.
+        // The addon does not detect, classify, or otherwise take an interest in external physical
+        // controllers, so this is deliberately folded into NotController rather than given its own
+        // classification: nothing downstream needs to distinguish "external physical controller" from
+        // "not a controller we care about".
+        return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "NotAddonRelevant");
     }
 
     public bool IsClawTweaksVirtualControllerCandidate(ControllerDeviceInfo device)
