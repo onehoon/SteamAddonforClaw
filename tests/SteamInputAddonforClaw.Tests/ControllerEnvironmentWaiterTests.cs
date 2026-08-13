@@ -17,47 +17,104 @@ public sealed class ControllerEnvironmentWaiterTests
         Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, readiness);
     }
 
+    // A realistic Stock Center M topology requires both the gamepad-usage interface AND the
+    // mode-switch-critical control HID interface (see MsiClawModeTopology). A single generic
+    // MSI VID/PID device is not sufficient for readiness — see the dedicated
+    // GamepadOnlyWithoutControlHid regression test below for why.
     [Fact]
     public async Task WaitUntilStableAsync_WhenInternalHandheldTopologyIsStable_ReturnsStable()
     {
-        var claw = new ControllerDeviceInfo(
-            "HID\\VID_0DB0&PID_1902",
-            Guid.NewGuid(),
-            null,
-            [],
-            "HID",
-            ["HID\\VID_0DB0&PID_1902"],
-            ["HID_DEVICE_UP:0001_U:0005"],
-            "HIDClass",
-            null,
-            null,
-            0x0DB0,
-            0x1902,
-            true);
-        var waiter = CreateWaiter([claw], requiredStableSnapshots: 3, timeout: TimeSpan.FromSeconds(1));
+        var gamepadInterface = GamepadInterface();
+        var directInputControlHid = DirectInputControlHid();
+        var waiter = CreateWaiter([gamepadInterface, directInputControlHid], requiredStableSnapshots: 3, timeout: TimeSpan.FromSeconds(1));
 
         var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
 
         Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
     }
 
+    // Same good path as above, but exercises the XInput control HID topology (PID 1901, UsagePage
+    // 0xFFA0, Usage 0x0001) instead of DirectInput, proving readiness recognizes either mode.
     [Fact]
-    public async Task WaitUntilStableAsync_ExternalControllerHotplugNoise_DoesNotResetOrBlockStockCenterMStabilization()
+    public async Task WaitUntilStableAsync_GamepadAndXInputControlHidBothStable_ReturnsStable()
     {
-        var claw = new ControllerDeviceInfo(
-            "HID\\VID_0DB0&PID_1902",
+        var gamepadInterface = GamepadInterface();
+        var xInputControlHid = new ControllerDeviceInfo(
+            "HID\\VID_0DB0&PID_1901&MI_02&COL01",
             Guid.NewGuid(),
             null,
             [],
             "HID",
-            ["HID\\VID_0DB0&PID_1902"],
-            ["HID_DEVICE_UP:0001_U:0005"],
+            ["HID\\VID_0DB0&PID_1901&MI_02&COL01"],
+            ["HID_DEVICE_UP:FFA0_U:0001"],
             "HIDClass",
             null,
             null,
             0x0DB0,
-            0x1902,
-            true);
+            0x1901,
+            true,
+            null,
+            0xFFA0,
+            0x0001);
+        var waiter = CreateWaiter([gamepadInterface, xInputControlHid], requiredStableSnapshots: 3, timeout: TimeSpan.FromSeconds(1));
+
+        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
+    }
+
+    // Regression: the MSI gamepad-usage interface enumerating (and staying constant) is not enough on
+    // its own. Without the mode-switch-critical control HID (XInput or DirectInput topology) ever
+    // appearing, readiness must never settle on Stable, no matter how many stable polls the gamepad
+    // interface alone accumulates.
+    [Fact]
+    public async Task WaitUntilStableAsync_GamepadOnlyWithoutControlHid_DoesNotReportStable()
+    {
+        var gamepadInterface = GamepadInterface();
+        var waiter = CreateWaiter([gamepadInterface], requiredStableSnapshots: 3, timeout: TimeSpan.FromMilliseconds(30));
+
+        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, readiness);
+    }
+
+    private static ControllerDeviceInfo GamepadInterface() => new(
+        "HID\\VID_0DB0&PID_1902&MI_00&COL01",
+        Guid.NewGuid(),
+        null,
+        [],
+        "HID",
+        ["HID\\VID_0DB0&PID_1902&MI_00&COL01"],
+        ["HID_DEVICE_UP:0001_U:0005"],
+        "HIDClass",
+        null,
+        null,
+        0x0DB0,
+        0x1902,
+        true);
+
+    private static ControllerDeviceInfo DirectInputControlHid() => new(
+        "HID\\VID_0DB0&PID_1902&MI_02&COL01",
+        Guid.NewGuid(),
+        null,
+        [],
+        "HID",
+        ["HID\\VID_0DB0&PID_1902&MI_02&COL01"],
+        ["HID_DEVICE_UP:FFF0_U:0040"],
+        "HIDClass",
+        null,
+        null,
+        0x0DB0,
+        0x1902,
+        true,
+        null,
+        0xFFF0,
+        0x0040);
+
+    [Fact]
+    public async Task WaitUntilStableAsync_ExternalControllerHotplugNoise_DoesNotResetOrBlockStockCenterMStabilization()
+    {
+        var stableDevices = new[] { GamepadInterface(), DirectInputControlHid() };
         var xboxController = new ControllerDeviceInfo(
             "HID\\VID_045E&PID_0B13",
             Guid.NewGuid(),
@@ -89,7 +146,7 @@ public sealed class ControllerEnvironmentWaiterTests
             null,
             0xFF00,
             0x0001);
-        var enumerator = new HotplugNoiseEnumerator(claw, [xboxController, steamControllerReceiver]);
+        var enumerator = new HotplugNoiseEnumerator(stableDevices, [xboxController, steamControllerReceiver]);
         var waiter = new ControllerEnvironmentWaiter(
             enumerator,
             new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
@@ -232,14 +289,14 @@ public sealed class ControllerEnvironmentWaiterTests
     /// candidate device is present alongside the always-present stable device. Used to prove that
     /// external-controller connect/disconnect noise cannot reset or block startup stabilization.
     /// </summary>
-    private sealed class HotplugNoiseEnumerator(ControllerDeviceInfo stableDevice, IReadOnlyList<ControllerDeviceInfo> noiseCandidates) : IControllerDeviceEnumerator
+    private sealed class HotplugNoiseEnumerator(IReadOnlyList<ControllerDeviceInfo> stableDevices, IReadOnlyList<ControllerDeviceInfo> noiseCandidates) : IControllerDeviceEnumerator
     {
         private int _tick;
 
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
         {
             var index = _tick++ % (noiseCandidates.Count + 1);
-            var devices = new List<ControllerDeviceInfo> { stableDevice };
+            var devices = new List<ControllerDeviceInfo>(stableDevices);
             if (index > 0) devices.Add(noiseCandidates[index - 1]);
             return devices;
         }
@@ -274,7 +331,10 @@ public sealed class ControllerEnvironmentWaiterTests
                 null,
                 0x0DB0,
                 0x1902,
-                true);
+                true,
+                null,
+                0xFFF0,
+                0x0040);
             return [gamepadInterface, controlInterface];
         }
     }

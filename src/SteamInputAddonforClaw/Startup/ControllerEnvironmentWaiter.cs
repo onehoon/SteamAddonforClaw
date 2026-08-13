@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 
 namespace SteamInputAddonforClaw.Startup;
 
@@ -108,10 +109,30 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
             .OrderBy(identity => identity, StringComparer.OrdinalIgnoreCase));
         var ready = mode switch
         {
-            ControllerEnvironmentMode.StockCenterM => relevantDevices.Length > 0,
+            // An MSI VID/PID device existing at all is not sufficient: the mode-switch step immediately
+            // after startup readiness resolves a specific control HID collection (see
+            // MsiClawModeTopology/MsiClawControlHidResolver), not just "some MSI device". If that control
+            // HID hasn't enumerated yet, readiness must not settle on the gamepad-usage interface alone.
+            ControllerEnvironmentMode.StockCenterM => relevantDevices.Length > 0 && HasResolvableControlHid(relevantDevices),
             ControllerEnvironmentMode.ClawTweaks => relevantDevices.Length > 0,
             _ => false
         };
         return (snapshot, ready);
+    }
+
+    private static bool HasResolvableControlHid(IReadOnlyList<ControllerDeviceInfo> devices)
+    {
+        return MatchesModeTopology(devices, MsiClawNativeMode.XInput)
+            || MatchesModeTopology(devices, MsiClawNativeMode.DirectInput);
+    }
+
+    private static bool MatchesModeTopology(IReadOnlyList<ControllerDeviceInfo> devices, MsiClawNativeMode mode)
+    {
+        if (!MsiClawModeTopology.TryGet(mode, out var topology)) return false;
+        return devices.Any(device => device.Present
+            && device.VendorId == MsiClawHardware.VendorId
+            && device.ProductId == topology.ProductId
+            && device.UsagePage == topology.UsagePage
+            && device.Usage == topology.Usage);
     }
 }
