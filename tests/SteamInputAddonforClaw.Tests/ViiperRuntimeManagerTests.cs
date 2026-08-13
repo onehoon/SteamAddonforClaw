@@ -141,7 +141,93 @@ public sealed class ViiperRuntimeManagerTests
         runtime.Dispose();
 
         Assert.Contains(deviceId, api.RemovedDevices);
+        Assert.True(api.ShutdownCalled);
         Assert.True(api.Disposed);
+    }
+
+    [Fact]
+    public void StopIfUnusedShutsDownAndDisposesLogicalApiWrapperWhenLastDeviceRemoved()
+    {
+        var api = new FakeApi();
+        using var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ => api);
+        var deviceId = runtime.CreateDevice();
+
+        runtime.RemoveDevice(runtime.BusId, deviceId);
+        runtime.StopIfUnused();
+
+        Assert.True(api.ShutdownCalled);
+        Assert.True(api.Disposed);
+    }
+
+    [Fact]
+    public void RuntimeCanReinitializeAndCreateADeviceAfterStopIfUnused()
+    {
+        var factoryCallCount = 0;
+        FakeApi? current = null;
+        var runtime = new ViiperRuntimeManager(Path.GetFullPath("libVIIPER.dll"), _ =>
+        {
+            factoryCallCount++;
+            current = new FakeApi();
+            return current;
+        });
+
+        var firstDeviceId = runtime.CreateDevice();
+        runtime.RemoveDevice(runtime.BusId, firstDeviceId);
+        runtime.StopIfUnused();
+
+        var secondDeviceId = runtime.CreateDevice();
+
+        Assert.Equal(2, factoryCallCount);
+        Assert.Equal((uint)42, secondDeviceId);
+        Assert.Contains(secondDeviceId, runtime.OwnedDeviceIds);
+        Assert.True(current!.InitializeCalls.Count >= 1);
+        runtime.Dispose();
+    }
+
+    [Fact]
+    public void RepeatedStartCreateRemoveStopCyclesDoNotCauseRepeatedNativeModuleLoads()
+    {
+        var loadCount = 0;
+        var path = Path.GetFullPath(Path.Combine(Path.GetTempPath(), $"libVIIPER-{Guid.NewGuid():N}.dll"));
+        nint FakeLoad(string p) { loadCount++; return new nint(loadCount); }
+
+        for (var cycle = 0; cycle < 3; cycle++)
+        {
+            using var runtime = new ViiperRuntimeManager(path, p =>
+            {
+                var handle = ViiperNativeModuleCache.GetOrLoad(p, FakeLoad);
+                return new FakeApi();
+            });
+            var deviceId = runtime.CreateDevice();
+            runtime.RemoveDevice(runtime.BusId, deviceId);
+            runtime.StopIfUnused();
+        }
+
+        Assert.Equal(1, loadCount);
+    }
+
+    [Fact]
+    public void UnsupportedDeviceTypeFailureDoesNotInvalidateThePinnedNativeModule()
+    {
+        var loadCount = 0;
+        var path = Path.GetFullPath(Path.Combine(Path.GetTempPath(), $"libVIIPER-{Guid.NewGuid():N}.dll"));
+        nint FakeLoad(string p) { loadCount++; return new nint(loadCount); }
+
+        using var failingRuntime = new ViiperRuntimeManager(path, p =>
+        {
+            ViiperNativeModuleCache.GetOrLoad(p, FakeLoad);
+            return new FakeApi { DeviceTypes = ["xbox360"] };
+        });
+        Assert.Throws<InvalidOperationException>(() => failingRuntime.Start());
+
+        using var succeedingRuntime = new ViiperRuntimeManager(path, p =>
+        {
+            ViiperNativeModuleCache.GetOrLoad(p, FakeLoad);
+            return new FakeApi();
+        });
+        succeedingRuntime.CreateDevice();
+
+        Assert.Equal(1, loadCount);
     }
 
     private sealed class FakeApi : IViiperNativeApi
