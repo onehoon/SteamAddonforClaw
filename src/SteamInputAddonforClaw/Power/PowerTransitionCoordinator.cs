@@ -13,6 +13,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly Func<CancellationToken, Task<bool>> _establishBaseline;
     private readonly Func<CancellationToken, Task<bool>>? _afterRecovery;
     private readonly bool _recoveryEnabled;
+    private readonly TimeSpan _suspendQuiesceBudget;
     private readonly SemaphoreSlim _serial = new(1, 1);
     private readonly Channel<QueuedNotification> _notifications = Channel.CreateUnbounded<QueuedNotification>(new() { SingleReader = true, SingleWriter = false });
     private readonly CancellationTokenSource _shutdown = new();
@@ -22,12 +23,17 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
-    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null)
+    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, Func<CancellationToken, Task<bool>> recover, IEnumerable<IPowerTransitionParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null)
     {
         (_gate, _recovery, _recover, _participants, _afterRecovery) = (gate, recovery, recover, participants.ToArray(), afterRecovery);
         _recoveryEnabled = recoveryEnabled;
         _hasIncompleteRecovery = hasIncompleteRecovery ?? (() => true);
         _establishBaseline = establishBaseline ?? (_ => Task.FromResult(true));
+        // Real Windows suspend grace period budget for participants to quiesce. Kept as an
+        // injectable value (default unchanged) so tests can give slower/contended CI runners
+        // headroom against enqueue-to-processing scheduling delay without weakening the real
+        // production deadline.
+        _suspendQuiesceBudget = suspendQuiesceBudget ?? TimeSpan.FromMilliseconds(1200);
         _reader = Task.Run(ProcessNotificationsAsync);
     }
     internal long NextSequence() => Interlocked.Increment(ref _sequence);
@@ -67,7 +73,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                 if (!observation.BarrierApplied) { AppLog.Debug("Power.Coordinator", "Duplicate suspend ignored.", ("Cycle", _cycle), ("Epoch", _gate.Epoch)); return; }
                 var cycle = Interlocked.Increment(ref _cycle); _resumeCycle = -1; State = PowerTransitionState.Quiescing;
                 var suspendEpoch = observation.EpochAfter;
-                var deadline = observation.ObservedUtc.AddMilliseconds(1200);
+                var deadline = observation.ObservedUtc.Add(_suspendQuiesceBudget);
                 var success = true;
                 var cleanupSealed = false;
                 try
