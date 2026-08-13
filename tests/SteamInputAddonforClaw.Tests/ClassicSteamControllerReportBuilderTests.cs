@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
 
@@ -12,6 +14,88 @@ public sealed class ClassicSteamControllerReportBuilderTests
         ClassicSteamControllerReportBuilder.Write(report, 0, new(false, false));
         Assert.Equal(NeutralGolden, report);
     }
+
+    [Theory]
+    [InlineData((byte)0)]
+    [InlineData((byte)64)]
+    [InlineData((byte)128)]
+    [InlineData((byte)254)]
+    [InlineData((byte)255)]
+    public void LeftTriggerAnalogTravelIsPreservedAcrossAllReportFields(byte value)
+    {
+        var report = new byte[64];
+        var input = TriggerInput(left: value, leftFull: false, right: 0, rightFull: false);
+
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        AssertTriggerFields(report, offsetByte: 11, offsetWide1: 24, offsetWide2: 50, value);
+    }
+
+    [Theory]
+    [InlineData((byte)0)]
+    [InlineData((byte)64)]
+    [InlineData((byte)128)]
+    [InlineData((byte)254)]
+    [InlineData((byte)255)]
+    public void RightTriggerAnalogTravelIsPreservedAcrossAllReportFields(byte value)
+    {
+        var report = new byte[64];
+        var input = TriggerInput(left: 0, leftFull: false, right: value, rightFull: false);
+
+        ClassicSteamControllerReportBuilder.Write(report, 0, input);
+
+        AssertTriggerFields(report, offsetByte: 12, offsetWide1: 26, offsetWide2: 52, value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LeftTriggerFullButtonDoesNotOverrideAnalogMagnitude(bool triggerFull)
+    {
+        // The MSI Claw's digital "trigger full" button can latch true while the analog axis is
+        // still mid-travel; the analog fields must reflect only TriggerState.Left, never the
+        // digital flag. Only the digital button bit (report[8] bit 1) may differ.
+        const byte value = 64;
+        var withoutFull = new byte[64];
+        var withFull = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(withoutFull, 0, TriggerInput(left: value, leftFull: false, right: 0, rightFull: false));
+        ClassicSteamControllerReportBuilder.Write(withFull, 0, TriggerInput(left: value, leftFull: triggerFull, right: 0, rightFull: false));
+
+        Assert.Equal(withoutFull[11], withFull[11]);
+        Assert.Equal(withoutFull[24..26].ToArray(), withFull[24..26].ToArray());
+        Assert.Equal(withoutFull[50..52].ToArray(), withFull[50..52].ToArray());
+        Assert.Equal(triggerFull ? 2 : 0, withFull[8] & 2);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RightTriggerFullButtonDoesNotOverrideAnalogMagnitude(bool triggerFull)
+    {
+        const byte value = 64;
+        var withoutFull = new byte[64];
+        var withFull = new byte[64];
+        ClassicSteamControllerReportBuilder.Write(withoutFull, 0, TriggerInput(left: 0, leftFull: false, right: value, rightFull: false));
+        ClassicSteamControllerReportBuilder.Write(withFull, 0, TriggerInput(left: 0, leftFull: false, right: value, rightFull: triggerFull));
+
+        Assert.Equal(withoutFull[12], withFull[12]);
+        Assert.Equal(withoutFull[26..28].ToArray(), withFull[26..28].ToArray());
+        Assert.Equal(withoutFull[52..54].ToArray(), withFull[52..54].ToArray());
+        Assert.Equal(triggerFull ? 1 : 0, withFull[8] & 1);
+    }
+
+    private static void AssertTriggerFields(byte[] report, int offsetByte, int offsetWide1, int offsetWide2, byte value)
+    {
+        var expectedRaw = value * 26000 / 255;
+        var expectedByte = (byte)Math.Clamp(expectedRaw * 255 / 26000, 0, 255);
+        Assert.Equal(expectedByte, report[offsetByte]);
+        Assert.Equal((ushort)expectedRaw, BinaryPrimitives.ReadUInt16LittleEndian(report.AsSpan(offsetWide1, 2)));
+        Assert.Equal((ushort)expectedRaw, BinaryPrimitives.ReadUInt16LittleEndian(report.AsSpan(offsetWide2, 2)));
+    }
+
+    private static ClassicSteamControllerInput TriggerInput(byte left, bool leftFull, byte right, bool rightFull) =>
+        new(new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, leftFull, rightFull),
+            default, default, new TriggerState(left, right), false, false);
 
     [Theory]
     [MemberData(nameof(GripVectors))]
