@@ -209,6 +209,7 @@ public partial class App : Application
         }, powerParticipants, async token =>
         {
             if (_routingRuntimeCoordinator is null) return true;
+            var freshSucceeded = false;
             _resumeFreshReconcileSuppression.Begin();
             try
             {
@@ -217,11 +218,12 @@ public partial class App : Application
                     _steamSessionWatcher?.Refresh();
                     _effectiveSteamSessionSource?.Refresh();
                 });
-                return await _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).ConfigureAwait(false);
+                freshSucceeded = await _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).ConfigureAwait(false);
+                return freshSucceeded;
             }
             finally
             {
-                if (_resumeFreshReconcileSuppression.Complete()) _ = ReconcileRoutingAsync();
+                if (_resumeFreshReconcileSuppression.Complete(freshSucceeded)) _ = ReconcileRoutingAsync();
             }
         }, recoveryEnabled: recoverySafe,
         hasIncompleteRecovery: () => _recoveryManager?.HasIncompleteRecovery == true,
@@ -486,14 +488,14 @@ internal sealed class ResumeFreshReconcileSuppression
         }
     }
 
-    public bool Complete()
+    public bool Complete(bool freshSucceeded)
     {
         lock (_sync)
         {
             _owned = 0;
             var pending = _pending != 0;
             _pending = 0;
-            return pending;
+            return freshSucceeded && pending;
         }
     }
 }

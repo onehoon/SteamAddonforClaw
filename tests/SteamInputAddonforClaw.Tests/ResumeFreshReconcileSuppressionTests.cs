@@ -15,7 +15,19 @@ public sealed class ResumeFreshReconcileSuppressionTests
         Assert.True(suppression.TrySuppressStateChange());
         Assert.True(suppression.TrySuppressStateChange());
 
-        Assert.True(suppression.Complete());
+        Assert.True(suppression.Complete(freshSucceeded: true));
+        Assert.False(suppression.TrySuppressStateChange());
+    }
+
+    [Fact]
+    public void Fresh_reconciliation_failure_discards_deferred_state_change()
+    {
+        var suppression = new ResumeFreshReconcileSuppression();
+
+        suppression.Begin();
+        Assert.True(suppression.TrySuppressStateChange());
+
+        Assert.False(suppression.Complete(freshSucceeded: false));
         Assert.False(suppression.TrySuppressStateChange());
     }
 }
