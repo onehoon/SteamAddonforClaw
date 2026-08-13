@@ -49,11 +49,7 @@ internal sealed class ViiperNativeApi : IViiperNativeApi
         _freeString = Bind<FreeString>("viiper_free_string");
     }
 
-    internal static ViiperNativeApi Load(string absolutePath)
-    {
-        if (!Path.IsPathFullyQualified(absolutePath)) throw new ArgumentException("VIIPER must be loaded from an absolute path.", nameof(absolutePath));
-        return new ViiperNativeApi(NativeLibrary.Load(absolutePath));
-    }
+    internal static ViiperNativeApi Load(string absolutePath) => new(ViiperNativeModuleCache.GetOrLoad(absolutePath));
 
     public int Initialize(string listenAddress) => WithUtf8(listenAddress, _initialize);
     public void Shutdown() => _shutdown();
@@ -80,7 +76,8 @@ internal sealed class ViiperNativeApi : IViiperNativeApi
     }
     public string[] GetDeviceTypes() => ReadOwnedString(_getTypes) is { Length: > 0 } json ? System.Text.Json.JsonSerializer.Deserialize<string[]>(json) ?? [] : [];
     public string? GetLastError() => ReadOwnedString(_getLastError);
-    public void Dispose() { if (!_disposed) { NativeLibrary.Free(_library); _disposed = true; } }
+    // The native module itself is process-lifetime and is never unloaded here; see ViiperNativeModuleCache.
+    public void Dispose() { if (!_disposed) { _feedbackCallback = null; _disposed = true; } }
 
     private T Bind<T>(string export) where T : Delegate => Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(_library, export));
     private int WithUtf8(string value, Init action) { var pointer = Marshal.StringToCoTaskMemUTF8(value); try { return action(pointer); } finally { Marshal.FreeCoTaskMem(pointer); } }
