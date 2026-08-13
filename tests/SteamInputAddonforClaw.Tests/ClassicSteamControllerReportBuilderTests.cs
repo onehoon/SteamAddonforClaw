@@ -95,7 +95,7 @@ public sealed class ClassicSteamControllerReportBuilderTests
 
     private static ClassicSteamControllerInput TriggerInput(byte left, bool leftFull, byte right, bool rightFull) =>
         new(new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, leftFull, rightFull),
-            default, default, new TriggerState(left, right), false, false);
+            default, default, new TriggerState(left, right), false, false, false, false);
 
     [Theory]
     [InlineData(short.MinValue, (short)0)]
@@ -105,7 +105,7 @@ public sealed class ClassicSteamControllerReportBuilderTests
     public void FullDeflectionRightStickDoesNotThrow(short x, short y)
     {
         var report = new byte[64];
-        var input = new ClassicSteamControllerInput(default, default, new StickState(x, y), default, false, false);
+        var input = ClassicSteamControllerInputMapper.Map(new ControllerState(default, default, new StickState(x, y), default, new([false, false])));
 
         var exception = Record.Exception(() => ClassicSteamControllerReportBuilder.Write(report, 0, input));
 
@@ -116,7 +116,7 @@ public sealed class ClassicSteamControllerReportBuilderTests
     public void RightStickAtShortMinValueIsReportedAsActive()
     {
         var report = new byte[64];
-        var input = new ClassicSteamControllerInput(default, default, new StickState(short.MinValue, short.MinValue), default, false, false);
+        var input = ClassicSteamControllerInputMapper.Map(new ControllerState(default, default, new StickState(short.MinValue, short.MinValue), default, new([false, false])));
 
         ClassicSteamControllerReportBuilder.Write(report, 0, input);
 

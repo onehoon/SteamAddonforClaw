@@ -52,7 +52,7 @@ public sealed class FullNonGyroPipelineTests
     [Fact]
     public void Center_offset_does_not_activate_right_pad_and_duplicate_trigger_fields_match()
     {
-        var input = new ClassicSteamControllerInput(default, default, new(1, -1), new(128, 64), false, false);
+        var input = new ClassicSteamControllerInput(default, default, new(1, -1), new(128, 64), false, false, false, false);
         var report = new byte[64]; ClassicSteamControllerReportBuilder.Write(report, 0, input);
         Assert.Equal(0, report[10] & 0x10);
         Assert.Equal(report[24..26], report[50..52]); Assert.Equal(report[26..28], report[52..54]);
@@ -65,7 +65,7 @@ public sealed class FullNonGyroPipelineTests
     public void Trigger_raw_scaling_preserves_the_26000_contract(byte value, short expected)
     {
         var report = new byte[64];
-        ClassicSteamControllerReportBuilder.Write(report, 0, new(default, default, default, new(value, value), false, false));
+        ClassicSteamControllerReportBuilder.Write(report, 0, new(default, default, default, new(value, value), false, false, false, false));
         Assert.Equal(expected, BitConverter.ToInt16(report, 24));
         Assert.Equal(expected, BitConverter.ToInt16(report, 26));
     }
@@ -75,7 +75,7 @@ public sealed class FullNonGyroPipelineTests
     {
         var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true);
         var report = new byte[64];
-        ClassicSteamControllerReportBuilder.Write(report, 0, new(buttons, default, new(123, -456), new(0, 255), false, false));
+        ClassicSteamControllerReportBuilder.Write(report, 0, new(buttons, default, new(123, -456), new(0, 255), false, false, true, true));
         Assert.Equal(0x03, report[8] & 0x03);
         Assert.Equal(0, report[9] & 0x20);
         Assert.Equal(123, BitConverter.ToInt16(report, 20));
@@ -94,7 +94,7 @@ public sealed class FullNonGyroPipelineTests
         // local TriggerFull button flag must not force the raw value to max on top of that, or
         // partial physical travel would be reported to Steam as a full pull.
         var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true);
-        var input = new ClassicSteamControllerInput(buttons, default, default, new(0, 100), false, false);
+        var input = new ClassicSteamControllerInput(buttons, default, default, new(0, 100), false, false, false, false);
         var report = new byte[64];
         ClassicSteamControllerReportBuilder.Write(report, 0, input);
 
@@ -111,7 +111,7 @@ public sealed class FullNonGyroPipelineTests
     [Fact]
     public void Partial_trigger_without_full_click_preserves_analog_value()
     {
-        var input = new ClassicSteamControllerInput(default, default, default, new(128, 0), false, false);
+        var input = new ClassicSteamControllerInput(default, default, default, new(128, 0), false, false, false, false);
         var report = new byte[64];
         ClassicSteamControllerReportBuilder.Write(report, 0, input);
 
@@ -122,7 +122,7 @@ public sealed class FullNonGyroPipelineTests
     [Fact]
     public void Maximum_analog_trigger_without_digital_full_click_round_trips_as_full()
     {
-        var input = new ClassicSteamControllerInput(default, default, default, new(255, 0), false, false);
+        var input = new ClassicSteamControllerInput(default, default, default, new(255, 0), false, false, false, false);
         var report = new byte[64];
         ClassicSteamControllerReportBuilder.Write(report, 0, input);
 
