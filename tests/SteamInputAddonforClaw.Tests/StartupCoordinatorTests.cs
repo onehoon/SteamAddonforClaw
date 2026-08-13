@@ -345,8 +345,11 @@ public sealed class StartupCoordinatorTests
         var status = (HardwareCompatibilityStatus)statusValue;
         var events = new List<string>();
         var store = new FakeRecoveryJournalStore(events, exists: false);
+        // Indeterminate is retried by the hardware probe stabilization; this fake never
+        // resolves, so use a non-waiting fake delay and a short timeout to avoid a real 5s wait.
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(),
-            new FakeProbeFactory(), new FixedHardwareEvaluator(status), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+            new FakeProbeFactory(), new FixedHardwareEvaluator(status), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
+            hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -371,6 +374,58 @@ public sealed class StartupCoordinatorTests
         Assert.DoesNotContain("Baseline", events);
         Assert.DoesNotContain("Discard", events);
         Assert.Equal(0, store.DeleteCallCount);
+    }
+
+    [Theory]
+    [InlineData((int)ControllerEnvironmentCompatibilityStatus.Indeterminate, (int)ControllerEnvironmentCompatibilityReason.MsiCenterMStarting)]
+    [InlineData((int)ControllerEnvironmentCompatibilityStatus.Unsupported, (int)ControllerEnvironmentCompatibilityReason.MsiCenterMNotOperational)]
+    public async Task StockEnvironment_ReachesBaselineRegardlessOfCenterMRuntimeState(int statusValue, int reasonValue)
+    {
+        // Policy: MSI Center M being fully Running is NOT a prerequisite for controller
+        // ownership. When no conflicting controller manager is present (Mode == StockCenterM)
+        // and the actual MSI hardware topology is Stable, startup must proceed to baseline even
+        // if Center M itself is still Starting or NotRunning -- that is a Center M process-state
+        // fact, not a controller ownership conflict, and must not gate hardware access.
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FixedCompatibilityEnvironmentDetector(events, (ControllerEnvironmentCompatibilityStatus)statusValue, (ControllerEnvironmentCompatibilityReason)reasonValue),
+            new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
+        Assert.Equal(ControllerEnvironmentReadiness.Stable, result.EnvironmentReadiness);
+        Assert.Contains("Baseline", events);
+        Assert.True(result.RecoverySafe);
+    }
+
+    [Fact]
+    public async Task HandheldCompanionDetected_DoesNotRunStockBaselineOrJournalDiscard()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: true);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FixedEnvironmentDetector(events, new(ControllerEnvironmentMode.HHCManaged, ClawTweaksState.NotInstalled)), new ThrowingEnvironmentWaiter(),
+            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentMode.HHCManaged, result.EnvironmentMode);
+        Assert.False(result.RecoverySafe);
+        Assert.DoesNotContain("Baseline", events);
+        Assert.DoesNotContain("Discard", events);
+        Assert.Equal(0, store.DeleteCallCount);
+    }
+
+    private sealed class FixedCompatibilityEnvironmentDetector(List<string> events, ControllerEnvironmentCompatibilityStatus status, ControllerEnvironmentCompatibilityReason reason) : IControllerEnvironmentAssessmentProvider
+    {
+        public ControllerEnvironmentAssessmentSnapshot Capture()
+        {
+            events.Add("EnvironmentDetector");
+            return new([], new(ControllerManagerKind.None, ControllerManagerClassificationReason.NoThirdPartyControllerManager), new(status, reason));
+        }
     }
 
     private sealed class FakeBaseline(List<string> events, bool succeeded = true) : IStockCenterMStartupBaseline
@@ -433,6 +488,137 @@ public sealed class StartupCoordinatorTests
     private sealed class FixedEnvironmentDetector(List<string> events, ControllerEnvironment environment) : IControllerEnvironmentAssessmentProvider
     {
         public ControllerEnvironmentAssessmentSnapshot Capture() { events.Add("EnvironmentDetector"); return Assessment(environment.Mode); }
+    }
+
+    [Fact]
+    public async Task HardwareIndeterminate_ThenSupported_RetriesAndContinues()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var evaluator = new SequencedHardwareEvaluator([
+            new(HardwareCompatibilityStatus.Indeterminate, null, null, "test"),
+            new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test")
+        ]);
+        var delay = new RecordingHardwareProbeDelay();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events),
+            new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(2, evaluator.CallCount);
+        Assert.Equal([TimeSpan.FromMilliseconds(500)], delay.Delays);
+        Assert.True(result.RecoverySafe);
+    }
+
+    [Fact]
+    public async Task HardwareNoAdapterMatched_ThenSupported_RetriesAndContinues()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var evaluator = new SequencedHardwareEvaluator([
+            new(HardwareCompatibilityStatus.Unsupported, null, null, "No handheld-device adapter matched."),
+            new(HardwareCompatibilityStatus.Supported, new("msi.claw"), new("msi.claw.cg3em"), "test")
+        ]);
+        var delay = new RecordingHardwareProbeDelay();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events),
+            new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(2, evaluator.CallCount);
+        Assert.Equal([TimeSpan.FromMilliseconds(500)], delay.Delays);
+        Assert.True(result.RecoverySafe);
+    }
+
+    [Fact]
+    public async Task HardwareTerminalUnsupported_DoesNotRetry()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Unsupported, null, null, "MsiClawModelUnsupported")]);
+        var delay = new RecordingHardwareProbeDelay();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(),
+            new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Equal(1, evaluator.CallCount);
+        Assert.Empty(delay.Delays);
+        Assert.Equal(ControllerEnvironmentMode.Unsupported, result.EnvironmentMode);
+    }
+
+    [Fact]
+    public async Task HardwareSupportedOnFirstAttempt_NoDelay()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var delay = new RecordingHardwareProbeDelay();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events),
+            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hardwareProbeDelay: delay.DelayAsync);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Empty(delay.Delays);
+        Assert.True(result.RecoverySafe);
+    }
+
+    [Fact]
+    public async Task HardwareTransientNeverResolves_TimesOutPassive()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Indeterminate, null, null, "test")], repeatLast: true);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(),
+            new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
+            hardwareProbeTimeout: TimeSpan.FromMilliseconds(20), hardwareProbeDelay: (_, _) => Task.CompletedTask);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(evaluator.CallCount > 1);
+        Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
+        Assert.False(result.RecoverySafe);
+    }
+
+    [Fact]
+    public async Task CancellationDuringHardwareProbeStabilization_Propagates()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: false);
+        using var cancellation = new CancellationTokenSource();
+        var evaluator = new SequencedHardwareEvaluator([new(HardwareCompatibilityStatus.Indeterminate, null, null, "test")], repeatLast: true);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue), new ThrowingEnvironmentDetector(), new ThrowingEnvironmentWaiter(),
+            new FakeProbeFactory(), evaluator, recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events),
+            hardwareProbeDelay: (_, token) => { cancellation.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coordinator.RunAsync(cancellation.Token));
+
+        Assert.Equal(1, evaluator.CallCount);
+    }
+
+    private sealed class SequencedHardwareEvaluator(IEnumerable<HardwareCompatibilityAssessment> results, bool repeatLast = false) : IHardwareCompatibilityEvaluator
+    {
+        private readonly Queue<HardwareCompatibilityAssessment> _results = new(results);
+        private HardwareCompatibilityAssessment? _last;
+        public int CallCount { get; private set; }
+
+        public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _)
+        {
+            CallCount++;
+            if (_results.Count > 0) { _last = _results.Dequeue(); return _last; }
+            if (repeatLast && _last is not null) return _last;
+            throw new InvalidOperationException("SequencedHardwareEvaluator exhausted.");
+        }
+    }
+
+    private sealed class RecordingHardwareProbeDelay
+    {
+        public List<TimeSpan> Delays { get; } = [];
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            Delays.Add(delay);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }

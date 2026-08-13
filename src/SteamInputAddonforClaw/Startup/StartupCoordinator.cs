@@ -15,6 +15,9 @@ internal sealed class StartupCoordinator
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
+    private readonly TimeSpan _hardwareProbePollInterval;
+    private readonly TimeSpan _hardwareProbeTimeout;
+    private readonly Func<TimeSpan, CancellationToken, Task> _hardwareProbeDelay;
 
     public StartupCoordinator(
         IUpdateGate updateGate,
@@ -23,7 +26,10 @@ internal sealed class StartupCoordinator
         IWindowsDeviceProbeContextFactory probeContextFactory,
         IHardwareCompatibilityEvaluator hardwareCompatibilityEvaluator,
         IRecoveryJournalStore recoveryJournalStore,
-        IStockCenterMStartupBaseline? stockCenterMBaseline = null)
+        IStockCenterMStartupBaseline? stockCenterMBaseline = null,
+        TimeSpan? hardwareProbePollInterval = null,
+        TimeSpan? hardwareProbeTimeout = null,
+        Func<TimeSpan, CancellationToken, Task>? hardwareProbeDelay = null)
     {
         _updateGate = updateGate;
         _environmentAssessmentProvider = environmentAssessmentProvider;
@@ -32,6 +38,9 @@ internal sealed class StartupCoordinator
         _stockCenterMBaseline = stockCenterMBaseline;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
+        _hardwareProbePollInterval = hardwareProbePollInterval ?? TimeSpan.FromMilliseconds(500);
+        _hardwareProbeTimeout = hardwareProbeTimeout ?? TimeSpan.FromSeconds(5);
+        _hardwareProbeDelay = hardwareProbeDelay ?? Task.Delay;
     }
 
 
@@ -47,7 +56,7 @@ internal sealed class StartupCoordinator
             return new StartupResult(false, ControllerEnvironmentMode.Indeterminate, ControllerEnvironmentReadiness.Indeterminate, RecoverySafe: false);
         }
 
-        var hardware = EvaluateHardwareCompatibility();
+        var hardware = await EvaluateHardwareCompatibilityWithStabilizationAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("Hardware", "Startup hardware compatibility assessment completed.",
             ("Status", hardware.Status), ("DeviceFamily", hardware.DeviceFamily), ("DeviceModel", hardware.DeviceModel), ("Reason", hardware.Reason),
             ("Action", hardware.Status == HardwareCompatibilityStatus.Supported ? "Continue" : "Passive"));
@@ -139,6 +148,49 @@ internal sealed class StartupCoordinator
             return new(HardwareCompatibilityStatus.Indeterminate, null, null, "HardwareCompatibilityEvaluationFailed:" + exception.GetType().Name);
         }
     }
+
+    /// <summary>
+    /// Retries the hardware compatibility probe/evaluate for a short bounded window at
+    /// immediate Windows logon, when PnP/WMI enumeration has not yet reported the MSI Claw
+    /// controller. Without this, a single-shot Indeterminate or a registry no-adapter-matched
+    /// Unsupported result -- both transient at boot -- would return Passive before ever
+    /// reaching the existing physical topology waiter. This never waits for MSI Center M or any
+    /// other process/service; it only re-probes the same PnP/WMI-backed hardware compatibility
+    /// evaluation already used everywhere else.
+    /// </summary>
+    private async Task<HardwareCompatibilityAssessment> EvaluateHardwareCompatibilityWithStabilizationAsync(CancellationToken cancellationToken)
+    {
+        var assessment = EvaluateHardwareCompatibility();
+        if (!IsTransientHardwareProbeResult(assessment)) return assessment;
+
+        var stopwatch = Stopwatch.StartNew();
+        var attempts = 1;
+        AppLog.Info("Hardware", "Startup hardware probe stabilization wait started.",
+            ("PollIntervalMs", _hardwareProbePollInterval.TotalMilliseconds), ("TimeoutMs", _hardwareProbeTimeout.TotalMilliseconds),
+            ("Status", assessment.Status), ("Reason", assessment.Reason));
+
+        while (IsTransientHardwareProbeResult(assessment))
+        {
+            if (stopwatch.Elapsed >= _hardwareProbeTimeout)
+            {
+                AppLog.Warn("Hardware", "Startup hardware probe stabilization timed out.", null,
+                    ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status), ("Reason", assessment.Reason), ("Action", "Passive"));
+                return assessment;
+            }
+
+            await _hardwareProbeDelay(_hardwareProbePollInterval, cancellationToken).ConfigureAwait(false);
+            attempts++;
+            assessment = EvaluateHardwareCompatibility();
+            AppLog.Debug("Hardware", "Startup hardware probe stabilization poll.", ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status));
+        }
+
+        AppLog.Info("Hardware", "Startup hardware probe stabilization satisfied.", ("Attempts", attempts), ("ElapsedMs", stopwatch.ElapsedMilliseconds), ("Status", assessment.Status), ("Reason", assessment.Reason));
+        return assessment;
+    }
+
+    private static bool IsTransientHardwareProbeResult(HardwareCompatibilityAssessment assessment) =>
+        assessment.Status == HardwareCompatibilityStatus.Indeterminate
+        || (assessment.Status == HardwareCompatibilityStatus.Unsupported && assessment.Reason == "No handheld-device adapter matched.");
 }
 
 internal sealed record StartupResult(bool ShouldStartRuntime, ControllerEnvironmentMode EnvironmentMode, ControllerEnvironmentReadiness EnvironmentReadiness, bool RecoverySafe = false);
