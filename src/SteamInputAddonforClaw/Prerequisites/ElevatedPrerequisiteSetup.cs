@@ -353,8 +353,6 @@ internal static class ElevatedPrerequisiteSetup
             if (!compatibility.AllowsMutation) return (false, "Compatibility" + compatibility.Reason);
             var recoverySafety = new MachineRecoverySafetyInspector().Inspect();
             if (!AllowsRecoverySafeProvisioning(recoverySafety)) return (false, recoverySafety.Reason);
-            var external = DetectExternalControllers(new WindowsControllerDeviceEnumerator());
-            if (external.Status != ExternalControllerAssessmentStatus.Clear) return (false, "ExternalController" + external.Status);
             using var runningAppId = new SteamRunningAppIdRegistrySource();
             var steam = SteamSessionState.FromRunningAppId(runningAppId.GetRunningAppId());
             return steam.IsActive ? (false, "SteamSessionActive") : (true, "Allowed");
@@ -364,14 +362,6 @@ internal static class ElevatedPrerequisiteSetup
             AppLog.Warn("PrerequisiteSetup", "Prerequisite safety gate inspection failed.", exception, ("Reason", "SafetyGateInspectionFailed"));
             return (false, "SafetyGateInspectionFailed");
         }
-    }
-
-    internal static ExternalControllerAssessment DetectExternalControllers(IControllerDeviceEnumerator devices)
-    {
-        var msiAdapter = new MsiClawDeviceAdapter(devices);
-        return new ExternalControllerDetector(
-            devices,
-            new ControllerDeviceClassifier(msiAdapter.InternalControllerMatcher)).Detect();
     }
 
     internal static bool AllowsRecoverySafeProvisioning(RecoverySafetyAssessment assessment) => assessment.Status == RecoverySafetyStatus.Safe;

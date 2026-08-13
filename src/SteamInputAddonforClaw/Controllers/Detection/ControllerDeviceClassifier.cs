@@ -8,7 +8,6 @@ public enum ControllerDeviceClassification
     InternalHandheld,
     AddonOwnedVirtual,
     KnownVirtual,
-    ExternalPhysical,
     Indeterminate
 }
 
@@ -19,8 +18,6 @@ internal sealed record ControllerClassificationResult(
 
 public sealed class ControllerDeviceClassifier
 {
-    private const ushort SteamControllerVendorId = 0x28DE;
-    private const ushort SteamControllerProductId = 0x1304;
     private static readonly string[] GameControllerTokens =
     [
         "HID_DEVICE_SYSTEM_GAME",
@@ -54,10 +51,26 @@ public sealed class ControllerDeviceClassifier
     public ControllerDeviceClassification Classify(ControllerDeviceInfo device)
         => ClassifyDetailed(device).Classification;
 
-    internal bool HasUncertainIdentityOwnership => _identityExclusionSource.HasUncertainOwnership;
-
-    internal ControllerDeviceClassification Classify(ControllerDeviceInfo device, ControllerTopologySnapshot topology)
-        => ClassifyDetailed(device, topology).Classification;
+    /// <summary>
+    /// Narrow predicate for "is this device part of the MSI Claw's own known internal-controller
+    /// topology (any of its VID 0x0DB0 / PID 1901-1903 interfaces, including its non-gamepad-usage
+    /// vendor/control HID interfaces)?" Deliberately does not go through the general classifier (and
+    /// therefore never computes or discards an external-physical-controller verdict for non-Claw
+    /// devices) and deliberately does NOT require <see cref="IsGameControllerCandidate"/>: the Claw's
+    /// XInput (PID 1901, UsagePage 0xFFA0/Usage 0x0001) and DirectInput (PID 1902, UsagePage
+    /// 0xFFF0/Usage 0x0040) control HID interfaces — the ones the mode-switch logic actually depends on
+    /// — are vendor-defined usage pages, not generic gamepad-usage interfaces, so requiring
+    /// IsGameControllerCandidate here would let startup declare Stable from the gamepad-usage interface
+    /// alone while the control HID interface the mode switch needs is still enumerating. Callers that
+    /// just need to find/ignore the Claw (e.g. startup topology stabilization) should use this instead
+    /// of <see cref="ClassifyDetailed(ControllerDeviceInfo, ControllerTopologySnapshot?)"/>. Still safe
+    /// against external controllers: MatchInternalController only matches MSI's own VID/PID family.
+    /// </summary>
+    internal bool IsInternalHandheld(ControllerDeviceInfo device, ControllerTopologySnapshot? topology = null)
+    {
+        return device.Present
+            && MatchInternalController(device, topology).Status == InternalControllerMatchStatus.Match;
+    }
 
     internal ControllerClassificationResult ClassifyDetailed(ControllerDeviceInfo device)
         => ClassifyDetailed(device, topology: null);
@@ -67,29 +80,6 @@ public sealed class ControllerDeviceClassifier
         if (!device.Present)
         {
             return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "DeviceNotPresent");
-        }
-
-        if (IsSteamController1304HidCollection(device))
-        {
-            if (_identityExclusionSource.IsExcluded(device))
-            {
-                return new ControllerClassificationResult(ControllerDeviceClassification.AddonOwnedVirtual, "IdentityExclusionSource");
-            }
-
-            var steamControllerKnownVirtual = GetKnownVirtualEvidence(device, topology);
-            if (steamControllerKnownVirtual is not null)
-            {
-                return new ControllerClassificationResult(ControllerDeviceClassification.KnownVirtual, steamControllerKnownVirtual.Value.Reason, steamControllerKnownVirtual.Value.Device);
-            }
-
-            if (!IsSteamController1304ControllerCollection(device))
-            {
-                return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "SteamController1304CollectionIsNotControllerCapable");
-            }
-
-            return HasVerifiedSteamController1304PhysicalRoot(device, topology)
-                ? new ControllerClassificationResult(ControllerDeviceClassification.ExternalPhysical, "VerifiedSteamController1304PhysicalTopology")
-                : new ControllerClassificationResult(ControllerDeviceClassification.Indeterminate, "SteamController1304PhysicalRootUnverified");
         }
 
         if (!IsGameControllerCandidate(device))
@@ -129,15 +119,12 @@ public sealed class ControllerDeviceClassifier
             return new ControllerClassificationResult(ControllerDeviceClassification.Indeterminate, "UnverifiedVirtualInstanceIdentity");
         }
 
-        return new ControllerClassificationResult(ControllerDeviceClassification.ExternalPhysical, "PhysicalGameControllerWithoutExclusion");
-    }
-
-    public bool IsRelevantTopologyDevice(ControllerDeviceInfo device)
-    {
-        return IsSteamController1304ControllerCollection(device)
-            || IsGameControllerCandidate(device)
-            || MatchInternalController(device, topology: null).Status is InternalControllerMatchStatus.Match or InternalControllerMatchStatus.Indeterminate
-            || ContainsKnownVirtualIdentity(device);
+        // A physical game controller that is neither the MSI Claw nor a known/addon-owned virtual device.
+        // The addon does not detect, classify, or otherwise take an interest in external physical
+        // controllers, so this is deliberately folded into NotController rather than given its own
+        // classification: nothing downstream needs to distinguish "external physical controller" from
+        // "not a controller we care about".
+        return new ControllerClassificationResult(ControllerDeviceClassification.NotController, "NotAddonRelevant");
     }
 
     public bool IsClawTweaksVirtualControllerCandidate(ControllerDeviceInfo device)
@@ -174,48 +161,6 @@ public sealed class ControllerDeviceClassifier
         {
             return new(InternalControllerMatchStatus.Indeterminate, $"InternalControllerMatcherFailed:{exception.GetType().Name}");
         }
-    }
-
-    private static bool IsSteamController1304HidCollection(ControllerDeviceInfo device)
-    {
-        return device.VendorId == SteamControllerVendorId
-            && device.ProductId == SteamControllerProductId
-            && device.EnumeratorName?.Equals("HID", StringComparison.OrdinalIgnoreCase) == true
-            && device.InstanceId.StartsWith("HID\\VID_28DE&PID_1304&MI_", StringComparison.OrdinalIgnoreCase)
-            && device.InstanceId.Contains("&COL", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsSteamController1304ControllerCollection(ControllerDeviceInfo device)
-    {
-        if (!IsSteamController1304HidCollection(device))
-        {
-            return false;
-        }
-
-        return device.UsagePage == 0xFF00 && device.Usage == 0x0001
-            || device.HardwareIds.Concat(device.CompatibleIds)
-                .Any(id => id.Contains("HID_DEVICE_UP:FF00_U:0001", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool HasVerifiedSteamController1304PhysicalRoot(ControllerDeviceInfo device, ControllerTopologySnapshot? topology)
-    {
-        if (topology is null)
-        {
-            return false;
-        }
-
-        return topology.ResolveAncestors(device).Any(ancestor =>
-            ancestor.Present
-            && ancestor.VendorId == SteamControllerVendorId
-            && ancestor.ProductId == SteamControllerProductId
-            && ancestor.EnumeratorName?.Equals("USB", StringComparison.OrdinalIgnoreCase) == true
-            && ancestor.Service?.Equals("usbccgp", StringComparison.OrdinalIgnoreCase) == true
-            && ancestor.InstanceId.StartsWith("USB\\VID_28DE&PID_1304\\", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool ContainsKnownVirtualIdentity(ControllerDeviceInfo device)
-    {
-        return GetKnownVirtualEvidence(device, topology: null) is not null;
     }
 
     private static bool ContainsClawTweaksRoutingIdentity(ControllerDeviceInfo device)

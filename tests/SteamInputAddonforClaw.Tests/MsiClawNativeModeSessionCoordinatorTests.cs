@@ -354,47 +354,6 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task ActiveSessionExternalVeto_IsHandedToCanonicalPipelineAndRemainsLatchedUntilSessionBoundary()
-    {
-        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
-        var modeController = new FakeModeController(devices);
-        var mutationAllowed = true;
-        var monitorTick = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var vetoHandled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handoffCount = 0;
-        await using var coordinator = CreateCoordinator(
-            devices,
-            modeController,
-            mutationAllowed: () => mutationAllowed,
-            routingSafetyVetoHandler: () =>
-            {
-                Interlocked.Increment(ref handoffCount);
-                vetoHandled.TrySetResult();
-                return Task.FromResult(true);
-            },
-            safetyMonitorDelay: token => monitorTick.Task.WaitAsync(token));
-
-        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
-
-        mutationAllowed = false;
-        monitorTick.SetResult();
-        await vetoHandled.Task.WaitAsync(TimeSpan.FromSeconds(3));
-
-        Assert.True(coordinator.IsActive);
-        Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
-        Assert.Equal(1, handoffCount);
-        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
-
-        var blocked = await coordinator.EnterForPipelineAsync(CancellationToken.None);
-        Assert.False(blocked.Succeeded);
-        Assert.Equal("SessionVetoLatched", blocked.Reason);
-
-        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
-        mutationAllowed = true;
-        Assert.True((await coordinator.InspectForPipelineAsync(CancellationToken.None)).Succeeded);
-    }
-
-    [Fact]
     public async Task RoutingFaultLatch_BlocksForwardEntryUntilSteamSessionBoundaryWithoutDirectRestore()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
@@ -414,77 +373,6 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
 
         Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
         Assert.True((await coordinator.InspectForPipelineAsync(CancellationToken.None)).Succeeded);
-    }
-
-    [Fact]
-    public async Task ActiveSessionExternalVeto_RetriesFailedCanonicalHandoffWithoutDirectRestore()
-    {
-        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
-        var modeController = new FakeModeController(devices);
-        var mutationAllowed = true;
-        var firstTick = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondTick = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var firstAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var ticks = new Queue<Task>([firstTick.Task, secondTick.Task]);
-        var attempts = 0;
-        await using var coordinator = CreateCoordinator(devices, modeController,
-            mutationAllowed: () => mutationAllowed,
-            routingSafetyVetoHandler: () =>
-            {
-                var attempt = Interlocked.Increment(ref attempts);
-                (attempt == 1 ? firstAttempt : secondAttempt).TrySetResult();
-                return Task.FromResult(attempt == 2);
-            },
-            safetyMonitorDelay: token => ticks.Dequeue().WaitAsync(token));
-
-        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
-        mutationAllowed = false;
-        firstTick.SetResult();
-        await firstAttempt.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        Assert.True(coordinator.IsActive);
-        Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
-
-        secondTick.SetResult();
-        await secondAttempt.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        Assert.Equal(2, attempts);
-        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task ActiveSessionExternalVeto_RetriesExceptionalCanonicalHandoffWithoutDirectRestore()
-    {
-        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
-        var modeController = new FakeModeController(devices);
-        var mutationAllowed = true;
-        var firstTick = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondTick = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var firstAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var ticks = new Queue<Task>([firstTick.Task, secondTick.Task]);
-        var attempts = 0;
-        await using var coordinator = CreateCoordinator(devices, modeController,
-            mutationAllowed: () => mutationAllowed,
-            routingSafetyVetoHandler: () =>
-            {
-                var attempt = Interlocked.Increment(ref attempts);
-                (attempt == 1 ? firstAttempt : secondAttempt).TrySetResult();
-                if (attempt == 1) throw new InvalidOperationException("simulated");
-                return Task.FromResult(true);
-            },
-            safetyMonitorDelay: token => ticks.Dequeue().WaitAsync(token));
-
-        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
-        mutationAllowed = false;
-        firstTick.SetResult();
-        await firstAttempt.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        Assert.True(coordinator.IsActive);
-        Assert.Equal(MsiClawNativeMode.DirectInput, devices.Mode);
-
-        secondTick.SetResult();
-        await secondAttempt.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        Assert.Equal(2, attempts);
-        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -522,15 +410,12 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         FakeDeviceEnumerator devices,
         FakeModeController modeController,
         PowerMutationGate? gate = null,
-        RecoverySafetyState? recoverySafety = null,
-        Func<bool>? mutationAllowed = null,
-        Func<Task<bool>>? routingSafetyVetoHandler = null,
-        Func<CancellationToken, Task>? safetyMonitorDelay = null)
+        RecoverySafetyState? recoverySafety = null)
     {
         var store = new MemoryJournalStore();
         var recovery = new RecoveryManager(store);
         var native = new MsiClawNativeStateManager(devices, modeController);
-        return new(native, recovery, gate ?? new PowerMutationGate(initiallyOpen: true), recoverySafety ?? new RecoverySafetyState(RecoverySafety.Safe), mutationAllowed: mutationAllowed, routingSafetyVetoHandler: routingSafetyVetoHandler, safetyMonitorDelay: safetyMonitorDelay);
+        return new(native, recovery, gate ?? new PowerMutationGate(initiallyOpen: true), recoverySafety ?? new RecoverySafetyState(RecoverySafety.Safe));
     }
 
     private static MsiClawNativeModeSessionCoordinator CreateCoordinatorFor(IControllerDeviceEnumerator devices, IMsiClawModeController modeController)

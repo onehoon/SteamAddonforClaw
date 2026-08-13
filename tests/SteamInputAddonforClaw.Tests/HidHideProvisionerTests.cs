@@ -38,12 +38,10 @@ public sealed class HidHideProvisionerTests
     }
 
     [Fact]
-    public async Task ExternalControllerOrSteamSession_BlocksBeforeProcessLaunch()
+    public async Task ActiveSteamSession_BlocksBeforeProcessLaunch()
     {
         var runner = new FakeRunner();
-        var external = Context() with { ExternalController = new(ExternalControllerAssessmentStatus.ExternalPresent, 1, []) };
         var steam = Context() with { Steam = SteamSessionState.FromRunningAppId(10) };
-        Assert.Equal(HidHideProvisioningResultKind.Blocked, (await Create(runner, context: external).ProvisionAsync(CancellationToken.None)).Kind);
         Assert.Equal(HidHideProvisioningResultKind.Blocked, (await Create(runner, context: steam).ProvisionAsync(CancellationToken.None)).Kind);
         Assert.Equal(0, runner.Calls);
     }
@@ -209,7 +207,7 @@ public sealed class HidHideProvisionerTests
     public async Task LiveSafetyState_IsRecheckedImmediatelyBeforeProcessStart()
     {
         var allowed = Context();
-        var blocked = allowed with { ExternalController = new(ExternalControllerAssessmentStatus.ExternalPresent, 1, []) };
+        var blocked = allowed with { Steam = SteamSessionState.FromRunningAppId(10) };
         var safety = new FakeSafetyProvider(allowed, blocked);
         var store = new FakeStore();
         var runner = new FakeRunner();
@@ -235,7 +233,6 @@ public sealed class HidHideProvisionerTests
 
     private static HidHideProvisioningContext Context(ControllerEnvironmentCompatibilityStatus compatibility = ControllerEnvironmentCompatibilityStatus.Supported) => new(
         new(compatibility, compatibility == ControllerEnvironmentCompatibilityStatus.Supported ? ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported : ControllerEnvironmentCompatibilityReason.ClawTweaksNotSupportedByCurrentVersion),
-        new(ExternalControllerAssessmentStatus.Clear, 0, []),
         SteamSessionState.FromRunningAppId(0),
         new(PrerequisiteKind.HidHide, PrerequisiteStatus.Missing, "test"), true);
 

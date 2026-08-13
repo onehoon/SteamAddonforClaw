@@ -24,7 +24,6 @@ public sealed class RoutingPipelineSessionCoordinatorTests
 
     [Theory]
     [InlineData((int)RoutingDecisionKind.WaitingForSteam, (int)RoutingDecisionReason.SteamInactive)]
-    [InlineData((int)RoutingDecisionKind.VetoedForSession, (int)RoutingDecisionReason.ExternalControllerSessionLatched)]
     [InlineData((int)RoutingDecisionKind.SetupRequired, (int)RoutingDecisionReason.PrerequisitesNotReady)]
     [InlineData((int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.RecoveryUnsafe)]
     [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ControllerEnvironmentUnsupported)]
@@ -169,11 +168,10 @@ public sealed class RoutingPipelineSessionCoordinatorTests
 
     [Theory]
     [InlineData((int)RoutingDecisionKind.WaitingForSteam, (int)RoutingDecisionReason.SteamInactive)]
-    [InlineData((int)RoutingDecisionKind.VetoedForSession, (int)RoutingDecisionReason.ExternalControllerSessionLatched)]
     [InlineData((int)RoutingDecisionKind.SetupRequired, (int)RoutingDecisionReason.PrerequisitesNotReady)]
     [InlineData((int)RoutingDecisionKind.Indeterminate, (int)RoutingDecisionReason.RecoveryUnsafe)]
     [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ControllerEnvironmentUnsupported)]
-    [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.ExternalControllerPresent)]
+    [InlineData((int)RoutingDecisionKind.Passive, (int)RoutingDecisionReason.UnsupportedDevice)]
     public async Task ActiveNonEligibleDecisionExitsFrozenSession(int kindValue, int reasonValue)
     {
         var executor = new FakeExecutor();

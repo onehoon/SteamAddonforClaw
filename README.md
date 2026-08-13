@@ -102,7 +102,7 @@ For the supported Stock MSI Center M environment, every new application process 
 
 Previous journal state is not desired current state. Previous routing state is not the current routing decision. At application startup or restart, Stock MSI Center M does not resume or reconstruct a prior routing session, restore its exact native state, replay HidHide changes, or use earlier RunningAppID data. After the independently verified live XInput baseline, stale previous-process journal bookkeeping is discarded without interpreting or restoring its payload. If that discard fails, the verified physical controller remains XInput and new routing is passive.
 
-The normal runtime then reads the current RunningAppID, applies the external-controller veto and all other current eligibility checks, and may create a completely new routing session. Recovery journaling remains in use for mutations made by an active runtime session and for power-transition handling; it is not the startup target authority.
+The normal runtime then reads the current RunningAppID, applies the current eligibility checks, and may create a completely new routing session. Recovery journaling remains in use for mutations made by an active runtime session and for power-transition handling; it is not the startup target authority.
 
 ## Power-transition safety
 
@@ -149,8 +149,6 @@ Unless a section is explicitly labeled **Current MVP**, later ClawTweaks and HHC
 The addon may intervene only when:
 
 ```text
-External physical controller absent
-AND
 recovery state safe
 AND
 current handheld model supported
@@ -161,6 +159,8 @@ routing prerequisites ready
 AND
 Steam session active
 ```
+
+External physical controller presence or absence is **not** a routing eligibility input. The addon never inspects other controllers to decide whether to route, and never acquires, hides, or otherwise mutates them.
 
 Any non-eligible outcome prevents routing and mutation. The operational UI distinguishes the reason as **Passive**, **Unsupported**, **Indeterminate**, **Setup required**, or **Waiting for Steam**; these are not all the same user-visible state.
 
@@ -182,7 +182,7 @@ The addon should avoid persistent system-wide controller modifications whenever 
 
 Routing eligibility and pipeline configuration are separate concerns. `RoutingDecision` determines whether routing is eligible. `RoutingPipelineSessionCoordinator` directly enters, exits, or retains the current session from that decision. `RoutingPipelinePlan` describes the fixed per-stage `Disabled`, `ObserveOnly`, or `Enabled` baseline for an environment-specific routing implementation.
 
-The initial pipeline stages are `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, `ThirdPartyIsolation`, `SteamOutput`, `XboxOutput`, and `GameBarRouting`. `RoutingPipelineSessionCoordinator` selects the fixed baseline plan directly from the already-classified controller-manager environment when a session enters. Recovery and external-controller veto are not optional stages; they remain mandatory cross-cutting safety requirements.
+The initial pipeline stages are `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, `ThirdPartyIsolation`, `SteamOutput`, `XboxOutput`, and `GameBarRouting`. `RoutingPipelineSessionCoordinator` selects the fixed baseline plan directly from the already-classified controller-manager environment when a session enters. Recovery safety and addon-owned VIIPER output identity safety are not optional stages; they remain mandatory cross-cutting safety requirements. External physical-controller presence is not a pipeline input.
 
 The plan does not infer stage dependencies. The generic executor uses an explicit forward order of `NativeMode` → `PhysicalInput` → `PhysicalIsolation` → `ThirdPartyIsolation` → `SteamOutput` → `XboxOutput` → `GameBarRouting`. Rollback uses the explicit dependency order `GameBarRouting` → `XboxOutput` → `SteamOutput` → `ThirdPartyIsolation` → `PhysicalInput` → `NativeMode` → `PhysicalIsolation`: a failed `SteamOutput`, `PhysicalInput`, or `NativeMode` rollback blocks dependent teardown, while unrelated-stage rollback failures remain best effort.
 
@@ -190,7 +190,7 @@ The plan does not infer stage dependencies. The generic executor uses an explici
 
 `ControllerManagerClassification` is the canonical input for selecting the fixed session plan. `None` selects the StockCenterM plan; ClawTweaks selects the all-disabled ClawTweaks framework plan; Handheld Companion, Winhanced, multiple managers, indeterminate, and unknown classifications fail closed as Unsupported.
 
-Plan selection does not authorize controller mutation. Routing eligibility, external-controller veto, recovery safety, prerequisite readiness, and compatibility policy remain separate mandatory gates. The current StockCenterM baseline enables `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, and `SteamOutput`; ClawTweaks retains every stage disabled. The enabled StockCenterM baseline is used only for an eligible real Steam session, and the all-disabled ClawTweaks framework plan does not make ClawTweaks supported by the current compatibility policy.
+Plan selection does not authorize controller mutation. Routing eligibility, recovery safety, prerequisite readiness, and compatibility policy remain separate mandatory gates. The current StockCenterM baseline enables `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, and `SteamOutput`; ClawTweaks retains every stage disabled. The enabled StockCenterM baseline is used only for an eligible real Steam session, and the all-disabled ClawTweaks framework plan does not make ClawTweaks supported by the current compatibility policy.
 
 `RoutingPipelineSessionCoordinator` is the single runtime owner of routing-session state and serializes reconciliation. `ActiveSession == null` means Passive; `ActiveSession != null` means OverrideActive. It selects and freezes the fixed `RoutingPipelinePlan` once when an override session enters. Repeated eligible observations do not rebuild or replace an active plan, and exit/failure cleanup uses the exact plan frozen at entry. If rollback fails, the active session and frozen plan are preserved so cleanup can be retried. Pending cleanup records incomplete rollback work but does not create another operational-state authority. Plan selection is not routing authorization.
 
@@ -198,11 +198,11 @@ The MSI Claw `NativeMode` stage now has a concrete pipeline adapter that reuses 
 
 `RoutingPipelineRuntimeCoordinator` is the production routing bridge. It converts the canonical `SystemStatusSnapshot` into manager classification and pipeline-session reconciliation, retires stale frozen sessions after recovery before capturing fresh status, and rolls back the frozen plan during shutdown. Runtime fail-closed is non-terminal, while shutdown is terminal.
 
-Runtime reconciliation is serialized across status capture and pipeline transition. Post-recovery retirement and fresh entry are one serialized transition, and shutdown is a terminal runtime boundary that prevents later reconciliation. Steam-session boundary participants run only after successful pipeline cleanup, so the NativeMode local safety veto can be reset safely between sessions. Production App routing now uses this pipeline path.
+Runtime reconciliation is serialized across status capture and pipeline transition. Post-recovery retirement and fresh entry are one serialized transition, and shutdown is a terminal runtime boundary that prevents later reconciliation. Steam-session boundary participants run only after successful pipeline cleanup, so the NativeMode routing-fault latch can be reset safely between sessions. Production App routing now uses this pipeline path.
 
-User-initiated Exit and Restart are disabled while the addon owns live routing mutations, recovery state, or pending routing cleanup. Termination availability is derived from addon ownership and transition state, not directly from RunningAppID or external-controller presence. After successful rollback and restoration, Exit and Restart become available again even if the Steam session remains active under an external-controller veto. A frozen pipeline `ActiveSession` alone is not treated as physical mutation ownership.
+User-initiated Exit and Restart are disabled while the addon owns live routing mutations, recovery state, or pending routing cleanup. Termination availability is derived from addon ownership and transition state, not directly from RunningAppID. After successful rollback and restoration, Exit and Restart become available again. A frozen pipeline `ActiveSession` alone is not treated as physical mutation ownership.
 
-Unsupported, Handheld Companion, Winhanced, multiple-manager, indeterminate, and unknown environments fail closed and do not bypass compatibility, routing eligibility, external-controller veto, recovery safety, or prerequisite gates. Stock Center M enables `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, and `SteamOutput` as its production baseline. ClawTweaks retains an all-disabled framework plan but remains blocked by the current production compatibility policy. Developer Test Mode is a synthetic Steam-session source for quickly starting and stopping the Stock production path; it does not bypass safety gates.
+Unsupported, Handheld Companion, Winhanced, multiple-manager, indeterminate, and unknown environments fail closed and do not bypass compatibility, routing eligibility, recovery safety, or prerequisite gates. Stock Center M enables `NativeMode`, `PhysicalInput`, `PhysicalIsolation`, and `SteamOutput` as its production baseline. ClawTweaks retains an all-disabled framework plan but remains blocked by the current production compatibility policy. Developer Test Mode is a synthetic Steam-session source for quickly starting and stopping the Stock production path; it does not bypass safety gates.
 
 The Stock MSI Claw `PhysicalInput` stage has a concrete PID_1902 implementation and publishes only its exact owned immutable identity. The production StockCenterM plan now runs `NativeMode`, `PhysicalInput`, recoverable `PhysicalIsolation`, and `SteamOutput` for an eligible session. PID_1902 selection is not based on VID/PID count alone: the DirectInput interface must resolve to a verified MSI gamepad PnP interface and MSI physical root. Multiple descriptors are accepted only when they share the same verified physical identity and PnP instance; otherwise acquisition fails closed.
 
@@ -214,25 +214,9 @@ For this stage, ObserveOnly and Enabled Prepare perform enumeration and identity
 
 # State Priority
 
-External controller detection has the highest priority.
-
 Conceptually:
 
 ```text
-External physical controller present?
-    YES
-    → PASSIVE / VETO
-
-    NO
-    ↓
-
-External-controller veto latched for this Steam session?
-    YES
-    → PASSIVE / VETO
-
-    NO
-    ↓
-
 Recovery safe?
     NO
     → INDETERMINATE
@@ -240,7 +224,7 @@ Recovery safe?
     YES
     ↓
 
-External controller assessment indeterminate?
+Addon-owned VIIPER output identity uncertain?
     YES
     → INDETERMINATE
 
@@ -297,7 +281,7 @@ Xbox Game Bar foreground?
     → Steam Controller receives live input
 ```
 
-External-controller veto always overrides every other state. Current-MVP controller-environment incompatibility is reported as Unsupported and does not create an external-controller veto latch.
+External physical-controller presence or absence does not appear anywhere in this decision chain. Connecting or disconnecting an external controller (Xbox controller, DualSense, a real Steam Controller, etc.) while the addon is routing has no effect on any of these states; the addon keeps routing the MSI Claw internal controller through Gordon and leaves the external controller alone.
 
 ---
 
@@ -341,52 +325,17 @@ Game
 
 must remain one continuous Steam routing session.
 
-The Steam override ends only when `RunningAppID` returns to `0`, unless an external-controller veto or another higher-priority pass-through condition occurs first.
+The Steam override ends only when `RunningAppID` returns to `0`, unless another higher-priority pass-through condition (such as active HHC controller management) occurs first.
 
 Registry monitoring should be event-driven where practical.
 
 ---
 
-# External Controller Veto
+# External Controllers
 
-If any external physical game controller is present, the addon must remain completely passive.
+External physical game controllers (Xbox controllers, DualSense, DualShock, 8BitDo controllers, a real Steam Controller, other USB/Bluetooth gamepads, etc.) are **not a routing input**. The addon does not detect, classify, veto on, acquire, hide, or otherwise mutate them. They remain normally available to Windows and to Steam at all times, whether or not the addon is actively routing the MSI Claw internal controller.
 
-Examples include:
-
-* Xbox controllers;
-* DualSense;
-* DualShock;
-* 8BitDo controllers;
-* other external USB/Bluetooth gamepads.
-
-The addon must not acquire those controllers or alter their behavior.
-
-External-controller detection should use Windows device information rather than XInput slot counting.
-
-Preferred basis:
-
-* PnP;
-* SetupAPI;
-* device instance identity;
-* physical device/container identity;
-* `DEVPKEY_Device_ContainerId` or equivalent container-level information where useful.
-
-XInput slot occupancy alone must not be treated as authoritative physical-controller detection.
-
-## Devices excluded from the veto
-
-The following must not be mistaken for external physical controllers:
-
-* MSI Claw internal controller interfaces;
-* addon-owned VIIPER devices;
-* ClawTweaks-owned virtual controllers;
-* Handheld Companion virtual controllers;
-* USB/IP virtual devices;
-* ViGEm virtual devices.
-
-This distinction is critical because a virtual controller may appear in Windows as a normal USB controller.
-
-HHC virtual outputs are excluded from the **external physical-controller** detector even though active HHC controller management independently causes the addon to remain passive.
+This is a deliberate simplification from earlier design iterations of this project, which treated external-controller presence as a session-scoped veto. That veto has been removed: it is no longer part of the routing eligibility model, the active-session safety monitor, startup detection, or the status UI. See [Addon-Owned Virtual Device Tracking](#addon-owned-virtual-device-tracking) below for the distinct, still-active safety concern of correctly identifying the addon's *own* virtual output.
 
 ---
 
@@ -414,7 +363,7 @@ After creation
 → record its path / instance / container identity
 ```
 
-Tracked addon-owned virtual devices are always excluded from external-controller veto detection.
+Correctly identifying the addon's own virtual output remains a mandatory safety concern independent of any external-controller detection: if the addon cannot verify which VIIPER device it just created (for example, because a matching candidate device that isn't verifiably ours is still present after a failed teardown), routing must fail safe rather than guess. This is enforced directly in the routing eligibility policy — see `RoutingPolicyInput.AddonOwnedOutputIdentityUncertain` in `RoutingEligibilityPolicy` — independently of whatever other controllers happen to be connected.
 
 Useful identities may include:
 
@@ -425,42 +374,6 @@ Useful identities may include:
 * parent/child device relationships.
 
 VID/PID alone should not be considered sufficient identity.
-
----
-
-# External Controller Hotplug
-
-If an external physical controller appears while Steam routing is active:
-
-```text
-1. Stop addon routing
-2. Remove addon virtual outputs
-3. Restore native MSI/ClawTweaks state
-4. Set ExternalControllerVeto
-```
-
-The veto remains latched until the current Steam session ends.
-
-Example:
-
-```text
-Steam session starts
-→ addon active
-
-Xbox controller connected
-→ addon disengages
-
-Xbox controller disconnected
-→ addon remains passive
-
-RunningAppID becomes 0
-→ veto cleared
-
-Next Steam session
-→ normal eligibility evaluation again
-```
-
-This avoids repeated virtual-controller hotplug and Steam Input device rebinding during one game session.
 
 ---
 
@@ -635,7 +548,7 @@ In an HHC-managed state:
 
 HHC being **installed but inactive** is not sufficient to veto addon routing. Detection should determine whether HHC controller management is actually active using public OS-visible evidence where practical, such as process/device/topology identity. The addon must not depend on private HHC IPC.
 
-HHC-owned virtual controllers must remain excluded from external physical-controller detection.
+HHC-owned virtual controllers must not be mistaken for the MSI Claw internal controller or for addon-owned output.
 
 If HHC controller management becomes active while addon Steam routing is already active:
 
@@ -707,10 +620,7 @@ The implementation should not assume a single active virtual target.
 
 # Steam Controller Lifetime
 
-Once created for an eligible Steam session, the Classic Steam Controller should remain enumerated until:
-
-* the Steam session ends;
-* an external-controller veto forces complete disengagement.
+Once created for an eligible Steam session, the Classic Steam Controller should remain enumerated until the Steam session ends. External controllers connecting or disconnecting do not affect its lifecycle at all.
 
 Planned future HHC coexistence may add an HHC-management transition that forces pass-through. That is not part of the Current MVP lifecycle because an installed HHC environment is currently unsupported.
 
@@ -917,9 +827,6 @@ SteamInputAddonforClaw
 ├─ SteamSessionWatcher
 │    └─ RunningAppID monitoring
 │
-├─ ExternalControllerDetector
-│    └─ PnP / SetupAPI physical-controller veto
-│
 ├─ MsiClawInputSource
 │    └─ PID_1902 DirectInput
 │
@@ -958,20 +865,6 @@ MSI Claw controller identities and auxiliary-control definitions belong to its d
 Conceptually:
 
 ```text
-                 ┌─────────────────────────────┐
-                 │ External controller present │
-                 └──────────────┬──────────────┘
-                                │ YES
-                                ▼
-                         PASSIVE / VETO
-                                │
-                                │ until Steam session ends
-                                │
-                                ▼
-
-External controller absent
-        │
-        ▼
 HHC controller management active?
         │
         ├─ YES → PASSIVE / HHC-MANAGED
@@ -1008,9 +901,9 @@ The following are architectural invariants.
 
 When intervention is unnecessary, the machine should behave as though the addon were not installed.
 
-## External-controller invariant
+## External-controller non-interference invariant
 
-The addon never takes control while a separate physical controller is present.
+The addon never acquires, hides, or otherwise mutates an external physical controller, and external-controller presence or absence never changes addon routing eligibility, session state, or the UI.
 
 ## HHC ownership invariant
 
@@ -1060,12 +953,11 @@ Required validation areas:
 14. Return from Game Bar without Steam Controller re-enumeration.
 15. Clean MSI Center M restoration.
 16. Clean ClawTweaks restoration.
-17. External physical-controller detection.
-18. External-controller hotplug veto.
-19. Addon-owned VIIPER output correctly excluded from that veto.
-20. HHC active controller management causing complete addon pass-through without classifying HHC virtual output as an external physical controller.
-21. HHC activation during an active Steam session causing clean disengagement and a session-scoped HHC veto latch.
-22. Crash recovery restoring controller/HidHide state.
+17. External physical-controller connect/disconnect during an active session causes no routing change, no Gordon teardown, and no HidHide/native-state rollback.
+18. Addon-owned VIIPER output identity uncertainty still fails routing closed, independent of external-controller presence.
+19. HHC active controller management causing complete addon pass-through without classifying HHC virtual output as an external physical controller.
+20. HHC activation during an active Steam session causing clean disengagement and a session-scoped HHC veto latch.
+21. Crash recovery restoring controller/HidHide state.
 
 These are validation requirements, not reasons to expand the product scope.
 
@@ -1167,7 +1059,7 @@ hotplug patterns
 
 # Windows Platform References
 
-For external-controller detection, the primary source of truth should remain Windows device APIs.
+For MSI Claw internal-controller identification, addon-owned VIIPER output identity, and controller-environment stabilization, the primary source of truth should remain Windows device APIs.
 
 Preferred areas:
 
@@ -1180,7 +1072,7 @@ Device Container ID
 device relationship information
 ```
 
-DS4Windows patterns may help with implementation, but external-controller classification should be built around Windows device identity rather than application-specific VID/PID lists alone.
+DS4Windows patterns may help with implementation, but device classification should be built around Windows device identity rather than application-specific VID/PID lists alone. This addon does not classify or detect external physical controllers for routing purposes; see [External Controllers](#external-controllers).
 
 ---
 
@@ -1205,11 +1097,8 @@ usbip-win2
 HidHide coordination
 → hbashton/DS4Windows
 
-Addon-owned virtual-device exclusion
+Addon-owned virtual-device exclusion and ownership safety
 → hbashton/DS4Windows
-
-External physical-controller detection
-→ Windows PnP/SetupAPI + DS4Windows patterns
 ```
 
 ---

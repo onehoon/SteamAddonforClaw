@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 
 namespace SteamInputAddonforClaw.Startup;
 
@@ -91,9 +92,15 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
     {
         var devices = _deviceEnumerator.EnumeratePresentDevices();
         var topology = new ControllerTopologySnapshot(devices);
+        // Stability tracking must be scoped to the MSI Claw's own internal-controller topology only.
+        // Any device that merely looks like a generic game controller (an Xbox controller, DualSense,
+        // a real Steam Controller, etc.) must never be part of this snapshot: connecting/disconnecting
+        // one during startup must not reset the stable-poll counter or push readiness into
+        // Indeterminate. Uses the narrow IsInternalHandheld predicate ("is this the MSI Claw?") rather
+        // than the general classifier, so non-Claw devices are never classified at all here.
         var relevantDevices = mode == ControllerEnvironmentMode.ClawTweaks
             ? devices.Where(device => _classifier.IsClawTweaksVirtualControllerCandidate(device, topology)).ToArray()
-            : devices.Where(_classifier.IsRelevantTopologyDevice).ToArray();
+            : devices.Where(device => _classifier.IsInternalHandheld(device, topology)).ToArray();
         var snapshot = string.Join('\n', relevantDevices
             .Select(device => string.Join('|',
                 device.InstanceId,
@@ -102,10 +109,30 @@ internal sealed class ControllerEnvironmentWaiter : IControllerEnvironmentWaiter
             .OrderBy(identity => identity, StringComparer.OrdinalIgnoreCase));
         var ready = mode switch
         {
-            ControllerEnvironmentMode.StockCenterM => devices.Any(device => _classifier.Classify(device) == ControllerDeviceClassification.InternalHandheld),
+            // An MSI VID/PID device existing at all is not sufficient: the mode-switch step immediately
+            // after startup readiness resolves a specific control HID collection (see
+            // MsiClawModeTopology/MsiClawControlHidResolver), not just "some MSI device". If that control
+            // HID hasn't enumerated yet, readiness must not settle on the gamepad-usage interface alone.
+            ControllerEnvironmentMode.StockCenterM => relevantDevices.Length > 0 && HasResolvableControlHid(relevantDevices),
             ControllerEnvironmentMode.ClawTweaks => relevantDevices.Length > 0,
             _ => false
         };
         return (snapshot, ready);
+    }
+
+    private static bool HasResolvableControlHid(IReadOnlyList<ControllerDeviceInfo> devices)
+    {
+        return MatchesModeTopology(devices, MsiClawNativeMode.XInput)
+            || MatchesModeTopology(devices, MsiClawNativeMode.DirectInput);
+    }
+
+    private static bool MatchesModeTopology(IReadOnlyList<ControllerDeviceInfo> devices, MsiClawNativeMode mode)
+    {
+        if (!MsiClawModeTopology.TryGet(mode, out var topology)) return false;
+        return devices.Any(device => device.Present
+            && device.VendorId == MsiClawHardware.VendorId
+            && device.ProductId == topology.ProductId
+            && device.UsagePage == topology.UsagePage
+            && device.Usage == topology.Usage);
     }
 }

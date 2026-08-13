@@ -251,7 +251,7 @@ internal sealed class ElevatedProcessRunner : IElevatedProcessRunner
 
 internal enum HidHideProvisioningResultKind { AlreadyReady, Installed, RebootRequired, Cancelled, Failed, Blocked, AlreadyInProgress }
 internal sealed record HidHideProvisioningResult(HidHideProvisioningResultKind Kind, string Reason);
-internal sealed record HidHideProvisioningContext(ControllerEnvironmentCompatibilityAssessment Compatibility, ExternalControllerAssessment ExternalController, SteamSessionState Steam, PrerequisiteAssessment HidHide, bool SetupAllowed);
+internal sealed record HidHideProvisioningContext(ControllerEnvironmentCompatibilityAssessment Compatibility, SteamSessionState Steam, PrerequisiteAssessment HidHide, bool SetupAllowed);
 internal interface IHidHideProvisioner
 {
     Task<HidHideProvisioningResult> ProvisionAsync(CancellationToken cancellationToken);
@@ -269,7 +269,7 @@ internal sealed class SystemStatusHidHideProvisioningSafetyStateProvider(ISystem
     public async Task<HidHideProvisioningContext> CaptureAsync(CancellationToken cancellationToken)
     {
         var snapshot = await systemStatusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        return new(snapshot.Compatibility, snapshot.ExternalController, SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId), snapshot.Prerequisites.HidHide, snapshot.Addon.Status == AddonOperationalStatus.SetupRequired);
+        return new(snapshot.Compatibility, SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId), snapshot.Prerequisites.HidHide, snapshot.Addon.Status == AddonOperationalStatus.SetupRequired);
     }
 }
 
@@ -396,7 +396,6 @@ internal sealed class HidHideProvisioner(
 
     private static bool AllowsInstall(HidHideProvisioningContext context) => context.SetupAllowed
         && context.Compatibility.AllowsMutation
-        && context.ExternalController.Status == ExternalControllerAssessmentStatus.Clear
         && !context.Steam.IsActive
         && context.HidHide.Status == PrerequisiteStatus.Missing;
     private static bool VerifyInstaller(string path) => File.Exists(path)

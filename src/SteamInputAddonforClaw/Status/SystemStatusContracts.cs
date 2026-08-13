@@ -1,4 +1,3 @@
-using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Routing;
@@ -23,10 +22,15 @@ internal sealed record SystemStatusSnapshot(
     ControllerEnvironmentCompatibilityAssessment Compatibility,
     RuntimePrerequisiteAssessment Prerequisites,
     SteamStatusSnapshot Steam,
-    ExternalControllerAssessment ExternalController,
     RoutingDecision RoutingDecision,
     AddonStatusSnapshot Addon,
-    bool RecoverySafe = true);
+    // Both of the following are safety-boundary fields with no safe default: a snapshot-construction
+    // path that forgets to pass one must fail to compile rather than silently resolve to "safe".
+    bool RecoverySafe,
+    // Raw addon-owned VIIPER output identity safety signal (AddonOwnedVirtualDeviceTracker.HasUncertainOwnership),
+    // preserved independently of RoutingDecision so it is inspectable/testable, and consumed directly by
+    // FirstTimeSetupPolicy so prerequisite (re)installation stays blocked while ownership is unverifiable.
+    bool AddonOwnedOutputIdentityUncertain);
 
 internal interface IDeviceInformationProvider { DeviceStatusSnapshot Capture(DeviceProbeContext context); }
 internal interface ISystemStatusProvider { Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default); }

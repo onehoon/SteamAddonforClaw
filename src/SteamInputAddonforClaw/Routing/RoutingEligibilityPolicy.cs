@@ -1,4 +1,3 @@
-using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Status;
@@ -6,34 +5,33 @@ using SteamInputAddonforClaw.Devices;
 
 namespace SteamInputAddonforClaw.Routing;
 
-internal enum RoutingDecisionKind { Passive, WaitingForSteam, Eligible, SetupRequired, VetoedForSession, Indeterminate }
+internal enum RoutingDecisionKind { Passive, WaitingForSteam, Eligible, SetupRequired, Indeterminate }
 internal enum RoutingDecisionReason
 {
-    SteamInactive, ExternalControllerPresent, ExternalControllerSessionLatched, ExternalControllerIndeterminate,
+    SteamInactive, AddonOwnedOutputIdentityUncertain,
     RecoveryUnsafe, UnsupportedDevice, DeviceCompatibilityIndeterminate, ControllerEnvironmentUnsupported, ControllerEnvironmentIndeterminate, PrerequisitesNotReady, Eligible
 }
 
 internal sealed record RoutingDecision(RoutingDecisionKind Kind, RoutingDecisionReason Reason);
 internal sealed record RoutingPolicyInput(
     SteamSessionState Steam,
-    ExternalControllerAssessment ExternalController,
     HardwareCompatibilityAssessment HardwareCompatibility,
     ControllerEnvironmentCompatibilityAssessment Compatibility,
     RuntimePrerequisiteAssessment Prerequisites,
-    bool RecoverySafe);
+    bool RecoverySafe,
+    bool AddonOwnedOutputIdentityUncertain);
 
 internal static class RoutingEligibilityPolicy
 {
-    public static RoutingDecision Evaluate(RoutingPolicyInput input, bool externalControllerVetoLatched)
+    public static RoutingDecision Evaluate(RoutingPolicyInput input)
     {
-        if (input.ExternalController.Status == ExternalControllerAssessmentStatus.ExternalPresent)
-            return new(input.Steam.IsActive ? RoutingDecisionKind.VetoedForSession : RoutingDecisionKind.Passive, RoutingDecisionReason.ExternalControllerPresent);
-        if (externalControllerVetoLatched)
-            return new(RoutingDecisionKind.VetoedForSession, RoutingDecisionReason.ExternalControllerSessionLatched);
         if (!input.RecoverySafe)
             return new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.RecoveryUnsafe);
-        if (input.ExternalController.Status == ExternalControllerAssessmentStatus.Indeterminate)
-            return new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.ExternalControllerIndeterminate);
+        // Addon-owned VIIPER output identity safety is independent of external-controller detection:
+        // if a previous virtual-output mutation left ownership unverifiable, routing must fail safe
+        // regardless of what other physical controllers are connected. See AddonOwnedVirtualDeviceTracker.
+        if (input.AddonOwnedOutputIdentityUncertain)
+            return new(RoutingDecisionKind.Indeterminate, RoutingDecisionReason.AddonOwnedOutputIdentityUncertain);
 
         if (input.HardwareCompatibility.Status == HardwareCompatibilityStatus.Unsupported)
             return new(RoutingDecisionKind.Passive, RoutingDecisionReason.UnsupportedDevice);
