@@ -71,6 +71,28 @@ public sealed class StartupCoordinatorTests
     }
 
     [Fact]
+    public async Task UnsupportedSchemaJournal_PreservesJournalAndBlocksRouting_NoHidHideCleanup()
+    {
+        // The Stock XInput baseline may already have succeeded; only the LoadJournal() schema
+        // gate downstream of it decides whether the (unreadable-as-current-schema) journal is
+        // trusted. It must fail closed rather than run HidHide cleanup against untrusted evidence.
+        var events = new List<string>();
+        var unsupportedSchemaJson = System.Text.Json.JsonSerializer.Serialize(new { SchemaVersion = RecoveryManager.CurrentSchemaVersion - 1 });
+        var store = new FakeRecoveryJournalStore(events, exists: true, rawJson: unsupportedSchemaJson);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Contains("Baseline", events);
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(0, store.DeleteCallCount);
+        Assert.Equal(0, cleaner.CallCount);
+    }
+
+    [Fact]
     public async Task ValidJournalWithoutHidHideEvidence_DoesNotInvokeCleaner_DiscardsAndSafe()
     {
         var events = new List<string>();
@@ -431,7 +453,7 @@ public sealed class StartupCoordinatorTests
     /// from it -- and it must never write/replace journal contents itself.
     /// </summary>
     private sealed class FakeRecoveryJournalStore(List<string> events, bool exists = false, bool deleteThrows = false, bool existsAfterDelete = false,
-        RecoveryJournal? journal = null, bool readTextThrows = false, bool malformedJson = false) : IRecoveryJournalStore
+        RecoveryJournal? journal = null, bool readTextThrows = false, bool malformedJson = false, string? rawJson = null) : IRecoveryJournalStore
     {
         private bool _deleted;
         private int _existsCallCount;
@@ -450,6 +472,7 @@ public sealed class StartupCoordinatorTests
         {
             if (readTextThrows) throw new IOException("read failed");
             if (malformedJson) return "{ not valid json";
+            if (rawJson is not null) return rawJson;
             var effective = journal ?? new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null, new());
             return JsonSerializer.Serialize(effective);
         }

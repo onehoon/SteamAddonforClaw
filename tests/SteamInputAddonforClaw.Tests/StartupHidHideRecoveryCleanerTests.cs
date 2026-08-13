@@ -128,8 +128,22 @@ public sealed class StartupHidHideRecoveryCleanerTests
 
         Assert.True(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out _));
 
-        Assert.Equal(2, client.RemoveHiddenDeviceCalls);
+        // "HID\A" was already absent: no unnecessary RemoveHiddenDevice call for it, only "HID\B".
+        Assert.Equal(1, client.RemoveHiddenDeviceCalls);
         Assert.Empty(client.CurrentHidden);
+    }
+
+    [Fact]
+    public void IdempotentWhitelistResidue_AlreadyAbsentEntrySkipped()
+    {
+        var client = new FakeHidHideClient(active: false, hidden: [], whitelist: ["C:\\already-gone.exe"]);
+        var journal = Journal(whitelist: ["C:\\addon.exe", "C:\\already-gone.exe"], originalActive: null);
+
+        Assert.True(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out _));
+
+        // "C:\addon.exe" was already absent: no unnecessary RemoveApplication call for it.
+        Assert.Equal(1, client.RemoveApplicationCalls);
+        Assert.Empty(client.CurrentWhitelist);
     }
 
     [Fact]
@@ -179,6 +193,20 @@ public sealed class StartupHidHideRecoveryCleanerTests
     }
 
     [Fact]
+    public void SetActiveReportsSuccessButVerificationStillActive_CleanupFails()
+    {
+        var client = new FakeHidHideClient(active: true, hidden: ["HID\\A"], whitelist: []) { SetActiveVerifiedStillActive = true };
+        var journal = Journal(hidden: ["HID\\A"], originalActive: false);
+
+        Assert.False(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out _));
+
+        Assert.True(client.SetActiveCalled);
+        // The global-state mutation was never trusted at face value; nothing else was cleaned.
+        Assert.Equal(0, client.RemoveHiddenDeviceCalls);
+        Assert.Equal(["HID\\A"], client.CurrentHidden);
+    }
+
+    [Fact]
     public void StateDriftsBeforeDisable_SecondInspectionUnsafe_SetActiveNeverCalledFailsClosed()
     {
         var client = new FakeHidHideClient(active: true, hidden: ["HID\\A"], whitelist: []);
@@ -214,6 +242,42 @@ public sealed class StartupHidHideRecoveryCleanerTests
         Assert.Equal(0, client.InspectCallCount);
     }
 
+    [Fact]
+    public void InvalidEvidence_HiddenEntryWithSurroundingWhitespace_FailsClosedWithoutAnyHidHideCall()
+    {
+        var client = new FakeHidHideClient(active: true, hidden: [], whitelist: []);
+        var journal = Journal(hidden: [" HID\\A "], originalActive: null);
+
+        Assert.False(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out _));
+        Assert.Equal(0, client.InspectCallCount);
+    }
+
+    [Theory]
+    [InlineData("addon.exe")] // relative
+    [InlineData(@"\addon.exe")] // root-relative
+    [InlineData("C:addon.exe")] // drive-relative
+    [InlineData(@"C:\foo\..\addon.exe")] // non-canonical
+    [InlineData(@"\\server\share\addon.exe")] // UNC
+    [InlineData(@" C:\addon.exe")] // surrounding whitespace
+    public void InvalidEvidence_NonCanonicalWhitelistPath_FailsClosedWithoutAnyHidHideCall(string path)
+    {
+        var client = new FakeHidHideClient(active: true, hidden: [], whitelist: []);
+        var journal = Journal(whitelist: [path], originalActive: null);
+
+        Assert.False(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out _));
+        Assert.Equal(0, client.InspectCallCount);
+    }
+
+    [Fact]
+    public void ValidCanonicalWhitelistPath_IsAccepted()
+    {
+        var client = new FakeHidHideClient(active: false, hidden: [], whitelist: [@"C:\addon.exe"]);
+        var journal = Journal(whitelist: [@"C:\addon.exe"], originalActive: null);
+
+        Assert.True(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out _));
+        Assert.Empty(client.CurrentWhitelist);
+    }
+
     private static RecoveryJournal Journal(IReadOnlyList<string>? hidden = null, IReadOnlyList<string>? whitelist = null, bool? originalActive = null) =>
         new(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
             new(HidHideDeviceAdditions: hidden, ExecutableWhitelistAdditions: whitelist, OriginalHidHideActiveState: originalActive));
@@ -235,8 +299,10 @@ public sealed class StartupHidHideRecoveryCleanerTests
         public bool VerifyMismatchHidden { get; set; }
         public bool VerifyMismatchWhitelist { get; set; }
         public bool SetActiveCalled { get; private set; }
+        public bool SetActiveVerifiedStillActive { get; set; }
         public int InspectCallCount { get; private set; }
         public int RemoveHiddenDeviceCalls { get; private set; }
+        public int RemoveApplicationCalls { get; private set; }
         public Action? OnInspect { get; set; }
 
         public HidHideInspection Inspect()
@@ -250,6 +316,7 @@ public sealed class StartupHidHideRecoveryCleanerTests
 
         public bool RemoveApplication(string executablePath)
         {
+            RemoveApplicationCalls++;
             if (FailRemoveApplication) return false;
             if (!VerifyMismatchWhitelist) CurrentWhitelist.RemoveWhere(entry => string.Equals(entry, executablePath, StringComparison.OrdinalIgnoreCase));
             return true;
@@ -269,7 +336,7 @@ public sealed class StartupHidHideRecoveryCleanerTests
         {
             SetActiveCalled = true;
             if (FailSetActive) return false;
-            IsActive = active;
+            if (!SetActiveVerifiedStillActive) IsActive = active;
             return true;
         }
     }

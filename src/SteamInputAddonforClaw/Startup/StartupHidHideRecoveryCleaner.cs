@@ -27,7 +27,7 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
         var whitelistEntries = journal.Mutations.ExecutableWhitelistAdditions ?? [];
         var originalActive = journal.Mutations.OriginalHidHideActiveState;
 
-        if (hiddenEntries.Any(string.IsNullOrWhiteSpace) || whitelistEntries.Any(entry => !IsValidExecutablePath(entry)))
+        if (hiddenEntries.Any(entry => !IsValidHiddenEntry(entry)) || whitelistEntries.Any(entry => !IsValidExecutablePath(entry)))
         {
             reason = "Recovery journal contains invalid HidHide evidence.";
             LogFailure(journal, reason);
@@ -93,17 +93,26 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
             AppLog.Info("Recovery", "Startup stale HidHide global state restored.", ("SessionId", journal.RecoverySessionId), ("Active", false));
         }
 
-        foreach (var entry in hiddenEntries)
+        if (hiddenEntries.Count > 0)
         {
-            if (!hidHideClient.RemoveHiddenDevice(entry))
+            var preRemoval = hidHideClient.Inspect();
+            if (!preRemoval.IsConfigurationReadable)
             {
-                reason = $"Failed to remove addon-owned hidden device entry '{entry}'.";
+                reason = "HidHide configuration became unreadable before hidden-device cleanup.";
                 LogFailure(journal, reason);
                 return false;
             }
-        }
-        if (hiddenEntries.Count > 0)
-        {
+            var currentHidden = new HashSet<string>(preRemoval.HiddenDeviceEntries ?? [], StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in hiddenEntries)
+            {
+                if (!currentHidden.Contains(entry)) continue; // Already absent: idempotent success, no call needed.
+                if (!hidHideClient.RemoveHiddenDevice(entry))
+                {
+                    reason = $"Failed to remove addon-owned hidden device entry '{entry}'.";
+                    LogFailure(journal, reason);
+                    return false;
+                }
+            }
             var verify = hidHideClient.Inspect();
             if (!verify.IsConfigurationReadable || StillPresent(verify.HiddenDeviceEntries, hiddenEntries))
             {
@@ -114,17 +123,25 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
             AppLog.Info("Recovery", "Startup stale HidHide hidden entries cleaned.", ("SessionId", journal.RecoverySessionId), ("Count", hiddenEntries.Count));
         }
 
-        foreach (var entry in whitelistEntries)
+        if (whitelistEntries.Count > 0)
         {
-            if (!hidHideClient.RemoveApplication(entry))
+            var preRemoval = hidHideClient.Inspect();
+            if (!preRemoval.IsConfigurationReadable)
             {
-                reason = $"Failed to remove addon-owned whitelist entry '{entry}'.";
+                reason = "HidHide configuration became unreadable before whitelist cleanup.";
                 LogFailure(journal, reason);
                 return false;
             }
-        }
-        if (whitelistEntries.Count > 0)
-        {
+            foreach (var entry in whitelistEntries)
+            {
+                if (!preRemoval.ApplicationWhitelist.Contains(entry)) continue; // Already absent: idempotent success, no call needed.
+                if (!hidHideClient.RemoveApplication(entry))
+                {
+                    reason = $"Failed to remove addon-owned whitelist entry '{entry}'.";
+                    LogFailure(journal, reason);
+                    return false;
+                }
+            }
             var verify = hidHideClient.Inspect();
             if (!verify.IsConfigurationReadable || whitelistEntries.Any(entry => verify.ApplicationWhitelist.Contains(entry)))
             {
@@ -153,10 +170,27 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
     private static bool StillPresent(IReadOnlyList<string>? current, IReadOnlyList<string> owned) =>
         owned.Any(entry => (current ?? []).Contains(entry, StringComparer.OrdinalIgnoreCase));
 
+    // The recovery writer only ever records Trim()med hidden-device entries, so anything else
+    // is not evidence this addon produced and must be rejected rather than normalized/guessed.
+    private static bool IsValidHiddenEntry(string entry) =>
+        !string.IsNullOrWhiteSpace(entry) && entry == entry.Trim();
+
+    // The recovery writer only ever records Path.GetFullPath()-canonicalized whitelist entries
+    // (see RecoveryManager.BeginHidHideWhitelistLease/RecordHidHideWhitelistAddition), so a
+    // relative, drive-relative, root-relative, UNC, or non-canonical (e.g. containing "..")
+    // path is not evidence this addon produced. HidHidePathConverter.ToFullImageName() would
+    // re-resolve such a path against the *current* process, which could target a different file
+    // than the journal actually recorded -- fail closed instead of guessing.
     private static bool IsValidExecutablePath(string path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return false;
-        try { _ = Path.GetFullPath(path); return true; }
+        if (string.IsNullOrWhiteSpace(path) || path != path.Trim()) return false;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(path, @"^[A-Za-z]:\\")) return false;
+        if (!Path.IsPathFullyQualified(path)) return false;
+        try
+        {
+            var canonical = Path.GetFullPath(path);
+            return string.Equals(canonical, path, StringComparison.OrdinalIgnoreCase);
+        }
         catch { return false; }
     }
 }
