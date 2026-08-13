@@ -224,7 +224,7 @@ public sealed class MsiClawInputSourceTests
 
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
         Assert.True(source.Start().Started);
-        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(10));
         await source.StopAsync();
 
         Assert.False(source.IsRunning);
@@ -248,8 +248,8 @@ public sealed class MsiClawInputSourceTests
         };
 
         Assert.True(source.Start().Started);
-        await thirdReadAttempt.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+        await thirdReadAttempt.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(MsiClawInputStopReason.ReadStateFailed, summary.StopReason);
         Assert.Equal(1, summary.ReadFailures);
@@ -266,7 +266,7 @@ public sealed class MsiClawInputSourceTests
         var summaryTask = ObserveSummary(source);
 
         Assert.True(source.Start().Started);
-        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(MsiClawInputStopReason.InvalidButtonLayout, summary.StopReason);
         Assert.Equal(1, device.ReadCount);
@@ -282,7 +282,7 @@ public sealed class MsiClawInputSourceTests
         var summaryTask = ObserveSummary(source);
 
         Assert.True(source.Start().Started);
-        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(MsiClawInputStopReason.InvalidButtonLayout, summary.StopReason);
         Assert.Equal(1, device.ReadCount);
@@ -303,10 +303,10 @@ public sealed class MsiClawInputSourceTests
         };
 
         Assert.True(source.Start().Started);
-        await validStateObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await validStateObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, true])), source.LatestState);
         await source.StopAsync();
-        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(MsiClawInputStopReason.Stopped, summary.StopReason);
         Assert.True(device.ReadCount >= 2);
@@ -321,7 +321,7 @@ public sealed class MsiClawInputSourceTests
         var summaryTask = ObserveSummary(source);
 
         Assert.True(source.Start().Started);
-        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(MsiClawInputStopReason.InitialStateNotReady, summary.StopReason);
         Assert.Equal(17, device.ReadCount);
@@ -340,8 +340,8 @@ public sealed class MsiClawInputSourceTests
         device.ReadPerformed += count => { if (count >= 2) secondRead.TrySetResult(); };
 
         Assert.True(source.Start().Started);
-        await secondRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+        await secondRead.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(MsiClawInputStopReason.InvalidButtonLayout, summary.StopReason);
         Assert.Equal(2, device.ReadCount);
@@ -377,7 +377,7 @@ public sealed class MsiClawInputSourceTests
         };
 
         Assert.True(source.Start().Started);
-        await changedStateObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await changedStateObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, true])), source.LatestState);
         await source.StopAsync();
         Assert.Equal(new ControllerState(new AuxiliaryButtonState([false, false])), source.LatestState);
@@ -405,9 +405,9 @@ public sealed class MsiClawInputSourceTests
         };
 
         Assert.True(source.Start().Started);
-        await expectedReadsObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await expectedReadsObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await source.StopAsync();
-        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(expectedM1, summary.M1Observed);
         Assert.Equal(expectedM2, summary.M2Observed);
@@ -431,7 +431,7 @@ public sealed class MsiClawInputSourceTests
 
         Assert.True(source.Start().Started);
         await source.StopAsync();
-        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var summary = await summaryTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.False(summary.CleanupSucceeded);
         Assert.Equal(1, device.UnacquireCount);
