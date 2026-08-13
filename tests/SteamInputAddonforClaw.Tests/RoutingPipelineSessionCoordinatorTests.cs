@@ -58,8 +58,6 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         Assert.Equal(RoutingOperationalState.OverrideActive, result.State);
         var session = coordinator.ActiveSession;
         Assert.NotNull(session);
-        Assert.Equal(RoutingEnvironmentStrategyKind.StockCenterM, session.StrategyKind);
-        Assert.Equal(classification, session.Classification);
         Assert.Equal(RoutingPipelinePlan.StockCenterM, executor.ExecutedPlans.Single());
         Assert.Equal(executor.ExecutedPlans.Single(), session.Plan);
     }
@@ -264,7 +262,7 @@ public sealed class RoutingPipelineSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task ClawTweaksIsAValidFrameworkStrategy()
+    public async Task ClawTweaksEligibleUsesAllDisabledFrameworkPlan()
     {
         var executor = new FakeExecutor();
         var coordinator = Create(executor);
@@ -274,8 +272,8 @@ public sealed class RoutingPipelineSessionCoordinatorTests
         Assert.True(result.Succeeded);
         var session = coordinator.ActiveSession;
         Assert.NotNull(session);
-        Assert.Equal(RoutingEnvironmentStrategyKind.ClawTweaks, session.StrategyKind);
         Assert.Equal(RoutingPipelinePlan.AllDisabled, executor.ExecutedPlans.Single());
+        Assert.Equal(RoutingPipelinePlan.AllDisabled, session.Plan);
     }
 
     [Fact]

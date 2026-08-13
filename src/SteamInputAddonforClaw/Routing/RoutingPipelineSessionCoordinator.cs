@@ -3,17 +3,7 @@ using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Routing;
 
-internal enum RoutingEnvironmentStrategyKind
-{
-    StockCenterM = 0,
-    ClawTweaks = 1,
-    Unsupported = 2
-}
-
-internal sealed record ActiveRoutingPipelineSession(
-    RoutingEnvironmentStrategyKind StrategyKind,
-    ControllerManagerClassification Classification,
-    RoutingPipelinePlan Plan);
+internal sealed record ActiveRoutingPipelineSession(RoutingPipelinePlan Plan);
 
 internal enum RoutingOperationalState { Passive, OverrideActive }
 internal enum RoutingActionKind { None, EnterOverride, ExitOverride }
@@ -104,11 +94,11 @@ internal sealed class RoutingPipelineSessionCoordinator
         if (ActiveSession is not null)
             return Failure(RoutingActionKind.EnterOverride, "ActiveSessionAlreadyExists");
 
-        if (!TrySelectEnvironmentPlan(classification, out var environmentKind, out var plan))
+        if (!TrySelectEnvironmentPlan(classification, out var plan))
             return Failure(RoutingActionKind.EnterOverride, "UnsupportedEnvironmentStrategy");
 
-        var candidate = new ActiveRoutingPipelineSession(environmentKind, classification, plan);
-        LogPlan("Enter candidate", candidate, RoutingActionKind.EnterOverride);
+        var candidate = new ActiveRoutingPipelineSession(plan);
+        LogPlan("Enter candidate", classification, plan, RoutingActionKind.EnterOverride);
 
         RoutingPipelineExecutionResult execution;
         try
@@ -135,8 +125,8 @@ internal sealed class RoutingPipelineSessionCoordinator
 
         SetActiveSession(candidate);
         AppLog.Info("Routing.Session", "Routing session entered.",
-            ("Action", RoutingActionKind.EnterOverride), ("Result", "Active"), ("Strategy", candidate.StrategyKind),
-            ("Classification", candidate.Classification.Kind));
+            ("Action", RoutingActionKind.EnterOverride), ("Result", "Active"),
+            ("Classification", classification.Kind));
         return Success(RoutingActionKind.EnterOverride, "EnteredOverride");
     }
 
@@ -148,7 +138,7 @@ internal sealed class RoutingPipelineSessionCoordinator
             return Failure(RoutingActionKind.ExitOverride, "ActiveSessionMissing");
 
         AppLog.Info("Routing.Session", "Routing session exit started.",
-            ("Action", RoutingActionKind.ExitOverride), ("Strategy", session.StrategyKind), ("PlanSource", "FrozenSession"));
+            ("Action", RoutingActionKind.ExitOverride), ("PlanSource", "FrozenSession"));
 
         var rollback = await _pipelineExecutor.RollbackAsync(session.Plan, cancellationToken).ConfigureAwait(false);
         if (!rollback.Succeeded)
@@ -210,21 +200,17 @@ internal sealed class RoutingPipelineSessionCoordinator
 
     private static bool TrySelectEnvironmentPlan(
         ControllerManagerClassification classification,
-        out RoutingEnvironmentStrategyKind environmentKind,
         out RoutingPipelinePlan plan)
     {
         switch (classification.Kind)
         {
             case ControllerManagerKind.None:
-                environmentKind = RoutingEnvironmentStrategyKind.StockCenterM;
                 plan = RoutingPipelinePlan.StockCenterM;
                 return true;
             case ControllerManagerKind.ClawTweaks:
-                environmentKind = RoutingEnvironmentStrategyKind.ClawTweaks;
                 plan = RoutingPipelinePlan.AllDisabled;
                 return true;
             default:
-                environmentKind = RoutingEnvironmentStrategyKind.Unsupported;
                 plan = RoutingPipelinePlan.AllDisabled;
                 return false;
         }
@@ -252,12 +238,14 @@ internal sealed class RoutingPipelineSessionCoordinator
         _ => "AlreadyPassive"
     };
 
-    private static void LogPlan(string message, ActiveRoutingPipelineSession session, RoutingActionKind action)
+    private static void LogPlan(
+        string message,
+        ControllerManagerClassification classification,
+        RoutingPipelinePlan plan,
+        RoutingActionKind action)
     {
-        var plan = session.Plan;
         AppLog.Info("Routing.Session", message,
-            ("Action", action), ("Strategy", session.StrategyKind),
-            ("Classification", session.Classification.Kind), ("NativeMode", plan.NativeMode),
+            ("Action", action), ("Classification", classification.Kind), ("NativeMode", plan.NativeMode),
             ("PhysicalInput", plan.PhysicalInput), ("PhysicalIsolation", plan.PhysicalIsolation),
             ("ThirdPartyIsolation", plan.ThirdPartyIsolation), ("SteamOutput", plan.SteamOutput),
             ("XboxOutput", plan.XboxOutput), ("GameBarRouting", plan.GameBarRouting));
