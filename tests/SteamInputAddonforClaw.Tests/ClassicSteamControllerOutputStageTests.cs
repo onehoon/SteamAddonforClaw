@@ -66,6 +66,37 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task PnPTimeoutEmitsExactlyOneBoundedIdentityDiagnosticDumpNotOnePerPoll()
+    {
+        var runtime = new FakeRuntime();
+        // ~100 polling iterations at the fixed 1ms poll interval used by the Create() helper.
+        var stage = Create(runtime, new FakeEnumerator([[], []]), new FakeHidHide(), TimeSpan.FromMilliseconds(100));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        var occurrences = log.Split("ViiperIdentityDiagnosticSummary").Length - 1;
+        Assert.Equal(1, occurrences);
+    }
+
+    [Fact]
+    public async Task SuccessfulResolutionEmitsNoIdentityDiagnosticDump()
+    {
+        var runtime = new FakeRuntime();
+        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.DoesNotContain("ViiperIdentityDiagnosticSummary", log);
+        await stage.RollbackMutationAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task ExecuteCancellationAfterIntentRollsBackRecordedMutation()
     {
         var runtime = new FakeRuntime { CancelAfterStart = true };

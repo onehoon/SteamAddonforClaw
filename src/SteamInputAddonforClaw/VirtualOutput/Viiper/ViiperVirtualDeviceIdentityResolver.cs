@@ -11,6 +11,10 @@ internal sealed record ViiperVirtualDeviceResolution(ViiperVirtualDeviceResoluti
 
 internal sealed class ViiperVirtualDeviceIdentityResolver(ViiperVirtualDeviceIdentityPolicy policy)
 {
+    // Exposed so ViiperVirtualDeviceIdentityDiagnostics can re-evaluate the same policy the
+    // resolver used, without duplicating a second policy instance.
+    internal ViiperVirtualDeviceIdentityPolicy Policy => policy;
+
     internal ViiperVirtualDeviceResolution Resolve(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlyList<ControllerDeviceInfo> after)
     {
         var previous = before.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
