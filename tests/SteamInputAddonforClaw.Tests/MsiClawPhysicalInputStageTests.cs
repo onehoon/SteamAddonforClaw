@@ -72,6 +72,21 @@ public sealed class MsiClawPhysicalInputStageTests
         Assert.Equal(0, input.StopCount);
     }
 
+    [Fact]
+    public async Task Execute_RequiresFirstValidStateBeforeItSucceedsOrPublishesIdentity()
+    {
+        var input = new FakeInput { FirstValidStateObserved = false };
+        var stage = new MsiClawPhysicalInputStage(() => new FakeEnumerator([Device()]), input);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("FirstValidStateNotObserved", result.Reason);
+        Assert.Equal(1, input.StopCount);
+        Assert.Null(stage.CurrentIdentity);
+    }
+
     private static DirectInputDeviceDescriptor Device() => new(
         Guid.NewGuid(), Guid.NewGuid(), "test", 0x0DB0, 0x1902,
         "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST", "HID\\INSTANCE", "USB\\MSI_ROOT", 0x0001, 0x0005, 17, 6, "Verified");
@@ -97,6 +112,7 @@ public sealed class MsiClawPhysicalInputStageTests
     {
         public event EventHandler<ControllerState>? StateChanged = delegate { };
         public bool IsRunning { get; set; }
+        public bool FirstValidStateObserved { get; set; } = true;
         public int StartPreparedCount { get; private set; }
         public int StopCount { get; private set; }
         public DirectInputDeviceDescriptor? PreparedDescriptor { get; private set; }
@@ -107,6 +123,7 @@ public sealed class MsiClawPhysicalInputStageTests
             IsRunning = true;
             return new(MsiClawInputStartStatus.Started, "Started");
         }
+        public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken) => Task.FromResult(FirstValidStateObserved);
         public Task StopAsync() { StopCount++; IsRunning = false; return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

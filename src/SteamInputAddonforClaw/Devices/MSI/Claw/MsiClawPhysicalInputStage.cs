@@ -75,26 +75,43 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
         }
     }
 
-    public ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
+    public async ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         DirectInputDeviceDescriptor? descriptor;
         lock (_sync) descriptor = _preparedDescriptor;
         if (descriptor is null)
-            return ValueTask.FromResult(RoutingStageOperationResult.Failure("PhysicalInputNotPrepared"));
+            return RoutingStageOperationResult.Failure("PhysicalInputNotPrepared");
 
         var result = _inputSource.StartPrepared(descriptor);
         if (!result.Started)
-            return ValueTask.FromResult(RoutingStageOperationResult.Failure(result.Status.ToString()));
+            return RoutingStageOperationResult.Failure(result.Status.ToString());
         if (!_inputSource.IsRunning)
-            return ValueTask.FromResult(RoutingStageOperationResult.Failure("InputSourceDidNotStart"));
+            return RoutingStageOperationResult.Failure("InputSourceDidNotStart");
+        bool ready;
+        try
+        {
+            ready = await _inputSource.WaitForFirstValidStateAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            await _inputSource.StopAsync().ConfigureAwait(false);
+            throw;
+        }
+        if (!ready)
+        {
+            await _inputSource.StopAsync().ConfigureAwait(false);
+            return RoutingStageOperationResult.Failure("FirstValidStateNotObserved");
+        }
+        if (!_inputSource.IsRunning)
+            return RoutingStageOperationResult.Failure("InputSourceStoppedBeforeReady");
         lock (_sync)
         {
             _ownsInputSession = true;
             _currentIdentity = new(descriptor.InstanceGuid, descriptor.DevicePath!, descriptor.PnpInstanceId!, descriptor.PhysicalIdentity!);
         }
         AppLog.Debug("PhysicalInput", "PhysicalInput selected", ("InstanceGuid", descriptor.InstanceGuid), ("DevicePath", descriptor.DevicePath), ("PnpInstanceId", descriptor.PnpInstanceId), ("PhysicalIdentity", descriptor.PhysicalIdentity));
-        return ValueTask.FromResult(RoutingStageOperationResult.Success("Started"));
+        return RoutingStageOperationResult.Success("Started");
     }
 
     public async ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)

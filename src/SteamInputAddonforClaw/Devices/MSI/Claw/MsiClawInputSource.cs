@@ -11,6 +11,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
     private static readonly int M1AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M1);
     private static readonly int M2AuxiliaryIndex = MsiClawControls.Catalog.GetIndex(MsiClawControls.M2);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(8);
+    private const int MaximumKnownInvalidInitialStates = 16;
     private readonly Func<IDirectInputDeviceEnumerator> _enumeratorFactory;
     private readonly Lock _sync = new();
     private InputSession? _currentSession;
@@ -201,6 +202,13 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         }
     }
 
+    public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken)
+    {
+        InputSession? session;
+        lock (_sync) session = _currentSession;
+        return session is null ? Task.FromResult(false) : session.FirstValidState.Task.WaitAsync(cancellationToken);
+    }
+
     public async ValueTask DisposeAsync()
     {
         lock (_sync)
@@ -248,6 +256,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         var cleanupSucceeded = true;
         var stopReason = MsiClawInputStopReason.Stopped;
         var firstReadLogged = false;
+        var invalidInitialStateCount = 0;
 
         try
         {
@@ -267,10 +276,33 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                     break;
                 }
 
-                if (!TryMapState(input, out var current))
+                if (input.Buttons.Count < MsiClawHardware.RequiredDirectInputButtonCount)
                 {
                     stopReason = MsiClawInputStopReason.InvalidButtonLayout;
                     AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", "InsufficientButtonCount"));
+                    break;
+                }
+
+                if (!firstReadLogged && MsiClawControllerStateMapper.IsKnownInvalidInitialState(input))
+                {
+                    invalidInitialStateCount++;
+                    if (invalidInitialStateCount <= MaximumKnownInvalidInitialStates)
+                    {
+                        if (invalidInitialStateCount == 1)
+                            AppLog.Debug("MsiInput", "Known invalid DirectInput initial state was ignored.", ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("MaximumInitialStates", MaximumKnownInvalidInitialStates), ("Action", "AwaitNextState"), ("Reason", "KnownInvalidInitialState"));
+                        await Task.Delay(PollInterval, session.Cancellation.Token).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    stopReason = MsiClawInputStopReason.InitialStateNotReady;
+                    AppLog.Warn("MsiInput", "Known invalid DirectInput initial state persisted beyond the startup allowance.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("MaximumInitialStates", MaximumKnownInvalidInitialStates), ("Action", "StopDiagnostic"), ("Reason", "InitialStateNotReady"));
+                    break;
+                }
+
+                if (!TryMapState(input, out var current))
+                {
+                    stopReason = MsiClawInputStopReason.InvalidButtonLayout;
+                    AppLog.Warn("MsiInput", "DirectInput state layout is invalid.", null, ("TestSession", session.Id), ("ButtonCount", input.Buttons.Count), ("RequiredButtonCount", MsiClawHardware.RequiredDirectInputButtonCount), ("Action", "StopDiagnostic"), ("Reason", "KnownInvalidState"));
                     break;
                 }
 
@@ -281,6 +313,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                 if (!firstReadLogged)
                 {
                     firstReadLogged = true;
+                    session.FirstValidState.TrySetResult(true);
                     AppLog.Debug("RoutingTrace", "Physical input first read succeeded.", ("Event", "PhysicalInputFirstRead"), ("RoutingExecution", (object?)RoutingTraceContext.Current), ("TestSession", session.Id), ("AcquireElapsedMs", session.AcquireDurationMs), ("FirstReadAfterAcquireMs", ElapsedBetween(session.AcquiredAt, successfulReadAt)), ("SessionAgeMs", Elapsed(session.StartedAt)));
                 }
 
@@ -328,6 +361,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         }
         finally
         {
+            session.FirstValidState.TrySetResult(false);
             Volatile.Write(ref _latestState, new StateBox(NeutralState()));
             cleanupSucceeded = CleanupSession(session);
             var summary = new MsiClawInputTestSummary(session.Id, stopwatch.ElapsedMilliseconds, m1Observed, m2Observed, independent, readFailures, cleanupSucceeded, stopReason);
@@ -435,6 +469,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
         public long AcquireDurationMs { get; set; }
         public long? LastSuccessfulReadAt { get; set; }
         public int SuccessfulReadCount { get; set; }
+        public TaskCompletionSource<bool> FirstValidState { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
 }
