@@ -306,6 +306,8 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                     break;
                 }
 
+                ControllerStateDiagnostics.LogPovIfChanged(session.Id, input.PointOfViewControllers[0]);
+
                 var successfulReadAt = Stopwatch.GetTimestamp();
                 Volatile.Write(ref _latestState, new StateBox(current));
                 session.SuccessfulReadCount++;
