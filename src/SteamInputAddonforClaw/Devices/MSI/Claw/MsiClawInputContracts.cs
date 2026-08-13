@@ -31,13 +31,14 @@ public sealed record MsiClawInputTestSummary(
     bool CleanupSucceeded,
     MsiClawInputStopReason StopReason);
 
-public enum MsiClawInputStopReason { Stopped, ReadStateFailed, InvalidButtonLayout }
+public enum MsiClawInputStopReason { Stopped, ReadStateFailed, InvalidButtonLayout, InitialStateNotReady }
 
 internal interface IMsiClawPreparedInputSource : IAsyncDisposable
 {
     event EventHandler<ControllerState>? StateChanged;
     bool IsRunning { get; }
     MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor);
+    Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken);
     Task StopAsync();
 }
 

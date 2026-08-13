@@ -312,6 +312,7 @@ public sealed class M1M2DiagnosticCoordinatorTests
         public int StartCount { get; private set; }
         public MsiClawInputStartResult Start() { StartCount++; IsRunning = true; events?.Add("Start"); return new(MsiClawInputStartStatus.Started, "Started"); }
         public MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor) { IsRunning = true; events?.Add("StartPrepared"); return new(MsiClawInputStartStatus.Started, "Started"); }
+        public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken) => Task.FromResult(true);
         public Task StopAsync() { IsRunning = false; TestCompleted?.Invoke(this, new(1, 0, false, false, false, 0, true, MsiClawInputStopReason.Stopped)); return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
