@@ -7,122 +7,93 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ViiperVirtualDeviceIdentityDiagnosticsTests
 {
     private static readonly ViiperVirtualDeviceIdentityPolicy Policy = new();
+    private const string UsbIpHostInstanceId = "ROOT\\USB\\0000";
+    private const string UsbIpHostService = "usbip2_ude";
+    private const string UsbIpHostHardwareId = "ROOT\\USBIP_WIN2\\UDE";
+    private const string RootHubInstanceId = "USB\\ROOT_HUB30\\1&2B53A856&2&0";
 
     [Fact]
-    public void NewGordonNodeFailingOnlyTopologyIsClassifiedButNotResolved()
+    public void RealObservedTopologyReportsHasUsbIpWin2AncestorAndNoRejection()
     {
-        var gordon = Device("USB\\VID_28DE&PID_1102\\NEW", vendorId: 0x28DE, productId: 0x1102, service: "unrelated");
+        var host = UsbIpHost();
+        var gordon = Gordon("USB\\VID_28DE&PID_1102\\NEW", Guid.NewGuid());
         var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
-        var resolution = resolver.Resolve([], [gordon]);
-
-        Assert.Equal(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, resolution.Status);
-        Assert.Equal("VirtualDeviceDidNotAppear", resolution.Reason);
-
-        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([], [gordon], Policy, resolution);
-        var device = Assert.Single(evidence.Devices);
-        Assert.True(device.IsNewSinceBefore);
-        Assert.True(device.VidMatch);
-        Assert.True(device.PidMatch);
-        Assert.True(device.VidPidMatchesGordon);
-        Assert.False(device.HasCurrentViiperTopologyEvidence);
-        Assert.False(device.CurrentPolicyMatches);
-        Assert.Equal(ViiperVirtualDeviceIdentityDiagnostics.MissingViiperTopologyEvidenceRejection, device.Rejection);
-    }
-
-    [Fact]
-    public void GordonLeafAndUsbipParentAreBothIncludedWithRelationshipVisible()
-    {
-        // The parent carries no USBIP/VIIPER token anywhere and is pre-existing, so it does not
-        // independently match categories A/B/C. It must still show up purely because it is an
-        // ancestor of the interesting leaf (category D) -- isolating that pull-in path.
-        var parent = Device("ROOT\\GENERIC\\PARENT001", vendorId: null, productId: null, service: null);
-        var leaf = Device("USB\\VID_28DE&PID_1102\\LEAF", vendorId: 0x28DE, productId: 0x1102, service: "unrelated", parentInstanceId: parent.InstanceId, ancestorInstanceIds: [parent.InstanceId]);
-        var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
-        var resolution = resolver.Resolve([parent], [leaf, parent]);
-
-        Assert.Equal(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, resolution.Status);
-
-        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([parent], [leaf, parent], Policy, resolution);
-        Assert.Equal(2, evidence.Devices.Count);
-        var leafEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == leaf.InstanceId);
-        var parentEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == parent.InstanceId);
-        Assert.Contains($"ChildOf:{parent.InstanceId}", leafEvidence.RelatedInterestingNodes);
-        Assert.Contains($"ParentOf:{leaf.InstanceId}", parentEvidence.RelatedInterestingNodes);
-        Assert.Contains($"DescendantOf:{parent.InstanceId}", leafEvidence.RelatedInterestingNodes);
-        Assert.DoesNotContain(leafEvidence.RelatedInterestingNodes, r => r.StartsWith("AncestorOf:", StringComparison.Ordinal));
-        Assert.False(leafEvidence.CurrentPolicyMatches);
-    }
-
-    [Fact]
-    public void PreExistingUsbipNodeSharingContainerIdWithNewGordonIsIncludedViaSameContainer()
-    {
-        // The USBIP node is pre-existing, has no VID/PID, and has no parent/ancestor relationship
-        // to the new Gordon leaf -- the only link is a shared ContainerId. It DOES carry the same
-        // narrow topology token the production policy checks (Service), so it must be pulled into
-        // the interesting set independently of the new-Gordon leaf, not merely alongside it.
-        var container = Guid.NewGuid();
-        var usbipNode = Device("ROOT\\USB\\HOST_CONTROLLER", vendorId: null, productId: null, service: "usbipw2co");
-        usbipNode = usbipNode with { ContainerId = container };
-        var gordon = Device("USB\\VID_28DE&PID_1102\\NEW", vendorId: 0x28DE, productId: 0x1102, service: "unrelated");
-        gordon = gordon with { ContainerId = container };
-
-        var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
-        var resolution = resolver.Resolve([usbipNode], [usbipNode, gordon]);
-
-        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([usbipNode], [usbipNode, gordon], Policy, resolution);
-        Assert.Equal(2, evidence.Devices.Count);
-        var usbipEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == usbipNode.InstanceId);
-        var gordonEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == gordon.InstanceId);
-        Assert.True(usbipEvidence.HasCurrentViiperTopologyEvidence);
-        Assert.False(usbipEvidence.IsNewSinceBefore);
-        Assert.Contains($"SameContainerAs:{gordon.InstanceId}", usbipEvidence.RelatedInterestingNodes);
-        Assert.Contains($"SameContainerAs:{usbipNode.InstanceId}", gordonEvidence.RelatedInterestingNodes);
-    }
-
-    [Fact]
-    public void FullyMatchingCandidateReportsNoRejectionAndResolverStillResolves()
-    {
-        var gordon = Device("USB\\VID_28DE&PID_1102\\OK", vendorId: 0x28DE, productId: 0x1102, service: "usbip");
-        var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
-        var resolution = resolver.Resolve([], [gordon]);
+        var resolution = resolver.Resolve([host], [host, gordon]);
 
         Assert.True(resolution.Succeeded);
 
+        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([host], [host, gordon], Policy, resolution);
+        var gordonEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == gordon.InstanceId);
+        Assert.True(gordonEvidence.HasUsbIpWin2Ancestor);
+        Assert.Contains(UsbIpHostInstanceId, gordonEvidence.MatchingUsbIpWin2AncestorInstanceIds);
+        Assert.True(gordonEvidence.CurrentPolicyMatches);
+        Assert.Equal(ViiperVirtualDeviceIdentityDiagnostics.NoneRejection, gordonEvidence.Rejection);
+    }
+
+    [Fact]
+    public void NewGordonWithoutRecognizedUsbIpWin2AncestorReportsMissingAncestorRejection()
+    {
+        var gordon = Gordon("USB\\VID_28DE&PID_1102\\PHYSICAL", Guid.NewGuid(), ancestorInstanceIds: [RootHubInstanceId]);
+        var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
+        var resolution = resolver.Resolve([], [gordon]);
+
+        Assert.Equal(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, resolution.Status);
+
         var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([], [gordon], Policy, resolution);
-        var device = Assert.Single(evidence.Devices);
-        Assert.True(device.CurrentPolicyMatches);
-        Assert.Equal(ViiperVirtualDeviceIdentityDiagnostics.NoneRejection, device.Rejection);
+        var gordonEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == gordon.InstanceId);
+        Assert.True(gordonEvidence.IsNewSinceBefore);
+        Assert.True(gordonEvidence.VidPidMatchesGordon);
+        Assert.False(gordonEvidence.HasUsbIpWin2Ancestor);
+        Assert.False(gordonEvidence.CurrentPolicyMatches);
+        Assert.Equal(ViiperVirtualDeviceIdentityDiagnostics.MissingUsbIpWin2AncestorRejection, gordonEvidence.Rejection);
+    }
+
+    [Fact]
+    public void UsbIpHostAncestorRecordItselfIsVisibleInDiagnostics()
+    {
+        var host = UsbIpHost();
+        var gordon = Gordon("USB\\VID_28DE&PID_1102\\NEW", Guid.NewGuid());
+        var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
+        var resolution = resolver.Resolve([host], [host, gordon]);
+
+        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([host], [host, gordon], Policy, resolution);
+        var hostEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == UsbIpHostInstanceId);
+        Assert.True(hostEvidence.IsUsbIpWin2HostNode);
+        Assert.Contains($"DescendantOf:{UsbIpHostInstanceId}", Assert.Single(evidence.Devices, d => d.Device.InstanceId == gordon.InstanceId).RelatedInterestingNodes);
     }
 
     [Fact]
     public void PreExistingGordonIsNotClassifiedAsNew()
     {
-        var gordon = Device("USB\\VID_28DE&PID_1102\\OLD", vendorId: 0x28DE, productId: 0x1102, service: "usbip");
+        var host = UsbIpHost();
+        var gordon = Gordon("USB\\VID_28DE&PID_1102\\OLD", Guid.NewGuid());
         var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
-        var resolution = resolver.Resolve([gordon], [gordon]);
+        var resolution = resolver.Resolve([host, gordon], [host, gordon]);
 
         Assert.Equal(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, resolution.Status);
 
-        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([gordon], [gordon], Policy, resolution);
-        var device = Assert.Single(evidence.Devices);
-        Assert.False(device.IsNewSinceBefore);
-        Assert.Equal(ViiperVirtualDeviceIdentityDiagnostics.PreExistingInstanceRejection, device.Rejection);
+        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([host, gordon], [host, gordon], Policy, resolution);
+        var gordonEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == gordon.InstanceId);
+        Assert.False(gordonEvidence.IsNewSinceBefore);
+        Assert.Equal(ViiperVirtualDeviceIdentityDiagnostics.PreExistingInstanceRejection, gordonEvidence.Rejection);
     }
 
     [Fact]
-    public void MultipleNewGordonNodesAreEachReportedOnceWithStableKeys()
+    public void AmbiguousValidGroupsAreBothRepresentedAndPolicyMatching()
     {
-        var first = Device("USB\\VID_28DE&PID_1102\\ONE", vendorId: 0x28DE, productId: 0x1102, service: "usbip");
-        var second = Device("USB\\VID_28DE&PID_1102\\TWO", vendorId: 0x28DE, productId: 0x1102, service: "usbip");
+        var host = UsbIpHost();
+        var first = Gordon("USB\\VID_28DE&PID_1102\\ONE", Guid.NewGuid());
+        var second = Gordon("USB\\VID_28DE&PID_1102\\TWO", Guid.NewGuid());
         var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
-        var resolution = resolver.Resolve([], [first, second]);
+        var resolution = resolver.Resolve([host], [host, first, second]);
 
         Assert.Equal(ViiperVirtualDeviceResolutionStatus.Ambiguous, resolution.Status);
 
-        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([], [first, second], Policy, resolution);
-        Assert.Equal(2, evidence.Devices.Count);
-        Assert.Equal(2, evidence.Devices.Select(d => d.Device.InstanceId).Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        Assert.All(evidence.Devices, d => Assert.True(d.CurrentPolicyMatches));
+        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([host], [host, first, second], Policy, resolution);
+        var firstEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == first.InstanceId);
+        var secondEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == second.InstanceId);
+        Assert.True(firstEvidence.CurrentPolicyMatches);
+        Assert.True(secondEvidence.CurrentPolicyMatches);
     }
 
     [Fact]
@@ -150,30 +121,58 @@ public sealed class ViiperVirtualDeviceIdentityDiagnosticsTests
 
         var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([], [device], Policy, resolution);
         var entry = Assert.Single(evidence.Devices);
-        Assert.Empty(entry.BroaderTopologyEvidenceFields);
+        Assert.Empty(entry.MatchingUsbIpWin2AncestorInstanceIds);
         Assert.Empty(entry.RelatedInterestingNodes);
     }
 
     [Fact]
     public void SameInstanceWithDifferentCasingIsNotClassifiedAsNew()
     {
-        var before = Device("USB\\VID_28DE&PID_1102\\CASED", vendorId: 0x28DE, productId: 0x1102, service: "usbip");
-        var after = Device("usb\\vid_28de&pid_1102\\cased", vendorId: 0x28DE, productId: 0x1102, service: "usbip");
+        var host = UsbIpHost();
+        var before = Gordon("USB\\VID_28DE&PID_1102\\CASED", Guid.NewGuid());
+        var after = before with { InstanceId = before.InstanceId.ToLowerInvariant() };
         var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
-        var resolution = resolver.Resolve([before], [after]);
+        var resolution = resolver.Resolve([host, before], [host, after]);
 
         Assert.Equal(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, resolution.Status);
 
-        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([before], [after], Policy, resolution);
-        var entry = Assert.Single(evidence.Devices);
+        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([host, before], [host, after], Policy, resolution);
+        var entry = Assert.Single(evidence.Devices, d => d.Device.InstanceId == after.InstanceId);
         Assert.False(entry.IsNewSinceBefore);
         Assert.Equal(ViiperVirtualDeviceIdentityDiagnostics.PreExistingInstanceRejection, entry.Rejection);
     }
 
     [Fact]
+    public void PreExistingUsbipNodeSharingContainerIdWithNewGordonIsIncludedViaSameContainer()
+    {
+        // The USBIP node is pre-existing and has no parent/ancestor relationship to the new
+        // Gordon leaf -- the only link is a shared ContainerId. It carries the exact usbip-win2
+        // host signature, so it must be pulled into the interesting set independently, not merely
+        // alongside the Gordon leaf.
+        var container = Guid.NewGuid();
+        var usbipNode = UsbIpHost() with { ContainerId = container };
+        var gordon = Gordon("USB\\VID_28DE&PID_1102\\NEW", container, ancestorInstanceIds: [RootHubInstanceId]);
+
+        var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
+        var resolution = resolver.Resolve([usbipNode], [usbipNode, gordon]);
+
+        var evidence = ViiperVirtualDeviceIdentityDiagnostics.Build([usbipNode], [usbipNode, gordon], Policy, resolution);
+        Assert.Equal(2, evidence.Devices.Count);
+        var usbipEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == usbipNode.InstanceId);
+        var gordonEvidence = Assert.Single(evidence.Devices, d => d.Device.InstanceId == gordon.InstanceId);
+        Assert.True(usbipEvidence.IsUsbIpWin2HostNode);
+        Assert.False(usbipEvidence.IsNewSinceBefore);
+        Assert.Contains($"SameContainerAs:{gordon.InstanceId}", usbipEvidence.RelatedInterestingNodes);
+        Assert.Contains($"SameContainerAs:{usbipNode.InstanceId}", gordonEvidence.RelatedInterestingNodes);
+        // Ancestor points at the root hub, not directly at the usbip node, so ownership is still
+        // rejected here -- SameContainerAs is diagnostic evidence only, never a production rule.
+        Assert.False(gordonEvidence.CurrentPolicyMatches);
+    }
+
+    [Fact]
     public void LogOnFailureDoesNotThrowForFailureOrSuccessResolutions()
     {
-        var gordon = Device("USB\\VID_28DE&PID_1102\\LOG", vendorId: 0x28DE, productId: 0x1102, service: "unrelated");
+        var gordon = Gordon("USB\\VID_28DE&PID_1102\\LOG", Guid.NewGuid(), ancestorInstanceIds: [RootHubInstanceId]);
         var resolver = new ViiperVirtualDeviceIdentityResolver(Policy);
         var resolution = resolver.Resolve([], [gordon]);
 
@@ -181,12 +180,9 @@ public sealed class ViiperVirtualDeviceIdentityDiagnosticsTests
         Assert.Null(exception);
     }
 
-    private static ControllerDeviceInfo Device(
-        string instanceId,
-        ushort? vendorId,
-        ushort? productId,
-        string? service,
-        string? parentInstanceId = null,
-        IReadOnlyList<string>? ancestorInstanceIds = null) =>
-        new(instanceId, null, parentInstanceId, ancestorInstanceIds ?? [], null, [], [], "HIDClass", null, service, vendorId, productId, true);
+    private static ControllerDeviceInfo UsbIpHost() =>
+        new(UsbIpHostInstanceId, null, null, [], "ROOT", [UsbIpHostHardwareId], [], "System", null, UsbIpHostService, null, null, true);
+
+    private static ControllerDeviceInfo Gordon(string instanceId, Guid container, IReadOnlyList<string>? ancestorInstanceIds = null) =>
+        new(instanceId, container, RootHubInstanceId, ancestorInstanceIds ?? [RootHubInstanceId, UsbIpHostInstanceId], "USB", [], [], "HIDClass", null, null, 0x28DE, 0x1102, true);
 }

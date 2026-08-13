@@ -19,7 +19,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task SuccessfulCreationResolvesPnPAndSendsOneNeutralReport()
     {
         var runtime = new FakeRuntime();
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide());
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
         Assert.True(result.Succeeded, result.Reason);
@@ -31,7 +31,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task HidHideInspectionFailureRollsBackAndLeavesNoOwnedRuntimeDevice()
     {
         var runtime = new FakeRuntime();
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide { Inspection = new(HidHideInspectionStatus.ConfigurationUnavailable, new HashSet<string>()) });
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide { Inspection = new(HidHideInspectionStatus.ConfigurationUnavailable, new HashSet<string>()) });
         await stage.PrepareMutationAsync(CancellationToken.None);
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
         Assert.False(result.Succeeded);
@@ -43,7 +43,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     {
         var runtime = new FakeRuntime();
         var hidHide = new FakeHidHide { Inspection = new(HidHideInspectionStatus.Available, new HashSet<string>(), ["owned"]) };
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), hidHide);
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), hidHide);
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
@@ -85,7 +85,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task SuccessfulResolutionEmitsNoIdentityDiagnosticDump()
     {
         var runtime = new FakeRuntime();
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide());
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
@@ -175,7 +175,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task SuspendQuiescesOutputAndResumeRequiresFreshRecreation()
     {
         var runtime = new FakeRuntime();
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide());
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True(await stage.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
@@ -187,7 +187,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task BusCleanupFailureDoesNotBlockVerifiedDeviceMutationCompletion()
     {
         var runtime = new FakeRuntime { BusRemoved = false };
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide());
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -215,7 +215,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     {
         var runtime = new FakeRuntime();
         var ticks = new ManualTicks(); runtime.BlockInput = true;
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         ticks.Tick(); await runtime.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -231,7 +231,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task NeutralRejectionDoesNotStartPublisher()
     {
         var runtime = new FakeRuntime { NeutralAccepted = false };
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
         await stage.PrepareMutationAsync(CancellationToken.None);
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
         Assert.False(result.Succeeded);
@@ -242,7 +242,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task NeutralRejectionRetainsFailureOperationTimingAndLogsOnce()
     {
         var runtime = new FakeRuntime { NeutralAccepted = false };
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
@@ -259,7 +259,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task RemoveDeviceFailureLogsRollbackTimingAndPreservesFailureResult()
     {
         var runtime = new FakeRuntime { Removal = new(false, false) };
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -277,7 +277,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task LivePublisherFaultRequestsOneFailClosedNotification()
     {
         var runtime = new FakeRuntime { InputAccepted = false };
-        var stage = Create(runtime, new FakeEnumerator([[], [Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var stage = Create(runtime, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
         var fault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         stage.SetOutputFaultHandler(() => { fault.TrySetResult(); return ValueTask.CompletedTask; });
         await stage.PrepareMutationAsync(CancellationToken.None);
@@ -297,7 +297,9 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         return new(runtime, enumerator, new(new ViiperVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks);
     }
 
-    private static ControllerDeviceInfo Device(string id) => new(id, Guid.Empty, null, [], "VIIPER", ["HID\\VID_28DE&PID_1102"], [], "HIDClass", null, "VIIPER", 0x28DE, 0x1102, true);
+    private const string UsbIpHostInstanceId = "ROOT\\USB\\0000";
+    private static ControllerDeviceInfo UsbIpHost() => new(UsbIpHostInstanceId, null, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "System", null, "usbip2_ude", null, null, true);
+    private static ControllerDeviceInfo Device(string id) => new(id, Guid.Empty, null, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1102"], [], "HIDClass", null, null, 0x28DE, 0x1102, true);
     public ClassicSteamControllerOutputStageTests()
     {
         Directory.CreateDirectory(_directory);

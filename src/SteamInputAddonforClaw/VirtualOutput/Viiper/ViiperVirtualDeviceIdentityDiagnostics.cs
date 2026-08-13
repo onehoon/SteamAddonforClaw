@@ -21,10 +21,10 @@ internal sealed record ViiperVirtualDeviceIdentityDeviceEvidence(
     bool VidMatch,
     bool PidMatch,
     bool VidPidMatchesGordon,
-    bool HasCurrentViiperTopologyEvidence,
-    bool InstanceContainsCurrentPolicyToken,
-    bool AncestorContainsCurrentPolicyToken,
-    bool ServiceContainsCurrentPolicyToken,
+    bool HasUsbIpWin2Ancestor,
+    IReadOnlyList<string> MatchingUsbIpWin2AncestorInstanceIds,
+    bool IsUsbIpWin2HostNode,
+    bool HasBroadUsbIpOrViiperTextEvidence,
     IReadOnlyList<string> BroaderTopologyEvidenceFields,
     bool CurrentPolicyMatches,
     string LogicalIdentityKey,
@@ -48,7 +48,7 @@ internal static class ViiperVirtualDeviceIdentityDiagnostics
     internal const string PreExistingInstanceRejection = "PreExistingInstance";
     internal const string VendorMismatchRejection = "VendorMismatch";
     internal const string ProductMismatchRejection = "ProductMismatch";
-    internal const string MissingViiperTopologyEvidenceRejection = "MissingViiperTopologyEvidence";
+    internal const string MissingUsbIpWin2AncestorRejection = "MissingUsbIpWin2Ancestor";
 
     internal static ViiperVirtualDeviceIdentityEvidence Build(
         IReadOnlyList<ControllerDeviceInfo> before,
@@ -61,24 +61,26 @@ internal static class ViiperVirtualDeviceIdentityDiagnostics
         bool VidMatch(ControllerDeviceInfo device) => device.VendorId == ViiperVirtualDeviceIdentityPolicy.VendorId;
         bool PidMatch(ControllerDeviceInfo device) => device.ProductId == ViiperVirtualDeviceIdentityPolicy.ProductId;
 
-        var byInstanceId = new Dictionary<string, ControllerDeviceInfo>(StringComparer.OrdinalIgnoreCase);
-        foreach (var device in after) byInstanceId.TryAdd(device.InstanceId, device);
+        var byInstanceId = ViiperVirtualDeviceIdentityPolicy.BuildInstanceIndex(after);
 
-        // A: new since `before`. B: Gordon VID/PID regardless of newness. C: any broader
-        // USBIP/VIIPER token evidence, even outside the narrow fields the production policy checks.
+        // A: new since `before`. B: Gordon VID/PID regardless of newness. C: the usbip-win2 host
+        // node itself, or any device with broader USBIP/VIIPER text evidence (diagnostic-only,
+        // wider than the narrow fields the production policy checks).
         var coreInteresting = new List<ControllerDeviceInfo>();
         var coreSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var device in after)
         {
             if (!coreSeen.Add(device.InstanceId)) continue;
             if (IsNew(device) || (VidMatch(device) && PidMatch(device))
-                || ViiperVirtualDeviceIdentityPolicy.HasCurrentTopologyEvidence(device)
+                || ViiperVirtualDeviceIdentityPolicy.IsUsbIpWin2HostNode(device)
+                || ViiperVirtualDeviceIdentityPolicy.HasBroadUsbIpOrViiperTextEvidence(device)
                 || FindBroaderTopologyEvidenceFields(device).Count > 0)
                 coreInteresting.Add(device);
         }
 
         // D: pull in parent/ancestor records for the interesting set from the same current
-        // snapshot, since USBIP/VIIPER evidence may live on a related node rather than the leaf.
+        // snapshot, since the usbip-win2 host evidence lives on a related node rather than the
+        // Gordon leaf itself.
         var interestingIds = new HashSet<string>(coreInteresting.Select(device => device.InstanceId), StringComparer.OrdinalIgnoreCase);
         var interesting = new List<ControllerDeviceInfo>(coreInteresting);
         foreach (var device in coreInteresting)
@@ -90,11 +92,11 @@ internal static class ViiperVirtualDeviceIdentityDiagnostics
             }
         }
 
-        var deviceEvidence = interesting.Select(device => BuildDeviceEvidence(device, interesting, previousIds)).ToArray();
+        var deviceEvidence = interesting.Select(device => BuildDeviceEvidence(device, interesting, previousIds, byInstanceId)).ToArray();
 
-        var policyDelta = after.Where(device => policy.IsMatchingCandidate(device) && IsNew(device)).ToArray();
+        var policyDelta = after.Where(device => policy.IsMatchingCandidate(device, byInstanceId) && IsNew(device)).ToArray();
         var logicalGroupCount = policyDelta.GroupBy(ControllerLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase).Count();
-        var topologyEvidenceCount = after.Count(ViiperVirtualDeviceIdentityPolicy.HasCurrentTopologyEvidence);
+        var topologyEvidenceCount = after.Count(device => ViiperVirtualDeviceIdentityPolicy.HasUsbIpWin2Ancestor(device, byInstanceId));
 
         var summary = new ViiperVirtualDeviceIdentitySummary(
             resolution.Reason,
@@ -113,22 +115,25 @@ internal static class ViiperVirtualDeviceIdentityDiagnostics
     private static ViiperVirtualDeviceIdentityDeviceEvidence BuildDeviceEvidence(
         ControllerDeviceInfo device,
         IReadOnlyList<ControllerDeviceInfo> interesting,
-        IReadOnlySet<string> previousIds)
+        IReadOnlySet<string> previousIds,
+        IReadOnlyDictionary<string, ControllerDeviceInfo> currentByInstanceId)
     {
         var isNew = !previousIds.Contains(device.InstanceId);
         var vidMatch = device.VendorId == ViiperVirtualDeviceIdentityPolicy.VendorId;
         var pidMatch = device.ProductId == ViiperVirtualDeviceIdentityPolicy.ProductId;
-        var hasCurrentTopologyEvidence = ViiperVirtualDeviceIdentityPolicy.HasCurrentTopologyEvidence(device);
-        var instanceContains = ContainsToken(device.InstanceId);
-        var ancestorContains = device.AncestorInstanceIds.Any(ContainsToken);
-        var serviceContains = ContainsToken(device.Service);
+        var matchingAncestors = device.AncestorInstanceIds
+            .Where(ancestorId => currentByInstanceId.TryGetValue(ancestorId, out var ancestor) && ViiperVirtualDeviceIdentityPolicy.IsUsbIpWin2HostNode(ancestor))
+            .ToArray();
+        var hasUsbIpWin2Ancestor = matchingAncestors.Length > 0;
+        var isUsbIpWin2HostNode = ViiperVirtualDeviceIdentityPolicy.IsUsbIpWin2HostNode(device);
+        var hasBroadTextEvidence = ViiperVirtualDeviceIdentityPolicy.HasBroadUsbIpOrViiperTextEvidence(device);
         var broaderFields = FindBroaderTopologyEvidenceFields(device);
-        var policyMatches = vidMatch && pidMatch && hasCurrentTopologyEvidence;
+        var policyMatches = vidMatch && pidMatch && hasUsbIpWin2Ancestor;
         var rejection =
             !isNew ? PreExistingInstanceRejection :
             !vidMatch ? VendorMismatchRejection :
             !pidMatch ? ProductMismatchRejection :
-            !hasCurrentTopologyEvidence ? MissingViiperTopologyEvidenceRejection :
+            !hasUsbIpWin2Ancestor ? MissingUsbIpWin2AncestorRejection :
             NoneRejection;
 
         var related = new List<string>();
@@ -153,10 +158,10 @@ internal static class ViiperVirtualDeviceIdentityDiagnostics
             vidMatch,
             pidMatch,
             vidMatch && pidMatch,
-            hasCurrentTopologyEvidence,
-            instanceContains,
-            ancestorContains,
-            serviceContains,
+            hasUsbIpWin2Ancestor,
+            matchingAncestors,
+            isUsbIpWin2HostNode,
+            hasBroadTextEvidence,
             broaderFields,
             policyMatches,
             ControllerLogicalIdentity.GetLogicalKey(device),
@@ -244,10 +249,11 @@ internal static class ViiperVirtualDeviceIdentityDiagnostics
                 ("VidMatch", deviceEvidence.VidMatch),
                 ("PidMatch", deviceEvidence.PidMatch),
                 ("VidPidMatchesGordon", deviceEvidence.VidPidMatchesGordon),
-                ("HasCurrentViiperTopologyEvidence", deviceEvidence.HasCurrentViiperTopologyEvidence),
-                ("InstanceContainsCurrentPolicyToken", deviceEvidence.InstanceContainsCurrentPolicyToken),
-                ("AncestorContainsCurrentPolicyToken", deviceEvidence.AncestorContainsCurrentPolicyToken),
-                ("ServiceContainsCurrentPolicyToken", deviceEvidence.ServiceContainsCurrentPolicyToken),
+                ("HasUsbIpWin2Ancestor", deviceEvidence.HasUsbIpWin2Ancestor),
+                ("MatchingUsbIpWin2AncestorInstanceIds", Join(deviceEvidence.MatchingUsbIpWin2AncestorInstanceIds)),
+                ("IsUsbIpWin2HostNode", deviceEvidence.IsUsbIpWin2HostNode),
+                // Raw/debug-only text evidence below -- NOT production ownership proof; see Rejection/CurrentPolicyMatches for the actual decision.
+                ("HasBroadUsbIpOrViiperTextEvidence", deviceEvidence.HasBroadUsbIpOrViiperTextEvidence),
                 ("BroaderTopologyEvidenceFields", Join(deviceEvidence.BroaderTopologyEvidenceFields)),
                 ("CurrentPolicyMatches", deviceEvidence.CurrentPolicyMatches),
                 ("LogicalIdentityKey", deviceEvidence.LogicalIdentityKey),

@@ -299,14 +299,17 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         if (_before is null) return false;
         var beforeIds = _before.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var deadline = DateTime.UtcNow + _pnPTimeout;
+        var policy = new ViiperVirtualDeviceIdentityPolicy();
         while (DateTime.UtcNow < deadline)
         {
             var current = _enumerator.EnumeratePresentDevices();
-            if (!current.Any(device => new ViiperVirtualDeviceIdentityPolicy().IsMatchingCandidate(device) && !beforeIds.Contains(device.InstanceId))) return true;
+            var currentByInstanceId = ViiperVirtualDeviceIdentityPolicy.BuildInstanceIndex(current);
+            if (!current.Any(device => policy.IsMatchingCandidate(device, currentByInstanceId) && !beforeIds.Contains(device.InstanceId))) return true;
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
         }
         var final = _enumerator.EnumeratePresentDevices();
-        return !final.Any(device => new ViiperVirtualDeviceIdentityPolicy().IsMatchingCandidate(device) && !beforeIds.Contains(device.InstanceId));
+        var finalByInstanceId = ViiperVirtualDeviceIdentityPolicy.BuildInstanceIndex(final);
+        return !final.Any(device => policy.IsMatchingCandidate(device, finalByInstanceId) && !beforeIds.Contains(device.InstanceId));
     }
 
     private async ValueTask<RoutingStageOperationResult> FailAndRollbackCoreAsync(string reason)
