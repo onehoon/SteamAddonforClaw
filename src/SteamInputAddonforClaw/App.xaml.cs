@@ -80,13 +80,14 @@ public partial class App : Application
             new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
         };
         var controllerEnvironmentAssessmentProvider = new ControllerEnvironmentAssessmentProvider(controllerSoftwareProviders);
-        _recoveryManager = new RecoveryManager(new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath), deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
+        var recoveryJournalStore = new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath);
+        _recoveryManager = new RecoveryManager(recoveryJournalStore, deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             controllerEnvironmentAssessmentProvider,
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
-            recoveryManager: _recoveryManager,
+            recoveryJournalStore: recoveryJournalStore,
             stockCenterMBaseline: nativeState is null ? null : new StockCenterMStartupBaseline(nativeState),
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
             hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));

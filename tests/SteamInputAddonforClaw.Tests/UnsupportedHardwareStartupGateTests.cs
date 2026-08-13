@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Recovery;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -37,7 +38,7 @@ public sealed class UnsupportedHardwareStartupGateTests
     [Fact]
     public async Task UpdateRestart_PrecedesHardwareGate()
     {
-        var coordinator = new StartupCoordinator(new UpdateGate(UpdateGateResult.RestartScheduled), new ThrowingEnvironmentDetector(), new ThrowingWaiter(), new ThrowingProbeFactory(), new ThrowingEvaluator());
+        var coordinator = new StartupCoordinator(new UpdateGate(UpdateGateResult.RestartScheduled), new ThrowingEnvironmentDetector(), new ThrowingWaiter(), new ThrowingProbeFactory(), new ThrowingEvaluator(), recoveryJournalStore: new NoOpRecoveryJournalStore());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -48,7 +49,7 @@ public sealed class UnsupportedHardwareStartupGateTests
     public async Task SupportedHardware_ContinuesIntoEnvironmentDetection()
     {
         var events = new List<string>();
-        var coordinator = new StartupCoordinator(new RecordingUpdateGate(events), new RecordingEnvironmentDetector(events), new RecordingWaiter(events), new RecordingProbeFactory(events), new RecordingEvaluator());
+        var coordinator = new StartupCoordinator(new RecordingUpdateGate(events), new RecordingEnvironmentDetector(events), new RecordingWaiter(events), new RecordingProbeFactory(events), new RecordingEvaluator(), recoveryJournalStore: new NoOpRecoveryJournalStore());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
@@ -67,7 +68,7 @@ public sealed class UnsupportedHardwareStartupGateTests
         Assert.Equal(ControllerEnvironmentReadiness.NotApplicable, result);
     }
 
-    private static StartupCoordinator Create(HardwareCompatibilityAssessment assessment) => new(new UpdateGate(UpdateGateResult.Continue), new ThrowingEnvironmentDetector(), new ThrowingWaiter(), new ProbeFactory(), new Evaluator(assessment));
+    private static StartupCoordinator Create(HardwareCompatibilityAssessment assessment) => new(new UpdateGate(UpdateGateResult.Continue), new ThrowingEnvironmentDetector(), new ThrowingWaiter(), new ProbeFactory(), new Evaluator(assessment), recoveryJournalStore: new NoOpRecoveryJournalStore());
 
     private sealed class UpdateGate(UpdateGateResult result) : IUpdateGate { public Task<UpdateGateResult> RunAsync(CancellationToken _) => Task.FromResult(result); }
     private sealed class ProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => new(DeviceProbeCaptureStatus.Success, new DeviceProbeContext(), "test"); }
@@ -83,4 +84,13 @@ public sealed class UnsupportedHardwareStartupGateTests
     private static ControllerEnvironmentAssessmentSnapshot Stock() => new([], new(ControllerManagerKind.None, ControllerManagerClassificationReason.NoThirdPartyControllerManager), new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported));
     private sealed class ThrowingWaiter : IControllerEnvironmentWaiter { public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode _, CancellationToken __) => throw new Xunit.Sdk.XunitException("Environment waiter must not be called."); }
     private sealed class ThrowingEnumerator : IControllerDeviceEnumerator { public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => throw new Xunit.Sdk.XunitException("Enumerator must not be called."); }
+    private sealed class NoOpRecoveryJournalStore : IRecoveryJournalStore
+    {
+        public string JournalPath => "noop-recovery-journal.json";
+        public bool Exists() => false;
+        public string ReadText() => throw new NotSupportedException();
+        public void WriteNew(RecoveryJournal journal) => throw new NotSupportedException();
+        public void ReplaceExisting(RecoveryJournal journal) => throw new NotSupportedException();
+        public void Delete() => throw new NotSupportedException();
+    }
 }
