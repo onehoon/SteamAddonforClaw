@@ -102,6 +102,56 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task RetryResidualCleanupForResumeRollsBackTheFrozenPlanWithoutCapturingStatus()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var frozen = bridge.Session.ActiveSession!;
+        var captures = provider.CaptureCount;
+
+        Assert.True(bridge.Bridge.HasResidualSessionState);
+        var retried = await bridge.Bridge.RetryResidualCleanupForResumeAsync(CancellationToken.None);
+
+        Assert.True(retried);
+        Assert.Equal(captures, provider.CaptureCount);
+        Assert.Equal(frozen.Plan, executor.RollbackPlans.Single());
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Null(bridge.Session.PendingCleanup);
+        Assert.False(bridge.Bridge.HasResidualSessionState);
+    }
+
+    [Fact]
+    public async Task RetryResidualCleanupForResumeFailurePreservesRoutingCleanupState()
+    {
+        var executor = new FakeExecutor();
+        executor.RollbackResults.Enqueue(new(false, RoutingStageKind.NativeMode, "Failed"));
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.False(await bridge.Bridge.RetryResidualCleanupForResumeAsync(CancellationToken.None));
+
+        Assert.NotNull(bridge.Session.ActiveSession);
+        Assert.NotNull(bridge.Session.PendingCleanup);
+        Assert.True(bridge.Bridge.HasResidualSessionState);
+    }
+
+    [Fact]
+    public async Task HasResidualSessionStateIsFalseWhenPassive()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        Assert.False(bridge.Bridge.HasResidualSessionState);
+        Assert.True(await bridge.Bridge.RetryResidualCleanupForResumeAsync(CancellationToken.None));
+        Assert.Empty(executor.RollbackPlans);
+        Assert.Equal(0, provider.CaptureCount);
+    }
+
+    [Fact]
     public async Task SuspendQuiesceWhenPassiveDoesNotCaptureStatusOrEnterRouting()
     {
         var executor = new FakeExecutor();

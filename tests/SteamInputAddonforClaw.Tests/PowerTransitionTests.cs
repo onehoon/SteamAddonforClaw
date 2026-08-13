@@ -41,6 +41,125 @@ public sealed class PowerTransitionTests
         Assert.Equal(["Fallback", "Baseline"], calls);
     }
     [Fact]
+    public async Task ResidualRoutingCleanup_RetriedBeforeJournalFallbackAndBaseline()
+    {
+        var calls = new List<string>();
+        var gate = new PowerMutationGate(false);
+        var gateOpenDuringCleanup = true;
+        var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Unsafe),
+            _ => { calls.Add("Fallback"); return Task.FromResult(true); }, [],
+            hasIncompleteRecovery: () => true,
+            establishBaseline: _ => { calls.Add("Baseline"); return Task.FromResult(true); },
+            hasResidualRoutingCleanup: () => true,
+            retryResidualRoutingCleanup: _ =>
+            {
+                calls.Add("Cleanup");
+                gateOpenDuringCleanup = gate.IsOpen;
+                return Task.FromResult(true);
+            });
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+
+        Assert.Equal(["Cleanup", "Fallback", "Baseline"], calls);
+        Assert.False(gateOpenDuringCleanup);
+        Assert.True(gate.IsOpen);
+    }
+
+    [Fact]
+    public async Task ResidualRoutingCleanup_RemovesIncompleteRecoveryJournal_SkipsFallback()
+    {
+        var calls = new List<string>();
+        var cleanupRan = false;
+        var coordinator = new PowerTransitionCoordinator(new PowerMutationGate(false), new RecoverySafetyState(RecoverySafety.Unsafe),
+            _ => { calls.Add("Fallback"); return Task.FromResult(true); }, [],
+            hasIncompleteRecovery: () => !cleanupRan,
+            establishBaseline: _ => { calls.Add("Baseline"); return Task.FromResult(true); },
+            hasResidualRoutingCleanup: () => true,
+            retryResidualRoutingCleanup: _ =>
+            {
+                calls.Add("Cleanup");
+                cleanupRan = true;
+                return Task.FromResult(true);
+            });
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+
+        Assert.Equal(["Cleanup", "Baseline"], calls);
+    }
+
+    [Fact]
+    public async Task ResidualRoutingCleanup_Failure_SkipsFallbackAndBaselineAndRemainsUnsafe()
+    {
+        var fallbackCalls = 0; var baselineCalls = 0;
+        var gate = new PowerMutationGate(false);
+        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+        var coordinator = new PowerTransitionCoordinator(gate, recovery,
+            _ => { fallbackCalls++; return Task.FromResult(true); }, [],
+            hasIncompleteRecovery: () => true,
+            establishBaseline: _ => { baselineCalls++; return Task.FromResult(true); },
+            hasResidualRoutingCleanup: () => true,
+            retryResidualRoutingCleanup: _ => Task.FromResult(false));
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+
+        Assert.Equal(0, fallbackCalls);
+        Assert.Equal(0, baselineCalls);
+        Assert.False(gate.IsOpen);
+        Assert.Equal(RecoverySafety.Unsafe, recovery.Current);
+        Assert.Equal(PowerTransitionState.Unsafe, coordinator.State);
+    }
+
+    [Fact]
+    public async Task NoResidualRoutingState_SkipsCleanupRetryAndKeepsExistingResumeFlow()
+    {
+        var calls = new List<string>();
+        var coordinator = new PowerTransitionCoordinator(new PowerMutationGate(false), new RecoverySafetyState(RecoverySafety.Unsafe),
+            _ => { calls.Add("Fallback"); return Task.FromResult(true); }, [],
+            hasIncompleteRecovery: () => true,
+            establishBaseline: _ => { calls.Add("Baseline"); return Task.FromResult(true); },
+            hasResidualRoutingCleanup: () => false,
+            retryResidualRoutingCleanup: _ => { calls.Add("Cleanup"); return Task.FromResult(true); });
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+
+        Assert.Equal(["Fallback", "Baseline"], calls);
+    }
+
+    [Fact]
+    public async Task StaleResidualCleanupCompletion_DoesNotSealOrCommitOverANewerSuspendEpoch()
+    {
+        var gate = new PowerMutationGate(false);
+        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var coordinator = new PowerTransitionCoordinator(gate, recovery,
+            _ => Task.FromResult(true), [],
+            hasIncompleteRecovery: () => false,
+            establishBaseline: _ => Task.FromResult(true),
+            hasResidualRoutingCleanup: () => true,
+            retryResidualRoutingCleanup: async _ =>
+            {
+                started.TrySetResult();
+                return await release.Task;
+            });
+
+        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await started.Task;
+
+        // Simulate a newer suspend cycle (already applied by the watcher's own barrier logic)
+        // arriving while the residual cleanup retry for the older resume is still in flight.
+        gate.EnterNewCycleBarrier(out _, out var newerEpoch);
+        coordinator.InvalidateForBarrier();
+        release.TrySetResult(true);
+        await resume;
+
+        Assert.Equal(newerEpoch, gate.Epoch);
+        Assert.False(gate.IsOpen);
+        Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
+        Assert.Equal(RecoverySafety.Indeterminate, recovery.Current);
+    }
+
+    [Fact]
     public void Suspend_barrier_denies_forward_mutation_and_allows_cleanup_until_sealed()
     {
         var gate = new PowerMutationGate(true);
