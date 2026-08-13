@@ -27,6 +27,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
     private uint _deviceId;
     private uint _busId;
     private IReadOnlyList<ControllerDeviceInfo>? _owned;
+    private IReadOnlyList<string> _potentialGordonInstanceIdsAtIdentityFailure = [];
     private LifecycleState _state;
     private CancellationTokenSource? _creationCancellation;
     private ClassicSteamControllerInputPublisher? _publisher;
@@ -156,6 +157,7 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             if (!resolved.Succeeded)
             {
                 ViiperVirtualDeviceIdentityDiagnostics.LogOnFailure(_before, identitySnapshot, _resolver.Policy, resolved, _busId, _deviceId);
+                _potentialGordonInstanceIdsAtIdentityFailure = FindPotentialGordonInstanceIds(_before!, identitySnapshot);
                 return await FailAndRollbackCoreAsync(resolved.Reason).ConfigureAwait(false);
             }
             _owned = resolved.Devices;
@@ -255,7 +257,15 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
             {
                 absent = hadResolvedIdentity
                     ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
-                    : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
+                    : _potentialGordonInstanceIdsAtIdentityFailure.Count > 0
+                        // Identity resolution failed (e.g. the usbip-win2 ancestor record was
+                        // missing/incomplete in that snapshot), so ownership was never proven.
+                        // Still, any 28DE:1102 node that newly appeared while we were attempting
+                        // creation must be verified absent by its exact InstanceId -- re-running
+                        // the strict ownership predicate here could false-positive "absent" for
+                        // exactly the same reason it rejected the candidate in the first place.
+                        ? await WaitForAbsenceAsync(_potentialGordonInstanceIdsAtIdentityFailure, cancellationToken).ConfigureAwait(false)
+                        : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
             }
             finally { pnpAbsenceMs = Elapsed(absenceStarted); }
             if (!absent) return RollbackFailure("VirtualDevicePnPStillPresent");
@@ -266,8 +276,17 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         if (!complete.IsSafeToContinue) return RollbackFailure("VirtualDeviceRecoveryCompletionFailed");
         AppLog.Debug("SteamOutput", "SteamOutput inactive", ("BusId", _busId), ("DeviceId", _deviceId), ("DeviceRemoved", removal.DeviceRemoved), ("BusRemoved", removal.BusRemoved), ("PnPAbsent", absent), ("RecoveryMutationCompleted", complete.IsSafeToContinue));
         AppLog.Debug("RoutingTrace", "Steam output rollback completed.", ("Event", "SteamOutputRollbackCompleted"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Success"), ("Reason", "ClassicSteamControllerRemoved"));
-        _deviceId = 0; _busId = 0; _owned = null; _before = null; _state = LifecycleState.Inactive; _runtime.StopIfUnused();
+        _deviceId = 0; _busId = 0; _owned = null; _before = null; _potentialGordonInstanceIdsAtIdentityFailure = []; _state = LifecycleState.Inactive; _runtime.StopIfUnused();
         return RoutingStageOperationResult.Success("ClassicSteamControllerRemoved");
+    }
+
+    private static IReadOnlyList<string> FindPotentialGordonInstanceIds(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlyList<ControllerDeviceInfo> snapshot)
+    {
+        var beforeIds = before.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return snapshot
+            .Where(device => device.VendorId == ViiperVirtualDeviceIdentityPolicy.VendorId && device.ProductId == ViiperVirtualDeviceIdentityPolicy.ProductId && !beforeIds.Contains(device.InstanceId))
+            .Select(device => device.InstanceId)
+            .ToArray();
     }
 
     private async ValueTask<(ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> WaitForIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, CancellationToken token)
@@ -299,14 +318,17 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage,
         if (_before is null) return false;
         var beforeIds = _before.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var deadline = DateTime.UtcNow + _pnPTimeout;
+        var policy = new ViiperVirtualDeviceIdentityPolicy();
         while (DateTime.UtcNow < deadline)
         {
             var current = _enumerator.EnumeratePresentDevices();
-            if (!current.Any(device => new ViiperVirtualDeviceIdentityPolicy().IsMatchingCandidate(device) && !beforeIds.Contains(device.InstanceId))) return true;
+            var currentByInstanceId = ViiperVirtualDeviceIdentityPolicy.BuildInstanceIndex(current);
+            if (!current.Any(device => policy.IsMatchingCandidate(device, currentByInstanceId) && !beforeIds.Contains(device.InstanceId))) return true;
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
         }
         var final = _enumerator.EnumeratePresentDevices();
-        return !final.Any(device => new ViiperVirtualDeviceIdentityPolicy().IsMatchingCandidate(device) && !beforeIds.Contains(device.InstanceId));
+        var finalByInstanceId = ViiperVirtualDeviceIdentityPolicy.BuildInstanceIndex(final);
+        return !final.Any(device => policy.IsMatchingCandidate(device, finalByInstanceId) && !beforeIds.Contains(device.InstanceId));
     }
 
     private async ValueTask<RoutingStageOperationResult> FailAndRollbackCoreAsync(string reason)

@@ -259,8 +259,9 @@ public sealed class PowerTransitionTests
         var tracker = new AddonOwnedVirtualDeviceTracker(); var policy = new ViiperVirtualDeviceIdentityPolicy(); tracker.MarkOwnershipUncertain();
         Assert.True(tracker.ClearUncertaintyAfterVerifiedAbsence([], policy)); Assert.False(tracker.HasUncertainOwnership);
         tracker.MarkOwnershipUncertain();
-        var candidate = new ControllerDeviceInfo("USB\\VID_28DE&PID_1102\\A", null, null, ["ROOT\\USBIP_WIN2\\UDE"], "HID", [], [], "HID", null, "usbip2_ude", 0x28DE, 0x1102, true);
-        Assert.False(tracker.ClearUncertaintyAfterVerifiedAbsence([candidate], policy)); Assert.True(tracker.HasUncertainOwnership);
+        var usbIpHost = new ControllerDeviceInfo("ROOT\\USB\\0000", null, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "System", null, "usbip2_ude", null, null, true);
+        var candidate = new ControllerDeviceInfo("USB\\VID_28DE&PID_1102\\A", null, null, [usbIpHost.InstanceId], "HID", [], [], "HID", null, null, 0x28DE, 0x1102, true);
+        Assert.False(tracker.ClearUncertaintyAfterVerifiedAbsence([usbIpHost, candidate], policy)); Assert.True(tracker.HasUncertainOwnership);
     }
 
     private static PowerTransitionCoordinator Coordinator(PowerMutationGate gate, params IPowerTransitionParticipant[] participants) => new(gate, new RecoverySafetyState(RecoverySafety.Safe), _ => Task.FromResult(true), participants);
