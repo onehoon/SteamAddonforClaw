@@ -1,3 +1,4 @@
+using System.Text.Json;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Devices;
@@ -36,21 +37,179 @@ public sealed class StartupCoordinatorTests
     }
 
     [Fact]
-    public async Task StaleJournalReportedButReadTextThrows_DiscardStillSucceeds()
+    public async Task StaleJournalUnreadable_PreservesJournalAndBlocksRouting()
     {
-        // Explicit no-replay proof: startup must never read/deserialize journal contents,
-        // it only checks existence and deletes.
+        // The stale journal is now read as immutable ownership evidence for HidHide cleanup
+        // (never for routing/native/VIIPER replay). An unreadable journal must therefore be
+        // treated fail-closed: preserved, never deleted, routing stays passive.
         var events = new List<string>();
-        var store = new FakeRecoveryJournalStore(events, exists: true, existsAfterDelete: false);
+        var store = new FakeRecoveryJournalStore(events, exists: true, readTextThrows: true);
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(0, store.DeleteCallCount);
+    }
+
+    [Fact]
+    public async Task MalformedJournal_PreservesJournalAndBlocksRouting_NoHidHideCleanup()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: true, malformedJson: true);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(0, store.DeleteCallCount);
+        Assert.Equal(0, cleaner.CallCount);
+    }
+
+    [Fact]
+    public async Task UnsupportedSchemaJournal_PreservesJournalAndBlocksRouting_NoHidHideCleanup()
+    {
+        // The Stock XInput baseline may already have succeeded; only the LoadJournal() schema
+        // gate downstream of it decides whether the (unreadable-as-current-schema) journal is
+        // trusted. It must fail closed rather than run HidHide cleanup against untrusted evidence.
+        var events = new List<string>();
+        var unsupportedSchemaJson = System.Text.Json.JsonSerializer.Serialize(new { SchemaVersion = RecoveryManager.CurrentSchemaVersion - 1 });
+        var store = new FakeRecoveryJournalStore(events, exists: true, rawJson: unsupportedSchemaJson);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.Contains("Baseline", events);
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(0, store.DeleteCallCount);
+        Assert.Equal(0, cleaner.CallCount);
+    }
+
+    [Fact]
+    public async Task ValidJournalWithoutHidHideEvidence_DoesNotInvokeCleaner_DiscardsAndSafe()
+    {
+        var events = new List<string>();
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null, new());
+        var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
         Assert.True(result.RecoverySafe);
         Assert.Equal(1, store.DeleteCallCount);
-        // ReadText/WriteNew/ReplaceExisting throw NotSupportedException in this fake; RunAsync
-        // completing successfully proves none of them were ever invoked by StartupCoordinator.
+        Assert.Equal(0, cleaner.CallCount);
+    }
+
+    [Fact]
+    public async Task ValidJournalWithOwnedHidHideResidue_InvokesCleaner_DiscardsAndSafe()
+    {
+        var events = new List<string>();
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(HidHideDeviceAdditions: ["HID\\Claw"], ExecutableWhitelistAdditions: ["C:\\addon.exe"], OriginalHidHideActiveState: false));
+        var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.RecoverySafe);
+        Assert.Equal(1, store.DeleteCallCount);
+        Assert.Equal(1, cleaner.CallCount);
+        Assert.Equal(journal.RecoverySessionId, cleaner.LastJournal?.RecoverySessionId);
+    }
+
+    [Fact]
+    public async Task HidHideCleanupFails_PreservesJournalAndUnsafe()
+    {
+        var events = new List<string>();
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(HidHideDeviceAdditions: ["HID\\Claw"]));
+        var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner(succeeds: false);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(0, store.DeleteCallCount);
+        Assert.Equal(1, cleaner.CallCount);
+    }
+
+    [Fact]
+    public async Task HidHideEvidencePresentButNoCleanerConfigured_PreservesJournalAndUnsafe()
+    {
+        var events = new List<string>();
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(ExecutableWhitelistAdditions: ["C:\\addon.exe"]));
+        var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events));
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(0, store.DeleteCallCount);
+    }
+
+    [Fact]
+    public async Task MixedJournal_CleansOnlyHidHideResidue_AndNeverReplaysNativeOrVirtualState()
+    {
+        var mutationId = Guid.NewGuid();
+        var events = new List<string>();
+        var snapshot = new DeviceNativeStateSnapshot(new HandheldDeviceId("test.device"), 1, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(new { Mode = "DirectInput" }));
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow,
+            snapshot,
+            new(DeviceNativeStateChanged: true,
+                HidHideDeviceAdditions: ["HID\\Claw"],
+                ExecutableWhitelistAdditions: ["C:\\addon.exe"],
+                OriginalHidHideActiveState: false,
+                AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["USB\\VID_28DE&PID_1102\\owned"])]));
+        var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.True(result.RecoverySafe);
+        Assert.Equal(1, cleaner.CallCount);
+        Assert.Equal(1, store.DeleteCallCount);
+        // The cleaner only ever receives the journal + IHidHideClient (see
+        // StartupHidHideRecoveryCleaner), so it structurally cannot replay native or VIIPER
+        // state -- there is no such dependency for it to call.
+    }
+
+    [Fact]
+    public async Task ConflictingManagerDetected_DoesNotInvokeHidHideCleaner()
+    {
+        var events = new List<string>();
+        var store = new FakeRecoveryJournalStore(events, exists: true);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner();
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FixedEnvironmentDetector(events, new(ControllerEnvironmentMode.HHCManaged, ClawTweaksState.NotInstalled)), new ThrowingEnvironmentWaiter(),
+            new FakeProbeFactory(), new FakeHardwareEvaluator(), recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(0, cleaner.CallCount);
+        Assert.Equal(0, store.DeleteCallCount);
     }
 
     [Fact]
@@ -288,11 +447,13 @@ public sealed class StartupCoordinatorTests
     }
 
     /// <summary>
-    /// Startup-specific test double for <see cref="IRecoveryJournalStore"/>. StartupCoordinator's
-    /// stale-journal retirement is discard-only: it must call only Exists()/Delete(), never
-    /// ReadText/WriteNew/ReplaceExisting. Those three throw NotSupportedException here to prove it.
+    /// Startup-specific test double for <see cref="IRecoveryJournalStore"/>. StartupCoordinator
+    /// reads the journal (via <see cref="RecoveryManager.LoadJournal"/>) only as immutable
+    /// ownership evidence for HidHide cleanup -- it never replays routing/native/VIIPER state
+    /// from it -- and it must never write/replace journal contents itself.
     /// </summary>
-    private sealed class FakeRecoveryJournalStore(List<string> events, bool exists = false, bool deleteThrows = false, bool existsAfterDelete = false) : IRecoveryJournalStore
+    private sealed class FakeRecoveryJournalStore(List<string> events, bool exists = false, bool deleteThrows = false, bool existsAfterDelete = false,
+        RecoveryJournal? journal = null, bool readTextThrows = false, bool malformedJson = false, string? rawJson = null) : IRecoveryJournalStore
     {
         private bool _deleted;
         private int _existsCallCount;
@@ -307,7 +468,15 @@ public sealed class StartupCoordinatorTests
             return _deleted ? existsAfterDelete : exists;
         }
 
-        public string ReadText() => throw new NotSupportedException("StartupCoordinator must never read recovery journal contents.");
+        public string ReadText()
+        {
+            if (readTextThrows) throw new IOException("read failed");
+            if (malformedJson) return "{ not valid json";
+            if (rawJson is not null) return rawJson;
+            var effective = journal ?? new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null, new());
+            return JsonSerializer.Serialize(effective);
+        }
+
         public void WriteNew(RecoveryJournal journal) => throw new NotSupportedException("StartupCoordinator must never write recovery journal contents.");
         public void ReplaceExisting(RecoveryJournal journal) => throw new NotSupportedException("StartupCoordinator must never replace recovery journal contents.");
 
@@ -316,6 +485,20 @@ public sealed class StartupCoordinatorTests
             DeleteCallCount++;
             _deleted = true;
             if (deleteThrows) throw new IOException("delete failed");
+        }
+    }
+
+    private sealed class FakeStartupHidHideRecoveryCleaner(bool succeeds = true, string reason = "cleaned") : IStartupHidHideRecoveryCleaner
+    {
+        public int CallCount { get; private set; }
+        public RecoveryJournal? LastJournal { get; private set; }
+
+        public bool TryClean(RecoveryJournal journal, out string outReason)
+        {
+            CallCount++;
+            LastJournal = journal;
+            outReason = reason;
+            return succeeds;
         }
     }
 
