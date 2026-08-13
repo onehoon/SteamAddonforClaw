@@ -36,6 +36,7 @@ public partial class App : Application
     private readonly SingleInstanceGate _singleInstanceGate;
     private DeveloperTestModeState? _developerTestModeState;
     private EffectiveSteamSessionSource? _effectiveSteamSessionSource;
+    private readonly ResumeFreshReconcileSuppression _resumeFreshReconcileSuppression = new();
     private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
@@ -83,12 +84,13 @@ public partial class App : Application
         var recoveryJournalStore = new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath);
         _recoveryManager = new RecoveryManager(recoveryJournalStore, deviceRegistry, new HidHideDriverClient(), deviceEnumerator);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
+        var stockCenterMBaseline = nativeState is null ? null : new StockCenterMStartupBaseline(nativeState);
         var coordinator = new StartupCoordinator(
             new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
             controllerEnvironmentAssessmentProvider,
             new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
             recoveryJournalStore: recoveryJournalStore,
-            stockCenterMBaseline: nativeState is null ? null : new StockCenterMStartupBaseline(nativeState),
+            stockCenterMBaseline: stockCenterMBaseline,
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
             hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
 
@@ -102,7 +104,7 @@ public partial class App : Application
                 return;
             }
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(addonOwnedVirtualDeviceTracker, deviceRegistry, msiClawAdapter, controllerEnvironmentAssessmentProvider, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(addonOwnedVirtualDeviceTracker, deviceRegistry, msiClawAdapter, controllerEnvironmentAssessmentProvider, stockCenterMBaseline, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
@@ -114,7 +116,7 @@ public partial class App : Application
         }
     }
 
-    private void StartNormalRuntime(AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
+    private void StartNormalRuntime(AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, IStockCenterMStartupBaseline? stockCenterMBaseline, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
@@ -207,8 +209,29 @@ public partial class App : Application
         }, powerParticipants, async token =>
         {
             if (_routingRuntimeCoordinator is null) return true;
-            return await _routingRuntimeCoordinator.ReconcileAfterRecoveryAsync(token).ConfigureAwait(false);
-        }, recoveryEnabled: recoverySafe);
+            var freshSucceeded = false;
+            _resumeFreshReconcileSuppression.Begin();
+            try
+            {
+                _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() =>
+                {
+                    _steamSessionWatcher?.Refresh();
+                    _effectiveSteamSessionSource?.Refresh();
+                });
+                freshSucceeded = await _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).ConfigureAwait(false);
+                return freshSucceeded;
+            }
+            finally
+            {
+                if (_resumeFreshReconcileSuppression.Complete(freshSucceeded)) _ = ReconcileRoutingAsync();
+            }
+        }, recoveryEnabled: recoverySafe,
+        hasIncompleteRecovery: () => _recoveryManager?.HasIncompleteRecovery == true,
+        establishBaseline: async token =>
+        {
+            if (stockCenterMBaseline is null) return false;
+            return (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
+        });
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
             () => _routingRuntimeCoordinator?.CancelInFlightTransition());
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
@@ -239,7 +262,7 @@ public partial class App : Application
     {
         _diagnosticSessions.Observe(_runningAppIdSource?.GetRunningAppId() ?? 0, args.Current.RunningAppId, args.Current.Source.ToString());
         _mainWindow?.UpdateSteamSessionState(args.Current);
-        _ = ReconcileRoutingAsync();
+        if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) _ = ReconcileRoutingAsync();
     }
 
     private async Task ReconcileRoutingAsync(CancellationToken cancellationToken = default)
@@ -428,5 +451,51 @@ public partial class App : Application
         AppLog.Info("Update shutdown requested.");
         _startupCancellationTokenSource.Cancel();
         Exit();
+    }
+}
+
+internal sealed class ResumeFreshReconcileSuppression
+{
+    private readonly Lock _sync = new();
+    private int _owned;
+    private int _pending;
+
+    public void Begin()
+    {
+        lock (_sync)
+        {
+            _pending = 0;
+            _owned = 1;
+        }
+    }
+
+    public bool TrySuppressStateChange()
+    {
+        lock (_sync)
+        {
+            if (_owned == 0) return false;
+            _pending = 1;
+            return true;
+        }
+    }
+
+    public void ExecuteExplicitRefresh(Action refresh)
+    {
+        lock (_sync)
+        {
+            refresh();
+            _pending = 0;
+        }
+    }
+
+    public bool Complete(bool freshSucceeded)
+    {
+        lock (_sync)
+        {
+            _owned = 0;
+            var pending = _pending != 0;
+            _pending = 0;
+            return freshSucceeded && pending;
+        }
     }
 }

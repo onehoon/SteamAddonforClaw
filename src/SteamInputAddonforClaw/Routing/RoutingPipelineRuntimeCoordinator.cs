@@ -60,7 +60,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerTransitionPartic
         }
     }
 
-    internal async ValueTask<bool> ReconcileAfterRecoveryAsync(CancellationToken cancellationToken)
+    internal async ValueTask<bool> ReconcileFreshAfterResumeAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _transitionOperationCount);
         var acquired = false;
@@ -71,7 +71,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerTransitionPartic
             acquired = true;
             if (IsShutdownRequested) return false;
             using var transition = CreateTransitionCancellation(cancellationToken);
-            return await ReconcileAfterRecoveryCoreAsync(transition.Token).ConfigureAwait(false);
+            return await ReconcileFreshAfterResumeCoreAsync(transition.Token).ConfigureAwait(false);
         }
         finally
         {
@@ -198,7 +198,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerTransitionPartic
         return result;
     }
 
-    private async ValueTask<bool> ReconcileAfterRecoveryCoreAsync(CancellationToken cancellationToken)
+    private async ValueTask<bool> ReconcileFreshAfterResumeCoreAsync(CancellationToken cancellationToken)
     {
         // RecoveryManager restores hardware before this boundary. Retire the old frozen
         // pipeline session first; never reuse it for post-recovery re-entry.

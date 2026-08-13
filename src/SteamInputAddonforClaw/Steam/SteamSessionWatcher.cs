@@ -61,6 +61,12 @@ public sealed class SteamSessionWatcher : IDisposable
         }
     }
 
+    public void Refresh()
+    {
+        ThrowIfDisposed();
+        RefreshCore();
+    }
+
     public void Dispose()
     {
         if (_isDisposed)
@@ -75,6 +81,12 @@ public sealed class SteamSessionWatcher : IDisposable
     }
 
     private void OnRunningAppIdChanged(object? sender, EventArgs e)
+    {
+        if (_isDisposed) return;
+        RefreshCore();
+    }
+
+    private void RefreshCore()
     {
         SteamSessionState? changedState = null;
 
