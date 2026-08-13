@@ -278,6 +278,64 @@ public sealed class StartupHidHideRecoveryCleanerTests
         Assert.Empty(client.CurrentWhitelist);
     }
 
+    [Fact]
+    public void JournalWhitelistPresent_UnnormalizableRawWhitelistEntry_DoesNotTreatOwnedEntryAsAbsent()
+    {
+        // HidHideDriverClient.Inspect() drops a raw whitelist entry it cannot convert to a DOS
+        // path from the normalized ApplicationWhitelist view, but keeps it in
+        // RawApplicationWhitelist. If the journal-owned entry happened to be *that* dropped raw
+        // entry, the normalized view alone would make it look already-absent -- which would let
+        // the cleaner report success (and the journal get deleted) while the addon-owned
+        // whitelist residue is still physically present. Must fail closed instead.
+        var client = new FakeHidHideClient(active: false, hidden: [], whitelist: []);
+        client.UnnormalizableRawWhitelistEntries.Add(@"\Device\HarddiskVolumeUnknown\addon.exe");
+        var journal = Journal(whitelist: [@"C:\addon.exe"], originalActive: null);
+
+        Assert.False(new StartupHidHideRecoveryCleaner(client).TryClean(journal, out var reason));
+
+        Assert.Equal(0, client.RemoveApplicationCalls);
+        Assert.NotEmpty(reason);
+    }
+
+    [Fact]
+    public void InverseWhitelistDriftsAfterGlobalRestore_HiddenCleanupFailsClosed()
+    {
+        // The global active-state restore itself succeeds and verifies fine, but before hidden-
+        // device cleanup runs, another process flips HidHide into inverse-whitelist mode. Inverse
+        // whitelist is still "configuration readable", so a check that only looks at
+        // IsConfigurationReadable would incorrectly let cleanup continue.
+        var client = new FakeHidHideClient(active: true, hidden: ["HID\\A"], whitelist: []);
+        var journal = Journal(hidden: ["HID\\A"], originalActive: false);
+        var setActiveHappened = false;
+        client.OnInspect = () =>
+        {
+            if (setActiveHappened) client.Status = HidHideInspectionStatus.InverseWhitelist;
+        };
+
+        var cleaner = new StartupHidHideRecoveryCleaner(new DriftingHidHideClient(client, () => setActiveHappened = true));
+        Assert.False(cleaner.TryClean(journal, out _));
+        Assert.Equal(0, client.RemoveHiddenDeviceCalls);
+    }
+
+    /// <summary>
+    /// Thin decorator that flags when SetActive has run, letting the wrapped FakeHidHideClient's
+    /// OnInspect hook change behavior on subsequent inspections only.
+    /// </summary>
+    private sealed class DriftingHidHideClient(FakeHidHideClient inner, Action onSetActive) : IHidHideClient
+    {
+        public HidHideInspection Inspect() => inner.Inspect();
+        public bool AddApplication(string executablePath) => inner.AddApplication(executablePath);
+        public bool RemoveApplication(string executablePath) => inner.RemoveApplication(executablePath);
+        public bool AddHiddenDevice(string deviceEntry) => inner.AddHiddenDevice(deviceEntry);
+        public bool RemoveHiddenDevice(string deviceEntry) => inner.RemoveHiddenDevice(deviceEntry);
+        public bool SetActive(bool active)
+        {
+            var result = inner.SetActive(active);
+            onSetActive();
+            return result;
+        }
+    }
+
     private static RecoveryJournal Journal(IReadOnlyList<string>? hidden = null, IReadOnlyList<string>? whitelist = null, bool? originalActive = null) =>
         new(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
             new(HidHideDeviceAdditions: hidden, ExecutableWhitelistAdditions: whitelist, OriginalHidHideActiveState: originalActive));
@@ -305,11 +363,19 @@ public sealed class StartupHidHideRecoveryCleanerTests
         public int RemoveApplicationCalls { get; private set; }
         public Action? OnInspect { get; set; }
 
+        /// <summary>
+        /// Extra raw whitelist entries that never appear in the normalized <c>ApplicationWhitelist</c>,
+        /// modeling HidHideDriverClient.Inspect() silently dropping an entry it could not
+        /// convert to a DOS path (see HidHideDriverClient.Inspect()'s try/catch around ToDosPath).
+        /// </summary>
+        public List<string> UnnormalizableRawWhitelistEntries { get; } = [];
+
         public HidHideInspection Inspect()
         {
             InspectCallCount++;
             OnInspect?.Invoke();
-            return new(Status, new HashSet<string>(CurrentWhitelist, StringComparer.OrdinalIgnoreCase), CurrentHidden.ToList(), null, IsActive, Status == HidHideInspectionStatus.InverseWhitelist);
+            var raw = CurrentWhitelist.Concat(UnnormalizableRawWhitelistEntries).ToList();
+            return new(Status, new HashSet<string>(CurrentWhitelist, StringComparer.OrdinalIgnoreCase), CurrentHidden.ToList(), raw, IsActive, Status == HidHideInspectionStatus.InverseWhitelist);
         }
 
         public bool AddApplication(string executablePath) => true;

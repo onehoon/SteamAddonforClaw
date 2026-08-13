@@ -83,7 +83,7 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
             }
 
             var verifyActive = hidHideClient.Inspect();
-            if (!verifyActive.IsConfigurationReadable || verifyActive.IsActive)
+            if (!IsSafeToMutate(verifyActive) || verifyActive.IsActive)
             {
                 reason = "HidHide global active-state restore could not be verified.";
                 LogFailure(journal, reason);
@@ -96,9 +96,9 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
         if (hiddenEntries.Count > 0)
         {
             var preRemoval = hidHideClient.Inspect();
-            if (!preRemoval.IsConfigurationReadable)
+            if (!IsSafeToMutate(preRemoval))
             {
-                reason = "HidHide configuration became unreadable before hidden-device cleanup.";
+                reason = "HidHide configuration became unsafe to mutate before hidden-device cleanup.";
                 LogFailure(journal, reason);
                 return false;
             }
@@ -114,7 +114,7 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
                 }
             }
             var verify = hidHideClient.Inspect();
-            if (!verify.IsConfigurationReadable || StillPresent(verify.HiddenDeviceEntries, hiddenEntries))
+            if (!IsSafeToMutate(verify) || StillPresent(verify.HiddenDeviceEntries, hiddenEntries))
             {
                 reason = "Addon-owned hidden device entries remain after removal.";
                 LogFailure(journal, reason);
@@ -126,9 +126,14 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
         if (whitelistEntries.Count > 0)
         {
             var preRemoval = hidHideClient.Inspect();
-            if (!preRemoval.IsConfigurationReadable)
+            if (!IsSafeToMutate(preRemoval) || !HasFullyNormalizedWhitelist(preRemoval))
             {
-                reason = "HidHide configuration became unreadable before whitelist cleanup.";
+                // A raw whitelist entry that HidHideDriverClient could not normalize to a DOS
+                // path is silently dropped from ApplicationWhitelist (kept only in
+                // RawApplicationWhitelist), which would make an addon-owned journal entry look
+                // "already absent" from the normalized view alone. Ambiguous ownership must not
+                // be treated as already-clean.
+                reason = "HidHide whitelist state is unsafe to mutate, or contains entries that could not be normalized; ownership cannot be safely verified.";
                 LogFailure(journal, reason);
                 return false;
             }
@@ -143,9 +148,9 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
                 }
             }
             var verify = hidHideClient.Inspect();
-            if (!verify.IsConfigurationReadable || whitelistEntries.Any(entry => verify.ApplicationWhitelist.Contains(entry)))
+            if (!IsSafeToMutate(verify) || !HasFullyNormalizedWhitelist(verify) || whitelistEntries.Any(entry => verify.ApplicationWhitelist.Contains(entry)))
             {
-                reason = "Addon-owned whitelist entries remain after removal.";
+                reason = "Addon-owned whitelist entries remain after removal, or whitelist ownership could not be safely re-verified.";
                 LogFailure(journal, reason);
                 return false;
             }
@@ -169,6 +174,14 @@ internal sealed class StartupHidHideRecoveryCleaner(IHidHideClient hidHideClient
 
     private static bool StillPresent(IReadOnlyList<string>? current, IReadOnlyList<string> owned) =>
         owned.Any(entry => (current ?? []).Contains(entry, StringComparer.OrdinalIgnoreCase));
+
+    // HidHideDriverClient.Inspect() silently drops any raw whitelist entry it cannot normalize
+    // to a DOS path from ApplicationWhitelist (it survives only in RawApplicationWhitelist).
+    // If raw and normalized counts differ, the normalized view cannot be trusted as complete
+    // ownership evidence -- conservatively treat that as unsafe to mutate.
+    private static bool HasFullyNormalizedWhitelist(HidHideInspection inspection) =>
+        inspection.RawApplicationWhitelist is not null &&
+        inspection.RawApplicationWhitelist.Count == inspection.ApplicationWhitelist.Count;
 
     // The recovery writer only ever records Trim()med hidden-device entries, so anything else
     // is not evidence this addon produced and must be rejected rather than normalized/guessed.
