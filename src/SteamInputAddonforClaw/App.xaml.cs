@@ -36,6 +36,7 @@ public partial class App : Application
     private readonly SingleInstanceGate _singleInstanceGate;
     private DeveloperTestModeState? _developerTestModeState;
     private EffectiveSteamSessionSource? _effectiveSteamSessionSource;
+    private int _resumeFreshReconcileOwned;
     private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
@@ -208,9 +209,14 @@ public partial class App : Application
         }, powerParticipants, async token =>
         {
             if (_routingRuntimeCoordinator is null) return true;
-            _steamSessionWatcher?.Refresh();
-            _effectiveSteamSessionSource?.Refresh();
-            return await _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).ConfigureAwait(false);
+            Interlocked.Exchange(ref _resumeFreshReconcileOwned, 1);
+            try
+            {
+                _steamSessionWatcher?.Refresh();
+                _effectiveSteamSessionSource?.Refresh();
+                return await _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).ConfigureAwait(false);
+            }
+            finally { Volatile.Write(ref _resumeFreshReconcileOwned, 0); }
         }, recoveryEnabled: recoverySafe,
         hasIncompleteRecovery: () => _recoveryManager?.HasIncompleteRecovery == true,
         establishBaseline: async token =>
@@ -248,7 +254,7 @@ public partial class App : Application
     {
         _diagnosticSessions.Observe(_runningAppIdSource?.GetRunningAppId() ?? 0, args.Current.RunningAppId, args.Current.Source.ToString());
         _mainWindow?.UpdateSteamSessionState(args.Current);
-        _ = ReconcileRoutingAsync();
+        if (Volatile.Read(ref _resumeFreshReconcileOwned) == 0) _ = ReconcileRoutingAsync();
     }
 
     private async Task ReconcileRoutingAsync(CancellationToken cancellationToken = default)
