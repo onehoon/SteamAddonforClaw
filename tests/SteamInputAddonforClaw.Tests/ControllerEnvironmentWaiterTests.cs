@@ -102,6 +102,79 @@ public sealed class ControllerEnvironmentWaiterTests
         Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
     }
 
+    // Regression for the startup race: the MSI Claw's gamepad-usage HID interface (the one that
+    // satisfies a generic "is this a game controller" filter) can enumerate before the vendor/control
+    // HID interface (vendor-defined usage page, e.g. XInput PID 1901 UsagePage 0xFFA0/Usage 0x0001, or
+    // DirectInput PID 1902 UsagePage 0xFFF0/Usage 0x0040) that the mode-switch logic actually depends
+    // on. IsInternalHandheld must track both, not just the gamepad-usage interface, so readiness cannot
+    // be declared Stable while the control interface is still settling.
+    [Fact]
+    public async Task WaitUntilStableAsync_MsiControlInterfaceStillSettling_DoesNotReportStable()
+    {
+        var gamepadInterface = new ControllerDeviceInfo(
+            "HID\\VID_0DB0&PID_1902&MI_00&COL01",
+            Guid.NewGuid(),
+            null,
+            [],
+            "HID",
+            ["HID\\VID_0DB0&PID_1902&MI_00&COL01"],
+            ["HID_DEVICE_UP:0001_U:0005"],
+            "HIDClass",
+            null,
+            null,
+            0x0DB0,
+            0x1902,
+            true);
+        // The control interface never settles: its InstanceId changes on every poll, simulating PnP
+        // enumeration still in progress.
+        var enumerator = new SettlingControlInterfaceEnumerator(gamepadInterface, settleAfterTick: int.MaxValue);
+        var waiter = new ControllerEnvironmentWaiter(
+            enumerator,
+            new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
+            requiredStableSnapshots: 3,
+            sampleInterval: TimeSpan.Zero,
+            timeout: TimeSpan.FromMilliseconds(30));
+
+        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+
+        // Prior to the fix, IsInternalHandheld required IsGameControllerCandidate, which the vendor
+        // control interface never satisfies, so it was silently excluded from the stability snapshot
+        // entirely and the gamepad interface alone would report Stable almost immediately within this
+        // same short timeout. With the fix, the still-changing control interface keeps resetting
+        // stability, so readiness times out to Indeterminate instead.
+        Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, readiness);
+    }
+
+    [Fact]
+    public async Task WaitUntilStableAsync_MsiControlInterfaceSettlesAfterFewPolls_ReturnsStableOnceBothSettle()
+    {
+        var gamepadInterface = new ControllerDeviceInfo(
+            "HID\\VID_0DB0&PID_1902&MI_00&COL01",
+            Guid.NewGuid(),
+            null,
+            [],
+            "HID",
+            ["HID\\VID_0DB0&PID_1902&MI_00&COL01"],
+            ["HID_DEVICE_UP:0001_U:0005"],
+            "HIDClass",
+            null,
+            null,
+            0x0DB0,
+            0x1902,
+            true);
+        var enumerator = new SettlingControlInterfaceEnumerator(gamepadInterface, settleAfterTick: 2);
+        var waiter = new ControllerEnvironmentWaiter(
+            enumerator,
+            new ControllerDeviceClassifier(new MsiClawInternalControllerMatcher()),
+            requiredStableSnapshots: 3,
+            sampleInterval: TimeSpan.Zero,
+            timeout: TimeSpan.FromSeconds(2));
+
+        var readiness = await waiter.WaitUntilStableAsync(ControllerEnvironmentMode.StockCenterM, CancellationToken.None);
+
+        Assert.Equal(ControllerEnvironmentReadiness.Stable, readiness);
+    }
+
     [Fact]
     public async Task WaitUntilStableAsync_WhenClawTweaksVirtualTopologyIsStable_DoesNotRequireInternalHandheld()
     {
@@ -169,6 +242,40 @@ public sealed class ControllerEnvironmentWaiterTests
             var devices = new List<ControllerDeviceInfo> { stableDevice };
             if (index > 0) devices.Add(noiseCandidates[index - 1]);
             return devices;
+        }
+    }
+
+    /// <summary>
+    /// Simulates the MSI Claw's vendor/control HID interface (same VID/PID family as the gamepad
+    /// interface, different collection) still being enumerated by PnP: before <paramref name="settleAfterTick"/>
+    /// its InstanceId changes on every poll; from that tick onward it is fixed. The always-present
+    /// gamepad interface never changes.
+    /// </summary>
+    private sealed class SettlingControlInterfaceEnumerator(ControllerDeviceInfo gamepadInterface, int settleAfterTick) : IControllerDeviceEnumerator
+    {
+        private int _tick;
+
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            var tick = _tick++;
+            var instanceId = tick < settleAfterTick
+                ? $"HID\\VID_0DB0&PID_1902&MI_02&COL01_Settling_{tick}"
+                : "HID\\VID_0DB0&PID_1902&MI_02&COL01";
+            var controlInterface = new ControllerDeviceInfo(
+                instanceId,
+                Guid.NewGuid(),
+                null,
+                [],
+                "HID",
+                [instanceId],
+                ["HID_DEVICE_UP:FFF0_U:0040"],
+                "HIDClass",
+                null,
+                null,
+                0x0DB0,
+                0x1902,
+                true);
+            return [gamepadInterface, controlInterface];
         }
     }
 }

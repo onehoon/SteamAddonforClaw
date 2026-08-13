@@ -51,19 +51,24 @@ public sealed class ControllerDeviceClassifier
     public ControllerDeviceClassification Classify(ControllerDeviceInfo device)
         => ClassifyDetailed(device).Classification;
 
-    internal bool HasUncertainIdentityOwnership => _identityExclusionSource.HasUncertainOwnership;
-
     /// <summary>
-    /// Narrow predicate for "is this the MSI Claw's own internal-controller topology?" Deliberately does
-    /// not go through the general classifier (and therefore never computes or discards an
-    /// external-physical-controller verdict for non-Claw devices) — it only runs the internal-controller
-    /// matcher. Callers that just need to find/ignore the Claw (e.g. startup topology stabilization)
-    /// should use this instead of <see cref="ClassifyDetailed(ControllerDeviceInfo, ControllerTopologySnapshot?)"/>.
+    /// Narrow predicate for "is this device part of the MSI Claw's own known internal-controller
+    /// topology (any of its VID 0x0DB0 / PID 1901-1903 interfaces, including its non-gamepad-usage
+    /// vendor/control HID interfaces)?" Deliberately does not go through the general classifier (and
+    /// therefore never computes or discards an external-physical-controller verdict for non-Claw
+    /// devices) and deliberately does NOT require <see cref="IsGameControllerCandidate"/>: the Claw's
+    /// XInput (PID 1901, UsagePage 0xFFA0/Usage 0x0001) and DirectInput (PID 1902, UsagePage
+    /// 0xFFF0/Usage 0x0040) control HID interfaces — the ones the mode-switch logic actually depends on
+    /// — are vendor-defined usage pages, not generic gamepad-usage interfaces, so requiring
+    /// IsGameControllerCandidate here would let startup declare Stable from the gamepad-usage interface
+    /// alone while the control HID interface the mode switch needs is still enumerating. Callers that
+    /// just need to find/ignore the Claw (e.g. startup topology stabilization) should use this instead
+    /// of <see cref="ClassifyDetailed(ControllerDeviceInfo, ControllerTopologySnapshot?)"/>. Still safe
+    /// against external controllers: MatchInternalController only matches MSI's own VID/PID family.
     /// </summary>
     internal bool IsInternalHandheld(ControllerDeviceInfo device, ControllerTopologySnapshot? topology = null)
     {
         return device.Present
-            && IsGameControllerCandidate(device)
             && MatchInternalController(device, topology).Status == InternalControllerMatchStatus.Match;
     }
 
