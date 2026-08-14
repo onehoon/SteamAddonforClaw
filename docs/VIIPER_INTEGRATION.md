@@ -14,10 +14,10 @@ It records the pinned VIIPER baseline, fork-added canonical API surface, ownersh
 |---|---|
 | VIIPER hardening | **VALIDATED / COMPLETE / FROZEN** |
 | Pinned VIIPER repository | `onehoon/VIIPER` |
-| Pinned VIIPER merge baseline | `6b5da6de4e9a9c15460783bae0d984762a9b05ef` |
+| Pinned VIIPER merge baseline | `3bd042dbbec9120035f7e86c9f3cac1418202be6` |
 | VIIPER canonical embedded ABI | **VALIDATED** |
 | Current Addon VIIPER binding | **LEGACY / TO BE MIGRATED** |
-| Canonical Addon migration | **PLANNED** |
+| Canonical Addon migration | **M0 VALIDATED / M1 NEXT** |
 | Game Bar Xbox360 route | **PLANNED** |
 | Gyro/IMU routing | **PLANNED / HARDWARE VALIDATION REQUIRED** |
 | MSI Claw hardware validation of the canonical DLL path | **REQUIRES ADDON INTEGRATION TESTING** |
@@ -80,10 +80,20 @@ https://github.com/onehoon/VIIPER
 Pinned integration baseline:
 
 ```text
-6b5da6de4e9a9c15460783bae0d984762a9b05ef
+3bd042dbbec9120035f7e86c9f3cac1418202be6
 ```
 
-This is the merge commit containing the completed canonical embedded lifecycle hardening through VIIPER PR #11.
+This is the merge commit containing the completed canonical embedded lifecycle hardening through VIIPER PR #11 and the independent L2/R2 Gordon state extension merged by VIIPER PR #13. M0 is **VALIDATED**.
+
+The Gordon canonical state now has independent `L2` and `R2` fields. Digital full-pull semantics are:
+
+```text
+digital full-pull = explicit L2/R2 OR analog saturation
+```
+
+Explicit `L2`/`R2` changes only the digital full-pull bit; it must not change the analog trigger magnitude. The canonical `SteamControllerDeviceState` ABI size is **62 bytes**.
+
+The Addon must use a matching DLL, generated header, and C# P/Invoke definition from the same pinned VIIPER commit/build: `3bd042dbbec9120035f7e86c9f3cac1418202be6` and its matching canonical build. Do not begin Addon ABI work from a mismatched artifact or header.
 
 Do not silently update the embedded DLL/source baseline beyond this commit. A baseline update requires the process in [Section 22](#22-updating-the-pinned-viiper-baseline).
 
@@ -362,6 +372,7 @@ Canonical state fields:
 typedef struct {
     uint8_t A, X, B, Y;
     uint8_t L1, R1;
+    uint8_t L2, R2;
     uint8_t Menu, Steam, Options;
     uint8_t DPadDown, DPadLeft, DPadRight, DPadUp;
     uint8_t L3;
@@ -377,6 +388,8 @@ typedef struct {
     uint16_t BatteryMilliVolts;
 } SteamControllerDeviceState;
 ```
+
+The canonical `SteamControllerDeviceState` layout is **62 bytes**. `L2` and `R2` are explicit digital full-pull inputs; Gordon also sets the corresponding digital full-pull bit when the analog trigger reaches saturation. Explicit digital full-pull inputs do not modify `LTrigger` or `RTrigger`.
 
 The native Gordon object owns its own frame progression. The Addon supplies logical state, not a manually owned Gordon frame number.
 
@@ -905,7 +918,7 @@ This layout can be retained during migration.
 
 When adopting the canonical baseline:
 
-1. build `libVIIPER.dll` from pinned commit `6b5da6de...` using canonical `lib/viiper`;
+1. build `libVIIPER.dll` from pinned commit `3bd042db...` using canonical `lib/viiper`;
 2. replace `Dependencies/Viiper/libVIIPER.dll`;
 3. replace `Dependencies/Viiper/libVIIPER.h` with the matching generated header;
 4. replace/update `Dependencies/Viiper/LICENSE.txt` / notices as required by the built artifact;
@@ -1470,7 +1483,7 @@ No runtime behavior change.
 
 Goal:
 
-- build/embed the canonical DLL from `6b5da6de...`;
+- build/embed the canonical DLL from `3bd042db...`;
 - update header/provenance/hash verification;
 - replace legacy flat symbol binding with canonical server/bus/device bindings;
 - add C# ABI/layout/export tests;
@@ -1612,7 +1625,7 @@ VIIPER integration reference:
 
 Pinned VIIPER:
   onehoon/VIIPER
-  6b5da6de4e9a9c15460783bae0d984762a9b05ef
+  3bd042dbbec9120035f7e86c9f3cac1418202be6
 
 Canonical native path:
   lib/viiper
