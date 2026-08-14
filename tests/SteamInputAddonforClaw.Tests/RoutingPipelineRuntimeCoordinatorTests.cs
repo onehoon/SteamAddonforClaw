@@ -52,6 +52,32 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public void CurrentOperationalState_IsPassiveWithNoActiveSession()
+    {
+        var bridge = Create(new FakeStatusProvider(Snapshot(Eligible(), Software())), new FakeExecutor());
+
+        Assert.Equal(RoutingOperationalState.Passive, bridge.Bridge.CurrentOperationalState);
+        Assert.False(bridge.Bridge.ActiveSessionHasSteamOutputEnabled);
+    }
+
+    [Fact]
+    public async Task CurrentOperationalState_ReflectsActiveSessionSteamOutputAfterEntry()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        var result = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(RoutingOperationalState.OverrideActive, bridge.Bridge.CurrentOperationalState);
+        Assert.True(bridge.Bridge.ActiveSessionHasSteamOutputEnabled);
+        // Reading the accessors again must not mutate the session.
+        Assert.Equal(RoutingOperationalState.OverrideActive, bridge.Bridge.CurrentOperationalState);
+        Assert.NotNull(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
     public async Task FailClosedRollsBackTheActiveExperimentalPipeline()
     {
         var executor = new FakeExecutor();

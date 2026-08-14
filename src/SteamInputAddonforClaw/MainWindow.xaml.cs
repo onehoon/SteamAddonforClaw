@@ -19,12 +19,11 @@ using Windows.Foundation;
 using WinRT.Interop;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Prerequisites;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Developer;
-using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
+using SteamInputAddonforClaw.Routing;
 using Microsoft.UI.Dispatching;
 
 namespace SteamInputAddonforClaw;
@@ -32,29 +31,21 @@ namespace SteamInputAddonforClaw;
 public sealed partial class MainWindow : Window
 {
     private readonly StartupSettingsCoordinator _startupSettings;
-    private bool _isLoadingStartupSettings;
     private readonly MainNavigationState _navigationState = new();
     private readonly ISystemStatusProvider _systemStatusProvider;
     private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
     private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
     private readonly DeveloperTestModeState? _developerTestModeState;
-    private bool _isInitializingTestMode;
-    private bool _isInitializingLogLevel;
+    private readonly Func<RoutingRuntimeStatusSnapshot> _routingRuntimeStatusProvider;
     private SystemStatusSnapshot? _latestSystemStatus;
-    private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
-    private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
-    private readonly ObservableCollection<StatusCardViewModel> _runtimeCards = [];
     private int _isRefreshingStatus;
-    private int _isGeneratingEnvironmentDiscoveryReport;
-    private string? _environmentDiscoveryDirectory;
+    private int _statusRefreshPending;
     private bool _setupPromptActive;
     private bool _setupPromptDeclinedForCurrentProcess;
     private bool _windowActivatedForUser;
     private bool _setupPromptPendingActivation;
     private bool _prerequisiteSetupInProgress;
-    private ClawSensorProbeCoordinator _clawSensorProbe = new();
-    private DispatcherQueueTimer? _clawSensorProbeUiTimer;
 
     public MainWindow(
         StartupSettingsCoordinator startupSettings,
@@ -71,13 +62,15 @@ public sealed partial class MainWindow : Window
         IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
         IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
         DeveloperTestModeState? developerTestModeState = null,
-        IElevatedProcessRunner? prerequisiteSetupRunner = null)
+        IElevatedProcessRunner? prerequisiteSetupRunner = null,
+        Func<RoutingRuntimeStatusSnapshot>? routingRuntimeStatusProvider = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
         _hidHideReceiptStore = hidHideReceiptStore ?? new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
         _prerequisiteSetupRunner = prerequisiteSetupRunner ?? new ElevatedProcessRunner();
         _developerTestModeState = developerTestModeState;
+        _routingRuntimeStatusProvider = routingRuntimeStatusProvider ?? (() => RoutingRuntimeStatusSnapshot.Unavailable);
         _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
             new WindowsEnvironmentDiscoverySnapshotSource(),
             new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
@@ -89,19 +82,14 @@ public sealed partial class MainWindow : Window
         ApplyDefaultWindowSize();
         Closed += OnWindowClosed;
         Activated += OnWindowActivated;
-        _isLoadingStartupSettings = true;
-        LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
-        _isLoadingStartupSettings = false;
-        _isInitializingTestMode = true;
-        TestModeToggleSwitch.IsOn = _developerTestModeState?.IsEnabled == true;
-        _isInitializingTestMode = false;
-        _isInitializingLogLevel = true;
-        LogLevelComboBox.SelectedIndex = _startupSettings.Settings.LogLevel == AppLogPreference.Debug ? 1 : 0;
-        _isInitializingLogLevel = false;
-        StartupSettingsStatusText.Text = startupRegistrationMessage;
-        ControllerSoftwareRepeater.ItemsSource = _softwareCards;
-        RoutingComponentsRepeater.ItemsSource = _componentCards;
-        RuntimeStatusList.ItemsSource = _runtimeCards;
+        SettingsContent.Initialize(_startupSettings, startupRegistrationMessage);
+        SettingsContent.DeveloperMenuRequested += (_, _) => OpenDeveloperMenu();
+        DeveloperMenuContent.Initialize(_startupSettings, _developerTestModeState, _environmentDiscoveryReportGenerator, () => _prerequisiteSetupInProgress);
+        DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
+        DeveloperMenuContent.ClawSensorProbeRequested += (_, _) => OpenClawSensorProbe();
+        ClawSensorProbeContent.Initialize(() => _latestSystemStatus);
+        ClawSensorProbeContent.ReturnToDeveloperMenuRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
         MainNavigationView.SelectedItem = StatusNavigationItem;
         _ = RefreshSystemStatusAsync();
     }
@@ -120,39 +108,18 @@ public sealed partial class MainWindow : Window
 
     public void UpdateSteamSessionState(SteamSessionState state)
     {
+        RequestStatusRefresh();
+    }
+
+    internal void RequestStatusRefresh()
+    {
         DispatcherQueue.TryEnqueue(() =>
         {
             _ = RefreshSystemStatusAsync();
         });
     }
 
-    private void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (_isLoadingStartupSettings)
-        {
-            return;
-        }
-
-        var launchAtWindowsStartup = LaunchAtWindowsStartupToggleSwitch.IsOn;
-        var result = _startupSettings.ChangeLaunchAtWindowsStartup(launchAtWindowsStartup);
-        StartupSettingsStatusText.Text = result.Message;
-    }
-
-    private void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (!_isInitializingTestMode && !_prerequisiteSetupInProgress)
-            _developerTestModeState?.SetEnabled(TestModeToggleSwitch.IsOn);
-    }
-
-    private void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
-    {
-        if (_isInitializingLogLevel || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
-        var level = AppSettingsPolicy.Normalize(value);
-        _startupSettings.ChangeLogLevel(level);
-    }
-
-
-    private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)
+    private void OpenDeveloperMenu()
     {
         var previousPage = _navigationState.CurrentPage;
         ShowPage(_navigationState.OpenDeveloperMenu());
@@ -161,278 +128,15 @@ public sealed partial class MainWindow : Window
             ("CurrentPage", _navigationState.CurrentPage));
     }
 
-    private async void GenerateEnvironmentDiscoveryReportButton_Click(object sender, RoutedEventArgs args)
+    private async void OpenClawSensorProbe()
     {
-        if (_prerequisiteSetupInProgress) return;
-        if (Interlocked.Exchange(ref _isGeneratingEnvironmentDiscoveryReport, 1) != 0) return;
-        GenerateEnvironmentDiscoveryReportButton.IsEnabled = false;
-        OpenEnvironmentDiscoveryFolderButton.IsEnabled = false;
-        OpenEnvironmentDiscoveryFolderButton.Visibility = Visibility.Collapsed;
-        EnvironmentDiscoveryReportStatusText.Text = "Generating...";
-        try
-        {
-            var result = await _environmentDiscoveryReportGenerator.GenerateAsync();
-            _environmentDiscoveryDirectory = result.DirectoryPath;
-            EnvironmentDiscoveryReportStatusText.Text = $"Report generated successfully.{Environment.NewLine}{result.ReportFileName}";
-            OpenEnvironmentDiscoveryFolderButton.Visibility = Visibility.Visible;
-            OpenEnvironmentDiscoveryFolderButton.IsEnabled = true;
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("EnvironmentDiscovery", "Environment discovery report generation failed.", exception, ("Reason", exception.GetType().Name));
-            EnvironmentDiscoveryReportStatusText.Text = "Report generation failed.\r\nSee the application log for details.";
-        }
-        finally
-        {
-            GenerateEnvironmentDiscoveryReportButton.IsEnabled = true;
-            Volatile.Write(ref _isGeneratingEnvironmentDiscoveryReport, 0);
-        }
-    }
-
-    private void OpenEnvironmentDiscoveryFolderButton_Click(object sender, RoutedEventArgs args)
-    {
-        if (_prerequisiteSetupInProgress) return;
-        if (string.IsNullOrWhiteSpace(_environmentDiscoveryDirectory)) return;
-        try
-        {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_environmentDiscoveryDirectory}\"") { UseShellExecute = true });
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("EnvironmentDiscovery", "Environment discovery folder could not be opened.", exception);
-        }
-    }
-
-    private void DeveloperMenuBackButton_Click(object sender, RoutedEventArgs args)
-    {
-        ReturnToSettings("BackButton");
-    }
-
-    private async void ClawSensorProbeButton_Click(object sender, RoutedEventArgs args)
-    {
-        if (_clawSensorProbe.State is ClawSensorProbeState.Completed or ClawSensorProbeState.Failed)
-        {
-            await _clawSensorProbe.DisposeAsync();
-            _clawSensorProbe = new ClawSensorProbeCoordinator();
-        }
+        await ClawSensorProbeContent.PrepareForShowAsync();
         ShowPage(_navigationState.OpenClawSensorProbe());
-        ResetClawSensorProbeUi();
-        ClawSensorProbeStatusText.Text = "Ready. This diagnostic is read-only.";
-    }
-    private async void ClawSensorProbeBackButton_Click(object sender, RoutedEventArgs args)
-    {
-        if (_clawSensorProbe.State is ClawSensorProbeState.Starting or ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase)
-            await StopClawSensorProbeSafelyAsync();
-        _clawSensorProbeUiTimer?.Stop();
-        ShowPage(_navigationState.ReturnToDeveloperMenu());
-    }
-    private async void ClawSensorProbeStartButton_Click(object sender, RoutedEventArgs args)
-    {
-        try
-        {
-            ClawSensorProbeStartButton.IsEnabled = false;
-            _clawSensorProbe.Prepare();
-            ClawSensorProbeStatusText.Text = "Discovering Windows motion sensors...";
-            _clawSensorProbe.Start();
-            var device = _latestSystemStatus?.Device;
-            var hardware = _latestSystemStatus?.HardwareCompatibility;
-            var resolvedModel = hardware?.DeviceModel?.Value ?? "Unknown / unresolved";
-            _clawSensorProbe.SetDeviceIdentity(device?.Manufacturer ?? "Unavailable", device?.Model ?? "Unavailable", device?.BaseBoardProduct ?? "Unavailable", resolvedModel);
-            _clawSensorProbe.SetHardwareCompatibility(hardware?.Status.ToString() ?? "Indeterminate", hardware?.DeviceFamily?.Value ?? "Unavailable", hardware?.DeviceModel?.Value ?? "Unavailable", hardware?.Reason ?? "Not captured");
-            ClawSensorProbeDeviceText.Text = $"Device: {device?.Manufacturer ?? "Unavailable"} {device?.Model ?? "Unavailable"}";
-            ClawSensorProbeModelText.Text = $"Model: {resolvedModel} | Production compatibility: {hardware?.Status.ToString() ?? "Indeterminate"}";
-            ClawSensorProbeBoardText.Text = $"Base board: {device?.BaseBoardProduct ?? "Unavailable"}";
-            if (!ClawSensorProbeCoordinator.AllowsReadOnlyDiagnostic(hardware))
-                throw new InvalidOperationException("This diagnostic is available only on an identified MSI Claw device.");
-            await _clawSensorProbe.StartCaptureAsync(_clawSensorProbe.LifecycleCancellation);
-            var discovery = _clawSensorProbe.Discovery;
-            ClawSensorProbeGyroText.Text = discovery?.Gyroscope is { } gyro ? $"Gyroscope: {gyro.FriendlyName} | ID: {gyro.SensorId} | Type: {gyro.TypeGuid} | Category: {gyro.CategoryGuid} | Manufacturer: {gyro.Manufacturer} | Model: {gyro.Model} | Persistent ID: {gyro.PersistentUniqueId} | Min interval: {gyro.MinimumReportInterval} ms | HID usage: {gyro.CustomUsage} | Status: Ready" : "Gyroscope: Not available";
-            ClawSensorProbeAccelText.Text = discovery?.Accelerometer is { } accel ? $"Accelerometer: {accel.FriendlyName} | ID: {accel.SensorId} | Type: {accel.TypeGuid} | Category: {accel.CategoryGuid} | Manufacturer: {accel.Manufacturer} | Model: {accel.Model} | Persistent ID: {accel.PersistentUniqueId} | Min interval: {accel.MinimumReportInterval} ms | HID usage: {accel.CustomUsage} | Status: Ready" : "Accelerometer: Not available";
-            StartClawSensorProbeUiTimer();
-            UpdateClawSensorProbePhaseUi();
-            await _clawSensorProbe.CountdownAsync(status => { ClawSensorProbeStatusText.Text = status; return Task.CompletedTask; }, ClawSensorProbePhaseLabel, _clawSensorProbe.LifecycleCancellation);
-            _clawSensorProbe.BeginRecording();
-            ClawSensorProbeStatusText.Text = "Recording. Sensor discovery and capture are read-only.";
-            ClawSensorProbeStopButton.IsEnabled = true;
-            ClawSensorProbeNextPhaseButton.IsEnabled = true;
-        }
-        catch (OperationCanceledException)
-        {
-            await _clawSensorProbe.StopAsync();
-            _clawSensorProbeUiTimer?.Stop();
-            ClawSensorProbeStatusText.Text = "Test stopped. Output: " + _clawSensorProbe.OutputDirectory;
-            ClawSensorProbeStopButton.IsEnabled = false;
-            ClawSensorProbeNextPhaseButton.IsEnabled = false;
-            ClawSensorProbeDoneButton.IsEnabled = true;
-            ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
-            UpdateClawSensorProbeSummary("Test stopped");
-        }
-        catch (Exception exception)
-        {
-            await _clawSensorProbe.FailAsync(exception.Message);
-            ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
-            ClawSensorProbeStatusText.Text = $"Test failed: {exception.Message}";
-            ClawSensorProbeErrorText.Text = exception.Message;
-            ClawSensorProbeDoneButton.IsEnabled = true;
-            UpdateClawSensorProbeSummary("Test failed");
-        }
-    }
-    private async void ClawSensorProbeNextPhaseButton_Click(object sender, RoutedEventArgs args)
-    {
-        try
-        {
-            if (_clawSensorProbe.State != ClawSensorProbeState.RecordingPhase) return;
-            ClawSensorProbeBackPhaseButton.IsEnabled = false;
-            ClawSensorProbeNextPhaseButton.IsEnabled = false;
-            await _clawSensorProbe.AdvancePhaseAsync(status => { ClawSensorProbeStatusText.Text = status; return Task.CompletedTask; }, ClawSensorProbePhaseLabel, UpdateClawSensorProbePhaseUi, _clawSensorProbe.LifecycleCancellation);
-            if (_clawSensorProbe.State == ClawSensorProbeState.Completed)
-            {
-                await _clawSensorProbe.StopAsync(); _clawSensorProbeUiTimer?.Stop();
-                ClawSensorProbeStatusText.Text = "Test completed. Output: " + _clawSensorProbe.OutputDirectory;
-                ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
-                UpdateClawSensorProbeSummary("Test completed");
-            }
-            UpdateClawSensorProbePhaseUi();
-        }
-        catch (OperationCanceledException)
-        {
-            await _clawSensorProbe.StopAsync(); _clawSensorProbeUiTimer?.Stop();
-            ClawSensorProbeStatusText.Text = "Test stopped. Output: " + _clawSensorProbe.OutputDirectory;
-            ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeNextPhaseButton.IsEnabled = false; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
-            UpdateClawSensorProbeSummary("Test stopped");
-        }
-        catch (Exception exception)
-        {
-            await _clawSensorProbe.FailAsync(exception.Message);
-            _clawSensorProbeUiTimer?.Stop();
-            ClawSensorProbeStatusText.Text = $"Test failed: {exception.Message}";
-            ClawSensorProbeErrorText.Text = exception.Message;
-            ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeNextPhaseButton.IsEnabled = false; ClawSensorProbeBackPhaseButton.IsEnabled = false; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
-            UpdateClawSensorProbeSummary("Test failed");
-        }
-    }
-    private async void ClawSensorProbeBackPhaseButton_Click(object sender, RoutedEventArgs args)
-    {
-        try
-        {
-            ClawSensorProbeBackPhaseButton.IsEnabled = false;
-            ClawSensorProbeNextPhaseButton.IsEnabled = false;
-            await _clawSensorProbe.RevisitPreviousPhaseAsync(status => { ClawSensorProbeStatusText.Text = status; return Task.CompletedTask; }, ClawSensorProbePhaseLabel, UpdateClawSensorProbePhaseUi, _clawSensorProbe.LifecycleCancellation);
-            UpdateClawSensorProbePhaseUi();
-        }
-        catch (OperationCanceledException)
-        {
-            await _clawSensorProbe.StopAsync(); _clawSensorProbeUiTimer?.Stop();
-            ClawSensorProbeStatusText.Text = "Test stopped. Output: " + _clawSensorProbe.OutputDirectory;
-            ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeNextPhaseButton.IsEnabled = false; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
-            UpdateClawSensorProbeSummary("Test stopped");
-        }
-        catch (Exception exception)
-        {
-            await _clawSensorProbe.FailAsync(exception.Message);
-            _clawSensorProbeUiTimer?.Stop();
-            ClawSensorProbeStatusText.Text = $"Test failed: {exception.Message}";
-            ClawSensorProbeErrorText.Text = exception.Message;
-            ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeNextPhaseButton.IsEnabled = false; ClawSensorProbeBackPhaseButton.IsEnabled = false; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
-            UpdateClawSensorProbeSummary("Test failed");
-        }
-    }
-    private async void ClawSensorProbeStopButton_Click(object sender, RoutedEventArgs args) { ClawSensorProbeStopButton.IsEnabled = false; ClawSensorProbeNextPhaseButton.IsEnabled = false; ClawSensorProbeStatusText.Text = "Stopping sensor capture..."; await StopClawSensorProbeSafelyAsync(); _clawSensorProbeUiTimer?.Stop(); ClawSensorProbeStatusText.Text = "Test stopped. Output: " + _clawSensorProbe.OutputDirectory; ClawSensorProbeDoneButton.IsEnabled = true; ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport; UpdateClawSensorProbeSummary(); }
-    private void ClawSensorProbeOpenFolderButton_Click(object sender, RoutedEventArgs args)
-    {
-        if (string.IsNullOrWhiteSpace(_clawSensorProbe.OutputDirectory))
-        {
-            ClawSensorProbeErrorText.Text = "The diagnostic output directory is unavailable.";
-            return;
-        }
-
-        try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_clawSensorProbe.OutputDirectory}\"") { UseShellExecute = true }); }
-        catch (Exception exception) { ClawSensorProbeErrorText.Text = $"The diagnostic log folder could not be opened: {exception.Message}"; }
-    }
-    private async void ClawSensorProbeDoneButton_Click(object sender, RoutedEventArgs args) { if (_clawSensorProbe.State is ClawSensorProbeState.Starting or ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase) await StopClawSensorProbeSafelyAsync(); ShowPage(_navigationState.ReturnToDeveloperMenu()); }
-    private async Task StopClawSensorProbeSafelyAsync()
-    {
-        try { await _clawSensorProbe.StopAsync(); }
-        catch (Exception exception) { ClawSensorProbeErrorText.Text = $"Probe shutdown warning: {exception.Message}"; }
-    }
-    private void ResetClawSensorProbeUi()
-    {
-        ClawSensorProbeStartButton.IsEnabled = true;
-        ClawSensorProbeStopButton.IsEnabled = false;
-        ClawSensorProbeBackPhaseButton.IsEnabled = false;
-        ClawSensorProbeNextPhaseButton.IsEnabled = false;
-        ClawSensorProbeDoneButton.IsEnabled = false;
-        ClawSensorProbeOpenFolderButton.IsEnabled = false;
-        ClawSensorProbeDeviceText.Text = "Device: Unavailable";
-        ClawSensorProbeModelText.Text = "Model: Unknown / unresolved";
-        ClawSensorProbeBoardText.Text = "Base board: Unavailable";
-        ClawSensorProbeGyroText.Text = "Gyroscope: Not discovered";
-        ClawSensorProbeAccelText.Text = "Accelerometer: Not discovered";
-        ClawSensorProbePhaseText.Text = "Step: Not started";
-        ClawSensorProbeInstructionText.Text = "Keep Still: Place the device on a flat surface and do not touch it.";
-        ClawSensorProbeLiveText.Text = $"Gyroscope: waiting{Environment.NewLine}Accelerometer: waiting";
-        ClawSensorProbeSummaryText.Text = string.Empty;
-        ClawSensorProbeErrorText.Text = string.Empty;
-    }
-    private void UpdateClawSensorProbeSummary(string result = "Test stopped") { var gyro = _clawSensorProbe.GyroscopeSummary; var accel = _clawSensorProbe.AccelerometerSummary; ClawSensorProbeSummaryText.Text = $"{result}{Environment.NewLine}Output directory: {_clawSensorProbe.OutputDirectory ?? "Unavailable"}{Environment.NewLine}Gyroscope samples: {gyro?.SampleCount ?? 0}, average rate: {gyro?.EffectiveHz:0.0} Hz, interval: {gyro?.MinimumIntervalMs:0.###}-{gyro?.MaximumIntervalMs:0.###} ms, dropped: {_clawSensorProbe.DroppedGyroscopeCount}{Environment.NewLine}Accelerometer samples: {accel?.SampleCount ?? 0}, average rate: {accel?.EffectiveHz:0.0} Hz, interval: {accel?.MinimumIntervalMs:0.###}-{accel?.MaximumIntervalMs:0.###} ms, dropped: {_clawSensorProbe.DroppedAccelerometerCount}{Environment.NewLine}Dropped samples total: {_clawSensorProbe.DroppedSampleCount}"; }
-    private void UpdateClawSensorProbePhaseUi() { var index = _clawSensorProbe.Workflow.CurrentIndex; var phase = index >= 0 ? _clawSensorProbe.Workflow.Visits.Last().Phase : ClawSensorProbePhase.REST; ClawSensorProbePhaseText.Text = index >= 0 ? $"Step: {index + 1} of {ClawSensorProbeWorkflow.Phases.Count} - {ClawSensorProbePhaseLabel(phase)}" : "Step: Not started"; ClawSensorProbeInstructionText.Text = phase switch { ClawSensorProbePhase.REST => "Keep Still: Place the device on a flat surface and do not touch it.", ClawSensorProbePhase.ROLL_LEFT => "Roll Left: Slowly lower the left side, then return to the starting position.", ClawSensorProbePhase.ROLL_RIGHT => "Roll Right: Slowly lower the right side, then return to the starting position.", ClawSensorProbePhase.PITCH_UP => "Pitch Up: Slowly tilt the top upward, then return to the starting position.", ClawSensorProbePhase.PITCH_DOWN => "Pitch Down: Slowly tilt the top downward, then return to the starting position.", ClawSensorProbePhase.YAW_LEFT => "Yaw Left: Keep the device level and rotate it left, then return to center.", _ => "Yaw Right: Keep the device level and rotate it right, then return to center." }; var recording = _clawSensorProbe.State == ClawSensorProbeState.RecordingPhase; ClawSensorProbeBackPhaseButton.IsEnabled = recording && index > 0; ClawSensorProbeNextPhaseButton.IsEnabled = recording; ClawSensorProbeNextPhaseButton.Content = index == ClawSensorProbeWorkflow.Phases.Count - 1 ? "Finish Test" : "Next"; }
-    private static string ClawSensorProbePhaseLabel(ClawSensorProbePhase phase) => phase switch
-    {
-        ClawSensorProbePhase.REST => "Keep Still",
-        ClawSensorProbePhase.ROLL_LEFT => "Roll Left",
-        ClawSensorProbePhase.ROLL_RIGHT => "Roll Right",
-        ClawSensorProbePhase.PITCH_UP => "Pitch Up",
-        ClawSensorProbePhase.PITCH_DOWN => "Pitch Down",
-        ClawSensorProbePhase.YAW_LEFT => "Yaw Left",
-        _ => "Yaw Right"
-    };
-    private void StartClawSensorProbeUiTimer()
-    {
-        _clawSensorProbeUiTimer ??= DispatcherQueue.GetForCurrentThread().CreateTimer();
-        _clawSensorProbeUiTimer.Interval = TimeSpan.FromMilliseconds(200);
-        _clawSensorProbeUiTimer.Tick -= ClawSensorProbeUiTimer_Tick;
-        _clawSensorProbeUiTimer.Tick += ClawSensorProbeUiTimer_Tick;
-        _clawSensorProbeUiTimer.Start();
-    }
-    private void ClawSensorProbeUiTimer_Tick(DispatcherQueueTimer sender, object args)
-    {
-        var snapshot = _clawSensorProbe.LiveSnapshot;
-        if (snapshot is null) return;
-        if (_clawSensorProbe.ReaderErrors.Count > 0)
-        {
-            ClawSensorProbeErrorText.Text = string.Join(Environment.NewLine, _clawSensorProbe.ReaderErrors);
-            _ = DispatcherQueue.TryEnqueue(async () =>
-            {
-                try
-                {
-                    await _clawSensorProbe.FailOnReaderFaultAsync();
-                    _clawSensorProbeUiTimer?.Stop();
-                    ClawSensorProbeStatusText.Text = "Test failed: sensor reader stopped unexpectedly.";
-                    ClawSensorProbeStopButton.IsEnabled = false;
-                    ClawSensorProbeBackPhaseButton.IsEnabled = false;
-                    ClawSensorProbeNextPhaseButton.IsEnabled = false;
-                    ClawSensorProbeDoneButton.IsEnabled = true;
-                    ClawSensorProbeOpenFolderButton.IsEnabled = _clawSensorProbe.HasReport;
-                    UpdateClawSensorProbeSummary("Test failed");
-                }
-                catch (Exception exception)
-                {
-                    AppLog.Warn("ClawSensorProbe", "Automatic reader-fault cleanup failed.", exception);
-                    ClawSensorProbeErrorText.Text = $"Sensor reader failed and cleanup reported a warning: {exception.Message}";
-                }
-            });
-            return;
-        }
-        var gyro = snapshot.Gyro; var accel = snapshot.Accel;
-        ClawSensorProbeLiveText.Text = $"Status: {_clawSensorProbe.CaptureContext.Mode}{Environment.NewLine}Gyroscope raw: X={gyro.X:0.###}, Y={gyro.Y:0.###}, Z={gyro.Z:0.###} | {gyro.Hz:0.0} Hz | {gyro.Count} samples{Environment.NewLine}Accelerometer raw: X={accel.X:0.###}, Y={accel.Y:0.###}, Z={accel.Z:0.###} | {accel.Hz:0.0} Hz | {accel.Count} samples";
     }
 
     private async void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        if (_clawSensorProbe.State is ClawSensorProbeState.Starting or ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase)
-            await StopClawSensorProbeSafelyAsync();
-        try { await _clawSensorProbe.DisposeAsync(); }
-        catch (Exception exception) { AppLog.Warn("ClawSensorProbe", "Probe cleanup failed.", exception); }
+        await ClawSensorProbeContent.ShutdownAsync();
     }
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -452,45 +156,32 @@ public sealed partial class MainWindow : Window
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
     }
 
-    private async void RefreshStatusButton_Click(object sender, RoutedEventArgs args) => await RefreshSystemStatusAsync();
-
     private async Task RefreshSystemStatusAsync()
     {
         if (_prerequisiteSetupInProgress) return;
-        if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0) return;
-        RefreshStatusButton.IsEnabled = false;
+        if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0)
+        {
+            Volatile.Write(ref _statusRefreshPending, 1);
+            return;
+        }
+        StatusContent.SetRefreshing(true);
         try { RenderSystemStatus(await _systemStatusProvider.CaptureAsync()); }
         catch (Exception exception) { AppLog.Warn("Status", "System status refresh failed.", exception, ("Reason", "SnapshotCaptureFailed")); }
-        finally { RefreshStatusButton.IsEnabled = true; Volatile.Write(ref _isRefreshingStatus, 0); }
+        finally
+        {
+            StatusContent.SetRefreshing(false);
+            Volatile.Write(ref _isRefreshingStatus, 0);
+            if (Interlocked.Exchange(ref _statusRefreshPending, 0) != 0)
+                DispatcherQueue.TryEnqueue(() => _ = RefreshSystemStatusAsync());
+        }
     }
 
     private void RenderSystemStatus(SystemStatusSnapshot snapshot)
     {
         _latestSystemStatus = snapshot;
-        DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
-        DeviceModelText.Text = snapshot.Device.Model;
-        DeviceSupportText.Text = snapshot.HardwareCompatibility.Status switch
-        {
-            HardwareCompatibilityStatus.Supported => "Supported",
-            HardwareCompatibilityStatus.Unsupported => "Unsupported",
-            _ => "Compatibility unknown"
-        };
-        DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoardProduct}  GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
-        Replace(_softwareCards, snapshot.ControllerSoftware.Select(item => new StatusCardViewModel(item.DisplayName, FormatSoftwareStatus(item), item.Reason)));
-        Replace(_componentCards,
-        [
-            new("HidHide", snapshot.Prerequisites.HidHide.Status.ToString(), snapshot.Prerequisites.HidHide.Reason),
-            new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
-            new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
-        ]);
         var setup = EvaluateFirstTimeSetup(snapshot);
-        var canInstall = setup.CanInstallRequiredComponents;
         var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
-        Replace(_runtimeCards,
-        [
-            new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
-            new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
-        ]);
+        StatusContent.Render(snapshot, addonPresentation, _routingRuntimeStatusProvider());
         if (PrerequisiteSetupPromptPolicy.IsInstallable(setup))
         {
             if (_windowActivatedForUser)
@@ -639,26 +330,9 @@ public sealed partial class MainWindow : Window
     {
         PrerequisiteSetupBusyOverlay.Visibility = _prerequisiteSetupInProgress ? Visibility.Visible : Visibility.Collapsed;
         MainNavigationView.IsHitTestVisible = !_prerequisiteSetupInProgress;
-        RefreshStatusButton.IsEnabled = !_prerequisiteSetupInProgress;
+        StatusContent.SetRefreshing(_prerequisiteSetupInProgress);
     }
 
-    private void ShowStatusButton_Click(object sender, RoutedEventArgs args)
-    {
-        MainNavigationView.SelectedItem = StatusNavigationItem;
-        ShowPage(_navigationState.SelectNavigationItem(false, "Status"));
-    }
-
-    private static void Replace(ObservableCollection<StatusCardViewModel> destination, IEnumerable<StatusCardViewModel> source) { destination.Clear(); foreach (var item in source) destination.Add(item); }
-    internal static string FormatSoftwareStatus(ControllerSoftwareStatus item) => item.Runtime switch
-    {
-        SoftwareRuntimeStatus.Running => "Running",
-        SoftwareRuntimeStatus.Starting => "Starting",
-        SoftwareRuntimeStatus.Indeterminate => "Indeterminate",
-        _ when item.Installation == SoftwareInstallationStatus.Installed => "Installed / Not running",
-        _ when item.Installation == SoftwareInstallationStatus.NotInstalled => "Not installed",
-        _ => "Indeterminate"
-    };
-    private static string FormatAddonStatus(AddonOperationalStatus status) => status switch { AddonOperationalStatus.WaitingForSteam => "Waiting for Steam", AddonOperationalStatus.SetupRequired => "Setup required", AddonOperationalStatus.RecoveryRequired => "Recovery required", AddonOperationalStatus.Unsupported => "Unsupported", _ => status.ToString() };
     private static ComponentProvisioningState ToComponentProvisioningState(HidHideProvisioningReceiptState state) => state switch
     {
         HidHideProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned,

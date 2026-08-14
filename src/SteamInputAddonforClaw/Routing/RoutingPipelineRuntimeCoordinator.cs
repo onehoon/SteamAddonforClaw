@@ -166,6 +166,13 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         }
     }
 
+    /// <summary>Read-only routing session state for UI presentation. Never mutates the session.</summary>
+    internal RoutingOperationalState CurrentOperationalState => _sessionCoordinator.CurrentState;
+
+    /// <summary>True only when an active session exists and its plan has the Steam output stage enabled.</summary>
+    internal bool ActiveSessionHasSteamOutputEnabled =>
+        _sessionCoordinator.ActiveSession?.Plan.SteamOutput == RoutingStageMode.Enabled;
+
     internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() =>
         new(
             Volatile.Read(ref _transitionOperationCount) > 0,

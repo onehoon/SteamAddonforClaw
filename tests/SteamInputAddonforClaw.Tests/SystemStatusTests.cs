@@ -323,7 +323,7 @@ public sealed class SystemStatusTests
     [InlineData((int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.Starting, "Starting")]
     [InlineData((int)SoftwareInstallationStatus.Installed, (int)SoftwareRuntimeStatus.NotRunning, "Installed / Not running")]
     public void SoftwareStatusFormatting_PreservesStarting(int installationValue, int runtimeValue, string expected) =>
-        Assert.Equal(expected, MainWindow.FormatSoftwareStatus(Software(ControllerSoftwareKind.MsiCenterM, (SoftwareInstallationStatus)installationValue, (SoftwareRuntimeStatus)runtimeValue)));
+        Assert.Equal(expected, ControllerSoftwareStatusFormatter.Format(Software(ControllerSoftwareKind.MsiCenterM, (SoftwareInstallationStatus)installationValue, (SoftwareRuntimeStatus)runtimeValue)));
 
     [Theory]
     [InlineData(@"C:\Packages\MSIQuickSettings_1.0", @"C:\Packages\MSIQuickSettings_1.0\Gamebar_Widget.exe", true)]
