@@ -33,13 +33,7 @@ internal sealed class BufferedEntryWriter<T> : IDisposable
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.Wait,
         });
-        // LongRunning gets a dedicated thread instead of a thread-pool slot. This writer, its
-        // Shutdown()/DrainForTests() blocking waits, and (in tests) many throwaway instances of this
-        // type all otherwise compete with the shared thread pool; under heavy concurrent load that
-        // showed up as multi-second scheduling delays here and, via general pool contention, in
-        // unrelated tests elsewhere. A dedicated thread removes the writer from that contention entirely
-        // and keeps drain/shutdown latency independent of how busy the thread pool is.
-        _writerTask = Task.Factory.StartNew(RunAsync, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+        _writerTask = Task.Run(RunAsync);
     }
 
     /// <summary>Count of items dropped because the queue was saturated and <see cref="isHighPriority"/> returned false.</summary>
@@ -48,7 +42,12 @@ internal sealed class BufferedEntryWriter<T> : IDisposable
     /// <summary>Count of high-priority items dropped after retrying because the queue stayed saturated.</summary>
     public long DroppedHighPriorityCount => Interlocked.Read(ref _droppedHighPriorityCount);
 
-    /// <summary>Enqueues an item without blocking the caller. Never throws.</summary>
+    /// <summary>
+    /// Enqueues an item. Never throws, and never waits for the writer thread. Routine/low-priority items
+    /// return immediately even under saturation. High-priority items may perform a brief, bounded
+    /// caller-side spin-retry (microseconds, not a real wait) before falling back to drop-and-count; see
+    /// <see cref="HighPriorityRetryAttempts"/>.
+    /// </summary>
     public void Enqueue(T item)
     {
         var envelope = new Envelope(item, null);
@@ -61,9 +60,10 @@ internal sealed class BufferedEntryWriter<T> : IDisposable
             return;
         }
 
-        // High-priority items are preserved whenever reasonably possible: a short, bounded number of
-        // non-blocking retries gives the writer a chance to drain space. The caller is never blocked
-        // indefinitely; if the queue is still saturated afterward, the item is dropped and counted.
+        // High-priority items are preserved whenever reasonably possible: a short, bounded caller-side
+        // spin-retry gives the writer a chance to drain space. This briefly occupies the caller (unlike
+        // the low-priority path above), but never for long and never indefinitely; if the queue is still
+        // saturated afterward, the item is dropped and counted.
         for (var attempt = 0; attempt < HighPriorityRetryAttempts; attempt++)
         {
             Thread.SpinWait(200);

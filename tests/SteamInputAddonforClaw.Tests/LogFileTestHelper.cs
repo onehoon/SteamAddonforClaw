@@ -1,19 +1,19 @@
-using SteamInputAddonforClaw.Diagnostics;
-
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>
-/// AppLog is one process-wide singleton with a single background writer and a single shared queue.
-/// Reading its log file right after AppLog.DrainForTests() can still transiently race under the full test
-/// suite (not just this test's own serialized collection): other concurrently-running collections'
-/// production-code paths enqueue through the same writer and can re-target its one open file handle
-/// between this test's own drain and its file read. Re-draining before every retry (not just once up
-/// front) closes that window on each attempt instead of only checking a stale close from before the race.
+/// Reading a log file immediately after AppLog.DrainForTests() can, in principle, still race a transient
+/// OS-level file lock (e.g. antivirus/indexer briefly opening a freshly closed file) even though the
+/// writer's own handle is guaranteed closed by then. The main cross-test race that used to make this
+/// common -- other, untagged test collections concurrently writing through the same AppLog singleton --
+/// is closed at the assembly level instead (see AssemblyInfo.cs, DisableTestParallelization = true).
+/// A short bounded retry remains as defense-in-depth: DisableTestParallelization guarantees no two test
+/// *methods* run concurrently, but does not join/cancel background work a test left running past its own
+/// return (a separate test-hygiene concern), so a rare residual race is still possible.
 /// </summary>
 internal static class LogFileTestHelper
 {
-    private const int MaxAttempts = 40;
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(100);
+    private const int MaxAttempts = 20;
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(150);
 
     internal static string ReadAllText(string path) => Retry(() => File.ReadAllText(path));
 
@@ -24,11 +24,7 @@ internal static class LogFileTestHelper
         for (var attempt = 1; ; attempt++)
         {
             try { return read(); }
-            catch (IOException) when (attempt < MaxAttempts)
-            {
-                Thread.Sleep(RetryDelay);
-                AppLog.DrainForTests();
-            }
+            catch (IOException) when (attempt < MaxAttempts) { Thread.Sleep(RetryDelay); }
         }
     }
 }

@@ -357,7 +357,9 @@ public partial class App : Application
         if (_physicalInputSource is not null) _physicalInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _physicalInputSource = null;
         AppLog.Info("Runtime cleanup completed.");
-        AppLog.Shutdown();
+        // Shutdown ownership lives solely in Program.Main's `finally` (runs once Application.Start
+        // returns, i.e. after this method), so it drains exactly this entry plus everything queued
+        // before it -- without also blocking here for up to its own separate timeout.
     }
 
     private void OnMainWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)

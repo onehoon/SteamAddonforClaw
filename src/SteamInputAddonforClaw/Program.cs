@@ -18,12 +18,11 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        // Guarantees AppLog.Shutdown() runs on every exit path out of Main -- not just the MainWindow
-        // real-exit path (App.xaml.cs) -- including the several early `return`s below (elevated
-        // prerequisite setup, secondary-instance activation, restart timeout) that never reach a
-        // MainWindow at all. AppLog.Shutdown() is safe to call more than once (Queue.Writer.TryComplete
-        // is a no-op once already completed, and waiting on an already-finished writer task returns
-        // immediately), so this is unconditional even though App.xaml.cs also calls it on its own path.
+        // Sole owner of AppLog.Shutdown(): guarantees it runs exactly once, on every exit path out of
+        // Main -- the several early `return`s below (elevated prerequisite setup, secondary-instance
+        // activation, restart timeout) that never reach a MainWindow at all, the fatal-startup-exception
+        // path, and the normal path (Application.Start blocks until the WinUI app -- including
+        // App.xaml.cs's OnMainWindowClosed -- has fully exited, so this still runs after that).
         try
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);

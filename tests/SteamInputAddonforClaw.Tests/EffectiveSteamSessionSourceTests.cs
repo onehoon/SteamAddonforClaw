@@ -214,14 +214,28 @@ public sealed class EffectiveSteamSessionSourceTests
         };
 
         var enable = Task.Run(() => testMode.SetEnabled(true));
-        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
-        var dispose = Task.Run(effective.Dispose);
-        Assert.NotSame(dispose, await Task.WhenAny(dispose, Task.Delay(100)));
-        release.Set();
-        await Task.WhenAll(enable, dispose);
+        try
+        {
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            var dispose = Task.Run(effective.Dispose);
+            Assert.NotSame(dispose, await Task.WhenAny(dispose, Task.Delay(100)));
+            release.Set();
+            await Task.WhenAll(enable, dispose);
 
-        testMode.SetEnabled(false);
-        Assert.Equal(1, notifications);
+            testMode.SetEnabled(false);
+            Assert.Equal(1, notifications);
+        }
+        finally
+        {
+            // If an assertion above throws, the StateChanged handler may still be sitting in
+            // release.Wait() (or about to enter it) with `enable` never observed/awaited -- without this,
+            // that leaves a background thread-pool work item permanently blocked for the rest of the
+            // test process, which can then starve unrelated later tests. Always release it and let
+            // `enable` finish so nothing outlives this test.
+            release.Set();
+            try { await enable.WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
+            effective.Dispose();
+        }
     }
 
     [Fact]
