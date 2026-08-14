@@ -8,21 +8,21 @@ internal readonly record struct ClassicSteamControllerInput(GamepadButtons Butto
     internal ClassicSteamControllerInput(bool leftGrip, bool rightGrip) : this(default, default, default, default, leftGrip, rightGrip, default, default) { }
 }
 
+internal static class ClassicSteamControllerRightPadPolicy
+{
+    internal const short TouchThreshold = 500;
+
+    internal static bool IsTouched(StickState pad, bool press) =>
+        press || Math.Abs((int)pad.X) > TouchThreshold || Math.Abs((int)pad.Y) > TouchThreshold;
+}
+
 internal static class ClassicSteamControllerInputMapper
 {
-    // HHC's established Steam Controller path uses this noise threshold for automatic
-    // pad-touch activation, filtering real analog stick drift while leaving RightPad
-    // coordinates themselves untouched -- deadzone/sensitivity remain Steam Input's job.
-    private const short RightPadTouchThreshold = 500;
-
     internal static ClassicSteamControllerInput Map(ControllerState state)
     {
         var rightPad = state.RightStick;
         var press = state.Buttons.RightStickClick;
-        // Math.Abs(short) throws OverflowException for short.MinValue (-32768), which a
-        // full-deflection analog stick reaches routinely; widen to int before taking the
-        // absolute value.
-        var touch = press || Math.Abs((int)rightPad.X) > RightPadTouchThreshold || Math.Abs((int)rightPad.Y) > RightPadTouchThreshold;
+        var touch = ClassicSteamControllerRightPadPolicy.IsTouched(rightPad, press);
         return new(state.Buttons, state.LeftStick, rightPad, state.Triggers, state.Auxiliary[(int)AuxiliaryButtonSlot.LeftRear], state.Auxiliary[(int)AuxiliaryButtonSlot.RightRear], press, touch);
     }
 }
