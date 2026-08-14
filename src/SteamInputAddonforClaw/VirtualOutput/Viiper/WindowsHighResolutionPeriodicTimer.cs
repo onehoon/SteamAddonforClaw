@@ -28,6 +28,9 @@ internal sealed class WindowsHighResolutionPeriodicTimer : WaitHandle
     internal WindowsHighResolutionPeriodicTimer(TimeSpan period, IWaitableTimerNativeApi? nativeApi = null)
     {
         if (period <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(period), period, "The timer period must be positive.");
+        // SetWaitableTimerEx's lPeriod is a whole number of milliseconds; silently truncating a
+        // fractional period (e.g. 1.5ms) would arm a timer with a different period than requested.
+        if (period.Ticks % TimeSpan.TicksPerMillisecond != 0) throw new ArgumentOutOfRangeException(nameof(period), period, "The timer period must be a whole number of milliseconds.");
         if (period.TotalMilliseconds is < 1 or > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(period), period, "The timer period must be representable as a whole number of milliseconds.");
 
         _native = nativeApi ?? Win32WaitableTimerNativeApi.Instance;

@@ -24,7 +24,11 @@ internal sealed class CanonicalSteamControllerInputPublisher
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ProductionPeriod = TimeSpan.FromMilliseconds(4);
-    private static readonly TimeSpan WorkerJoinTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan DefaultWorkerJoinTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>Test-only seam so the join-timeout fail-closed path can be exercised deterministically
+    /// without an actual multi-second wait. Production always uses the 5s default.</summary>
+    internal TimeSpan WorkerJoinTimeoutForTests { get; set; } = DefaultWorkerJoinTimeout;
 
     private readonly IControllerStateSnapshotSource _snapshot;
     private readonly ICanonicalSteamControllerStateSink _sink;
@@ -134,6 +138,18 @@ internal sealed class CanonicalSteamControllerInputPublisher
         _workerThread.Start();
     }
 
+    /// <summary>
+    /// Signals the worker to stop and waits for it to actually exit. Fail closed on a join timeout: the
+    /// caller (ClassicSteamControllerOutputStage) proceeds from a successful StopAsync() straight into
+    /// native Gordon device removal, so if this returned normally while the worker might still be inside
+    /// an in-flight SetState, that removal could race the worker's own SetState call against the native
+    /// handle being torn down. So a timed-out join does NOT dispose the timer/stop event or clear the
+    /// worker references -- it throws instead, and the caller's existing SteamOutput failure path handles
+    /// it like any other stop failure. The stop event stays set, so once the slow SetState call the worker
+    /// was blocked in eventually returns, the worker still exits on its very next wait; a subsequent
+    /// StopAsync() call (the caller's rollback path already retries operations) will then join and
+    /// complete cleanup normally, without re-signaling anything that wasn't already signaled.
+    /// </summary>
     private async Task StopProductionWorkerAsync()
     {
         if (_workerStopEvent is null) return;
@@ -144,11 +160,15 @@ internal sealed class CanonicalSteamControllerInputPublisher
         stopEvent.Set();
         if (thread is not null)
         {
-            // Bounded and deterministic: never leave a blocked publisher thread behind. The worker wakes
-            // on the stop event immediately in normal operation; Join is off-thread and time-boxed purely
-            // as a safety net.
-            var joined = await Task.Run(() => thread.Join(WorkerJoinTimeout)).ConfigureAwait(false);
-            if (!joined) AppLog.Warn("SteamOutput", "Canonical Gordon publisher worker did not join within the shutdown timeout.", null, ("TimeoutMs", (long)WorkerJoinTimeout.TotalMilliseconds));
+            // Off-thread so this doesn't block the async caller; bounded by WorkerJoinTimeoutForTests
+            // (production always uses the 5s default -- see that property's doc comment).
+            var joined = await Task.Run(() => thread.Join(WorkerJoinTimeoutForTests)).ConfigureAwait(false);
+            if (!joined)
+            {
+                var timeout = new TimeoutException("The canonical Gordon publisher worker did not stop within the shutdown timeout; it may still be inside SetState. Refusing to proceed with teardown.");
+                AppLog.Error("SteamOutput", "Canonical Gordon publisher worker did not stop within the shutdown timeout.", timeout, ("TimeoutMs", (long)WorkerJoinTimeoutForTests.TotalMilliseconds));
+                throw timeout;
+            }
         }
 
         timer?.Dispose();
@@ -168,11 +188,17 @@ internal sealed class CanonicalSteamControllerInputPublisher
     {
         try
         {
-            WaitHandle[] handles = [timer, stopEvent];
+            // Stop must be index 0: WaitHandle.WaitAny returns the lowest-index signaled handle when
+            // several are signaled at once. If a slow SetState call runs past a timer period while
+            // StopAsync is concurrently signaling the stop event, both handles can be signaled by the
+            // time this thread comes back to wait -- putting the timer first would let one more publish
+            // start after stop was requested (and, under sustained SetState delay, could starve stop
+            // indefinitely). Stop must always win that race.
+            WaitHandle[] handles = [stopEvent, timer];
             while (true)
             {
                 var signaled = WaitHandle.WaitAny(handles);
-                if (signaled == 1) return; // stop event
+                if (signaled == 0) return; // stop event
                 if (!PublishCurrentStateOnce()) return;
             }
         }

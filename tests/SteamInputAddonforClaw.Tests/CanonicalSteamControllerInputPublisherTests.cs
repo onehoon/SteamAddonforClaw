@@ -377,6 +377,87 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         Assert.True(sink.Count < 60, $"Expected no catch-up burst, but observed {sink.Count} SetState calls.");
     }
 
+    [Fact]
+    public async Task Production_stop_wins_the_race_when_both_stop_and_timer_are_signaled()
+    {
+        // Regression for WaitAny([timer, stopEvent]) returning the lowest signaled index: if the worker
+        // is still inside a slow SetState when StopAsync signals the stop event, and a timer period also
+        // elapses before SetState returns, both handles are signaled by the time the worker waits again.
+        // Stop must win that race -- the worker must exit without starting a second SetState call.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var firstCallBlocked = new ManualResetEventSlim(false);
+        var releaseFirstCall = new ManualResetEventSlim(false);
+        var sink = new BlockingFirstCallSink(firstCallBlocked, releaseFirstCall);
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink);
+
+        publisher.Start();
+        try
+        {
+            Assert.True(firstCallBlocked.Wait(TimeSpan.FromSeconds(2)), "The first SetState call never started.");
+
+            // Begin stopping while the worker is still blocked inside the first SetState. StopAsync's
+            // stop-event Set() runs synchronously before its first await, so by the time this call
+            // returns a Task, the stop event is already signaled.
+            var stopTask = publisher.StopAsync();
+
+            // Let several 4 ms periods elapse while still blocked, so the timer is also signaled by the
+            // time the worker returns to WaitAny -- this is the race window from the review.
+            await Task.Delay(50);
+            releaseFirstCall.Set();
+
+            await stopTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            // No-op if the above already completed the stop; a safety net if an assertion failed first.
+            await publisher.StopAsync();
+        }
+
+        Assert.Equal(1, sink.Count);
+        Assert.False(publisher.IsRunning);
+    }
+
+    [Fact]
+    public async Task Production_stop_fails_closed_and_preserves_state_when_the_worker_does_not_join_in_time()
+    {
+        // Regression: a join timeout must NOT let StopAsync complete "successfully" while the worker may
+        // still be inside SetState -- the caller (ClassicSteamControllerOutputStage) proceeds straight
+        // into native Gordon device removal after a successful StopAsync, which must never race a still-
+        // running SetState against the native handle being torn down.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var firstCallBlocked = new ManualResetEventSlim(false);
+        var releaseFirstCall = new ManualResetEventSlim(false);
+        var sink = new BlockingFirstCallSink(firstCallBlocked, releaseFirstCall);
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink)
+        {
+            WorkerJoinTimeoutForTests = TimeSpan.FromMilliseconds(50),
+        };
+
+        publisher.Start();
+        try
+        {
+            Assert.True(firstCallBlocked.Wait(TimeSpan.FromSeconds(2)), "The first SetState call never started.");
+
+            // The worker is blocked well past the 50ms join timeout, so StopAsync must throw rather than
+            // return successfully.
+            await Assert.ThrowsAsync<TimeoutException>(publisher.StopAsync);
+
+            // Fail closed: the publisher must still consider itself running (worker reference retained,
+            // thread genuinely still alive), so a caller cannot mistake this for a clean stop.
+            Assert.True(publisher.IsRunning);
+        }
+        finally
+        {
+            // Unblock the slow call so the worker can actually exit, then let a normal StopAsync (now
+            // well within budget) complete cleanup -- proving the state left behind by the failed stop is
+            // still recoverable rather than corrupted.
+            releaseFirstCall.Set();
+            await publisher.StopAsync();
+        }
+
+        Assert.False(publisher.IsRunning);
+    }
+
     private sealed class BlockingFirstCallSink(ManualResetEventSlim firstCallBlocked, ManualResetEventSlim releaseFirstCall) : ICanonicalSteamControllerStateSink
     {
         private int _count;

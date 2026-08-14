@@ -90,6 +90,17 @@ public sealed class WindowsHighResolutionPeriodicTimerTests
     }
 
     [Fact]
+    public void Constructor_RejectsFractionalMillisecondPeriodsInsteadOfSilentlyTruncating()
+    {
+        // SetWaitableTimerEx's lPeriod is a whole number of milliseconds; a fractional period like 1.5ms
+        // must be rejected rather than silently armed with a different period than requested.
+        var fake = new FakeNativeApi();
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => new WindowsHighResolutionPeriodicTimer(TimeSpan.FromMilliseconds(1.5), fake));
+        Assert.Equal(0, fake.SetWaitableTimerExCallCount);
+        Assert.Contains("whole number of milliseconds", exception.Message);
+    }
+
+    [Fact]
     public void Dispose_CancelsTheTimerOnce()
     {
         var fake = new FakeNativeApi();
