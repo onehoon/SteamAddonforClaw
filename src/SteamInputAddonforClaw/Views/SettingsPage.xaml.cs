@@ -22,7 +22,7 @@ public sealed partial class SettingsPage : UserControl
         _isLoadingStartupSettings = true;
         LaunchAtWindowsStartupToggleSwitch.IsOn = startupSettings.Settings.LaunchAtWindowsStartup;
         _isLoadingStartupSettings = false;
-        StartupSettingsStatusText.Text = startupRegistrationMessage;
+        LaunchAtStartupCard.Description = startupRegistrationMessage;
     }
 
     private void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
@@ -34,7 +34,7 @@ public sealed partial class SettingsPage : UserControl
 
         var launchAtWindowsStartup = LaunchAtWindowsStartupToggleSwitch.IsOn;
         var result = _startupSettings.ChangeLaunchAtWindowsStartup(launchAtWindowsStartup);
-        StartupSettingsStatusText.Text = result.Message;
+        LaunchAtStartupCard.Description = result.Message;
     }
 
     private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)

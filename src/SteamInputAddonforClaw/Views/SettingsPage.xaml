@@ -1,59 +1,32 @@
 <UserControl
     x:Class="SteamInputAddonforClaw.Views.SettingsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
-        <StackPanel Spacing="16">
+        <StackPanel MaxWidth="1100" HorizontalAlignment="Left" Spacing="16">
             <TextBlock FontSize="24" FontWeight="SemiBold" Text="Settings" />
 
-            <Border
-                Padding="18,16"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="8">
-                <Grid ColumnSpacing="16">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <SymbolIcon VerticalAlignment="Center" Symbol="Play" />
-                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Launch at Windows startup" />
-                        <TextBlock x:Name="StartupSettingsStatusText" Opacity="0.7" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <ToggleSwitch
-                        x:Name="LaunchAtWindowsStartupToggleSwitch"
-                        Grid.Column="2"
-                        MinWidth="0"
-                        OffContent=""
-                        OnContent=""
-                        Toggled="LaunchAtWindowsStartupToggleSwitch_Toggled"
-                        VerticalAlignment="Center" />
-                </Grid>
-            </Border>
+            <ctcontrols:SettingsCard x:Name="LaunchAtStartupCard" Header="Launch at Windows startup">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Play" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="LaunchAtWindowsStartupToggleSwitch"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="LaunchAtWindowsStartupToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
 
-            <Button
+            <ctcontrols:SettingsCard
                 Click="DeveloperMenuButton_Click"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Stretch"
-                Padding="18,16">
-                <Grid ColumnSpacing="16">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <SymbolIcon VerticalAlignment="Center" Symbol="Help" />
-                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Developer Menu" />
-                        <TextBlock Opacity="0.7" Text="Developer-only diagnostics. General users should not use this menu." TextWrapping="Wrap" />
-                    </StackPanel>
-                    <SymbolIcon Grid.Column="2" Opacity="0.7" Symbol="Forward" VerticalAlignment="Center" />
-                </Grid>
-            </Button>
+                Description="Developer-only diagnostics. General users should not use this menu."
+                Header="Developer Menu"
+                IsClickEnabled="True">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Help" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+            </ctcontrols:SettingsCard>
         </StackPanel>
     </ScrollViewer>
 </UserControl>
