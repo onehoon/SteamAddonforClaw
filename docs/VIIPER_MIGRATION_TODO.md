@@ -41,7 +41,7 @@ Rules for this backlog:
 The latest reviewed Addon runtime baseline is:
 
 ```text
-4f5aabb0a2c8e2080eadc45d8fa3a77c8e4a0e4c
+c9ae8f270014ccb649550fd1c0daf93e8a135ef0
 ```
 
 The documentation contract was then merged as:
@@ -350,7 +350,25 @@ After merge:
 
 # M1. Addon exact usbip-win2 version routing gate
 
-**Status: TODO / next**
+**Status: VALIDATED — Addon PR #144 merged**
+
+Merge commit:
+
+```text
+c9ae8f270014ccb649550fd1c0daf93e8a135ef0
+```
+
+Validated behavior:
+
+```text
+exact usbip-win2 0.9.7.7 + healthy runtime evidence → Ready
+valid unsupported version → Incompatible
+missing/untrusted/malformed version evidence → Indeterminate
+genuine total absence → Missing
+exact supported version with unhealthy runtime evidence → Unusable
+```
+
+`RoutingEligibilityPolicy` remained unchanged. The runtime prerequisite gate now supplies fail-closed, version-aware usbip-win2 readiness.
 
 Repository: `onehoon/SteamInputAddonforClaw`
 
@@ -417,7 +435,7 @@ Do not silently accept `0.9.7.8+` based on numeric "newer is better" logic.
 
 # M2. Canonical C# ABI definitions and verification only
 
-**Status: BLOCKED by M1**
+**Status: TODO / NEXT**
 
 ## Goal
 
@@ -568,7 +586,7 @@ The raw builder is removed only after physical routing proof in M5.
 
 # M4. Canonical DLL payload and runtime/session lifecycle cutover
 
-**Status: BLOCKED by M1 + M2 + M3**
+**Status: BLOCKED by M2 + M3**
 
 This is the first PR that actually changes production VIIPER routing.
 
@@ -1072,10 +1090,10 @@ Update this table whenever a step changes state.
 | ID | Task | State | Dependency | Notes |
 |---|---|---|---|---|
 | M0 | VIIPER independent L2/R2 typed Gordon API | **VALIDATED** | none | VIIPER PR #13 merged at `3bd042d...`; canonical state ABI size 62 |
-| M1 | exact usbip-win2 0.9.7.7 routing gate | **TODO / NEXT** | M0 | No native ABI changes |
-| M2 | canonical C# ABI definitions/tests | **BLOCKED** | M1 | No production wiring |
+| M1 | exact usbip-win2 0.9.7.7 routing gate | **VALIDATED** | M0 | Addon PR #144 merged at `c9ae8f27...`; exact usbip-win2 0.9.7.7 gate |
+| M2 | canonical C# ABI definitions/tests | **TODO / NEXT** | M1 | No production wiring |
 | M3 | typed Gordon state mapper/parity tests | **BLOCKED** | M2 | Keep raw builder as oracle |
-| M4 | canonical payload/runtime production cutover | **BLOCKED** | M1, M2, M3 | First production canonical route |
+| M4 | canonical payload/runtime production cutover | **BLOCKED** | M2, M3 | First production canonical route |
 | M5 | physical routing proof + legacy cleanup | **BLOCKED / HARDWARE** | M4 | Required before deleting parity path |
 | M6 | Gordon host-output / rumble | **DEFERRED** | M5 | Separate research/PR |
 | M7 | Game Bar Gordon-neutral + typed X360 | **DEFERRED** | M5 | Minimize Gordon hotplug |
