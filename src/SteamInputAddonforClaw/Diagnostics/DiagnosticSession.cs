@@ -38,6 +38,9 @@ internal static class ControllerStateDiagnostics
     private static readonly Lock PovSync = new();
     private static int? _lastPovSession;
     private static int? _lastPov;
+    private static readonly Lock DPadSync = new();
+    private static int? _lastDPadSession;
+    private static (bool Up, bool Right, bool Down, bool Left)? _lastDPad;
 
     internal static void LogChanges(ControllerState oldState, ControllerState state, int session)
     {
@@ -50,6 +53,28 @@ internal static class ControllerStateDiagnostics
         var analogChanged = oldState.LeftStick != state.LeftStick || oldState.RightStick != state.RightStick || oldState.Triggers != state.Triggers;
         if (analogChanged && ShouldLogAnalog(state)) fields.Add(("Analog", $"LX={state.LeftStick.X},LY={state.LeftStick.Y},RX={state.RightStick.X},RY={state.RightStick.Y},LT={state.Triggers.Left},RT={state.Triggers.Right}"));
         if (fields.Count > 0) AppLog.Debug("Input", "ControllerState changed", fields.Append(("TestSession", session)).ToArray());
+    }
+
+    /// <summary>
+    /// M5 diagnostic: logs the physical/normalized D-pad state at INFO whenever it changes (including
+    /// the first observed state), independent of <see cref="MinimumLevelOverride"/> being Debug. This is
+    /// deliberately separate from <see cref="LogChanges"/> (which is Debug-only and covers every field)
+    /// so a real-hardware D-pad investigation does not require enabling full Debug logging.
+    /// </summary>
+    internal static void LogDPadTransitionIfChanged(GamepadButtons buttons, int session)
+    {
+        var current = (buttons.DPadUp, buttons.DPadRight, buttons.DPadDown, buttons.DPadLeft);
+        lock (DPadSync)
+        {
+            // Track session alongside the value, same as LogPovIfChanged: a new input session must
+            // always produce an initial D-pad log, even if its first value happens to match the
+            // previous session's last observed value (e.g. both start neutral).
+            if (_lastDPadSession == session && _lastDPad == current) return;
+            _lastDPadSession = session;
+            _lastDPad = current;
+        }
+        AppLog.Info("Input", "Physical D-pad state changed", ("TestSession", session),
+            ("Up", buttons.DPadUp), ("Right", buttons.DPadRight), ("Down", buttons.DPadDown), ("Left", buttons.DPadLeft));
     }
 
     /// <summary>

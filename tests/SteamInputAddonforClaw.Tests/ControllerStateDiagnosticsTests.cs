@@ -110,6 +110,55 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
         Assert.Contains(lines, line => line.Contains("TestSession=602") && line.Contains("POV=0"));
     }
 
+    [Fact]
+    public void DPadTransitionIsLoggedAtInfoLevel()
+    {
+        var neutral = Neutral().Buttons;
+        var pressed = neutral with { DPadUp = true, DPadRight = true };
+
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(neutral, session: 700001);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(pressed, session: 700001);
+
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("[INFO]", log);
+        Assert.Contains("Physical D-pad state changed", log);
+        Assert.Contains("Up=True", log);
+        Assert.Contains("Right=True", log);
+        Assert.Contains("Down=False", log);
+        Assert.Contains("Left=False", log);
+    }
+
+    [Fact]
+    public void RepeatedIdenticalDPadStateDoesNotDuplicate()
+    {
+        var neutral = Neutral().Buttons;
+        var down = neutral with { DPadDown = true };
+
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(neutral, session: 700002);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(down, session: 700002);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(down, session: 700002);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(down, session: 700002);
+
+        AppLog.DrainForTests();
+        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Equal(2, log.Split("Physical D-pad state changed", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void NewInputSessionAlwaysLogsAnInitialDPadStateEvenIfItMatchesThePreviousSessionsLastValue()
+    {
+        var neutral = Neutral().Buttons;
+
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(neutral, session: 700003);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(neutral, session: 700004);
+
+        AppLog.DrainForTests();
+        var lines = File.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        Assert.Contains(lines, line => line.Contains("TestSession=700003") && line.Contains("Physical D-pad state changed"));
+        Assert.Contains(lines, line => line.Contains("TestSession=700004") && line.Contains("Physical D-pad state changed"));
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]

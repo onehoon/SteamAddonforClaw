@@ -334,6 +334,7 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                 {
                     LogStateChange(session.Id, previous, current);
                     ControllerStateDiagnostics.LogChanges(previous, current, session.Id);
+                    ControllerStateDiagnostics.LogDPadTransitionIfChanged(current.Buttons, session.Id);
                     StateChanged?.Invoke(this, current);
                     previous = current;
                 }
