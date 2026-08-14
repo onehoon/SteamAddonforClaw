@@ -30,7 +30,8 @@ public sealed class SettingsStore
                 ? startupProperty.GetBoolean() : true;
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
             var routeInSteamBigPicture = root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty) && routeProperty.ValueKind == JsonValueKind.True && routeProperty.GetBoolean();
-            var settings = new AppSettings(startup, logLevel, routeInSteamBigPicture);
+            var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
+            var settings = new AppSettings(startup, logLevel, routeInSteamBigPicture, suppressDeveloperMenuWarning);
             AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
             return settings;
         }
@@ -62,6 +63,8 @@ public sealed class SettingsStore
             var route = root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty)
                 ? routeProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? routeProperty.GetBoolean() : throw new JsonException("RouteInSteamBigPicture must be boolean.")
                 : false;
+            // Developer-menu warning suppression is UI preference data, not a safety-gate input.
+            // Keep malformed values from affecting the prerequisite mutation decision.
             return new(new AppSettings(startup, logLevel, route), true, "Loaded");
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -79,7 +82,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.RouteInSteamBigPicture };
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.RouteInSteamBigPicture, settings.SuppressDeveloperMenuWarning };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

@@ -37,6 +37,39 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveAndLoad_PreservesDeveloperMenuWarningSuppression()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+
+        store.Save(new AppSettings(SuppressDeveloperMenuWarning: true));
+
+        Assert.True(store.Load().SuppressDeveloperMenuWarning);
+    }
+
+    [Fact]
+    public void SuppressionIsNotPersistedUntilExplicitlyRequested()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        Assert.False(coordinator.SuppressDeveloperMenuWarning);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void SuppressDeveloperMenuWarningPermanently_PersistsPreference()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        coordinator.SuppressDeveloperMenuWarningPermanently();
+
+        Assert.True(coordinator.SuppressDeveloperMenuWarning);
+        Assert.True(store.Load().SuppressDeveloperMenuWarning);
+    }
+
+    [Fact]
     public void ReliableLoad_InvalidBigPictureType_BlocksSafetyMutation()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
@@ -45,6 +78,20 @@ public sealed class SettingsStoreTests : IDisposable
         var result = new SettingsStore(path).LoadForSafetyGate();
         Assert.False(result.IsReliable);
         Assert.Equal("SettingsUnreliable", result.Reason);
+    }
+
+    [Fact]
+    public void ReliableLoad_InvalidDeveloperMenuWarningType_DoesNotAffectSafetyMutation()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"RouteInSteamBigPicture\":false,\"SuppressDeveloperMenuWarning\":\"false\"}");
+
+        var result = new SettingsStore(path).LoadForSafetyGate();
+
+        Assert.True(result.IsReliable);
+        Assert.Equal("Loaded", result.Reason);
+        Assert.False(result.Settings.RouteInSteamBigPicture);
     }
 
     [Fact]
