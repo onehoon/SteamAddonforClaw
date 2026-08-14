@@ -357,6 +357,7 @@ public partial class App : Application
         if (_physicalInputSource is not null) _physicalInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _physicalInputSource = null;
         AppLog.Info("Runtime cleanup completed.");
+        AppLog.Shutdown();
     }
 
     private void OnMainWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)

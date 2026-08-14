@@ -19,6 +19,7 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
 
     public void Dispose()
     {
+        AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
         // Best-effort cleanup: a concurrently-running test in a different, non-serialized
@@ -48,6 +49,7 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
         var result = await controller.SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
 
         Assert.True(result.Succeeded, result.Reason);
+        AppLog.DrainForTests();
         var lines = File.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
         var poll1 = Assert.Single(lines, line => line.Contains("NativeModeTransitionPoll") && line.Contains("Poll=1"));
         Assert.Contains("TargetPidPresent=True", poll1);
@@ -83,6 +85,7 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
 
         Assert.Equal(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, result.Status);
         Assert.Equal(2, enumerator.CallCount);
+        AppLog.DrainForTests();
         var log = File.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("TargetPidPresent=False", log);
         Assert.Contains("TargetControlCandidateCount=0", log);

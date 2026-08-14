@@ -98,6 +98,9 @@ public static class Program
         catch (Exception exception)
         {
             AppLog.Fatal("Startup", "Fatal startup exception.", exception);
+            // The process is about to terminate via the rethrow below; make sure the fatal entry above
+            // actually reaches disk instead of being lost in the background writer's queue.
+            AppLog.Shutdown();
             throw;
         }
     }

@@ -24,6 +24,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
 
         ControllerStateDiagnostics.LogChanges(oldState, newState, 7);
 
+        AppLog.DrainForTests();
         var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Contains("A=", log);
         Assert.Contains("LTFull=", log);
@@ -38,6 +39,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         var session = DiagnosticSession.Start(123, 123, "Actual");
         DiagnosticSession.Complete(session, ("RecoveryClean", true));
 
+        AppLog.DrainForTests();
         var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Contains("Session started", log);
         Assert.Contains("Session completed", log);
@@ -55,6 +57,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         tracker.Observe(0, uint.MaxValue, "DeveloperTest");
         tracker.Complete();
 
+        AppLog.DrainForTests();
         var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Equal(3, log.Split("Session started", StringSplitOptions.None).Length - 1);
         Assert.Equal(3, log.Split("Session completed", StringSplitOptions.None).Length - 1);
@@ -69,6 +72,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         tracker.Observe(0, 0, "BigPicture");
         tracker.Complete();
 
+        AppLog.DrainForTests();
         var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Contains("EffectiveSource=BigPicture", log);
     }
@@ -80,6 +84,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
         await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
 
+        AppLog.DrainForTests();
         var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
         var executions = System.Text.RegularExpressions.Regex.Matches(log, @"RoutingExecution=(\d+)")
             .Select(match => match.Groups[1].Value).Distinct().ToArray();
@@ -96,6 +101,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         var stage = new CorrelatedStage();
         await new RoutingPipelineExecutor([stage]).ExecuteAsync(RoutingPipelinePlan.AllDisabled with { PhysicalInput = RoutingStageMode.ObserveOnly }, CancellationToken.None);
 
+        AppLog.DrainForTests();
         var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Contains("StageDetail", log);
         Assert.Contains("RoutingExecution=", log);
@@ -127,6 +133,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
 
     public void Dispose()
     {
+        AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);

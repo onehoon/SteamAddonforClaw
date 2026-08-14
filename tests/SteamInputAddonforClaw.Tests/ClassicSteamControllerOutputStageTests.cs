@@ -135,6 +135,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
+        AppLog.DrainForTests();
         var log = File.ReadAllText(AppLog.CurrentLogFilePath);
         var occurrences = log.Split("ViiperIdentityDiagnosticSummary").Length - 1;
         Assert.Equal(1, occurrences);
@@ -190,6 +191,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
         Assert.True(result.Succeeded, result.Reason);
+        AppLog.DrainForTests();
         var log = File.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.DoesNotContain("ViiperIdentityDiagnosticSummary", log);
         await stage.RollbackMutationAsync(CancellationToken.None);
@@ -338,6 +340,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
+        AppLog.DrainForTests();
         var log = File.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Equal(1, log.Split("Event=SteamOutputCreationFailed", StringSplitOptions.None).Length - 1);
         Assert.Contains("FailedOperation=NeutralReport", log);
@@ -357,6 +360,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.Equal("VirtualDeviceRemoveFailed", result.Reason);
+        AppLog.DrainForTests();
         var log = File.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Equal(1, log.Split("Event=SteamOutputRollbackFailed", StringSplitOptions.None).Length - 1);
         Assert.Contains("Reason=VirtualDeviceRemoveFailed", log);
@@ -418,6 +422,7 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
 
     public void Dispose()
     {
+        AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
