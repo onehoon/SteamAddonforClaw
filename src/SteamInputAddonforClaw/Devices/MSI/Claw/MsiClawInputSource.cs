@@ -310,7 +310,10 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
                     break;
                 }
 
-                ControllerStateDiagnostics.LogPovIfChanged(session.Id, ResolvePov(input));
+                // Gated per-poll: LogPovIfChanged itself takes a lock and compares state even when the
+                // eventual AppLog.Debug call would be filtered, so check the level here rather than
+                // relying only on AppLog's own internal filter.
+                if (AppLog.IsEnabled(AppLogLevel.Debug)) ControllerStateDiagnostics.LogPovIfChanged(session.Id, ResolvePov(input));
 
                 var successfulReadAt = Stopwatch.GetTimestamp();
                 Volatile.Write(ref _latestState, new StateBox(current));
@@ -325,16 +328,25 @@ public sealed class MsiClawInputSource : IMsiClawInputDiagnostic, IControllerSta
 
                 if (!hasPrevious)
                 {
-                    AppLog.Debug("MsiInput", "Initial ControllerState.", ("TestSession", session.Id), ("M1", IsM1Pressed(current)), ("M2", IsM2Pressed(current)));
+                    if (AppLog.IsEnabled(AppLogLevel.Debug))
+                        AppLog.Debug("MsiInput", "Initial ControllerState.", ("TestSession", session.Id), ("M1", IsM1Pressed(current)), ("M2", IsM2Pressed(current)));
+                    // M5: record the first observed physical D-pad state too, not just later
+                    // transitions, so it lines up with the canonical publisher's own first-tick log.
+                    if (AppLog.IsEnabled(AppLogLevel.Info))
+                        ControllerStateDiagnostics.LogDPadTransitionIfChanged(current.Buttons, session.Id);
                     StateChanged?.Invoke(this, current);
                     previous = current;
                     hasPrevious = true;
                 }
                 else if (current != previous)
                 {
-                    LogStateChange(session.Id, previous, current);
-                    ControllerStateDiagnostics.LogChanges(previous, current, session.Id);
-                    ControllerStateDiagnostics.LogDPadTransitionIfChanged(current.Buttons, session.Id);
+                    if (AppLog.IsEnabled(AppLogLevel.Debug))
+                    {
+                        LogStateChange(session.Id, previous, current);
+                        ControllerStateDiagnostics.LogChanges(previous, current, session.Id);
+                    }
+                    if (AppLog.IsEnabled(AppLogLevel.Info))
+                        ControllerStateDiagnostics.LogDPadTransitionIfChanged(current.Buttons, session.Id);
                     StateChanged?.Invoke(this, current);
                     previous = current;
                 }

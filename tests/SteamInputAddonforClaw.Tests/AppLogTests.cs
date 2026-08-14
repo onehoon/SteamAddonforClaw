@@ -8,6 +8,14 @@ public sealed class AppLogTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
 
+    public AppLogTests()
+    {
+        // AppLog now defaults to Off; most tests in this file exercise Info-level behavior and would
+        // otherwise silently log nothing. Tests that specifically exercise level filtering (Off, Debug,
+        // live level changes) set MinimumLevelOverride explicitly within the test body, overriding this.
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+    }
+
     [Fact]
     public void Info_WritesDailyFileAndRemovesLogsOlderThanYesterday()
     {
@@ -414,10 +422,24 @@ public sealed class AppLogTests : IDisposable
         Assert.Null(exception);
     }
 
+    [Fact]
+    public void BufferedEntryWriter_ShutdownCalledTwiceIsSafeAndStillReturnsTrue()
+    {
+        // Program.cs's Main() calls AppLog.Shutdown() in a `finally` unconditionally, even on the normal
+        // MainWindow-exit path where App.xaml.cs's OnMainWindowClosed already called it once. Shutdown
+        // must tolerate that second call without throwing and without misreporting whether the writer
+        // stopped cleanly.
+        using var writer = new BufferedEntryWriter<int>(capacity: 8, process: static _ => { }, isHighPriority: static _ => false);
+        writer.Enqueue(1);
+        Assert.True(writer.Shutdown(TimeSpan.FromSeconds(2)));
+        var exception = Record.Exception(() => Assert.True(writer.Shutdown(TimeSpan.FromSeconds(2))));
+        Assert.Null(exception);
+    }
+
     public void Dispose()
     {
         AppLog.DirectoryOverride = null;
-        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
         AppLog.ResetMaintenanceStateForTests();
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
