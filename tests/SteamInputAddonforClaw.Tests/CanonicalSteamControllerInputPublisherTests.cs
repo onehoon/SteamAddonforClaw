@@ -458,6 +458,41 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         Assert.False(publisher.IsRunning);
     }
 
+    [Fact]
+    public async Task Production_worker_thread_start_failure_cleans_up_handles_and_propagates()
+    {
+        // Thread.Start() cannot be made to fail on demand (it only fails on rare conditions like
+        // OutOfMemoryException), so this uses the test-only override seam to simulate that failure
+        // deterministically and assert the timer/stop-event/worker-thread state it leaves behind is
+        // clean -- not a leaked native timer handle or a _workerThread reference to a never-started
+        // thread (which would make a later StopAsync's Join throw ThreadStateException instead of
+        // cleaning up).
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink)
+        {
+            WorkerThreadStartOverrideForTests = _ => throw new InvalidOperationException("simulated Thread.Start() failure"),
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(publisher.Start);
+
+        Assert.Contains("worker thread", exception.Message);
+        Assert.False(publisher.IsRunning);
+
+        // The failure must be fully recoverable: a normal Start() (no override) afterward works exactly
+        // like a first attempt, proving no handle or state was left behind by the failed one.
+        publisher.WorkerThreadStartOverrideForTests = null;
+        publisher.Start();
+        try
+        {
+            await sink.WaitForCountAsync(1, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+    }
+
     private sealed class BlockingFirstCallSink(ManualResetEventSlim firstCallBlocked, ManualResetEventSlim releaseFirstCall) : ICanonicalSteamControllerStateSink
     {
         private int _count;

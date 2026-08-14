@@ -127,16 +127,36 @@ internal sealed class CanonicalSteamControllerInputPublisher
         }
 
         var stopEvent = new ManualResetEvent(false);
-        _timer = timer;
-        _workerStopEvent = stopEvent;
-        _workerThread = new Thread(() => WorkerLoop(timer, stopEvent))
+        var thread = new Thread(() => WorkerLoop(timer, stopEvent))
         {
             IsBackground = true,
             Name = "SteamInputAddon.GordonPublisher",
             Priority = ThreadPriority.Normal,
         };
-        _workerThread.Start();
+
+        try
+        {
+            (WorkerThreadStartOverrideForTests ?? (static t => t.Start()))(thread);
+        }
+        catch (Exception exception)
+        {
+            // Thread.Start() can fail (e.g. OutOfMemoryException creating the OS thread); the timer and
+            // stop event were already successfully created, so clean those up rather than leaking a
+            // native handle, and never leave _workerThread pointing at a thread that was never started
+            // (StopAsync's Join would throw ThreadStateException on it).
+            timer.Dispose();
+            stopEvent.Dispose();
+            throw new InvalidOperationException("Failed to start the canonical Gordon publisher worker thread.", exception);
+        }
+
+        _timer = timer;
+        _workerStopEvent = stopEvent;
+        _workerThread = thread;
     }
+
+    /// <summary>Test-only seam: lets a test make thread startup itself fail deterministically (Thread.Start()
+    /// cannot be made to fail on demand) to exercise the partial-resource cleanup path above.</summary>
+    internal Action<Thread>? WorkerThreadStartOverrideForTests { get; set; }
 
     /// <summary>
     /// Signals the worker to stop and waits for it to actually exit. Fail closed on a join timeout: the
