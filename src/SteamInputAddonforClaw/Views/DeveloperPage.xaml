@@ -34,7 +34,7 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <SymbolIcon VerticalAlignment="Center" Symbol="Find" />
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                        <TextBlock Style="{ThemeResource BodyStrongTextBlockStyle}" Text="Environment Discovery" />
+                        <TextBlock Text="Environment Discovery" />
                         <TextBlock Opacity="0.7" Text="Generate a read-only system report for controller software detection development." TextWrapping="Wrap" />
                     </StackPanel>
                     <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="6">
@@ -60,7 +60,7 @@
                 Header="Claw Sensor Probe"
                 IsClickEnabled="True">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Zoom" />
+                    <SymbolIcon Symbol="Directions" />
                 </ctcontrols:SettingsCard.HeaderIcon>
             </ctcontrols:SettingsCard>
         </StackPanel>
