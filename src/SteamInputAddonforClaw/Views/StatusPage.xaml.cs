@@ -88,7 +88,7 @@ public sealed partial class StatusPage : UserControl
     {
         var (title, symbol, severity) = status switch
         {
-            AddonOperationalStatus.Ready => ("Steam Input Addon is active", Symbol.Accept, InfoBarSeverity.Success),
+            AddonOperationalStatus.Ready => ("Ready for Steam Input routing", Symbol.Accept, InfoBarSeverity.Success),
             AddonOperationalStatus.WaitingForSteam => ("Ready. Waiting for a Steam session.", Symbol.Sync, InfoBarSeverity.Informational),
             AddonOperationalStatus.Passive => ("Controller remains native.", Symbol.Repair, InfoBarSeverity.Informational),
             AddonOperationalStatus.SetupRequired => ("Setup required", Symbol.Important, InfoBarSeverity.Warning),
