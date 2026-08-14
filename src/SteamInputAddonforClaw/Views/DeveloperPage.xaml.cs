@@ -42,7 +42,12 @@ public sealed partial class DeveloperPage : UserControl
         _isInitializingTestMode = false;
 
         _isInitializingLogLevel = true;
-        LogLevelComboBox.SelectedIndex = startupSettings.Settings.LogLevel == AppLogPreference.Debug ? 1 : 0;
+        LogLevelComboBox.SelectedIndex = startupSettings.Settings.LogLevel switch
+        {
+            AppLogPreference.Info => 1,
+            AppLogPreference.Debug => 2,
+            _ => 0,
+        };
         _isInitializingLogLevel = false;
     }
 

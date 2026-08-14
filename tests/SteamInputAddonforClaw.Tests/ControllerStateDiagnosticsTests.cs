@@ -18,6 +18,7 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
 
     public void Dispose()
     {
+        AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
         // Best-effort cleanup: a concurrently-running test in a different, non-serialized
@@ -34,7 +35,8 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
 
         ControllerStateDiagnostics.LogChanges(before, after, session: 424241);
 
-        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("DPadUp=False->True", log);
         Assert.Contains("DPadRight=False->True", log);
     }
@@ -48,7 +50,8 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
 
         // No fields changed, so LogChanges never calls AppLog at all -- the log file may not
         // even exist yet in this test's isolated directory.
-        var log = File.Exists(AppLog.CurrentLogFilePath) ? File.ReadAllText(AppLog.CurrentLogFilePath) : string.Empty;
+        AppLog.DrainForTests();
+        var log = File.Exists(AppLog.CurrentLogFilePath) ? LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath) : string.Empty;
         Assert.DoesNotContain("TestSession=424242", log);
     }
 
@@ -60,7 +63,8 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
 
         ControllerStateDiagnostics.LogChanges(before, after, session: 424243);
 
-        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("DPadDown=True->False", log);
         Assert.Contains("DPadLeft=False->True", log);
     }
@@ -73,7 +77,8 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
         ControllerStateDiagnostics.LogPovIfChanged(session: 1, pov: -20250001);
         ControllerStateDiagnostics.LogPovIfChanged(session: 1, pov: 9000);
 
-        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("POV=9000", log);
     }
 
@@ -85,7 +90,8 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
         ControllerStateDiagnostics.LogPovIfChanged(session: 2, pov: 18000);
         ControllerStateDiagnostics.LogPovIfChanged(session: 2, pov: 18000);
 
-        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Equal(1, log.Split("POV=18000", StringSplitOptions.None).Length - 1);
     }
 
@@ -98,9 +104,59 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
         ControllerStateDiagnostics.LogPovIfChanged(session: 601, pov: 0);
         ControllerStateDiagnostics.LogPovIfChanged(session: 602, pov: 0);
 
-        var lines = File.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
         Assert.Contains(lines, line => line.Contains("TestSession=601") && line.Contains("POV=0"));
         Assert.Contains(lines, line => line.Contains("TestSession=602") && line.Contains("POV=0"));
+    }
+
+    [Fact]
+    public void DPadTransitionIsLoggedAtInfoLevel()
+    {
+        var neutral = Neutral().Buttons;
+        var pressed = neutral with { DPadUp = true, DPadRight = true };
+
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(neutral, session: 700001);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(pressed, session: 700001);
+
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("[INFO]", log);
+        Assert.Contains("Physical D-pad state changed", log);
+        Assert.Contains("Up=True", log);
+        Assert.Contains("Right=True", log);
+        Assert.Contains("Down=False", log);
+        Assert.Contains("Left=False", log);
+    }
+
+    [Fact]
+    public void RepeatedIdenticalDPadStateDoesNotDuplicate()
+    {
+        var neutral = Neutral().Buttons;
+        var down = neutral with { DPadDown = true };
+
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(neutral, session: 700002);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(down, session: 700002);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(down, session: 700002);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(down, session: 700002);
+
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Equal(2, log.Split("Physical D-pad state changed", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void NewInputSessionAlwaysLogsAnInitialDPadStateEvenIfItMatchesThePreviousSessionsLastValue()
+    {
+        var neutral = Neutral().Buttons;
+
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(neutral, session: 700003);
+        ControllerStateDiagnostics.LogDPadTransitionIfChanged(neutral, session: 700004);
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n');
+        Assert.Contains(lines, line => line.Contains("TestSession=700003") && line.Contains("Physical D-pad state changed"));
+        Assert.Contains(lines, line => line.Contains("TestSession=700004") && line.Contains("Physical D-pad state changed"));
     }
 
     [Theory]
@@ -116,7 +172,8 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
         ControllerStateDiagnostics.LogPovIfChanged(session: 3, pov: pov - 1);
         ControllerStateDiagnostics.LogPovIfChanged(session: 3, pov: pov);
 
-        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains($"POV={pov}", log);
     }
 

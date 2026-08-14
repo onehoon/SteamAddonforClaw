@@ -48,21 +48,21 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void LegacySettings_DefaultsLogLevelToInfo()
+    public void LegacySettings_DefaultsLogLevelToOff()
     {
         var path = Path.Combine(_testDirectory, "settings.json"); Directory.CreateDirectory(_testDirectory);
         File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false}");
         var settings = new SettingsStore(path).Load();
-        Assert.False(settings.LaunchAtWindowsStartup); Assert.Equal(AppLogPreference.Info, settings.LogLevel);
+        Assert.False(settings.LaunchAtWindowsStartup); Assert.Equal(AppLogPreference.Off, settings.LogLevel);
     }
 
     [Fact]
-    public void InvalidLogLevel_PreservesOtherSettingsAndDefaultsToInfo()
+    public void InvalidLogLevel_PreservesOtherSettingsAndDefaultsToOff()
     {
         var path = Path.Combine(_testDirectory, "settings.json"); Directory.CreateDirectory(_testDirectory);
         File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false,\"LogLevel\":\"SomethingInvalid\"}");
         var settings = new SettingsStore(path).Load();
-        Assert.False(settings.LaunchAtWindowsStartup); Assert.Equal(AppLogPreference.Info, settings.LogLevel);
+        Assert.False(settings.LaunchAtWindowsStartup); Assert.Equal(AppLogPreference.Off, settings.LogLevel);
     }
 
     [Fact]
@@ -72,6 +72,30 @@ public sealed class SettingsStoreTests : IDisposable
         store.Save(new AppSettings(false, AppLogPreference.Debug));
         Assert.Equal(AppLogPreference.Debug, store.Load().LogLevel);
         Assert.Contains("\"LogLevel\": \"Debug\"", File.ReadAllText(Path.Combine(_testDirectory, "settings.json")));
+    }
+
+    [Fact]
+    public void InfoLogLevel_RoundTripsAsText()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        store.Save(new AppSettings(false, AppLogPreference.Info));
+        Assert.Equal(AppLogPreference.Info, store.Load().LogLevel);
+        Assert.Contains("\"LogLevel\": \"Info\"", File.ReadAllText(Path.Combine(_testDirectory, "settings.json")));
+    }
+
+    [Fact]
+    public void OffLogLevel_RoundTripsAsText()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        store.Save(new AppSettings(false, AppLogPreference.Off));
+        Assert.Equal(AppLogPreference.Off, store.Load().LogLevel);
+        Assert.Contains("\"LogLevel\": \"Off\"", File.ReadAllText(Path.Combine(_testDirectory, "settings.json")));
+    }
+
+    [Fact]
+    public void NewAppSettings_DefaultsLogLevelToOff()
+    {
+        Assert.Equal(AppLogPreference.Off, new AppSettings().LogLevel);
     }
 
     [Fact]

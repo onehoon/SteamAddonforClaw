@@ -18,12 +18,17 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Sole owner of AppLog.Shutdown(): guarantees it runs exactly once, on every exit path out of
+        // Main -- the several early `return`s below (elevated prerequisite setup, secondary-instance
+        // activation, restart timeout) that never reach a MainWindow at all, the fatal-startup-exception
+        // path, and the normal path (Application.Start blocks until the WinUI app -- including
+        // App.xaml.cs's OnMainWindowClosed -- has fully exited, so this still runs after that).
         try
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
             VelopackApp.Build().Run();
             var persistedLogLevel = LogLevelBootstrap.Read(VelopackAppPaths.SettingsPath);
-            AppLog.MinimumLevelOverride = persistedLogLevel == AppLogPreference.Debug ? AppLogLevel.Debug : AppLogLevel.Info;
+            AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(persistedLogLevel);
             AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));
             AppLog.Debug("Velopack", "Velopack bootstrap completed.");
             if (args.Contains(ElevatedPrerequisiteSetup.Argument, StringComparer.OrdinalIgnoreCase))
@@ -99,6 +104,10 @@ public static class Program
         {
             AppLog.Fatal("Startup", "Fatal startup exception.", exception);
             throw;
+        }
+        finally
+        {
+            AppLog.Shutdown();
         }
     }
 }
