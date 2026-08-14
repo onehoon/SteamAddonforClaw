@@ -33,7 +33,13 @@ internal sealed class BufferedEntryWriter<T> : IDisposable
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.Wait,
         });
-        _writerTask = Task.Run(RunAsync);
+        // LongRunning gets a dedicated thread instead of a thread-pool slot. This writer, its
+        // Shutdown()/DrainForTests() blocking waits, and (in tests) many throwaway instances of this
+        // type all otherwise compete with the shared thread pool; under heavy concurrent load that
+        // showed up as multi-second scheduling delays here and, via general pool contention, in
+        // unrelated tests elsewhere. A dedicated thread removes the writer from that contention entirely
+        // and keeps drain/shutdown latency independent of how busy the thread pool is.
+        _writerTask = Task.Factory.StartNew(RunAsync, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
     }
 
     /// <summary>Count of items dropped because the queue was saturated and <see cref="isHighPriority"/> returned false.</summary>

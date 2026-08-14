@@ -1,15 +1,19 @@
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>
-/// Reading a log file immediately after AppLog.DrainForTests() can transiently race a Windows file-handle
-/// release even though the background writer has already synchronously closed its own handle by the time
-/// DrainForTests() returns -- observed intermittently in CI (e.g. antivirus/indexer briefly opening a
-/// freshly closed file). Retry briefly instead of failing an assertion on that unrelated timing hiccup.
+/// AppLog is one process-wide singleton with a single background writer and a single shared queue.
+/// Reading its log file right after AppLog.DrainForTests() can still transiently race under the full test
+/// suite (not just this test's own serialized collection): other concurrently-running collections'
+/// production-code paths enqueue through the same writer and can re-target its one open file handle
+/// between this test's own drain and its file read. Re-draining before every retry (not just once up
+/// front) closes that window on each attempt instead of only checking a stale close from before the race.
 /// </summary>
 internal static class LogFileTestHelper
 {
-    private const int MaxAttempts = 10;
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(20);
+    private const int MaxAttempts = 40;
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(100);
 
     internal static string ReadAllText(string path) => Retry(() => File.ReadAllText(path));
 
@@ -20,7 +24,11 @@ internal static class LogFileTestHelper
         for (var attempt = 1; ; attempt++)
         {
             try { return read(); }
-            catch (IOException) when (attempt < MaxAttempts) { Thread.Sleep(RetryDelay); }
+            catch (IOException) when (attempt < MaxAttempts)
+            {
+                Thread.Sleep(RetryDelay);
+                AppLog.DrainForTests();
+            }
         }
     }
 }
