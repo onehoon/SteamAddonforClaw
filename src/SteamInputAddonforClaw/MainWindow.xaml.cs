@@ -19,7 +19,6 @@ using Windows.Foundation;
 using WinRT.Interop;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Prerequisites;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
@@ -38,9 +37,6 @@ public sealed partial class MainWindow : Window
     private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
     private readonly DeveloperTestModeState? _developerTestModeState;
     private SystemStatusSnapshot? _latestSystemStatus;
-    private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
-    private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
-    private readonly ObservableCollection<StatusCardViewModel> _runtimeCards = [];
     private int _isRefreshingStatus;
     private bool _setupPromptActive;
     private bool _setupPromptDeclinedForCurrentProcess;
@@ -88,9 +84,7 @@ public sealed partial class MainWindow : Window
         DeveloperMenuContent.ClawSensorProbeRequested += (_, _) => OpenClawSensorProbe();
         ClawSensorProbeContent.Initialize(() => _latestSystemStatus);
         ClawSensorProbeContent.ReturnToDeveloperMenuRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
-        ControllerSoftwareRepeater.ItemsSource = _softwareCards;
-        RoutingComponentsRepeater.ItemsSource = _componentCards;
-        RuntimeStatusList.ItemsSource = _runtimeCards;
+        StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
         MainNavigationView.SelectedItem = StatusNavigationItem;
         _ = RefreshSystemStatusAsync();
     }
@@ -152,45 +146,22 @@ public sealed partial class MainWindow : Window
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
     }
 
-    private async void RefreshStatusButton_Click(object sender, RoutedEventArgs args) => await RefreshSystemStatusAsync();
-
     private async Task RefreshSystemStatusAsync()
     {
         if (_prerequisiteSetupInProgress) return;
         if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0) return;
-        RefreshStatusButton.IsEnabled = false;
+        StatusContent.SetRefreshing(true);
         try { RenderSystemStatus(await _systemStatusProvider.CaptureAsync()); }
         catch (Exception exception) { AppLog.Warn("Status", "System status refresh failed.", exception, ("Reason", "SnapshotCaptureFailed")); }
-        finally { RefreshStatusButton.IsEnabled = true; Volatile.Write(ref _isRefreshingStatus, 0); }
+        finally { StatusContent.SetRefreshing(false); Volatile.Write(ref _isRefreshingStatus, 0); }
     }
 
     private void RenderSystemStatus(SystemStatusSnapshot snapshot)
     {
         _latestSystemStatus = snapshot;
-        DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
-        DeviceModelText.Text = snapshot.Device.Model;
-        DeviceSupportText.Text = snapshot.HardwareCompatibility.Status switch
-        {
-            HardwareCompatibilityStatus.Supported => "Supported",
-            HardwareCompatibilityStatus.Unsupported => "Unsupported",
-            _ => "Compatibility unknown"
-        };
-        DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoardProduct}  GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
-        Replace(_softwareCards, snapshot.ControllerSoftware.Select(item => new StatusCardViewModel(item.DisplayName, FormatSoftwareStatus(item), item.Reason)));
-        Replace(_componentCards,
-        [
-            new("HidHide", snapshot.Prerequisites.HidHide.Status.ToString(), snapshot.Prerequisites.HidHide.Reason),
-            new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
-            new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
-        ]);
         var setup = EvaluateFirstTimeSetup(snapshot);
-        var canInstall = setup.CanInstallRequiredComponents;
         var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
-        Replace(_runtimeCards,
-        [
-            new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
-            new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
-        ]);
+        StatusContent.Render(snapshot, addonPresentation);
         if (PrerequisiteSetupPromptPolicy.IsInstallable(setup))
         {
             if (_windowActivatedForUser)
@@ -339,7 +310,7 @@ public sealed partial class MainWindow : Window
     {
         PrerequisiteSetupBusyOverlay.Visibility = _prerequisiteSetupInProgress ? Visibility.Visible : Visibility.Collapsed;
         MainNavigationView.IsHitTestVisible = !_prerequisiteSetupInProgress;
-        RefreshStatusButton.IsEnabled = !_prerequisiteSetupInProgress;
+        StatusContent.SetRefreshing(_prerequisiteSetupInProgress);
     }
 
     private void ShowStatusButton_Click(object sender, RoutedEventArgs args)
@@ -348,7 +319,6 @@ public sealed partial class MainWindow : Window
         ShowPage(_navigationState.SelectNavigationItem(false, "Status"));
     }
 
-    private static void Replace(ObservableCollection<StatusCardViewModel> destination, IEnumerable<StatusCardViewModel> source) { destination.Clear(); foreach (var item in source) destination.Add(item); }
     internal static string FormatSoftwareStatus(ControllerSoftwareStatus item) => item.Runtime switch
     {
         SoftwareRuntimeStatus.Running => "Running",
