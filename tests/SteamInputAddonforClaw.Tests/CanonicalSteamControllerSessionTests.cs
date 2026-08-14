@@ -221,6 +221,49 @@ public sealed class CanonicalSteamControllerSessionTests
     }
 
     [Fact]
+    public void Create_bus_failure_retains_server_when_initial_close_fails()
+    {
+        var native = new FakeNative
+        {
+            CreateBusResult = false,
+            CloseResults = new Queue<bool>([false, true])
+        };
+        using var session = new CanonicalSteamControllerSession(native);
+
+        Assert.False(session.Start());
+        Assert.Equal(CanonicalSteamControllerSessionState.CleanupPending, session.State);
+        Assert.Equal(CanonicalPendingCleanupPhase.ServerClose, session.PendingCleanupPhase);
+        Assert.Equal((nuint)10, session.ServerHandle);
+
+        var beforeRetry = native.Calls.Count;
+        Assert.True(session.RetryPendingCleanup());
+        Assert.Equal(["CloseUSBServer"], native.Calls.Skip(beforeRetry));
+        Assert.Equal(CanonicalSteamControllerSessionState.Clean, session.State);
+    }
+
+    [Fact]
+    public void Create_device_failure_retains_bus_when_initial_bus_removal_fails()
+    {
+        var native = new FakeNative
+        {
+            CreateDeviceResult = false,
+            RemoveBusResults = new Queue<bool>([false, true])
+        };
+        using var session = new CanonicalSteamControllerSession(native);
+
+        Assert.False(session.Start());
+        Assert.Equal(CanonicalSteamControllerSessionState.CleanupPending, session.State);
+        Assert.Equal(CanonicalPendingCleanupPhase.BusRemoval, session.PendingCleanupPhase);
+        Assert.Equal((uint)42, session.BusId);
+        Assert.Equal((nuint)10, session.ServerHandle);
+
+        var beforeRetry = native.Calls.Count;
+        Assert.True(session.RetryPendingCleanup());
+        Assert.Equal(["RemoveUSBBus", "CloseUSBServer"], native.Calls.Skip(beforeRetry));
+        Assert.Equal(CanonicalSteamControllerSessionState.Clean, session.State);
+    }
+
+    [Fact]
     public void Attach_failure_is_unsafe_and_does_not_run_destructive_cleanup()
     {
         var native = new FakeNative { AttachResult = false };
