@@ -63,10 +63,9 @@ public sealed class SettingsStore
             var route = root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty)
                 ? routeProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? routeProperty.GetBoolean() : throw new JsonException("RouteInSteamBigPicture must be boolean.")
                 : false;
-            var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty)
-                ? warningProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? warningProperty.GetBoolean() : throw new JsonException("SuppressDeveloperMenuWarning must be boolean.")
-                : false;
-            return new(new AppSettings(startup, logLevel, route, suppressDeveloperMenuWarning), true, "Loaded");
+            // Developer-menu warning suppression is UI preference data, not a safety-gate input.
+            // Keep malformed values from affecting the prerequisite mutation decision.
+            return new(new AppSettings(startup, logLevel, route), true, "Loaded");
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
