@@ -25,7 +25,7 @@ public sealed class StatusPresentationTests
     [Theory]
     [InlineData(123u, SteamSessionSource.Actual, "Running")]
     [InlineData(0u, SteamSessionSource.Actual, "Not Running")]
-    [InlineData(0u, SteamSessionSource.BigPicture, "Not Running")]
+    [InlineData(0u, SteamSessionSource.BigPicture, "Big Picture Mode")]
     [InlineData(uint.MaxValue, SteamSessionSource.DeveloperTest, "Not Running")]
     public void FormatSteamGame_ReflectsActualGameIdentity(uint appId, SteamSessionSource source, string expected) =>
         Assert.Equal(expected, StatusPresentation.FormatSteamGame(new SteamStatusSnapshot(appId != 0 || source != SteamSessionSource.Actual, appId, source)));

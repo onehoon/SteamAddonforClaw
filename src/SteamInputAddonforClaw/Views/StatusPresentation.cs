@@ -32,7 +32,12 @@ internal static class StatusPresentation
         _ => "Compatibility unknown"
     };
 
-    internal static string FormatSteamGame(SteamStatusSnapshot steam) => steam.Source == SteamSessionSource.Actual && steam.RunningAppId != 0 ? "Running" : "Not Running";
+    internal static string FormatSteamGame(SteamStatusSnapshot steam) => steam.Source switch
+    {
+        SteamSessionSource.BigPicture => "Big Picture Mode",
+        SteamSessionSource.Actual when steam.RunningAppId != 0 => "Running",
+        _ => "Not Running"
+    };
 
     /// <summary>
     /// True only when recovery/ownership/compatibility state is trustworthy enough to report an
