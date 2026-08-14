@@ -167,6 +167,231 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         Assert.Contains("TotalPublishedStateCount=3", heartbeat);
         Assert.Contains("SetStateFailures=0", heartbeat);
         Assert.Contains("MaxSetStateDurationMs=", heartbeat);
+        // fakeNow jumped from 0 to Stopwatch.Frequency+1, i.e. ~1000ms elapsed for 3 calls => ~3 Hz.
+        Assert.Contains("HeartbeatElapsedMs=", heartbeat);
+        Assert.Contains("EffectiveSetStateHz=", heartbeat);
+        var effectiveHzText = heartbeat.Split("EffectiveSetStateHz=")[1].Split(' ')[0];
+        var effectiveHz = double.Parse(effectiveHzText, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange(effectiveHz, 2.9, 3.1);
+    }
+
+    [Fact]
+    public async Task Production_worker_publishes_using_the_real_high_resolution_timer()
+    {
+        // No IInputReportTickSource supplied: this exercises the actual production path (dedicated
+        // worker thread + WindowsHighResolutionPeriodicTimer), not the manual-tick test seam. Only
+        // presence/lifecycle is asserted -- never a specific Hz -- to stay deterministic under CI load.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink);
+
+        publisher.Start();
+        try
+        {
+            await sink.WaitForCountAsync(1, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+
+        Assert.True(sink.Count >= 1);
+        Assert.True(publisher.PublishedStateCount >= 1);
+    }
+
+    [Fact]
+    public async Task Production_worker_publishes_multiple_ticks_over_a_short_window()
+    {
+        // At a 4 ms period, a 200 ms window should comfortably produce more than one publish even under
+        // heavy CI scheduling noise -- this is a "the timer actually recurs" check, not a rate assertion.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink);
+
+        publisher.Start();
+        try
+        {
+            await sink.WaitForCountAsync(2, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+
+        Assert.True(sink.Count >= 2);
+    }
+
+    [Fact]
+    public async Task Production_stop_wakes_the_worker_promptly_and_stops_publishing()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink);
+        publisher.Start();
+        TimeSpan stopElapsed;
+        try
+        {
+            await sink.WaitForCountAsync(1, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            // StopAsync (and its timing) must run even if the wait above throws (timeout), so no worker
+            // thread or native timer handle is left behind for the rest of the test process.
+            var stopwatch = Stopwatch.StartNew();
+            await publisher.StopAsync();
+            stopElapsed = stopwatch.Elapsed;
+        }
+
+        // The worker wakes on the stop event immediately; this is far below the 5s join safety-net
+        // timeout, so a slow stop here would indicate the worker isn't actually waking on the event.
+        Assert.True(stopElapsed < TimeSpan.FromSeconds(1), $"StopAsync took {stopElapsed.TotalMilliseconds} ms.");
+        Assert.False(publisher.IsRunning);
+    }
+
+    [Fact]
+    public async Task Production_no_SetState_call_begins_after_shutdown_completes()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink);
+        publisher.Start();
+        try
+        {
+            await sink.WaitForCountAsync(1, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+
+        var countAtStop = sink.Count;
+        await Task.Delay(100);
+
+        Assert.Equal(countAtStop, sink.Count);
+    }
+
+    [Fact]
+    public async Task Production_start_stop_lifecycle_is_safe_and_restartable()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink);
+
+        publisher.Start();
+        try
+        {
+            Assert.Throws<InvalidOperationException>(publisher.Start);
+            await sink.WaitForCountAsync(1, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+        await publisher.StopAsync(); // no-op, must not throw
+
+        // Restart after a clean stop must work exactly like the first start.
+        publisher.Start();
+        try
+        {
+            await sink.WaitForCountAsync(sink.Count + 1, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Production_SetState_returning_false_triggers_existing_fault_semantics()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink { Accept = false };
+        var faults = 0;
+        var faultObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink, fault: _ => { Interlocked.Increment(ref faults); faultObserved.TrySetResult(true); });
+
+        publisher.Start();
+        try
+        {
+            await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+
+        Assert.Equal(1, faults);
+        Assert.False(publisher.IsRunning);
+    }
+
+    [Fact]
+    public async Task Production_SetState_throwing_triggers_existing_fault_semantics()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink { ThrowOnSet = true };
+        var faults = 0;
+        var faultObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink, fault: _ => { Interlocked.Increment(ref faults); faultObserved.TrySetResult(true); });
+
+        publisher.Start();
+        await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await publisher.StopAsync();
+
+        Assert.Equal(1, faults);
+        Assert.False(publisher.IsRunning);
+    }
+
+    [Fact]
+    public async Task Production_worker_does_not_burst_catch_up_ticks_after_a_slow_publish()
+    {
+        // A synchronization (auto-reset) waitable timer does not queue multiple missed signals -- if the
+        // worker is busy for several period-lengths, only one signal is still pending when it comes back
+        // to wait, so it publishes once and resumes normal cadence instead of firing a backlog of
+        // "catch up" calls. Block the very first SetState for well beyond several 4 ms periods, then
+        // assert the total call count shortly after unblocking is small (steady-cadence sized), not a
+        // burst proportional to the periods that elapsed while blocked.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var firstCallBlocked = new ManualResetEventSlim(false);
+        var releaseFirstCall = new ManualResetEventSlim(false);
+        var sink = new BlockingFirstCallSink(firstCallBlocked, releaseFirstCall);
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink);
+
+        publisher.Start();
+        try
+        {
+            Assert.True(firstCallBlocked.Wait(TimeSpan.FromSeconds(2)), "The first SetState call never started.");
+            // ~25 timer periods would fire while blocked here if periods queued; they must not.
+            await Task.Delay(100);
+            releaseFirstCall.Set();
+            // Give the worker a further short, bounded window to resume normal cadence.
+            await Task.Delay(100);
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+
+        // Steady 4 ms cadence over ~100ms post-release would be on the order of ~25 calls; a catch-up
+        // burst for the ~100ms spent blocked would add roughly that many again. Assert well below a
+        // doubled/burst count without pinning an exact number (CI scheduling noise).
+        Assert.True(sink.Count < 60, $"Expected no catch-up burst, but observed {sink.Count} SetState calls.");
+    }
+
+    private sealed class BlockingFirstCallSink(ManualResetEventSlim firstCallBlocked, ManualResetEventSlim releaseFirstCall) : ICanonicalSteamControllerStateSink
+    {
+        private int _count;
+        private int _isFirstCall = 1;
+        internal int Count => Volatile.Read(ref _count);
+        public bool SetState(SteamControllerDeviceState state)
+        {
+            Interlocked.Increment(ref _count);
+            if (Interlocked.Exchange(ref _isFirstCall, 0) == 1)
+            {
+                firstCallBlocked.Set();
+                releaseFirstCall.Wait();
+            }
+            return true;
+        }
     }
 
     private sealed class Snapshot(ControllerState value) : IControllerStateSnapshotSource
@@ -189,14 +414,29 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
 
     private sealed class FakeSink : ICanonicalSteamControllerStateSink
     {
-        internal bool Accept = true;
-        internal bool ThrowOnSet;
-        internal List<SteamControllerDeviceState> States { get; } = [];
+        // Thread-safe: the real high-resolution-timer/dedicated-worker production path calls SetState
+        // from its own thread while tests observe from the test thread, unlike the manual-tick tests
+        // above where everything happens on one thread.
+        private readonly Lock _sync = new();
+        private readonly List<SteamControllerDeviceState> _states = [];
+        internal volatile bool Accept = true;
+        internal volatile bool ThrowOnSet;
+        internal IReadOnlyList<SteamControllerDeviceState> States { get { lock (_sync) return _states.ToArray(); } }
+        internal int Count { get { lock (_sync) return _states.Count; } }
         public bool SetState(SteamControllerDeviceState state)
         {
             if (ThrowOnSet) throw new InvalidOperationException("set failed");
-            States.Add(state); return Accept;
+            lock (_sync) _states.Add(state);
+            return Accept;
         }
-        public async Task WaitForCountAsync(int count) { while (States.Count < count) await Task.Yield(); }
+        public async Task WaitForCountAsync(int count, TimeSpan? timeout = null)
+        {
+            var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
+            while (Count < count)
+            {
+                if (DateTime.UtcNow >= deadline) throw new TimeoutException($"FakeSink did not reach {count} SetState calls within the timeout (had {Count}).");
+                await Task.Delay(5);
+            }
+        }
     }
 }
