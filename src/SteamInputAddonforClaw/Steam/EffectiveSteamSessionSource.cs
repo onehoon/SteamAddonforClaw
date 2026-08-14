@@ -18,7 +18,7 @@ public sealed class EffectiveSteamSessionSource : IDisposable
     private bool _disposed;
     private SteamSessionState _state;
 
-    public EffectiveSteamSessionSource(SteamSessionWatcher watcher, SteamBigPictureWatcher bigPictureWatcher, DeveloperTestModeState testMode, ISteamBigPictureRoutingPreference settings)
+    internal EffectiveSteamSessionSource(SteamSessionWatcher watcher, SteamBigPictureWatcher bigPictureWatcher, DeveloperTestModeState testMode, ISteamBigPictureRoutingPreference settings)
     {
         _watcher = watcher ?? throw new ArgumentNullException(nameof(watcher));
         _testMode = testMode ?? throw new ArgumentNullException(nameof(testMode));
