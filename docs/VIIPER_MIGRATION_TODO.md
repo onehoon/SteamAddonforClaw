@@ -38,10 +38,10 @@ Rules for this backlog:
 
 ## Addon main reviewed for this plan
 
-At the time this TODO was created, the latest reviewed Addon runtime baseline was:
+The latest reviewed Addon runtime baseline is:
 
 ```text
-72d17e1111da949525bd7b358be4f082e3ee6423
+4f5aabb0a2c8e2080eadc45d8fa3a77c8e4a0e4c
 ```
 
 The documentation contract was then merged as:
@@ -71,20 +71,20 @@ Current hardened VIIPER baseline:
 
 ```text
 repository: onehoon/VIIPER
-commit:     6b5da6de4e9a9c15460783bae0d984762a9b05ef
+commit:     3bd042dbbec9120035f7e86c9f3cac1418202be6
 ```
 
-This baseline contains the PR8-PR11 lifecycle/ownership/callback/transport hardening described in `VIIPER_INTEGRATION.md`.
+This baseline contains the PR8-PR11 lifecycle/ownership/callback/transport hardening and VIIPER PR #13's independent L2/R2 Gordon state extension described in `VIIPER_INTEGRATION.md`. VIIPER M0 is merged and **VALIDATED**.
 
-However, Section 2 below records one integration contract gap discovered while mapping the current Addon input model onto the canonical typed Gordon API. That gap must be resolved before the Addon pins its final canonical C# ABI.
+The canonical Gordon state now records independent `L2`/`R2` digital full-pull inputs. The final semantics are `digital full-pull = explicit L2/R2 OR analog saturation`; explicit L2/R2 does not change analog trigger magnitude. The canonical `SteamControllerDeviceState` ABI size is **62 bytes**.
 
-Until M0 is merged, treat the VIIPER lifecycle/transport hardening as validated but the final Addon-consumed Gordon typed-state ABI as **pending one corrective extension**.
+Any future Addon DLL, generated header, or P/Invoke definition must come from the same `3bd042dbbec9120035f7e86c9f3cac1418202be6` VIIPER revision family.
 
 ---
 
-# 2. Newly discovered blocking VIIPER API gap — independent trigger full-pull buttons
+# 2. Resolved VIIPER API gap — independent trigger full-pull buttons
 
-**Status: BLOCKED / VIIPER corrective PR required**
+**Status: VALIDATED — VIIPER PR #13 merged**
 
 ## 2.1 Current Addon behavior
 
@@ -124,20 +124,20 @@ L2 digital full-pull bit = ON
 
 Existing regression tests explicitly require that the digital full-pull flag does **not** overwrite analog trigger magnitude.
 
-## 2.2 Canonical VIIPER typed-state gap
+## 2.2 Pre-M0 canonical VIIPER typed-state gap
 
-The current canonical `SteamControllerDeviceState` exposes:
+The former canonical `SteamControllerDeviceState` exposed:
 
 ```text
 L1, R1
 LTrigger, RTrigger
 ```
 
-but no explicit `L2` / `R2` digital fields.
+but no explicit `L2` / `R2` digital fields. VIIPER PR #13 added those fields and updated the canonical ABI.
 
-The Gordon implementation currently derives the L2/R2 report bits only from whether analog `LTrigger/RTrigger` reaches the maximum raw value (`26000`).
+The Gordon implementation now derives the L2/R2 report bits from explicit `L2`/`R2` or analog `LTrigger`/`RTrigger` reaching the maximum raw value (`26000`).
 
-Therefore a direct migration would change behavior:
+Before VIIPER PR #13, a direct migration would have changed behavior:
 
 ```text
 Claw state:
@@ -155,7 +155,7 @@ canonical typed VIIPER today:
 
 This is an input-parity regression and must not be accepted as part of migration.
 
-## 2.3 Required VIIPER corrective change
+## 2.3 Validated VIIPER corrective change
 
 Preferred contract:
 
@@ -178,7 +178,7 @@ This preserves both behaviors:
 1. Addon can represent MSI Claw digital full-pull independently from analog magnitude.
 2. Existing VIIPER consumers that only set analog to max still receive the traditional digital full-pull bit.
 
-## 2.4 Required VIIPER tests
+## 2.4 Validated VIIPER tests
 
 The corrective VIIPER PR must include at least:
 
@@ -194,17 +194,16 @@ The corrective VIIPER PR must include at least:
 - `go vet ./...`;
 - Windows canonical DLL/ABI CI green.
 
-## 2.5 After the corrective VIIPER PR merges
+## 2.5 Addon consequence after the corrective VIIPER PR merge
 
-Update all of the following together before Addon canonical ABI work begins:
+The following are now the required inputs for the later Addon canonical ABI work:
 
-- pinned VIIPER commit in `VIIPER_INTEGRATION.md`;
-- this TODO baseline;
+- pinned VIIPER commit in `VIIPER_INTEGRATION.md` and this TODO baseline;
 - future embedded DLL provenance;
 - C# native state layout specification;
 - any C ABI/header examples that include `SteamControllerDeviceState`.
 
-Do **not** start the production canonical C# struct binding before this ABI is finalized.
+Do **not** start the production canonical C# struct binding until the separate M1 gate is complete. M2 remains a later, independent ABI-only step.
 
 ---
 
@@ -324,7 +323,7 @@ M6-M8 are follow-up capabilities and must remain separate PRs.
 
 # M0. VIIPER independent L2/R2 corrective API
 
-**Status: BLOCKED / next prerequisite**
+**Status: VALIDATED — VIIPER PR #13 merged**
 
 Repository: `onehoon/VIIPER`
 
@@ -345,13 +344,13 @@ After merge:
 
 - update `VIIPER_INTEGRATION.md`;
 - update this file;
-- mark M0 `VALIDATED`.
+- record the merged VIIPER PR #13 baseline and keep M0 `VALIDATED`.
 
 ---
 
 # M1. Addon exact usbip-win2 version routing gate
 
-**Status: TODO after M0 may run in parallel only if no canonical ABI files are touched**
+**Status: TODO / next**
 
 Repository: `onehoon/SteamInputAddonforClaw`
 
@@ -418,7 +417,7 @@ Do not silently accept `0.9.7.8+` based on numeric "newer is better" logic.
 
 # M2. Canonical C# ABI definitions and verification only
 
-**Status: BLOCKED by M0**
+**Status: BLOCKED by M1**
 
 ## Goal
 
@@ -1072,9 +1071,9 @@ Update this table whenever a step changes state.
 
 | ID | Task | State | Dependency | Notes |
 |---|---|---|---|---|
-| M0 | VIIPER independent L2/R2 typed Gordon API | **BLOCKED / NEXT** | none | Correct API gap before Addon ABI pinning |
-| M1 | exact usbip-win2 0.9.7.7 routing gate | **TODO** | none technically; complete before M4 | No native ABI changes |
-| M2 | canonical C# ABI definitions/tests | **BLOCKED** | M0 | No production wiring |
+| M0 | VIIPER independent L2/R2 typed Gordon API | **VALIDATED** | none | VIIPER PR #13 merged at `3bd042d...`; canonical state ABI size 62 |
+| M1 | exact usbip-win2 0.9.7.7 routing gate | **TODO / NEXT** | M0 | No native ABI changes |
+| M2 | canonical C# ABI definitions/tests | **BLOCKED** | M1 | No production wiring |
 | M3 | typed Gordon state mapper/parity tests | **BLOCKED** | M2 | Keep raw builder as oracle |
 | M4 | canonical payload/runtime production cutover | **BLOCKED** | M1, M2, M3 | First production canonical route |
 | M5 | physical routing proof + legacy cleanup | **BLOCKED / HARDWARE** | M4 | Required before deleting parity path |
