@@ -41,11 +41,12 @@ Rules for this backlog:
 The current authoritative Addon main baseline is:
 
 ```text
-6b270bbcfcfd193d70ca520bc1844413eddd77c9
+0c688c27c5dc3a6f505d84074a5ece7c77224c7d
 ```
 
-This is the merge commit for Addon PR #148, which validated the M3 typed
-Gordon mapper and legacy parity coverage.
+This is the merge commit for Addon PR #150, which added the side-by-side M4A
+canonical session foundation. M4A corrective classified-remove synchronization
+is the current implementation step.
 
 Historical pre-M3 milestones are retained for migration traceability:
 
@@ -81,14 +82,14 @@ Current hardened VIIPER baseline:
 
 ```text
 repository: onehoon/VIIPER
-commit:     3bd042dbbec9120035f7e86c9f3cac1418202be6
+commit:     db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
 ```
 
-This baseline contains the PR8-PR11 lifecycle/ownership/callback/transport hardening and VIIPER PR #13's independent L2/R2 Gordon state extension described in `VIIPER_INTEGRATION.md`. VIIPER M0 is merged and **VALIDATED**.
+This baseline contains the PR8-PR11 lifecycle/ownership/callback/transport hardening, VIIPER PR #13's independent L2/R2 Gordon state extension, and VIIPER PR #14's classified Gordon removal result described in `VIIPER_INTEGRATION.md`. VIIPER M0 and the classified-remove corrective dependency are merged and **VALIDATED**.
 
 The canonical Gordon state now records independent `L2`/`R2` digital full-pull inputs. The final semantics are `digital full-pull = explicit L2/R2 OR analog saturation`; explicit L2/R2 does not change analog trigger magnitude. The canonical `SteamControllerDeviceState` ABI size is **62 bytes**.
 
-Any future Addon DLL, generated header, or P/Invoke definition must come from the same pinned VIIPER commit/build: `3bd042dbbec9120035f7e86c9f3cac1418202be6` and its matching canonical build.
+Any future Addon DLL, generated header, or P/Invoke definition must come from the same pinned VIIPER commit/build: `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` and its matching canonical build. The current embedded production payload remains the legacy artifact until M4B.
 
 ---
 
@@ -656,7 +657,7 @@ Keep it focused on lifecycle parity. Do not add Game Bar/Xbox360 or gyro here.
 
 ### M4A — canonical session/runtime foundation
 
-**Status: CURRENT IMPLEMENTATION PR**
+**Status: IN PROGRESS — corrective sync after Addon PR #150**
 
 M4A owns:
 
@@ -668,14 +669,16 @@ M4A owns:
 - phased cleanup state and `PendingCleanupPhase`;
 - explicit retry of only the remaining native cleanup phase;
 - the typed nominal 250 Hz publisher;
-- fake-native lifecycle and publisher tests.
+- fake-native lifecycle and publisher tests;
+- classified Gordon removal ABI and fail-closed cleanup mapping;
+- pre-Attach rollback coverage and same-state publisher regression coverage.
 
 M4A does not own production routing, payload replacement, PnP, RecoveryManager,
 HidHide, or production Steam-session orchestration.
 
 ### M4B — canonical payload and production routing cutover
 
-**Status: BLOCKED by M4A**
+**Status: BLOCKED until M4A corrective sync is reviewed and merged**
 
 M4B owns:
 
@@ -1194,7 +1197,7 @@ Update this table whenever a step changes state.
 | M1 | exact usbip-win2 0.9.7.7 routing gate | **VALIDATED** | M0 | Addon PR #144 merged at `c9ae8f27...`; exact usbip-win2 0.9.7.7 gate |
 | M2 | canonical C# ABI definitions/tests | **VALIDATED** | M1 | Addon PR #146 merged at `02c9bc7...`; no production wiring |
 | M3 | typed Gordon state mapper/parity tests | **VALIDATED** | M2 | Addon PR #148 merged at `6b270bbc...`; typed mapper/parity only; no production cutover |
-| M4 | canonical payload/runtime production cutover | **TODO / NEXT** | M3 | First production canonical route |
+| M4 | canonical payload/runtime production cutover | **IN PROGRESS** | M3 | M4A corrective sync in progress; M4B remains blocked |
 | M5 | physical routing proof + legacy cleanup | **BLOCKED / HARDWARE** | M4 | Required before deleting parity path |
 | M6 | Gordon host-output / rumble | **DEFERRED** | M5 | Separate research/PR |
 | M7 | Game Bar Gordon-neutral + typed X360 | **DEFERRED** | M5 | Minimize Gordon hotplug |

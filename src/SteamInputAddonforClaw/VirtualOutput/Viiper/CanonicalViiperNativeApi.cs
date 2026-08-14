@@ -2,6 +2,14 @@ using System.Runtime.InteropServices;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
+internal enum SteamControllerDeviceRemoveResult : int
+{
+    Success = 0,
+    RetryableFailure = 1,
+    UnsafeOutcomeUnknown = 2,
+    Invalid = 3
+}
+
 internal interface ICanonicalViiperNativeApi
 {
     bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null);
@@ -15,6 +23,7 @@ internal interface ICanonicalViiperNativeApi
     bool SetSteamControllerDeviceState(nuint deviceHandle, SteamControllerDeviceState state);
     bool SetSteamControllerOutputCallback(nuint deviceHandle, SteamControllerOutputCallback? callback);
     bool RemoveSteamControllerDevice(nuint deviceHandle);
+    SteamControllerDeviceRemoveResult RemoveSteamControllerDeviceEx(nuint deviceHandle);
 }
 
 internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
@@ -31,7 +40,8 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         "CreateSteamControllerDevice",
         "SetSteamControllerDeviceState",
         "SetSteamControllerOutputCallback",
-        "RemoveSteamControllerDevice"
+        "RemoveSteamControllerDevice",
+        "RemoveSteamControllerDeviceEx"
     ];
 
     private readonly NewUsbServerDelegate _newUsbServer;
@@ -45,6 +55,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     private readonly SetSteamControllerDeviceStateDelegate _setSteamControllerDeviceState;
     private readonly SetSteamControllerOutputCallbackDelegate _setSteamControllerOutputCallback;
     private readonly RemoveSteamControllerDeviceDelegate _removeSteamControllerDevice;
+    private readonly RemoveSteamControllerDeviceExDelegate _removeSteamControllerDeviceEx;
     private readonly object _callbackGate = new();
     private readonly Dictionary<nuint, SteamControllerOutputCallback> _outputCallbacks = [];
     private readonly Dictionary<nuint, ViiperLogCallback> _logCallbacks = [];
@@ -64,6 +75,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         _setSteamControllerDeviceState = Bind<SetSteamControllerDeviceStateDelegate>(library, resolve, "SetSteamControllerDeviceState");
         _setSteamControllerOutputCallback = Bind<SetSteamControllerOutputCallbackDelegate>(library, resolve, "SetSteamControllerOutputCallback");
         _removeSteamControllerDevice = Bind<RemoveSteamControllerDeviceDelegate>(library, resolve, "RemoveSteamControllerDevice");
+        _removeSteamControllerDeviceEx = Bind<RemoveSteamControllerDeviceExDelegate>(library, resolve, "RemoveSteamControllerDeviceEx");
     }
 
     internal static CanonicalViiperNativeApi Load(string absolutePath)
@@ -158,15 +170,25 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     public bool RemoveSteamControllerDevice(nuint deviceHandle)
     {
         var succeeded = Succeeded(_removeSteamControllerDevice(deviceHandle));
-        if (succeeded)
-        {
-            lock (_callbackGate)
-            {
-                _outputCallbacks.Remove(deviceHandle);
-                _deviceOwnership.Remove(deviceHandle);
-            }
-        }
+        if (succeeded) ReleaseDeviceOwnership(deviceHandle);
         return succeeded;
+    }
+
+    public SteamControllerDeviceRemoveResult RemoveSteamControllerDeviceEx(nuint deviceHandle)
+    {
+        var result = _removeSteamControllerDeviceEx(deviceHandle);
+        if (result == SteamControllerDeviceRemoveResult.Success)
+            ReleaseDeviceOwnership(deviceHandle);
+        return result;
+    }
+
+    private void ReleaseDeviceOwnership(nuint deviceHandle)
+    {
+        lock (_callbackGate)
+        {
+            _outputCallbacks.Remove(deviceHandle);
+            _deviceOwnership.Remove(deviceHandle);
+        }
     }
 
     private void ReleaseOutputCallbacksLocked(Func<(nuint ServerHandle, uint BusId), bool> predicate)
@@ -223,4 +245,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate byte RemoveSteamControllerDeviceDelegate(nuint handle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate SteamControllerDeviceRemoveResult RemoveSteamControllerDeviceExDelegate(nuint handle);
 }

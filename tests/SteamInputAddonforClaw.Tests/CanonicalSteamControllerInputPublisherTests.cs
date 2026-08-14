@@ -25,6 +25,25 @@ public sealed class CanonicalSteamControllerInputPublisherTests
     }
 
     [Fact]
+    public async Task Manual_ticks_publish_unchanged_state_on_every_tick()
+    {
+        var state = new ControllerState(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false), default, default, default, new([false, false]));
+        var source = new Snapshot(state);
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink, ticks);
+        publisher.Start();
+
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        await ticks.TickAsync(); await sink.WaitForCountAsync(3);
+        await publisher.StopAsync();
+
+        Assert.Equal(3, sink.States.Count);
+        Assert.All(sink.States, published => Assert.Equal((byte)1, published.A));
+        Assert.Equal(3, publisher.PublishedStateCount);
+    }
+
+    [Fact]
     public async Task False_or_throwing_sink_reports_one_fault_and_stops()
     {
         foreach (var throwing in new[] { false, true })
