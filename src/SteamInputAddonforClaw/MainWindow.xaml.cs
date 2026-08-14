@@ -313,15 +313,6 @@ public sealed partial class MainWindow : Window
         StatusContent.SetRefreshing(_prerequisiteSetupInProgress);
     }
 
-    internal static string FormatSoftwareStatus(ControllerSoftwareStatus item) => item.Runtime switch
-    {
-        SoftwareRuntimeStatus.Running => "Running",
-        SoftwareRuntimeStatus.Starting => "Starting",
-        SoftwareRuntimeStatus.Indeterminate => "Indeterminate",
-        _ when item.Installation == SoftwareInstallationStatus.Installed => "Installed / Not running",
-        _ when item.Installation == SoftwareInstallationStatus.NotInstalled => "Not installed",
-        _ => "Indeterminate"
-    };
     private static ComponentProvisioningState ToComponentProvisioningState(HidHideProvisioningReceiptState state) => state switch
     {
         HidHideProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned,

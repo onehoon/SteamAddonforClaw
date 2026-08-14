@@ -48,7 +48,7 @@ public sealed partial class StatusPage : UserControl
         ]);
 
         var software = snapshot.ControllerSoftware
-            .Select(item => new StatusCardViewModel(item.DisplayName, MainWindow.FormatSoftwareStatus(item), item.Reason))
+            .Select(item => new StatusCardViewModel(item.DisplayName, ControllerSoftwareStatusFormatter.Format(item), item.Reason))
             .ToList();
         RenderGroup(ControllerSoftwareExpander, software, "installed",
             status => status is not ("Not installed" or "Indeterminate"));
