@@ -36,21 +36,28 @@ Rules for this backlog:
 
 # 1. Current baselines
 
-## Addon main reviewed for this plan
+## Current Addon main baseline
 
-The latest reviewed Addon runtime baseline is:
+The current authoritative Addon main baseline is:
 
 ```text
-c9ae8f270014ccb649550fd1c0daf93e8a135ef0
+02c9bc7b5c2251437d69fd7424b437fb94a58f0d
 ```
 
-The documentation contract was then merged as:
+This is the merge commit for Addon PR #146, which validated the M2
+canonical C# ABI definitions and tests.
+
+Historical pre-M2 milestones are retained for migration traceability:
 
 ```text
+Historical pre-M2 runtime baseline / M1 merge:
+c9ae8f270014ccb649550fd1c0daf93e8a135ef0
+
+Historical documentation-sync milestone:
 33260eafb00c7cbffa59a009e265b3b0aa93e4f9
 ```
 
-The runtime baseline includes PR #140, **optional Steam Big Picture routing**.
+The current runtime baseline includes PR #140, **optional Steam Big Picture routing**.
 
 Important consequence: routing eligibility is no longer equivalent to only `RunningAppID != 0`.
 
@@ -203,7 +210,11 @@ The following are now the required inputs for the later Addon canonical ABI work
 - C# native state layout specification;
 - any C ABI/header examples that include `SteamControllerDeviceState`.
 
-Do **not** start the production canonical C# struct binding until the separate M1 gate is complete. M2 remains a later, independent ABI-only step.
+M2 is now validated as a side-by-side ABI-only layer. Production routing
+remains on the legacy path until M3 is completed and the later production
+cutover milestone is reached. M3 adds the typed `ControllerState` → Gordon
+state mapping and parity oracle only; it does not change production routing.
+M4 is the first production canonical runtime/payload cutover milestone.
 
 ---
 
@@ -435,7 +446,30 @@ Do not silently accept `0.9.7.8+` based on numeric "newer is better" logic.
 
 # M2. Canonical C# ABI definitions and verification only
 
-**Status: TODO / NEXT**
+**Status: VALIDATED — Addon PR #146 merged**
+
+Merge commit:
+
+```text
+02c9bc7b5c2251437d69fd7424b437fb94a58f0d
+```
+
+Validated result:
+
+- canonical C# ABI definitions were added side-by-side with the legacy path;
+- `USBServerConfig` and `SteamControllerDeviceState` layouts were pinned;
+- Gordon state ABI size is 62 bytes, with critical offsets `L1=4`, `R1=5`,
+  `L2=6`, `R2=7`, `Menu=8`, and `LPadX=24`;
+- native boolean boundaries use one-byte values, opaque handles use `nuint`,
+  canonical delegates use Cdecl, and device state is passed by value;
+- all 11 M2 canonical exports/signatures are pinned by tests;
+- callback roots are retained during registration, released after successful
+  device/bus/server teardown, and retained when bus/server teardown fails;
+- the exact pinned VIIPER revision was freshly built to regenerate and verify
+  the canonical header/DLL ABI;
+- production routing still uses the legacy `clib` integration and the
+  embedded Addon DLL was not replaced;
+- M3 was not started.
 
 ## Goal
 
@@ -519,7 +553,7 @@ Production routing must still use the existing legacy path after M2 merges.
 
 # M3. Typed Gordon state mapper with legacy raw-report parity oracle
 
-**Status: BLOCKED by M2**
+**Status: TODO / NEXT**
 
 ## Goal
 
@@ -586,7 +620,7 @@ The raw builder is removed only after physical routing proof in M5.
 
 # M4. Canonical DLL payload and runtime/session lifecycle cutover
 
-**Status: BLOCKED by M2 + M3**
+**Status: BLOCKED by M3**
 
 This is the first PR that actually changes production VIIPER routing.
 
@@ -1091,9 +1125,9 @@ Update this table whenever a step changes state.
 |---|---|---|---|---|
 | M0 | VIIPER independent L2/R2 typed Gordon API | **VALIDATED** | none | VIIPER PR #13 merged at `3bd042d...`; canonical state ABI size 62 |
 | M1 | exact usbip-win2 0.9.7.7 routing gate | **VALIDATED** | M0 | Addon PR #144 merged at `c9ae8f27...`; exact usbip-win2 0.9.7.7 gate |
-| M2 | canonical C# ABI definitions/tests | **TODO / NEXT** | M1 | No production wiring |
-| M3 | typed Gordon state mapper/parity tests | **BLOCKED** | M2 | Keep raw builder as oracle |
-| M4 | canonical payload/runtime production cutover | **BLOCKED** | M2, M3 | First production canonical route |
+| M2 | canonical C# ABI definitions/tests | **VALIDATED** | M1 | Addon PR #146 merged at `02c9bc7...`; no production wiring |
+| M3 | typed Gordon state mapper/parity tests | **TODO / NEXT** | M2 | Keep raw builder as oracle; no production routing cutover |
+| M4 | canonical payload/runtime production cutover | **BLOCKED** | M3 | First production canonical route |
 | M5 | physical routing proof + legacy cleanup | **BLOCKED / HARDWARE** | M4 | Required before deleting parity path |
 | M6 | Gordon host-output / rumble | **DEFERRED** | M5 | Separate research/PR |
 | M7 | Game Bar Gordon-neutral + typed X360 | **DEFERRED** | M5 | Minimize Gordon hotplug |
