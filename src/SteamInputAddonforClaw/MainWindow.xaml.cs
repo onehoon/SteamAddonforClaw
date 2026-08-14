@@ -360,7 +360,7 @@ public sealed partial class MainWindow : Window
         new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), devices),
         new HardwareCompatibilityEvaluator(new HandheldDeviceRegistry([adapter])),
         [new MsiCenterMSoftwareStatusProvider(), new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()), new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())],
-        new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices)), new ViiperRuntimeInspector()),
+        new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices), new WindowsUsbIpWin2PackageProbe()), new ViiperRuntimeInspector()),
         // This fallback path has no real AddonOwnedVirtualDeviceTracker to observe (it is only reached by
         // the public parameterless-provider MainWindow constructor, which App.xaml.cs never uses in
         // production; the real runtime always supplies the tracker-backed provider explicitly). Fail safe

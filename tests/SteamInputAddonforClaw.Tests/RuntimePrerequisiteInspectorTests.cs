@@ -61,40 +61,107 @@ public sealed class RuntimePrerequisiteInspectorTests
         Assert.Equal("HidHideInspectionFailed", assessment.Reason);
     }
 
+    [Fact]
+    public void UsbIpWin2Probe_ExactPackageAndHealthyRuntimeIsReady()
+    {
+        var assessment = InspectUsbIp(true, true, true, true);
+
+        Assert.Equal(PrerequisiteStatus.Ready, assessment.Status);
+        Assert.Equal("0.9.7.7", assessment.Version);
+    }
+
     [Theory]
-    [InlineData(false, false, false, false, (int)PrerequisiteStatus.Missing)]
-    [InlineData(true, true, true, true, (int)PrerequisiteStatus.Ready)]
-    [InlineData(true, false, false, false, (int)PrerequisiteStatus.Unusable)]
-    [InlineData(true, true, false, true, (int)PrerequisiteStatus.Unusable)]
-    [InlineData(false, true, true, true, (int)PrerequisiteStatus.Unusable)]
-    public void UsbIpWin2Probe_MapsPresenceAndUsability(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled, int expectedValue)
+    [InlineData("0.9.7.8")]
+    [InlineData("0.9.7.6")]
+    [InlineData("1.0.0.0")]
+    public void UsbIpWin2Probe_ValidUnsupportedPackageIsIncompatible(string version)
     {
-        var expected = (PrerequisiteStatus)expectedValue;
-        var assessment = new UsbIpWin2PrerequisiteInspector(new FakeUsbIpProbe(serviceInstalled, devicePresent, driverUsable, filterInstalled)).Inspect();
+        var assessment = InspectUsbIp(true, true, true, true, new(true, version, true, true));
 
-        Assert.Equal(expected, assessment.Status);
+        Assert.Equal(PrerequisiteStatus.Incompatible, assessment.Status);
+        Assert.Equal(version, assessment.Version);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void UsbIpWin2Probe_PackageEntryWithoutVersionIsIndeterminate(string? version)
+    {
+        var assessment = InspectUsbIp(true, true, true, true, new(false, version, true, true));
+
+        Assert.Equal(PrerequisiteStatus.Indeterminate, assessment.Status);
+        Assert.Equal("UsbIpWin2VersionUnavailable", assessment.Reason);
     }
 
     [Fact]
-    public void UsbIpWin2Probe_MissingFilterServiceIsUnusable()
+    public void UsbIpWin2Probe_MalformedPackageVersionIsIndeterminate()
     {
-        var assessment = new UsbIpWin2PrerequisiteInspector(new FakeUsbIpProbe(true, true, true, filterInstalled: false)).Inspect();
+        var assessment = InspectUsbIp(true, true, true, true, new(true, "unknown", true, true));
+
+        Assert.Equal(PrerequisiteStatus.Indeterminate, assessment.Status);
+        Assert.Equal("UsbIpWin2VersionMalformed", assessment.Reason);
+        Assert.Equal("unknown", assessment.Version);
+    }
+
+    [Fact]
+    public void UsbIpWin2Probe_PackageInspectionFailureIsIndeterminate()
+    {
+        var assessment = new UsbIpWin2PrerequisiteInspector(
+            new FakeUsbIpProbe(true, true, true, true),
+            new FakeUsbIpPackageProbe(new(false, null, false, false))).Inspect();
+
+        Assert.Equal(PrerequisiteStatus.Indeterminate, assessment.Status);
+        Assert.Equal("UsbIpWin2PackageInspectionFailed", assessment.Reason);
+    }
+
+    [Fact]
+    public void UsbIpWin2Probe_PackageProbeExceptionIsIndeterminate()
+    {
+        var assessment = new UsbIpWin2PrerequisiteInspector(
+            new FakeUsbIpProbe(true, true, true, true),
+            new ThrowingUsbIpPackageProbe()).Inspect();
+
+        Assert.Equal(PrerequisiteStatus.Indeterminate, assessment.Status);
+        Assert.Equal("UsbIpWin2PackageInspectionFailed", assessment.Reason);
+    }
+
+    [Fact]
+    public void UsbIpWin2Probe_NoPackageAndNoRuntimeEvidenceIsMissing()
+    {
+        var assessment = InspectUsbIp(false, false, false, false, new(false, null, true, false));
+
+        Assert.Equal(PrerequisiteStatus.Missing, assessment.Status);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, false, false, true)]
+    public void UsbIpWin2Probe_RuntimeEvidenceWithoutPackageIsIndeterminate(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled)
+    {
+        var assessment = InspectUsbIp(serviceInstalled, devicePresent, driverUsable, filterInstalled, new(false, null, true, false));
+
+        Assert.Equal(PrerequisiteStatus.Indeterminate, assessment.Status);
+        Assert.NotEqual(PrerequisiteStatus.Ready, assessment.Status);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, false, true)]
+    [InlineData(false, true, true, true)]
+    public void UsbIpWin2Probe_ExactPackageWithUnhealthyRuntimeIsUnusable(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled)
+    {
+        var assessment = InspectUsbIp(serviceInstalled, devicePresent, driverUsable, filterInstalled);
 
         Assert.Equal(PrerequisiteStatus.Unusable, assessment.Status);
+        Assert.Equal("0.9.7.7", assessment.Version);
     }
 
     [Fact]
-    public void UsbIpWin2Probe_FilterOnlyResidualIsUnusable()
+    public void UsbIpWin2Probe_DeviceInspectionExceptionIsIndeterminate()
     {
-        var assessment = new UsbIpWin2PrerequisiteInspector(new FakeUsbIpProbe(false, false, false, filterInstalled: true)).Inspect();
-
-        Assert.Equal(PrerequisiteStatus.Unusable, assessment.Status);
-    }
-
-    [Fact]
-    public void UsbIpWin2Probe_ExceptionIsIndeterminate()
-    {
-        var assessment = new UsbIpWin2PrerequisiteInspector(new ThrowingUsbIpProbe()).Inspect();
+        var assessment = new UsbIpWin2PrerequisiteInspector(new ThrowingUsbIpProbe(), ExactUsbIpPackageProbe()).Inspect();
 
         Assert.Equal(PrerequisiteStatus.Indeterminate, assessment.Status);
         Assert.Equal("UsbIpWin2InspectionFailed", assessment.Reason);
@@ -139,6 +206,7 @@ public sealed class RuntimePrerequisiteInspectorTests
     [InlineData((int)PrerequisiteStatus.Ready, (int)PrerequisiteStatus.Missing, (int)PrerequisiteStatus.Ready)]
     [InlineData((int)PrerequisiteStatus.Ready, (int)PrerequisiteStatus.Ready, (int)PrerequisiteStatus.Missing)]
     [InlineData((int)PrerequisiteStatus.Indeterminate, (int)PrerequisiteStatus.Ready, (int)PrerequisiteStatus.Ready)]
+    [InlineData((int)PrerequisiteStatus.Incompatible, (int)PrerequisiteStatus.Ready, (int)PrerequisiteStatus.Ready)]
     public void Aggregate_AnyNonReadyPrerequisiteFailsClosed(int hidHideValue, int usbIpWin2Value, int viiperValue)
     {
         var hidHide = (PrerequisiteStatus)hidHideValue;
@@ -151,6 +219,13 @@ public sealed class RuntimePrerequisiteInspectorTests
         new PrerequisiteAssessment(PrerequisiteKind.HidHide, hidHide, "test"),
         new PrerequisiteAssessment(PrerequisiteKind.UsbIpWin2, usbIpWin2, "test"),
         new PrerequisiteAssessment(PrerequisiteKind.Viiper, viiper, "test"));
+
+    private static PrerequisiteAssessment InspectUsbIp(bool serviceInstalled, bool devicePresent, bool driverUsable, bool filterInstalled, UsbIpWin2PackageState? package = null)
+        => new UsbIpWin2PrerequisiteInspector(
+            new FakeUsbIpProbe(serviceInstalled, devicePresent, driverUsable, filterInstalled),
+            new FakeUsbIpPackageProbe(package ?? new(true, "0.9.7.7", true, true))).Inspect();
+
+    private static IUsbIpWin2PackageProbe ExactUsbIpPackageProbe() => new FakeUsbIpPackageProbe(new(true, "0.9.7.7", true, true));
 
     private sealed class FakeHidHideClient(HidHideInspectionStatus status) : IHidHideClient
     {
@@ -178,6 +253,16 @@ public sealed class RuntimePrerequisiteInspectorTests
     private sealed class ThrowingUsbIpProbe : IUsbIpWin2DeviceProbe
     {
         public UsbIpWin2ProbeResult Probe() => throw new InvalidOperationException();
+    }
+
+    private sealed class FakeUsbIpPackageProbe(UsbIpWin2PackageState state) : IUsbIpWin2PackageProbe
+    {
+        public UsbIpWin2PackageState Inspect() => state;
+    }
+
+    private sealed class ThrowingUsbIpPackageProbe : IUsbIpWin2PackageProbe
+    {
+        public UsbIpWin2PackageState Inspect() => throw new InvalidOperationException();
     }
 
     private sealed class FakePayloadFileSystem(bool exists) : IRuntimePayloadFileSystem

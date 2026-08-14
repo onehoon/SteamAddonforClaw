@@ -10,7 +10,9 @@ internal interface IUsbIpWin2DeviceProbe
     UsbIpWin2ProbeResult Probe();
 }
 
-internal sealed class UsbIpWin2PrerequisiteInspector(IUsbIpWin2DeviceProbe deviceProbe)
+internal sealed class UsbIpWin2PrerequisiteInspector(
+    IUsbIpWin2DeviceProbe deviceProbe,
+    IUsbIpWin2PackageProbe packageProbe)
 {
     internal const string RootHardwareId = "ROOT\\USBIP_WIN2\\UDE";
     internal const string ServiceName = "usbip2_ude";
@@ -18,14 +20,38 @@ internal sealed class UsbIpWin2PrerequisiteInspector(IUsbIpWin2DeviceProbe devic
 
     public PrerequisiteAssessment Inspect()
     {
+        UsbIpWin2PackageState package;
         try
         {
+            package = packageProbe.Inspect();
+        }
+        catch
+        {
+            return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Indeterminate, "UsbIpWin2PackageInspectionFailed");
+        }
+
+        try
+        {
+            if (!package.InspectionSucceeded)
+                return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Indeterminate, "UsbIpWin2PackageInspectionFailed", package.Version);
+
             var result = deviceProbe.Probe();
-            if (!result.ServiceInstalled && !result.DevicePresent && !result.FilterInstalled)
-                return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "UsbIpWin2DeviceMissing");
+            var runtimeEvidence = result.ServiceInstalled || result.DevicePresent || result.FilterInstalled;
+
+            if (!package.PackageEntryPresent)
+                return runtimeEvidence
+                    ? new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Indeterminate, "UsbIpWin2VersionUnavailable")
+                    : new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Missing, "UsbIpWin2DeviceMissing");
+
+            if (string.IsNullOrWhiteSpace(package.Version))
+                return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Indeterminate, "UsbIpWin2VersionUnavailable", package.Version);
+            if (!Version.TryParse(package.Version, out var version))
+                return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Indeterminate, "UsbIpWin2VersionMalformed", package.Version);
+            if (version != UsbIpWin2PackageMetadata.BundledVersion)
+                return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Incompatible, "UsbIpWin2VersionUnsupported", package.Version);
             if (result.ServiceInstalled && result.DevicePresent && result.DriverUsable && result.FilterInstalled)
-                return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "UsbIpWin2DeviceReady");
-            return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Unusable, "UsbIpWin2DeviceUnavailable");
+                return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "UsbIpWin2DeviceReady", package.Version);
+            return new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Unusable, "UsbIpWin2DeviceUnavailable", package.Version);
         }
         catch
         {
