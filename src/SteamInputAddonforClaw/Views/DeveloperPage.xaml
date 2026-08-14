@@ -44,11 +44,12 @@
                 </Grid>
             </Border>
 
-            <ctcontrols:SettingsCard Header="Logging" Description="Debug is for developer use only. Use Info for normal use.">
+            <ctcontrols:SettingsCard Header="Logging" Description="Off by default. Info enables runtime diagnostics; Debug is verbose and for developer use only.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="List" />
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <ComboBox x:Name="LogLevelComboBox" Width="120" VerticalAlignment="Center" SelectionChanged="LogLevelComboBox_SelectionChanged">
+                    <ComboBoxItem Content="Off" />
                     <ComboBoxItem Content="Info" />
                     <ComboBoxItem Content="Debug" />
                 </ComboBox>

@@ -11,6 +11,6 @@ public static class LogLevelBootstrap
             using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
             return AppSettingsPolicy.Normalize(document.RootElement.TryGetProperty("LogLevel", out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null);
         }
-        catch { return AppLogPreference.Info; }
+        catch { return AppLogPreference.Off; }
     }
 }

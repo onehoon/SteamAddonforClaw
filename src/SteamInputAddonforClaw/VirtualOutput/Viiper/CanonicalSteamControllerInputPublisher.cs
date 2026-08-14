@@ -73,24 +73,32 @@ internal sealed class CanonicalSteamControllerInputPublisher
             while (await _ticks.WaitForTickAsync(token).ConfigureAwait(false))
             {
                 var state = SteamControllerDeviceStateMapper.Map(_snapshot.LatestState);
-                LogMappedDPadTransitionIfChanged(state);
 
-                var callStart = _timestampProvider();
+                // M5 diagnostics only run when Info (or Debug) is actually enabled: on the 4 ms hot
+                // path, avoid the timestamp sampling / comparisons / heartbeat bookkeeping entirely
+                // when logging is Off, rather than relying only on AppLog's own internal level check.
+                var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);
+                if (diagnosticsEnabled) LogMappedDPadTransitionIfChanged(state);
+
+                var callStart = diagnosticsEnabled ? _timestampProvider() : 0;
                 var accepted = _sink.SetState(state);
-                var callDuration = _timestampProvider() - callStart;
 
-                _setStateCallsSinceHeartbeat++;
-                if (callDuration > _maxSetStateTicksSinceHeartbeat) _maxSetStateTicksSinceHeartbeat = callDuration;
+                if (diagnosticsEnabled)
+                {
+                    var callDuration = _timestampProvider() - callStart;
+                    _setStateCallsSinceHeartbeat++;
+                    if (callDuration > _maxSetStateTicksSinceHeartbeat) _maxSetStateTicksSinceHeartbeat = callDuration;
+                }
 
                 if (!accepted)
                 {
-                    _totalSetStateFailures++;
+                    if (diagnosticsEnabled) _totalSetStateFailures++;
                     ReportFault(new InvalidOperationException("Canonical VIIPER rejected a typed Gordon state."));
                     return;
                 }
                 _publishedStateCount++;
 
-                EmitHeartbeatIfDue();
+                if (diagnosticsEnabled) EmitHeartbeatIfDue();
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }

@@ -1,5 +1,5 @@
 namespace SteamInputAddonforClaw.Settings;
 
-public enum AppLogPreference { Info, Debug }
+public enum AppLogPreference { Off, Info, Debug }
 
-public sealed record AppSettings(bool LaunchAtWindowsStartup = true, AppLogPreference LogLevel = AppLogPreference.Info, bool RouteInSteamBigPicture = false);
+public sealed record AppSettings(bool LaunchAtWindowsStartup = true, AppLogPreference LogLevel = AppLogPreference.Off, bool RouteInSteamBigPicture = false);

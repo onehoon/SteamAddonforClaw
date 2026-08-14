@@ -122,7 +122,7 @@ public partial class App : Application
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         var settingsStore = new SettingsStore(VelopackAppPaths.SettingsPath);
         var settings = settingsStore.Load();
-        AppLog.MinimumLevelOverride = settings.LogLevel == AppLogPreference.Debug ? AppLogLevel.Debug : AppLogLevel.Info;
+        AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
         var startupRegistration = new WindowsTaskSchedulerStartupManager();
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();

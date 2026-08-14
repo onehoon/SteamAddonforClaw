@@ -28,9 +28,11 @@ public sealed class StartupSettingsCoordinator : ISteamBigPictureRoutingPreferen
     public void ChangeLogLevel(AppLogPreference level)
     {
         var previous = Settings.LogLevel;
-        Settings = Settings with { LogLevel = level is AppLogPreference.Debug ? AppLogPreference.Debug : AppLogPreference.Info };
+        Settings = Settings with { LogLevel = level };
         _settingsStore.Save(Settings);
-        SteamInputAddonforClaw.Diagnostics.AppLog.MinimumLevelOverride = Settings.LogLevel == AppLogPreference.Debug ? Diagnostics.AppLogLevel.Debug : Diagnostics.AppLogLevel.Info;
+        SteamInputAddonforClaw.Diagnostics.AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(Settings.LogLevel);
+        // Silent when the new level is Off: the message would be filtered anyway, and logging nothing
+        // is the whole point of turning it off.
         SteamInputAddonforClaw.Diagnostics.AppLog.Info("Settings", "Log level changed.", ("Previous", previous), ("Current", Settings.LogLevel));
     }
 

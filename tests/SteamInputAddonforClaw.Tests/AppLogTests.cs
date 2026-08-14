@@ -110,6 +110,60 @@ public sealed class AppLogTests : IDisposable
     }
 
     [Fact]
+    public void OffLevel_SuppressesEverythingIncludingFatal()
+    {
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
+        AppLog.Debug("Test", "should not appear");
+        AppLog.Info("Test", "should not appear");
+        AppLog.Warn("Test", "should not appear");
+        AppLog.Error("Test", "should not appear", new InvalidOperationException());
+        AppLog.Fatal("Test", "should not appear", new InvalidOperationException());
+        AppLog.DrainForTests();
+        Assert.False(File.Exists(AppLog.CurrentLogFilePath));
+    }
+
+    [Fact]
+    public void IsEnabled_ReflectsMinimumLevelOverride()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
+        Assert.False(AppLog.IsEnabled(AppLogLevel.Info));
+        Assert.False(AppLog.IsEnabled(AppLogLevel.Debug));
+        Assert.False(AppLog.IsEnabled(AppLogLevel.Fatal));
+
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        Assert.True(AppLog.IsEnabled(AppLogLevel.Info));
+        Assert.False(AppLog.IsEnabled(AppLogLevel.Debug));
+
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        Assert.True(AppLog.IsEnabled(AppLogLevel.Info));
+        Assert.True(AppLog.IsEnabled(AppLogLevel.Debug));
+    }
+
+    [Fact]
+    public void ChangeLogLevel_SupportsAllThreeLevelsAndUpdatesAppLogImmediately()
+    {
+        var store = new SteamInputAddonforClaw.Settings.SettingsStore(Path.Combine(_directory, "settings.json"));
+        var coordinator = new SteamInputAddonforClaw.Settings.StartupSettingsCoordinator(
+            new SteamInputAddonforClaw.Settings.AppSettings(), store, new NoOpStartupManager());
+
+        coordinator.ChangeLogLevel(SteamInputAddonforClaw.Settings.AppLogPreference.Debug);
+        Assert.Equal(AppLogLevel.Debug, AppLog.MinimumLevelOverride);
+
+        coordinator.ChangeLogLevel(SteamInputAddonforClaw.Settings.AppLogPreference.Info);
+        Assert.Equal(AppLogLevel.Info, AppLog.MinimumLevelOverride);
+
+        coordinator.ChangeLogLevel(SteamInputAddonforClaw.Settings.AppLogPreference.Off);
+        Assert.Equal(AppLogLevel.Off, AppLog.MinimumLevelOverride);
+        Assert.Equal(SteamInputAddonforClaw.Settings.AppLogPreference.Off, store.Load().LogLevel);
+    }
+
+    private sealed class NoOpStartupManager : SteamInputAddonforClaw.Install.IWindowsStartupManager
+    {
+        public SteamInputAddonforClaw.Install.StartupRegistrationResult Synchronize(bool enabled) => SteamInputAddonforClaw.Install.StartupRegistrationResult.Enabled();
+    }
+
+    [Fact]
     public void Retention_KeepsSixDayOldFileAndDeletesSevenDayOldFile()
     {
         Directory.CreateDirectory(_directory);

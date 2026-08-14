@@ -3,7 +3,9 @@ using System.Text.RegularExpressions;
 
 namespace SteamInputAddonforClaw.Diagnostics;
 
-internal enum AppLogLevel { Debug, Info, Warn, Error, Fatal }
+// Off is a threshold sentinel, never a level a message is logged at: it sorts above Fatal so that
+// MinimumLevelOverride = Off filters every message, including Fatal.
+internal enum AppLogLevel { Debug, Info, Warn, Error, Fatal, Off }
 
 internal static class AppLog
 {
@@ -32,8 +34,18 @@ internal static class AppLog
     private static StreamWriter? _openWriter;
 
     internal static string? DirectoryOverride { get; set; }
-    private static int _minimumLevel = (int)AppLogLevel.Info;
+    // Logging ships disabled by default; the user opts into Info (M5/runtime diagnostics) or Debug
+    // (verbose) explicitly. See AppLogPreference/AppSettingsPolicy for the persisted user setting.
+    private static int _minimumLevel = (int)AppLogLevel.Off;
     internal static AppLogLevel MinimumLevelOverride { get => (AppLogLevel)Volatile.Read(ref _minimumLevel); set => Volatile.Write(ref _minimumLevel, (int)value); }
+
+    /// <summary>
+    /// Cheap pre-check for call sites that would otherwise do non-trivial work (timestamp sampling,
+    /// state comparisons, etc.) purely to prepare a log entry that will never be enqueued when disabled.
+    /// Ordinary AppLog.Debug/Info/... calls do not need this: they already return before any formatting
+    /// work when the level is filtered.
+    /// </summary>
+    internal static bool IsEnabled(AppLogLevel level) => level >= MinimumLevelOverride;
     internal static string DirectoryPath => DirectoryOverride ?? DefaultDirectory;
     internal static string CurrentLogFileName => LaunchFileName;
     internal static string CurrentLogFilePath => Path.Combine(DirectoryPath, LaunchFileName);
