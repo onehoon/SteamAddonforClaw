@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Steam;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -31,7 +32,7 @@ internal static class StatusPresentation
         _ => "Compatibility unknown"
     };
 
-    internal static string FormatSteamGame(bool steamIsActive) => steamIsActive ? "Running" : "Not Running";
+    internal static string FormatSteamGame(SteamStatusSnapshot steam) => steam.Source == SteamSessionSource.Actual && steam.RunningAppId != 0 ? "Running" : "Not Running";
 
     /// <summary>
     /// True only when recovery/ownership/compatibility state is trustworthy enough to report an

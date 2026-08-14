@@ -27,6 +27,7 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private SteamRunningAppIdRegistrySource? _runningAppIdSource;
     private SteamSessionWatcher? _steamSessionWatcher;
+    private SteamBigPictureWatcher? _steamBigPictureWatcher;
     private readonly CancellationTokenSource _startupCancellationTokenSource = new();
     private DispatcherQueue? _dispatcherQueue;
     private bool _showMainWindow;
@@ -120,17 +121,18 @@ public partial class App : Application
     private void StartNormalRuntime(AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, IStockCenterMStartupBaseline? stockCenterMBaseline, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
-        _runningAppIdSource = new SteamRunningAppIdRegistrySource();
-        _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
-        _developerTestModeState = new DeveloperTestModeState();
-        _effectiveSteamSessionSource = new EffectiveSteamSessionSource(_steamSessionWatcher, _developerTestModeState);
-        _effectiveSteamSessionSource.StateChanged += OnEffectiveSteamSessionStateChanged;
-
         var settingsStore = new SettingsStore(VelopackAppPaths.SettingsPath);
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = settings.LogLevel == AppLogPreference.Debug ? AppLogLevel.Debug : AppLogLevel.Info;
         var startupRegistration = new WindowsTaskSchedulerStartupManager();
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
+        _runningAppIdSource = new SteamRunningAppIdRegistrySource();
+        _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
+        _steamBigPictureWatcher = new SteamBigPictureWatcher();
+        _developerTestModeState = new DeveloperTestModeState();
+        _steamBigPictureWatcher.Start();
+        _effectiveSteamSessionSource = new EffectiveSteamSessionSource(_steamSessionWatcher, _steamBigPictureWatcher, _developerTestModeState, startupSettings);
+        _effectiveSteamSessionSource.StateChanged += OnEffectiveSteamSessionStateChanged;
         var startupRegistrationResult = startupSettings.Repair();
 
         if (recoverySafe)
@@ -321,6 +323,8 @@ public partial class App : Application
             _steamSessionWatcher.Dispose();
             _steamSessionWatcher = null;
         }
+        _steamBigPictureWatcher?.Dispose();
+        _steamBigPictureWatcher = null;
 
         _runningAppIdSource?.Dispose();
         _runningAppIdSource = null;

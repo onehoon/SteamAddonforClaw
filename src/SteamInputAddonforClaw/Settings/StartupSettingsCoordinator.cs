@@ -2,7 +2,7 @@ using SteamInputAddonforClaw.Install;
 
 namespace SteamInputAddonforClaw.Settings;
 
-public sealed class StartupSettingsCoordinator
+public sealed class StartupSettingsCoordinator : ISteamBigPictureRoutingPreference
 {
     private readonly SettingsStore _settingsStore;
     private readonly IWindowsStartupManager _startupManager;
@@ -15,6 +15,8 @@ public sealed class StartupSettingsCoordinator
     }
 
     public AppSettings Settings { get; private set; }
+    public bool RouteInSteamBigPicture => Settings.RouteInSteamBigPicture;
+    public event EventHandler? RouteInSteamBigPictureChanged;
 
     public StartupRegistrationResult ChangeLaunchAtWindowsStartup(bool enabled)
     {
@@ -32,5 +34,20 @@ public sealed class StartupSettingsCoordinator
         SteamInputAddonforClaw.Diagnostics.AppLog.Info("Settings", "Log level changed.", ("Previous", previous), ("Current", Settings.LogLevel));
     }
 
+    public void ChangeRouteInSteamBigPicture(bool enabled)
+    {
+        if (Settings.RouteInSteamBigPicture == enabled) return;
+        var next = Settings with { RouteInSteamBigPicture = enabled };
+        _settingsStore.Save(next);
+        Settings = next;
+        RouteInSteamBigPictureChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public StartupRegistrationResult Repair() => _startupManager.Synchronize(Settings.LaunchAtWindowsStartup);
+}
+
+public interface ISteamBigPictureRoutingPreference
+{
+    bool RouteInSteamBigPicture { get; }
+    event EventHandler? RouteInSteamBigPictureChanged;
 }

@@ -83,6 +83,7 @@ public sealed partial class MainWindow : Window
         Closed += OnWindowClosed;
         Activated += OnWindowActivated;
         SettingsContent.Initialize(_startupSettings, startupRegistrationMessage);
+        ControllerContent.Initialize(_startupSettings);
         SettingsContent.DeveloperMenuRequested += (_, _) => OpenDeveloperMenu();
         DeveloperMenuContent.Initialize(_startupSettings, _developerTestModeState, _environmentDiscoveryReportGenerator, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
@@ -259,7 +260,7 @@ public sealed partial class MainWindow : Window
         var usbInstallation = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
         return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
             snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.AddonOwnedOutputIdentityUncertain,
-            SteamSessionState.FromRunningAppId(snapshot.Steam.IsActive ? snapshot.Steam.RunningAppId : 0),
+            new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source),
             snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstallation, usbInstallation, new(hidHideState, usbIpState, hidBootChanged, usbBootChanged)));
     }
 

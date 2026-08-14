@@ -29,7 +29,8 @@ public sealed class SettingsStore
             var startup = root.TryGetProperty("LaunchAtWindowsStartup", out var startupProperty) && startupProperty.ValueKind is JsonValueKind.False or JsonValueKind.True
                 ? startupProperty.GetBoolean() : true;
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
-            var settings = new AppSettings(startup, logLevel);
+            var routeInSteamBigPicture = root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty) && routeProperty.ValueKind == JsonValueKind.True && routeProperty.GetBoolean();
+            var settings = new AppSettings(startup, logLevel, routeInSteamBigPicture);
             AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
             return settings;
         }
@@ -45,17 +46,44 @@ public sealed class SettingsStore
         }
     }
 
+    internal SettingsLoadResult LoadForSafetyGate()
+    {
+        try
+        {
+            if (!File.Exists(_settingsPath)) return new(new AppSettings(), true, "Defaults");
+            using var document = JsonDocument.Parse(File.ReadAllText(_settingsPath));
+            var root = document.RootElement;
+            var startup = root.TryGetProperty("LaunchAtWindowsStartup", out var startupProperty)
+                ? startupProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? startupProperty.GetBoolean() : throw new JsonException("LaunchAtWindowsStartup must be boolean.")
+                : true;
+            var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty)
+                ? levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : throw new JsonException("LogLevel must be string.")
+                : null);
+            var route = root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty)
+                ? routeProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? routeProperty.GetBoolean() : throw new JsonException("RouteInSteamBigPicture must be boolean.")
+                : false;
+            return new(new AppSettings(startup, logLevel, route), true, "Loaded");
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            AppLog.Warn("Settings", "Reliable safety-gate settings read failed.", exception, ("Action", "BlockMutation"));
+            return new(new AppSettings(), false, "SettingsUnreliable");
+        }
+    }
+
     public void Save(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        AppLog.Debug("Settings", "Settings save started.", ("Path", _settingsPath), ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
+        AppLog.Debug("Settings", "Settings save started.", ("Path", _settingsPath), ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel), ("RouteInSteamBigPicture", settings.RouteInSteamBigPicture));
 
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString() };
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.RouteInSteamBigPicture };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");
     }
 }
+
+internal sealed record SettingsLoadResult(AppSettings Settings, bool IsReliable, string Reason);

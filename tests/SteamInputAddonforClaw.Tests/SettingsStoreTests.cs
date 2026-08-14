@@ -29,6 +29,25 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveAndLoad_PreservesBigPictureSetting()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        store.Save(new AppSettings(RouteInSteamBigPicture: true));
+        Assert.True(store.Load().RouteInSteamBigPicture);
+    }
+
+    [Fact]
+    public void ReliableLoad_InvalidBigPictureType_BlocksSafetyMutation()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"RouteInSteamBigPicture\":\"true\"}");
+        var result = new SettingsStore(path).LoadForSafetyGate();
+        Assert.False(result.IsReliable);
+        Assert.Equal("SettingsUnreliable", result.Reason);
+    }
+
+    [Fact]
     public void LegacySettings_DefaultsLogLevelToInfo()
     {
         var path = Path.Combine(_testDirectory, "settings.json"); Directory.CreateDirectory(_testDirectory);
@@ -86,6 +105,19 @@ public sealed class SettingsStoreTests : IDisposable
 
         Assert.True(coordinator.Settings.LaunchAtWindowsStartup);
         Assert.Equal([true], manager.Requests);
+    }
+
+    [Fact]
+    public void ChangeBigPictureSetting_SaveFailureKeepsMemoryAndEmitsNoChange()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(_testDirectory), new FakeStartupManager());
+        var changes = 0;
+        coordinator.RouteInSteamBigPictureChanged += (_, _) => changes++;
+
+        Assert.ThrowsAny<Exception>(() => coordinator.ChangeRouteInSteamBigPicture(true));
+        Assert.False(coordinator.RouteInSteamBigPicture);
+        Assert.Equal(0, changes);
     }
 
     [Fact]

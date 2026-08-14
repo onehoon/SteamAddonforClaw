@@ -29,7 +29,7 @@ public sealed partial class StatusPage : UserControl
         DeviceSupportText.Text = StatusPresentation.FormatDeviceCompatibility(snapshot.HardwareCompatibility.Status);
         DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoardProduct} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
 
-        SteamGameStatusText.Text = StatusPresentation.FormatSteamGame(snapshot.Steam.IsActive);
+        SteamGameStatusText.Text = StatusPresentation.FormatSteamGame(snapshot.Steam);
         var stateTrusted = StatusPresentation.IsControllerStateTrusted(snapshot);
         // No independent, non-probing signal currently confirms the native mode is XInput ahead
         // of routing entry; fail conservative and omit the "(XInput)" qualifier rather than guess.

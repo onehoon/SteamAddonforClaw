@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Views;
+using SteamInputAddonforClaw.Steam;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -22,10 +23,12 @@ public sealed class StatusPresentationTests
         Assert.Equal("Acme Devices", StatusPresentation.FormatManufacturerForDisplay("  Acme Devices  "));
 
     [Theory]
-    [InlineData(false, "Not Running")]
-    [InlineData(true, "Running")]
-    public void FormatSteamGame_ReflectsSteamIsActive(bool isActive, string expected) =>
-        Assert.Equal(expected, StatusPresentation.FormatSteamGame(isActive));
+    [InlineData(123u, SteamSessionSource.Actual, "Running")]
+    [InlineData(0u, SteamSessionSource.Actual, "Not Running")]
+    [InlineData(0u, SteamSessionSource.BigPicture, "Not Running")]
+    [InlineData(uint.MaxValue, SteamSessionSource.DeveloperTest, "Not Running")]
+    public void FormatSteamGame_ReflectsActualGameIdentity(uint appId, SteamSessionSource source, string expected) =>
+        Assert.Equal(expected, StatusPresentation.FormatSteamGame(new SteamStatusSnapshot(appId != 0 || source != SteamSessionSource.Actual, appId, source)));
 
     [Fact]
     public void FormatControllerStatus_PassiveWithoutVerifiedXInput_OmitsQualifier()

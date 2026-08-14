@@ -17,6 +17,8 @@ The PID_1902 DirectInput layout is independently normalized into device-independ
 
 This MVP path does not include gyro, accelerometer, rumble, haptics, Game Bar temporary Xbox360 routing, ClawTweaks production compatibility, or production auto-enable of the complete routing pipeline. Hardware success and Steam recognition remain subject to MSI Claw validation.
 
+Steam Controller routing normally follows a non-zero Steam `RunningAppID`. The optional `RouteInSteamBigPicture` setting extends that session to the supported Steam Big Picture top-level window, identified by the `steamwebhelper.exe` owner, `SDL_app` class, and `Steam Big Picture` title prefix. The setting is disabled by default, and prerequisite installation remains blocked whenever the effective Steam session is active.
+
 > Unofficial project. Not affiliated with MSI or Valve.
 
 ## Project
