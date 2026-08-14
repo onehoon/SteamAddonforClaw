@@ -313,12 +313,6 @@ public sealed partial class MainWindow : Window
         StatusContent.SetRefreshing(_prerequisiteSetupInProgress);
     }
 
-    private void ShowStatusButton_Click(object sender, RoutedEventArgs args)
-    {
-        MainNavigationView.SelectedItem = StatusNavigationItem;
-        ShowPage(_navigationState.SelectNavigationItem(false, "Status"));
-    }
-
     internal static string FormatSoftwareStatus(ControllerSoftwareStatus item) => item.Runtime switch
     {
         SoftwareRuntimeStatus.Running => "Running",
@@ -328,7 +322,6 @@ public sealed partial class MainWindow : Window
         _ when item.Installation == SoftwareInstallationStatus.NotInstalled => "Not installed",
         _ => "Indeterminate"
     };
-    private static string FormatAddonStatus(AddonOperationalStatus status) => status switch { AddonOperationalStatus.WaitingForSteam => "Waiting for Steam", AddonOperationalStatus.SetupRequired => "Setup required", AddonOperationalStatus.RecoveryRequired => "Recovery required", AddonOperationalStatus.Unsupported => "Unsupported", _ => status.ToString() };
     private static ComponentProvisioningState ToComponentProvisioningState(HidHideProvisioningReceiptState state) => state switch
     {
         HidHideProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned,

@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
-        <StackPanel MaxWidth="1100" HorizontalAlignment="Left" Spacing="16">
+        <StackPanel Spacing="16">
             <TextBlock FontSize="24" FontWeight="SemiBold" Text="Settings" />
 
             <ctcontrols:SettingsCard x:Name="LaunchAtStartupCard" Header="Launch at Windows startup">

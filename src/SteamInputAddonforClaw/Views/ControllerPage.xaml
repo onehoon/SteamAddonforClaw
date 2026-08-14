@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <ScrollViewer Padding="32">
-        <StackPanel MaxWidth="1100" HorizontalAlignment="Left" Spacing="16">
+        <StackPanel Spacing="16">
             <StackPanel Spacing="4">
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
                 <TextBlock Opacity="0.7" Text="Controller-specific options will appear here as they become available." TextWrapping="Wrap" />

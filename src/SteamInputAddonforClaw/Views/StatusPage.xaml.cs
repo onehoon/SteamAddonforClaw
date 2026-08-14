@@ -1,3 +1,5 @@
+using CommunityToolkit.WinUI.Controls;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Devices;
@@ -12,9 +14,6 @@ internal sealed record StatusTileViewModel(string Header, string Value, string S
 public sealed partial class StatusPage : UserControl
 {
     private readonly ObservableCollection<StatusTileViewModel> _summaryTiles = [];
-    private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
-    private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
-    private readonly ObservableCollection<StatusCardViewModel> _runtimeCards = [];
 
     public event EventHandler? RefreshRequested;
 
@@ -22,9 +21,6 @@ public sealed partial class StatusPage : UserControl
     {
         InitializeComponent();
         SummaryTilesRepeater.ItemsSource = _summaryTiles;
-        ControllerSoftwareRepeater.ItemsSource = _softwareCards;
-        RoutingComponentsRepeater.ItemsSource = _componentCards;
-        RuntimeStatusRepeater.ItemsSource = _runtimeCards;
     }
 
     internal void SetRefreshing(bool isRefreshing)
@@ -50,18 +46,42 @@ public sealed partial class StatusPage : UserControl
             new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
         ]);
 
-        Replace(_softwareCards, snapshot.ControllerSoftware.Select(item => new StatusCardViewModel(item.DisplayName, MainWindow.FormatSoftwareStatus(item), item.Reason)));
-        Replace(_componentCards,
-        [
+        var software = snapshot.ControllerSoftware
+            .Select(item => new StatusCardViewModel(item.DisplayName, MainWindow.FormatSoftwareStatus(item), item.Reason))
+            .ToList();
+        RenderGroup(ControllerSoftwareExpander, software, "installed",
+            status => status is not ("Not installed" or "Indeterminate"));
+
+        var routing = new List<StatusCardViewModel>
+        {
             new("HidHide", snapshot.Prerequisites.HidHide.Status.ToString(), snapshot.Prerequisites.HidHide.Reason),
             new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
             new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
-        ]);
-        Replace(_runtimeCards,
-        [
-            new("Steam", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
-            new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
-        ]);
+        };
+        RenderGroup(RoutingComponentsExpander, routing, "ready",
+            status => string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void RenderGroup(SettingsExpander expander, IReadOnlyList<StatusCardViewModel> items, string goodLabel, Func<string, bool> isGood)
+    {
+        var goodCount = items.Count(item => isGood(item.Status));
+        expander.Description = new TextBlock
+        {
+            Text = $"{goodCount} of {items.Count} {goodLabel}",
+            FontSize = 14,
+            FontWeight = FontWeights.SemiBold
+        };
+
+        expander.Items.Clear();
+        foreach (var item in items)
+        {
+            expander.Items.Add(new SettingsCard
+            {
+                Header = item.Name,
+                Description = item.Secondary,
+                Content = new TextBlock { Text = item.Status, Opacity = 0.7 }
+            });
+        }
     }
 
     private void RenderHero(AddonOperationalStatus status, string reason)
