@@ -17,7 +17,7 @@ It records the pinned VIIPER baseline, fork-added canonical API surface, ownersh
 | Pinned VIIPER merge baseline | `3bd042dbbec9120035f7e86c9f3cac1418202be6` |
 | VIIPER canonical embedded ABI | **VALIDATED** |
 | Current Addon VIIPER binding | **LEGACY / TO BE MIGRATED** |
-| Canonical Addon migration | **M0-M2 VALIDATED / M3 NEXT** |
+| Canonical Addon migration | **M0-M3 VALIDATED / M4 NEXT** |
 | Game Bar Xbox360 route | **PLANNED** |
 | Gyro/IMU routing | **PLANNED / HARDWARE VALIDATION REQUIRED** |
 | MSI Claw hardware validation of the canonical DLL path | **REQUIRES ADDON INTEGRATION TESTING** |

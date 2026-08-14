@@ -41,15 +41,18 @@ Rules for this backlog:
 The current authoritative Addon main baseline is:
 
 ```text
-02c9bc7b5c2251437d69fd7424b437fb94a58f0d
+6b270bbcfcfd193d70ca520bc1844413eddd77c9
 ```
 
-This is the merge commit for Addon PR #146, which validated the M2
-canonical C# ABI definitions and tests.
+This is the merge commit for Addon PR #148, which validated the M3 typed
+Gordon mapper and legacy parity coverage.
 
-Historical pre-M2 milestones are retained for migration traceability:
+Historical pre-M3 milestones are retained for migration traceability:
 
 ```text
+Historical M2 implementation merge:
+02c9bc7b5c2251437d69fd7424b437fb94a58f0d
+
 Historical pre-M2 runtime baseline / M1 merge:
 c9ae8f270014ccb649550fd1c0daf93e8a135ef0
 
@@ -210,11 +213,11 @@ The following are now the required inputs for the later Addon canonical ABI work
 - C# native state layout specification;
 - any C ABI/header examples that include `SteamControllerDeviceState`.
 
-M2 is now validated as a side-by-side ABI-only layer. Production routing
-remains on the legacy path until M3 is completed and the later production
-cutover milestone is reached. M3 adds the typed `ControllerState` → Gordon
-state mapping and parity oracle only; it does not change production routing.
-M4 is the first production canonical runtime/payload cutover milestone.
+M3 is now validated as the typed `ControllerState` →
+`SteamControllerDeviceState` mapper and parity layer. Production routing
+remains on the legacy path until M4. M4 is the first production canonical
+runtime/payload cutover milestone. M3 does not call
+`SetSteamControllerDeviceState` from production.
 
 ---
 
@@ -553,7 +556,28 @@ Production routing must still use the existing legacy path after M2 merges.
 
 # M3. Typed Gordon state mapper with legacy raw-report parity oracle
 
-**Status: TODO / NEXT**
+**Status: VALIDATED — Addon PR #148 merged**
+
+Merge commit:
+
+```text
+6b270bbcfcfd193d70ca520bc1844413eddd77c9
+```
+
+Validated result:
+
+- added the pure `ControllerState` → `SteamControllerDeviceState` mapper;
+- pinned button/D-pad source identity, Menu/Options, L3, right-pad policy,
+  unchanged right-pad coordinates, and M2→LGrip / M1→RGrip mapping;
+- preserved `value * 26000 / 255` trigger scaling and independent explicit
+  L2/R2 digital full-pull values;
+- covered canonical `explicit L2/R2 OR analog saturation` semantics, including
+  the intentional legacy difference at analog 255 with explicit full false;
+- kept left-pad, motion, quaternion, Steam, and battery input neutral, while
+  covering pinned VIIPER zero quaternion/battery wire defaults in test-only
+  semantics;
+- retained the legacy raw path as the parity oracle, with no production
+  canonical runtime cutover or frame ownership in the typed state.
 
 ## Goal
 
@@ -620,7 +644,7 @@ The raw builder is removed only after physical routing proof in M5.
 
 # M4. Canonical DLL payload and runtime/session lifecycle cutover
 
-**Status: BLOCKED by M3**
+**Status: TODO / NEXT**
 
 This is the first PR that actually changes production VIIPER routing.
 
@@ -1126,8 +1150,8 @@ Update this table whenever a step changes state.
 | M0 | VIIPER independent L2/R2 typed Gordon API | **VALIDATED** | none | VIIPER PR #13 merged at `3bd042d...`; canonical state ABI size 62 |
 | M1 | exact usbip-win2 0.9.7.7 routing gate | **VALIDATED** | M0 | Addon PR #144 merged at `c9ae8f27...`; exact usbip-win2 0.9.7.7 gate |
 | M2 | canonical C# ABI definitions/tests | **VALIDATED** | M1 | Addon PR #146 merged at `02c9bc7...`; no production wiring |
-| M3 | typed Gordon state mapper/parity tests | **TODO / NEXT** | M2 | Keep raw builder as oracle; no production routing cutover |
-| M4 | canonical payload/runtime production cutover | **BLOCKED** | M3 | First production canonical route |
+| M3 | typed Gordon state mapper/parity tests | **VALIDATED** | M2 | Addon PR #148 merged at `6b270bbc...`; typed mapper/parity only; no production cutover |
+| M4 | canonical payload/runtime production cutover | **TODO / NEXT** | M3 | First production canonical route |
 | M5 | physical routing proof + legacy cleanup | **BLOCKED / HARDWARE** | M4 | Required before deleting parity path |
 | M6 | Gordon host-output / rumble | **DEFERRED** | M5 | Separate research/PR |
 | M7 | Game Bar Gordon-neutral + typed X360 | **DEFERRED** | M5 | Minimize Gordon hotplug |
