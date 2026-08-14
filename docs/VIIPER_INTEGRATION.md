@@ -213,8 +213,8 @@ That provenance/hash belongs to the old DLL and **must not be used as the active
 The active M4B payload is built from pinned commit `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` and has:
 
 ```text
-generated header SHA-256: 7F7965DA90EBE69AB57BBC23389BBFEAF8036224BEE3D4D05E0036B60C557E57
-DLL SHA-256:              2B02EE966F23AAE8D3CDAE0ECB96CBECB54C9EF37C3B7D653AD0B2DC379CDD93
+generated header SHA-256: 99EC2B08FCC1B168B2AB58BFDDC0B76F74FBC5FFE0D4D2D19D2B25BE1B7CAEF7
+DLL SHA-256:              FEBD1D688426144E2973EC3914AEED14DCA35235AD0634E3DB4809101FA0999D
 sizeof(remove result):    4
 sizeof(Gordon state):     62
 L1 offset / LPadX offset: 4 / 24

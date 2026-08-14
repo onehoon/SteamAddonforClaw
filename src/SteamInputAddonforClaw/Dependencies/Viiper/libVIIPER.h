@@ -635,41 +635,267 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
+/*
+ * CreateUSBBus creates a new USB bus on the server associated with the given handle.
+ * @param handle Handle to the USB server.
+ * @param busID ID of the bus to create. If 0 or NULL, the server will assign the next free bus ID.
+ *
+ */
 extern GoUint8 CreateUSBBus(USBServerHandle handle, GoUint32* busID);
+/*
+ * RemoveUSBBus removes the USB bus with the given ID from the server associated with the given handle.
+ * Automatically removes devices associated with the bus.
+ * @param handle Handle to the USB server.
+ * @param busID ID of the bus to remove.
+ *
+ */
 extern GoUint8 RemoveUSBBus(USBServerHandle handle, GoUint32 busID);
+/*
+ * GetUSBDeviceIdentity returns the logical VIIPER USB bus and device identity for a typed device handle.
+ * This does not indicate Windows attachment or PnP enumeration state.
+ *
+ */
 extern _Bool GetUSBDeviceIdentity(uintptr_t handle, uint32_t* outBusID, uint32_t* outDeviceID);
 extern _Bool AttachUSBDevice(uintptr_t handle);
 extern _Bool DetachUSBDevice(uintptr_t handle);
+/*
+ * CreateDualSenseDevice creates a new DualSense (non-edge) device on the bus with the given ID on the server associated with the given handle.
+ * @param serverHandle Handle to the USB server.
+ * @param outDeviceHandle Output parameter for the created device handle.
+ * @param busID ID of the bus to add the device to.
+ * @param autoAttachLocalhost If true, the device will be automatically attached to a USBIP-Client/Driver running on THIS machine.
+ * @param idVendor Optional USB vendor ID (0 = default).
+ * @param idProduct Optional USB product ID (0 = default).
+ * @param meta Optional pointer to initial device metadata. Pass NULL to use defaults.
+ *
+ */
 extern GoUint8 CreateDualSenseDevice(USBServerHandle serverHandle, DSDeviceHandle* outDeviceHandle, GoUint32 busID, GoUint8 autoAttachLocalhost, GoUint16 idVendor, GoUint16 idProduct, DSMetaState* meta);
+/*
+ * CreateDualSenseEdgeDevice creates a new DualSense Edge device on the bus with the given ID on the server associated with the given handle.
+ * @param serverHandle Handle to the USB server.
+ * @param outDeviceHandle Output parameter for the created device handle.
+ * @param busID ID of the bus to add the device to.
+ * @param autoAttachLocalhost If true, the device will be automatically attached to a USBIP-Client/Driver running on THIS machine.
+ * @param idVendor Optional USB vendor ID (0 = default).
+ * @param idProduct Optional USB product ID (0 = default).
+ * @param meta Optional pointer to initial device metadata. Pass NULL to use defaults.
+ *
+ */
 extern GoUint8 CreateDualSenseEdgeDevice(USBServerHandle serverHandle, DSDeviceHandle* outDeviceHandle, GoUint32 busID, GoUint8 autoAttachLocalhost, GoUint16 idVendor, GoUint16 idProduct, DSMetaState* meta);
+/*
+ * SetDualSenseDeviceState updates the input state of the DualSense device associated with the given handle.
+ * @param handle Handle to the DualSense device.
+ * @param state New input state to set on the device.
+ *
+ */
 extern GoUint8 SetDualSenseDeviceState(DSDeviceHandle handle, DSDeviceState state);
+/*
+ * SetDualSenseOutputCallback sets a callback to be invoked when the host sends output (rumble/LED) commands to the device.
+ * @param handle Handle to the DualSense device.
+ * @param callback Callback receiving rumbleSmall, rumbleLarge, ledRed, ledGreen, ledBlue, playerLeds. Pass NULL to clear.
+ *
+ */
 extern GoUint8 SetDualSenseOutputCallback(DSDeviceHandle handle, DSOutputCallback cb);
+/*
+ * RemoveDualSenseDevice removes the DualSense device associated with the given handle from the server.
+ * @param handle Handle to the DualSense device to remove.
+ *
+ */
 extern GoUint8 RemoveDualSenseDevice(DSDeviceHandle handle);
+/*
+ * CreateDS4Device creates a new DualShock 4 device on the bus with the given ID on the server associated with the given handle.
+ * @param serverHandle Handle to the USB server.
+ * @param outDeviceHandle Output parameter for the created device handle.
+ * @param busID ID of the bus to add the device to.
+ * @param autoAttachLocalhost If true, the device will be automatically attached to a USBIP-Client/Driver running on THIS machine.
+ * @param idVendor Optional USB vendor ID (0 = default).
+ * @param idProduct Optional USB product ID (0 = default).
+ * @param meta Optional pointer to initial device metadata. Pass NULL to use defaults.
+ *
+ */
 extern GoUint8 CreateDS4Device(USBServerHandle serverHandle, DS4DeviceHandle* outDeviceHandle, GoUint32 busID, GoUint8 autoAttachLocalhost, GoUint16 idVendor, GoUint16 idProduct, DS4MetaState* meta);
+/*
+ * SetDS4DeviceState updates the input state of the DualShock 4 device associated with the given handle.
+ * @param handle Handle to the DS4 device.
+ * @param state New input state to set on the device.
+ *
+ */
 extern GoUint8 SetDS4DeviceState(DS4DeviceHandle handle, DS4DeviceState state);
+/*
+ * SetDS4OutputCallback sets a callback to be invoked when the host sends output (rumble/LED) commands to the device.
+ * @param handle Handle to the DS4 device.
+ * @param callback Callback receiving rumbleSmall, rumbleLarge, ledRed, ledGreen, ledBlue, flashOn, flashOff. Pass NULL to clear.
+ *
+ */
 extern GoUint8 SetDS4OutputCallback(DS4DeviceHandle handle, DS4OutputCallback cb);
+/*
+ * RemoveDS4Device removes the DualShock 4 device associated with the given handle from the server.
+ * @param handle Handle to the DS4 device to remove.
+ *
+ */
 extern GoUint8 RemoveDS4Device(DS4DeviceHandle handle);
+/*
+ * CreateKeyboardDevice creates a new HID keyboard device on the bus with the given ID on the server associated with the given handle.
+ * @param serverHandle Handle to the USB server.
+ * @param outDeviceHandle Output parameter for the created device handle.
+ * @param busID ID of the bus to add the device to.
+ * @param autoAttachLocalhost If true, the device will be automatically attached to a USBIP-Client/Driver running on THIS machine.
+ * @param idVendor Optional USB vendor ID (0 = default).
+ * @param idProduct Optional USB product ID (0 = default).
+ *
+ */
 extern GoUint8 CreateKeyboardDevice(USBServerHandle serverHandle, KeyboardDeviceHandle* outDeviceHandle, GoUint32 busID, GoUint8 autoAttachLocalhost, GoUint16 idVendor, GoUint16 idProduct);
+/*
+ * SetKeyboardDeviceState updates the input state of the keyboard device associated with the given handle.
+ * @param handle Handle to the keyboard device.
+ * @param state New input state (Modifiers bitmask + 256-bit key bitmap).
+ *
+ */
 extern GoUint8 SetKeyboardDeviceState(KeyboardDeviceHandle handle, KeyboardDeviceState state);
+/*
+ * SetKeyboardLEDCallback sets a callback to be invoked when the host changes keyboard LED state.
+ * @param handle Handle to the keyboard device.
+ * @param callback Callback receiving the raw LED bitmask byte (KB_LED_* flags). Pass NULL to clear.
+ *
+ */
 extern GoUint8 SetKeyboardLEDCallback(KeyboardDeviceHandle handle, KeyboardLEDCallback cb);
+/*
+ * RemoveKeyboardDevice removes the keyboard device associated with the given handle from the server.
+ * @param handle Handle to the keyboard device to remove.
+ *
+ */
 extern GoUint8 RemoveKeyboardDevice(KeyboardDeviceHandle handle);
+/*
+ * CreateMouseDevice creates a new HID mouse device on the bus with the given ID on the server associated with the given handle.
+ * @param serverHandle Handle to the USB server.
+ * @param outDeviceHandle Output parameter for the created device handle.
+ * @param busID ID of the bus to add the device to.
+ * @param autoAttachLocalhost If true, the device will be automatically attached to a USBIP-Client/Driver running on THIS machine.
+ * @param idVendor Optional USB vendor ID (0 = default).
+ * @param idProduct Optional USB product ID (0 = default).
+ *
+ */
 extern GoUint8 CreateMouseDevice(USBServerHandle serverHandle, MouseDeviceHandle* outDeviceHandle, GoUint32 busID, GoUint8 autoAttachLocalhost, GoUint16 idVendor, GoUint16 idProduct);
+/*
+ * SetMouseDeviceState updates the input state of the mouse device associated with the given handle.
+ * @param handle Handle to the mouse device.
+ * @param state New input state. DX/DY/Wheel/Pan are relative and consumed each poll cycle.
+ *
+ */
 extern GoUint8 SetMouseDeviceState(MouseDeviceHandle handle, MouseDeviceState state);
+/*
+ * RemoveMouseDevice removes the mouse device associated with the given handle from the server.
+ * @param handle Handle to the mouse device to remove.
+ *
+ */
 extern GoUint8 RemoveMouseDevice(MouseDeviceHandle handle);
+/*
+ * CreateNS2ProDevice creates a new Nintendo Switch 2 Pro Controller device on the bus with the given ID on the server associated with the given handle.
+ * @param serverHandle Handle to the USB server.
+ * @param outDeviceHandle Output parameter for the created device handle.
+ * @param busID ID of the bus to add the device to.
+ * @param autoAttachLocalhost If true, the device will be automatically attached to a USBIP-Client/Driver running on THIS machine.
+ * @param idVendor Optional USB vendor ID (0 = default).
+ * @param idProduct Optional USB product ID (0 = default).
+ * @param meta Optional pointer to initial device metadata. Pass NULL to use defaults.
+ *
+ */
 extern GoUint8 CreateNS2ProDevice(USBServerHandle serverHandle, NS2ProDeviceHandle* outDeviceHandle, GoUint32 busID, GoUint8 autoAttachLocalhost, GoUint16 idVendor, GoUint16 idProduct, NS2ProMetaState* meta);
+/*
+ * SetNS2ProDeviceState updates the input state of the NS2Pro device associated with the given handle.
+ * @param handle Handle to the NS2Pro device.
+ * @param state New input state to set on the device.
+ *
+ */
 extern GoUint8 SetNS2ProDeviceState(NS2ProDeviceHandle handle, NS2ProDeviceState state);
+/*
+ * SetNS2ProOutputCallback sets a callback to be invoked when the host sends output (rumble/LED) commands to the device.
+ * @param handle Handle to the NS2Pro device.
+ * @param callback Callback receiving the full output state (HD rumble data, flags, player LED mask). Pass NULL to clear.
+ *
+ */
 extern GoUint8 SetNS2ProOutputCallback(NS2ProDeviceHandle handle, NS2ProOutputCallback cb);
+/*
+ * RemoveNS2ProDevice removes the NS2Pro device associated with the given handle from the server.
+ * @param handle Handle to the NS2Pro device to remove.
+ *
+ */
 extern GoUint8 RemoveNS2ProDevice(NS2ProDeviceHandle handle);
+/*
+ * NewUSBServer creates a new USB server with the given configuration and returns a handle to it.
+ * The server will run in the background and can be stopped by calling CloseUSBServer with the returned handle.
+ * @param config Server configuration
+ * @param outHandle Output parameter for the created server handle
+ * @param logCallback Optional callback function for log messages from the USB server
+ *
+ */
 extern GoUint8 NewUSBServer(USBServerConfig* config, USBServerHandle* outHandle, VIIPERLogCallback logCallback);
+/*
+ * CloseUSBServer closes the USB server associated with the given handle.
+ * Automatically removes busses and devices associated with the server.
+ * @param handle Handle to the USB server to close.
+ *
+ */
 extern GoUint8 CloseUSBServer(USBServerHandle handle);
+/*
+ * CreateSteamControllerDevice creates a Classic Steam Controller (Gordon) on a caller-owned bus.
+ * A zero vendor or product ID uses Gordon's default 28DE:1102 identity.
+ *
+ */
 extern GoUint8 CreateSteamControllerDevice(USBServerHandle serverHandle, SteamControllerDeviceHandle* outDeviceHandle, GoUint32 busID, GoUint8 autoAttachLocalhost, GoUint16 idVendor, GoUint16 idProduct);
+/*
+ * SetSteamControllerDeviceState updates Gordon's logical input state. Frame ownership remains internal to Gordon.
+ *
+ */
 extern GoUint8 SetSteamControllerDeviceState(SteamControllerDeviceHandle handle, SteamControllerDeviceState state);
+/*
+ * SetSteamControllerOutputCallback registers a raw 64-byte host-output callback. The supplied buffer is C-owned,
+ * valid only for the synchronous callback, and must be copied by callers that need to retain it.
+ *
+ */
 extern GoUint8 SetSteamControllerOutputCallback(SteamControllerDeviceHandle handle, SteamControllerOutputCallback cb);
+/*
+ * RemoveSteamControllerDevice removes and finalizes only the Gordon logical device. The bus remains caller-owned.
+ *
+ */
 extern GoUint8 RemoveSteamControllerDevice(SteamControllerDeviceHandle handle);
+/*
+ * RemoveSteamControllerDeviceEx returns the classified Gordon logical-device removal result.
+ * The legacy RemoveSteamControllerDevice bool export remains available for compatibility.
+ *
+ */
 extern SteamControllerDeviceRemoveResult RemoveSteamControllerDeviceEx(SteamControllerDeviceHandle handle);
+/*
+ * CreateXbox360Device creates a new Xbox360 device on the bus with the given ID on the server associated with the given handle.
+ * @param serverHandle Handle to the USB server.
+ * @param outDeviceHandle Output parameter for the created device handle.
+ * @param busID ID of the bus to add the device to.
+ * @param idVendor Optional USB vendor ID to set on the device.
+ * @param idProduct Optional USB product ID to set on the device.
+ * @param xinputSubType Optional XInput subtype to set on the device (e.g. 0x01 for gamepad, 0x02 for wheel, etc.). (Default gamepad)
+ * @param autoAttachLocalhost If true, the device will be automatically attached to a USBIP-Client/Driver running on THIS machine. (uses IOCTL on windows, USBIP binary on linux)
+ *
+ */
 extern GoUint8 CreateXbox360Device(USBServerHandle serverHandle, Xbox360DeviceHandle* outDeviceHandle, GoUint32 busID, GoUint8 autoAttachLocalhost, GoUint16 idVendor, GoUint16 idProduct, GoUint8 xinputSubType);
+/*
+ * SetXbox360DeviceState updates the input state of the Xbox360 device associated with the given handle.
+ * @param deviceHandle Handle to the Xbox360 device to update.
+ * @param state New input state to set on the device.^
+ *
+ */
 extern GoUint8 SetXbox360DeviceState(Xbox360DeviceHandle handle, Xbox360DeviceState state);
+/*
+ * RemoveXbox360Device removes the Xbox360 device associated with the given handle from the server.
+ * @param deviceHandle Handle to the Xbox360 device to remove.
+ *
+ */
 extern GoUint8 RemoveXbox360Device(Xbox360DeviceHandle handle);
+/*
+ * SetXbox360RumbleCallback sets a callback to be invoked when the host sends rumble/motor commands to the device.
+ * @param handle Handle to the Xbox360 device.
+ * @param callback Callback function receiving the device handle and left/right motor intensities (0-255). Pass NULL to clear.
+ *
+ */
 extern GoUint8 SetXbox360RumbleCallback(Xbox360DeviceHandle handle, Xbox360RumbleCallback cb);
 
 #ifdef __cplusplus

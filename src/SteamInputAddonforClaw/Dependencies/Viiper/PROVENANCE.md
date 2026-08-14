@@ -19,8 +19,9 @@ go build -buildmode=c-shared -ldflags="-s -w" -trimpath -o dist/libVIIPER/libVII
 - Go: `go1.26.5 windows/amd64`
 - GCC/MinGW: `w64devkit 2.9.1`, `gcc.exe (GCC) 16.2.0`
 - Output: `libVIIPER.dll` (Windows x64)
-- Generated header SHA-256: `7F7965DA90EBE69AB57BBC23389BBFEAF8036224BEE3D4D05E0036B60C557E57`
-- DLL SHA-256: `2B02EE966F23AAE8D3CDAE0ECB96CBECB54C9EF37C3B7D653AD0B2DC379CDD93`
+- Generated header SHA-256: `99EC2B08FCC1B168B2AB58BFDDC0B76F74FBC5FFE0D4D2D19D2B25BE1B7CAEF7`
+- DLL SHA-256: `FEBD1D688426144E2973EC3914AEED14DCA35235AD0634E3DB4809101FA0999D`
+- Canonical entrypoint: `just build-libVIIPER Release`
 - Native ABI checks: `sizeof(SteamControllerDeviceRemoveResult) = 4`, `sizeof(SteamControllerDeviceState) = 62`, `L1 = 4`, `LPadX = 24`
 
 The build does not use or redistribute Handheld Companion's bundled DLL, and no byte-for-byte equivalence claim is made. Rebuilds are traceable through the exact source, recipe, toolchain, and artifact hash; CI verifies the committed artifact hash rather than demanding a byte-identical rebuild.

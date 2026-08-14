@@ -111,6 +111,10 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
             if (_before is null || _sessionId() is not { } session) return RoutingStageOperationResult.Failure("SteamOutputNotPrepared");
             if (_state != LifecycleState.Prepared) return RoutingStageOperationResult.Failure("SteamOutputAlreadyActive");
             cancellationToken.ThrowIfCancellationRequested();
+            // Loading and binding the canonical module is not a native routing mutation. Do it
+            // before recording recovery intent so a missing DLL/export leaves no recovery
+            // boundary or ownership uncertainty behind.
+            _canonicalSession ??= _sessionFactory();
             var intent = _recovery.RecordAddonOwnedVirtualDeviceIntent(session, _mutationId, "steamcontroller",
                 ViiperVirtualDeviceIdentityPolicy.VendorId, ViiperVirtualDeviceIdentityPolicy.ProductId,
                 _before.Where(device => device.VendorId == ViiperVirtualDeviceIdentityPolicy.VendorId && device.ProductId == ViiperVirtualDeviceIdentityPolicy.ProductId).Select(device => device.InstanceId));
@@ -124,7 +128,6 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
 
             operationToken.ThrowIfCancellationRequested();
             _state = LifecycleState.Creating;
-            _canonicalSession ??= _sessionFactory();
             var started = Stopwatch.GetTimestamp();
             try
             {
@@ -218,6 +221,8 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
         if (_state == LifecycleState.Inactive) return RoutingStageOperationResult.Success("SteamOutputAlreadyInactive");
         if (_state == LifecycleState.Prepared)
         {
+            _canonicalSession?.Dispose();
+            _canonicalSession = null;
             _before = null;
             _state = LifecycleState.Inactive;
             return RoutingStageOperationResult.Success("SteamOutputPreparationCancelled");
@@ -234,7 +239,9 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
         if (_canonicalSession is null) return RollbackFailure("CanonicalSessionUnavailable");
         if (_canonicalSession.State is CanonicalSteamControllerSessionState.Unsafe)
             return RollbackFailure("CanonicalSessionUnsafe");
-        if (_canonicalSession.State is CanonicalSteamControllerSessionState.Active or CanonicalSteamControllerSessionState.CleanupPending)
+        if (_canonicalSession.State is CanonicalSteamControllerSessionState.Active ||
+            (_canonicalSession.State == CanonicalSteamControllerSessionState.CleanupPending &&
+             _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval))
         {
             var removeStarted = Stopwatch.GetTimestamp();
             try
