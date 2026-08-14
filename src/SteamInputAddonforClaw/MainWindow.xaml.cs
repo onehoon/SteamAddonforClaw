@@ -369,24 +369,22 @@ public sealed partial class MainWindow : Window
 
     private async void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
     {
-        if (!args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed)
+        if (!args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed ||
+            _navigationState.GetMouseBackDestination() is not { } destination)
         {
             return;
         }
 
-        switch (_navigationState.CurrentPage)
+        args.Handled = true;
+        switch (destination)
         {
-            case MainNavigationPage.DeveloperMenu:
+            case MainNavigationPage.Settings:
                 ReturnToSettings("MouseBackButton");
                 break;
-            case MainNavigationPage.ClawSensorProbe:
+            case MainNavigationPage.DeveloperMenu:
                 await ClawSensorProbeContent.ReturnToDeveloperMenuAsync();
                 break;
-            default:
-                return;
         }
-
-        args.Handled = true;
     }
 
     private void ReturnToSettings(string reason)

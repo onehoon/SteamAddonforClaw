@@ -42,4 +42,11 @@ internal sealed class MainNavigationState
 
     internal MainNavigationPage OpenClawSensorProbe() => CurrentPage = MainNavigationPage.ClawSensorProbe;
     internal MainNavigationPage ReturnToDeveloperMenu() => CurrentPage = MainNavigationPage.DeveloperMenu;
+
+    internal MainNavigationPage? GetMouseBackDestination() => CurrentPage switch
+    {
+        MainNavigationPage.DeveloperMenu => MainNavigationPage.Settings,
+        MainNavigationPage.ClawSensorProbe => MainNavigationPage.DeveloperMenu,
+        _ => null
+    };
 }

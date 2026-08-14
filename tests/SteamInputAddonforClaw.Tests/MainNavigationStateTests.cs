@@ -64,6 +64,19 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void MouseBack_destinations_match_developer_page_hierarchy()
+    {
+        var navigation = new MainNavigationState();
+
+        navigation.SelectNavigationItem(isSettingsSelected: true, selectedTag: null);
+        navigation.OpenDeveloperMenu();
+        Assert.Equal(MainNavigationPage.Settings, navigation.GetMouseBackDestination());
+
+        navigation.OpenClawSensorProbe();
+        Assert.Equal(MainNavigationPage.DeveloperMenu, navigation.GetMouseBackDestination());
+    }
+
+    [Fact]
     public void Full_settings_to_sensor_probe_round_trip_returns_to_settings()
     {
         var navigation = new MainNavigationState();

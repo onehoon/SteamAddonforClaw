@@ -77,11 +77,13 @@ internal static class StatusPresentation
     /// </summary>
     internal static bool IsWarning(SystemStatusSnapshot snapshot)
     {
+        if (snapshot.AddonOwnedOutputIdentityUncertain)
+            return true;
+
         if (snapshot.HardwareCompatibility.Status == HardwareCompatibilityStatus.Unsupported)
             return false;
 
         return !snapshot.RecoverySafe
-        || snapshot.AddonOwnedOutputIdentityUncertain
         || snapshot.RoutingDecision.Reason is RoutingDecisionReason.DeviceCompatibilityIndeterminate or RoutingDecisionReason.ControllerEnvironmentIndeterminate
         || snapshot.Addon.Status is AddonOperationalStatus.SetupRequired or AddonOperationalStatus.RecoveryRequired or AddonOperationalStatus.Unsupported;
     }
