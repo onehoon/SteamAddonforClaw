@@ -14,6 +14,34 @@ public sealed class SteamBigPictureWatcherTests
     }
 
     [Fact]
+    public void CandidateClassReadFailure_IsUnreliable()
+    {
+        var result = new SteamBigPictureWindowProbe(
+            callback => { callback(new IntPtr(1)); return true; },
+            _ => new(true, true),
+            _ => new(false, string.Empty),
+            _ => new(true, "Steam Big Picture"))
+            .Capture();
+
+        Assert.False(result.IsReliable);
+        Assert.False(result.IsActive);
+    }
+
+    [Fact]
+    public void CandidateTitleReadFailure_IsUnreliable()
+    {
+        var result = new SteamBigPictureWindowProbe(
+            callback => { callback(new IntPtr(1)); return true; },
+            _ => new(true, true),
+            _ => new(true, "SDL_app"),
+            _ => new(false, string.Empty))
+            .Capture();
+
+        Assert.False(result.IsReliable);
+        Assert.False(result.IsActive);
+    }
+
+    [Fact]
     public void UnreliableProbe_ClearsPreviouslyActiveState()
     {
         var probe = new MutableProbe(new(true, true, "Active"));

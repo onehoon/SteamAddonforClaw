@@ -5,6 +5,8 @@ using System.Text;
 namespace SteamInputAddonforClaw.Steam;
 
 internal sealed record SteamBigPictureProbeResult(bool IsActive, bool IsReliable, string Reason);
+internal sealed record WindowTextReadResult(bool Succeeded, string Value);
+internal sealed record WindowCandidateResult(bool IsCandidate, bool IsReliable);
 
 internal interface ISteamBigPictureWindowProbe
 {
@@ -17,9 +19,21 @@ internal sealed class SteamBigPictureWindowProbe : ISteamBigPictureWindowProbe
     private const string WindowClass = "SDL_app";
     private const string TitlePrefix = "Steam Big Picture";
     private readonly Func<Func<IntPtr, bool>, bool> _enumerateWindows;
+    private readonly Func<IntPtr, WindowCandidateResult> _candidateReader;
+    private readonly Func<IntPtr, WindowTextReadResult> _classNameReader;
+    private readonly Func<IntPtr, WindowTextReadResult> _titleReader;
 
-    internal SteamBigPictureWindowProbe(Func<Func<IntPtr, bool>, bool>? enumerateWindows = null) =>
+    internal SteamBigPictureWindowProbe(
+        Func<Func<IntPtr, bool>, bool>? enumerateWindows = null,
+        Func<IntPtr, WindowCandidateResult>? candidateReader = null,
+        Func<IntPtr, WindowTextReadResult>? classNameReader = null,
+        Func<IntPtr, WindowTextReadResult>? titleReader = null)
+    {
         _enumerateWindows = enumerateWindows ?? (callback => EnumWindows((window, _) => callback(window), IntPtr.Zero));
+        _candidateReader = candidateReader ?? IsSteamWebHelperWindow;
+        _classNameReader = classNameReader ?? ReadClassName;
+        _titleReader = titleReader ?? ReadWindowTitle;
+    }
 
     public SteamBigPictureProbeResult Capture()
     {
@@ -48,39 +62,61 @@ internal sealed class SteamBigPictureWindowProbe : ISteamBigPictureWindowProbe
         }
     }
 
-    private static bool IsBigPictureWindow(IntPtr window, out bool reliable)
+    private bool IsBigPictureWindow(IntPtr window, out bool reliable)
     {
         reliable = true;
-        var className = ReadWindowText(GetClassName, window);
-        var title = ReadWindowText(GetWindowText, window);
+        var candidate = _candidateReader(window);
+        if (!candidate.IsReliable) { reliable = false; return false; }
+        if (!candidate.IsCandidate) return false;
+
+        var classNameResult = _classNameReader(window);
+        if (!classNameResult.Succeeded) { reliable = false; return false; }
+        var titleResult = _titleReader(window);
+        if (!titleResult.Succeeded) { reliable = false; return false; }
+        var className = classNameResult.Value;
+        var title = titleResult.Value;
         if (!string.Equals(className, WindowClass, StringComparison.Ordinal)) return false;
         if (!title.StartsWith(TitlePrefix, StringComparison.OrdinalIgnoreCase)) return false;
+        return true;
+    }
+
+    private static WindowCandidateResult IsSteamWebHelperWindow(IntPtr window)
+    {
         GetWindowThreadProcessId(window, out var processId);
-        if (processId == 0) { reliable = false; return false; }
+        if (processId == 0) return new(false, false);
         try
         {
             using var process = Process.GetProcessById((int)processId);
-            return string.Equals(process.ProcessName, ProcessName, StringComparison.OrdinalIgnoreCase);
+            return new(string.Equals(process.ProcessName, ProcessName, StringComparison.OrdinalIgnoreCase), true);
         }
         catch
         {
-            reliable = false;
-            return false;
+            return new(false, false);
         }
     }
 
-    private static string ReadWindowText(Func<IntPtr, StringBuilder, int, int> reader, IntPtr window)
+    private static WindowTextReadResult ReadClassName(IntPtr window)
     {
         var buffer = new StringBuilder(512);
-        reader(window, buffer, buffer.Capacity);
-        return buffer.ToString();
+        var length = GetClassName(window, buffer, buffer.Capacity);
+        return new(length != 0, buffer.ToString());
+    }
+
+    private static WindowTextReadResult ReadWindowTitle(IntPtr window)
+    {
+        var buffer = new StringBuilder(512);
+        SetLastError(0);
+        var length = GetWindowText(window, buffer, buffer.Capacity);
+        var error = Marshal.GetLastWin32Error();
+        return new(length != 0 || error == 0, buffer.ToString());
     }
 
     private delegate bool EnumWindowsProc(IntPtr window, IntPtr data);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr data);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int maxCount);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int maxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern int GetClassName(IntPtr window, StringBuilder text, int maxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int maxCount);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern void SetLastError(uint errorCode);
 }
 
 internal interface ISteamBigPictureEventHook : IDisposable
