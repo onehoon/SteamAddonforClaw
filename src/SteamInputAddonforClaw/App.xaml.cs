@@ -235,7 +235,14 @@ public partial class App : Application
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
         _ = ReconcileRoutingAsync();
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider, developerTestModeState: _developerTestModeState);
+        RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => _routingRuntimeCoordinator is null
+            ? RoutingRuntimeStatusSnapshot.Unavailable
+            : new(
+                _routingRuntimeCoordinator.CurrentOperationalState,
+                _routingRuntimeCoordinator.ActiveSessionHasSteamOutputEnabled,
+                _msiClawNativeModeSession?.IsActive == true);
+        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider,
+            developerTestModeState: _developerTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 

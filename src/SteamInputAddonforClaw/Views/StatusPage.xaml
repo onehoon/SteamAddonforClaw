@@ -11,36 +11,41 @@
                 <Button x:Name="RefreshStatusButton" Grid.Column="1" Click="RefreshStatusButton_Click" Content="↻ Refresh" VerticalAlignment="Center" />
             </Grid>
 
-            <!-- Overall status hero -->
-            <Border Padding="20,18" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
-                <StackPanel Orientation="Horizontal" Spacing="16">
-                    <SymbolIcon x:Name="HeroIcon" Symbol="Sync" VerticalAlignment="Top" />
-                    <StackPanel Spacing="3">
-                        <TextBlock x:Name="HeroTitleText" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
-                        <TextBlock x:Name="HeroReasonText" Opacity="0.75" TextWrapping="Wrap" />
-                    </StackPanel>
+            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Device" />
+            <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                <StackPanel Spacing="4">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock x:Name="DeviceManufacturerText" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock x:Name="DeviceModelText" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBlock x:Name="DeviceSupportText" Grid.Column="1" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    </Grid>
+                    <TextBlock x:Name="DeviceBoardGpuText" Opacity="0.7" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <TextBlock Margin="0,4,0,0" FontSize="20" FontWeight="SemiBold" Text="Current Status" />
+            <Border Padding="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                <StackPanel>
+                    <Grid Padding="16,12" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="15" FontWeight="SemiBold" Text="Steam Game" VerticalAlignment="Center" />
+                        <Border Grid.Column="1" Padding="8,3" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="12" VerticalAlignment="Center">
+                            <TextBlock x:Name="SteamGameStatusText" FontSize="13" FontWeight="SemiBold" />
+                        </Border>
+                    </Grid>
+                    <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+                    <Grid Padding="16,12" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="15" FontWeight="SemiBold" Text="Controller Status" VerticalAlignment="Center" />
+                        <TextBlock x:Name="ControllerStatusText" Grid.Column="1" MaxWidth="280" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    </Grid>
                 </StackPanel>
             </Border>
 
             <InfoBar x:Name="StatusInfoBar" IsClosable="False" IsOpen="False" />
-
-            <!-- Summary tiles -->
-            <ItemsRepeater x:Name="SummaryTilesRepeater">
-                <ItemsRepeater.Layout>
-                    <UniformGridLayout ItemsStretch="Fill" MaximumRowsOrColumns="3" MinColumnSpacing="8" MinItemWidth="220" MinRowSpacing="8" Orientation="Horizontal" />
-                </ItemsRepeater.Layout>
-                <ItemsRepeater.ItemTemplate>
-                    <DataTemplate>
-                        <Border Padding="16,14" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                            <StackPanel Spacing="2">
-                                <TextBlock Opacity="0.7" Text="{Binding Header}" />
-                                <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Value}" TextWrapping="Wrap" />
-                                <TextBlock Opacity="0.7" Text="{Binding Secondary}" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ItemsRepeater.ItemTemplate>
-            </ItemsRepeater>
 
             <ctcontrols:SettingsExpander x:Name="ControllerSoftwareExpander" Header="Controller Software" />
 

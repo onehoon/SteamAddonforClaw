@@ -2,26 +2,19 @@ using CommunityToolkit.WinUI.Controls;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
-using System.Collections.ObjectModel;
 
 namespace SteamInputAddonforClaw.Views;
 
-internal sealed record StatusTileViewModel(string Header, string Value, string Secondary);
-
 public sealed partial class StatusPage : UserControl
 {
-    private readonly ObservableCollection<StatusTileViewModel> _summaryTiles = [];
-
     public event EventHandler? RefreshRequested;
 
     public StatusPage()
     {
         InitializeComponent();
-        SummaryTilesRepeater.ItemsSource = _summaryTiles;
     }
 
     internal void SetRefreshing(bool isRefreshing)
@@ -29,23 +22,23 @@ public sealed partial class StatusPage : UserControl
         RefreshStatusButton.IsEnabled = !isRefreshing;
     }
 
-    internal void Render(SystemStatusSnapshot snapshot, FirstTimeSetupAddonPresentation addonPresentation)
+    internal void Render(SystemStatusSnapshot snapshot, FirstTimeSetupAddonPresentation addonPresentation, RoutingRuntimeStatusSnapshot routingStatus)
     {
-        var deviceSupport = snapshot.HardwareCompatibility.Status switch
-        {
-            HardwareCompatibilityStatus.Supported => "Supported",
-            HardwareCompatibilityStatus.Unsupported => "Unsupported",
-            _ => "Compatibility unknown"
-        };
+        DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
+        DeviceModelText.Text = snapshot.Device.Model;
+        DeviceSupportText.Text = StatusPresentation.FormatDeviceCompatibility(snapshot.HardwareCompatibility.Status);
+        DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoardProduct} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
 
-        RenderHero(snapshot, addonPresentation.Reason);
+        SteamGameStatusText.Text = StatusPresentation.FormatSteamGame(snapshot.Steam.IsActive);
+        var stateTrusted = StatusPresentation.IsControllerStateTrusted(snapshot);
+        // No independent, non-probing signal currently confirms the native mode is XInput ahead
+        // of routing entry; fail conservative and omit the "(XInput)" qualifier rather than guess.
+        ControllerStatusText.Text = StatusPresentation.FormatControllerStatus(stateTrusted, routingStatus, nativeXInputVerified: false);
 
-        Replace(_summaryTiles,
-        [
-            new("Device", $"{snapshot.Device.Manufacturer} {snapshot.Device.Model}", deviceSupport),
-            new("Steam Session", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
-            new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
-        ]);
+        var isWarning = StatusPresentation.IsWarning(snapshot);
+        StatusInfoBar.Severity = InfoBarSeverity.Warning;
+        StatusInfoBar.Message = addonPresentation.Reason;
+        StatusInfoBar.IsOpen = isWarning;
 
         var software = snapshot.ControllerSoftware
             .Select(item => new StatusCardViewModel(item.DisplayName, ControllerSoftwareStatusFormatter.Format(item), item.Reason))
@@ -85,58 +78,8 @@ public sealed partial class StatusPage : UserControl
         }
     }
 
-    private void RenderHero(SystemStatusSnapshot snapshot, string reason)
-    {
-        var (title, symbol, severity) = GetHeroPresentation(snapshot);
-
-        HeroIcon.Symbol = symbol;
-        HeroTitleText.Text = title;
-        HeroReasonText.Text = reason;
-
-        if (severity == InfoBarSeverity.Warning)
-        {
-            StatusInfoBar.Severity = severity;
-            StatusInfoBar.Message = reason;
-            StatusInfoBar.IsOpen = true;
-        }
-        else
-        {
-            StatusInfoBar.IsOpen = false;
-        }
-    }
-
-    private static (string Title, Symbol Symbol, InfoBarSeverity Severity) GetHeroPresentation(SystemStatusSnapshot snapshot)
-    {
-        // Recovery/ownership safety must never present as merely "indeterminate" — these are the
-        // conditions RoutingEligibilityPolicy checks first and fails safe on, so the hero has to
-        // surface them ahead of the generic AddonOperationalStatus mapping.
-        if (!snapshot.RecoverySafe)
-            return ("Recovery required", Symbol.Important, InfoBarSeverity.Warning);
-        if (snapshot.AddonOwnedOutputIdentityUncertain)
-            return ("Routing disabled for safety", Symbol.Important, InfoBarSeverity.Warning);
-        if (snapshot.RoutingDecision.Reason is RoutingDecisionReason.DeviceCompatibilityIndeterminate or RoutingDecisionReason.ControllerEnvironmentIndeterminate)
-            return ("Compatibility could not be verified", Symbol.Important, InfoBarSeverity.Warning);
-
-        return snapshot.Addon.Status switch
-        {
-            AddonOperationalStatus.Ready => ("Ready for Steam Input routing", Symbol.Accept, InfoBarSeverity.Success),
-            AddonOperationalStatus.WaitingForSteam => ("Ready. Waiting for a Steam session.", Symbol.Sync, InfoBarSeverity.Informational),
-            AddonOperationalStatus.Passive => ("Controller remains native.", Symbol.Repair, InfoBarSeverity.Informational),
-            AddonOperationalStatus.SetupRequired => ("Setup required", Symbol.Important, InfoBarSeverity.Warning),
-            AddonOperationalStatus.RecoveryRequired => ("Recovery required", Symbol.Important, InfoBarSeverity.Warning),
-            AddonOperationalStatus.Unsupported => ("Not supported on this device", Symbol.Important, InfoBarSeverity.Warning),
-            _ => ("Status indeterminate", Symbol.Help, InfoBarSeverity.Informational)
-        };
-    }
-
     private void RefreshStatusButton_Click(object sender, RoutedEventArgs args)
     {
         RefreshRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private static void Replace<T>(ObservableCollection<T> destination, IEnumerable<T> source)
-    {
-        destination.Clear();
-        foreach (var item in source) destination.Add(item);
     }
 }

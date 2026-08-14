@@ -12,7 +12,11 @@
                 Click="BackButton_Click"
                 Content="Back to Settings"
                 HorizontalAlignment="Left" />
-            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Developer Menu" />
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock FontSize="24" FontWeight="SemiBold" Text="Developer Menu" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Click="OpenLogFolderButton_Click" Content="Log Folder" VerticalAlignment="Center" />
+            </Grid>
             <TextBlock
                 Opacity="0.7"
                 Text="These diagnostics are for developers only. General users should not use this menu."
@@ -27,23 +31,24 @@
 
             <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
                 <Grid ColumnSpacing="16">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                    <SymbolIcon VerticalAlignment="Top" Symbol="Document" />
-                    <StackPanel Grid.Column="1" Spacing="10">
-                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="Environment Discovery" />
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <SymbolIcon VerticalAlignment="Center" Symbol="Find" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{ThemeResource BodyStrongTextBlockStyle}" Text="Environment Discovery" />
                         <TextBlock Opacity="0.7" Text="Generate a read-only system report for controller software detection development." TextWrapping="Wrap" />
-                        <Button x:Name="GenerateEnvironmentDiscoveryReportButton" Click="GenerateEnvironmentDiscoveryReportButton_Click" Content="Generate Report" HorizontalAlignment="Left" />
-                        <TextBlock x:Name="EnvironmentDiscoveryReportStatusText" Opacity="0.7" TextWrapping="Wrap" />
-                        <Button x:Name="OpenEnvironmentDiscoveryFolderButton" Click="OpenEnvironmentDiscoveryFolderButton_Click" Content="Open Folder" HorizontalAlignment="Left" IsEnabled="False" Visibility="Collapsed" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="6">
+                        <Button x:Name="GenerateEnvironmentDiscoveryReportButton" Click="GenerateEnvironmentDiscoveryReportButton_Click" Content="Generate Report" FontWeight="Normal" HorizontalAlignment="Right" />
+                        <TextBlock x:Name="EnvironmentDiscoveryReportStatusText" HorizontalAlignment="Right" Opacity="0.7" TextWrapping="Wrap" Visibility="Collapsed" />
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <ctcontrols:SettingsCard Header="Logging" Description="Control application log verbosity. Info is recommended for normal use. Debug records detailed controller and PnP diagnostics and may significantly increase log size.">
+            <ctcontrols:SettingsCard Header="Logging" Description="Debug is for developer use only. Use Info for normal use.">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Document" />
+                    <SymbolIcon Symbol="List" />
                 </ctcontrols:SettingsCard.HeaderIcon>
-                <ComboBox x:Name="LogLevelComboBox" Width="120" SelectionChanged="LogLevelComboBox_SelectionChanged">
+                <ComboBox x:Name="LogLevelComboBox" Width="120" VerticalAlignment="Center" SelectionChanged="LogLevelComboBox_SelectionChanged">
                     <ComboBoxItem Content="Info" />
                     <ComboBoxItem Content="Debug" />
                 </ComboBox>
@@ -55,7 +60,7 @@
                 Header="Claw Sensor Probe"
                 IsClickEnabled="True">
                 <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Document" />
+                    <SymbolIcon Symbol="Zoom" />
                 </ctcontrols:SettingsCard.HeaderIcon>
             </ctcontrols:SettingsCard>
         </StackPanel>

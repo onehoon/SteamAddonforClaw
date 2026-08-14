@@ -17,7 +17,6 @@ public sealed partial class DeveloperPage : UserControl
     private bool _isInitializingTestMode;
     private bool _isInitializingLogLevel;
     private int _isGeneratingEnvironmentDiscoveryReport;
-    private string? _environmentDiscoveryDirectory;
 
     public event EventHandler? BackRequested;
     public event EventHandler? ClawSensorProbeRequested;
@@ -57,6 +56,18 @@ public sealed partial class DeveloperPage : UserControl
         ClawSensorProbeRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private void OpenLogFolderButton_Click(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{AppLog.DirectoryPath}\"") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("DeveloperMenu", "Log folder could not be opened.", exception);
+        }
+    }
+
     private void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
         if (!_isInitializingTestMode && _isPrerequisiteSetupInProgress?.Invoke() != true)
@@ -75,21 +86,16 @@ public sealed partial class DeveloperPage : UserControl
         if (_isPrerequisiteSetupInProgress?.Invoke() == true) return;
         if (Interlocked.Exchange(ref _isGeneratingEnvironmentDiscoveryReport, 1) != 0) return;
         GenerateEnvironmentDiscoveryReportButton.IsEnabled = false;
-        OpenEnvironmentDiscoveryFolderButton.IsEnabled = false;
-        OpenEnvironmentDiscoveryFolderButton.Visibility = Visibility.Collapsed;
-        EnvironmentDiscoveryReportStatusText.Text = "Generating...";
+        SetEnvironmentDiscoveryStatus("Generating...");
         try
         {
-            var result = await _environmentDiscoveryReportGenerator!.GenerateAsync();
-            _environmentDiscoveryDirectory = result.DirectoryPath;
-            EnvironmentDiscoveryReportStatusText.Text = $"Report generated successfully.{Environment.NewLine}{result.ReportFileName}";
-            OpenEnvironmentDiscoveryFolderButton.Visibility = Visibility.Visible;
-            OpenEnvironmentDiscoveryFolderButton.IsEnabled = true;
+            await _environmentDiscoveryReportGenerator!.GenerateAsync();
+            SetEnvironmentDiscoveryStatus(string.Empty);
         }
         catch (Exception exception)
         {
             AppLog.Warn("EnvironmentDiscovery", "Environment discovery report generation failed.", exception, ("Reason", exception.GetType().Name));
-            EnvironmentDiscoveryReportStatusText.Text = "Report generation failed.\r\nSee the application log for details.";
+            SetEnvironmentDiscoveryStatus("Report generation failed.\r\nSee the application log for details.");
         }
         finally
         {
@@ -98,17 +104,9 @@ public sealed partial class DeveloperPage : UserControl
         }
     }
 
-    private void OpenEnvironmentDiscoveryFolderButton_Click(object sender, RoutedEventArgs args)
+    private void SetEnvironmentDiscoveryStatus(string text)
     {
-        if (_isPrerequisiteSetupInProgress?.Invoke() == true) return;
-        if (string.IsNullOrWhiteSpace(_environmentDiscoveryDirectory)) return;
-        try
-        {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_environmentDiscoveryDirectory}\"") { UseShellExecute = true });
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("EnvironmentDiscovery", "Environment discovery folder could not be opened.", exception);
-        }
+        EnvironmentDiscoveryReportStatusText.Text = text;
+        EnvironmentDiscoveryReportStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
     }
 }

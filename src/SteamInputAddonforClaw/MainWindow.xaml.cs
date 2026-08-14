@@ -23,6 +23,7 @@ using System.Diagnostics;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Developer;
+using SteamInputAddonforClaw.Routing;
 using Microsoft.UI.Dispatching;
 
 namespace SteamInputAddonforClaw;
@@ -36,6 +37,7 @@ public sealed partial class MainWindow : Window
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
     private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
     private readonly DeveloperTestModeState? _developerTestModeState;
+    private readonly Func<RoutingRuntimeStatusSnapshot> _routingRuntimeStatusProvider;
     private SystemStatusSnapshot? _latestSystemStatus;
     private int _isRefreshingStatus;
     private bool _setupPromptActive;
@@ -59,13 +61,15 @@ public sealed partial class MainWindow : Window
         IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
         IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
         DeveloperTestModeState? developerTestModeState = null,
-        IElevatedProcessRunner? prerequisiteSetupRunner = null)
+        IElevatedProcessRunner? prerequisiteSetupRunner = null,
+        Func<RoutingRuntimeStatusSnapshot>? routingRuntimeStatusProvider = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
         _hidHideReceiptStore = hidHideReceiptStore ?? new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
         _prerequisiteSetupRunner = prerequisiteSetupRunner ?? new ElevatedProcessRunner();
         _developerTestModeState = developerTestModeState;
+        _routingRuntimeStatusProvider = routingRuntimeStatusProvider ?? (() => RoutingRuntimeStatusSnapshot.Unavailable);
         _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
             new WindowsEnvironmentDiscoverySnapshotSource(),
             new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
@@ -161,7 +165,7 @@ public sealed partial class MainWindow : Window
         _latestSystemStatus = snapshot;
         var setup = EvaluateFirstTimeSetup(snapshot);
         var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
-        StatusContent.Render(snapshot, addonPresentation);
+        StatusContent.Render(snapshot, addonPresentation, _routingRuntimeStatusProvider());
         if (PrerequisiteSetupPromptPolicy.IsInstallable(setup))
         {
             if (_windowActivatedForUser)
