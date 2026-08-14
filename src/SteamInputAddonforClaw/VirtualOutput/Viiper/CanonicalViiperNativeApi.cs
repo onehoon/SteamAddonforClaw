@@ -2,7 +2,22 @@ using System.Runtime.InteropServices;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
-internal sealed class CanonicalViiperNativeApi
+internal interface ICanonicalViiperNativeApi
+{
+    bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null);
+    bool CloseUSBServer(nuint serverHandle);
+    bool CreateUSBBus(nuint serverHandle, ref uint busId);
+    bool RemoveUSBBus(nuint serverHandle, uint busId);
+    bool GetUSBDeviceIdentity(nuint deviceHandle, out uint busId, out uint deviceId);
+    bool AttachUSBDevice(nuint deviceHandle);
+    bool DetachUSBDevice(nuint deviceHandle);
+    bool CreateSteamControllerDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct);
+    bool SetSteamControllerDeviceState(nuint deviceHandle, SteamControllerDeviceState state);
+    bool SetSteamControllerOutputCallback(nuint deviceHandle, SteamControllerOutputCallback? callback);
+    bool RemoveSteamControllerDevice(nuint deviceHandle);
+}
+
+internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 {
     internal static readonly IReadOnlyList<string> RequiredExports =
     [
@@ -54,7 +69,7 @@ internal sealed class CanonicalViiperNativeApi
     internal static CanonicalViiperNativeApi Load(string absolutePath)
         => new(ViiperNativeModuleCache.GetOrLoad(absolutePath));
 
-    internal bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null)
+    public bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null)
     {
         var succeeded = Succeeded(_newUsbServer(ref config, out serverHandle, logCallback));
         if (succeeded && logCallback is not null)
@@ -64,7 +79,7 @@ internal sealed class CanonicalViiperNativeApi
         return succeeded;
     }
 
-    internal bool CloseUSBServer(nuint serverHandle)
+    public bool CloseUSBServer(nuint serverHandle)
     {
         var succeeded = Succeeded(_closeUsbServer(serverHandle));
         if (succeeded)
@@ -78,10 +93,10 @@ internal sealed class CanonicalViiperNativeApi
         return succeeded;
     }
 
-    internal bool CreateUSBBus(nuint serverHandle, ref uint busId)
+    public bool CreateUSBBus(nuint serverHandle, ref uint busId)
         => Succeeded(_createUsbBus(serverHandle, ref busId));
 
-    internal bool RemoveUSBBus(nuint serverHandle, uint busId)
+    public bool RemoveUSBBus(nuint serverHandle, uint busId)
     {
         var succeeded = Succeeded(_removeUsbBus(serverHandle, busId));
         if (succeeded)
@@ -92,16 +107,16 @@ internal sealed class CanonicalViiperNativeApi
         return succeeded;
     }
 
-    internal bool GetUSBDeviceIdentity(nuint deviceHandle, out uint busId, out uint deviceId)
+    public bool GetUSBDeviceIdentity(nuint deviceHandle, out uint busId, out uint deviceId)
         => Succeeded(_getUsbDeviceIdentity(deviceHandle, out busId, out deviceId));
 
-    internal bool AttachUSBDevice(nuint deviceHandle)
+    public bool AttachUSBDevice(nuint deviceHandle)
         => Succeeded(_attachUsbDevice(deviceHandle));
 
-    internal bool DetachUSBDevice(nuint deviceHandle)
+    public bool DetachUSBDevice(nuint deviceHandle)
         => Succeeded(_detachUsbDevice(deviceHandle));
 
-    internal bool CreateSteamControllerDevice(
+    public bool CreateSteamControllerDevice(
         nuint serverHandle,
         out nuint deviceHandle,
         uint busId,
@@ -123,10 +138,10 @@ internal sealed class CanonicalViiperNativeApi
         return succeeded;
     }
 
-    internal bool SetSteamControllerDeviceState(nuint deviceHandle, SteamControllerDeviceState state)
+    public bool SetSteamControllerDeviceState(nuint deviceHandle, SteamControllerDeviceState state)
         => Succeeded(_setSteamControllerDeviceState(deviceHandle, state));
 
-    internal bool SetSteamControllerOutputCallback(nuint deviceHandle, SteamControllerOutputCallback? callback)
+    public bool SetSteamControllerOutputCallback(nuint deviceHandle, SteamControllerOutputCallback? callback)
     {
         var succeeded = Succeeded(_setSteamControllerOutputCallback(deviceHandle, callback));
         if (succeeded)
@@ -140,7 +155,7 @@ internal sealed class CanonicalViiperNativeApi
         return succeeded;
     }
 
-    internal bool RemoveSteamControllerDevice(nuint deviceHandle)
+    public bool RemoveSteamControllerDevice(nuint deviceHandle)
     {
         var succeeded = Succeeded(_removeSteamControllerDevice(deviceHandle));
         if (succeeded)
