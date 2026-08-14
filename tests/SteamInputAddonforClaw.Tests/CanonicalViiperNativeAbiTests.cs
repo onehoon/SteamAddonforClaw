@@ -168,6 +168,48 @@ public sealed class CanonicalViiperNativeAbiTests
     }
 
     [Fact]
+    public void CanonicalApi_RemoveBusFailureKeepsOwnedOutputCallbackRooted()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterOutputCallback(api, deviceHandle);
+
+        FakeExports.FailRemoveBus = true;
+        try
+        {
+            Assert.False(api.RemoveUSBBus(1, 1));
+            CollectGarbage();
+            Assert.True(weak.TryGetTarget(out _));
+        }
+        finally
+        {
+            FakeExports.FailRemoveBus = false;
+        }
+    }
+
+    [Fact]
+    public void CanonicalApi_CloseServerFailureKeepsOutputAndLogCallbacksRooted()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        var logWeak = RegisterLogCallback(api);
+        Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var outputWeak = RegisterOutputCallback(api, deviceHandle);
+
+        FakeExports.FailCloseServer = true;
+        try
+        {
+            Assert.False(api.CloseUSBServer(1));
+            CollectGarbage();
+            Assert.True(logWeak.TryGetTarget(out _));
+            Assert.True(outputWeak.TryGetTarget(out _));
+        }
+        finally
+        {
+            FakeExports.FailCloseServer = false;
+        }
+    }
+
+    [Fact]
     public void CanonicalLoad_RejectsRelativePaths()
     {
         Assert.Throws<ArgumentException>(() => CanonicalViiperNativeApi.Load("libVIIPER.dll"));
@@ -210,7 +252,7 @@ public sealed class CanonicalViiperNativeAbiTests
     private static class FakeExports
     {
         private static readonly CanonicalViiperNativeApi.NewUsbServerDelegate NewServer = NewServerImpl;
-        private static readonly CanonicalViiperNativeApi.CloseUsbServerDelegate CloseServer = HandleOnlyImpl;
+        private static readonly CanonicalViiperNativeApi.CloseUsbServerDelegate CloseServer = CloseServerImpl;
         private static readonly CanonicalViiperNativeApi.CreateUsbBusDelegate CreateBus = CreateBusImpl;
         private static readonly CanonicalViiperNativeApi.RemoveUsbBusDelegate RemoveBus = RemoveBusImpl;
         private static readonly CanonicalViiperNativeApi.GetUsbDeviceIdentityDelegate Identity = IdentityImpl;
@@ -220,6 +262,24 @@ public sealed class CanonicalViiperNativeAbiTests
         private static readonly CanonicalViiperNativeApi.SetSteamControllerDeviceStateDelegate SetState = SetStateImpl;
         private static readonly CanonicalViiperNativeApi.SetSteamControllerOutputCallbackDelegate SetCallback = SetCallbackImpl;
         private static readonly CanonicalViiperNativeApi.RemoveSteamControllerDeviceDelegate RemoveDevice = RemoveDeviceImpl;
+
+        [ThreadStatic]
+        private static bool _failCloseServer;
+
+        [ThreadStatic]
+        private static bool _failRemoveBus;
+
+        internal static bool FailCloseServer
+        {
+            get => _failCloseServer;
+            set => _failCloseServer = value;
+        }
+
+        internal static bool FailRemoveBus
+        {
+            get => _failRemoveBus;
+            set => _failRemoveBus = value;
+        }
 
         private static readonly Dictionary<string, nint> Pointers = new(StringComparer.Ordinal)
         {
@@ -246,6 +306,8 @@ public sealed class CanonicalViiperNativeAbiTests
 
         private static byte HandleOnlyImpl(nuint _) => 1;
 
+        private static byte CloseServerImpl(nuint _) => FailCloseServer ? (byte)0 : (byte)1;
+
         private static byte AttachImpl(nuint _) => 1;
 
         private static byte DetachImpl(nuint _) => 1;
@@ -258,7 +320,7 @@ public sealed class CanonicalViiperNativeAbiTests
             return 1;
         }
 
-        private static byte RemoveBusImpl(nuint _, uint __) => 1;
+        private static byte RemoveBusImpl(nuint _, uint __) => FailRemoveBus ? (byte)0 : (byte)1;
 
         private static byte IdentityImpl(nuint _, out uint busId, out uint deviceId)
         {
