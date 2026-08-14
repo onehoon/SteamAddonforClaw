@@ -73,11 +73,16 @@ internal static class StatusPresentation
 
     /// <summary>
     /// True when the addon's derived operational status is a safety-boundary condition that must
-    /// stay visible as a warning InfoBar, regardless of which page the user is looking at.
+    /// stay visible as a warning InfoBar on supported hardware.
     /// </summary>
-    internal static bool IsWarning(SystemStatusSnapshot snapshot) =>
-        !snapshot.RecoverySafe
+    internal static bool IsWarning(SystemStatusSnapshot snapshot)
+    {
+        if (snapshot.HardwareCompatibility.Status == HardwareCompatibilityStatus.Unsupported)
+            return false;
+
+        return !snapshot.RecoverySafe
         || snapshot.AddonOwnedOutputIdentityUncertain
         || snapshot.RoutingDecision.Reason is RoutingDecisionReason.DeviceCompatibilityIndeterminate or RoutingDecisionReason.ControllerEnvironmentIndeterminate
         || snapshot.Addon.Status is AddonOperationalStatus.SetupRequired or AddonOperationalStatus.RecoveryRequired or AddonOperationalStatus.Unsupported;
+    }
 }
