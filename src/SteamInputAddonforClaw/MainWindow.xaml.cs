@@ -38,15 +38,11 @@ public sealed partial class MainWindow : Window
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
     private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
     private readonly DeveloperTestModeState? _developerTestModeState;
-    private bool _isInitializingTestMode;
-    private bool _isInitializingLogLevel;
     private SystemStatusSnapshot? _latestSystemStatus;
     private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _runtimeCards = [];
     private int _isRefreshingStatus;
-    private int _isGeneratingEnvironmentDiscoveryReport;
-    private string? _environmentDiscoveryDirectory;
     private bool _setupPromptActive;
     private bool _setupPromptDeclinedForCurrentProcess;
     private bool _windowActivatedForUser;
@@ -90,12 +86,9 @@ public sealed partial class MainWindow : Window
         Activated += OnWindowActivated;
         SettingsContent.Initialize(_startupSettings, startupRegistrationMessage);
         SettingsContent.DeveloperMenuRequested += (_, _) => OpenDeveloperMenu();
-        _isInitializingTestMode = true;
-        TestModeToggleSwitch.IsOn = _developerTestModeState?.IsEnabled == true;
-        _isInitializingTestMode = false;
-        _isInitializingLogLevel = true;
-        LogLevelComboBox.SelectedIndex = _startupSettings.Settings.LogLevel == AppLogPreference.Debug ? 1 : 0;
-        _isInitializingLogLevel = false;
+        DeveloperMenuContent.Initialize(_startupSettings, _developerTestModeState, _environmentDiscoveryReportGenerator, () => _prerequisiteSetupInProgress);
+        DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
+        DeveloperMenuContent.ClawSensorProbeRequested += (_, _) => OpenClawSensorProbe();
         ControllerSoftwareRepeater.ItemsSource = _softwareCards;
         RoutingComponentsRepeater.ItemsSource = _componentCards;
         RuntimeStatusList.ItemsSource = _runtimeCards;
@@ -123,20 +116,6 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (!_isInitializingTestMode && !_prerequisiteSetupInProgress)
-            _developerTestModeState?.SetEnabled(TestModeToggleSwitch.IsOn);
-    }
-
-    private void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
-    {
-        if (_isInitializingLogLevel || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
-        var level = AppSettingsPolicy.Normalize(value);
-        _startupSettings.ChangeLogLevel(level);
-    }
-
-
     private void OpenDeveloperMenu()
     {
         var previousPage = _navigationState.CurrentPage;
@@ -146,54 +125,7 @@ public sealed partial class MainWindow : Window
             ("CurrentPage", _navigationState.CurrentPage));
     }
 
-    private async void GenerateEnvironmentDiscoveryReportButton_Click(object sender, RoutedEventArgs args)
-    {
-        if (_prerequisiteSetupInProgress) return;
-        if (Interlocked.Exchange(ref _isGeneratingEnvironmentDiscoveryReport, 1) != 0) return;
-        GenerateEnvironmentDiscoveryReportButton.IsEnabled = false;
-        OpenEnvironmentDiscoveryFolderButton.IsEnabled = false;
-        OpenEnvironmentDiscoveryFolderButton.Visibility = Visibility.Collapsed;
-        EnvironmentDiscoveryReportStatusText.Text = "Generating...";
-        try
-        {
-            var result = await _environmentDiscoveryReportGenerator.GenerateAsync();
-            _environmentDiscoveryDirectory = result.DirectoryPath;
-            EnvironmentDiscoveryReportStatusText.Text = $"Report generated successfully.{Environment.NewLine}{result.ReportFileName}";
-            OpenEnvironmentDiscoveryFolderButton.Visibility = Visibility.Visible;
-            OpenEnvironmentDiscoveryFolderButton.IsEnabled = true;
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("EnvironmentDiscovery", "Environment discovery report generation failed.", exception, ("Reason", exception.GetType().Name));
-            EnvironmentDiscoveryReportStatusText.Text = "Report generation failed.\r\nSee the application log for details.";
-        }
-        finally
-        {
-            GenerateEnvironmentDiscoveryReportButton.IsEnabled = true;
-            Volatile.Write(ref _isGeneratingEnvironmentDiscoveryReport, 0);
-        }
-    }
-
-    private void OpenEnvironmentDiscoveryFolderButton_Click(object sender, RoutedEventArgs args)
-    {
-        if (_prerequisiteSetupInProgress) return;
-        if (string.IsNullOrWhiteSpace(_environmentDiscoveryDirectory)) return;
-        try
-        {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_environmentDiscoveryDirectory}\"") { UseShellExecute = true });
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("EnvironmentDiscovery", "Environment discovery folder could not be opened.", exception);
-        }
-    }
-
-    private void DeveloperMenuBackButton_Click(object sender, RoutedEventArgs args)
-    {
-        ReturnToSettings("BackButton");
-    }
-
-    private async void ClawSensorProbeButton_Click(object sender, RoutedEventArgs args)
+    private async void OpenClawSensorProbe()
     {
         if (_clawSensorProbe.State is ClawSensorProbeState.Completed or ClawSensorProbeState.Failed)
         {

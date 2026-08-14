@@ -62,61 +62,7 @@
 
             <views:SettingsPage x:Name="SettingsContent" Visibility="Collapsed" />
 
-            <ScrollViewer
-                x:Name="DeveloperMenuContent"
-                Padding="32"
-                HorizontalContentAlignment="Stretch"
-                HorizontalScrollBarVisibility="Disabled"
-                Visibility="Collapsed">
-                <StackPanel Spacing="12" HorizontalAlignment="Stretch">
-                <Button
-                    Click="DeveloperMenuBackButton_Click"
-                    Content="Back to Settings"
-                    HorizontalAlignment="Left" />
-                <TextBlock FontSize="24" FontWeight="SemiBold" Text="Developer Menu" />
-                <TextBlock
-                    Opacity="0.7"
-                    Text="These diagnostics are for developers only. General users should not use this menu."
-                    TextWrapping="Wrap" />
-                <Border Padding="18,16" HorizontalAlignment="Stretch" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                    <Grid HorizontalAlignment="Stretch" ColumnSpacing="16">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <SymbolIcon VerticalAlignment="Center" Symbol="Repair" />
-                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Test Mode" />
-                            <TextBlock Opacity="0.7" Text="Treat Steam session as active without launching a game. This setting is not saved and resets when the app restarts." TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ToggleSwitch x:Name="TestModeToggleSwitch" Grid.Column="2" MinWidth="0" HorizontalAlignment="Right" OffContent="" OnContent="" Toggled="TestModeToggleSwitch_Toggled" VerticalAlignment="Center" />
-                    </Grid>
-                </Border>
-                <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                    <Grid ColumnSpacing="16">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                        <SymbolIcon VerticalAlignment="Top" Symbol="Document" />
-                        <StackPanel Grid.Column="1" Spacing="10">
-                            <TextBlock FontSize="20" FontWeight="SemiBold" Text="Environment Discovery" />
-                            <TextBlock Opacity="0.7" Text="Generate a read-only system report for controller software detection development." TextWrapping="Wrap" />
-                            <Button x:Name="GenerateEnvironmentDiscoveryReportButton" Click="GenerateEnvironmentDiscoveryReportButton_Click" Content="Generate Report" HorizontalAlignment="Left" />
-                            <TextBlock x:Name="EnvironmentDiscoveryReportStatusText" Opacity="0.7" TextWrapping="Wrap" />
-                            <Button x:Name="OpenEnvironmentDiscoveryFolderButton" Click="OpenEnvironmentDiscoveryFolderButton_Click" Content="Open Folder" HorizontalAlignment="Left" IsEnabled="False" Visibility="Collapsed" />
-                        </StackPanel>
-                    </Grid>
-                </Border>
-                <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                    <Grid ColumnSpacing="16">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <SymbolIcon VerticalAlignment="Top" Symbol="Document" />
-                        <StackPanel Grid.Column="1" Spacing="2"><TextBlock FontSize="18" FontWeight="SemiBold" Text="Logging" /><TextBlock Opacity="0.7" Text="Control application log verbosity. Info is recommended for normal use. Debug records detailed controller and PnP diagnostics and may significantly increase log size." TextWrapping="Wrap" /></StackPanel>
-                        <ComboBox x:Name="LogLevelComboBox" Grid.Column="2" Width="120" SelectionChanged="LogLevelComboBox_SelectionChanged"><ComboBoxItem Content="Info" /><ComboBoxItem Content="Debug" /></ComboBox>
-                    </Grid>
-                </Border>
-                <Button Click="ClawSensorProbeButton_Click" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="18,16">
-                    <Grid ColumnSpacing="16"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <SymbolIcon VerticalAlignment="Center" Symbol="Document" /><StackPanel Grid.Column="1" Spacing="2"><TextBlock FontSize="18" FontWeight="SemiBold" Text="Claw Sensor Probe" /><TextBlock Opacity="0.7" Text="Read-only gyro and accelerometer diagnostics for MSI Claw hardware research." TextWrapping="Wrap" /></StackPanel><SymbolIcon Grid.Column="2" Opacity="0.7" Symbol="Forward" />
-                    </Grid>
-                </Button>
-                </StackPanel>
-            </ScrollViewer>
+            <views:DeveloperPage x:Name="DeveloperMenuContent" Visibility="Collapsed" />
             <ScrollViewer x:Name="ClawSensorProbeContent" Padding="32" Visibility="Collapsed"><StackPanel Spacing="14">
                 <Button Click="ClawSensorProbeBackButton_Click" Content="Back to Developer Menu" HorizontalAlignment="Left" />
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Claw Sensor Probe" /><TextBlock Opacity="0.7" Text="Read-only motion sensor diagnostic. This probe does not modify controller routing." TextWrapping="Wrap" />
