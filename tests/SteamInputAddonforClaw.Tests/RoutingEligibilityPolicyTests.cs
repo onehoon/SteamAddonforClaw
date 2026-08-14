@@ -51,6 +51,8 @@ public sealed class RoutingEligibilityPolicyTests
     [Theory]
     [InlineData((int)PrerequisiteKind.HidHide, (int)PrerequisiteStatus.Missing)]
     [InlineData((int)PrerequisiteKind.UsbIpWin2, (int)PrerequisiteStatus.Missing)]
+    [InlineData((int)PrerequisiteKind.UsbIpWin2, (int)PrerequisiteStatus.Incompatible)]
+    [InlineData((int)PrerequisiteKind.UsbIpWin2, (int)PrerequisiteStatus.Indeterminate)]
     [InlineData((int)PrerequisiteKind.Viiper, (int)PrerequisiteStatus.Present)]
     public void NonReadyPrerequisite_RequiresSetup(int kindValue, int statusValue)
     {

@@ -223,7 +223,7 @@ public sealed class FirstTimeSetupPolicyTests
         var elapsed = 100000L;
         var polls = 0;
         var result = ElevatedPrerequisiteSetup.WaitForUsbIpPostInstallEvidence(
-            () => polls++ == 0 ? new UsbIpWin2PackageState(false, null, true) : new UsbIpWin2PackageState(true, "0.9.7.7", true),
+            () => polls++ == 0 ? new UsbIpWin2PackageState(false, null, true, false) : new UsbIpWin2PackageState(true, "0.9.7.7", true, true),
             () => new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Unusable, "UsbIpWin2DeviceUnavailable"),
             () => elapsed,
             milliseconds => elapsed += milliseconds,

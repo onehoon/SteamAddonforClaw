@@ -110,10 +110,11 @@ internal static class ElevatedPrerequisiteSetup
                 if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
                 restartRequired |= code == 3010;
             }
-            var usbIp = new WindowsUsbIpWin2PackageProbe().Inspect();
+            var usbPackageProbe = new WindowsUsbIpWin2PackageProbe();
+            var usbIp = usbPackageProbe.Inspect();
             AppLog.Info("PrerequisiteSetup", "usbip-win2 package probe completed.", ("Installed", usbIp.Installed), ("Version", usbIp.Version), ("InspectionSucceeded", usbIp.InspectionSucceeded));
             if (!usbIp.InspectionSucceeded) return 1;
-            var usbPrerequisite = new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())).Inspect();
+            var usbPrerequisite = new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), usbPackageProbe).Inspect();
             AppLog.Info("PrerequisiteSetup", "usbip-win2 prerequisite probe completed.", ("Status", usbPrerequisite.Status), ("Reason", usbPrerequisite.Reason));
             ReconcileUsbIpReceipt(usbStore, usbIp, usbPrerequisite);
             var usbInstallation = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbIp, usbPrerequisite, UsbIpWin2PackageMetadata.BundledVersion.ToString());
@@ -138,7 +139,7 @@ internal static class ElevatedPrerequisiteSetup
                 var code = RunChild("usbip-win2", UsbIpWin2PackageMetadata.InstallerPath, "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /TYPE=compact /NOICONS", UsbIpWin2PackageMetadata.InstallerSha256);
                 var (after, afterPrerequisite) = code is 0 or 3010
                     ? WaitForUsbIpPostInstallEvidence(receipt.InstallerVersion, code)
-                    : (new WindowsUsbIpWin2PackageProbe().Inspect(), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())).Inspect());
+                    : InspectUsbIpRuntime();
                 var outcome = PrerequisiteSetupExecutionPolicy.EvaluatePostInstall(code, after.InspectionSucceeded, after.Installed, after.Version, receipt.InstallerVersion, afterPrerequisite.Status);
                 var state = outcome.IsProvisioned ? UsbIpWin2ProvisioningReceiptState.Provisioned : outcome.RequiresRestart ? UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot : UsbIpWin2ProvisioningReceiptState.AttemptFailed;
                 usbStore.Save(receipt with { State = state, CompletedAtUtc = DateTimeOffset.UtcNow, ObservedInstalledVersion = after.Version, FailureReason = outcome.Reason, InstallerExitCode = code });
@@ -200,11 +201,21 @@ internal static class ElevatedPrerequisiteSetup
     private static (UsbIpWin2PackageState Package, PrerequisiteAssessment Prerequisite) WaitForUsbIpPostInstallEvidence(string expectedVersion, int installerExitCode)
         => WaitForUsbIpPostInstallEvidence(
             () => new WindowsUsbIpWin2PackageProbe().Inspect(),
-            () => new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())).Inspect(),
+            () => new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()).Inspect(),
             () => Environment.TickCount64,
             Thread.Sleep,
             expectedVersion,
             installerExitCode);
+
+    private static (UsbIpWin2PackageState Package, PrerequisiteAssessment Prerequisite) InspectUsbIpRuntime()
+    {
+        var packageProbe = new WindowsUsbIpWin2PackageProbe();
+        var package = packageProbe.Inspect();
+        var prerequisite = new UsbIpWin2PrerequisiteInspector(
+            new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()),
+            packageProbe).Inspect();
+        return (package, prerequisite);
+    }
 
     internal static (UsbIpWin2PackageState Package, PrerequisiteAssessment Prerequisite) WaitForUsbIpPostInstallEvidence(
         Func<UsbIpWin2PackageState> packageProbe,

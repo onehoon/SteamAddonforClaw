@@ -155,7 +155,7 @@ public partial class App : Application
             controllerEnvironmentAssessmentProvider,
             new RuntimePrerequisiteInspector(
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
-                new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator())),
+                new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()),
                 new ViiperRuntimeInspector()),
             () => _effectiveSteamSessionSource?.State ?? SteamSessionState.FromRunningAppId(0),
             () => recoverySafetyState.Current == RecoverySafety.Safe,
