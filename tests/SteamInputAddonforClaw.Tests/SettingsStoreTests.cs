@@ -37,6 +37,39 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveAndLoad_PreservesDeveloperMenuWarningSuppression()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+
+        store.Save(new AppSettings(SuppressDeveloperMenuWarning: true));
+
+        Assert.True(store.Load().SuppressDeveloperMenuWarning);
+    }
+
+    [Fact]
+    public void CancelEquivalent_WhenSuppressionIsNotChanged_DoesNotPersistIt()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        Assert.False(coordinator.SuppressDeveloperMenuWarning);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void SuppressDeveloperMenuWarningPermanently_PersistsPreference()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+
+        coordinator.SuppressDeveloperMenuWarningPermanently();
+
+        Assert.True(coordinator.SuppressDeveloperMenuWarning);
+        Assert.True(store.Load().SuppressDeveloperMenuWarning);
+    }
+
+    [Fact]
     public void ReliableLoad_InvalidBigPictureType_BlocksSafetyMutation()
     {
         var path = Path.Combine(_testDirectory, "settings.json");

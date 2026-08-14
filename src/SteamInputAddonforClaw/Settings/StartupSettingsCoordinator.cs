@@ -16,6 +16,7 @@ public sealed class StartupSettingsCoordinator : ISteamBigPictureRoutingPreferen
 
     public AppSettings Settings { get; private set; }
     public bool RouteInSteamBigPicture => Settings.RouteInSteamBigPicture;
+    public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public event EventHandler? RouteInSteamBigPictureChanged;
 
     public StartupRegistrationResult ChangeLaunchAtWindowsStartup(bool enabled)
@@ -43,6 +44,14 @@ public sealed class StartupSettingsCoordinator : ISteamBigPictureRoutingPreferen
         _settingsStore.Save(next);
         Settings = next;
         RouteInSteamBigPictureChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void SuppressDeveloperMenuWarningPermanently()
+    {
+        if (Settings.SuppressDeveloperMenuWarning) return;
+        var next = Settings with { SuppressDeveloperMenuWarning = true };
+        _settingsStore.Save(next);
+        Settings = next;
     }
 
     public StartupRegistrationResult Repair() => _startupManager.Synchronize(Settings.LaunchAtWindowsStartup);

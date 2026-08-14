@@ -84,7 +84,7 @@ public sealed partial class MainWindow : Window
         Activated += OnWindowActivated;
         SettingsContent.Initialize(_startupSettings, startupRegistrationMessage);
         ControllerContent.Initialize(_startupSettings);
-        SettingsContent.DeveloperMenuRequested += (_, _) => OpenDeveloperMenu();
+        SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_startupSettings, _developerTestModeState, _environmentDiscoveryReportGenerator, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
         DeveloperMenuContent.ClawSensorProbeRequested += (_, _) => OpenClawSensorProbe();
@@ -127,6 +127,56 @@ public sealed partial class MainWindow : Window
         AppLog.Info("Window", "Developer menu opened.",
             ("PreviousPage", previousPage),
             ("CurrentPage", _navigationState.CurrentPage));
+    }
+
+    private async void OnDeveloperMenuRequested(object? sender, EventArgs args)
+    {
+        if (_startupSettings.SuppressDeveloperMenuWarning)
+        {
+            OpenDeveloperMenu();
+            return;
+        }
+
+        if (Content.XamlRoot is null)
+        {
+            AppLog.Warn("DeveloperMenu", "Developer menu warning could not be shown because the window has no XamlRoot.");
+            return;
+        }
+
+        var suppressWarningCheckBox = new CheckBox { Content = "Don't show this warning again" };
+        var dialog = new ContentDialog
+        {
+            Title = "Developer Menu",
+            Content = new StackPanel
+            {
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Developer features are intended for testing and diagnostics. Changing these settings may affect normal application behavior.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    suppressWarningCheckBox
+                }
+            },
+            PrimaryButtonText = "Continue",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Content.XamlRoot
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        if (suppressWarningCheckBox.IsChecked == true)
+        {
+            _startupSettings.SuppressDeveloperMenuWarningPermanently();
+        }
+
+        OpenDeveloperMenu();
     }
 
     private async void OpenClawSensorProbe()
