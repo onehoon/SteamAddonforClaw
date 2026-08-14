@@ -24,7 +24,7 @@ internal sealed class ViiperRuntimeInspector(IRuntimePayloadFileSystem fileSyste
 {
     internal const string PayloadFileName = "libVIIPER.dll";
     internal static string PayloadRelativePath => Path.Combine("Dependencies", "Viiper", PayloadFileName);
-    internal const string ExpectedPayloadSha256 = "04FD174EE7DDAA65D17B9C356668A67DBD5CCA3F08CF6051455A863095DD8474";
+    internal const string ExpectedPayloadSha256 = "2B02EE966F23AAE8D3CDAE0ECB96CBECB54C9EF37C3B7D653AD0B2DC379CDD93";
 
     public ViiperRuntimeInspector()
         : this(new RuntimePayloadFileSystem(), Path.Combine(AppContext.BaseDirectory, PayloadRelativePath), new RuntimePayloadHashProvider())

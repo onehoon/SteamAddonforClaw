@@ -11,7 +11,7 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
 {
     private enum LifecycleState { Inactive, Prepared, IntentRecorded, Creating, Active, RollingBack }
-    private readonly IViiperRuntime _runtime;
+    private readonly Func<ICanonicalSteamControllerSession> _sessionFactory;
     private readonly IControllerDeviceEnumerator _enumerator;
     private readonly ViiperVirtualDeviceIdentityResolver _resolver;
     private readonly AddonOwnedVirtualDeviceTracker _tracker;
@@ -23,17 +23,21 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
     private readonly SemaphoreSlim _serial = new(1, 1);
     private IReadOnlyList<ControllerDeviceInfo>? _before;
     private Guid _mutationId;
-    private uint _deviceId;
     private uint _busId;
+    private uint _deviceId;
     private IReadOnlyList<ControllerDeviceInfo>? _owned;
     private IReadOnlyList<string> _potentialGordonInstanceIdsAtIdentityFailure = [];
     private LifecycleState _state;
     private CancellationTokenSource? _creationCancellation;
-    private ClassicSteamControllerInputPublisher? _publisher;
+    private CanonicalSteamControllerInputPublisher? _publisher;
     private readonly IControllerStateSnapshotSource _snapshot;
     private readonly IInputReportTickSource? _reportTicks;
     private Func<ValueTask>? _outputFaultHandler;
     private int _outputFaultReported;
+    private ICanonicalSteamControllerSession? _canonicalSession;
+    private bool _pnpAbsenceVerified;
+    private bool _ownershipUncertaintyCleared;
+    private bool _recoveryMutationCompleted;
     private CreationTiming? _creationTiming;
 
     private sealed class CreationTiming
@@ -48,15 +52,23 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
         internal long PublisherStartMs { get; set; }
     }
 
-    internal ClassicSteamControllerOutputStage(IViiperRuntime runtime, IControllerDeviceEnumerator enumerator,
+    internal ClassicSteamControllerOutputStage(Func<ICanonicalSteamControllerSession> sessionFactory, IControllerDeviceEnumerator enumerator,
         ViiperVirtualDeviceIdentityResolver resolver, AddonOwnedVirtualDeviceTracker tracker, RecoveryManager recovery,
         Func<Guid?> sessionId, IHidHideClient hidHide, IControllerStateSnapshotSource snapshot,
         TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null, IInputReportTickSource? reportTicks = null)
     {
-        _runtime = runtime; _enumerator = enumerator; _resolver = resolver; _tracker = tracker; _recovery = recovery; _sessionId = sessionId; _hidHide = hidHide;
+        _sessionFactory = sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory)); _enumerator = enumerator; _resolver = resolver; _tracker = tracker; _recovery = recovery; _sessionId = sessionId; _hidHide = hidHide;
         _pnPTimeout = pnPTimeout ?? TimeSpan.FromSeconds(5); _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(50);
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot)); _reportTicks = reportTicks;
     }
+
+    // Compatibility seam for the pre-M4B test fixtures only. Production composition uses the
+    // canonical session factory overload above and never constructs this adapter.
+    internal ClassicSteamControllerOutputStage(IViiperRuntime runtime, IControllerDeviceEnumerator enumerator,
+        ViiperVirtualDeviceIdentityResolver resolver, AddonOwnedVirtualDeviceTracker tracker, RecoveryManager recovery,
+        Func<Guid?> sessionId, IHidHideClient hidHide, IControllerStateSnapshotSource snapshot,
+        TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null, IInputReportTickSource? reportTicks = null)
+        : this(() => new LegacyRuntimeSessionAdapter(runtime), enumerator, resolver, tracker, recovery, sessionId, hidHide, snapshot, pnPTimeout, pollInterval, reportTicks) { }
 
     public RoutingStageKind Kind => RoutingStageKind.SteamOutput;
     public string Name => "SteamOutput";
@@ -99,9 +111,9 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
             if (_before is null || _sessionId() is not { } session) return RoutingStageOperationResult.Failure("SteamOutputNotPrepared");
             if (_state != LifecycleState.Prepared) return RoutingStageOperationResult.Failure("SteamOutputAlreadyActive");
             cancellationToken.ThrowIfCancellationRequested();
-            var intent = _recovery.RecordAddonOwnedVirtualDeviceIntent(session, _mutationId, ViiperRuntimeManager.DeviceType,
-                ViiperRuntimeManager.VendorId, ViiperRuntimeManager.ProductId,
-                _before.Where(device => device.VendorId == ViiperRuntimeManager.VendorId && device.ProductId == ViiperRuntimeManager.ProductId).Select(device => device.InstanceId));
+            var intent = _recovery.RecordAddonOwnedVirtualDeviceIntent(session, _mutationId, "steamcontroller",
+                ViiperVirtualDeviceIdentityPolicy.VendorId, ViiperVirtualDeviceIdentityPolicy.ProductId,
+                _before.Where(device => device.VendorId == ViiperVirtualDeviceIdentityPolicy.VendorId && device.ProductId == ViiperVirtualDeviceIdentityPolicy.ProductId).Select(device => device.InstanceId));
             if (!intent.IsSafeToContinue) return RoutingStageOperationResult.Failure("VirtualDeviceRecoveryIntentFailed");
 
             _state = LifecycleState.IntentRecorded;
@@ -112,14 +124,16 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
 
             operationToken.ThrowIfCancellationRequested();
             _state = LifecycleState.Creating;
+            _canonicalSession ??= _sessionFactory();
             var started = Stopwatch.GetTimestamp();
-            try { _runtime.Start(); }
+            try
+            {
+                if (!_canonicalSession.Start()) return await FailAndRollbackCoreAsync("CanonicalSessionStartFailed").ConfigureAwait(false);
+            }
             finally { timing.RuntimeStartMs = Elapsed(started); }
             operationToken.ThrowIfCancellationRequested();
-            started = Stopwatch.GetTimestamp();
-            try { _deviceId = _runtime.CreateDevice(); }
-            finally { timing.CreateDeviceMs = Elapsed(started); }
-            _busId = _runtime.BusId;
+            _busId = _canonicalSession.BusId ?? 0;
+            _deviceId = _canonicalSession.LogicalDeviceId ?? 0;
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             ViiperVirtualDeviceResolution resolved;
@@ -152,17 +166,17 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             bool neutralAccepted;
-            try { neutralAccepted = _runtime.SetNeutral(_deviceId); }
+            try { neutralAccepted = _canonicalSession.SetNeutral(); }
             finally { timing.NeutralReportMs = Elapsed(started); }
             if (!neutralAccepted) return await FailAndRollbackCoreAsync("NeutralReportRejected").ConfigureAwait(false);
             Interlocked.Exchange(ref _outputFaultReported, 0);
-            _publisher = new ClassicSteamControllerInputPublisher(_snapshot, _runtime, _deviceId, _reportTicks,
+            _publisher = new CanonicalSteamControllerInputPublisher(_snapshot, _canonicalSession, _reportTicks,
                 fault: ReportOutputFault);
             started = Stopwatch.GetTimestamp();
             try { _publisher.Start(); }
             finally { timing.PublisherStartMs = Elapsed(started); }
             _state = LifecycleState.Active;
-            AppLog.Debug("SteamOutput", "SteamOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{ViiperRuntimeManager.VendorId:X4}"), ("PID", $"{ViiperRuntimeManager.ProductId:X4}"), ("NeutralAccepted", true));
+            AppLog.Debug("SteamOutput", "SteamOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{ViiperVirtualDeviceIdentityPolicy.VendorId:X4}"), ("PID", $"{ViiperVirtualDeviceIdentityPolicy.ProductId:X4}"), ("NeutralAccepted", true));
             AppLog.Debug("RoutingTrace", "Steam output creation completed.", ("Event", "SteamOutputCreated"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(timing.Started)), ("RuntimeStartMs", timing.RuntimeStartMs), ("CreateDeviceMs", timing.CreateDeviceMs), ("PnPResolveMs", timing.PnpResolveMs), ("RecoveryCheckpointMs", timing.RecoveryCheckpointMs), ("HidHideInspectionMs", timing.HidHideInspectionMs), ("NeutralReportMs", timing.NeutralReportMs), ("PublisherStartMs", timing.PublisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
             return RoutingStageOperationResult.Success("ClassicSteamControllerCreated");
         }
@@ -216,39 +230,64 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
         }
         if (_sessionId() is not { } session) return RollbackFailure("RecoverySessionUnavailable");
         var hadResolvedIdentity = _owned is { Count: > 0 };
-        var removal = ViiperDeviceRemovalResult.Failed;
-        var absent = false;
-        if (_deviceId != 0)
+        var absent = _pnpAbsenceVerified;
+        if (_canonicalSession is null) return RollbackFailure("CanonicalSessionUnavailable");
+        if (_canonicalSession.State is CanonicalSteamControllerSessionState.Unsafe)
+            return RollbackFailure("CanonicalSessionUnsafe");
+        if (_canonicalSession.State is CanonicalSteamControllerSessionState.Active or CanonicalSteamControllerSessionState.CleanupPending)
         {
             var removeStarted = Stopwatch.GetTimestamp();
-            try { removal = _runtime.RemoveDevice(_busId, _deviceId); }
+            try
+            {
+                var removed = _canonicalSession.State == CanonicalSteamControllerSessionState.CleanupPending &&
+                    _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval
+                    ? _canonicalSession.RetryPendingCleanup()
+                    : _canonicalSession.RemoveDevice();
+                if (!removed) return RollbackFailure(_canonicalSession.State == CanonicalSteamControllerSessionState.Unsafe ? "CanonicalSessionUnsafe" : "VirtualDeviceRemoveFailed");
+            }
             finally { removeMs = Elapsed(removeStarted); }
-            if (!removal.DeviceRemoved) return RollbackFailure("VirtualDeviceRemoveFailed");
+        }
+        if (!_pnpAbsenceVerified)
+        {
             var absenceStarted = Stopwatch.GetTimestamp();
             try
             {
                 absent = hadResolvedIdentity
                     ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
                     : _potentialGordonInstanceIdsAtIdentityFailure.Count > 0
-                        // Identity resolution failed (e.g. the usbip-win2 ancestor record was
-                        // missing/incomplete in that snapshot), so ownership was never proven.
-                        // Still, any 28DE:1102 node that newly appeared while we were attempting
-                        // creation must be verified absent by its exact InstanceId -- re-running
-                        // the strict ownership predicate here could false-positive "absent" for
-                        // exactly the same reason it rejected the candidate in the first place.
                         ? await WaitForAbsenceAsync(_potentialGordonInstanceIdsAtIdentityFailure, cancellationToken).ConfigureAwait(false)
                         : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
             }
             finally { pnpAbsenceMs = Elapsed(absenceStarted); }
             if (!absent) return RollbackFailure("VirtualDevicePnPStillPresent");
+            _pnpAbsenceVerified = true;
         }
-        if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new ViiperVirtualDeviceIdentityPolicy(), _before, _owned))
-            return RollbackFailure("UnrelatedMatchingVirtualDeviceStillPresent");
-        var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
-        if (!complete.IsSafeToContinue) return RollbackFailure("VirtualDeviceRecoveryCompletionFailed");
-        AppLog.Debug("SteamOutput", "SteamOutput inactive", ("BusId", _busId), ("DeviceId", _deviceId), ("DeviceRemoved", removal.DeviceRemoved), ("BusRemoved", removal.BusRemoved), ("PnPAbsent", absent), ("RecoveryMutationCompleted", complete.IsSafeToContinue));
+        if (!_ownershipUncertaintyCleared)
+        {
+            if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new ViiperVirtualDeviceIdentityPolicy(), _before, _owned))
+                return RollbackFailure("UnrelatedMatchingVirtualDeviceStillPresent");
+            _ownershipUncertaintyCleared = true;
+        }
+        if (!_recoveryMutationCompleted)
+        {
+            var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
+            if (!complete.IsSafeToContinue) return RollbackFailure("VirtualDeviceRecoveryCompletionFailed");
+            _recoveryMutationCompleted = true;
+        }
+        if (_canonicalSession.State is CanonicalSteamControllerSessionState.DeviceRemoved or CanonicalSteamControllerSessionState.CleanupPending)
+        {
+            var cleaned = _canonicalSession.State == CanonicalSteamControllerSessionState.CleanupPending
+                ? _canonicalSession.RetryPendingCleanup()
+                : _canonicalSession.CompleteRuntimeCleanup();
+            if (!cleaned) return RollbackFailure("CanonicalSessionCleanupPending");
+        }
+        AppLog.Debug("SteamOutput", "SteamOutput inactive", ("BusId", _busId), ("DeviceId", _deviceId), ("PnPAbsent", absent), ("RecoveryMutationCompleted", _recoveryMutationCompleted));
         AppLog.Debug("RoutingTrace", "Steam output rollback completed.", ("Event", "SteamOutputRollbackCompleted"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Success"), ("Reason", "ClassicSteamControllerRemoved"));
-        _deviceId = 0; _busId = 0; _owned = null; _before = null; _potentialGordonInstanceIdsAtIdentityFailure = []; _state = LifecycleState.Inactive; _runtime.StopIfUnused();
+        _canonicalSession.Dispose();
+        _canonicalSession = null;
+        _deviceId = 0; _busId = 0; _owned = null; _before = null; _potentialGordonInstanceIdsAtIdentityFailure = [];
+        _pnpAbsenceVerified = false; _ownershipUncertaintyCleared = false; _recoveryMutationCompleted = false;
+        _state = LifecycleState.Inactive;
         return RoutingStageOperationResult.Success("ClassicSteamControllerRemoved");
     }
 
@@ -322,4 +361,41 @@ internal sealed class ClassicSteamControllerOutputStage : IRoutingPipelineStage
     };
 
     private static long Elapsed(long started) => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+
+    private sealed class LegacyRuntimeSessionAdapter(IViiperRuntime runtime) : ICanonicalSteamControllerSession
+    {
+        private uint _deviceId;
+        private bool _started;
+        public CanonicalSteamControllerSessionState State { get; private set; } = CanonicalSteamControllerSessionState.Clean;
+        public CanonicalPendingCleanupPhase PendingCleanupPhase => CanonicalPendingCleanupPhase.None;
+        public uint? BusId => _started ? runtime.BusId : null;
+        public uint? LogicalDeviceId => _deviceId == 0 ? null : _deviceId;
+        public bool Start()
+        {
+            runtime.Start();
+            _deviceId = runtime.CreateDevice();
+            _started = true;
+            State = CanonicalSteamControllerSessionState.Active;
+            return true;
+        }
+        public bool SetState(SteamControllerDeviceState state) => runtime.SetInput(_deviceId, new byte[64]);
+        public bool SetNeutral() => runtime.SetNeutral(_deviceId);
+        public bool RemoveDevice()
+        {
+            var result = runtime.RemoveDevice(runtime.BusId, _deviceId);
+            if (!result.DeviceRemoved) return false;
+            State = CanonicalSteamControllerSessionState.DeviceRemoved;
+            return true;
+        }
+        public bool RetryPendingCleanup() => false;
+        public bool CompleteRuntimeCleanup()
+        {
+            if (State != CanonicalSteamControllerSessionState.DeviceRemoved) return false;
+            runtime.StopIfUnused();
+            _started = false;
+            State = CanonicalSteamControllerSessionState.Clean;
+            return true;
+        }
+        public void Dispose() => runtime.Dispose();
+    }
 }

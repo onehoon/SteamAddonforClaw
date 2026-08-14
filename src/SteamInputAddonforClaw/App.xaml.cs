@@ -43,7 +43,6 @@ public partial class App : Application
     private PowerTransitionCoordinator? _powerCoordinator;
     private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
     private MsiClawInputSource? _physicalInputSource;
-    private ViiperRuntimeManager? _viiperRuntime;
     private RoutingPipelineRuntimeCoordinator? _routingRuntimeCoordinator;
     private UserTerminationGuard? _userTerminationGuard;
 
@@ -176,9 +175,9 @@ public partial class App : Application
                 _recoveryManager!,
                 new HidHideDriverClient(),
                 () => Environment.ProcessPath);
-            _viiperRuntime = new ViiperRuntimeManager(Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll"));
+            var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
             var steamOutputStage = new ClassicSteamControllerOutputStage(
-                _viiperRuntime,
+                () => new CanonicalSteamControllerSession(CanonicalViiperNativeApi.Load(canonicalViiperPath)),
                 new WindowsControllerDeviceEnumerator(),
                 new ViiperVirtualDeviceIdentityResolver(new ViiperVirtualDeviceIdentityPolicy()),
                 addonOwnedVirtualDeviceTracker,
@@ -357,8 +356,6 @@ public partial class App : Application
         _msiClawNativeModeSession = null;
         if (_physicalInputSource is not null) _physicalInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _physicalInputSource = null;
-        _viiperRuntime?.Dispose();
-        _viiperRuntime = null;
         AppLog.Info("Runtime cleanup completed.");
     }
 

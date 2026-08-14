@@ -17,6 +17,21 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     private readonly Guid _session = Guid.NewGuid();
 
     [Fact]
+    public async Task CanonicalSessionPathUsesTypedPublisherAndCleanupOrder()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = CreateCanonical(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var created = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.True(created.Succeeded, created.Reason);
+
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+        Assert.True(rollback.Succeeded, rollback.Reason);
+        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Dispose"], session.Trace);
+    }
+
+    [Fact]
     public async Task SuccessfulCreationResolvesPnPAndSendsOneNeutralReport()
     {
         var runtime = new FakeRuntime();
@@ -329,6 +344,15 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         return new(runtime, enumerator, new(new ViiperVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks);
     }
 
+    private ClassicSteamControllerOutputStage CreateCanonical(FakeCanonicalSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid)
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new RecoveryJournalStore(Path.Combine(_directory, "canonical-recovery.json"));
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, _session, DateTimeOffset.UtcNow, null, new());
+        File.WriteAllText(store.JournalPath, System.Text.Json.JsonSerializer.Serialize(journal));
+        return new(() => session, enumerator, new(new ViiperVirtualDeviceIdentityPolicy()), new(), new RecoveryManager(store), () => _session, hid, new FakeSnapshot(), TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(1));
+    }
+
     private const string UsbIpHostInstanceId = "ROOT\\USB\\0000";
     private static ControllerDeviceInfo UsbIpHost() => new(UsbIpHostInstanceId, null, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "System", null, "usbip2_ude", null, null, true);
     private static ControllerDeviceInfo Device(string id) => new(id, Guid.Empty, null, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1102"], [], "HIDClass", null, null, 0x28DE, 0x1102, true);
@@ -376,6 +400,21 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
         public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) { Trace.Add("Remove"); RemovedDevices++; OnRemoveDeviceCalled?.Invoke(); return Removal with { BusRemoved = BusRemoved }; }
         public void StopIfUnused() { }
         public void Dispose() { }
+    }
+    private sealed class FakeCanonicalSession : ICanonicalSteamControllerSession
+    {
+        public List<string> Trace { get; } = [];
+        public CanonicalSteamControllerSessionState State { get; private set; } = CanonicalSteamControllerSessionState.Clean;
+        public CanonicalPendingCleanupPhase PendingCleanupPhase { get; private set; }
+        public uint? BusId => State == CanonicalSteamControllerSessionState.Clean ? null : 1;
+        public uint? LogicalDeviceId => State == CanonicalSteamControllerSessionState.Clean ? null : 7;
+        public bool Start() { Trace.Add("Start"); State = CanonicalSteamControllerSessionState.Active; return true; }
+        public bool SetState(SteamControllerDeviceState state) => true;
+        public bool SetNeutral() { Trace.Add("Neutral"); return true; }
+        public bool RemoveDevice() { Trace.Add("Remove"); State = CanonicalSteamControllerSessionState.DeviceRemoved; return true; }
+        public bool RetryPendingCleanup() => false;
+        public bool CompleteRuntimeCleanup() { Trace.Add("CompleteCleanup"); State = CanonicalSteamControllerSessionState.Clean; return true; }
+        public void Dispose() => Trace.Add("Dispose");
     }
     private sealed class FakeSnapshot : IControllerStateSnapshotSource
     { public ControllerState LatestState => new(new AuxiliaryButtonState([false, false])); }

@@ -16,8 +16,8 @@ It records the pinned VIIPER baseline, fork-added canonical API surface, ownersh
 | Pinned VIIPER repository | `onehoon/VIIPER` |
 | Pinned VIIPER merge baseline | `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` |
 | VIIPER canonical embedded ABI | **VALIDATED** |
-| Current Addon VIIPER binding | **LEGACY / TO BE MIGRATED** |
-| Canonical Addon migration | **M0-M3 VALIDATED / M4A IN PROGRESS / M4B BLOCKED** |
+| Current Addon VIIPER binding | **CANONICAL M4B PAYLOAD / PRODUCTION STEAMOUTPUT** |
+| Canonical Addon migration | **M0-M3 VALIDATED / M4A VALIDATED / M4B IN PROGRESS** |
 | Game Bar Xbox360 route | **PLANNED** |
 | Gyro/IMU routing | **PLANNED / HARDWARE VALIDATION REQUIRED** |
 | MSI Claw hardware validation of the canonical DLL path | **REQUIRES ADDON INTEGRATION TESTING** |
@@ -93,7 +93,7 @@ digital full-pull = explicit L2/R2 OR analog saturation
 
 Explicit `L2`/`R2` changes only the digital full-pull bit; it must not change the analog trigger magnitude. The canonical `SteamControllerDeviceState` ABI size is **62 bytes**.
 
-The Addon must use a matching DLL, generated header, and C# P/Invoke definition from the same pinned VIIPER commit/build: `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` and its matching canonical build. Do not begin Addon ABI work from a mismatched artifact or header. The current embedded production payload is intentionally not replaced by M4A.
+The Addon must use a matching DLL, generated header, and C# P/Invoke definition from the same pinned VIIPER commit/build: `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` and its matching canonical build. The M4B embedded payload is the verified pair recorded in Section 4.1.
 
 Do not silently update the embedded DLL/source baseline beyond this commit. A baseline update requires the process in [Section 22](#22-updating-the-pinned-viiper-baseline).
 
@@ -194,7 +194,7 @@ src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md
 src/SteamInputAddonforClaw/Dependencies/Viiper/LICENSE.txt
 ```
 
-The current `PROVENANCE.md` still identifies the old baseline:
+The historical pre-M4B payload was identified by the old baseline:
 
 ```text
 tag:    steam-input-addon-baseline-1
@@ -202,13 +202,23 @@ commit: 209c882009caea4f3baf322b9b6020c1a921feed
 build:  ./clib/
 ```
 
-The current committed DLL SHA-256 is:
+The historical pre-M4B DLL SHA-256 was:
 
 ```text
 04FD174EE7DDAA65D17B9C356668A67DBD5CCA3F08CF6051455A863095DD8474
 ```
 
-That provenance/hash belongs to the old DLL and **must not be carried forward** when the canonical DLL is adopted.
+That provenance/hash belongs to the old DLL and **must not be used as the active M4B payload identity**.
+
+The active M4B payload is built from pinned commit `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` and has:
+
+```text
+generated header SHA-256: 7F7965DA90EBE69AB57BBC23389BBFEAF8036224BEE3D4D05E0036B60C557E57
+DLL SHA-256:              2B02EE966F23AAE8D3CDAE0ECB96CBECB54C9EF37C3B7D653AD0B2DC379CDD93
+sizeof(remove result):    4
+sizeof(Gordon state):     62
+L1 offset / LPadX offset: 4 / 24
+```
 
 ## 4.2 Existing native binding
 
