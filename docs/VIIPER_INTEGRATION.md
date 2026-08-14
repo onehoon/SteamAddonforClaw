@@ -93,7 +93,7 @@ digital full-pull = explicit L2/R2 OR analog saturation
 
 Explicit `L2`/`R2` changes only the digital full-pull bit; it must not change the analog trigger magnitude. The canonical `SteamControllerDeviceState` ABI size is **62 bytes**.
 
-The Addon must use a matching DLL, generated header, and C# P/Invoke definition from the same `3bd042dbbec9120035f7e86c9f3cac1418202be6` VIIPER revision family. Do not begin Addon ABI work from a mismatched artifact or header.
+The Addon must use a matching DLL, generated header, and C# P/Invoke definition from the same pinned VIIPER commit/build: `3bd042dbbec9120035f7e86c9f3cac1418202be6` and its matching canonical build. Do not begin Addon ABI work from a mismatched artifact or header.
 
 Do not silently update the embedded DLL/source baseline beyond this commit. A baseline update requires the process in [Section 22](#22-updating-the-pinned-viiper-baseline).
 
@@ -372,12 +372,12 @@ Canonical state fields:
 typedef struct {
     uint8_t A, X, B, Y;
     uint8_t L1, R1;
+    uint8_t L2, R2;
     uint8_t Menu, Steam, Options;
     uint8_t DPadDown, DPadLeft, DPadRight, DPadUp;
     uint8_t L3;
     uint8_t LGrip, RGrip;
     uint8_t LPadTouch, RPadTouch, LPadPress, RPadPress, LPadAndStick;
-    uint8_t L2, R2;
     int16_t LPadX, LPadY;
     int16_t RPadX, RPadY;
     uint16_t LTrigger, RTrigger;

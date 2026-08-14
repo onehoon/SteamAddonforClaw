@@ -78,7 +78,7 @@ This baseline contains the PR8-PR11 lifecycle/ownership/callback/transport harde
 
 The canonical Gordon state now records independent `L2`/`R2` digital full-pull inputs. The final semantics are `digital full-pull = explicit L2/R2 OR analog saturation`; explicit L2/R2 does not change analog trigger magnitude. The canonical `SteamControllerDeviceState` ABI size is **62 bytes**.
 
-Any future Addon DLL, generated header, or P/Invoke definition must come from the same `3bd042dbbec9120035f7e86c9f3cac1418202be6` VIIPER revision family.
+Any future Addon DLL, generated header, or P/Invoke definition must come from the same pinned VIIPER commit/build: `3bd042dbbec9120035f7e86c9f3cac1418202be6` and its matching canonical build.
 
 ---
 
