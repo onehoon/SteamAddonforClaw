@@ -25,7 +25,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         ControllerStateDiagnostics.LogChanges(oldState, newState, 7);
 
         AppLog.DrainForTests();
-        var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
+        var log = LogFileTestHelper.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Contains("A=", log);
         Assert.Contains("LTFull=", log);
         Assert.Contains("M1=", log);
@@ -40,7 +40,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         DiagnosticSession.Complete(session, ("RecoveryClean", true));
 
         AppLog.DrainForTests();
-        var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
+        var log = LogFileTestHelper.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Contains("Session started", log);
         Assert.Contains("Session completed", log);
         Assert.Contains("RawRunningAppID=123", log);
@@ -58,7 +58,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         tracker.Complete();
 
         AppLog.DrainForTests();
-        var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
+        var log = LogFileTestHelper.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Equal(3, log.Split("Session started", StringSplitOptions.None).Length - 1);
         Assert.Equal(3, log.Split("Session completed", StringSplitOptions.None).Length - 1);
         Assert.Contains("EffectiveSource=DeveloperTest", log);
@@ -73,7 +73,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         tracker.Complete();
 
         AppLog.DrainForTests();
-        var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
+        var log = LogFileTestHelper.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Contains("EffectiveSource=BigPicture", log);
     }
 
@@ -85,7 +85,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
 
         AppLog.DrainForTests();
-        var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
+        var log = LogFileTestHelper.ReadAllText(Directory.GetFiles(_directory)[0]);
         var executions = System.Text.RegularExpressions.Regex.Matches(log, @"RoutingExecution=(\d+)")
             .Select(match => match.Groups[1].Value).Distinct().ToArray();
         Assert.True(executions.Length >= 2);
@@ -102,7 +102,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         await new RoutingPipelineExecutor([stage]).ExecuteAsync(RoutingPipelinePlan.AllDisabled with { PhysicalInput = RoutingStageMode.ObserveOnly }, CancellationToken.None);
 
         AppLog.DrainForTests();
-        var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
+        var log = LogFileTestHelper.ReadAllText(Directory.GetFiles(_directory)[0]);
         Assert.Contains("StageDetail", log);
         Assert.Contains("RoutingExecution=", log);
         Assert.DoesNotContain("Stage operation", log);
@@ -128,7 +128,7 @@ public sealed class DiagnosticLoggingTests : IDisposable
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
         await new RoutingPipelineExecutor([]).ExecuteAsync(RoutingPipelinePlan.AllDisabled, CancellationToken.None);
 
-        Assert.False(Directory.Exists(_directory) && Directory.GetFiles(_directory).Any(file => File.ReadAllText(file).Contains("[RoutingTrace]", StringComparison.Ordinal)));
+        Assert.False(Directory.Exists(_directory) && Directory.GetFiles(_directory).Any(file => LogFileTestHelper.ReadAllText(file).Contains("[RoutingTrace]", StringComparison.Ordinal)));
     }
 
     public void Dispose()

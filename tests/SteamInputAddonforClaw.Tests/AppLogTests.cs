@@ -57,7 +57,7 @@ public sealed class AppLogTests : IDisposable
         AppLog.Info("first"); AppLog.Info("second"); AppLog.Info("third");
         AppLog.DrainForTests();
         Assert.Single(Directory.EnumerateFiles(_directory));
-        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("first", log); Assert.Contains("second", log); Assert.Contains("third", log);
     }
 
@@ -74,7 +74,7 @@ public sealed class AppLogTests : IDisposable
         AppLog.Fatal("Test", "fatal", new InvalidOperationException("fatal failure"));
         AppLog.DrainForTests();
 
-        var log = File.ReadAllText(Directory.EnumerateFiles(_directory).Single());
+        var log = LogFileTestHelper.ReadAllText(Directory.EnumerateFiles(_directory).Single());
         Assert.Contains("[DEBUG]", log);
         Assert.Contains("[INFO]", log);
         Assert.Contains("[WARN]", log);
@@ -97,7 +97,7 @@ public sealed class AppLogTests : IDisposable
         AppLog.Info("Test", "visible");
         AppLog.DrainForTests();
 
-        var log = File.ReadAllText(Directory.EnumerateFiles(_directory).Single());
+        var log = LogFileTestHelper.ReadAllText(Directory.EnumerateFiles(_directory).Single());
         Assert.DoesNotContain("hidden", log);
         Assert.Contains("visible", log);
     }
@@ -113,7 +113,7 @@ public sealed class AppLogTests : IDisposable
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
         AppLog.Debug("Test", "Debug C");
         AppLog.DrainForTests();
-        var log = File.ReadAllText(Directory.EnumerateFiles(_directory).Single());
+        var log = LogFileTestHelper.ReadAllText(Directory.EnumerateFiles(_directory).Single());
         Assert.DoesNotContain("Debug A", log); Assert.Contains("Debug B", log); Assert.DoesNotContain("Debug C", log);
     }
 
@@ -269,7 +269,7 @@ public sealed class AppLogTests : IDisposable
         await Task.WhenAll(entries.Select(index => Task.Run(() => AppLog.Info("Concurrent", "entry", ("Index", index)))));
         AppLog.DrainForTests();
 
-        var lines = File.ReadAllLines(Directory.EnumerateFiles(_directory).Single());
+        var lines = LogFileTestHelper.ReadAllLines(Directory.EnumerateFiles(_directory).Single());
         Assert.Equal(entries.Length, lines.Length);
         Assert.All(lines, line => Assert.Contains("[Concurrent] entry Index=", line));
     }
@@ -283,7 +283,7 @@ public sealed class AppLogTests : IDisposable
             AppLog.Info("Order", "entry", ("Index", index));
         AppLog.DrainForTests();
 
-        var lines = File.ReadAllLines(Directory.EnumerateFiles(_directory).Single());
+        var lines = LogFileTestHelper.ReadAllLines(Directory.EnumerateFiles(_directory).Single());
         Assert.Equal(200, lines.Length);
         for (var index = 0; index < 200; index++)
             Assert.Contains($"Index={index}", lines[index]);
@@ -311,7 +311,7 @@ public sealed class AppLogTests : IDisposable
         AppLog.Info("Test", "first");
         AppLog.Info("Test", "second");
         AppLog.DrainForTests();
-        var launchIds = File.ReadAllLines(Directory.EnumerateFiles(_directory).Single()).Select(line => line.Split(' ').Single(part => part.StartsWith("[L="))).Distinct();
+        var launchIds = LogFileTestHelper.ReadAllLines(Directory.EnumerateFiles(_directory).Single()).Select(line => line.Split(' ').Single(part => part.StartsWith("[L="))).Distinct();
         Assert.Single(launchIds);
     }
 

@@ -107,7 +107,7 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         await publisher.StopAsync();
 
         AppLog.DrainForTests();
-        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("[INFO]", log);
         Assert.Equal(1, log.Split("Canonical mapped D-pad state changed", StringSplitOptions.None).Length - 1);
         Assert.Contains("Up=1", log);
@@ -134,7 +134,7 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         await publisher.StopAsync();
 
         AppLog.DrainForTests();
-        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         // Neutral (initial) -> Down -> Neutral is three distinct observed mapped D-pad states.
         Assert.Equal(3, log.Split("Canonical mapped D-pad state changed", StringSplitOptions.None).Length - 1);
     }
@@ -152,7 +152,7 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         await ticks.TickAsync(); await sink.WaitForCountAsync(1);
         await ticks.TickAsync(); await sink.WaitForCountAsync(2);
         AppLog.DrainForTests();
-        Assert.DoesNotContain("publisher heartbeat", File.Exists(AppLog.CurrentLogFilePath) ? File.ReadAllText(AppLog.CurrentLogFilePath) : string.Empty);
+        Assert.DoesNotContain("publisher heartbeat", File.Exists(AppLog.CurrentLogFilePath) ? LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath) : string.Empty);
 
         // Simulate one second elapsing since Start(); the third tick's post-call heartbeat check
         // must now fire, reporting all three calls made since the last (never-fired) heartbeat.
@@ -161,7 +161,7 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         await publisher.StopAsync();
 
         AppLog.DrainForTests();
-        var log = File.ReadAllText(AppLog.CurrentLogFilePath);
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         var heartbeat = Assert.Single(log.Split('\n'), line => line.Contains("Canonical Steam Controller publisher heartbeat"));
         Assert.Contains("SetStateCallsLastSecond=3", heartbeat);
         Assert.Contains("TotalPublishedStateCount=3", heartbeat);
