@@ -32,7 +32,6 @@ namespace SteamInputAddonforClaw;
 public sealed partial class MainWindow : Window
 {
     private readonly StartupSettingsCoordinator _startupSettings;
-    private bool _isLoadingStartupSettings;
     private readonly MainNavigationState _navigationState = new();
     private readonly ISystemStatusProvider _systemStatusProvider;
     private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
@@ -89,16 +88,14 @@ public sealed partial class MainWindow : Window
         ApplyDefaultWindowSize();
         Closed += OnWindowClosed;
         Activated += OnWindowActivated;
-        _isLoadingStartupSettings = true;
-        LaunchAtWindowsStartupToggleSwitch.IsOn = _startupSettings.Settings.LaunchAtWindowsStartup;
-        _isLoadingStartupSettings = false;
+        SettingsContent.Initialize(_startupSettings, startupRegistrationMessage);
+        SettingsContent.DeveloperMenuRequested += (_, _) => OpenDeveloperMenu();
         _isInitializingTestMode = true;
         TestModeToggleSwitch.IsOn = _developerTestModeState?.IsEnabled == true;
         _isInitializingTestMode = false;
         _isInitializingLogLevel = true;
         LogLevelComboBox.SelectedIndex = _startupSettings.Settings.LogLevel == AppLogPreference.Debug ? 1 : 0;
         _isInitializingLogLevel = false;
-        StartupSettingsStatusText.Text = startupRegistrationMessage;
         ControllerSoftwareRepeater.ItemsSource = _softwareCards;
         RoutingComponentsRepeater.ItemsSource = _componentCards;
         RuntimeStatusList.ItemsSource = _runtimeCards;
@@ -126,18 +123,6 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (_isLoadingStartupSettings)
-        {
-            return;
-        }
-
-        var launchAtWindowsStartup = LaunchAtWindowsStartupToggleSwitch.IsOn;
-        var result = _startupSettings.ChangeLaunchAtWindowsStartup(launchAtWindowsStartup);
-        StartupSettingsStatusText.Text = result.Message;
-    }
-
     private void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
         if (!_isInitializingTestMode && !_prerequisiteSetupInProgress)
@@ -152,7 +137,7 @@ public sealed partial class MainWindow : Window
     }
 
 
-    private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)
+    private void OpenDeveloperMenu()
     {
         var previousPage = _navigationState.CurrentPage;
         ShowPage(_navigationState.OpenDeveloperMenu());
