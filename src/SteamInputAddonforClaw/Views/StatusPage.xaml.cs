@@ -7,8 +7,11 @@ using System.Collections.ObjectModel;
 
 namespace SteamInputAddonforClaw.Views;
 
+internal sealed record StatusTileViewModel(string Header, string Value, string Secondary);
+
 public sealed partial class StatusPage : UserControl
 {
+    private readonly ObservableCollection<StatusTileViewModel> _summaryTiles = [];
     private readonly ObservableCollection<StatusCardViewModel> _softwareCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _componentCards = [];
     private readonly ObservableCollection<StatusCardViewModel> _runtimeCards = [];
@@ -18,9 +21,10 @@ public sealed partial class StatusPage : UserControl
     public StatusPage()
     {
         InitializeComponent();
+        SummaryTilesRepeater.ItemsSource = _summaryTiles;
         ControllerSoftwareRepeater.ItemsSource = _softwareCards;
         RoutingComponentsRepeater.ItemsSource = _componentCards;
-        RuntimeStatusList.ItemsSource = _runtimeCards;
+        RuntimeStatusRepeater.ItemsSource = _runtimeCards;
     }
 
     internal void SetRefreshing(bool isRefreshing)
@@ -30,15 +34,22 @@ public sealed partial class StatusPage : UserControl
 
     internal void Render(SystemStatusSnapshot snapshot, FirstTimeSetupAddonPresentation addonPresentation)
     {
-        DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
-        DeviceModelText.Text = snapshot.Device.Model;
-        DeviceSupportText.Text = snapshot.HardwareCompatibility.Status switch
+        var deviceSupport = snapshot.HardwareCompatibility.Status switch
         {
             HardwareCompatibilityStatus.Supported => "Supported",
             HardwareCompatibilityStatus.Unsupported => "Unsupported",
             _ => "Compatibility unknown"
         };
-        DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoardProduct}  GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
+
+        RenderHero(snapshot.Addon.Status, addonPresentation.Reason);
+
+        Replace(_summaryTiles,
+        [
+            new("Device", $"{snapshot.Device.Manufacturer} {snapshot.Device.Model}", deviceSupport),
+            new("Steam Session", snapshot.Steam.IsActive ? "Active" : "Inactive", $"RunningAppID: {snapshot.Steam.RunningAppId}"),
+            new("Steam Input Addon", addonPresentation.Status, addonPresentation.Reason)
+        ]);
+
         Replace(_softwareCards, snapshot.ControllerSoftware.Select(item => new StatusCardViewModel(item.DisplayName, MainWindow.FormatSoftwareStatus(item), item.Reason)));
         Replace(_componentCards,
         [
@@ -53,12 +64,41 @@ public sealed partial class StatusPage : UserControl
         ]);
     }
 
+    private void RenderHero(AddonOperationalStatus status, string reason)
+    {
+        var (title, symbol, severity) = status switch
+        {
+            AddonOperationalStatus.Ready => ("Steam Input Addon is active", Symbol.Accept, InfoBarSeverity.Success),
+            AddonOperationalStatus.WaitingForSteam => ("Ready. Waiting for a Steam session.", Symbol.Sync, InfoBarSeverity.Informational),
+            AddonOperationalStatus.Passive => ("Controller remains native.", Symbol.Repair, InfoBarSeverity.Informational),
+            AddonOperationalStatus.SetupRequired => ("Setup required", Symbol.Important, InfoBarSeverity.Warning),
+            AddonOperationalStatus.RecoveryRequired => ("Recovery required", Symbol.Important, InfoBarSeverity.Warning),
+            AddonOperationalStatus.Unsupported => ("Not supported on this device", Symbol.Important, InfoBarSeverity.Warning),
+            _ => ("Status indeterminate", Symbol.Help, InfoBarSeverity.Informational)
+        };
+
+        HeroIcon.Symbol = symbol;
+        HeroTitleText.Text = title;
+        HeroReasonText.Text = reason;
+
+        if (severity == InfoBarSeverity.Warning)
+        {
+            StatusInfoBar.Severity = severity;
+            StatusInfoBar.Message = reason;
+            StatusInfoBar.IsOpen = true;
+        }
+        else
+        {
+            StatusInfoBar.IsOpen = false;
+        }
+    }
+
     private void RefreshStatusButton_Click(object sender, RoutedEventArgs args)
     {
         RefreshRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private static void Replace(ObservableCollection<StatusCardViewModel> destination, IEnumerable<StatusCardViewModel> source)
+    private static void Replace<T>(ObservableCollection<T> destination, IEnumerable<T> source)
     {
         destination.Clear();
         foreach (var item in source) destination.Add(item);
