@@ -9,6 +9,19 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class StatusPresentationTests
 {
     [Theory]
+    [InlineData("MICRO-STAR INTERNATIONAL")]
+    [InlineData("MICRO-STAR INTERNATIONAL CO., LTD")]
+    [InlineData("MICRO-STAR INTERNATIONAL CO., LTD.")]
+    [InlineData("MICRO-STAR INTERNATIONAL CO.,LTD")]
+    [InlineData("micro-star international co., ltd.")]
+    public void FormatManufacturerForDisplay_KnownMsiAliases_ReturnsMsi(string rawManufacturer) =>
+        Assert.Equal("MSI", StatusPresentation.FormatManufacturerForDisplay(rawManufacturer));
+
+    [Fact]
+    public void FormatManufacturerForDisplay_UnknownManufacturer_PreservesTrimmedValue() =>
+        Assert.Equal("Acme Devices", StatusPresentation.FormatManufacturerForDisplay("  Acme Devices  "));
+
+    [Theory]
     [InlineData(false, "Not Running")]
     [InlineData(true, "Running")]
     public void FormatSteamGame_ReflectsSteamIsActive(bool isActive, string expected) =>

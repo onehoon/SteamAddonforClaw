@@ -24,7 +24,7 @@ public sealed partial class StatusPage : UserControl
 
     internal void Render(SystemStatusSnapshot snapshot, FirstTimeSetupAddonPresentation addonPresentation, RoutingRuntimeStatusSnapshot routingStatus)
     {
-        DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
+        DeviceManufacturerText.Text = StatusPresentation.FormatManufacturerForDisplay(snapshot.Device.Manufacturer);
         DeviceModelText.Text = snapshot.Device.Model;
         DeviceSupportText.Text = StatusPresentation.FormatDeviceCompatibility(snapshot.HardwareCompatibility.Status);
         DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoardProduct} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";

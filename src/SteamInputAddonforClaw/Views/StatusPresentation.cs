@@ -11,6 +11,19 @@ namespace SteamInputAddonforClaw.Views;
 /// </summary>
 internal static class StatusPresentation
 {
+    internal static string FormatManufacturerForDisplay(string? rawManufacturer)
+    {
+        var manufacturer = rawManufacturer?.Trim() ?? string.Empty;
+        return manufacturer switch
+        {
+            _ when manufacturer.Equals("MICRO-STAR INTERNATIONAL", StringComparison.OrdinalIgnoreCase)
+                || manufacturer.Equals("MICRO-STAR INTERNATIONAL CO., LTD", StringComparison.OrdinalIgnoreCase)
+                || manufacturer.Equals("MICRO-STAR INTERNATIONAL CO., LTD.", StringComparison.OrdinalIgnoreCase)
+                || manufacturer.Equals("MICRO-STAR INTERNATIONAL CO.,LTD", StringComparison.OrdinalIgnoreCase) => "MSI",
+            _ => manufacturer
+        };
+    }
+
     internal static string FormatDeviceCompatibility(HardwareCompatibilityStatus status) => status switch
     {
         HardwareCompatibilityStatus.Supported => "Supported",
