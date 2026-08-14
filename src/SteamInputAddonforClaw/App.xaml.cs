@@ -201,22 +201,18 @@ public partial class App : Application
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants, async token =>
         {
             if (_routingRuntimeCoordinator is null) return true;
-            var freshSucceeded = false;
             _resumeFreshReconcileSuppression.Begin();
-            try
+            _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() =>
             {
-                _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() =>
-                {
-                    _steamSessionWatcher?.Refresh();
-                    _effectiveSteamSessionSource?.Refresh();
-                });
-                freshSucceeded = await _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).ConfigureAwait(false);
-                return freshSucceeded;
-            }
-            finally
-            {
-                if (_resumeFreshReconcileSuppression.Complete(freshSucceeded)) _ = ReconcileRoutingAsync();
-            }
+                _steamSessionWatcher?.Refresh();
+                _effectiveSteamSessionSource?.Refresh();
+            });
+            return await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
+                freshReconcile: token => _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).AsTask(),
+                completeSuppression: _resumeFreshReconcileSuppression.Complete,
+                deferredReconcile: () => ReconcileRoutingAsync(),
+                requestStatusRefresh: () => _mainWindow?.RequestStatusRefresh(),
+                cancellationToken: token).ConfigureAwait(false);
         }, recoveryEnabled: recoverySafe,
         hasIncompleteRecovery: () => _recoveryManager?.HasIncompleteRecovery == true,
         establishBaseline: async token =>

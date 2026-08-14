@@ -32,7 +32,7 @@
                     <Grid Padding="16,12" ColumnSpacing="12">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <TextBlock FontSize="15" FontWeight="SemiBold" Text="Steam Game" VerticalAlignment="Center" />
-                        <Border Grid.Column="1" Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12" HorizontalAlignment="Stretch" VerticalAlignment="Center">
+                        <Border Grid.Column="1" Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <TextBlock x:Name="SteamGameStatusText" FontSize="13" FontWeight="SemiBold" TextAlignment="Right" />
                         </Border>
                     </Grid>
@@ -40,7 +40,7 @@
                     <Grid Padding="16,12" ColumnSpacing="12">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <TextBlock FontSize="15" FontWeight="SemiBold" Text="Controller Status" VerticalAlignment="Center" />
-                        <Border Grid.Column="1" Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12" HorizontalAlignment="Stretch" VerticalAlignment="Center">
+                        <Border Grid.Column="1" Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <TextBlock x:Name="ControllerStatusText" FontSize="13" FontWeight="SemiBold" TextAlignment="Right" TextWrapping="Wrap" />
                         </Border>
                     </Grid>

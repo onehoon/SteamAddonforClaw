@@ -33,4 +33,28 @@ public sealed class RoutingReconcileStatusRefreshTests
 
         Assert.True(refreshRequested);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResumeFreshReconcileRequestsStatusRefreshForSuccessAndFailure(bool freshSucceeded)
+    {
+        var refreshRequested = false;
+        var deferredReconcileRequested = false;
+
+        var result = await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
+            _ => Task.FromResult(freshSucceeded),
+            _ => false,
+            () =>
+            {
+                deferredReconcileRequested = true;
+                return Task.CompletedTask;
+            },
+            () => refreshRequested = true,
+            CancellationToken.None);
+
+        Assert.Equal(freshSucceeded, result);
+        Assert.True(refreshRequested);
+        Assert.False(deferredReconcileRequested);
+    }
 }
