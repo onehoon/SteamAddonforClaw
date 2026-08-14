@@ -14,10 +14,10 @@ It records the pinned VIIPER baseline, fork-added canonical API surface, ownersh
 |---|---|
 | VIIPER hardening | **VALIDATED / COMPLETE / FROZEN** |
 | Pinned VIIPER repository | `onehoon/VIIPER` |
-| Pinned VIIPER merge baseline | `3bd042dbbec9120035f7e86c9f3cac1418202be6` |
+| Pinned VIIPER merge baseline | `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` |
 | VIIPER canonical embedded ABI | **VALIDATED** |
 | Current Addon VIIPER binding | **LEGACY / TO BE MIGRATED** |
-| Canonical Addon migration | **M0-M3 VALIDATED / M4 NEXT** |
+| Canonical Addon migration | **M0-M3 VALIDATED / M4A IN PROGRESS / M4B BLOCKED** |
 | Game Bar Xbox360 route | **PLANNED** |
 | Gyro/IMU routing | **PLANNED / HARDWARE VALIDATION REQUIRED** |
 | MSI Claw hardware validation of the canonical DLL path | **REQUIRES ADDON INTEGRATION TESTING** |
@@ -80,10 +80,10 @@ https://github.com/onehoon/VIIPER
 Pinned integration baseline:
 
 ```text
-3bd042dbbec9120035f7e86c9f3cac1418202be6
+db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
 ```
 
-This is the merge commit containing the completed canonical embedded lifecycle hardening through VIIPER PR #11 and the independent L2/R2 Gordon state extension merged by VIIPER PR #13. M0 is **VALIDATED**.
+This is the merge commit containing the completed canonical embedded lifecycle hardening through VIIPER PR #11, the independent L2/R2 Gordon state extension merged by VIIPER PR #13, and the classified Gordon removal API merged by VIIPER PR #14. M0 and the classified-remove dependency are **VALIDATED**.
 
 The Gordon canonical state now has independent `L2` and `R2` fields. Digital full-pull semantics are:
 
@@ -93,7 +93,7 @@ digital full-pull = explicit L2/R2 OR analog saturation
 
 Explicit `L2`/`R2` changes only the digital full-pull bit; it must not change the analog trigger magnitude. The canonical `SteamControllerDeviceState` ABI size is **62 bytes**.
 
-The Addon must use a matching DLL, generated header, and C# P/Invoke definition from the same pinned VIIPER commit/build: `3bd042dbbec9120035f7e86c9f3cac1418202be6` and its matching canonical build. Do not begin Addon ABI work from a mismatched artifact or header.
+The Addon must use a matching DLL, generated header, and C# P/Invoke definition from the same pinned VIIPER commit/build: `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` and its matching canonical build. Do not begin Addon ABI work from a mismatched artifact or header. The current embedded production payload is intentionally not replaced by M4A.
 
 Do not silently update the embedded DLL/source baseline beyond this commit. A baseline update requires the process in [Section 22](#22-updating-the-pinned-viiper-baseline).
 
@@ -353,7 +353,24 @@ bool SetSteamControllerOutputCallback(
 
 bool RemoveSteamControllerDevice(
     SteamControllerDeviceHandle handle);
+
+typedef enum {
+    VIIPER_REMOVE_SUCCESS = 0,
+    VIIPER_REMOVE_RETRYABLE_FAILURE = 1,
+    VIIPER_REMOVE_UNSAFE_OUTCOME_UNKNOWN = 2,
+    VIIPER_REMOVE_INVALID = 3
+} SteamControllerDeviceRemoveResult;
+
+SteamControllerDeviceRemoveResult RemoveSteamControllerDeviceEx(
+    SteamControllerDeviceHandle handle);
 ```
+
+`RemoveSteamControllerDeviceEx` is the classified Gordon removal contract
+consumed by the side-by-side M4A Addon session. `SUCCESS` releases the native
+handle; `RETRYABLE_FAILURE` retains known ownership for one explicit retry;
+`UNSAFE_OUTCOME_UNKNOWN` and `INVALID` fail closed and must not trigger
+destructive Remove, Detach, Attach, bus, or server cleanup. The legacy bool
+export remains compatible and returns true only for `SUCCESS`.
 
 Zero vendor/product values individually fall back to Gordon defaults. The Addon target remains explicitly:
 
@@ -918,7 +935,7 @@ This layout can be retained during migration.
 
 When adopting the canonical baseline:
 
-1. build `libVIIPER.dll` from pinned commit `3bd042db...` using canonical `lib/viiper`;
+1. build `libVIIPER.dll` from pinned commit `db70bded...` using canonical `lib/viiper`;
 2. replace `Dependencies/Viiper/libVIIPER.dll`;
 3. replace `Dependencies/Viiper/libVIIPER.h` with the matching generated header;
 4. replace/update `Dependencies/Viiper/LICENSE.txt` / notices as required by the built artifact;
@@ -972,6 +989,7 @@ CreateSteamControllerDevice
 SetSteamControllerDeviceState
 SetSteamControllerOutputCallback
 RemoveSteamControllerDevice
+RemoveSteamControllerDeviceEx
 ```
 
 and the generated Gordon callback/create/state/remove declarations.
@@ -1006,6 +1024,8 @@ Canonical integration should add or update automated coverage for the following 
 
 - expected native symbol names are defined in one binding layer;
 - native `byte` boolean conversion is explicit;
+- classified Gordon removal uses the validated native C enum width and exact
+  result values;
 - handle types are native-width;
 - `USBServerConfig` field offsets/size match the generated header;
 - `SteamControllerDeviceState` offsets/size match the generated header;
@@ -1483,7 +1503,7 @@ No runtime behavior change.
 
 Goal:
 
-- build/embed the canonical DLL from `3bd042db...`;
+- build/embed the canonical DLL from `db70bded...`;
 - update header/provenance/hash verification;
 - replace legacy flat symbol binding with canonical server/bus/device bindings;
 - add C# ABI/layout/export tests;
@@ -1625,7 +1645,7 @@ VIIPER integration reference:
 
 Pinned VIIPER:
   onehoon/VIIPER
-  3bd042dbbec9120035f7e86c9f3cac1418202be6
+  db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
 
 Canonical native path:
   lib/viiper

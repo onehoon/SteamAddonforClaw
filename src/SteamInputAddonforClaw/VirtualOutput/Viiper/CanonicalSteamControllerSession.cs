@@ -117,52 +117,36 @@ internal sealed class CanonicalSteamControllerSession : IDisposable, ICanonicalS
     {
         EnsureNotDisposed();
         if (State != CanonicalSteamControllerSessionState.Active || _deviceHandle == 0) return false;
-        if (!_native.RemoveSteamControllerDevice(_deviceHandle))
-        {
-            PendingCleanupPhase = CanonicalPendingCleanupPhase.DeviceRemoval;
-            State = CanonicalSteamControllerSessionState.CleanupPending;
-            return false;
-        }
-
-        ClearDeviceOwnership();
-        State = CanonicalSteamControllerSessionState.DeviceRemoved;
-        return true;
+        return ApplyDeviceRemovalResult(_native.RemoveSteamControllerDeviceEx(_deviceHandle));
     }
 
     internal bool CompleteRuntimeCleanup()
     {
         EnsureNotDisposed();
-        if (State == CanonicalSteamControllerSessionState.DeviceRemoved)
-            PendingCleanupPhase = CanonicalPendingCleanupPhase.BusRemoval;
-
-        if (State != CanonicalSteamControllerSessionState.CleanupPending && State != CanonicalSteamControllerSessionState.DeviceRemoved)
-            return false;
-        if (PendingCleanupPhase is CanonicalPendingCleanupPhase.None)
+        if (State != CanonicalSteamControllerSessionState.DeviceRemoved || PendingCleanupPhase != CanonicalPendingCleanupPhase.None)
             return false;
 
-        if (PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval)
-            return false;
-
-        return RetryPendingCleanup();
+        PendingCleanupPhase = CanonicalPendingCleanupPhase.BusRemoval;
+        State = CanonicalSteamControllerSessionState.CleanupPending;
+        return ContinuePendingCleanup();
     }
 
     internal bool RetryPendingCleanup()
     {
         EnsureNotDisposed();
-        if (State != CanonicalSteamControllerSessionState.CleanupPending && State != CanonicalSteamControllerSessionState.DeviceRemoved)
+        if (State != CanonicalSteamControllerSessionState.CleanupPending)
             return false;
 
+        return ContinuePendingCleanup();
+    }
+
+    private bool ContinuePendingCleanup()
+    {
         if (PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval)
         {
-            if (_deviceHandle == 0 || !_native.RemoveSteamControllerDevice(_deviceHandle)) return false;
-            ClearDeviceOwnership();
-            State = CanonicalSteamControllerSessionState.DeviceRemoved;
-            PendingCleanupPhase = CanonicalPendingCleanupPhase.None;
-            return true;
+            if (_deviceHandle == 0) return false;
+            return ApplyDeviceRemovalResult(_native.RemoveSteamControllerDeviceEx(_deviceHandle));
         }
-
-        if (State == CanonicalSteamControllerSessionState.DeviceRemoved)
-            PendingCleanupPhase = CanonicalPendingCleanupPhase.BusRemoval;
 
         if (PendingCleanupPhase == CanonicalPendingCleanupPhase.BusRemoval)
         {
@@ -230,13 +214,49 @@ internal sealed class CanonicalSteamControllerSession : IDisposable, ICanonicalS
 
     private void FailCreationWithUnattachedDevice()
     {
-        if (_deviceHandle != 0 && !_native.RemoveSteamControllerDevice(_deviceHandle))
+        if (_deviceHandle == 0)
         {
-            SetPending(CanonicalPendingCleanupPhase.DeviceRemoval);
+            FailCreationAfterBus();
+            return;
+        }
+
+        var result = _native.RemoveSteamControllerDeviceEx(_deviceHandle);
+        if (result != SteamControllerDeviceRemoveResult.Success)
+        {
+            if (result == SteamControllerDeviceRemoveResult.RetryableFailure)
+                SetPending(CanonicalPendingCleanupPhase.DeviceRemoval);
+            else
+                SetUnsafe();
             return;
         }
         ClearDeviceOwnership();
         FailCreationAfterBus();
+    }
+
+    private bool ApplyDeviceRemovalResult(SteamControllerDeviceRemoveResult result)
+    {
+        switch (result)
+        {
+            case SteamControllerDeviceRemoveResult.Success:
+                ClearDeviceOwnership();
+                PendingCleanupPhase = CanonicalPendingCleanupPhase.None;
+                State = CanonicalSteamControllerSessionState.DeviceRemoved;
+                return true;
+            case SteamControllerDeviceRemoveResult.RetryableFailure:
+                SetPending(CanonicalPendingCleanupPhase.DeviceRemoval);
+                return false;
+            case SteamControllerDeviceRemoveResult.UnsafeOutcomeUnknown:
+            case SteamControllerDeviceRemoveResult.Invalid:
+            default:
+                SetUnsafe();
+                return false;
+        }
+    }
+
+    private void SetUnsafe()
+    {
+        PendingCleanupPhase = CanonicalPendingCleanupPhase.None;
+        State = CanonicalSteamControllerSessionState.Unsafe;
     }
 
     private void SetPending(CanonicalPendingCleanupPhase phase)
