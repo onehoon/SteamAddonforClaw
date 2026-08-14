@@ -19,7 +19,7 @@
                         <TextBlock x:Name="DeviceManufacturerText" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
                         <TextBlock x:Name="DeviceModelText" Grid.Column="1" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" />
                         <Border Grid.Column="2" Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <TextBlock x:Name="DeviceSupportText" FontSize="13" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
+                            <TextBlock x:Name="DeviceSupportText" FontSize="13" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" VerticalAlignment="Center" />
                         </Border>
                     </Grid>
                     <TextBlock x:Name="DeviceBoardGpuText" Opacity="0.7" TextWrapping="Wrap" />
@@ -33,7 +33,7 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <TextBlock FontSize="15" FontWeight="SemiBold" Text="Steam Game" VerticalAlignment="Center" />
                         <Border Grid.Column="1" Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <TextBlock x:Name="SteamGameStatusText" FontSize="13" FontWeight="SemiBold" TextAlignment="Right" />
+                            <TextBlock x:Name="SteamGameStatusText" FontSize="13" FontWeight="SemiBold" TextAlignment="Right" VerticalAlignment="Center" />
                         </Border>
                     </Grid>
                     <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
@@ -41,7 +41,7 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <TextBlock FontSize="15" FontWeight="SemiBold" Text="Controller Status" VerticalAlignment="Center" />
                         <Border Grid.Column="1" Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <TextBlock x:Name="ControllerStatusText" FontSize="13" FontWeight="SemiBold" TextAlignment="Right" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ControllerStatusText" FontSize="13" FontWeight="SemiBold" TextAlignment="Right" TextWrapping="Wrap" VerticalAlignment="Center" />
                         </Border>
                     </Grid>
                 </StackPanel>
