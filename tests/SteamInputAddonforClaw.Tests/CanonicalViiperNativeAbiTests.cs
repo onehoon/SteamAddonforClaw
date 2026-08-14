@@ -113,16 +113,58 @@ public sealed class CanonicalViiperNativeAbiTests
     }
 
     [Fact]
+    public void CanonicalDelegatesHaveTheExpectedParameterSignatures()
+    {
+        AssertParameters("NewUsbServerDelegate", typeof(USBServerConfig).MakeByRefType(), typeof(nuint).MakeByRefType(), typeof(ViiperLogCallback));
+        AssertParameters("CloseUsbServerDelegate", typeof(nuint));
+        AssertParameters("CreateUsbBusDelegate", typeof(nuint), typeof(uint).MakeByRefType());
+        AssertParameters("RemoveUsbBusDelegate", typeof(nuint), typeof(uint));
+        AssertParameters("GetUsbDeviceIdentityDelegate", typeof(nuint), typeof(uint).MakeByRefType(), typeof(uint).MakeByRefType());
+        AssertParameters("AttachUsbDeviceDelegate", typeof(nuint));
+        AssertParameters("DetachUsbDeviceDelegate", typeof(nuint));
+        AssertParameters("CreateSteamControllerDeviceDelegate", typeof(nuint), typeof(nuint).MakeByRefType(), typeof(uint), typeof(byte), typeof(ushort), typeof(ushort));
+        AssertParameters("SetSteamControllerDeviceStateDelegate", typeof(nuint), typeof(SteamControllerDeviceState));
+        AssertParameters("SetSteamControllerOutputCallbackDelegate", typeof(nuint), typeof(SteamControllerOutputCallback));
+        AssertParameters("RemoveSteamControllerDeviceDelegate", typeof(nuint));
+    }
+
+    [Fact]
     public void CanonicalApi_RootsRegisteredOutputCallback()
     {
         var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-        var weak = RegisterOutputCallback(api);
+        var weak = RegisterOutputCallback(api, 42);
 
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
+        CollectGarbage();
 
         Assert.True(weak.TryGetTarget(out _));
+    }
+
+    [Fact]
+    public void CanonicalApi_RemovingBusReleasesOwnedOutputCallbacks()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterOutputCallback(api, deviceHandle);
+
+        Assert.True(api.RemoveUSBBus(1, 1));
+        CollectGarbage();
+
+        Assert.False(weak.TryGetTarget(out _));
+    }
+
+    [Fact]
+    public void CanonicalApi_ClosingServerReleasesOwnedOutputAndLogCallbacks()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        var logWeak = RegisterLogCallback(api);
+        Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var outputWeak = RegisterOutputCallback(api, deviceHandle);
+
+        Assert.True(api.CloseUSBServer(1));
+        CollectGarbage();
+
+        Assert.False(logWeak.TryGetTarget(out _));
+        Assert.False(outputWeak.TryGetTarget(out _));
     }
 
     [Fact]
@@ -131,12 +173,36 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.Throws<ArgumentException>(() => CanonicalViiperNativeApi.Load("libVIIPER.dll"));
     }
 
-    private static WeakReference<SteamControllerOutputCallback> RegisterOutputCallback(CanonicalViiperNativeApi api)
+    private static void AssertParameters(string delegateName, params Type[] expected)
     {
-        var callback = new SteamControllerOutputCallback((_, _, _) => { });
+        var actual = NestedDelegate(delegateName).GetMethod("Invoke")!.GetParameters().Select(parameter => parameter.ParameterType).ToArray();
+        Assert.Equal(expected, actual);
+    }
+
+    private static WeakReference<SteamControllerOutputCallback> RegisterOutputCallback(CanonicalViiperNativeApi api, nuint deviceHandle)
+    {
+        var marker = new object();
+        var callback = new SteamControllerOutputCallback((_, _, _) => GC.KeepAlive(marker));
         var weak = new WeakReference<SteamControllerOutputCallback>(callback);
-        Assert.True(api.SetSteamControllerOutputCallback(42, callback));
+        Assert.True(api.SetSteamControllerOutputCallback(deviceHandle, callback));
         return weak;
+    }
+
+    private static WeakReference<ViiperLogCallback> RegisterLogCallback(CanonicalViiperNativeApi api)
+    {
+        var marker = new object();
+        var callback = new ViiperLogCallback((_, _) => GC.KeepAlive(marker));
+        var weak = new WeakReference<ViiperLogCallback>(callback);
+        var config = default(USBServerConfig);
+        Assert.True(api.NewUSBServer(ref config, out _, callback));
+        return weak;
+    }
+
+    private static void CollectGarbage()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
     }
 
     private static Type NestedDelegate(string name) => typeof(CanonicalViiperNativeApi).GetNestedType(name, BindingFlags.NonPublic)!;

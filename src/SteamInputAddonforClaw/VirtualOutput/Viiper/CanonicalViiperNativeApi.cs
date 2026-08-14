@@ -33,6 +33,7 @@ internal sealed class CanonicalViiperNativeApi
     private readonly object _callbackGate = new();
     private readonly Dictionary<nuint, SteamControllerOutputCallback> _outputCallbacks = [];
     private readonly Dictionary<nuint, ViiperLogCallback> _logCallbacks = [];
+    private readonly Dictionary<nuint, (nuint ServerHandle, uint BusId)> _deviceOwnership = [];
 
     internal CanonicalViiperNativeApi(nint library, Func<nint, string, nint>? exportResolver = null)
     {
@@ -68,7 +69,11 @@ internal sealed class CanonicalViiperNativeApi
         var succeeded = Succeeded(_closeUsbServer(serverHandle));
         if (succeeded)
         {
-            lock (_callbackGate) _logCallbacks.Remove(serverHandle);
+            lock (_callbackGate)
+            {
+                ReleaseOutputCallbacksLocked(ownership => ownership.ServerHandle == serverHandle);
+                _logCallbacks.Remove(serverHandle);
+            }
         }
         return succeeded;
     }
@@ -77,7 +82,15 @@ internal sealed class CanonicalViiperNativeApi
         => Succeeded(_createUsbBus(serverHandle, ref busId));
 
     internal bool RemoveUSBBus(nuint serverHandle, uint busId)
-        => Succeeded(_removeUsbBus(serverHandle, busId));
+    {
+        var succeeded = Succeeded(_removeUsbBus(serverHandle, busId));
+        if (succeeded)
+        {
+            lock (_callbackGate)
+                ReleaseOutputCallbacksLocked(ownership => ownership.ServerHandle == serverHandle && ownership.BusId == busId);
+        }
+        return succeeded;
+    }
 
     internal bool GetUSBDeviceIdentity(nuint deviceHandle, out uint busId, out uint deviceId)
         => Succeeded(_getUsbDeviceIdentity(deviceHandle, out busId, out deviceId));
@@ -95,13 +108,20 @@ internal sealed class CanonicalViiperNativeApi
         bool autoAttachLocalhost,
         ushort idVendor,
         ushort idProduct)
-        => Succeeded(_createSteamControllerDevice(
+    {
+        var succeeded = Succeeded(_createSteamControllerDevice(
             serverHandle,
             out deviceHandle,
             busId,
             autoAttachLocalhost ? (byte)1 : (byte)0,
             idVendor,
             idProduct));
+        if (succeeded)
+        {
+            lock (_callbackGate) _deviceOwnership[deviceHandle] = (serverHandle, busId);
+        }
+        return succeeded;
+    }
 
     internal bool SetSteamControllerDeviceState(nuint deviceHandle, SteamControllerDeviceState state)
         => Succeeded(_setSteamControllerDeviceState(deviceHandle, state));
@@ -125,9 +145,24 @@ internal sealed class CanonicalViiperNativeApi
         var succeeded = Succeeded(_removeSteamControllerDevice(deviceHandle));
         if (succeeded)
         {
-            lock (_callbackGate) _outputCallbacks.Remove(deviceHandle);
+            lock (_callbackGate)
+            {
+                _outputCallbacks.Remove(deviceHandle);
+                _deviceOwnership.Remove(deviceHandle);
+            }
         }
         return succeeded;
+    }
+
+    private void ReleaseOutputCallbacksLocked(Func<(nuint ServerHandle, uint BusId), bool> predicate)
+    {
+        foreach (var (deviceHandle, ownership) in _deviceOwnership.ToArray())
+        {
+            if (!predicate(ownership)) continue;
+
+            _outputCallbacks.Remove(deviceHandle);
+            _deviceOwnership.Remove(deviceHandle);
+        }
     }
 
     private static T Bind<T>(nint library, Func<nint, string, nint> resolver, string export) where T : Delegate
