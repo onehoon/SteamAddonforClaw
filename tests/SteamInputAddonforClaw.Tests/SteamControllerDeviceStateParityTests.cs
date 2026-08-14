@@ -83,16 +83,18 @@ public sealed class SteamControllerDeviceStateParityTests
     }
 
     [Fact]
-    public void Zero_typed_quaternion_and_battery_match_legacy_wire_defaults()
+    public void Zero_typed_fields_use_pinned_VIIPER_wire_defaults()
     {
         var state = new ControllerState(default, new StickState(100, -200), default, default, new AuxiliaryButtonState(new[] { false, false }));
         var typed = SteamControllerDeviceStateMapper.Map(state);
         var report = LegacyReport(state);
 
         Assert.Equal(0, typed.GyroQuatW);
-        Assert.Equal(0x4000, BinaryPrimitives.ReadInt16LittleEndian(report.AsSpan(40, 2)));
+        Assert.Equal((short)0x4000, CanonicalQuaternionW(typed));
+        Assert.Equal(CanonicalQuaternionW(typed), BinaryPrimitives.ReadInt16LittleEndian(report.AsSpan(40, 2)));
         Assert.Equal(0, typed.BatteryMilliVolts);
-        Assert.Equal((ushort)3000, BinaryPrimitives.ReadUInt16LittleEndian(report.AsSpan(62, 2)));
+        Assert.Equal((ushort)3000, CanonicalBatteryMilliVolts(typed));
+        Assert.Equal(CanonicalBatteryMilliVolts(typed), BinaryPrimitives.ReadUInt16LittleEndian(report.AsSpan(62, 2)));
     }
 
     [Theory]
@@ -121,4 +123,10 @@ public sealed class SteamControllerDeviceStateParityTests
     }
 
     private static byte Bit(byte[] report, int offset, byte mask) => (byte)((report[offset] & mask) == 0 ? 0 : 1);
+
+    // Test-only mirror of pinned VIIPER's buildReport defaults; production does not serialize this state.
+    private static short CanonicalQuaternionW(SteamControllerDeviceState state) =>
+        state.GyroQuatW == 0 && state.GyroQuatX == 0 && state.GyroQuatY == 0 && state.GyroQuatZ == 0 ? (short)0x4000 : state.GyroQuatW;
+
+    private static ushort CanonicalBatteryMilliVolts(SteamControllerDeviceState state) => state.BatteryMilliVolts == 0 ? (ushort)3000 : state.BatteryMilliVolts;
 }

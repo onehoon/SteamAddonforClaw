@@ -12,6 +12,31 @@ public sealed class SteamControllerDeviceStateMapperTests
     {
         var mapped = SteamControllerDeviceStateMapper.Map(State());
 
+        Assert.Equal(0, mapped.A);
+        Assert.Equal(0, mapped.X);
+        Assert.Equal(0, mapped.B);
+        Assert.Equal(0, mapped.Y);
+        Assert.Equal(0, mapped.L1);
+        Assert.Equal(0, mapped.R1);
+        Assert.Equal(0, mapped.L2);
+        Assert.Equal(0, mapped.R2);
+        Assert.Equal(0, mapped.Menu);
+        Assert.Equal(0, mapped.Options);
+        Assert.Equal(0, mapped.DPadUp);
+        Assert.Equal(0, mapped.DPadRight);
+        Assert.Equal(0, mapped.DPadDown);
+        Assert.Equal(0, mapped.DPadLeft);
+        Assert.Equal(0, mapped.L3);
+        Assert.Equal(0, mapped.LGrip);
+        Assert.Equal(0, mapped.RGrip);
+        Assert.Equal(0, mapped.RPadTouch);
+        Assert.Equal(0, mapped.RPadPress);
+        Assert.Equal(0, mapped.RPadX);
+        Assert.Equal(0, mapped.RPadY);
+        Assert.Equal(0, mapped.LStickX);
+        Assert.Equal(0, mapped.LStickY);
+        Assert.Equal(0, mapped.LTrigger);
+        Assert.Equal(0, mapped.RTrigger);
         Assert.Equal(0, mapped.Steam);
         Assert.Equal(0, mapped.LPadTouch);
         Assert.Equal(0, mapped.LPadPress);
@@ -53,6 +78,44 @@ public sealed class SteamControllerDeviceStateMapperTests
         Assert.Equal(1, mapped.DPadLeft);
         Assert.Equal(1, mapped.L1);
         Assert.Equal(1, mapped.R1);
+    }
+
+    [Theory]
+    [InlineData("DPadUp")]
+    [InlineData("DPadRight")]
+    [InlineData("DPadDown")]
+    [InlineData("DPadLeft")]
+    public void Each_dpad_source_maps_only_to_its_matching_field(string direction)
+    {
+        var mapped = SteamControllerDeviceStateMapper.Map(State(buttons: Dpad(direction)));
+
+        foreach (var field in new[] { "DPadUp", "DPadRight", "DPadDown", "DPadLeft" })
+        {
+            var actual = (byte)typeof(SteamControllerDeviceState).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(mapped)!;
+            Assert.Equal(field == direction ? (byte)1 : (byte)0, actual);
+        }
+    }
+
+    [Fact]
+    public void Dpad_diagonal_preserves_the_two_source_directions_only()
+    {
+        var mapped = SteamControllerDeviceStateMapper.Map(State(buttons: new GamepadButtons(false, false, false, false, true, true, false, false, false, false, false, false, false, false, false, false)));
+
+        Assert.Equal(1, mapped.DPadUp);
+        Assert.Equal(1, mapped.DPadRight);
+        Assert.Equal(0, mapped.DPadDown);
+        Assert.Equal(0, mapped.DPadLeft);
+    }
+
+    [Theory]
+    [InlineData("LeftBumper")]
+    [InlineData("RightBumper")]
+    public void Each_shoulder_source_maps_only_to_its_matching_field(string shoulder)
+    {
+        var mapped = SteamControllerDeviceStateMapper.Map(State(buttons: Shoulder(shoulder)));
+
+        Assert.Equal(shoulder == "LeftBumper" ? (byte)1 : (byte)0, mapped.L1);
+        Assert.Equal(shoulder == "RightBumper" ? (byte)1 : (byte)0, mapped.R1);
     }
 
     [Fact]
@@ -130,6 +193,7 @@ public sealed class SteamControllerDeviceStateMapperTests
 
     [Theory]
     [InlineData((byte)0, false, (ushort)0, (byte)0)]
+    [InlineData((byte)0, true, (ushort)0, (byte)1)]
     [InlineData((byte)64, true, (ushort)6525, (byte)1)]
     [InlineData((byte)255, false, (ushort)26000, (byte)0)]
     [InlineData((byte)255, true, (ushort)26000, (byte)1)]
@@ -177,6 +241,22 @@ public sealed class SteamControllerDeviceStateMapperTests
         "X" => new(false, false, true, false, false, false, false, false, false, false, false, false, false, false, false, false),
         "B" => new(false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
         "Y" => new(false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false),
+        _ => throw new ArgumentOutOfRangeException(nameof(name), name, null)
+    };
+
+    private static GamepadButtons Dpad(string name) => name switch
+    {
+        "DPadUp" => new(false, false, false, false, true, false, false, false, false, false, false, false, false, false, false, false),
+        "DPadRight" => new(false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, false),
+        "DPadDown" => new(false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false),
+        "DPadLeft" => new(false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false),
+        _ => throw new ArgumentOutOfRangeException(nameof(name), name, null)
+    };
+
+    private static GamepadButtons Shoulder(string name) => name switch
+    {
+        "LeftBumper" => new(false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false),
+        "RightBumper" => new(false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false),
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, null)
     };
 }
