@@ -1,19 +1,20 @@
 <UserControl
     x:Class="SteamInputAddonforClaw.Views.ControllerPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
     <ScrollViewer Padding="32">
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
-                <TextBlock Opacity="0.7" Text="Controller-specific options will appear here as they become available." TextWrapping="Wrap" />
+                <TextBlock Opacity="0.7" Text="Configure how Steam Input routing behaves outside a running game." TextWrapping="Wrap" />
             </StackPanel>
-            <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
-                <StackPanel Orientation="Horizontal" Spacing="16">
-                    <SymbolIcon VerticalAlignment="Center" Symbol="Repair" />
-                    <TextBlock VerticalAlignment="Center" Opacity="0.7" Text="No controller options are available yet. Check Status for current routing and compatibility details." TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
+            <ctcontrols:SettingsCard Header="Steam Big Picture Mode" Description="Keep Steam Controller routing active in Big Picture, even when no game is running.">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Repair" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch x:Name="RouteInSteamBigPictureToggleSwitch" OffContent="" OnContent="" Toggled="RouteInSteamBigPictureToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Settings;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -20,6 +21,83 @@ public sealed class EffectiveSteamSessionSourceTests
         Assert.Equal(SteamSessionSource.DeveloperTest, effective.State.Source);
         Assert.Equal(uint.MaxValue, effective.State.RunningAppId);
         Assert.Equal(0u, actual.GetRunningAppId());
+    }
+
+    [Fact]
+    public void BigPicturePreference_EnablesAndDisablesTheEffectiveSessionImmediately()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        var bigPictureProbe = new FakeBigPictureProbe(false);
+        using var bigPicture = new SteamBigPictureWatcher(bigPictureProbe, new FakeBigPictureEventHook());
+        var preference = new FakeBigPicturePreference();
+        var testMode = new DeveloperTestModeState();
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, testMode, preference);
+        watcher.Start(); bigPicture.Start();
+        var states = new List<SteamSessionState>();
+        effective.StateChanged += (_, args) => states.Add(args.Current);
+
+        bigPictureProbe.SetActive(true);
+        bigPicture.Refresh();
+        preference.Set(true);
+        preference.Set(false);
+
+        Assert.Equal([SteamSessionSource.BigPicture, SteamSessionSource.Actual], states.Select(state => state.Source));
+        Assert.False(effective.State.IsActive);
+    }
+
+    [Fact]
+    public void ActualGame_HasPriorityRegardlessOfBigPicturePreference()
+    {
+        var actual = new FakeRunningAppIdSource(123);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(true), new FakeBigPictureEventHook());
+        var preference = new FakeBigPicturePreference();
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
+        watcher.Start(); bigPicture.Start(); preference.Set(true);
+
+        Assert.Equal(SteamSessionSource.Actual, effective.State.Source);
+        Assert.Equal(123u, effective.State.RunningAppId);
+    }
+
+    [Fact]
+    public void SameBigPicturePreference_DoesNotPublishDuplicateTransition()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        var probe = new FakeBigPictureProbe(true);
+        using var bigPicture = new SteamBigPictureWatcher(probe, new FakeBigPictureEventHook());
+        var preference = new FakeBigPicturePreference();
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
+        watcher.Start(); bigPicture.Start();
+        var publications = 0;
+        effective.StateChanged += (_, _) => publications++;
+
+        preference.Set(true);
+        preference.Set(true);
+
+        Assert.Equal(1, publications);
+    }
+
+    [Fact]
+    public void BigPictureToActualAndBack_PublishesActiveSourcesWithoutInactiveGap()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        var probe = new FakeBigPictureProbe(true);
+        using var bigPicture = new SteamBigPictureWatcher(probe, new FakeBigPictureEventHook());
+        var preference = new FakeBigPicturePreference();
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
+        watcher.Start(); bigPicture.Start(); preference.Set(true);
+        var sources = new List<SteamSessionSource>();
+        effective.StateChanged += (_, args) => sources.Add(args.Current.Source);
+
+        actual.SetRunningAppId(123);
+        actual.SetRunningAppId(0);
+        bigPicture.Refresh();
+
+        Assert.Equal([SteamSessionSource.Actual, SteamSessionSource.BigPicture], sources);
+        Assert.Equal(SteamSessionSource.BigPicture, effective.State.Source);
     }
 
     [Fact]
@@ -193,5 +271,32 @@ public sealed class EffectiveSteamSessionSourceTests
         public event EventHandler? Changed;
         public uint GetRunningAppId() => _appId;
         public void SetRunningAppId(uint appId) { _appId = appId; Changed?.Invoke(this, EventArgs.Empty); }
+    }
+
+    private sealed class FakeBigPicturePreference : ISteamBigPictureRoutingPreference
+    {
+        public bool RouteInSteamBigPicture { get; private set; }
+        public event EventHandler? RouteInSteamBigPictureChanged;
+        public void Set(bool value)
+        {
+            if (RouteInSteamBigPicture == value) return;
+            RouteInSteamBigPicture = value;
+            RouteInSteamBigPictureChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private sealed class FakeBigPictureProbe(bool active) : ISteamBigPictureWindowProbe
+    {
+        private bool _active = active;
+        public SteamBigPictureProbeResult Capture() => new(_active, true, _active ? "Active" : "Inactive");
+        public void SetActive(bool active) => _active = active;
+    }
+
+    private sealed class FakeBigPictureEventHook : ISteamBigPictureEventHook
+    {
+        private Action? _callback;
+        public bool Start(Action callback) { _callback = callback; return true; }
+        public void Raise() => _callback?.Invoke();
+        public void Dispose() => _callback = null;
     }
 }

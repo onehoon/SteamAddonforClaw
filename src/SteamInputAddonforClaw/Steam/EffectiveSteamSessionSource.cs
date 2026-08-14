@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Developer;
+using SteamInputAddonforClaw.Settings;
 
 namespace SteamInputAddonforClaw.Steam;
 
@@ -8,6 +9,8 @@ public sealed class EffectiveSteamSessionSource : IDisposable
 {
     private readonly SteamSessionWatcher _watcher;
     private readonly DeveloperTestModeState _testMode;
+    private readonly SteamBigPictureWatcher _bigPictureWatcher;
+    private readonly ISteamBigPictureRoutingPreference _settings;
     private readonly Lock _sync = new();
     private readonly Lock _publicationGate = new();
     private readonly Queue<SteamSessionStateChangedEventArgs> _pendingTransitions = new();
@@ -15,13 +18,22 @@ public sealed class EffectiveSteamSessionSource : IDisposable
     private bool _disposed;
     private SteamSessionState _state;
 
-    public EffectiveSteamSessionSource(SteamSessionWatcher watcher, DeveloperTestModeState testMode)
+    internal EffectiveSteamSessionSource(SteamSessionWatcher watcher, SteamBigPictureWatcher bigPictureWatcher, DeveloperTestModeState testMode, ISteamBigPictureRoutingPreference settings)
     {
         _watcher = watcher ?? throw new ArgumentNullException(nameof(watcher));
         _testMode = testMode ?? throw new ArgumentNullException(nameof(testMode));
+        _bigPictureWatcher = bigPictureWatcher ?? throw new ArgumentNullException(nameof(bigPictureWatcher));
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _state = ComputeState();
         _watcher.StateChanged += OnInputChanged;
+        _bigPictureWatcher.StateChanged += OnInputChanged;
+        _settings.RouteInSteamBigPictureChanged += OnInputChanged;
         _testMode.Changed += OnInputChanged;
+    }
+
+    public EffectiveSteamSessionSource(SteamSessionWatcher watcher, DeveloperTestModeState testMode)
+        : this(watcher, new SteamBigPictureWatcher(new InactiveSteamBigPictureProbe()), testMode, new StaticSteamBigPicturePreference())
+    {
     }
 
     public SteamSessionState State { get { lock (_sync) return _state; } }
@@ -48,7 +60,9 @@ public sealed class EffectiveSteamSessionSource : IDisposable
     private SteamSessionState ComputeState()
     {
         var actual = _watcher.State;
-        return actual.IsActive ? actual : _testMode.IsEnabled ? SteamSessionState.CreateDeveloperTest() : actual;
+        if (actual.IsActive) return actual;
+        if (_settings.RouteInSteamBigPicture && _bigPictureWatcher.IsActive) return SteamSessionState.CreateBigPicture();
+        return _testMode.IsEnabled ? SteamSessionState.CreateDeveloperTest() : actual;
     }
 
     private void Drain()
@@ -98,7 +112,20 @@ public sealed class EffectiveSteamSessionSource : IDisposable
             }
         }
         _watcher.StateChanged -= OnInputChanged;
+        _bigPictureWatcher.StateChanged -= OnInputChanged;
+        _settings.RouteInSteamBigPictureChanged -= OnInputChanged;
         _testMode.Changed -= OnInputChanged;
         GC.SuppressFinalize(this);
     }
+}
+
+internal sealed class StaticSteamBigPicturePreference : ISteamBigPictureRoutingPreference
+{
+    public bool RouteInSteamBigPicture => false;
+    public event EventHandler? RouteInSteamBigPictureChanged { add { } remove { } }
+}
+
+internal sealed class InactiveSteamBigPictureProbe : ISteamBigPictureWindowProbe
+{
+    public SteamBigPictureProbeResult Capture() => new(false, true, "Inactive");
 }

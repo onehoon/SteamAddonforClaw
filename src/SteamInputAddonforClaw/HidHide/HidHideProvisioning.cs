@@ -269,7 +269,7 @@ internal sealed class SystemStatusHidHideProvisioningSafetyStateProvider(ISystem
     public async Task<HidHideProvisioningContext> CaptureAsync(CancellationToken cancellationToken)
     {
         var snapshot = await systemStatusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        return new(snapshot.Compatibility, SteamSessionState.FromRunningAppId(snapshot.Steam.RunningAppId), snapshot.Prerequisites.HidHide, snapshot.Addon.Status == AddonOperationalStatus.SetupRequired);
+        return new(snapshot.Compatibility, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Addon.Status == AddonOperationalStatus.SetupRequired);
     }
 }
 

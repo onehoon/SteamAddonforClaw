@@ -63,6 +63,17 @@ public sealed class DiagnosticLoggingTests : IDisposable
     }
 
     [Fact]
+    public void DiagnosticSessionTracker_StartsBigPictureSessionWithoutRunningAppId()
+    {
+        var tracker = new DiagnosticSessionTracker();
+        tracker.Observe(0, 0, "BigPicture");
+        tracker.Complete();
+
+        var log = File.ReadAllText(Directory.GetFiles(_directory)[0]);
+        Assert.Contains("EffectiveSource=BigPicture", log);
+    }
+
+    [Fact]
     public async Task RoutingTrace_IsDebugOnlyAndCorrelatesExecutions()
     {
         AppLog.MinimumLevelOverride = AppLogLevel.Debug;

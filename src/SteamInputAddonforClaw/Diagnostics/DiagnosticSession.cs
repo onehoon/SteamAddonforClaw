@@ -23,7 +23,7 @@ internal sealed class DiagnosticSessionTracker
     {
         var identityChanged = _current is not null && (_current.RawRunningAppId != rawRunningAppId || _current.Source != source || _current.EffectiveRunningAppId != effectiveRunningAppId);
         if (identityChanged) { DiagnosticSession.Complete(_current!); _current = null; }
-        if (_current is null && (rawRunningAppId != 0 || source == "DeveloperTest")) _current = DiagnosticSession.Start(rawRunningAppId, effectiveRunningAppId, source);
+        if (_current is null && (rawRunningAppId != 0 || source is "DeveloperTest" or "BigPicture")) _current = DiagnosticSession.Start(rawRunningAppId, effectiveRunningAppId, source);
     }
     internal void Complete() { if (_current is not null) DiagnosticSession.Complete(_current); _current = null; }
 }
