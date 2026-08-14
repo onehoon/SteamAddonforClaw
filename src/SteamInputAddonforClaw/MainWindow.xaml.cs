@@ -367,16 +367,24 @@ public sealed partial class MainWindow : Window
         () => SteamSessionState.FromRunningAppId(0), () => true, () => true);
     }
 
-    private void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
+    private async void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)
     {
-        if (_navigationState.CurrentPage != MainNavigationPage.DeveloperMenu ||
-            !args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed)
+        if (!args.GetCurrentPoint(MainNavigationView).Properties.IsXButton1Pressed ||
+            _navigationState.GetMouseBackDestination() is not { } destination)
         {
             return;
         }
 
-        ReturnToSettings("MouseBackButton");
         args.Handled = true;
+        switch (destination)
+        {
+            case MainNavigationPage.Settings:
+                ReturnToSettings("MouseBackButton");
+                break;
+            case MainNavigationPage.DeveloperMenu:
+                await ClawSensorProbeContent.ReturnToDeveloperMenuAsync();
+                break;
+        }
     }
 
     private void ReturnToSettings(string reason)

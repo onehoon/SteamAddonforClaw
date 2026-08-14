@@ -165,6 +165,18 @@ public sealed class StatusPresentationTests
         Assert.True(StatusPresentation.IsWarning(Snapshot(recoverySafe: false)));
 
     [Fact]
+    public void IsWarning_UnsupportedHardware_HidesRecoveryWarning() =>
+        Assert.False(StatusPresentation.IsWarning(Snapshot(
+            recoverySafe: false,
+            hardwareStatus: HardwareCompatibilityStatus.Unsupported)));
+
+    [Fact]
+    public void IsWarning_UnsupportedHardware_WithUncertainAddonOutput_RemainsWarning() =>
+        Assert.True(StatusPresentation.IsWarning(Snapshot(
+            addonOwnedOutputIdentityUncertain: true,
+            hardwareStatus: HardwareCompatibilityStatus.Unsupported)));
+
+    [Fact]
     public void IsWarning_AddonOwnedOutputIdentityUncertain_RemainsWarning() =>
         Assert.True(StatusPresentation.IsWarning(Snapshot(addonOwnedOutputIdentityUncertain: true)));
 

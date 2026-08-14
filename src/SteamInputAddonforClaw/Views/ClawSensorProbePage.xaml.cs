@@ -47,6 +47,11 @@ public sealed partial class ClawSensorProbePage : UserControl
 
     private async void BackButton_Click(object sender, RoutedEventArgs args)
     {
+        await ReturnToDeveloperMenuAsync();
+    }
+
+    internal async Task ReturnToDeveloperMenuAsync()
+    {
         if (_clawSensorProbe.State is ClawSensorProbeState.Starting or ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase)
             await StopClawSensorProbeSafelyAsync();
         _clawSensorProbeUiTimer?.Stop();
