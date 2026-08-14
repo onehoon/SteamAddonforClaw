@@ -41,6 +41,8 @@ internal static class StatusPresentation
     internal static bool IsControllerStateTrusted(SystemStatusSnapshot snapshot) =>
         snapshot.RecoverySafe
         && !snapshot.AddonOwnedOutputIdentityUncertain
+        && snapshot.HardwareCompatibility.Status == HardwareCompatibilityStatus.Supported
+        && snapshot.Compatibility.Status == ControllerEnvironmentCompatibilityStatus.Supported
         && snapshot.RoutingDecision.Reason is not (RoutingDecisionReason.DeviceCompatibilityIndeterminate or RoutingDecisionReason.ControllerEnvironmentIndeterminate);
 
     /// <summary>
@@ -54,7 +56,7 @@ internal static class StatusPresentation
         RoutingRuntimeStatusSnapshot routingStatus,
         bool nativeXInputVerified)
     {
-        if (!stateTrusted) return "Unavailable";
+        if (!stateTrusted || !routingStatus.Available) return "Unavailable";
 
         if (routingStatus.OperationalState == RoutingOperationalState.OverrideActive
             && routingStatus.SteamOutputActive

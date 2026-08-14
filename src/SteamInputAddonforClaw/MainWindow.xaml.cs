@@ -40,6 +40,7 @@ public sealed partial class MainWindow : Window
     private readonly Func<RoutingRuntimeStatusSnapshot> _routingRuntimeStatusProvider;
     private SystemStatusSnapshot? _latestSystemStatus;
     private int _isRefreshingStatus;
+    private int _statusRefreshPending;
     private bool _setupPromptActive;
     private bool _setupPromptDeclinedForCurrentProcess;
     private bool _windowActivatedForUser;
@@ -107,6 +108,11 @@ public sealed partial class MainWindow : Window
 
     public void UpdateSteamSessionState(SteamSessionState state)
     {
+        RequestStatusRefresh();
+    }
+
+    internal void RequestStatusRefresh()
+    {
         DispatcherQueue.TryEnqueue(() =>
         {
             _ = RefreshSystemStatusAsync();
@@ -153,11 +159,21 @@ public sealed partial class MainWindow : Window
     private async Task RefreshSystemStatusAsync()
     {
         if (_prerequisiteSetupInProgress) return;
-        if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0) return;
+        if (Interlocked.Exchange(ref _isRefreshingStatus, 1) != 0)
+        {
+            Volatile.Write(ref _statusRefreshPending, 1);
+            return;
+        }
         StatusContent.SetRefreshing(true);
         try { RenderSystemStatus(await _systemStatusProvider.CaptureAsync()); }
         catch (Exception exception) { AppLog.Warn("Status", "System status refresh failed.", exception, ("Reason", "SnapshotCaptureFailed")); }
-        finally { StatusContent.SetRefreshing(false); Volatile.Write(ref _isRefreshingStatus, 0); }
+        finally
+        {
+            StatusContent.SetRefreshing(false);
+            Volatile.Write(ref _isRefreshingStatus, 0);
+            if (Interlocked.Exchange(ref _statusRefreshPending, 0) != 0)
+                DispatcherQueue.TryEnqueue(() => _ = RefreshSystemStatusAsync());
+        }
     }
 
     private void RenderSystemStatus(SystemStatusSnapshot snapshot)

@@ -6,10 +6,15 @@ namespace SteamInputAddonforClaw.Routing;
 /// is eligible" from "routing has actually entered and the Steam output stage is live".
 /// </summary>
 internal readonly record struct RoutingRuntimeStatusSnapshot(
+    bool Available,
     RoutingOperationalState OperationalState,
     bool SteamOutputActive,
     bool NativeDirectInputActive)
 {
     internal static RoutingRuntimeStatusSnapshot Unavailable { get; } =
-        new(RoutingOperationalState.Passive, SteamOutputActive: false, NativeDirectInputActive: false);
+        new(
+            Available: false,
+            OperationalState: RoutingOperationalState.Passive,
+            SteamOutputActive: false,
+            NativeDirectInputActive: false);
 }

@@ -234,13 +234,13 @@ public partial class App : Application
             () => _routingRuntimeCoordinator?.CancelInFlightTransition());
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
-        _ = ReconcileRoutingAsync();
         RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => _routingRuntimeCoordinator is null
             ? RoutingRuntimeStatusSnapshot.Unavailable
             : new(
-                _routingRuntimeCoordinator.CurrentOperationalState,
-                _routingRuntimeCoordinator.ActiveSessionHasSteamOutputEnabled,
-                _msiClawNativeModeSession?.IsActive == true);
+                Available: true,
+                OperationalState: _routingRuntimeCoordinator.CurrentOperationalState,
+                SteamOutputActive: _routingRuntimeCoordinator.ActiveSessionHasSteamOutputEnabled,
+                NativeDirectInputActive: _msiClawNativeModeSession?.IsActive == true);
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider,
             developerTestModeState: _developerTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
         _mainWindow.Closed += OnMainWindowClosed;
@@ -260,6 +260,7 @@ public partial class App : Application
             _mainWindow.Activate();
             AppLog.Info("Main window activated.");
         }
+        _ = ReconcileRoutingAsync();
 
     }
 
@@ -272,31 +273,35 @@ public partial class App : Application
 
     private async Task ReconcileRoutingAsync(CancellationToken cancellationToken = default)
     {
-        if (_routingRuntimeCoordinator is null) return;
-        try
+        var runtime = _routingRuntimeCoordinator;
+        if (runtime is null) return;
+        await RoutingReconcileStatusRefresh.RunAsync(async () =>
         {
-            var result = await _routingRuntimeCoordinator.ReconcileAsync(cancellationToken).ConfigureAwait(false);
-            if (!result.Succeeded)
-                AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,
-                    ("Action", result.Action), ("State", result.State), ("Reason", result.Reason));
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation failed; routing is being failed closed.", exception);
             try
             {
-                if (_msiClawNativeModeSession is not null)
-                    await _msiClawNativeModeSession.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
-                var rollback = await _routingRuntimeCoordinator.FailClosedAsync().ConfigureAwait(false);
-                if (!rollback.Succeeded)
-                    AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));
+                var result = await runtime.ReconcileAsync(cancellationToken).ConfigureAwait(false);
+                if (!result.Succeeded)
+                    AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,
+                        ("Action", result.Action), ("State", result.State), ("Reason", result.Reason));
             }
-            catch (Exception rollbackException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (Exception exception)
             {
-                AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback threw an exception.", rollbackException);
+                AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation failed; routing is being failed closed.", exception);
+                try
+                {
+                    if (_msiClawNativeModeSession is not null)
+                        await _msiClawNativeModeSession.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
+                    var rollback = await runtime.FailClosedAsync().ConfigureAwait(false);
+                    if (!rollback.Succeeded)
+                        AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));
+                }
+                catch (Exception rollbackException)
+                {
+                    AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback threw an exception.", rollbackException);
+                }
             }
-        }
+        }, () => _mainWindow?.RequestStatusRefresh()).ConfigureAwait(false);
     }
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
