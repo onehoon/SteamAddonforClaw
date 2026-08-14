@@ -1,0 +1,8 @@
+<UserControl
+    x:Class="SteamInputAddonforClaw.Views.ControllerPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Padding="32">
+        <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
+    </StackPanel>
+</UserControl>
