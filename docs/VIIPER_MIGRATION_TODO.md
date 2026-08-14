@@ -41,12 +41,11 @@ Rules for this backlog:
 The current authoritative Addon main baseline is:
 
 ```text
-0c688c27c5dc3a6f505d84074a5ece7c77224c7d
+8cb85834cb2c8dc860b483ce5fbca3a8662722ee
 ```
 
-This is the merge commit for Addon PR #150, which added the side-by-side M4A
-canonical session foundation. M4A corrective classified-remove synchronization
-is the current implementation step.
+This is the post-M4A corrective main baseline. Addon PR #150 and the
+classified-remove synchronization in PR #151 are merged and validated.
 
 Historical pre-M3 milestones are retained for migration traceability:
 
@@ -89,7 +88,7 @@ This baseline contains the PR8-PR11 lifecycle/ownership/callback/transport harde
 
 The canonical Gordon state now records independent `L2`/`R2` digital full-pull inputs. The final semantics are `digital full-pull = explicit L2/R2 OR analog saturation`; explicit L2/R2 does not change analog trigger magnitude. The canonical `SteamControllerDeviceState` ABI size is **62 bytes**.
 
-Any future Addon DLL, generated header, or P/Invoke definition must come from the same pinned VIIPER commit/build: `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` and its matching canonical build. The current embedded production payload remains the legacy artifact until M4B.
+Any Addon DLL, generated header, or P/Invoke definition must come from the same pinned VIIPER commit/build: `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` and its matching canonical build. M4B adopts the verified canonical payload recorded below.
 
 ---
 
@@ -648,8 +647,8 @@ The raw builder is removed only after physical routing proof in M5.
 **Status: IN PROGRESS**
 
 M4 is intentionally split into two independently reviewable Addon steps.
-M4A is the current implementation step; M4B remains blocked until M4A is
-validated. M4 is not validated yet.
+M4A is validated and complete; M4B is the current implementation step. M4 is
+not validated yet.
 
 Keep it focused on lifecycle parity. Do not add Game Bar/Xbox360 or gyro here.
 
@@ -657,7 +656,7 @@ Keep it focused on lifecycle parity. Do not add Game Bar/Xbox360 or gyro here.
 
 ### M4A — canonical session/runtime foundation
 
-**Status: IN PROGRESS — corrective sync after Addon PR #150**
+**Status: VALIDATED / COMPLETE — Addon PR #150 + #151**
 
 M4A owns:
 
@@ -678,7 +677,7 @@ HidHide, or production Steam-session orchestration.
 
 ### M4B — canonical payload and production routing cutover
 
-**Status: BLOCKED until M4A corrective sync is reviewed and merged**
+**Status: CURRENT IMPLEMENTATION**
 
 M4B owns:
 
@@ -698,7 +697,7 @@ integration belong to M4B.
 
 ## 4.1 Embedded dependency update — M4B
 
-Replace the old payload built from `./clib/` with a Release Windows amd64 DLL built from the newly pinned canonical `./lib/viiper` baseline.
+Replace the old payload built from `./clib/` with the verified Release Windows amd64 DLL built from the pinned canonical `./lib/viiper` baseline.
 
 Update together:
 
@@ -719,9 +718,15 @@ Provenance must record:
 - exact immutable commit/tag;
 - build command from `./lib/viiper`;
 - Go/toolchain information;
-- final DLL SHA-256.
+- final generated header and DLL SHA-256 values;
+- native enum/state `sizeof` and offset checks against the final pair.
 
-Do not reuse the old `04FD...` hash.
+Do not reuse the old `04FD...` hash. The final M4B payload hashes are:
+
+```text
+header: 99EC2B08FCC1B168B2AB58BFDDC0B76F74FBC5FFE0D4D2D19D2B25BE1B7CAEF7
+dll:    FEBD1D688426144E2973EC3914AEED14DCA35235AD0634E3DB4809101FA0999D
+```
 
 ## 4.2 First production canonical lifetime — M4B
 
@@ -1092,7 +1097,7 @@ viiper_free_string
 
 Target is canonical typed exports.
 
-## Legacy embedded payload
+## Historical pre-M4B embedded payload
 
 Current Addon dependency provenance still points to:
 
@@ -1197,7 +1202,7 @@ Update this table whenever a step changes state.
 | M1 | exact usbip-win2 0.9.7.7 routing gate | **VALIDATED** | M0 | Addon PR #144 merged at `c9ae8f27...`; exact usbip-win2 0.9.7.7 gate |
 | M2 | canonical C# ABI definitions/tests | **VALIDATED** | M1 | Addon PR #146 merged at `02c9bc7...`; no production wiring |
 | M3 | typed Gordon state mapper/parity tests | **VALIDATED** | M2 | Addon PR #148 merged at `6b270bbc...`; typed mapper/parity only; no production cutover |
-| M4 | canonical payload/runtime production cutover | **IN PROGRESS** | M3 | M4A corrective sync in progress; M4B remains blocked |
+| M4 | canonical payload/runtime production cutover | **IN PROGRESS** | M3 | M4A validated; M4B is the current implementation |
 | M5 | physical routing proof + legacy cleanup | **BLOCKED / HARDWARE** | M4 | Required before deleting parity path |
 | M6 | Gordon host-output / rumble | **DEFERRED** | M5 | Separate research/PR |
 | M7 | Game Bar Gordon-neutral + typed X360 | **DEFERRED** | M5 | Minimize Gordon hotplug |

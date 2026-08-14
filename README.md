@@ -988,7 +988,7 @@ See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the current component a
 
 ## VIIPER
 
-The Developer-only Classic Steam Controller lifecycle PoC bundles `libVIIPER.dll` built directly from [onehoon/VIIPER](https://github.com/onehoon/VIIPER) tag `steam-input-addon-baseline-1`. That immutable tag points to the Valkirie baseline `209c882009caea4f3baf322b9b6020c1a921feed`, whose lineage is [Valkirie/VIIPER](https://github.com/Valkirie/VIIPER) and [Alia5/VIIPER](https://github.com/Alia5/VIIPER). VIIPER is GPL-3.0.
+The Classic Steam Controller production path bundles `libVIIPER.dll` built directly from [onehoon/VIIPER](https://github.com/onehoon/VIIPER) pinned commit `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d`. VIIPER is GPL-3.0.
 
 The embedded DLL is loaded only through an absolute path using `NativeLibrary.Load` and required C exports. A standalone `viiper.exe` is not required. Handheld Companion's bundled DLL is not redistributed or used as a dependency; HHC remains a behavioral reference only.
 

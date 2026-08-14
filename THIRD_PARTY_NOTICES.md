@@ -34,9 +34,8 @@ The following are the direct NuGet dependencies currently declared by `src/Steam
 ### VIIPER
 
 - Project: VIIPER
-- Canonical source: https://github.com/onehoon/VIIPER/tree/steam-input-addon-baseline-1
-- Source archive: https://github.com/onehoon/VIIPER/archive/refs/tags/steam-input-addon-baseline-1.tar.gz
-- Source baseline: `steam-input-addon-baseline-1` -> `209c882009caea4f3baf322b9b6020c1a921feed`
+- Canonical source: https://github.com/onehoon/VIIPER/tree/db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
+- Source baseline: pinned commit `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d`
 - Lineage: https://github.com/Valkirie/VIIPER -> https://github.com/Alia5/VIIPER
 - Copyright: Peter Repukat (as identified by the upstream project)
 - License: GPL-3.0

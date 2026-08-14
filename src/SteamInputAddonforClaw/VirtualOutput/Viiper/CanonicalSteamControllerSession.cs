@@ -20,7 +20,7 @@ internal enum CanonicalPendingCleanupPhase
     ServerClose
 }
 
-internal sealed class CanonicalSteamControllerSession : IDisposable, ICanonicalSteamControllerStateSink
+internal sealed class CanonicalSteamControllerSession : ICanonicalSteamControllerSession
 {
     private const string LoopbackAddress = "127.0.0.1:3241";
     private readonly ICanonicalViiperNativeApi _native;
@@ -42,6 +42,16 @@ internal sealed class CanonicalSteamControllerSession : IDisposable, ICanonicalS
     internal uint? BusId => _busOwned ? _busId : null;
     internal nuint DeviceHandle => _deviceHandle;
     internal uint? LogicalDeviceId => _logicalDeviceId;
+
+    CanonicalSteamControllerSessionState ICanonicalSteamControllerSession.State => State;
+    CanonicalPendingCleanupPhase ICanonicalSteamControllerSession.PendingCleanupPhase => PendingCleanupPhase;
+    uint? ICanonicalSteamControllerSession.BusId => BusId;
+    uint? ICanonicalSteamControllerSession.LogicalDeviceId => LogicalDeviceId;
+    bool ICanonicalSteamControllerSession.Start() => Start();
+    bool ICanonicalSteamControllerSession.SetNeutral() => SetNeutral();
+    bool ICanonicalSteamControllerSession.RemoveDevice() => RemoveDevice();
+    bool ICanonicalSteamControllerSession.RetryPendingCleanup() => RetryPendingCleanup();
+    bool ICanonicalSteamControllerSession.CompleteRuntimeCleanup() => CompleteRuntimeCleanup();
 
     internal bool Start()
     {
@@ -280,4 +290,17 @@ internal sealed class CanonicalSteamControllerSession : IDisposable, ICanonicalS
 internal interface ICanonicalSteamControllerStateSink
 {
     bool SetState(SteamControllerDeviceState state);
+}
+
+internal interface ICanonicalSteamControllerSession : ICanonicalSteamControllerStateSink, IDisposable
+{
+    CanonicalSteamControllerSessionState State { get; }
+    CanonicalPendingCleanupPhase PendingCleanupPhase { get; }
+    uint? BusId { get; }
+    uint? LogicalDeviceId { get; }
+    bool Start();
+    bool SetNeutral();
+    bool RemoveDevice();
+    bool RetryPendingCleanup();
+    bool CompleteRuntimeCleanup();
 }
