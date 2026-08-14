@@ -63,11 +63,13 @@ public sealed class ClassicSteamControllerOutputStageTests : IDisposable
     public async Task CanonicalFactoryFailureLeavesNoRecoveryBoundaryOrOwnershipUncertainty()
     {
         var stage = CreateCanonicalFactoryFailure(new FakeEnumerator([[]]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
         var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
+        Assert.Contains("InvalidOperationException", result.Reason);
         Assert.True(rollback.Succeeded);
         Assert.Equal(RecoveryStatus.Success, new RecoveryManager(new RecoveryJournalStore(Path.Combine(_directory, "factory-failure-recovery.json"))).LoadJournal().Status);
     }
