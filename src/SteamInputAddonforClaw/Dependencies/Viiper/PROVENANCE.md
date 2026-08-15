@@ -23,20 +23,28 @@ intended to be merged or promoted as the new pinned VIIPER baseline.
 
 ## Build attestation
 
+Built with the literal official entrypoint, `just build-libVIIPER Release`, against a clean checkout
+of `da78d0fc77034afa48485def31dc1ba54960a04e` (PowerShell 7/`pwsh` installed for this purpose):
+
 ```text
-CGO_ENABLED=1
-GOOS=windows
-GOARCH=amd64
-go build -buildmode=c-shared -ldflags="-s -w" -trimpath -o dist/libVIIPER/libVIIPER.dll ./lib/viiper
+just build-libVIIPER Release
+  -> New-Item dist/libVIIPER
+  -> go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+  -> pwsh -NoProfile -NonInteractive -File scripts/inject-version.ps1 ...
+  -> goversioninfo -64 -o lib/viiper/resource.syso ...
+  -> CGO_ENABLED=1 go build -buildmode=c-shared -trimpath -ldflags "-s -w" -o dist/libVIIPER/libVIIPER.dll ./lib/viiper
+  -> gendef - dist/libVIIPER/libVIIPER.dll | Set-Content ... libVIIPER.def
+  -> go run ./lib/viiper/postbuild
+  -> just licenses-libVIIPER
 ```
 
 - Go: `go1.26.5 windows/amd64`
-- GCC/MinGW: `w64devkit`-equivalent toolchain, `gcc.exe (MinGW-W64 x86_64-ucrt-posix-seh) 16.1.0`
+- GCC/MinGW: `gcc.exe (MinGW-W64 x86_64-ucrt-posix-seh) 16.1.0`
 - Output: `libVIIPER.dll` (Windows x64)
 - Generated header SHA-256: `69D46A77E1E1FF925E986AC5E4A7B50362EB672350040C74AE0F33C3F72ED740`
 - DLL SHA-256: `F469C23871EE528BDB390AF953E73A435B8D2DB2BBD68BCB4F17FA7362180F19`
-- Canonical entrypoint: `just build-libVIIPER Release`
-- Native ABI checks: `sizeof(SteamControllerDeviceRemoveResult) = 4`, `sizeof(SteamControllerDeviceState) = 62`, `L1 = 4`, `LPadX = 24` (unchanged from the pinned baseline — the diagnostic commit does not touch the ABI struct)
+- Canonical entrypoint: `just build-libVIIPER Release` (used verbatim for this artifact; not approximated by a raw `go build`)
+- Native ABI checks: `sizeof(SteamControllerDeviceRemoveResult) = 4`, `sizeof(SteamControllerDeviceState) = 62`, `L1 = 4`, `LPadX = 24` (unchanged from the pinned baseline — the diagnostic commit does not touch the ABI struct; confirmed via VIIPER's own ABI/offset tests before this build)
 
 The build does not use or redistribute Handheld Companion's bundled DLL, and no byte-for-byte equivalence claim is made. Rebuilds are traceable through the exact source, recipe, toolchain, and artifact hash; CI verifies the committed artifact hash rather than demanding a byte-identical rebuild.
 
