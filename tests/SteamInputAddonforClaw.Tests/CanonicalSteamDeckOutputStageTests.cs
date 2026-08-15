@@ -490,6 +490,77 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
+    [Fact]
+    public async Task SameCountWithDifferentContainerIdsNeverStabilizes()
+    {
+        var leafA = DeviceWithContainer("USB\\VID_28DE&PID_1205\\A", Guid.NewGuid());
+        var leafB = DeviceWithContainer("USB\\VID_28DE&PID_1205\\B", Guid.NewGuid());
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([
+            [], [UsbIpHost(), leafA], [UsbIpHost(), leafB], [UsbIpHost(), leafA], [UsbIpHost(), leafB], []
+        ]), new FakeHidHide(), TimeSpan.FromMilliseconds(4));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task SameLogicalKeyWithDifferentInstanceIdsNeverStabilizes()
+    {
+        var container = Guid.NewGuid();
+        var first = DeviceWithContainer("USB\\VID_28DE&PID_1205\\FIRST", container);
+        var second = DeviceWithContainer("USB\\VID_28DE&PID_1205\\SECOND", container);
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([
+            [], [UsbIpHost(), first], [UsbIpHost(), second], [UsbIpHost(), first], [UsbIpHost(), second], []
+        ]), new FakeHidHide(), TimeSpan.FromMilliseconds(4));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task CandidateResolvedOnceThenDisappearingFailsClosedAtTimeout()
+    {
+        var candidate = Device("USB\\VID_28DE&PID_1205\\TRANSIENT");
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([
+            [], [UsbIpHost(), candidate], [], [], []
+        ]), new FakeHidHide(), TimeSpan.FromMilliseconds(4));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task CandidateAppearingTooLateForThreeStableSamplesFailsClosed()
+    {
+        var candidate = Device("USB\\VID_28DE&PID_1205\\LATE");
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([
+            [], [], [UsbIpHost(), candidate], [UsbIpHost(), candidate], []
+        ]), new FakeHidHide(), TimeSpan.FromMilliseconds(2));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
     private CanonicalSteamDeckOutputStage Create(FakeCanonicalSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null)
     {
         Directory.CreateDirectory(_directory);
@@ -513,6 +584,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     private const string UsbIpHostInstanceId = "ROOT\\USB\\0000";
     private static ControllerDeviceInfo UsbIpHost() => new(UsbIpHostInstanceId, null, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "System", null, "usbip2_ude", null, null, true);
     private static ControllerDeviceInfo Device(string id) => new(id, Guid.Empty, null, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+    private static ControllerDeviceInfo DeviceWithContainer(string id, Guid container) => new(id, container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
 
     public CanonicalSteamDeckOutputStageTests()
     {
