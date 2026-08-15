@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     0b3627317d2008065d8ec231f94bf31af7527bbd
+Commit:     9ed7eeec6e92b3f54cd4ac6785da22db8725742d
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: af9e08712fe9a33479e825ef5f8a6b2f0c283eb5e3e69027130484071049bced
-DLL SHA-256:              b2050ea357a6b663a97c5ede9ab01a134162ccb3661d96e318897f40a29b59ea
+DLL SHA-256:              a5e9549991eb14213453af719b294981f963a8cb0a0971efac94e47756927aa3
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,34 +42,12 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-This section holds the human-reviewed ABI delta for the currently embedded
-revision. A future dependency-automation adoption resets this section to an
-evergreen "review required" placeholder before anything is merged -- it is
-never synthesized from a new header, and a human must replace the
-placeholder with the actual reviewed delta (as below) before that PR can
-merge.
-
-Reviewed delta for `0b3627317d2008065d8ec231f94bf31af7527bbd` (adopted in
-Phase 2B2, from `ec64282c69e5587466b950332d7983fd53a7d778`): diffing the full
-exported function list of both generated headers shows exactly one added
-export, `SetSteamDeckOutputCallback` (and its `SteamDeckOutputCallback`
-delegate typedef); nothing else was added or removed.
-`SteamDeckDeviceState`/`SteamDeckDeviceRemoveResult` are byte-for-byte
-unchanged:
-
-```text
-sizeof(SteamDeckDeviceState) = 76
-sizeof(SteamDeckDeviceRemoveResult) = 4
-L2Digital = 6, R2Digital = 7, R3 = 22, QuickAccess = 27
-LPadX = 28, AccelX = 36, LTrigger = 56, LStickX = 60, RStickX = 64
-```
-
-The managed `ICanonicalViiperNativeApi` surface, `RequiredExports`, and
-callback-lifetime rooting (`CanonicalViiperNativeApi.cs`,
-`CanonicalViiperNativeTypes.cs`) were updated in the same change to bind
-`SetSteamDeckOutputCallback` and keep the native and managed ABI aligned. No
-production caller registers the Steam Deck output callback yet; Addon
-rumble/haptics handling remains a separate, later feature track.
+ABI compatibility is not inferred by the dependency automation. Review the
+generated `libVIIPER.h` diff and the managed interop
+(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
+`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
+Replace this paragraph with the reviewed ABI delta -- including any changed
+struct layout, offsets, or exports -- once confirmed.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
