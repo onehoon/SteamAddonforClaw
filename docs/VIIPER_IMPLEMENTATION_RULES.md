@@ -22,6 +22,14 @@ These are mandatory.
 
 `FORK_ARCHITECTURE.md` is the fork's architectural source of truth. `docs/libviiper/fork-api.md` is the consumer-facing canonical ABI/lifecycle guide.
 
+For the current Steam Deck SD2 work, the selected immutable VIIPER revision is:
+
+```text
+onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778
+```
+
+The former `feature/canonical-steamdeck` branch was merged and removed. Do not use it as a source reference.
+
 ---
 
 ## 2. Scope of this rule
@@ -43,7 +51,7 @@ This rule applies to:
 - updates to the pinned VIIPER baseline;
 - review of corrective VIIPER PRs discovered during Addon integration.
 
-The active Steam Deck migration begins with **SD1** in `VIIPER_MIGRATION_TODO.md`.
+SD1 is complete. The active Steam Deck migration step is **SD2** in `VIIPER_MIGRATION_TODO.md`.
 
 ---
 
@@ -109,6 +117,8 @@ For Steam Deck work, inspect at minimum:
 
 ```text
 device/steamdeck/
+lib/viiper/steamdeck.go
+lib/viiper/steamdeck_test.go
 lib/viiper/
 ```
 
@@ -120,13 +130,13 @@ Documentation does not replace code review. If docs and executable behavior disa
 
 ## 4. Required pre-change checklist
 
-Before writing VIIPER code:
+Before writing VIIPER or Addon interop code:
 
-1. Start from the latest explicitly selected VIIPER baseline/branch.
+1. Start from the latest explicitly selected VIIPER immutable revision. For current SD2 this is `ec64282c69e5587466b950332d7983fd53a7d778`.
 2. Read `FORK_ARCHITECTURE.md` from that revision.
 3. Read `docs/libviiper/fork-api.md` from that revision.
 4. Read the Addon `VIIPER_MIGRATION_TODO.md`.
-5. Identify the exact canonical `lib/viiper` files affected.
+5. Identify the exact canonical `lib/viiper` files affected or consumed.
 6. Identify the underlying device implementation affected.
 7. Identify generated C ABI impact.
 8. Identify focused/lifecycle/race tests protecting the contract.
@@ -166,33 +176,38 @@ The Addon's new primary target architecture is Steam Deck, but the current produ
 
 ### 6.1 Existing device implementation is the protocol authority
 
-The first Steam Deck canonical work should expose the existing:
+VIIPER `main@ec64282...` exposes the existing:
 
 ```text
 device/steamdeck
 ```
 
-through a typed `lib/viiper` wrapper.
+through the canonical typed `lib/viiper` wrapper.
 
 Do not create a second Steam Deck report builder inside `lib/viiper` or the Addon.
 
 ### 6.2 Generic ABI, not Claw-specific ABI
 
-A canonical `SteamDeckDeviceState` must represent generic Steam Deck semantic state. Do not remove trackpad or additional rear-button fields merely because the first Addon consumer does not use them.
+The canonical `SteamDeckDeviceState` represents generic Steam Deck semantic state. Do not remove trackpad or additional rear-button fields merely because the first Addon consumer does not use them.
 
 The Addon may send neutral values for unsupported physical controls.
 
-### 6.3 Minimal SD1 callback scope
+The selected ABI is pinned at:
+
+```text
+SteamDeckDeviceState = 76 bytes
+SteamDeckDeviceRemoveResult = 4 bytes
+```
+
+Critical field offsets are pinned by VIIPER tests. The generated header from the selected build remains the exact authority for Addon P/Invoke layout.
+
+### 6.3 Output callback remains outside initial SD2 scope
 
 The first Steam Deck input smoke test does not require a host-output callback.
 
-If `device/steamdeck` callback registration/dispatch does not yet satisfy the canonical callback synchronization contract, **do not expose a public canonical Steam Deck output callback just to make the first wrapper look feature-complete**.
+The validated SD1 wrapper intentionally does not expose `SetSteamDeckOutputCallback`, rumble, or haptics ABI because `device/steamdeck` callback registration/dispatch still needs a separate review against the canonical callback synchronization contract.
 
-Instead:
-
-- expose the minimal typed input/lifecycle surface;
-- validate it;
-- harden callback ownership separately before adding callback/rumble/haptics ABI.
+Do not add a public callback merely to make SD2 feature-complete.
 
 ### 6.4 No Steam Deck production claim before hardware proof
 
@@ -224,7 +239,7 @@ FORK_ARCHITECTURE.md
 docs/libviiper/fork-api.md
 ```
 
-For the Steam Deck typed wrapper, both documents should stop claiming that `device/steamdeck` lacks a typed canonical wrapper only after the wrapper actually exists on the PR branch.
+The Steam Deck typed-wrapper documentation requirement was satisfied by VIIPER PR #16. Future changes must keep those documents synchronized with the public ABI.
 
 ---
 
@@ -262,39 +277,47 @@ VIIPER_INTEGRATION.md
 VIIPER_MIGRATION_TODO.md
 ```
 
+For current SD2, all new native artifacts and managed ABI definitions must come from:
+
+```text
+onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778
+```
+
 Do not mix a DLL from one VIIPER revision with a generated header, managed layout, documentation, or provenance from another revision.
+
+The Addon's currently embedded Gordon payload remains `db70bded...` until the SD2 atomic adoption change lands.
 
 ---
 
-## 10. Immediate application to SD1
+## 10. Immediate application to SD2
 
-Current active VIIPER branch:
+SD1 is validated and merged to VIIPER `main`.
 
-```text
-onehoon/VIIPER:feature/canonical-steamdeck
-```
-
-Selected base:
+Selected native source revision:
 
 ```text
-db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
+onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778
 ```
 
-SD1 exists to expose the existing Steam Deck implementation through the canonical typed ABI with minimum input/lifecycle surface.
+SD2 exists to adopt that minimal typed Steam Deck ABI into the Addon side-by-side with the existing Gordon production path.
 
-Before implementing/reviewing SD1, verify:
+Before implementing/reviewing SD2, verify:
 
-- `FORK_ARCHITECTURE.md` and `fork-api.md` were read from the branch/base being changed;
-- the existing Gordon wrapper is used only as a lifecycle/ownership pattern, not as a reason to copy Gordon-specific state semantics;
+- `FORK_ARCHITECTURE.md` and `fork-api.md` are read from `ec64282c69e5587466b950332d7983fd53a7d778`;
+- matching Release `libVIIPER.dll` and generated `libVIIPER.h` are built from that exact commit;
+- `SteamDeckDeviceState` managed layout matches the generated ABI and the 76-byte native pin;
+- `SteamDeckDeviceRemoveResult` is represented with the correct 4-byte width and values;
+- `CreateSteamDeckDevice`, `SetSteamDeckDeviceState`, `RemoveSteamDeckDevice`, and `RemoveSteamDeckDeviceEx` signatures match the generated header;
+- shared identity/attach/detach APIs are reused rather than adding Deck-specific lifecycle calls;
+- the existing Gordon path is not deleted or broadly refactored before hardware proof;
 - default Steam Deck identity remains `28DE:1205`;
 - frame ownership remains internal to `device/steamdeck`;
-- typed state includes the generic Steam Deck fields needed by external consumers;
-- shared identity/attach/detach APIs accept the typed handle;
-- typed removal preserves caller-owned bus lifetime;
-- classified removal follows the canonical result model;
-- no public output callback is added until callback synchronization is proven;
-- generated header/export/layout tests are updated;
-- Gordon and `clib` compatibility remain intact.
+- trackpad and IMU fields remain neutral initially but stay present in the ABI;
+- physical LT/RT full-pull state remains independent from analog travel;
+- M1/M2 map to R4/L4 for the first smoke test;
+- no public output callback/rumble/haptics ABI is assumed;
+- recovery/PnP/HidHide safety ordering remains intact;
+- provenance, hashes, tests, integration docs, and TODO are updated atomically with payload adoption.
 
 ---
 
@@ -315,4 +338,4 @@ onehoon/VIIPER/docs/libviiper/fork-api.md
 
 For exact ABI work also require the generated `dist/libVIIPER/libVIIPER.h` from the selected build.
 
-No VIIPER implementation task for this Addon should proceed from memory alone.
+For current SD2, the selected VIIPER revision is `ec64282c69e5587466b950332d7983fd53a7d778` on `main`. No VIIPER implementation task for this Addon should proceed from the deleted development branch or from memory alone.
