@@ -234,10 +234,11 @@ internal sealed class CanonicalSteamControllerInputPublisher
                 // Real MSI Claw testing showed the #159 deadline scheduler maintaining ~250 Hz under
                 // normal load but suffering severe scheduling starvation under CPU-heavy workloads
                 // (sustained windows as low as ~60-150 Hz, tens to hundreds of skipped deadlines per
-                // heartbeat, and occasional multi-hundred-millisecond stalls). This is a short-lived
-                // input-delivery worker that spends most of each 4 ms interval waiting, not running, so
-                // AboveNormal gives it a better chance to run promptly when CPU-heavy games saturate
-                // available CPU -- without raising the whole process's priority or using realtime
+                // heartbeat, and occasional multi-hundred-millisecond stalls). This is a long-lived
+                // dedicated thread (kept for the whole routing session, not spun up per tick) whose
+                // per-wake CPU work is very short -- it spends most of each 4 ms interval waiting, not
+                // running -- so AboveNormal gives it a better chance to run promptly when CPU-heavy
+                // games saturate available CPU -- without raising the whole process's priority or realtime
                 // scheduling. This does not guarantee 250 Hz under saturation and does not eliminate all
                 // CPU starvation; see PR review notes for the hardware A/B comparison this is based on.
                 Priority = ThreadPriority.AboveNormal,
