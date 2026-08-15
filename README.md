@@ -330,4 +330,4 @@ docs/archive/gordon-baseline-2026-08-15/
 
 # License
 
-GPL-3.0-or-later unless otherwise stated for retained third-party reference material.
+AGPL-3.0-only for the Steam Input Addon for Claw project. Retained third-party components and reference material remain under their own licenses; direct reuse of third-party source requires an individual compatibility and license review.
