@@ -127,5 +127,6 @@ internal sealed class StaticSteamBigPicturePreference : ISteamBigPictureRoutingP
 
 internal sealed class InactiveSteamBigPictureProbe : ISteamBigPictureWindowProbe
 {
-    public SteamBigPictureProbeResult Capture() => new(false, true, "Inactive");
+    public BigPictureCandidateInspection InspectCandidate(IntPtr window) => new(false, true, 0);
+    public BigPictureScanResult ScanForCandidate(IntPtr preferredHwnd) => new(false, IntPtr.Zero, 0, true);
 }
