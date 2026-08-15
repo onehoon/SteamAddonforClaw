@@ -11,7 +11,7 @@ internal enum SteamControllerDeviceRemoveResult : int
 }
 
 // Mirrors VIIPER's SteamDeckDeviceRemoveResult enum (dist/libVIIPER/libVIIPER.h,
-// ec64282c69e5587466b950332d7983fd53a7d778). Distinct managed type from
+// 0b3627317d2008065d8ec231f94bf31af7527bbd). Distinct managed type from
 // SteamControllerDeviceRemoveResult even though the values are identical -- Gordon and Steam Deck
 // are separate typed devices in VIIPER with their own enums, and keeping them separate here avoids
 // silently coupling the two typed lifecycles together.
@@ -250,16 +250,24 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     public bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback)
     {
-        var succeeded = Succeeded(_setSteamDeckOutputCallback(deviceHandle, callback));
-        if (succeeded)
+        // The native call and the managed root mutation must be one serialized operation, not two
+        // independent steps: two threads racing SetSteamDeckOutputCallback on the same handle could
+        // otherwise interleave as native<-cb1, native<-cb2, root<-cb2, root<-cb1, leaving native
+        // holding cb2's function pointer while the managed root only keeps cb1 alive -- cb2 becomes
+        // GC-eligible while VIIPER can still invoke it. Holding _callbackGate across both the native
+        // call and the corresponding dictionary mutation makes the pair atomic with respect to any
+        // other Set/Clear on this API instance, as well as the teardown-driven root release paths
+        // below, which already run under the same lock.
+        lock (_callbackGate)
         {
-            lock (_callbackGate)
+            var succeeded = Succeeded(_setSteamDeckOutputCallback(deviceHandle, callback));
+            if (succeeded)
             {
                 if (callback is null) _steamDeckOutputCallbacks.Remove(deviceHandle);
                 else _steamDeckOutputCallbacks[deviceHandle] = callback;
             }
+            return succeeded;
         }
-        return succeeded;
     }
 
     public bool RemoveSteamDeckDevice(nuint deviceHandle)

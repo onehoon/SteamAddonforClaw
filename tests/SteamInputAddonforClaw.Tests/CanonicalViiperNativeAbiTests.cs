@@ -489,6 +489,127 @@ public sealed class CanonicalViiperNativeAbiTests
     }
 
     [Fact]
+    public void SteamDeckCallback_ExNonSuccessRetainsOwnedRoot()
+    {
+        foreach (var result in new[]
+        {
+            SteamDeckDeviceRemoveResult.RetryableFailure,
+            SteamDeckDeviceRemoveResult.UnsafeOutcomeUnknown,
+            SteamDeckDeviceRemoveResult.Invalid
+        })
+        {
+            var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+            Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+            var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+            FakeExports.RemoveDeckDeviceExResult = result;
+            try
+            {
+                Assert.Equal(result, api.RemoveSteamDeckDeviceEx(deviceHandle));
+                CollectGarbage();
+                Assert.True(weak.TryGetTarget(out _));
+            }
+            finally
+            {
+                FakeExports.RemoveDeckDeviceExResult = SteamDeckDeviceRemoveResult.Success;
+            }
+        }
+    }
+
+    [Fact]
+    public void SteamDeckCallback_RemoveBusFailureKeepsOwnedRootRooted()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+
+        FakeExports.FailRemoveBus = true;
+        try
+        {
+            Assert.False(api.RemoveUSBBus(1, 1));
+            CollectGarbage();
+            Assert.True(weak.TryGetTarget(out _));
+        }
+        finally
+        {
+            FakeExports.FailRemoveBus = false;
+        }
+    }
+
+    [Fact]
+    public void SteamDeckCallback_CloseServerFailureKeepsOwnedRootRooted()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+
+        FakeExports.FailCloseServer = true;
+        try
+        {
+            Assert.False(api.CloseUSBServer(1));
+            CollectGarbage();
+            Assert.True(weak.TryGetTarget(out _));
+        }
+        finally
+        {
+            FakeExports.FailCloseServer = false;
+        }
+    }
+
+    [Fact]
+    public void SteamDeckCallback_ConcurrentSetCallsKeepNativeStateAndManagedRootConsistent()
+    {
+        // Regression test for a race where the native SetSteamDeckOutputCallback call and the
+        // managed dictionary mutation were two separate, non-atomic steps: two threads racing to
+        // set different callbacks on the same handle could interleave as native<-cbA, native<-cbB,
+        // root<-cbB, root<-cbA, leaving native holding cbB's function pointer while the managed
+        // dictionary only rooted cbA -- cbB becomes GC-eligible while VIIPER can still invoke it.
+        // With the native call and root mutation serialized under one lock, whichever thread's call
+        // is the last to complete must be the same call that both "won" the native side (observed
+        // here via FakeExports.LastSetDeckCallback, set from inside the locked native call) and the
+        // managed root -- run repeatedly with a Barrier to maximize the chance of actual overlap.
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+
+        var rootsField = typeof(CanonicalViiperNativeApi).GetField("_steamDeckOutputCallbacks", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        FakeExports.TrackLastSetDeckCallback = true;
+        try
+        {
+            for (var iteration = 0; iteration < 200; iteration++)
+            {
+                SteamDeckOutputCallback callbackA = (_, _, _) => { };
+                SteamDeckOutputCallback callbackB = (_, _, _) => { };
+                var barrier = new Barrier(2);
+
+                var threadA = new Thread(() =>
+                {
+                    barrier.SignalAndWait();
+                    api.SetSteamDeckOutputCallback(deviceHandle, callbackA);
+                });
+                var threadB = new Thread(() =>
+                {
+                    barrier.SignalAndWait();
+                    api.SetSteamDeckOutputCallback(deviceHandle, callbackB);
+                });
+
+                threadA.Start();
+                threadB.Start();
+                threadA.Join();
+                threadB.Join();
+
+                var roots = (Dictionary<nuint, SteamDeckOutputCallback>)rootsField.GetValue(api)!;
+                Assert.True(roots.TryGetValue(deviceHandle, out var rootedCallback));
+                Assert.Same(FakeExports.LastSetDeckCallback, rootedCallback);
+            }
+        }
+        finally
+        {
+            FakeExports.TrackLastSetDeckCallback = false;
+            FakeExports.LastSetDeckCallback = null;
+        }
+    }
+
+    [Fact]
     public void SteamDeckCallback_ServerCloseReleasesOwnedRootsAndControllerCallbacksAreUnaffectedByDeckLifecycle()
     {
         var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
@@ -602,6 +723,9 @@ public sealed class CanonicalViiperNativeAbiTests
         private static SteamControllerDeviceRemoveResult _removeDeviceExResult;
 
         [ThreadStatic]
+        private static SteamDeckDeviceRemoveResult _removeDeckDeviceExResult;
+
+        [ThreadStatic]
         private static bool _failSetDeckCallback;
 
         internal static SteamControllerDeviceRemoveResult RemoveDeviceExResult
@@ -610,11 +734,26 @@ public sealed class CanonicalViiperNativeAbiTests
             set => _removeDeviceExResult = value;
         }
 
+        internal static SteamDeckDeviceRemoveResult RemoveDeckDeviceExResult
+        {
+            get => _removeDeckDeviceExResult;
+            set => _removeDeckDeviceExResult = value;
+        }
+
         internal static bool FailSetDeckCallback
         {
             get => _failSetDeckCallback;
             set => _failSetDeckCallback = value;
         }
+
+        // Only tracked while TrackLastSetDeckCallback is explicitly enabled (by the concurrency
+        // regression test below) -- otherwise this static field would itself become an unintended
+        // extra GC root for every other test's registered callback, defeating the very
+        // root-released-after-teardown assertions those tests make. Deliberately NOT [ThreadStatic]:
+        // it mirrors VIIPER's single native callback slot per device handle, shared across whichever
+        // managed thread last successfully set it.
+        internal static bool TrackLastSetDeckCallback;
+        internal static SteamDeckOutputCallback? LastSetDeckCallback;
 
         internal static bool FailCloseServer
         {
@@ -702,10 +841,15 @@ public sealed class CanonicalViiperNativeAbiTests
 
         private static byte SetDeckStateImpl(nuint _, SteamDeckDeviceState __) => 1;
 
-        private static byte SetDeckCallbackImpl(nuint _, SteamDeckOutputCallback? __) => FailSetDeckCallback ? (byte)0 : (byte)1;
+        private static byte SetDeckCallbackImpl(nuint _, SteamDeckOutputCallback? __)
+        {
+            if (FailSetDeckCallback) return 0;
+            if (TrackLastSetDeckCallback) LastSetDeckCallback = __;
+            return 1;
+        }
 
         private static byte RemoveDeckDeviceImpl(nuint _) => 1;
 
-        private static SteamDeckDeviceRemoveResult RemoveDeckDeviceExImpl(nuint _) => SteamDeckDeviceRemoveResult.Success;
+        private static SteamDeckDeviceRemoveResult RemoveDeckDeviceExImpl(nuint _) => RemoveDeckDeviceExResult;
     }
 }
