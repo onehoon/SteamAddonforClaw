@@ -371,12 +371,99 @@ public sealed class SteamBigPictureWatcherTests
         Assert.False(watcher.IsActive);
     }
 
+    [Fact]
+    public void ProtectionBoundaryScanFailure_DoesNotGetStuckInEntryProtected_ReacquiresOnNextValidEvent()
+    {
+        var probe = new FakeProbe();
+        var hook = new FakeHook();
+        var scheduler = new ManualScheduler();
+        using var watcher = new SteamBigPictureWatcher(probe, hook, scheduler.Schedule);
+        var transitions = 0;
+        watcher.StateChanged += (_, _) => transitions++;
+        watcher.Start();
+
+        probe.AddCandidate(Hwnd1);
+        hook.Raise(BigPictureWinEventType.Create, Hwnd1);
+        Assert.Equal(1, transitions);
+
+        // A transient full-enumeration failure at the protection boundary must not revoke the session, but
+        // must also not leave the watcher stuck in EntryProtected forever.
+        probe.EnumerationReliable = false;
+        scheduler.FireLast();
+        Assert.True(watcher.IsActive);
+        Assert.Equal(1, transitions);
+
+        // No timer was rescheduled (no polling); recovery is purely event-driven.
+        var scheduleCountAfterFailure = scheduler.ScheduleCount;
+
+        // Confirm the watcher lost exact-HWND authority: destroying the old HWND now (if the watcher were
+        // still tracking it) would be a no-op either way, but a *new* valid candidate must re-anchor it.
+        probe.EnumerationReliable = true;
+        probe.RemoveCandidate(Hwnd1); // simulate Hwnd1 genuinely gone by the time recovery happens
+        probe.AddCandidate(Hwnd2);
+        hook.Raise(BigPictureWinEventType.Create, Hwnd2);
+
+        Assert.True(watcher.IsActive);
+        Assert.Equal(1, transitions); // still no externally-visible transition -- session never left "active"
+        Assert.Equal(scheduleCountAfterFailure, scheduler.ScheduleCount); // reacquire schedules no new timer
+
+        // Prove Hwnd2 is now genuinely tracked.
+        probe.RemoveCandidate(Hwnd2);
+        hook.Raise(BigPictureWinEventType.Destroy, Hwnd2);
+        Assert.False(watcher.IsActive);
+        Assert.Equal(2, transitions);
+    }
+
+    [Fact]
+    public void ActiveTrackedHwndDestroyed_ReplacementScanFails_DoesNotStayActiveTrackingDeadHwnd_ReacquiresLater()
+    {
+        var probe = new FakeProbe();
+        var hook = new FakeHook();
+        var scheduler = new ManualScheduler();
+        using var watcher = new SteamBigPictureWatcher(probe, hook, scheduler.Schedule);
+        var transitions = 0;
+        watcher.StateChanged += (_, _) => transitions++;
+        watcher.Start();
+
+        probe.AddCandidate(Hwnd1);
+        hook.Raise(BigPictureWinEventType.Create, Hwnd1);
+        scheduler.FireLast();
+        Assert.True(watcher.IsActive);
+        Assert.Equal(1, transitions);
+
+        // Tracked HWND is destroyed, and the replacement-search EnumWindows call itself fails (transient).
+        probe.EnumerationReliable = false;
+        probe.RemoveCandidate(Hwnd1);
+        hook.Raise(BigPictureWinEventType.Destroy, Hwnd1);
+
+        Assert.True(watcher.IsActive); // must not revoke on a transient failure
+        Assert.Equal(1, transitions);
+
+        // Because ACTIVE ignores all non-destroy discovery events, if the watcher were still ACTIVE while
+        // tracking the (now-dead) Hwnd1, a new BPM window appearing would never be picked up. Prove it is.
+        probe.EnumerationReliable = true;
+        probe.AddCandidate(Hwnd2);
+        hook.Raise(BigPictureWinEventType.Create, Hwnd2);
+
+        Assert.True(watcher.IsActive);
+        Assert.Equal(1, transitions);
+
+        // Prove Hwnd2 is now genuinely tracked (not the dead Hwnd1).
+        probe.RemoveCandidate(Hwnd2);
+        hook.Raise(BigPictureWinEventType.Destroy, Hwnd2);
+        Assert.False(watcher.IsActive);
+        Assert.Equal(2, transitions);
+    }
+
     private sealed class FakeProbe : ISteamBigPictureWindowProbe
     {
         private readonly Dictionary<IntPtr, (bool Reliable, uint Pid)> _candidates = new();
         private readonly List<IntPtr> _order = [];
 
         public int ScanForCandidateCallCount { get; private set; }
+
+        /// <summary>When false, ScanForCandidate simulates a full EnumWindows enumeration failure.</summary>
+        public bool EnumerationReliable { get; set; } = true;
 
         public void AddCandidate(IntPtr hwnd, uint pid = 100, bool reliable = true)
         {
@@ -400,6 +487,8 @@ public sealed class SteamBigPictureWatcherTests
         public BigPictureScanResult ScanForCandidate(IntPtr preferredHwnd)
         {
             ScanForCandidateCallCount++;
+            if (!EnumerationReliable) return new(false, IntPtr.Zero, 0, false);
+
             if (preferredHwnd != IntPtr.Zero && _candidates.TryGetValue(preferredHwnd, out var preferred) && preferred.Reliable)
                 return new(true, preferredHwnd, preferred.Pid, true);
 
