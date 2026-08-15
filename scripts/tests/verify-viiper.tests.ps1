@@ -48,6 +48,22 @@ function Assert-Failure {
 $fixturesToClean = @()
 
 try {
+    # 0. Default invocation (no -RepoRoot), matching the exact CI workflow
+    #    invocation, resolves RepoRoot on its own and succeeds against the
+    #    real repo checkout. This is a regression test for RepoRoot
+    #    resolution breaking under Windows PowerShell's -File launcher.
+    Push-Location $repoRoot
+    try {
+        $defaultOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $defaultExitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    if ($defaultExitCode -ne 0) {
+        throw "Expected 'default invocation without -RepoRoot' to succeed, but it failed with output:`n$($defaultOutput | Out-String)"
+    }
+
     # 1. Valid current dependency succeeds.
     $validRoot = New-Fixture
     $fixturesToClean += $validRoot
