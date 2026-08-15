@@ -17,7 +17,8 @@ internal static class AppLog
     // firehose) so drops are rare in normal operation.
     private const int QueueCapacity = 2048;
 
-    private static readonly string LaunchId = Guid.NewGuid().ToString("N")[..10];
+    private static readonly string LaunchIdValue = Guid.NewGuid().ToString("N")[..10];
+    internal static string LaunchId => LaunchIdValue;
     private static readonly DateTimeOffset LaunchTimestamp = DateTimeOffset.Now;
     private static readonly string LaunchFileName = AppLogFileName.Create(LaunchTimestamp, Environment.ProcessId, LaunchId);
     private static readonly string DefaultDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "logs");

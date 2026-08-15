@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.GordonDPad;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
@@ -114,6 +115,31 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         Assert.Contains("Right=0", log);
         Assert.Contains("Down=0", log);
         Assert.Contains("Left=0", log);
+    }
+
+    [Fact]
+    public async Task Mapped_dpad_transition_publishes_the_canonical_stage_to_the_diagnostic_hub()
+    {
+        var state = new ControllerState(new GamepadButtons(false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false), default, default, default, new([false, false]));
+        var source = new Snapshot(state);
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink, ticks);
+        var received = new List<string>();
+        GordonDPadDiagnosticHub.LineObserved += received.Add;
+
+        try
+        {
+            publisher.Start();
+            await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+            await publisher.StopAsync();
+
+            var line = Assert.Single(received);
+            Assert.Equal("Stage=Canonical Up=0 Right=0 Left=1 Down=0 Mask=0x04", line);
+        }
+        finally
+        {
+            GordonDPadDiagnosticHub.ResetForTests();
+        }
     }
 
     [Fact]

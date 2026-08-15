@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.GordonDPad;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using Xunit;
 
@@ -14,6 +15,7 @@ public sealed class CanonicalViiperDiagnosticLogTests : IDisposable
     {
         AppLog.MinimumLevelOverride = AppLogLevel.Debug;
         AppLog.DirectoryOverride = _directory;
+        GordonDPadDiagnosticHub.ResetForTests();
     }
 
     private static void Invoke(ViiperLogLevel level, string text)
@@ -85,9 +87,80 @@ public sealed class CanonicalViiperDiagnosticLogTests : IDisposable
         AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
         AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        GordonDPadDiagnosticHub.ResetForTests();
         if (Directory.Exists(_directory))
         {
             Directory.Delete(_directory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void DebugDPadMessage_IsPublishedToTheHubWithThePrefixStripped()
+    {
+        var received = new List<string>();
+        GordonDPadDiagnosticHub.LineObserved += received.Add;
+
+        Invoke(ViiperLogLevel.Debug, "VIIPER.DPad Stage=ABIDecoded Up=1 Right=0 Left=0 Down=0 Mask=0x01");
+
+        Assert.Equal("Stage=ABIDecoded Up=1 Right=0 Left=0 Down=0 Mask=0x01", Assert.Single(received));
+    }
+
+    [Fact]
+    public void WarnDPadMessage_IsPublishedToTheHub()
+    {
+        var received = new List<string>();
+        GordonDPadDiagnosticHub.LineObserved += received.Add;
+
+        Invoke(ViiperLogLevel.Warn, "VIIPER.DPad Stage=GordonReportInvariant Expected=0x01 Actual=0x00");
+
+        Assert.Equal("Stage=GordonReportInvariant Expected=0x01 Actual=0x00", Assert.Single(received));
+    }
+
+    [Fact]
+    public void ArbitraryFutureStage_IsPublishedToTheHubWithoutAnyCodeChangeHere()
+    {
+        // The whole point of routing through GordonDPadDiagnosticHub rather than a fixed set of known
+        // stages: a brand-new VIIPER-side stage (e.g. a future USB/IP or feature-command diagnostic)
+        // must flow through automatically as long as it uses the "VIIPER.DPad" prefix and Debug/Warn.
+        var received = new List<string>();
+        GordonDPadDiagnosticHub.LineObserved += received.Add;
+
+        Invoke(ViiperLogLevel.Debug, "VIIPER.DPad Stage=USBIPResponse Detail=whatever-viiper-adds-next");
+
+        Assert.Equal("Stage=USBIPResponse Detail=whatever-viiper-adds-next", Assert.Single(received));
+    }
+
+    [Fact]
+    public void MessageWithoutDPadPrefix_IsNotPublishedToTheHub()
+    {
+        var received = new List<string>();
+        GordonDPadDiagnosticHub.LineObserved += received.Add;
+
+        Invoke(ViiperLogLevel.Debug, "USB server started operation=NewUSBServer serverState=Active");
+
+        Assert.Empty(received);
+    }
+
+    [Fact]
+    public void InfoLevelDPadMessage_IsNotPublishedToTheHub()
+    {
+        var received = new List<string>();
+        GordonDPadDiagnosticHub.LineObserved += received.Add;
+
+        Invoke(ViiperLogLevel.Info, "VIIPER.DPad Stage=ABIDecoded Up=1 Right=0 Left=0 Down=0 Mask=0x01");
+
+        Assert.Empty(received);
+    }
+
+    [Fact]
+    public void HubSubscriberException_DoesNotPreventAppLogForwarding()
+    {
+        GordonDPadDiagnosticHub.LineObserved += _ => throw new InvalidOperationException("broken diagnostic sink");
+
+        Invoke(ViiperLogLevel.Debug, "VIIPER.DPad Stage=ABIDecoded Up=1 Right=0 Left=0 Down=0 Mask=0x01");
+        AppLog.DrainForTests();
+
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("VIIPER.DPad Stage=ABIDecoded", log);
     }
 }

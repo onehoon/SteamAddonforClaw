@@ -11,6 +11,12 @@ internal sealed class AddonOwnedVirtualDeviceTracker : IControllerIdentityExclus
     public bool IsExcluded(ControllerDeviceInfo device) => _instanceIds.ContainsKey(device.InstanceId);
     public bool HasUncertainOwnership => Volatile.Read(ref _uncertainOwnership) != 0;
 
+    /// <summary>Read-only snapshot of the currently-owned instance IDs. Diagnostic-only consumer (see
+    /// <see cref="Diagnostics.GordonDPad.GordonDPadDiagnosticSession"/>): lets a read-only Windows HID
+    /// observer correlate itself to the exact owned Gordon rather than any VID/PID-matching HID
+    /// collection, without adding a new mutation surface to this tracker.</summary>
+    internal IReadOnlyCollection<string> OwnedInstanceIds => _instanceIds.Keys.ToArray();
+
     internal void Publish(ControllerDeviceInfo device)
     {
         if (string.IsNullOrWhiteSpace(device.InstanceId)) throw new ArgumentException("An addon-owned device requires an instance identity.", nameof(device));

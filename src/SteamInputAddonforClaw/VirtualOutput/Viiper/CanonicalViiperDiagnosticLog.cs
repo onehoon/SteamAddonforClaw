@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.GordonDPad;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
@@ -9,6 +10,14 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// VIIPER's own routine Info-level logging is intentionally not forwarded here, to avoid
 /// duplicating/flooding the Addon's product log with a second logging source.
 /// </summary>
+/// <remarks>
+/// Every forwarded "VIIPER.DPad" message is also published to <see cref="GordonDPadDiagnosticHub"/>
+/// (stripped of the "VIIPER.DPad " prefix, leaving the "Stage=..." line intact) so an active
+/// <see cref="GordonDPadDiagnosticSession"/> capture receives it too. Deliberately not limited to
+/// today's two known stages ("ABIDecoded"/"GordonReport") -- any future VIIPER-side stage using the
+/// same prefix (e.g. a USB/IP or feature-command stage) is forwarded automatically without an Addon
+/// code change, as long as it is logged at Debug or Warn on the native side.
+/// </remarks>
 internal static class CanonicalViiperDiagnosticLog
 {
     private const string DiagnosticPrefix = "VIIPER.DPad";
@@ -38,9 +47,11 @@ internal static class CanonicalViiperDiagnosticLog
             {
                 case ViiperLogLevel.Debug:
                     AppLog.Debug(Category, text);
+                    PublishToHub(text);
                     break;
                 case ViiperLogLevel.Warn:
                     AppLog.Warn(Category, text);
+                    PublishToHub(text);
                     break;
                 // Info/Error are not expected from this diagnostic prefix today; ignored rather
                 // than promoted, per the task's "never promote to Info" requirement.
@@ -50,5 +61,15 @@ internal static class CanonicalViiperDiagnosticLog
         {
             // Swallow: see remarks above.
         }
+    }
+
+    private static void PublishToHub(string text)
+    {
+        // Strip the "VIIPER.DPad " prefix so hub lines from every stage (physical, canonical, native)
+        // share the same "Stage=..." shape. GordonDPadDiagnosticHub.Publish already isolates a
+        // misbehaving subscriber, but this call itself must never throw back into the native-callback
+        // path above, so it stays wrapped in the caller's try/catch rather than adding a second one here.
+        var stripped = text.Length > DiagnosticPrefix.Length ? text[(DiagnosticPrefix.Length + 1)..] : text;
+        GordonDPadDiagnosticHub.Publish(stripped);
     }
 }

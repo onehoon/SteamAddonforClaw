@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.GordonDPad;
 using SteamInputAddonforClaw.Input;
 
 namespace SteamInputAddonforClaw.Diagnostics;
@@ -75,6 +76,16 @@ internal static class ControllerStateDiagnostics
         }
         AppLog.Info("Input", "Physical D-pad state changed", ("TestSession", session),
             ("Up", buttons.DPadUp), ("Right", buttons.DPadRight), ("Down", buttons.DPadDown), ("Left", buttons.DPadLeft));
+        GordonDPadDiagnosticHub.Publish(FormatStage("Physical", buttons.DPadUp, buttons.DPadRight, buttons.DPadDown, buttons.DPadLeft));
+    }
+
+    /// <summary>Shared formatting for the Gordon D-pad diagnostic hub, matching the native VIIPER.DPad
+    /// stage lines' field layout (Up/Right/Left/Down as 0/1, Mask as a hex byte) so all stages in a
+    /// capture file read consistently.</summary>
+    internal static string FormatStage(string stage, bool up, bool right, bool down, bool left)
+    {
+        var mask = (up ? 0x01 : 0) | (right ? 0x02 : 0) | (left ? 0x04 : 0) | (down ? 0x08 : 0);
+        return $"Stage={stage} Up={(up ? 1 : 0)} Right={(right ? 1 : 0)} Left={(left ? 1 : 0)} Down={(down ? 1 : 0)} Mask=0x{mask:X2}";
     }
 
     /// <summary>

@@ -46,6 +46,7 @@
 
             <views:DeveloperPage x:Name="DeveloperMenuContent" Visibility="Collapsed" />
             <views:ClawSensorProbePage x:Name="ClawSensorProbeContent" Visibility="Collapsed" />
+            <views:GordonDPadDiagnosticPage x:Name="GordonDPadDiagnosticContent" Visibility="Collapsed" />
         </Grid>
     </NavigationView>
         <Grid x:Name="PrerequisiteSetupBusyOverlay"

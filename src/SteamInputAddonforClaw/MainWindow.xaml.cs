@@ -25,6 +25,7 @@ using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Routing;
 using Microsoft.UI.Dispatching;
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw;
 
@@ -38,6 +39,7 @@ public sealed partial class MainWindow : Window
     private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
     private readonly DeveloperTestModeState? _developerTestModeState;
     private readonly Func<RoutingRuntimeStatusSnapshot> _routingRuntimeStatusProvider;
+    private readonly AddonOwnedVirtualDeviceTracker _addonOwnedVirtualDeviceTracker;
     private SystemStatusSnapshot? _latestSystemStatus;
     private int _isRefreshingStatus;
     private int _statusRefreshPending;
@@ -63,7 +65,8 @@ public sealed partial class MainWindow : Window
         IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
         DeveloperTestModeState? developerTestModeState = null,
         IElevatedProcessRunner? prerequisiteSetupRunner = null,
-        Func<RoutingRuntimeStatusSnapshot>? routingRuntimeStatusProvider = null)
+        Func<RoutingRuntimeStatusSnapshot>? routingRuntimeStatusProvider = null,
+        AddonOwnedVirtualDeviceTracker? addonOwnedVirtualDeviceTracker = null)
     {
         _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
         _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
@@ -71,6 +74,12 @@ public sealed partial class MainWindow : Window
         _prerequisiteSetupRunner = prerequisiteSetupRunner ?? new ElevatedProcessRunner();
         _developerTestModeState = developerTestModeState;
         _routingRuntimeStatusProvider = routingRuntimeStatusProvider ?? (() => RoutingRuntimeStatusSnapshot.Unavailable);
+        // Fallback path (only reached by the public parameterless-tracker MainWindow constructor, which
+        // App.xaml.cs never uses in production -- the real runtime always supplies the tracker the
+        // routing pipeline itself observes) has no owned devices to correlate against; the Gordon D-pad
+        // diagnostic page degrades to "Ambiguous"/"NoneFound" rather than guessing, same as if no Gordon
+        // is currently attached.
+        _addonOwnedVirtualDeviceTracker = addonOwnedVirtualDeviceTracker ?? new AddonOwnedVirtualDeviceTracker();
         _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
             new WindowsEnvironmentDiscoverySnapshotSource(),
             new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
@@ -88,8 +97,11 @@ public sealed partial class MainWindow : Window
         DeveloperMenuContent.Initialize(_startupSettings, _developerTestModeState, _environmentDiscoveryReportGenerator, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
         DeveloperMenuContent.ClawSensorProbeRequested += (_, _) => OpenClawSensorProbe();
+        DeveloperMenuContent.GordonDPadDiagnosticRequested += (_, _) => OpenGordonDPadDiagnostic();
         ClawSensorProbeContent.Initialize(() => _latestSystemStatus);
         ClawSensorProbeContent.ReturnToDeveloperMenuRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        GordonDPadDiagnosticContent.Initialize(WindowNative.GetWindowHandle(this), _addonOwnedVirtualDeviceTracker);
+        GordonDPadDiagnosticContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
         MainNavigationView.SelectedItem = StatusNavigationItem;
         _ = RefreshSystemStatusAsync();
@@ -185,9 +197,16 @@ public sealed partial class MainWindow : Window
         ShowPage(_navigationState.OpenClawSensorProbe());
     }
 
+    private void OpenGordonDPadDiagnostic()
+    {
+        GordonDPadDiagnosticContent.PrepareForShow();
+        ShowPage(_navigationState.OpenGordonDPadDiagnostic());
+    }
+
     private async void OnWindowClosed(object sender, WindowEventArgs args)
     {
         await ClawSensorProbeContent.ShutdownAsync();
+        await GordonDPadDiagnosticContent.ShutdownAsync();
     }
 
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -204,6 +223,7 @@ public sealed partial class MainWindow : Window
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
         ClawSensorProbeContent.Visibility = page == MainNavigationPage.ClawSensorProbe ? Visibility.Visible : Visibility.Collapsed;
+        GordonDPadDiagnosticContent.Visibility = page == MainNavigationPage.GordonDPadDiagnostic ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
     }
 
@@ -427,10 +447,15 @@ public sealed partial class MainWindow : Window
         }
 
         args.Handled = true;
+        var fromPage = _navigationState.CurrentPage;
         switch (destination)
         {
             case MainNavigationPage.Settings:
                 ReturnToSettings("MouseBackButton");
+                break;
+            case MainNavigationPage.DeveloperMenu when fromPage == MainNavigationPage.GordonDPadDiagnostic:
+                await GordonDPadDiagnosticContent.ShutdownAsync();
+                ShowPage(_navigationState.ReturnToDeveloperMenu());
                 break;
             case MainNavigationPage.DeveloperMenu:
                 await ClawSensorProbeContent.ReturnToDeveloperMenuAsync();

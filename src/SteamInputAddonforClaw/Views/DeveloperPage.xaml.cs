@@ -20,6 +20,7 @@ public sealed partial class DeveloperPage : UserControl
 
     public event EventHandler? BackRequested;
     public event EventHandler? ClawSensorProbeRequested;
+    public event EventHandler? GordonDPadDiagnosticRequested;
 
     public DeveloperPage()
     {
@@ -59,6 +60,11 @@ public sealed partial class DeveloperPage : UserControl
     private void ClawSensorProbeButton_Click(object sender, RoutedEventArgs args)
     {
         ClawSensorProbeRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void GordonDPadDiagnosticButton_Click(object sender, RoutedEventArgs args)
+    {
+        GordonDPadDiagnosticRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OpenLogFolderButton_Click(object sender, RoutedEventArgs args)

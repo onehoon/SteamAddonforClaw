@@ -64,6 +64,16 @@
                     <SymbolIcon Symbol="Directions" />
                 </ctcontrols:SettingsCard.HeaderIcon>
             </ctcontrols:SettingsCard>
+
+            <ctcontrols:SettingsCard
+                Click="GordonDPadDiagnosticButton_Click"
+                Description="Read-only end-to-end Gordon input diagnostics."
+                Header="Gordon D-pad Diagnostic"
+                IsClickEnabled="True">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Target" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+            </ctcontrols:SettingsCard>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

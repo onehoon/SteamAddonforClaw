@@ -239,7 +239,8 @@ public partial class App : Application
                 SteamOutputActive: _routingRuntimeCoordinator.ActiveSessionHasSteamOutputEnabled,
                 NativeDirectInputActive: _msiClawNativeModeSession?.IsActive == true);
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider,
-            developerTestModeState: _developerTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
+            developerTestModeState: _developerTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus,
+            addonOwnedVirtualDeviceTracker: addonOwnedVirtualDeviceTracker);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 

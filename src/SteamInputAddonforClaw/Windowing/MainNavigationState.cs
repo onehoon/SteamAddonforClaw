@@ -7,7 +7,8 @@ internal enum MainNavigationPage
     HowToUse,
     Settings,
     DeveloperMenu,
-    ClawSensorProbe
+    ClawSensorProbe,
+    GordonDPadDiagnostic
 }
 
 internal sealed class MainNavigationState
@@ -41,12 +42,14 @@ internal sealed class MainNavigationState
     }
 
     internal MainNavigationPage OpenClawSensorProbe() => CurrentPage = MainNavigationPage.ClawSensorProbe;
+    internal MainNavigationPage OpenGordonDPadDiagnostic() => CurrentPage = MainNavigationPage.GordonDPadDiagnostic;
     internal MainNavigationPage ReturnToDeveloperMenu() => CurrentPage = MainNavigationPage.DeveloperMenu;
 
     internal MainNavigationPage? GetMouseBackDestination() => CurrentPage switch
     {
         MainNavigationPage.DeveloperMenu => MainNavigationPage.Settings,
         MainNavigationPage.ClawSensorProbe => MainNavigationPage.DeveloperMenu,
+        MainNavigationPage.GordonDPadDiagnostic => MainNavigationPage.DeveloperMenu,
         _ => null
     };
 }

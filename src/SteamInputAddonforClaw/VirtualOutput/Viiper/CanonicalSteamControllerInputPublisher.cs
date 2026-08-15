@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.GordonDPad;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input;
 
@@ -511,6 +512,7 @@ internal sealed class CanonicalSteamControllerInputPublisher
         _lastLoggedDPad = current;
         AppLog.Info("SteamOutput", "Canonical mapped D-pad state changed",
             ("Up", state.DPadUp), ("Right", state.DPadRight), ("Down", state.DPadDown), ("Left", state.DPadLeft));
+        GordonDPadDiagnosticHub.Publish(ControllerStateDiagnostics.FormatStage("Canonical", state.DPadUp != 0, state.DPadRight != 0, state.DPadDown != 0, state.DPadLeft != 0));
     }
 
     private void EmitHeartbeatIfDue()

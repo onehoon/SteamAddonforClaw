@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.GordonDPad;
 using SteamInputAddonforClaw.Input;
 using Xunit;
 
@@ -178,4 +179,22 @@ public sealed class ControllerStateDiagnosticsTests : IDisposable
     }
 
     private static ControllerState Neutral() => new(default, default, default, default, new AuxiliaryButtonState([false, false]));
+
+    [Fact]
+    public void LogDPadTransitionIfChanged_PublishesThePhysicalStageToTheHub()
+    {
+        var received = new List<string>();
+        GordonDPadDiagnosticHub.LineObserved += received.Add;
+        try
+        {
+            ControllerStateDiagnostics.LogDPadTransitionIfChanged(new GamepadButtons(false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false), session: 909090);
+
+            var line = Assert.Single(received);
+            Assert.Equal("Stage=Physical Up=0 Right=0 Left=0 Down=1 Mask=0x08", line);
+        }
+        finally
+        {
+            GordonDPadDiagnosticHub.ResetForTests();
+        }
+    }
 }
