@@ -176,41 +176,17 @@ public partial class App : Application
                 new HidHideDriverClient(),
                 () => Environment.ProcessPath);
             var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
-            // Developer/test-only routing seam for SD2: the production Steam routing path remains
-            // Gordon by default (docs/VIIPER_MIGRATION_TODO.md SD2/SD4). Setting this internal,
-            // non-persisted environment variable lets a developer run the parallel Steam Deck path
-            // (28DE:1205) for the first real MSI Claw hardware smoke test (SD3) without adding a
-            // public "Gordon vs Steam Deck" user-facing setting. This is deliberately not wired
-            // through DeveloperTestModeState/the Developer page UI.
-            var useSteamDeckOutput = Environment.GetEnvironmentVariable("STEAMINPUT_ADDON_DEV_STEAMDECK_OUTPUT") == "1";
-            IRoutingPipelineStage steamOutputStage;
-            Action attachOutputFaultHandler;
-            if (useSteamDeckOutput)
-            {
-                var deckStage = new CanonicalSteamDeckOutputStage(
-                    () => new CanonicalSteamDeckSession(CanonicalViiperNativeApi.Load(canonicalViiperPath)),
-                    new WindowsControllerDeviceEnumerator(),
-                    new SteamDeckVirtualDeviceIdentityResolver(new SteamDeckVirtualDeviceIdentityPolicy()),
-                    addonOwnedVirtualDeviceTracker,
-                    _recoveryManager!,
-                    () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
-                    new HidHideDriverClient(), _physicalInputSource);
-                steamOutputStage = deckStage;
-                attachOutputFaultHandler = () => deckStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator!.FailClosedAsync().ConfigureAwait(false); });
-            }
-            else
-            {
-                var gordonStage = new ClassicSteamControllerOutputStage(
-                    () => new CanonicalSteamControllerSession(CanonicalViiperNativeApi.Load(canonicalViiperPath)),
-                    new WindowsControllerDeviceEnumerator(),
-                    new ViiperVirtualDeviceIdentityResolver(new ViiperVirtualDeviceIdentityPolicy()),
-                    addonOwnedVirtualDeviceTracker,
-                    _recoveryManager!,
-                    () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
-                    new HidHideDriverClient(), _physicalInputSource);
-                steamOutputStage = gordonStage;
-                attachOutputFaultHandler = () => gordonStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator!.FailClosedAsync().ConfigureAwait(false); });
-            }
+            SteamOutputComposition.LogTargetSelected();
+            var deckStage = new CanonicalSteamDeckOutputStage(
+                () => new CanonicalSteamDeckSession(CanonicalViiperNativeApi.Load(canonicalViiperPath)),
+                new WindowsControllerDeviceEnumerator(),
+                new SteamDeckVirtualDeviceIdentityResolver(new SteamDeckVirtualDeviceIdentityPolicy()),
+                addonOwnedVirtualDeviceTracker,
+                _recoveryManager!,
+                () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
+                new HidHideDriverClient(), _physicalInputSource);
+            IRoutingPipelineStage steamOutputStage = deckStage;
+            Action attachOutputFaultHandler = () => deckStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator!.FailClosedAsync().ConfigureAwait(false); });
             var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage, steamOutputStage]);
             var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(pipelineExecutor);
             _routingRuntimeCoordinator = new RoutingPipelineRuntimeCoordinator(

@@ -51,7 +51,7 @@ This rule applies to:
 - updates to the pinned VIIPER baseline;
 - review of corrective VIIPER PRs discovered during Addon integration.
 
-SD1 is complete. The active Steam Deck migration step is **SD2** in `VIIPER_MIGRATION_TODO.md`.
+SD1 and SD2 are complete. The active Steam Deck migration step is **SD3** in `VIIPER_MIGRATION_TODO.md`.
 
 ---
 
@@ -172,7 +172,7 @@ Every Addon-driven VIIPER change must preserve these invariants unless the same 
 
 ## 6. Steam Deck-specific rules
 
-The Addon's new primary target architecture is Steam Deck, but the current production Addon remains Gordon until hardware cutover is validated.
+The Addon's active runtime composition uses Steam Deck exclusively. Gordon remains retained reference/rollback code, and SD3 real MSI Claw hardware validation is still pending.
 
 ### 6.1 Existing device implementation is the protocol authority
 
@@ -209,9 +209,9 @@ The validated SD1 wrapper intentionally does not expose `SetSteamDeckOutputCallb
 
 Do not add a public callback merely to make SD2 feature-complete.
 
-### 6.4 No Steam Deck production claim before hardware proof
+### 6.4 No Steam Deck hardware-validation claim before hardware proof
 
-Do not update product documentation or code comments to say Steam Deck is the production output until the Addon SD3 hardware gate passes and SD4 cutover is reviewed.
+Do not claim that Steam Deck hardware validation or SD3 is complete until the Addon SD3 hardware gate passes. The active runtime composition may be Deck-only before that hardware evidence exists, and it must fail closed rather than falling back to Gordon.
 
 ---
 
@@ -285,7 +285,7 @@ onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778
 
 Do not mix a DLL from one VIIPER revision with a generated header, managed layout, documentation, or provenance from another revision.
 
-The Addon's current embedded payload is the SD2-validated `ec64282c...` pair. Gordon remains the production output default, and its typed ABI/behavior is unchanged by SD2.
+The Addon's current embedded payload is the SD2-validated `ec64282c...` pair. Steam Deck is the sole active runtime output composition; Gordon's typed ABI/behavior remains retained and unchanged.
 
 ---
 
@@ -299,7 +299,7 @@ Selected native source revision:
 onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778
 ```
 
-SD2 exists to adopt that minimal typed Steam Deck ABI into the Addon side-by-side with the existing Gordon production path.
+SD2 adopted that minimal typed Steam Deck ABI into the Addon. The active runtime composition now uses Deck exclusively; Gordon remains retained reference/rollback code and is not a runtime fallback.
 
 Before implementing/reviewing SD2, verify:
 

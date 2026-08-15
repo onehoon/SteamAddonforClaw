@@ -10,9 +10,9 @@ The addon exists to expose the built-in handheld controller to Steam while leavi
 > [!IMPORTANT]
 > **Architecture transition in progress — 2026-08-15**
 >
-> The current production implementation on `main` still uses the canonical VIIPER **Classic Steam Controller / Gordon** output (`28DE:1102`). That implementation is the preserved safety and lifecycle baseline.
+> The active runtime composition now uses the canonical VIIPER **Steam Deck** output (`28DE:1205`) exclusively. The Gordon implementation remains retained as a reference/rollback path; it is not selected by normal runtime composition.
 >
-> The new primary virtual-controller target is **Steam Deck** (`28DE:1205`). The minimal canonical typed Steam Deck wrapper is now merged into VIIPER `main` at `ec64282c69e5587466b950332d7983fd53a7d778`. The next step is Addon-side adoption of the matching Release DLL/header and side-by-side Steam Deck session/mapper/publisher work. Steam Deck is still not the Addon's production output until real MSI Claw hardware validation passes.
+> The minimal canonical typed Steam Deck wrapper and Addon-side session/mapper/publisher work are merged. Real MSI Claw SD3 hardware validation is still pending; no hardware validation is claimed here.
 >
 > The exact pre-transition Gordon documentation is archived under `docs/archive/gordon-baseline-2026-08-15/`.
 
@@ -26,12 +26,12 @@ The addon exists to expose the built-in handheld controller to Steam while leavi
 | --- | --- |
 | Physical MSI Claw PID_1902 acquisition | Implemented |
 | Native mode / HidHide / recovery safety shell | Implemented |
-| Canonical VIIPER Gordon output | Current production baseline |
-| Gordon output identity | `28DE:1102` |
-| Steam Deck output identity | Target `28DE:1205` |
+| Canonical VIIPER Gordon output | Retained reference/rollback implementation |
+| Gordon output identity | `28DE:1102` (not selected by active runtime composition) |
+| Steam Deck output identity | Sole active Steam output path: `28DE:1205` |
 | VIIPER canonical Steam Deck typed wrapper | **Validated and merged to `onehoon/VIIPER:main` at `ec64282c69e5587466b950332d7983fd53a7d778`** |
-| Addon Steam Deck binding/session/mapper | Ready for SD2; not yet implemented |
-| Steam Deck hardware smoke test | Pending SD2 implementation |
+| Addon Steam Deck binding/session/mapper | Implemented and active in runtime composition |
+| Steam Deck hardware smoke test | Pending SD3 real MSI Claw validation |
 | OEM1 → Steam Deck Quick Access | Planned after basic Deck input validation |
 | Gyro/accelerometer → Steam Deck IMU | Planned after basic Deck input validation |
 | Game Bar temporary Xbox360 route | Planned after Deck cutover |
@@ -277,13 +277,13 @@ Current high-level order:
 ```text
 SD0  preserve Gordon baseline and archive its documentation
 SD1  expose existing device/steamdeck through canonical typed libVIIPER — VALIDATED
-SD2  add side-by-side Addon Steam Deck ABI/session/mapper/publisher — NEXT
-SD3  real MSI Claw non-gyro Steam Deck smoke test
-SD4  cut production SteamOutput from Gordon to Steam Deck
+SD2  add Addon Steam Deck ABI/session/mapper/publisher — VALIDATED
+SD3  real MSI Claw non-gyro Steam Deck smoke test — NEXT
+SD4  review hardware-proven Steam Deck production readiness
 SD5  map OEM1 to Steam Deck Quick Access
 SD6  add Windows Sensor IMU → Steam Deck gyro/accelerometer
 SD7  add Game Bar neutral-Deck + typed Xbox360 route
-SD8  retire the Addon Gordon production path after Deck stability is proven
+SD8  retire the retained Addon Gordon reference path after Deck stability is proven
 ```
 
 Gordon rumble/gyro expansion is no longer a prerequisite for the product direction. Rumble/haptics can be added to the Steam Deck path as a separate feature track after the basic input and lifecycle cutover is stable.

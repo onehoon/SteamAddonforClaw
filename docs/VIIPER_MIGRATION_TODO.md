@@ -188,7 +188,7 @@ The old `feature/canonical-steamdeck` branch is not part of the ongoing integrat
 
 ## SD2. Add side-by-side Steam Deck binding/session/mapper/publisher to the Addon
 
-**Status: IMPLEMENTED (automated tests only; SD3 hardware smoke test still pending)**
+**Status: IMPLEMENTED / ACTIVE RUNTIME COMPOSITION (automated tests only; SD3 hardware smoke test still pending)**
 
 Implemented in this PR:
 
@@ -204,9 +204,11 @@ SteamDeckVirtualDeviceIdentityPolicy.cs / ...Resolver.cs   exact 28DE:1205 ident
 CanonicalSteamDeckOutputStage.cs   same Addon safety shell as ClassicSteamControllerOutputStage
 ```
 
-Wired only through the internal `STEAMINPUT_ADDON_DEV_STEAMDECK_OUTPUT=1` developer/test
-environment variable seam in `App.xaml.cs` -- not a public setting. Production routing default
-remains Gordon. The Gordon implementation (session/publisher/mapper/P-Invoke/tests) is unchanged.
+The active runtime composition now always instantiates `CanonicalSteamDeckOutputStage`. The old
+`STEAMINPUT_ADDON_DEV_STEAMDECK_OUTPUT=1` developer/test seam and Gordon runtime selection branch
+were removed. Deck creation or routing failure remains fail-closed; no Gordon fallback is attempted.
+The Gordon implementation (session/publisher/mapper/P-Invoke/tests) remains retained as reference/
+rollback code and is unchanged.
 
 No hardware validation has been performed; SD3 remains the gate for that.
 
@@ -224,7 +226,7 @@ onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778
 
 Goal:
 
-Add a parallel Steam Deck path without deleting the Gordon production path.
+Add and validate the Steam Deck path while retaining Gordon code as reference/rollback implementation.
 
 Expected components:
 
@@ -278,9 +280,9 @@ This atomic adoption has landed: the Addon-embedded VIIPER pin is now `ec64282c6
 
 ## SD3. Real MSI Claw non-gyro Steam Deck smoke test
 
-**Status: HARDWARE / BLOCKED on SD2**
+**Status: HARDWARE / NEXT (runtime composition is Deck-only; hardware validation still pending)**
 
-First hardware proof must establish that the new output is visible and usable as a Steam Deck class device before production cutover.
+First hardware proof must establish that the active Deck-only output is visible and usable as a Steam Deck class device.
 
 Minimum checks:
 
@@ -308,11 +310,11 @@ Do not require gyro, QAM, rumble, or Game Bar for this gate.
 
 ## SD4. Production cutover from Gordon to Steam Deck
 
-**Status: BLOCKED on SD3**
+**Status: DEFERRED until SD3 hardware evidence**
 
 Goal:
 
-Make Steam Deck the production `SteamOutput` target only after the SD3 hardware gate passes.
+Review whether the Deck-only runtime path is ready for production hardware promotion after the SD3 hardware gate passes.
 
 Requirements:
 
@@ -323,7 +325,7 @@ Requirements:
 - exact target-specific PnP identity (`28DE:1205`);
 - no fallback that silently creates both Gordon and Deck in normal production routing.
 
-Keep the Gordon implementation available as a short-term reference/fallback during initial Deck stabilization.
+Keep the Gordon implementation available as a short-term reference/rollback implementation during initial Deck stabilization. Do not select it as a runtime fallback when Deck fails.
 
 ---
 
