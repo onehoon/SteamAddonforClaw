@@ -1,0 +1,5 @@
+# The vendored VIIPER dependency's exact bytes are cryptographically pinned
+# (viiper.lock.json / PROVENANCE.md / scripts/verify-viiper.ps1). Line-ending
+# normalization must never alter them, regardless of platform or core.autocrlf.
+src/SteamInputAddonforClaw/Dependencies/Viiper/libVIIPER.dll binary
+src/SteamInputAddonforClaw/Dependencies/Viiper/libVIIPER.h binary
