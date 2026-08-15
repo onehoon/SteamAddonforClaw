@@ -25,8 +25,23 @@ closed if the lock file, `PROVENANCE.md`, the vendored DLL/header, and the
 pin recorded above ever disagree. Normal Addon builds consume the vendored,
 reviewed dependency as-is — they do not fetch VIIPER from any network source,
 mutable or otherwise. Upgrading the pinned revision remains a separate,
-reviewed change; an automated updater for exact canonical VIIPER artifacts is
-planned for a later phase and does not exist yet.
+reviewed change.
+
+`scripts/update-viiper.ps1 -Commit <40-char-sha>` can fetch and independently
+verify the canonical `onehoon/VIIPER` Windows build artifact for an exact,
+already-built commit: it discovers a `push`/`main`/successful run at that
+exact commit, downloads its canonical `libVIIPER-windows-amd64-Snapshot`
+artifact, and validates the artifact's own manifest (`viiper-artifact.json`)
+and recomputed DLL/header hashes. It only fetches and verifies into a
+disposable staging directory (`artifacts/viiper-update/<commit>/`, gitignored)
+-- it never modifies the vendored `Dependencies/Viiper` files, `viiper.lock.json`,
+`PROVENANCE.md`, or any managed code, and it never runs as part of normal
+CI/build/release, which stay network-independent of VIIPER. A mutable
+"latest main" or dev-snapshot release identity is never treated as dependency
+authority; only a successful `main` push run for the exact requested commit is
+eligible. Actually adopting a verified artifact -- updating the vendored
+files, the lock, provenance, and (if the ABI changed) the managed P/Invoke
+bindings together -- is a separate, later, reviewed operation.
 
 ## 1. Upstream authority
 
