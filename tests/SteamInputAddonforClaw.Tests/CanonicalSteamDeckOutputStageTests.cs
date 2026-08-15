@@ -148,6 +148,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         var occurrences = log.Split("SteamDeckIdentityDiagnosticSummary").Length - 1;
         Assert.Equal(1, occurrences);
+        Assert.Contains("FailedOperation=PnPResolve", log);
     }
 
     [Fact]

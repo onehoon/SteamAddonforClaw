@@ -327,7 +327,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved)
             {
                 var signature = BuildIdentitySignature(result.Devices);
-                stableConsecutiveSnapshots = StringComparer.Ordinal.Equals(signature, lastCandidateSignature)
+                stableConsecutiveSnapshots = StringComparer.OrdinalIgnoreCase.Equals(signature, lastCandidateSignature)
                     ? stableConsecutiveSnapshots + 1
                     : 1;
                 lastCandidateSignature = signature;
@@ -385,7 +385,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
 
     private static string FailureOperation(string reason) => reason switch
     {
-        "VirtualDeviceDidNotAppear" or "AmbiguousVirtualDeviceIdentity" => "PnPResolve",
+        "VirtualDeviceDidNotAppear" or "AmbiguousVirtualDeviceIdentity" or "VirtualDeviceIdentityDidNotStabilize" => "PnPResolve",
         "NeutralReportRejected" => "NeutralReport",
         "VirtualDeviceRecoveryCheckpointFailed" => "RecoveryCheckpoint",
         "HidHideOutputInspectionUnavailable" or "HidHideOutputAlreadyBlocked" => "HidHideInspection",

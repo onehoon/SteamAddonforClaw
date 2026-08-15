@@ -154,6 +154,25 @@ internal static class AppLog
     }, timeout);
 
     /// <summary>
+    /// Reads a test log on the single writer thread after flushing the active writer. This avoids a
+    /// test opening the same file concurrently with a late background log entry after DrainForTests.
+    /// </summary>
+    internal static string ReadAllTextForTests(string path) => ReadFileForTests(path, File.ReadAllText);
+
+    internal static string[] ReadAllLinesForTests(string path) => ReadFileForTests(path, File.ReadAllLines);
+
+    private static T ReadFileForTests<T>(string path, Func<string, T> read)
+    {
+        T? result = default;
+        Writer.RunOnWriterThreadForTests(() =>
+        {
+            _openWriter?.Flush();
+            result = read(path);
+        });
+        return result!;
+    }
+
+    /// <summary>
     /// Stops accepting new entries and waits (bounded by <paramref name="timeout"/>) for queued entries
     /// to be written before returning. Intended to be called exactly once, from the application's real
     /// shutdown path (see App.xaml.cs OnMainWindowClosed). Never blocks application exit indefinitely.
