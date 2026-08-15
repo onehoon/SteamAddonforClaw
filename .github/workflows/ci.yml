@@ -42,6 +42,9 @@ jobs:
       - name: Test VIIPER dependency-update receiver idempotency classifier
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/viiper-existing-automation-check.tests.ps1
 
+      - name: Test VIIPER dependency-update receiver stale-base classifier
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/viiper-base-drift-check.tests.ps1
+
       - name: Restore
         run: dotnet restore SteamInputAddonforClaw.slnx
 

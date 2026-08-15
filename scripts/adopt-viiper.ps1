@@ -186,6 +186,31 @@ function Test-ViiperAdoptionPayloadFiles {
     }
 }
 
+function Get-Utf8FileText {
+    <#
+    Reads a text file as UTF-8 explicitly, regardless of the process's
+    default console/system codepage. Get-Content -Raw / Set-Content without
+    an explicit encoding decode/encode using the OS default codepage in
+    Windows PowerShell 5.1, which silently mangles (not merely mis-displays)
+    any non-ASCII byte -- e.g. an em dash in a doc's prose -- into '?' on a
+    non-UTF-8 system locale. All of this script's UTF-8 doc/provenance files
+    are read and written exclusively through this pair of helpers so mechanical
+    adoption never depends on the runner's locale.
+    #>
+    param([Parameter(Mandatory)] [string] $Path)
+    return [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+}
+
+function Set-Utf8FileText {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $Content
+    )
+    # $false = no byte-order-mark, matching this repository's existing BOM-less UTF-8 files.
+    $noBomUtf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $noBomUtf8)
+}
+
 function Set-ExactTextReplacement {
     <#
     Fails closed unless $OldValue occurs in the file exactly $ExpectedCount
@@ -205,7 +230,7 @@ function Set-ExactTextReplacement {
         throw "Cannot apply mechanical replacement: file not found: $Path"
     }
 
-    $content = Get-Content -LiteralPath $Path -Raw
+    $content = Get-Utf8FileText -Path $Path
     $escaped = [regex]::Escape($OldValue)
     $actualCount = [regex]::Matches($content, $escaped).Count
 
@@ -217,7 +242,7 @@ function Set-ExactTextReplacement {
     # literal regardless of what characters NewValue contains ($ and \ are special in -replace).
     $updated = [regex]::Replace($content, $escaped, { param($m) $NewValue })
 
-    Set-Content -LiteralPath $Path -Value $updated -NoNewline
+    Set-Utf8FileText -Path $Path -Content $updated
 }
 
 function Set-AnchoredCommitReplacement {
@@ -240,7 +265,7 @@ function Set-AnchoredCommitReplacement {
         throw "Cannot apply mechanical replacement: file not found: $Path"
     }
 
-    $content = Get-Content -LiteralPath $Path -Raw
+    $content = Get-Utf8FileText -Path $Path
     $matches = [regex]::Matches($content, $Pattern)
 
     if ($matches.Count -ne $ExpectedCount) {
@@ -248,7 +273,7 @@ function Set-AnchoredCommitReplacement {
     }
 
     $updated = [regex]::Replace($content, $Pattern, { param($m) $m.Value.Replace($m.Groups[1].Value, $NewCommit) })
-    Set-Content -LiteralPath $Path -Value $updated -NoNewline
+    Set-Utf8FileText -Path $Path -Content $updated
 }
 
 function Set-ViiperAbiReviewPlaceholder {
@@ -282,7 +307,7 @@ struct layout, offsets, or exports -- once confirmed.
         throw "Cannot reset ABI review section: file not found: $Path"
     }
 
-    $content = Get-Content -LiteralPath $Path -Raw
+    $content = Get-Utf8FileText -Path $Path
     $pattern = [regex]::Escape($beginMarker) + '[\s\S]*?' + [regex]::Escape($endMarker)
     $matches = [regex]::Matches($content, $pattern)
 
@@ -291,7 +316,7 @@ struct layout, offsets, or exports -- once confirmed.
     }
 
     $updated = [regex]::Replace($content, $pattern, { param($m) $placeholder.TrimEnd("`r", "`n") })
-    Set-Content -LiteralPath $Path -Value $updated -NoNewline
+    Set-Utf8FileText -Path $Path -Content $updated
 }
 
 # --- main -------------------------------------------------------------
@@ -367,7 +392,7 @@ $lockContent = @"
   }
 }
 "@
-Set-Content -LiteralPath $lockPath -Value ($lockContent + "`n") -NoNewline
+Set-Utf8FileText -Path $lockPath -Content ($lockContent + "`n")
 
 # 3. PROVENANCE.md: mechanical identity fields, then reset the ABI review
 #    placeholder (never synthesized).

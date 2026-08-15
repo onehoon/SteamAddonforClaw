@@ -33,6 +33,7 @@ function Assert-Throws {
 
 $currentCommit = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 $targetCommit = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+$utf8Sentinel = "This is an em dash $([char]0x2014) and Korean text $([char]0xD55C)$([char]0xAE00)."
 
 function New-ValidManifest {
     param([string] $Commit = $targetCommit, [string] $DllSha256, [string] $HeaderSha256)
@@ -127,7 +128,7 @@ Some previous revision's stale ABI notes that must not survive adoption.
 ## Addon integration alignment
 "@ | Set-Content -LiteralPath (Join-Path $viiperDir 'PROVENANCE.md') -NoNewline
 
-    @"
+    $integrationText = @"
 # VIIPER Integration Contract
 
 | Item | Current contract |
@@ -136,7 +137,10 @@ $integrationRevisionLine
 
 Some other paragraph that historically mentions a different commit and must
 $integrationHistoricalLine
-"@ | Set-Content -LiteralPath (Join-Path $docsDir 'VIIPER_INTEGRATION.md') -NoNewline
+$utf8Sentinel
+"@
+    $noBomUtf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText((Join-Path $docsDir 'VIIPER_INTEGRATION.md'), $integrationText, $noBomUtf8)
 
     @"
 # Steam Deck Runtime Roadmap
@@ -266,9 +270,10 @@ try {
     if ($provenance -match 'Some previous revision''s stale ABI notes') { throw 'Stale ABI review content survived adoption.' }
     if ($provenance -notmatch 'ABI compatibility is not inferred') { throw 'ABI review placeholder not reset.' }
 
-    $integrationDoc = Get-Content -LiteralPath (Join-Path $fixture.Root 'docs\VIIPER_INTEGRATION.md') -Raw
+    $integrationDoc = [System.IO.File]::ReadAllText((Join-Path $fixture.Root 'docs\VIIPER_INTEGRATION.md'), [System.Text.Encoding]::UTF8)
     if ($integrationDoc -notmatch [regex]::Escape("| Embedded VIIPER revision | ``$targetCommit`` |")) { throw 'VIIPER_INTEGRATION.md pin not updated.' }
     if ($integrationDoc -notmatch [regex]::Escape('0000000000000000000000000000000000000000')) { throw 'Unrelated historical commit mention was touched.' }
+    if ($integrationDoc -notmatch [regex]::Escape($utf8Sentinel)) { throw 'BOM-less UTF-8 non-ASCII text was not preserved by PowerShell 5.1 adoption.' }
 
     $migrationDoc = Get-Content -LiteralPath (Join-Path $fixture.Root 'docs\VIIPER_MIGRATION_TODO.md') -Raw
     if ($migrationDoc -notmatch [regex]::Escape("onehoon/VIIPER@$targetCommit")) { throw 'VIIPER_MIGRATION_TODO.md pin not updated.' }

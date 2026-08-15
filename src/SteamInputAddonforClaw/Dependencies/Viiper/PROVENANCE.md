@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     a8a00efe7a5dce0c8d95de16795797a7daa7d82a
+Commit:     cb29c1727996f50debfc7836c1febd6c70008811
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc
-DLL SHA-256:              e07349aa76b9c1adf958607dfd147d9e599f0921c84bdbe593e9e53bde289e8c
+DLL SHA-256:              baa271a8859fc1864ea03898cec2ee3f708c85ae924e27ff7edd990e1ea57d33
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,41 +42,52 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-The reviewed cumulative generated-header delta from VIIPER
-`9ed7eeec6e92b3f54cd4ac6785da22db8725742d` to
-`a8a00efe7a5dce0c8d95de16795797a7daa7d82a` is:
+The reviewed generated-header delta from VIIPER
+`a8a00efe7a5dce0c8d95de16795797a7daa7d82a` to
+`cb29c1727996f50debfc7836c1febd6c70008811` is: none. The generated
+`libVIIPER.h` is byte-identical between the two revisions (same SHA-256,
+`e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`, and
+directly diffed with zero output). The DLL SHA-256 changed
+(`baa271a8859fc1864ea03898cec2ee3f708c85ae924e27ff7edd990e1ea57d33`) because
+the change is internal instrumentation, not because any exported surface
+changed.
 
-- `USBDeviceAttachResult`: `VIIPER_ATTACH_SUCCESS = 0`,
-  `VIIPER_ATTACH_RETRYABLE_FAILURE = 1`,
-  `VIIPER_ATTACH_UNSAFE_OUTCOME_UNKNOWN = 2`, `VIIPER_ATTACH_INVALID = 3`.
-- `USBDeviceDetachResult`: `VIIPER_DETACH_SUCCESS = 0`,
-  `VIIPER_DETACH_RETRYABLE_FAILURE = 1`,
-  `VIIPER_DETACH_UNSAFE_OUTCOME_UNKNOWN = 2`, `VIIPER_DETACH_INVALID = 3`.
-- `AttachUSBDeviceEx(uintptr_t)`.
-- `DetachUSBDeviceEx(uintptr_t)`.
-- `USBDeviceAttachmentState`: `VIIPER_ATTACHMENT_DETACHED = 0`,
-  `VIIPER_ATTACHMENT_ATTACHED = 1`,
-  `VIIPER_ATTACHMENT_OUTCOME_UNKNOWN = 2`.
-- `GetUSBDeviceAttachmentState(uintptr_t, USBDeviceAttachmentState*)`.
+Upstream VIIPER PR #26 ("Add USB attachment timing diagnostics") adds
+optional, internal latency measurement around the existing classified
+`attachDeviceLockedResult` / `detachDeviceLockedResult` call paths (canonical
+Go layer) and the Windows native IOCTL / command-fallback backends
+(`internal/server/api/autoattach_windows.go`,
+`internal/server/api/autoattach_contract.go`). It touches only
+`.go` sources and test files; no `.c`/`.h`/cgo export declaration changed, as
+independently confirmed by both the generated-header diff above and the
+upstream commit's own file list (`internal/server/api/autoattach_contract.go`,
+`internal/server/api/autoattach_contract_test.go`,
+`internal/server/api/autoattach_windows.go`,
+`internal/server/api/autoattach_windows_test.go`,
+`lib/viiper/attachment_timing_test.go`, `lib/viiper/viiper.go`). The upstream
+commit message itself independently states the header and DLL export list
+were confirmed byte-identical to pre-change `main`.
 
-The existing `AttachUSBDevice(uintptr_t)` and `DetachUSBDevice(uintptr_t)`
-bool exports remain available with compatibility semantics: they invoke the
-same classified mutation operation and return `true` only for `SUCCESS`.
-`GetUSBDeviceAttachmentState` is read-only and reports VIIPER's tracked
-localhost attachment ownership only. `ATTACHED` is not Windows PnP, HID,
-XInput, or Steam readiness; Addon-side exact PnP stabilization and ownership
-checks remain required. `OUTCOME_UNKNOWN` is a fail-closed native ownership
-state.
+Confirmed by this review:
 
-`SteamDeckDeviceState` layout, `SteamDeckDeviceRemoveResult`,
-`SteamDeckOutputCallback`, and the existing typed Steam Deck
-create/state/remove exports are unchanged. The VIIPER #25 generated-header
-whitespace normalization is formatting-only and does not change the ABI.
-All new exports and types are additive, so the existing Addon managed ABI
-remains compatible. The current Addon production path does not call
-`AttachUSBDeviceEx`, `DetachUSBDeviceEx`, or
-`GetUSBDeviceAttachmentState`; managed adoption is intentionally deferred to
-SD3 lifecycle/recovery work.
+- no exported function signatures added, removed, or changed;
+- no `SteamDeckDeviceState`, `SteamDeckDeviceRemoveResult`, or any other
+  struct/enum layout change;
+- `SetSteamDeckOutputCallback` and the rest of the typed Steam Deck ABI
+  (`SteamDeckDeviceHandle`, `CreateSteamDeckDevice`,
+  `SetSteamDeckDeviceState`, `RemoveSteamDeckDevice`,
+  `RemoveSteamDeckDeviceEx`) are unchanged;
+- the classified `AttachUSBDeviceEx` / `DetachUSBDeviceEx` and read-only
+  `GetUSBDeviceAttachmentState` exports (and their result enums) reviewed as
+  part of the prior `a8a00ef` adoption are unchanged;
+- no managed P/Invoke adaptation is required: `CanonicalViiperNativeApi.cs`,
+  `CanonicalViiperNativeTypes.cs`, and `CanonicalViiperNativeAbiTests.cs`
+  needed no changes and were not touched by this adoption;
+- no Addon routing, session, mapper, or lifecycle behavior changes -- this is
+  a dependency identity/ABI review only;
+- no hardware-validation claim is expanded by this adoption; MSI Claw EX
+  basic non-gyro controller input remains the only established Steam Deck
+  input hardware claim, and SD3 lifecycle/recovery validation remains next.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment

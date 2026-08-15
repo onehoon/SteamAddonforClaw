@@ -73,6 +73,22 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
+      - name: Capture adoption base SHA
+        id: adoption-base
+        shell: pwsh
+        run: |
+          # The exact main commit all mechanical adoption, build, and test work in this run is based on.
+          # Compared again immediately before pushing/opening the PR (see "Guard against a stale Addon
+          # main base" below) so a main merge that lands while this run is in flight (e.g. the previous
+          # VIIPER dependency PR merging while this run's adoption work is already executing) is caught
+          # instead of silently producing a stale-base mechanical commit.
+          $sha = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sha)) {
+            throw 'Failed to resolve the checked-out commit to use as the adoption base SHA.'
+          }
+          Write-Host "Adoption base SHA: $sha"
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
@@ -214,6 +230,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/adopt-viiper.tests.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/viiper-existing-automation-check.tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/viiper-base-drift-check.tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Restore
         if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
@@ -237,6 +257,72 @@ jobs:
         if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
         run: git diff --check
 
+      - name: Guard against a stale Addon main base
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          ADOPTION_BASE_SHA: ${{ steps.adoption-base.outputs.sha }}
+        run: |
+          # This must run as late as practical -- after artifact verification, mechanical adoption,
+          # dependency verification, build/tests, and git diff --check, but immediately before pushing
+          # the automation branch or opening the Draft PR -- to minimize the window in which main could
+          # advance out from under this run's stale snapshot.
+          . ./scripts/viiper-base-drift-check.ps1
+
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch origin/main to check for base drift (git fetch exit code $LASTEXITCODE)."
+          }
+          $latestMainSha = git rev-parse origin/main
+          $resolveExitCode = $LASTEXITCODE
+
+          $classification = Get-ViiperBaseDriftClassification -AdoptionBaseSha $env:ADOPTION_BASE_SHA -LatestMainSha $latestMainSha -ResolveLatestMainExitCode $resolveExitCode
+
+          if ($classification -eq 'StaleBase') {
+            throw "Addon main changed during VIIPER dependency adoption: base=$($env:ADOPTION_BASE_SHA) current=$latestMainSha. Aborting stale-base dependency PR creation."
+          }
+
+          Write-Host "Addon main base is unchanged since adoption began ($($env:ADOPTION_BASE_SHA)). Safe to proceed."
+
+      - name: Re-check for an existing automation branch/PR immediately before pushing
+        id: existing-final
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_COMMIT: ${{ steps.target.outputs.commit }}
+        run: |
+          # Repeats the earlier idempotency lookup one more time, right before the push, to close the
+          # remaining race window between that first check and this run's actual push/PR creation (e.g.
+          # another automation run, or a manual retry, completing for the same target commit in between).
+          . ./scripts/viiper-existing-automation-check.ps1
+
+          $branch = "automation/viiper-$($env:TARGET_COMMIT)"
+
+          $prJson = gh pr list --head $branch --state all --json number,isDraft,state
+          $prQueryExitCode = $LASTEXITCODE
+          $existingPrsParsed = if ($prQueryExitCode -eq 0) { $prJson | ConvertFrom-Json } else { @() }
+          $existingPrs = @($existingPrsParsed)
+
+          $remoteRefs = @(git ls-remote --heads origin "refs/heads/$branch")
+          $lsRemoteExitCode = $LASTEXITCODE
+
+          $classification = Get-ViiperExistingAutomationClassification `
+            -PrQueryExitCode $prQueryExitCode -ExistingPrCount $existingPrs.Count `
+            -LsRemoteExitCode $lsRemoteExitCode -RemoteRefCount $remoteRefs.Count -Branch $branch
+
+          switch ($classification) {
+            'PrExists' {
+              throw "An automation PR for $($env:TARGET_COMMIT) was created by another run while this run was in flight: #$($existingPrs[0].number) (state=$($existingPrs[0].state), draft=$($existingPrs[0].isDraft)). Aborting to avoid a duplicate or a force-push over it."
+            }
+            'BranchExists' {
+              throw "Remote branch '$branch' was created by another run while this run was in flight. Aborting to avoid pushing over it."
+            }
+            'Clean' {
+              Write-Host "No concurrent automation branch/PR for $($env:TARGET_COMMIT) appeared. Safe to proceed."
+            }
+          }
+
       - name: Commit, push, and open Draft PR
         if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
         shell: pwsh
@@ -245,6 +331,7 @@ jobs:
           TARGET_COMMIT: ${{ steps.target.outputs.commit }}
           CURRENT_COMMIT: ${{ steps.eligibility.outputs.current_commit }}
           BRANCH: ${{ steps.existing.outputs.branch }}
+          ADOPTION_BASE_SHA: ${{ steps.adoption-base.outputs.sha }}
           RUN_ID: ${{ steps.fetch.outputs.run_id }}
           ARTIFACT_NAME: ${{ steps.fetch.outputs.artifact_name }}
         run: |
@@ -258,7 +345,55 @@ jobs:
           git checkout -b $env:BRANCH
           git add -A
           git commit -m "VIIPER dependency update: $($env:CURRENT_COMMIT.Substring(0,7)) -> $($env:TARGET_COMMIT.Substring(0,7))" -m "Mechanically adopted by the VIIPER Dependency Update workflow. Managed ABI compatibility has NOT been inferred or automatically adapted -- review required before merge."
+
+          # This is the authoritative pre-push base check. The earlier guard and final
+          # idempotency lookup both perform useful early rejection, but network work after
+          # either check can otherwise leave a TOCTOU window before this push.
+          . ./scripts/viiper-base-drift-check.ps1
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch origin/main immediately before push (git fetch exit code $LASTEXITCODE)."
+          }
+          $latestMainSha = git rev-parse origin/main
+          $resolveExitCode = $LASTEXITCODE
+          $classification = Get-ViiperBaseDriftClassification -AdoptionBaseSha $env:ADOPTION_BASE_SHA -LatestMainSha $latestMainSha -ResolveLatestMainExitCode $resolveExitCode
+          if ($classification -eq 'StaleBase') {
+            throw "Addon main changed immediately before pushing VIIPER dependency branch: base=$($env:ADOPTION_BASE_SHA) current=$latestMainSha. Aborting stale-base dependency PR creation."
+          }
+
           git push -u origin $env:BRANCH
+
+          # Close the remaining push-to-PR race. If main advanced after the push,
+          # delete only a branch whose remote head is exactly this run's commit.
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to re-fetch origin/main after push (git fetch exit code $LASTEXITCODE). Failing closed without deleting the branch."
+          }
+          $latestMainAfterPush = git rev-parse origin/main
+          $resolveAfterPushExitCode = $LASTEXITCODE
+          $remoteBranchRefs = @(git ls-remote --heads origin "refs/heads/$($env:BRANCH)")
+          $lsRemoteAfterPushExitCode = $LASTEXITCODE
+          if ($lsRemoteAfterPushExitCode -ne 0 -or $remoteBranchRefs.Count -ne 1) {
+            throw "Could not establish exact remote ownership of pushed branch '$($env:BRANCH)' after push. Failing closed without deleting the branch."
+          }
+          $remoteBranchHead = ($remoteBranchRefs[0] -split '\s+')[0]
+          $postPushAction = Get-ViiperPostPushBaseDriftAction `
+            -AdoptionBaseSha $env:ADOPTION_BASE_SHA `
+            -LatestMainSha $latestMainAfterPush `
+            -ResolveLatestMainExitCode $resolveAfterPushExitCode `
+            -LocalHeadSha (git rev-parse HEAD) `
+            -RemoteBranchHeadSha $remoteBranchHead
+          if ($postPushAction -eq 'DeleteBranchAndFailClosed') {
+            $lease = "refs/heads/$($env:BRANCH):$remoteBranchHead"
+            git push origin "--force-with-lease=$lease" ":refs/heads/$($env:BRANCH)"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Addon main advanced after push, but conditional cleanup of branch '$($env:BRANCH)' failed because its remote ref changed or deletion was rejected. Preserving the branch and failing closed without creating a PR."
+            }
+            throw "Addon main advanced after pushing VIIPER dependency branch. Deleted the branch because its remote head matched this run's HEAD; no PR was created."
+          }
+          if ($postPushAction -eq 'FailClosedPreserveBranch') {
+            throw "Addon main advanced after push, but remote branch '$($env:BRANCH)' no longer points exclusively to this run's HEAD. Preserving the branch and refusing to create a PR."
+          }
 
           $shortSha = $env:TARGET_COMMIT.Substring(0, 7)
           $title = "VIIPER dependency update: $shortSha"
