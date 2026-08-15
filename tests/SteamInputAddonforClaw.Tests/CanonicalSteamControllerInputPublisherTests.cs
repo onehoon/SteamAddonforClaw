@@ -842,6 +842,41 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task Production_worker_thread_is_configured_as_a_named_background_AboveNormal_thread()
+    {
+        // Real MSI Claw testing under CPU-heavy workloads showed the #159 deadline scheduler suffering
+        // severe scheduling starvation at ThreadPriority.Normal; this pins the exact configuration the
+        // worker thread must be started with, using the existing WorkerThreadStartOverrideForTests seam
+        // to observe the Thread before it's started (rather than adding a new abstraction just to inspect
+        // it), then actually starting it through the override so the normal lifecycle completes.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        ThreadPriority? observedPriority = null;
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink)
+        {
+            WorkerThreadStartOverrideForTests = thread =>
+            {
+                observedPriority = thread.Priority;
+                Assert.Equal("SteamInputAddon.GordonPublisher", thread.Name);
+                Assert.True(thread.IsBackground);
+                thread.Start();
+            },
+        };
+
+        publisher.Start();
+        try
+        {
+            await sink.WaitForCountAsync(1, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+
+        Assert.Equal(ThreadPriority.AboveNormal, observedPriority);
+    }
+
+    [Fact]
     public async Task Production_worker_reports_fault_and_stops_on_a_runtime_rearm_failure_without_a_fallback_scheduler()
     {
         // A real SetWaitableTimerEx re-arm failure after the timer was already successfully created and
