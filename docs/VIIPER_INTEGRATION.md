@@ -79,6 +79,11 @@ behind the current pin is treated as a clean no-op, never adopted) and never
 duplicates or force-pushes over an existing automation PR for the same
 commit.
 
+The current adopted revision includes the classified `AttachUSBDeviceEx` and
+`DetachUSBDeviceEx` ABI, while the Addon production path intentionally
+continues to use the existing bool attach/detach APIs. Managed adoption of the
+new classified APIs is deferred to the separate SD3 lifecycle work.
+
 **Managed ABI compatibility is never inferred or automatically adapted.**
 The automation never edits `ICanonicalViiperNativeApi`, native delegate
 definitions, `RequiredExports`, struct/enum layouts, callback lifetime logic,

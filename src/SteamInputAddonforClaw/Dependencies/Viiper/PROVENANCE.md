@@ -42,12 +42,24 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-ABI compatibility is not inferred by the dependency automation. Review the
-generated `libVIIPER.h` diff and the managed interop
-(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
-Replace this paragraph with the reviewed ABI delta -- including any changed
-struct layout, offsets, or exports -- once confirmed.
+The reviewed generated-header delta for the adopted VIIPER revision adds the
+following classified attachment results and exports:
+
+- `USBDeviceAttachResult`: `SUCCESS = 0`, `RETRYABLE_FAILURE = 1`,
+  `UNSAFE_OUTCOME_UNKNOWN = 2`, `INVALID = 3`.
+- `USBDeviceDetachResult`: `SUCCESS = 0`, `RETRYABLE_FAILURE = 1`,
+  `UNSAFE_OUTCOME_UNKNOWN = 2`, `INVALID = 3`.
+- `AttachUSBDeviceEx(uintptr_t) -> USBDeviceAttachResult`.
+- `DetachUSBDeviceEx(uintptr_t) -> USBDeviceDetachResult`.
+
+The existing `AttachUSBDevice` and `DetachUSBDevice` exports remain present
+with their existing bool semantics. There are no Steam Deck struct, layout, or
+callback ABI changes in this adoption. The Addon production path does not yet
+use the new `*Ex` APIs; managed bindings and policy changes for classified
+attach/detach outcomes are intentionally deferred to the separate SD3
+lifecycle work. The current bool attach path remains conservative and
+fail-closed, while device removal already uses `RemoveSteamDeckDeviceEx` for
+retryable and unsafe outcome classification.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
