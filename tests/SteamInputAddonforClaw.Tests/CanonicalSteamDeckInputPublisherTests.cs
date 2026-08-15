@@ -181,15 +181,42 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         // Timing-decomposition parity fields (Minor 1): present with zero defaults on the manual-tick
         // path, which never drives WorkerLoop.
         Assert.Contains("TimerWakeCount=0", heartbeat);
+        Assert.Contains("ExpectedTicksAt4ms=", heartbeat);
         Assert.Contains("AverageWakeToWakeMs=0", heartbeat);
         Assert.Contains("MaxWakeToWakeMs=0", heartbeat);
         Assert.Contains("AverageWaitBlockedMs=0", heartbeat);
         Assert.Contains("MaxWaitBlockedMs=0", heartbeat);
         Assert.Contains("AveragePublishWorkMs=0", heartbeat);
         Assert.Contains("MaxPublishWorkMs=0", heartbeat);
+        Assert.Contains("WakeOver4_25MsCount=0", heartbeat);
+        Assert.Contains("WakeOver5MsCount=0", heartbeat);
         Assert.Contains("AverageWakeLatenessMs=0", heartbeat);
         Assert.Contains("MaxWakeLatenessMs=0", heartbeat);
         Assert.Contains("SkippedDeadlineCount=0", heartbeat);
+    }
+
+    [Fact]
+    public async Task TimingDiagnostics_WakeOverThresholdCountsIncrementLikeGordon()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var fakeNow = 0L;
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow);
+        publisher.Start();
+
+        var msToTicks = Stopwatch.Frequency / 1000.0;
+        publisher.RecordTimerWakeForTests((long)(0 * msToTicks));
+        publisher.RecordTimerWakeForTests((long)(4 * msToTicks)); // 4ms interval: under both thresholds
+        publisher.RecordTimerWakeForTests((long)(10 * msToTicks)); // 6ms interval: over both thresholds
+
+        fakeNow = Stopwatch.Frequency + 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var heartbeat = Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("publisher heartbeat"));
+        Assert.Contains("WakeOver4_25MsCount=1", heartbeat);
+        Assert.Contains("WakeOver5MsCount=1", heartbeat);
     }
 
     [Fact]

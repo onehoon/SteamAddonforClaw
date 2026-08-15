@@ -19,6 +19,8 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 internal sealed class CanonicalSteamDeckInputPublisher
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan WakeWarnThreshold = TimeSpan.FromMilliseconds(4.25);
+    private static readonly TimeSpan WakeAlarmThreshold = TimeSpan.FromMilliseconds(5);
     private static readonly TimeSpan ProductionPeriod = TimeSpan.FromMilliseconds(4);
     private static readonly TimeSpan DefaultWorkerJoinTimeout = TimeSpan.FromSeconds(5);
 
@@ -61,6 +63,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private int _wakeToWakeSampleCountSinceHeartbeat;
     private long _wakeToWakeTicksSumSinceHeartbeat;
     private long _maxWakeToWakeTicksSinceHeartbeat;
+    private int _wakeOver425MsCountSinceHeartbeat;
+    private int _wakeOver5MsCountSinceHeartbeat;
     private long _waitBlockedTicksSumSinceHeartbeat;
     private long _maxWaitBlockedTicksSinceHeartbeat;
     private long _publishWorkTicksSumSinceHeartbeat;
@@ -287,6 +291,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
             _wakeToWakeSampleCountSinceHeartbeat++;
             _wakeToWakeTicksSumSinceHeartbeat += interval;
             if (interval > _maxWakeToWakeTicksSinceHeartbeat) _maxWakeToWakeTicksSinceHeartbeat = interval;
+            var intervalSpan = Stopwatch.GetElapsedTime(0, interval);
+            if (intervalSpan >= WakeAlarmThreshold) _wakeOver5MsCountSinceHeartbeat++;
+            if (intervalSpan >= WakeWarnThreshold) _wakeOver425MsCountSinceHeartbeat++;
         }
         _previousTimerWakeTimestamp = wake;
         _hasPreviousTimerWake = true;
@@ -322,6 +329,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _wakeToWakeSampleCountSinceHeartbeat = 0;
         _wakeToWakeTicksSumSinceHeartbeat = 0;
         _maxWakeToWakeTicksSinceHeartbeat = 0;
+        _wakeOver425MsCountSinceHeartbeat = 0;
+        _wakeOver5MsCountSinceHeartbeat = 0;
         _waitBlockedTicksSumSinceHeartbeat = 0;
         _maxWaitBlockedTicksSinceHeartbeat = 0;
         _publishWorkTicksSumSinceHeartbeat = 0;
@@ -384,6 +393,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
 
         var elapsedMs = elapsed.TotalMilliseconds;
         var effectiveHz = elapsedMs > 0 ? _setStateCallsSinceHeartbeat / (elapsedMs / 1000.0) : 0.0;
+        var expectedTicksAt4Ms = elapsedMs / 4.0;
 
         var wakeCount = _timerWakeCountSinceHeartbeat;
         var wakeToWakeSampleCount = _wakeToWakeSampleCountSinceHeartbeat;
@@ -400,12 +410,15 @@ internal sealed class CanonicalSteamDeckInputPublisher
             ("HeartbeatElapsedMs", elapsedMs),
             ("EffectiveSetStateHz", effectiveHz),
             ("TimerWakeCount", wakeCount),
+            ("ExpectedTicksAt4ms", expectedTicksAt4Ms),
             ("AverageWakeToWakeMs", averageWakeToWakeMs),
             ("MaxWakeToWakeMs", Stopwatch.GetElapsedTime(0, _maxWakeToWakeTicksSinceHeartbeat).TotalMilliseconds),
             ("AverageWaitBlockedMs", averageWaitBlockedMs),
             ("MaxWaitBlockedMs", Stopwatch.GetElapsedTime(0, _maxWaitBlockedTicksSinceHeartbeat).TotalMilliseconds),
             ("AveragePublishWorkMs", averagePublishWorkMs),
             ("MaxPublishWorkMs", Stopwatch.GetElapsedTime(0, _maxPublishWorkTicksSinceHeartbeat).TotalMilliseconds),
+            ("WakeOver4_25MsCount", _wakeOver425MsCountSinceHeartbeat),
+            ("WakeOver5MsCount", _wakeOver5MsCountSinceHeartbeat),
             ("AverageWakeLatenessMs", averageWakeLatenessMs),
             ("MaxWakeLatenessMs", Stopwatch.GetElapsedTime(0, _maxWakeLatenessTicksSinceHeartbeat).TotalMilliseconds),
             ("SkippedDeadlineCount", _skippedDeadlineCountSinceHeartbeat));
@@ -418,6 +431,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _wakeToWakeSampleCountSinceHeartbeat = 0;
         _wakeToWakeTicksSumSinceHeartbeat = 0;
         _maxWakeToWakeTicksSinceHeartbeat = 0;
+        _wakeOver425MsCountSinceHeartbeat = 0;
+        _wakeOver5MsCountSinceHeartbeat = 0;
         _waitBlockedTicksSumSinceHeartbeat = 0;
         _maxWaitBlockedTicksSinceHeartbeat = 0;
         _publishWorkTicksSumSinceHeartbeat = 0;
