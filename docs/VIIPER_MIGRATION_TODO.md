@@ -16,6 +16,14 @@ stage are implemented. MSI Claw EX hardware has validated the basic non-gyro
 controller input path. That result does not by itself validate every lifecycle,
 recovery, native teardown, or failure-path condition.
 
+Phase 2B1 tooling status: `scripts/update-viiper.ps1` can fetch and
+independently verify the canonical Windows libVIIPER artifact for an exact,
+already-built `onehoon/VIIPER` commit into a disposable staging directory. It
+does not adopt any artifact and does not change the embedded revision above.
+Adopting a newer verified commit -- including the native/managed ABI move
+required for `SteamDeckOutputCallback`/`SetSteamDeckOutputCallback` -- remains
+a separate, later, reviewed Phase 2B2 operation.
+
 ## Active roadmap
 
 ### SD3 — lifecycle and recovery hardware validation
