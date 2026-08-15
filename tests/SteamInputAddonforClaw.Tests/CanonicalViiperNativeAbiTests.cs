@@ -556,26 +556,33 @@ public sealed class CanonicalViiperNativeAbiTests
     }
 
     [Fact]
-    public void SteamDeckCallback_ConcurrentSetCallsKeepNativeStateAndManagedRootConsistent()
+    public void SteamDeckCallback_ConcurrentSetCallsCannotEnterTheNativeCallConcurrently()
     {
         // Regression test for a race where the native SetSteamDeckOutputCallback call and the
         // managed dictionary mutation were two separate, non-atomic steps: two threads racing to
         // set different callbacks on the same handle could interleave as native<-cbA, native<-cbB,
         // root<-cbB, root<-cbA, leaving native holding cbB's function pointer while the managed
         // dictionary only rooted cbA -- cbB becomes GC-eligible while VIIPER can still invoke it.
-        // With the native call and root mutation serialized under one lock, whichever thread's call
-        // is the last to complete must be the same call that both "won" the native side (observed
-        // here via FakeExports.LastSetDeckCallback, set from inside the locked native call) and the
-        // managed root -- run repeatedly with a Barrier to maximize the chance of actual overlap.
+        //
+        // A bare "run it N times and hope the scheduler overlaps" test does not actually prove
+        // mutual exclusion -- it can pass 200/200 runs against the old, unlocked implementation if
+        // the scheduler happens to run the two calls back-to-back every time. Instead, the fake
+        // native call itself detects concurrent entry: it increments a shared depth counter, sleeps
+        // briefly to force any unsynchronized second caller into the window, then decrements. Any
+        // depth > 1 observed here is conclusive proof two callers were inside the "native" call
+        // simultaneously, which the fix's lock (_callbackGate) around the native call and the root
+        // mutation must make impossible. Also asserts the managed root matches whichever call
+        // actually completed last, which the same atomicity guarantees.
         var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
         Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
 
         var rootsField = typeof(CanonicalViiperNativeApi).GetField("_steamDeckOutputCallbacks", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
         FakeExports.TrackLastSetDeckCallback = true;
+        FakeExports.DetectConcurrentSetDeckCallbackEntry = true;
         try
         {
-            for (var iteration = 0; iteration < 200; iteration++)
+            for (var iteration = 0; iteration < 20; iteration++)
             {
                 SteamDeckOutputCallback callbackA = (_, _, _) => { };
                 SteamDeckOutputCallback callbackB = (_, _, _) => { };
@@ -597,6 +604,8 @@ public sealed class CanonicalViiperNativeAbiTests
                 threadA.Join();
                 threadB.Join();
 
+                Assert.False(FakeExports.ConcurrentSetDeckCallbackEntryDetected, "Two threads entered the native SetSteamDeckOutputCallback call concurrently -- the native call and the managed root mutation are not serialized.");
+
                 var roots = (Dictionary<nuint, SteamDeckOutputCallback>)rootsField.GetValue(api)!;
                 Assert.True(roots.TryGetValue(deviceHandle, out var rootedCallback));
                 Assert.Same(FakeExports.LastSetDeckCallback, rootedCallback);
@@ -606,6 +615,8 @@ public sealed class CanonicalViiperNativeAbiTests
         {
             FakeExports.TrackLastSetDeckCallback = false;
             FakeExports.LastSetDeckCallback = null;
+            FakeExports.DetectConcurrentSetDeckCallbackEntry = false;
+            FakeExports.ConcurrentSetDeckCallbackEntryDetected = false;
         }
     }
 
@@ -755,6 +766,13 @@ public sealed class CanonicalViiperNativeAbiTests
         internal static bool TrackLastSetDeckCallback;
         internal static SteamDeckOutputCallback? LastSetDeckCallback;
 
+        // Deliberately not [ThreadStatic]: used to detect two threads inside the fake
+        // SetSteamDeckOutputCallback body at once (see SetDeckCallbackImpl and the concurrency
+        // regression test above).
+        private static int _concurrentSetDeckCallbackDepth;
+        internal static bool DetectConcurrentSetDeckCallbackEntry;
+        internal static volatile bool ConcurrentSetDeckCallbackEntryDetected;
+
         internal static bool FailCloseServer
         {
             get => _failCloseServer;
@@ -843,6 +861,17 @@ public sealed class CanonicalViiperNativeAbiTests
 
         private static byte SetDeckCallbackImpl(nuint _, SteamDeckOutputCallback? __)
         {
+            if (DetectConcurrentSetDeckCallbackEntry)
+            {
+                var depth = Interlocked.Increment(ref _concurrentSetDeckCallbackDepth);
+                if (depth > 1) ConcurrentSetDeckCallbackEntryDetected = true;
+                // Widens the window so an unsynchronized concurrent caller is virtually certain to
+                // land inside it -- without this, a caller that raced in unsynchronized could still
+                // slip through between the increment and decrement below on a fast machine.
+                Thread.Sleep(5);
+                Interlocked.Decrement(ref _concurrentSetDeckCallbackDepth);
+            }
+
             if (FailSetDeckCallback) return 0;
             if (TrackLastSetDeckCallback) LastSetDeckCallback = __;
             return 1;
