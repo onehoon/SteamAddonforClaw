@@ -54,6 +54,41 @@ rooting were updated in the same change to keep the native and managed ABI
 aligned. No production caller registers the Steam Deck output callback yet;
 Addon rumble/haptics handling remains a separate feature track.
 
+### Automated dependency update PRs
+
+`scripts/adopt-viiper.ps1` mechanically applies an already-verified
+`update-viiper.ps1` staging payload to the vendored dependency identity: the
+DLL/header, `viiper.lock.json`, `PROVENANCE.md`'s mechanical fields (its
+marker-delimited "ABI review" section is reset to an evergreen human-review
+placeholder, never synthesized), the documented pins, `THIRD_PARTY_NOTICES.md`'s
+VIIPER source identity, `ViiperRuntimeInspector.ExpectedPayloadSha256`, and
+`scripts/verify-publish-assets.ps1`'s expected hash. `scripts/verify-viiper.ps1`
+is authoritative for all of these mechanical pins, not just the lock/provenance
+pair.
+
+The `.github/workflows/viiper-dependency-update.yml` workflow wires this into
+an end-to-end pipeline: a `repository_dispatch` from `onehoon/VIIPER` (sent
+only after a real `push`/`main`/successful canonical build completes) or a
+manual `workflow_dispatch` with an exact commit triggers independent
+re-verification via `update-viiper.ps1`, mechanical adoption via
+`adopt-viiper.ps1`, and a Draft PR into `main`. The dispatch payload's commit
+is only an input, never trusted as artifact authority -- the same
+push/main/success/exact-artifact/manifest/hash trust chain applies regardless
+of trigger. The workflow also fails closed on a downgrade (a target commit
+behind the current pin is treated as a clean no-op, never adopted) and never
+duplicates or force-pushes over an existing automation PR for the same
+commit.
+
+**Managed ABI compatibility is never inferred or automatically adapted.**
+The automation never edits `ICanonicalViiperNativeApi`, native delegate
+definitions, `RequiredExports`, struct/enum layouts, callback lifetime logic,
+or any runtime/session/mapper behavior. Every automated PR is opened as a
+Draft and requires human review of the generated header diff and managed
+interop before merging; if the ABI changed, the required managed changes are
+added to the same PR, not merged separately. Normal Addon CI and release stay
+network-independent of VIIPER -- only the dedicated dependency-update
+workflow fetches the external canonical artifact.
+
 ## 1. Upstream authority
 
 The architectural and API sources of truth are:

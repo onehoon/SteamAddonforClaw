@@ -16,6 +16,9 @@ $lockPath = Join-Path $viiperDir 'viiper.lock.json'
 $provenancePath = Join-Path $viiperDir 'PROVENANCE.md'
 $integrationDocPath = Join-Path $RepoRoot 'docs\VIIPER_INTEGRATION.md'
 $migrationDocPath = Join-Path $RepoRoot 'docs\VIIPER_MIGRATION_TODO.md'
+$noticesPath = Join-Path $RepoRoot 'THIRD_PARTY_NOTICES.md'
+$runtimeInspectorPath = Join-Path $RepoRoot 'src\SteamInputAddonforClaw\Prerequisites\ViiperRuntimeInspector.cs'
+$verifyPublishAssetsPath = Join-Path $RepoRoot 'scripts\verify-publish-assets.ps1'
 
 function Assert-Field {
     param(
@@ -162,4 +165,53 @@ if ($migrationCommit -notmatch '^[0-9a-fA-F]{40}$') {
 }
 Assert-Field -Actual $migrationCommit.ToLowerInvariant() -Expected $lockCommit -Message 'docs/VIIPER_MIGRATION_TODO.md pinned commit does not match viiper.lock.json.'
 
-Write-Host 'VIIPER embedded dependency verified: lock, provenance, and documentation pins are aligned.'
+# --- THIRD_PARTY_NOTICES.md source-identity cross-check --------------------
+
+if (-not (Test-Path -LiteralPath $noticesPath -PathType Leaf)) {
+    throw "THIRD_PARTY_NOTICES.md was not found: $noticesPath"
+}
+
+$noticesText = Get-Content -LiteralPath $noticesPath -Raw
+$noticesMatch = [regex]::Match($noticesText, '(?m)^- Source baseline: pinned commit `([0-9a-fA-F]+)`\r?$')
+if (-not $noticesMatch.Success) {
+    throw "THIRD_PARTY_NOTICES.md is missing a parseable VIIPER 'Source baseline: pinned commit' pin."
+}
+$noticesCommit = $noticesMatch.Groups[1].Value
+if ($noticesCommit -notmatch '^[0-9a-fA-F]{40}$') {
+    throw "THIRD_PARTY_NOTICES.md pinned commit is not exactly 40 hex characters: '$noticesCommit'."
+}
+Assert-Field -Actual $noticesCommit.ToLowerInvariant() -Expected $lockCommit -Message 'THIRD_PARTY_NOTICES.md VIIPER source baseline does not match viiper.lock.json.'
+
+# --- runtime prerequisite / publish gate DLL hash cross-check --------------
+
+if (-not (Test-Path -LiteralPath $runtimeInspectorPath -PathType Leaf)) {
+    throw "ViiperRuntimeInspector.cs was not found: $runtimeInspectorPath"
+}
+
+$runtimeInspectorText = Get-Content -LiteralPath $runtimeInspectorPath -Raw
+$runtimeInspectorMatch = [regex]::Match($runtimeInspectorText, 'ExpectedPayloadSha256\s*=\s*"([0-9a-fA-F]+)"')
+if (-not $runtimeInspectorMatch.Success) {
+    throw "ViiperRuntimeInspector.cs is missing a parseable 'ExpectedPayloadSha256' constant."
+}
+$runtimeInspectorHash = $runtimeInspectorMatch.Groups[1].Value
+if ($runtimeInspectorHash -notmatch '^[0-9a-fA-F]{64}$') {
+    throw "ViiperRuntimeInspector.cs ExpectedPayloadSha256 is not exactly 64 hex characters: '$runtimeInspectorHash'."
+}
+Assert-Field -Actual $runtimeInspectorHash.ToUpperInvariant() -Expected $lockDllHash -Message 'ViiperRuntimeInspector.ExpectedPayloadSha256 does not match viiper.lock.json.'
+
+if (-not (Test-Path -LiteralPath $verifyPublishAssetsPath -PathType Leaf)) {
+    throw "scripts/verify-publish-assets.ps1 was not found: $verifyPublishAssetsPath"
+}
+
+$verifyPublishAssetsText = Get-Content -LiteralPath $verifyPublishAssetsPath -Raw
+$verifyPublishAssetsMatch = [regex]::Match($verifyPublishAssetsText, "expectedViiperSha256\s*=\s*'([0-9a-fA-F]+)'")
+if (-not $verifyPublishAssetsMatch.Success) {
+    throw "scripts/verify-publish-assets.ps1 is missing a parseable 'expectedViiperSha256' assignment."
+}
+$verifyPublishAssetsHash = $verifyPublishAssetsMatch.Groups[1].Value
+if ($verifyPublishAssetsHash -notmatch '^[0-9a-fA-F]{64}$') {
+    throw "scripts/verify-publish-assets.ps1 expectedViiperSha256 is not exactly 64 hex characters: '$verifyPublishAssetsHash'."
+}
+Assert-Field -Actual $verifyPublishAssetsHash.ToUpperInvariant() -Expected $lockDllHash -Message 'scripts/verify-publish-assets.ps1 expectedViiperSha256 does not match viiper.lock.json.'
+
+Write-Host 'VIIPER embedded dependency verified: lock, provenance, documentation pins, third-party notices, runtime prerequisite hash, and publish gate hash are aligned.'

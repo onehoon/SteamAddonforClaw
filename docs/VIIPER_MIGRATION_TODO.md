@@ -32,6 +32,15 @@ hardware validation from before this adoption remains the only established
 Steam Deck input hardware claim; SD3 lifecycle/recovery validation below
 remains unstarted.
 
+Phase 3 dependency automation: `.github/workflows/viiper-dependency-update.yml`
+can now open a Draft PR automatically after a verified canonical VIIPER
+commit becomes available, using `scripts/adopt-viiper.ps1` for mechanical
+adoption. It never infers managed ABI compatibility and never merges; every
+automated PR requires human review, and if the ABI changed, the required
+managed changes are added to that same PR before it can merge. This is
+dependency-automation completion, not runtime/hardware validation -- it does
+not advance or substitute for SD3 below.
+
 ## Active roadmap
 
 ### SD3 — lifecycle and recovery hardware validation
