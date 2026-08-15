@@ -49,6 +49,10 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     private int _outputFaultReported;
     private ICanonicalSteamDeckSession? _canonicalSession;
     private bool _pnpAbsenceVerified;
+    // The exact PnP snapshot that verified absence, threaded through to ClearUncertaintyAfterVerifiedAbsence
+    // so both checks reason about the SAME point-in-time evidence instead of racing against a second,
+    // later snapshot taken separately (TOCTOU between "confirmed absent" and "confirmed still owned-absent").
+    private IReadOnlyList<ControllerDeviceInfo>? _verifiedAbsenceSnapshot;
     private bool _ownershipUncertaintyCleared;
     private bool _recoveryMutationCompleted;
     private CreationTiming? _creationTiming;
@@ -259,9 +263,10 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         if (!_pnpAbsenceVerified)
         {
             var absenceStarted = Stopwatch.GetTimestamp();
+            IReadOnlyList<ControllerDeviceInfo> verifiedSnapshot;
             try
             {
-                absent = hadResolvedIdentity
+                (absent, verifiedSnapshot) = hadResolvedIdentity
                     ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
                     : _potentialDeckInstanceIdsAtIdentityFailure.Count > 0
                         ? await WaitForAbsenceAsync(_potentialDeckInstanceIdsAtIdentityFailure, cancellationToken).ConfigureAwait(false)
@@ -270,10 +275,14 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             finally { pnpAbsenceMs = Elapsed(absenceStarted); }
             if (!absent) return RollbackFailure("VirtualDevicePnPStillPresent");
             _pnpAbsenceVerified = true;
+            _verifiedAbsenceSnapshot = verifiedSnapshot;
         }
         if (!_ownershipUncertaintyCleared)
         {
-            if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new SteamDeckVirtualDeviceIdentityPolicy(), _before, _owned))
+            // Reuse the SAME snapshot that verified absence (rather than taking a fresh, later one)
+            // so the two checks cannot race against real device-state change between them.
+            var evidence = _verifiedAbsenceSnapshot ?? _enumerator.EnumeratePresentDevices();
+            if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(evidence, new SteamDeckVirtualDeviceIdentityPolicy(), _before, _owned))
                 return RollbackFailure("UnrelatedMatchingVirtualDeviceStillPresent");
             _ownershipUncertaintyCleared = true;
         }
@@ -296,6 +305,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         _canonicalSession = null;
         _deviceId = 0; _busId = 0; _owned = null; _before = null; _potentialDeckInstanceIdsAtIdentityFailure = [];
         _pnpAbsenceVerified = false; _ownershipUncertaintyCleared = false; _recoveryMutationCompleted = false;
+        _verifiedAbsenceSnapshot = null;
         _state = LifecycleState.Inactive;
         return RoutingStageOperationResult.Success("SteamDeckRemoved");
     }
@@ -309,33 +319,69 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             .ToArray();
     }
 
+    // Steam Deck (28DE:1205) is a composite device exposing separate Keyboard/Mouse/Controller HID
+    // interfaces that can enumerate as sibling PnP nodes with real-world timing skew between them.
+    // Resolving as soon as the FIRST sibling appears would treat normal composite enumeration as
+    // already-complete and strand the later siblings as unowned. Instead, once a candidate logical
+    // group is observed we keep polling (reusing the same before/after delta resolver, which always
+    // re-evaluates against the original "before" snapshot, so the candidate set naturally grows as
+    // more siblings appear) until the group's size stops growing across N consecutive snapshots, and
+    // only then treat it as converged. A second, genuinely different logical group appearing at any
+    // point during stabilization still surfaces as Ambiguous immediately (fail closed, unchanged).
+    private const int IdentityStabilizationConsecutiveSnapshots = 3;
+
     private async ValueTask<(ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> WaitForIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, CancellationToken token)
     {
         var deadline = DateTime.UtcNow + _pnPTimeout;
-        ViiperVirtualDeviceResolution result;
+        ViiperVirtualDeviceResolution result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear");
+        ViiperVirtualDeviceResolution? lastResolved = null;
         IReadOnlyList<ControllerDeviceInfo> snapshot;
-        do
+        var stableConsecutiveSnapshots = 0;
+        var lastCandidateCount = -1;
+        while (true)
         {
             snapshot = _enumerator.EnumeratePresentDevices();
             result = _resolver.Resolve(before, snapshot);
-            if (result.Status != ViiperVirtualDeviceResolutionStatus.NoNewCandidate) return (result, snapshot);
+            if (result.Status == ViiperVirtualDeviceResolutionStatus.Ambiguous)
+                return (result, snapshot);
+            if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved)
+            {
+                stableConsecutiveSnapshots = result.Devices.Count == lastCandidateCount ? stableConsecutiveSnapshots + 1 : 1;
+                lastCandidateCount = result.Devices.Count;
+                lastResolved = result;
+                if (stableConsecutiveSnapshots >= IdentityStabilizationConsecutiveSnapshots) return (result, snapshot);
+            }
+            else
+            {
+                stableConsecutiveSnapshots = 0;
+                lastCandidateCount = -1;
+            }
+            if (DateTime.UtcNow >= deadline) break;
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
         }
-        while (DateTime.UtcNow < deadline);
-        return (result, snapshot);
+        // Overall PnP timeout elapsed. If we had at least one resolved (but not yet fully-stable)
+        // aggregate candidate set, prefer it over a hard failure -- a group that stopped changing
+        // right up until the deadline is still the best evidence we have of the converged device.
+        return lastResolved is not null ? (lastResolved, snapshot) : (result, snapshot);
     }
 
-    private async ValueTask<bool> WaitForAbsenceAsync(IEnumerable<string> ids, CancellationToken token)
+    private async ValueTask<(bool Absent, IReadOnlyList<ControllerDeviceInfo> Snapshot)> WaitForAbsenceAsync(IEnumerable<string> ids, CancellationToken token)
     {
         var wanted = ids.ToHashSet(StringComparer.OrdinalIgnoreCase); var deadline = DateTime.UtcNow + _pnPTimeout;
+        IReadOnlyList<ControllerDeviceInfo> snapshot;
         while (DateTime.UtcNow < deadline)
-        { if (!_enumerator.EnumeratePresentDevices().Any(device => wanted.Contains(device.InstanceId))) return true; await Task.Delay(_pollInterval, token).ConfigureAwait(false); }
-        return !_enumerator.EnumeratePresentDevices().Any(device => wanted.Contains(device.InstanceId));
+        {
+            snapshot = _enumerator.EnumeratePresentDevices();
+            if (!snapshot.Any(device => wanted.Contains(device.InstanceId))) return (true, snapshot);
+            await Task.Delay(_pollInterval, token).ConfigureAwait(false);
+        }
+        snapshot = _enumerator.EnumeratePresentDevices();
+        return (!snapshot.Any(device => wanted.Contains(device.InstanceId)), snapshot);
     }
 
-    private async ValueTask<bool> WaitForNoNewMatchingCandidatesAsync(CancellationToken token)
+    private async ValueTask<(bool Absent, IReadOnlyList<ControllerDeviceInfo> Snapshot)> WaitForNoNewMatchingCandidatesAsync(CancellationToken token)
     {
-        if (_before is null) return false;
+        if (_before is null) return (false, []);
         var beforeIds = _before.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var deadline = DateTime.UtcNow + _pnPTimeout;
         var policy = new SteamDeckVirtualDeviceIdentityPolicy();
@@ -343,12 +389,12 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         {
             var current = _enumerator.EnumeratePresentDevices();
             var currentByInstanceId = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(current);
-            if (!current.Any(device => policy.IsMatchingCandidate(device, currentByInstanceId) && !beforeIds.Contains(device.InstanceId))) return true;
+            if (!current.Any(device => policy.IsMatchingCandidate(device, currentByInstanceId) && !beforeIds.Contains(device.InstanceId))) return (true, current);
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
         }
         var final = _enumerator.EnumeratePresentDevices();
         var finalByInstanceId = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(final);
-        return !final.Any(device => policy.IsMatchingCandidate(device, finalByInstanceId) && !beforeIds.Contains(device.InstanceId));
+        return (!final.Any(device => policy.IsMatchingCandidate(device, finalByInstanceId) && !beforeIds.Contains(device.InstanceId)), final);
     }
 
     private async ValueTask<RoutingStageOperationResult> FailAndRollbackCoreAsync(string reason)
