@@ -4,6 +4,8 @@ This document defines the mandatory source-reading and validation rules for any 
 
 It is intentionally short and normative. The detailed integration contract remains in [`VIIPER_INTEGRATION.md`](./VIIPER_INTEGRATION.md), while the active implementation backlog remains in [`VIIPER_MIGRATION_TODO.md`](./VIIPER_MIGRATION_TODO.md).
 
+The exact pre-Steam-Deck-transition version is archived under `docs/archive/gordon-baseline-2026-08-15/`.
+
 ---
 
 ## 1. Mandatory upstream-fork documents
@@ -16,22 +18,21 @@ Before designing, implementing, reviewing, or updating any VIIPER change for thi
 2. `onehoon/VIIPER/docs/libviiper/fork-api.md`
    - https://github.com/onehoon/VIIPER/blob/main/docs/libviiper/fork-api.md
 
-These are not optional background reading.
+These are mandatory.
 
-`FORK_ARCHITECTURE.md` is the fork's architectural source of truth. It defines the canonical embedded architecture, ownership model, caller-owned bus lifetime, typed-handle direction, tracked USB/IP attachment model, server lifecycle, build expectations, and upstream-synchronization constraints.
-
-`docs/libviiper/fork-api.md` is the consumer-facing API/lifecycle guide for applications embedding the generated canonical C ABI. It defines the supported typed APIs, handle rules, return values, lifecycle order, attachment semantics, callback/teardown behavior, build/validation expectations, and the requirement to consume the generated header from the same build as the DLL.
+`FORK_ARCHITECTURE.md` is the fork's architectural source of truth. `docs/libviiper/fork-api.md` is the consumer-facing canonical ABI/lifecycle guide.
 
 ---
 
 ## 2. Scope of this rule
 
-This mandatory-reference rule applies to all of the following:
+This rule applies to:
 
 - changes in `onehoon/VIIPER` made for Steam Input Addon for Claw;
-- changes to `lib/viiper` canonical wrappers;
-- Gordon / Classic Steam Controller typed ABI changes;
-- Xbox360 typed ABI changes used by the Addon;
+- canonical `lib/viiper` typed wrappers;
+- Steam Deck typed ABI work;
+- Classic Steam Controller / Gordon typed ABI maintenance;
+- Xbox360 typed ABI work used by the Addon;
 - attachment/detachment ownership changes;
 - bus/server lifecycle changes;
 - callback or transport-drain changes;
@@ -40,15 +41,13 @@ This mandatory-reference rule applies to all of the following:
 - Addon C# P/Invoke definitions for canonical VIIPER;
 - replacement of the embedded `libVIIPER.dll` payload;
 - updates to the pinned VIIPER baseline;
-- review of any corrective VIIPER PR discovered during Addon integration.
+- review of corrective VIIPER PRs discovered during Addon integration.
 
-This explicitly includes migration step **M0** in `VIIPER_MIGRATION_TODO.md` and every later VIIPER correction discovered while integrating the Addon.
+The active Steam Deck migration begins with **SD1** in `VIIPER_MIGRATION_TODO.md`.
 
 ---
 
 ## 3. Required source hierarchy
-
-Use the following hierarchy when implementing or reviewing fork behavior.
 
 ### 3.1 Architecture
 
@@ -58,13 +57,14 @@ Authority:
 onehoon/VIIPER/FORK_ARCHITECTURE.md
 ```
 
-Use it to determine architectural intent and invariants such as:
+Use it to determine invariants such as:
 
 - `lib/viiper` is the canonical embedded ABI for new fork development;
 - typed device handles are the preferred ownership model;
+- required fork devices should be exposed through typed wrappers rather than a new generic controller-manager API;
 - new Addon integration must not use `clib` as its architectural base;
-- buses are caller-owned and are not implicitly removed by typed device removal;
-- tracked Windows attachment is explicit and ownership-aware;
+- buses are caller-owned;
+- Windows attachment is explicit and tracked;
 - server close is fail-closed and retry-aware;
 - fork-specific changes should remain localized where practical.
 
@@ -76,17 +76,15 @@ Authority:
 onehoon/VIIPER/docs/libviiper/fork-api.md
 ```
 
-Use it to determine application-facing behavior such as:
+Use it to determine:
 
 - canonical exported API names;
 - typed handle semantics;
-- true/false return behavior;
-- normal lifecycle ordering;
-- permitted server states and mutations;
+- lifecycle order;
 - typed Remove semantics;
 - `AttachUSBDevice` / `DetachUSBDevice` behavior;
-- callback and teardown guarantees;
-- required build/validation commands;
+- callback/teardown guarantees;
+- build and validation expectations;
 - generated-header requirements.
 
 ### 3.3 Exact C ABI layout and signatures
@@ -101,38 +99,47 @@ from the **same VIIPER commit and build as the DLL being embedded**.
 
 Do not use the repository-root legacy `libviiper.h` as the canonical Addon header.
 
-For C# interop, never infer field layout, field order, native boolean width, callback signature, or opaque-handle width from memory or an older generated header.
+For C# interop, never infer field layout, field order, native boolean width, callback signature, enum width, or opaque-handle width from memory or an older generated header.
 
 ### 3.4 Executable implementation and tests
 
-After reading the architecture/API documents, inspect the concrete production code and tests affected by the change.
+After reading the architecture/API documents, inspect the concrete device implementation and tests affected by the change.
 
-Documentation does not eliminate code review. If the docs and executable behavior appear inconsistent, stop and reconcile the mismatch in the VIIPER PR rather than silently choosing one interpretation.
+For Steam Deck work, inspect at minimum:
 
-Do not update the Addon against an undocumented accidental behavior.
+```text
+device/steamdeck/
+lib/viiper/
+```
+
+and use the existing Gordon canonical wrapper as a lifecycle/ownership reference where appropriate.
+
+Documentation does not replace code review. If docs and executable behavior disagree, reconcile the mismatch in VIIPER rather than silently choosing one interpretation.
 
 ---
 
-## 4. Required pre-change checklist for VIIPER work
+## 4. Required pre-change checklist
 
-Before writing code in `onehoon/VIIPER`:
+Before writing VIIPER code:
 
-1. Start from the latest explicitly selected VIIPER baseline.
+1. Start from the latest explicitly selected VIIPER baseline/branch.
 2. Read `FORK_ARCHITECTURE.md` from that revision.
 3. Read `docs/libviiper/fork-api.md` from that revision.
-4. Identify the exact canonical `lib/viiper` files affected.
-5. Identify the generated C ABI impact, if any.
-6. Identify existing focused/lifecycle/race tests protecting the affected contract.
-7. Confirm whether `clib` compatibility must remain unchanged.
-8. Confirm whether the change affects the Addon's pinned ABI or embedded DLL provenance.
+4. Read the Addon `VIIPER_MIGRATION_TODO.md`.
+5. Identify the exact canonical `lib/viiper` files affected.
+6. Identify the underlying device implementation affected.
+7. Identify generated C ABI impact.
+8. Identify focused/lifecycle/race tests protecting the contract.
+9. Confirm whether `clib` compatibility must remain unchanged.
+10. Confirm whether the change affects the Addon's pinned ABI or embedded payload provenance.
 
-Do not begin from HHC's historical `clib` usage and work backward. The Addon's new integration begins from the canonical fork architecture.
+Do not begin from historical HHC `clib` usage and work backward.
 
 ---
 
 ## 5. Fork invariants that must not be accidentally regressed
 
-Every Addon-driven VIIPER change must preserve these existing invariants unless the same PR explicitly and deliberately changes the documented contract:
+Every Addon-driven VIIPER change must preserve these invariants unless the same PR explicitly updates the documented contract:
 
 - canonical new integration uses `lib/viiper`, not `clib`;
 - typed handles remain opaque capability tokens;
@@ -143,8 +150,9 @@ Every Addon-driven VIIPER change must preserve these existing invariants unless 
 - known and unknown attachment outcomes remain distinct;
 - unknown attachment/detachment outcomes fail closed;
 - exact successful attachment backend/port ownership is retained for detach;
+- callback-bearing typed devices satisfy the documented callback clear/capture contract before being exposed publicly;
 - callback clearing occurs before destructive teardown;
-- public typed Remove/Close does not return before managed transport work required by the contract is drained;
+- public typed Remove/Close does not return before managed transport work required by the selected contract is drained;
 - already-completed teardown is not replayed during retry;
 - server lifecycle remains `active` / `closing` / `close-failed` / `closed` according to the documented state contract;
 - canonical Windows attachment support remains pinned to validated usbip-win2 compatibility, currently `v0.9.7.7` / `7c219953101cc5d0ec9a0bcb3eb87259cf72bedd`, until a later version is explicitly validated;
@@ -152,13 +160,54 @@ Every Addon-driven VIIPER change must preserve these existing invariants unless 
 
 ---
 
-## 6. Documentation is part of a VIIPER API change
+## 6. Steam Deck-specific rules
 
-If a VIIPER PR changes an architectural or consumer-visible contract, that PR must update the relevant VIIPER documentation in the same change.
+The Addon's new primary target architecture is Steam Deck, but the current production Addon remains Gordon until hardware cutover is validated.
+
+### 6.1 Existing device implementation is the protocol authority
+
+The first Steam Deck canonical work should expose the existing:
+
+```text
+device/steamdeck
+```
+
+through a typed `lib/viiper` wrapper.
+
+Do not create a second Steam Deck report builder inside `lib/viiper` or the Addon.
+
+### 6.2 Generic ABI, not Claw-specific ABI
+
+A canonical `SteamDeckDeviceState` must represent generic Steam Deck semantic state. Do not remove trackpad or additional rear-button fields merely because the first Addon consumer does not use them.
+
+The Addon may send neutral values for unsupported physical controls.
+
+### 6.3 Minimal SD1 callback scope
+
+The first Steam Deck input smoke test does not require a host-output callback.
+
+If `device/steamdeck` callback registration/dispatch does not yet satisfy the canonical callback synchronization contract, **do not expose a public canonical Steam Deck output callback just to make the first wrapper look feature-complete**.
+
+Instead:
+
+- expose the minimal typed input/lifecycle surface;
+- validate it;
+- harden callback ownership separately before adding callback/rumble/haptics ABI.
+
+### 6.4 No Steam Deck production claim before hardware proof
+
+Do not update product documentation or code comments to say Steam Deck is the production output until the Addon SD3 hardware gate passes and SD4 cutover is reviewed.
+
+---
+
+## 7. Documentation is part of a VIIPER API change
+
+If a VIIPER PR changes an architectural or consumer-visible contract, the same PR must update the relevant VIIPER documentation.
 
 Examples:
 
-- new typed state fields;
+- new typed device family;
+- new state fields;
 - changed struct layout;
 - new exported function;
 - changed lifecycle ordering;
@@ -168,20 +217,20 @@ Examples:
 - changed supported usbip-win2 version;
 - new failure/retry semantics.
 
-At minimum, review both mandatory documents and update whichever one is affected:
+At minimum review:
 
 ```text
 FORK_ARCHITECTURE.md
 docs/libviiper/fork-api.md
 ```
 
-If neither document needs a textual change, the PR review should still state that both were checked and remain accurate.
+For the Steam Deck typed wrapper, both documents should stop claiming that `device/steamdeck` lacks a typed canonical wrapper only after the wrapper actually exists on the PR branch.
 
 ---
 
-## 7. Required VIIPER validation gate
+## 8. Required VIIPER validation gate
 
-For canonical `lib/viiper` changes, the expected baseline validation is:
+For canonical `lib/viiper` changes, expected baseline validation is:
 
 ```text
 go test ./...
@@ -191,15 +240,15 @@ git diff --check
 just build-libVIIPER Release
 ```
 
-CI must also validate the relevant canonical Windows shared-library/header/export surface and lifecycle/race coverage.
+CI must also validate the relevant Windows shared-library/header/export surface and lifecycle/race coverage.
 
-When the public ABI changes, generated-header expectations and ABI layout tests must be updated deliberately, not merely regenerated without review.
+When the public ABI changes, generated-header expectations and ABI layout tests must be updated deliberately.
 
 ---
 
-## 8. Addon baseline-adoption rule
+## 9. Addon baseline-adoption rule
 
-After a VIIPER corrective PR merges, the Addon must not simply replace the DLL.
+After a VIIPER PR merges, the Addon must not simply replace the DLL.
 
 Adoption requires all of the following to refer to the same reviewed VIIPER commit:
 
@@ -213,43 +262,57 @@ VIIPER_INTEGRATION.md
 VIIPER_MIGRATION_TODO.md
 ```
 
-Do not mix a DLL from one VIIPER revision with a generated header, P/Invoke layout, documentation, or provenance from another revision.
+Do not mix a DLL from one VIIPER revision with a generated header, managed layout, documentation, or provenance from another revision.
 
 ---
 
-## 9. Immediate application to M0
+## 10. Immediate application to SD1
 
-The current first migration prerequisite is the independent Gordon L2/R2 full-pull corrective API described in `VIIPER_MIGRATION_TODO.md`.
+Current active VIIPER branch:
 
-Before implementing M0, the implementation model/reviewer must read both mandatory VIIPER documents listed in Section 1.
+```text
+onehoon/VIIPER:feature/canonical-steamdeck
+```
 
-Because M0 changes the public typed Gordon state layout, the M0 PR must explicitly verify/update:
+Selected base:
 
-- `FORK_ARCHITECTURE.md` if the architectural description requires clarification;
-- `docs/libviiper/fork-api.md` so the consumer-facing Gordon typed state/API remains accurate;
-- canonical state struct/layout tests;
-- generated header validation;
-- Windows DLL/export/ABI CI;
-- Addon pin/provenance documents after merge.
+```text
+db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
+```
 
-The M0 implementation must preserve the existing fork lifecycle/ownership/transport contracts. It is a narrow Gordon typed-state correction, not an opportunity to redesign `lib/viiper`.
+SD1 exists to expose the existing Steam Deck implementation through the canonical typed ABI with minimum input/lifecycle surface.
+
+Before implementing/reviewing SD1, verify:
+
+- `FORK_ARCHITECTURE.md` and `fork-api.md` were read from the branch/base being changed;
+- the existing Gordon wrapper is used only as a lifecycle/ownership pattern, not as a reason to copy Gordon-specific state semantics;
+- default Steam Deck identity remains `28DE:1205`;
+- frame ownership remains internal to `device/steamdeck`;
+- typed state includes the generic Steam Deck fields needed by external consumers;
+- shared identity/attach/detach APIs accept the typed handle;
+- typed removal preserves caller-owned bus lifetime;
+- classified removal follows the canonical result model;
+- no public output callback is added until callback synchronization is proven;
+- generated header/export/layout tests are updated;
+- Gordon and `clib` compatibility remain intact.
 
 ---
 
-## 10. New-conversation rule
+## 11. New-conversation / agent-handoff rule
 
-When starting a new conversation or handing a VIIPER implementation task to another coding agent, provide or require these files before implementation:
+Every new VIIPER implementation task must provide or require these files:
 
 ```text
 SteamInputAddonforClaw/README.md
 SteamInputAddonforClaw/docs/VIIPER_INTEGRATION.md
 SteamInputAddonforClaw/docs/VIIPER_MIGRATION_TODO.md
 SteamInputAddonforClaw/docs/VIIPER_IMPLEMENTATION_RULES.md
+SteamInputAddonforClaw/docs/Reference Research_Steam Deck VIIPER SteamOutput Input Reports.txt
 
 onehoon/VIIPER/FORK_ARCHITECTURE.md
 onehoon/VIIPER/docs/libviiper/fork-api.md
 ```
 
-For exact ABI work also require the generated `dist/libVIIPER/libVIIPER.h` from the selected VIIPER build.
+For exact ABI work also require the generated `dist/libVIIPER/libVIIPER.h` from the selected build.
 
 No VIIPER implementation task for this Addon should proceed from memory alone.

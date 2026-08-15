@@ -1,1412 +1,246 @@
 Steam Input Addon for Claw
 Reference Research Notes — Physical Input / HidHide / MSI Claw Isolation
 
-Date: 2026-08-11
-Scope: PR #77 PhysicalInput / PhysicalIsolation research
-Purpose: Preserve verified upstream behavior for later implementation and PR review.
+Original research date: 2026-08-11
+Status updated: 2026-08-15
+Status: ACTIVE PHYSICAL-INPUT REFERENCE / OUTPUT-TARGET-INDEPENDENT
 
 ===============================================================================
-1. REFERENCE SET
+0. STATUS NOTICE
 ===============================================================================
 
-The following three repositories are the fixed reference set for this research.
+This document now separates verified MSI Claw physical-input facts from the virtual-controller target.
 
-A. Steam Input Addon for Claw
-Repository:
-  onehoon/SteamInputAddonforClaw
+The exact pre-transition version, which was written while Gordon was the primary output target, is preserved at:
 
-Revision:
-  6a51c35ff9ace030986be997c5461b6ecc37ce2c
+  docs/archive/gordon-baseline-2026-08-15/Reference Research_Physical Input HidHide MSI Claw Isolation.txt
 
-Role:
-  Final authority for this project's architecture, ownership, recovery,
-  passive behavior, external-controller veto, and routing lifecycle.
+The current physical-input and HidHide ownership findings remain relevant to both Gordon and Steam Deck.
 
+Do not encode Gordon-specific report semantics in the physical input layer.
 
-B. Handheld Companion
-Repository:
-  Valkirie/HandheldCompanion
-
-Revision:
-  1ee1b78cbdb6a83f8027f7b5f377a04e07996264
-
-Role:
-  Primary production reference for MSI Claw-specific controller behavior.
-
-Especially relevant for:
-  - MSI Claw DirectInput controller
-  - PID selection
-  - M1/M2 behavior
-  - controller PnP identity
-  - HidHide target selection
-  - hide/unhide lifecycle
-  - physical controller topology
-
-
-C. hbashton/DS4Windows
-Repository:
-  hbashton/DS4Windows
-
-Revision:
-  3579450dc8f50a74d9532e711249589c732c460b
-
-Role:
-  Generic production reference for:
-  - HidHide mechanics
-  - physical HID instance conversion
-  - blacklist lifecycle
-  - session/persistent ownership
-  - physical-vs-virtual device handling
-  - VIIPER interaction
-
-
-===============================================================================
-2. REFERENCE PRIORITY RULE
-===============================================================================
-
-If the reference implementations differ, use this priority:
-
-MSI Claw-specific hardware behavior
-  -> Handheld Companion
-
-Generic HidHide / virtual-controller lifecycle behavior
-  -> DS4Windows
-
-Recovery, exact ownership, passive behavior, external-controller veto,
-and routing architecture
-  -> SteamInputAddonforClaw
-
-
-Do not copy HHC or DS4Windows architecture wholesale.
-
-External repositories are used to verify:
-  - device identity
-  - protocol behavior
-  - lifecycle behavior
-  - operation order
-  - hardware quirks
-
-Implementation must remain independent and follow SteamInputAddonforClaw's
-own routing/recovery architecture.
-
-
-===============================================================================
-3. HANDHELD COMPANION — FILES REVIEWED
-===============================================================================
-
-Revision:
-  1ee1b78cbdb6a83f8027f7b5f377a04e07996264
-
-Important files reviewed:
-
-  HandheldCompanion/Controllers/IController.cs
-
-  HandheldCompanion/Controllers/DInputController.cs
-
-  HandheldCompanion/Controllers/MSI/DClawController.cs
-
-  HandheldCompanion/Managers/ControllerManager.cs
-
-  HandheldCompanion/Managers/DeviceManager.cs
-
-  HandheldCompanion/Misc/PnPDetails.cs
-
-  HandheldCompanion/Misc/HidHide.cs
-
-  HandheldCompanion/Devices/MSI/ClawA1M.cs
-
-
-===============================================================================
-4. HHC — MSI CLAW DIRECTINPUT CONTROLLER
-===============================================================================
-
-HHC recognizes the MSI Claw DirectInput controller using MSI vendor/product
-IDs.
-
-MSI Vendor ID:
-  VID 0x0DB0
-
-Relevant Product IDs:
-  PID 0x1901 = XInput
-  PID 0x1902 = DirectInput
-  PID 0x1903 = testing/other mode
-
-ControllerManager creates DClawController for:
-
-  VID 0x0DB0
-  PID 0x1902
-  PID 0x1903
-
-The normal DirectInput routing target is PID 0x1902.
-
-
-===============================================================================
-5. HHC — DIRECTINPUT DEVICE MATCHING
-===============================================================================
-
-DClawController inherits from DInputController.
-
-DInputController.AttachDetails() does not select a controller only from
-VID/PID.
-
-It enumerates DirectInput gamepad devices and creates a Joystick for each
-candidate.
-
-For each joystick it obtains:
-
-  joystick.Properties.InterfacePath
-
-It then converts the HID symbolic/interface path into a PnP identity and
-compares it with the selected PnPDetails.SymLink.
-
-Conceptually:
-
-  DirectInput DeviceInstance
-      ->
-  Joystick
-      ->
-  InterfacePath
-      ->
-  HID/PnP symbolic identity
-      ->
-  compare with selected physical PnPDetails
-
-Therefore HHC's production behavior supports the same basic principle used
-by SteamInputAddonforClaw:
-
-  Do not acquire "the first VID/PID match".
-
-Instead:
-
-  Select an exact verified DirectInput interface belonging to the intended
-  physical controller.
-
-
-===============================================================================
-6. HHC — MSI CLAW BUTTON MAPPING
-===============================================================================
-
-DClawController.Tick() directly reads SharpDX DirectInput JoystickState.
-
-Confirmed rear-button indices:
-
-  M1 = state.Buttons[15]
-  M2 = state.Buttons[16]
-
-HHC maps them internally as:
-
-  M1 -> ButtonFlags.OEM3
-  M2 -> ButtonFlags.OEM4
-
-This independently confirms that M1 and M2 are separately visible in
-DirectInput.
-
-SteamInputAddonforClaw must continue to obtain M1/M2 from DirectInput.
-
-Do not derive M1/M2 from XInput.
-
-
-===============================================================================
-7. HHC — OTHER DIRECTINPUT AXIS/BUTTON CHARACTERISTICS
-===============================================================================
-
-The reviewed DClawController implementation contains the following mapping.
-
-Face buttons:
-
-  Buttons[1]  -> A
-  Buttons[2]  -> B
-  Buttons[0]  -> X
-  Buttons[3]  -> Y
-
-Shoulders:
-
-  Buttons[4]  -> L1
-  Buttons[5]  -> R1
-
-Digital full-trigger buttons:
-
-  Buttons[6]  -> L2 Full
-  Buttons[7]  -> R2 Full
-
-Menu buttons:
-
-  Buttons[8]  -> Back
-  Buttons[9]  -> Start
-
-Stick clicks:
-
-  Buttons[10] -> Left Stick Click
-  Buttons[11] -> Right Stick Click
-
-Rear buttons:
-
-  Buttons[15] -> M1
-  Buttons[16] -> M2
-
-
-D-pad uses POV values.
-
-Left stick:
-
-  X -> Left Stick X
-  Y -> Left Stick Y, inverted
-
-Right stick:
-
-  Z         -> Right Stick X
-  RotationZ -> Right Stick Y, inverted
-
-Analog triggers:
-
-  RotationX -> L2
-  RotationY -> R2
-
-HHC maps raw unsigned DirectInput ranges into its normalized state.
-
-These characteristics should be re-verified again before implementing the
-final Classic Steam Controller report mapper.
-
-They should not be silently assumed only from this document if the HHC
-reference revision changes.
-
-
-===============================================================================
-8. HHC — PNPDETAILS IDENTITY MODEL
-===============================================================================
-
-PnPDetails stores at least two distinct controller identities:
-
-  deviceInstanceId
-
-  baseContainerDeviceInstanceId
-
-
-It also stores:
-
-  devicePath
-  baseContainerDevicePath
-  SymLink
-  EnumeratorName
-  InterfaceGuid
-  VID/PID
-  virtual/physical flags
-  internal/external flags
-
-
-Meaning observed from DeviceManager:
-
-deviceInstanceId:
-  The actual selected HID PnP device instance.
-
-baseContainerDeviceInstanceId:
-  A higher/base physical PnP identity selected while walking the device
-  topology.
-
-This distinction is important for HidHide.
-
-
-===============================================================================
-9. HHC — HOW BASE CONTAINER IDENTITY IS DERIVED
-===============================================================================
-
-DeviceManager.GetDetails() begins from the HID interface/device.
-
-It walks upward through the PnP topology.
-
-The traversal attempts to find a useful base device associated with the same
-controller rather than treating only the leaf HID collection as the complete
-physical controller identity.
-
-PnPDetails is finally populated with both:
-
-  deviceInstanceId
-  baseContainerDeviceInstanceId
-
-Therefore HHC intentionally retains both:
-
-  selected HID child identity
-  physical/base controller identity
-
-
-===============================================================================
-10. HHC — HIDHIDE TARGET SELECTION
-===============================================================================
-
-This was the most important finding for PR #77.
-
-IController.HideHID() currently performs:
-
-  HidHide.HidePath(Details.baseContainerDeviceInstanceId)
-  HidHide.HidePath(Details.deviceInstanceId)
-
-UnhideHID() performs the inverse:
-
-  HidHide.UnhidePath(Details.baseContainerDeviceInstanceId)
-  HidHide.UnhidePath(Details.deviceInstanceId)
-
-Therefore HHC does NOT hide only one selected HID child.
-
-The current production pattern is:
-
-  physical/base controller PnP identity
-      +
-  selected controller/HID PnP identity
-      ->
-  HidHide BlockedInstanceIds
-
-
-This applies generically through IController and is used by MSI Claw
-DClawController as part of HHC's controller lifecycle.
-
-
-===============================================================================
-11. HHC — PREVIOUS FULL-TREE HIDING APPROACH
-===============================================================================
-
-IController.cs also contains older/commented logic that would enumerate a
-base device and its children and hide every discovered instance.
-
-That code is currently commented out.
-
-The active implementation instead uses only:
-
-  baseContainerDeviceInstanceId
-  deviceInstanceId
-
-This is important.
-
-HHC appears to have narrowed hiding from an entire tree to two specific
-identities.
-
-For SteamInputAddonforClaw this supports the design rule:
-
-  Hide the minimum exact topology needed.
-
-Do not recursively hide every child of the MSI controller unless future
-hardware evidence proves it necessary.
-
-
-===============================================================================
-12. HHC — ISHIDDEN SEMANTICS
-===============================================================================
-
-IController.IsHidden() checks:
-
-  HidHide.IsRegistered(Details.baseContainerDeviceInstanceId)
-
-Therefore HHC treats the base-container registration as a primary indicator
-that the physical controller is hidden.
-
-This is another indication that base identity is significant and should not
-be discarded when designing MSI Claw isolation.
-
-
-===============================================================================
-13. HHC — HIDHIDE IMPLEMENTATION
-===============================================================================
-
-HHC's HidHide wrapper uses Nefarius HidHideControlService.
-
-Relevant concepts:
-
-  service.ApplicationPaths
-  service.BlockedInstanceIds
-  service.IsActive
-
-HidePath():
-
-  If the exact deviceInstancePath is not already in BlockedInstanceIds,
-  add it.
-
-UnhidePath():
-
-  If the exact deviceInstancePath exists in BlockedInstanceIds,
-  remove it.
-
-The semantics are exact instance IDs, not VID/PID-wide rules.
-
-
-===============================================================================
-14. HHC — HIDHIDE FALLBACK
-===============================================================================
-
-If the HidHideControlService API cannot be used, HHC has a fallback to
-HidHideCLI.
-
-Relevant CLI concepts:
-
-  --app-reg
-  --app-unreg
-  --dev-hide
-  --dev-unhide
-  --cloak-on
-  --cloak-off
-
-SteamInputAddonforClaw currently uses its own direct driver/API integration,
-so there is no reason to copy this HHC fallback architecture.
-
-The useful reference fact is the identifier semantics:
-
-  HidHide device entries are PnP device instance paths/IDs.
-
-
-===============================================================================
-15. HHC — APPLICATION WHITELIST LIFECYCLE
-===============================================================================
-
-HHC registers its own executable with HidHide during application startup.
-
-Conceptually:
-
-  register HHC executable
-      ->
-  later hide physical controllers
-
-Therefore the application has permission to keep accessing hidden devices.
-
-This supports SteamInputAddonforClaw's planned mutation ordering:
-
-  whitelist addon executable first
-      ->
-  hide physical controller second
-
-
-===============================================================================
-16. HHC — GLOBAL CLOAKING STATE
-===============================================================================
-
-HHC also enables HidHide globally when its ControllerManager starts:
-
-  HidHide.SetCloaking(true)
-
-This behavior should NOT be copied into SteamInputAddonforClaw.
-
-Reason:
-
-SteamInputAddonforClaw has a stricter ownership rule:
-
-  Existing HidHide configuration is not owned by the addon.
-
-Therefore our addon should not globally enable/disable HidHide as part of
-normal routing.
-
-Current project rule remains:
-
-  New PhysicalIsolation may start only when HidHide is already in a supported
-  Available/active state.
-
-Recovery may still remove addon-owned entries when the HidHide configuration
-is readable even if active state later changed.
-
-
-===============================================================================
-17. HHC — HIDE() AND POWER CYCLING
-===============================================================================
-
-IController.Hide() performs:
-
-  HideHID()
-
-and optionally:
-
-  CyclePort()
-
-Unhide() similarly calls UnhideHID() and optionally CyclePort().
-
-ControllerManager intentionally calls Hide outside certain controller locks
-because port cycling can block for several seconds and trigger device/UI
-state transitions.
-
-This is useful as evidence that hiding a physical controller can interact
-with PnP lifecycle and device arrival/removal.
-
-SteamInputAddonforClaw #77 currently should NOT introduce port cycling merely
-because HHC does so.
-
-Whether the MSI Claw requires an explicit cycle for our DirectInput routing
-must be determined by hardware testing.
-
-Do not assume HHC's entire controller-manager lifecycle is necessary for the
-addon.
-
-
-===============================================================================
-18. HHC — MSI CLAW MODE INFORMATION
-===============================================================================
-
-ClawA1M contains the known MSI mode constants.
-
-Relevant command:
-
-  SwitchMode = 0x24
-
-Known product IDs:
-
-  PID_XINPUT  = 0x1901
-  PID_DINPUT  = 0x1902
-  PID_TESTING = 0x1903
-
-ClawA1M also confirms that MSI mode handling is device-specific.
-
-Mode switching should continue to use the separately reviewed native-mode
-contract in SteamInputAddonforClaw.
-
-This document is not a substitute for the native-mode reference notes from
-the earlier PRs.
-
-
-===============================================================================
-19. DS4WINDOWS — FILES REVIEWED
-===============================================================================
-
-Revision:
-  3579450dc8f50a74d9532e711249589c732c460b
-
-Important files reviewed:
-
-  DS4Windows/DS4Control/HidHideAPIDevice.cs
-
-  DS4Windows/DS4Control/ControlService.cs
-
-  DS4Windows/DS4Library/DS4Devices.cs
-
-
-===============================================================================
-20. DS4WINDOWS — RAW HIDHIDE IOCTL CONTRACT
-===============================================================================
-
-HidHideAPIDevice.cs contains the following control codes:
-
-  IOCTL_GET_WHITELIST          = 0x80016000
-  IOCTL_SET_WHITELIST          = 0x80016004
-  IOCTL_GET_BLACKLIST          = 0x80016008
-  IOCTL_SET_BLACKLIST          = 0x8001600C
-  IOCTL_GET_ACTIVE             = 0x80016010
-  IOCTL_SET_ACTIVE             = 0x80016014
-  IOCTL_GET_WL_INVERT          = 0x80016018
-  IOCTL_SET_WL_INVERT          = 0x8001601C
-
-This independently confirms the value used by SteamInputAddonforClaw #76:
-
-  HidHide hidden-device list write:
-  0x8001600C
-
-
-===============================================================================
-21. DS4WINDOWS — HIDHIDE HANDLE ACCESS
-===============================================================================
-
-HidHideAPIDevice opens the HidHide control device with:
-
-  GENERIC_READ
-
-and, when writes are required:
-
-  GENERIC_READ | GENERIC_WRITE
-
-This confirms the write access contract adopted in PR #76.
-
-
-===============================================================================
-22. DS4WINDOWS — BLACKLIST STORAGE
-===============================================================================
-
-Persistent HidHide blacklist operations use the complete blacklist as a
-MULTI_SZ.
-
-SetBlacklist():
-
-  read/create complete list
-      ->
-  serialize full MULTI_SZ
-      ->
-  SET_BLACKLIST
-
-Therefore a high-level "add one entry" API still must preserve all unrelated
-entries.
-
-SteamInputAddonforClaw's #76 behavior:
-
-  Inspect complete configuration
-      ->
-  add/remove one exact entry
-      ->
-  write complete list
-
-matches this requirement.
-
-
-===============================================================================
-23. DS4WINDOWS — ACTUAL PHYSICAL CONTROLLER HIDHIDE IDENTITY
-===============================================================================
-
-ControlService does not hide a physical controller using only VID/PID.
-
-For a DS4Device it uses:
-
-  dev.HidDevice.DevicePath
-
-and converts that device path through:
-
-  Global.GetInstanceIdFromDevicePath(...)
-
-The resulting exact PnP instance ID is the identifier passed to HidHide.
-
-Conceptually:
-
-  physical HID symbolic path
-      ->
-  exact PnP device instance ID
-      ->
-  HidHide blacklist/session blacklist
-
-
-This reinforces:
-
-  Never hide all devices matching VID/PID.
-
-
-===============================================================================
-24. HHC VS DS4WINDOWS TARGET DIFFERENCE
-===============================================================================
-
-HHC:
-
-  baseContainerDeviceInstanceId
-  +
-  deviceInstanceId
-
-DS4Windows:
-
-  selected HID device's exact PnP instance ID
-
-
-This difference should not automatically be treated as a contradiction.
-
-DS4Windows primarily manages ordinary physical Sony-compatible HID devices.
-
-HHC is managing handheld/composite-controller topology and explicitly keeps
-both a selected HID device identity and a base physical controller identity.
-
-
-Project decision:
-
-For MSI Claw-specific routing, prefer HHC behavior unless live hardware
-testing proves a different minimal set is sufficient.
-
-
-===============================================================================
-25. DS4WINDOWS — MANAGED HIDHIDE SETS
-===============================================================================
-
-The reviewed fork tracks separate case-insensitive sets for HidHide ownership.
-
-Examples:
-
-  hidHideSessionManagedInstanceIds
-  hidHidePersistentManagedInstanceIds
-
-String comparison is OrdinalIgnoreCase.
-
-This supports exact, case-insensitive PnP identity handling.
-
-
-===============================================================================
-26. DS4WINDOWS — EXISTING PERSISTENT ENTRY ADOPTION
-===============================================================================
-
-Important behavioral difference.
-
-DS4Windows checks whether a target instance ID already exists in the
-persistent blacklist.
-
-If it exists, the reviewed fork can "adopt" that entry into its managed
-persistent set.
-
-Later managed cleanup may release/remove managed persistent entries.
-
-This should NOT be copied into SteamInputAddonforClaw.
-
-
-SteamInputAddonforClaw ownership rule is stricter:
-
-  pre-existing entry
-  != addon-owned entry
-
-If an entry existed before the addon session:
-
-  do not journal it as an addition
-  do not claim ownership
-  do not remove it during rollback
-
-
-This protects:
-  - user HidHide configuration
-  - ClawTweaks configuration
-  - HHC configuration
-  - other controller tools
-
-
-===============================================================================
-27. DS4WINDOWS — SESSION BLACKLIST API
-===============================================================================
-
-The reviewed DS4Windows fork contains additional IOCTLs:
-
-  IOCTL_ADD_SESSION_BLACKLIST = 0x80016020
-  IOCTL_CLR_SESSION_BLACKLIST = 0x80016024
-
-The source comments describe these as process-lifetime HidHide entries that
-are automatically removed when the process exits.
-
-However, the same source explicitly notes that released HidHide 1.5 builds
-do not expose this API and therefore callers require a fallback.
-
-SteamInputAddonforClaw v1 baseline:
-
-  HidHide 1.5.230
-
-Therefore SteamInputAddonforClaw must NOT depend on session-blacklist IOCTLs.
-
-Current design remains:
-
-  persistent exact HidHide additions
-  +
-  RecoveryManager journal
-  +
-  exact normal rollback
-  +
-  startup crash recovery
-
-
-===============================================================================
-28. DS4WINDOWS — SESSION CLEANUP
-===============================================================================
-
-DS4Windows cleanup distinguishes session-managed and persistent-managed
-entries.
-
-Persistent cleanup:
-
-  GetBlacklist()
-      ->
-  remove only managed exact IDs
-      ->
-  SetBlacklist(updated list)
-
-This confirms the generic principle that unrelated entries must remain
-untouched.
-
-
-===============================================================================
-29. DS4WINDOWS — VIRTUAL OUTPUT HIDHIDE INTERACTION
-===============================================================================
-
-The reviewed ControlService also contains logic specifically protecting
-virtual VIIPER outputs from accidental HidHide containment.
-
-It distinguishes physical input hiding from virtual output devices.
-
-It contains logic described as preventing newly created VIIPER virtual Sony
-outputs from remaining accidentally blacklisted.
-
-This will be particularly important for the future SteamOutput PR.
-
-Project implication for later work:
-
-  addon-owned VIIPER outputs must never be mistaken for external physical
-  controllers or physical HidHide targets.
-
-Track addon-created virtual devices explicitly.
-
-
-===============================================================================
-30. TARGET REPO — FILES REVIEWED FOR #77
-===============================================================================
-
-SteamInputAddonforClaw revision:
-
-  6a51c35ff9ace030986be997c5461b6ecc37ce2c
-
-Important files:
-
-  src/SteamInputAddonforClaw/Input/DirectInput/
-    DirectInputDeviceTopologyResolver.cs
-
-  src/SteamInputAddonforClaw/Controllers/Detection/
-    WindowsControllerDeviceEnumerator.cs
-
-  src/SteamInputAddonforClaw/Devices/MSI/Claw/
-    MsiClawPhysicalInputStage.cs
-
-  src/SteamInputAddonforClaw/HidHide/
-    HidHideDriverClient.cs
-
-  src/SteamInputAddonforClaw/Recovery/
-    RecoveryManager.cs
-
-  routing/pipeline execution and experiment-plan code
-
-
-===============================================================================
-31. TARGET REPO — DIRECTINPUT TOPOLOGY
-===============================================================================
-
-DirectInputDeviceTopologyResolver begins with the DirectInput interface path.
-
-It extracts the exact PnP instance ID from the path.
-
-It then enumerates present PnP devices and requires exactly one matching
-device.
-
-The PnP interface must satisfy:
-
-  Vendor ID  = 0x0DB0
-  Product ID = 0x1902
-
-and gamepad usage:
-
-  UsagePage = 0x0001
-  Usage     = 0x0005
-
-It then walks ancestor instance IDs looking for:
-
-  USB\VID_0DB0&PID_1902\...
-
-The result stores:
-
-  PnpInstanceId
-  PhysicalIdentity
-
-
-Therefore current project topology already provides two useful identities.
-
-
-===============================================================================
-32. TARGET/HHC IDENTITY CORRELATION
-===============================================================================
-
-Based on the reviewed implementations, the closest semantic correspondence
-is:
-
-  Handheld Companion
-  baseContainerDeviceInstanceId
-
-      ~ corresponds to ~
-
-  SteamInputAddonforClaw
-  PhysicalIdentity
-
-
-and:
-
-  Handheld Companion
-  deviceInstanceId
-
-      ~ corresponds to ~
-
-  SteamInputAddonforClaw
-  PnpInstanceId
-
-
-This is a semantic correspondence inferred from how both projects construct
-and use the identities.
-
-It is not a claim that both strings will always be byte-for-byte identical
-on every MSI Claw model.
-
-Live hardware logging must confirm the exact values.
-
-
-===============================================================================
-33. PROJECT DECISION — PHYSICALISOLATION TARGET SET
-===============================================================================
-
-Based on HHC production behavior, the preferred #77 target set is:
-
-  PhysicalIdentity
-  PnpInstanceId
-
-Case-insensitive exact duplicate entries should be collapsed.
-
-Do not perform another broad PnP scan inside PhysicalIsolation.
-
-The source of both IDs must remain the already verified/owned PhysicalInput
-identity.
-
-
-===============================================================================
-34. PROJECT DECISION — FORWARD MUTATION ORDER
-===============================================================================
-
-Preferred mutation order:
-
-  1. addon executable whitelist
-  2. PhysicalIdentity HidHide entry
-  3. PnpInstanceId HidHide entry
-
-
-Reason:
-
-  - application access is established before hiding
-  - base/physical identity is registered
-  - selected HID child is then registered
-  - order is deterministic and journalable
-
-
 ===============================================================================
-35. PROJECT DECISION — ROLLBACK ORDER
+1. PHYSICAL CONTROLLER CONTRACT
 ===============================================================================
 
-Rollback should be the strict reverse:
+The Addon's Stock MSI Center M routing path acquires the built-in MSI controller in PID_1902 DirectInput mode.
 
-  1. PnpInstanceId
-  2. PhysicalIdentity
-  3. addon executable whitelist
+Verified physical contract retained from the original research:
 
+  USB VID/PID: 0DB0:1902
+  primary gamepad collection used by the Addon:
+    HID\VID_0DB0&PID_1902&MI_00&COL01\...
 
-Each addon-owned entry must be restored independently.
+The physical root and sibling collections remain topology/identity evidence and are not blanket HidHide targets.
 
-Recovery journal completion should occur immediately after each exact restore
-is verified.
+The Addon must resolve the DirectInput descriptor to the expected MSI gamepad PnP identity before acquisition. VID/PID count alone is not enough.
 
-
-===============================================================================
-36. PROJECT DECISION — PRE-EXISTING ENTRIES
-===============================================================================
-
-For every target independently:
-
-If present before PhysicalIsolation:
-
-  owner = external/pre-existing
-
-Do not:
-
-  RecordHidHideDeviceAddition
-  AddHiddenDevice
-  remove during rollback
-
-
-Example:
-
-Before session:
-
-  PhysicalIdentity already hidden
-  PnpInstanceId not hidden
-
-Then addon owns only:
-
-  PnpInstanceId addition
-
-Rollback removes only:
-
-  PnpInstanceId
-
-PhysicalIdentity remains untouched.
-
-
-===============================================================================
-37. PROJECT DECISION — AMBIGUOUS MUTATION
-===============================================================================
-
-This is stricter than HHC/DS4Windows and is required by the project recovery
-model.
-
-Before each actual mutation:
-
-  RecoveryManager record must succeed.
-
-If API call fails/throws, inspect actual configuration.
-
-Case A:
-  exact entry verified present
-
-Meaning:
-  mutation happened despite API failure.
-
-Action:
-  preserve journal evidence
-  treat mutation as needing rollback
-  fail Execute
-  generic pipeline rollback should restore it
-
-
-Case B:
-  exact entry verified absent
-
-Meaning:
-  mutation did not happen.
-
-Action:
-  complete/remove that recovery record
-  fail Execute
-
-
-Case C:
-  configuration cannot be inspected
-
-Meaning:
-  actual mutation state is unknown.
-
-Action:
-  preserve journal evidence
-  fail closed
-
-Critically:
-
-  Do NOT remove the addon whitelist while a physical HidHide mutation may
-  still exist but cannot be verified/restored.
-
-
-===============================================================================
-38. PROJECT DECISION — PARTIAL TWO-DEVICE FAILURE
-===============================================================================
-
-Example:
-
-  whitelist added successfully
-  PhysicalIdentity added successfully
-  PnpInstanceId add fails
-
-Rollback must be able to restore:
-
-  PnpInstanceId if possibly/actually added
-  PhysicalIdentity
-  whitelist
-
-If PnpInstanceId state is ambiguous:
-
-  do not proceed to PhysicalIdentity/whitelist cleanup in a way that could
-  reduce recovery access or discard evidence.
-
-Leave recovery state fail-closed.
-
-
-===============================================================================
-39. PROJECT DECISION — HIDHIDE ACTIVE STATE
-===============================================================================
-
-HHC and DS4Windows have broader ownership models and may manipulate HidHide
-active state.
-
-SteamInputAddonforClaw does not.
-
-New PhysicalIsolation:
-
-  HidHide Available
-  -> may proceed
-
-HidHide Disabled:
-  -> do not start a new isolation session
-
-InverseWhitelist:
-  -> do not start a new isolation session
-
-NotInstalled / AccessDenied / ConfigurationUnavailable:
-  -> fail closed
-
-
-Recovery differs:
-
-If configuration remains readable, addon-owned entries may still be removed
-during recovery even if HidHide is Disabled or InverseWhitelist.
-
-This was established in PR #76.
-
-
-===============================================================================
-40. PROJECT DECISION — NO POWER CYCLE YET
-===============================================================================
-
-HHC may power-cycle controllers after hide/unhide.
-
-SteamInputAddonforClaw should not add this only because HHC does.
-
-Current approach:
-
-  - exact HidHide mutation
-  - maintain acquired DirectInput source
-  - verify behavior on hardware
-
-If hardware testing proves that physical hiding is not effective until
-re-enumeration/power cycling, investigate that as a separate hardware-specific
-change.
-
-Do not introduce it speculatively.
-
-
-===============================================================================
-41. PROJECT DECISION — DEFAULT PRODUCTION PLAN
-===============================================================================
-
-PR #77 must NOT hide the controller in ordinary production routing yet.
-
-Until SteamOutput exists:
-
-  NativeMode             Enabled
-  PhysicalInput          Disabled
-  PhysicalIsolation      Disabled
-  ThirdPartyIsolation    Disabled
-  SteamOutput            Disabled
-  XboxOutput             Disabled
-  GameBarRouting         Disabled
-
-
-Reason:
-
-Enabling:
-
-  PhysicalInput
-  PhysicalIsolation
-
-before replacement SteamOutput exists would produce:
-
-  physical controller hidden
-  +
-  no virtual replacement controller
-
-which would break normal game input.
-
-
-===============================================================================
-42. #77 REVIEW CHECKLIST DERIVED FROM THIS RESEARCH
-===============================================================================
-
-PhysicalIsolation PR should be reviewed for:
-
-[ ] Uses only identity from the owned verified PhysicalInput session.
-
-[ ] Does not independently select another PID_1902 controller.
-
-[ ] Does not hide every VID_0DB0/PID_1902 device.
-
-[ ] Accounts for both:
-      PhysicalIdentity
-      PnpInstanceId
-    unless strong hardware evidence proves one is sufficient.
-
-[ ] De-duplicates identical exact IDs.
-
-[ ] Tracks pre-existing state independently for every exact target.
-
-[ ] Does not adopt pre-existing HidHide entries.
-
-[ ] Records recovery evidence before each new HidHide mutation.
-
-[ ] Whitelist is prepared before physical device hiding.
-
-[ ] Forward mutation order is deterministic.
-
-[ ] Rollback is deterministic reverse order.
-
-[ ] Partial failures leave sufficient evidence.
-
-[ ] Ambiguous mutation does not allow whitelist to be removed prematurely.
-
-[ ] Journal completion failure causes rollback failure.
-
-[ ] Disabled/Inverse HidHide cannot start a new PhysicalIsolation session.
-
-[ ] No global HidHide active/inverse state mutation.
-
-[ ] No power-cycle behavior added without hardware evidence.
-
-[ ] Default production Stock plan remains NativeMode-only.
-
-[ ] Unsupported/HHC/Winhanced/ClawTweaks environments remain unaffected.
-
-[ ] Dedicated PhysicalIsolation stage tests cover all above behavior.
-
-
-===============================================================================
-43. FUTURE #78 STEAMOUTPUT RESEARCH ITEMS
-===============================================================================
-
-Before implementing Classic Steam Controller creation, perform a deeper
-three-repo review.
-
-HHC must be inspected for:
-
-  - current Steam Controller implementation
-  - Classic Steam Controller vs Steam Deck/Neptune/Gordon behavior
-  - VID/PID
-  - USB descriptor setup
-  - VIIPER creation calls
-  - report descriptors
-  - feature reports
-  - input reports
-  - output/rumble reports
-  - connection lifecycle
-  - disconnect/reconnect behavior
-  - Steam detection
-  - suspend/resume
-  - virtual-device PnP identities
-
-
-DS4Windows must be inspected for:
-
-  - VIIPER setup manager
-  - libVIIPER lifecycle
-  - usbip-win2 lifecycle
-  - before/after PnP snapshots
-  - identifying created virtual devices
-  - virtual output cleanup
-  - HidHide accidental virtual-device containment
-  - sleep/resume
-  - crash behavior
-
-
-SteamInputAddonforClaw must then decide:
-
-  - exact addon-owned virtual-device identity contract
-  - recovery journal format
-  - output create/remove ordering
-  - external-controller detector exclusion
-  - HidHide exclusion
-  - production activation timing
-
-
 ===============================================================================
-44. FUTURE CONTROLLER-REPORT RESEARCH ITEMS
+2. VERIFIED CONTROL SEMANTICS
 ===============================================================================
-
-Before implementing live ControllerState -> Classic Steam Controller reports,
-perform full key-by-key comparison.
 
-At minimum verify:
+The original physical research established these MSI Claw semantics used by the current normalized ControllerState pipeline:
 
-  A / B / X / Y
-  D-pad
+  A/B/X/Y and ordinary gamepad buttons
+  8-way D-pad
   LB / RB
-  LT / RT analog characteristics
-  LT / RT digital/full-click characteristics
-  Left Stick X/Y
-  Right Stick X/Y
+  analog LT / RT travel
+  independent LT / RT digital full-pull buttons
+  left analog stick
+  right analog stick
   L3 / R3
-  Back / Start / Guide behavior
-  M1
-  M2
+  M1 / M2 rear buttons
 
-Specifically verify:
+Important independent trigger contract:
 
-  axis ranges
-  signedness
-  center values
-  inversion
-  trigger range
-  deadzone behavior
-  report bit positions
-  report cadence
-  neutral values
-  duplicate digital/analog trigger behavior
+  Buttons[6] -> LeftTriggerFull
+  Buttons[7] -> RightTriggerFull
 
+These digital full-pull states are independent from analog trigger travel and must remain independent after normalization.
 
-Authoritative project rear mapping remains:
+Rear-button contract used by the Addon:
 
-  M2 -> Classic Steam Controller Left Grip
-  M1 -> Classic Steam Controller Right Grip
+  M1 -> Buttons[15]
+  M2 -> Buttons[16]
 
+Physical position, viewed from the front:
 
-Do not change this mapping based only on HHC OEM3/OEM4 naming.
+  M1 = right rear
+  M2 = left rear
 
+The normalized physical state should preserve that side identity. The output mapper decides whether those buttons become Gordon grips, Steam Deck R4/L4, or another future target.
 
 ===============================================================================
-45. SOURCE-DERIVED FACT VS PROJECT INFERENCE
+3. AXIS / REPORT REFERENCE
 ===============================================================================
 
-The following are directly verified source behaviors:
+The retained DirectInput research maps the physical 16-bit axis slots from the PID_1902 input report as follows:
 
-HHC:
-  - DClawController uses PID_1902/1903.
-  - M1 = Buttons[15].
-  - M2 = Buttons[16].
-  - HideHID registers both baseContainerDeviceInstanceId and deviceInstanceId.
-  - UnhideHID removes both.
-  - IsHidden checks baseContainerDeviceInstanceId.
-  - HidHide operates on exact BlockedInstanceIds.
-  - HHC registers its application and manages global cloaking.
+  X      @ report offset 0x0D
+  Y      @ report offset 0x0F
+  Z      @ report offset 0x11
+  RotX   @ report offset 0x13
+  RotY   @ report offset 0x15
+  RotZ   @ report offset 0x17
 
-DS4Windows:
-  - physical HID DevicePath is converted into exact PnP instance ID.
-  - persistent blacklist is MULTI_SZ.
-  - SET_BLACKLIST is 0x8001600C.
-  - writes use GENERIC_READ | GENERIC_WRITE.
-  - managed IDs are case-insensitive.
-  - session blacklist IOCTL support exists in this fork but released HidHide
-    1.5 compatibility requires persistent fallback.
-  - virtual VIIPER outputs require explicit protection from accidental HidHide
-    containment.
+The DirectInput interpretation used by the Addon normalizes the stick and trigger sources rather than forwarding raw report offsets to the virtual output.
 
+Trigger analog values are normalized independently from the digital full-pull button state.
 
-The following are SteamInputAddonforClaw project decisions/inferences:
-
-  - HHC baseContainerDeviceInstanceId is best represented by our
-    PhysicalIdentity.
-
-  - HHC deviceInstanceId is best represented by our PnpInstanceId.
-
-  - MSI Claw PhysicalIsolation should therefore start with a two-entry target
-    model.
-
-  - Addon ownership must be stricter than HHC/DS4Windows and must never adopt
-    pre-existing entries.
-
-  - Normal rollback must be strict reverse mutation order.
-
-  - Global HidHide state must remain untouched.
-
-  - No controller power cycle should be added until hardware testing proves it
-    necessary.
-
+Do not make the physical parser depend on Steam Deck trigger units, Gordon trigger units, or any later virtual-controller report scale.
 
 ===============================================================================
-46. HARDWARE VALIDATION STILL REQUIRED
+4. D-PAD
 ===============================================================================
 
-The source comparison does not replace live MSI Claw validation.
+The physical D-pad is normalized before virtual-output mapping.
 
-After the first routing MVP is assembled, verify on hardware:
+Recent real-hardware diagnostics established that physical D-pad transitions and canonical mapped transitions could match state-for-state with low millisecond latency. Therefore a future output target must consume the normalized D-pad rather than re-reading physical HID state or inventing a target-specific physical parser.
 
-  1. Actual PID_1902 DirectInput DevicePath.
+Steam Deck mapping should be direct:
 
-  2. Actual PnpInstanceId.
-
-  3. Actual PhysicalIdentity.
-
-  4. Compare those values with HHC-style:
-       deviceInstanceId
-       baseContainerDeviceInstanceId
-
-  5. Verify whether hiding only the child works.
-
-  6. Verify whether hiding only the base works.
-
-  7. Verify whether both are required.
-
-  8. Verify DirectInput remains readable by the addon after hiding.
-
-  9. Verify native duplicate input disappears from games.
-
- 10. Verify Steam Input receives only the replacement controller.
-
- 11. Verify existing HidHide configuration remains untouched.
-
- 12. Verify Steam session exit exact restore.
-
- 13. Verify external-controller hotplug rollback.
-
- 14. Verify crash/startup recovery.
-
- 15. Verify sleep/resume/hibernate recovery.
-
-
-Until these tests are complete, the source-derived two-entry model should be
-treated as the strongest production precedent, not as final MSI hardware
-proof.
-
+  physical normalized Down  -> SteamDeck DPadDown
+  physical normalized Left  -> SteamDeck DPadLeft
+  physical normalized Right -> SteamDeck DPadRight
+  physical normalized Up    -> SteamDeck DPadUp
 
 ===============================================================================
-END
+5. RIGHT STICK / R3
 ===============================================================================
+
+The physical layer exposes a real right stick and R3.
+
+Historical Gordon output policy translated them to:
+
+  right stick -> Gordon right pad
+  R3          -> Gordon right-pad press
+
+That translation is output-specific and must not exist in the normalized physical state.
+
+Steam Deck provides native:
+
+  RStickX
+  RStickY
+  R3
+
+so the new mapper should use those directly.
+
+===============================================================================
+6. REAR BUTTON OUTPUT POLICY
+===============================================================================
+
+Historical Gordon mapping:
+
+  M1 / right rear -> Right Grip
+  M2 / left rear  -> Left Grip
+
+Initial Steam Deck mapping target:
+
+  M1 / right rear -> R4
+  M2 / left rear  -> L4
+
+L5/R5 remain neutral on MSI Claw until a supported device actually supplies additional rear controls.
+
+Future handheld support should evolve the normalized auxiliary-control model so four rear buttons can be represented without changing the Steam Deck ABI.
+
+===============================================================================
+7. OEM1 / QUICK ACCESS
+===============================================================================
+
+OEM1 is not part of the current normalized ControllerState contract documented by the original PID_1902 research.
+
+The Steam Deck target provides a native `QuickAccess` field, so OEM1 is a promising future physical source for QAM behavior.
+
+However, OEM1 must be researched as its own physical input/capability path before mapping. Do not assume it is another PID_1902 gamepad button and do not steal WING or another unrelated native control.
+
+See SD5 in `VIIPER_MIGRATION_TODO.md`.
+
+===============================================================================
+8. HIDHIDE OWNERSHIP CONTRACT
+===============================================================================
+
+The Addon may hide only the exact PID_1902 primary gamepad collection it has safely acquired and identified for the current routing session.
+
+Preserve these rules:
+
+  - do not hide the MSI physical root;
+  - do not hide PID_1901;
+  - do not hide unrelated PID_1902 sibling collections;
+  - preserve foreign HidHide blocked-device entries;
+  - preserve foreign application whitelist entries;
+  - acquire the Addon's exact executable whitelist lease before activation/mutation;
+  - if current HidHide state cannot be safely read or mutated, fail closed;
+  - rollback removes only Addon-owned changes;
+  - ambiguous ownership remains recovery evidence rather than being guessed away.
+
+Changing Gordon to Steam Deck does not change these physical-isolation rules.
+
+===============================================================================
+9. PNP OWNERSHIP OF THE VIRTUAL OUTPUT
+===============================================================================
+
+Physical-input identity and virtual-output identity are separate concerns.
+
+The Addon continues to use before/after Windows PnP snapshots and ownership correlation to identify the virtual output it created.
+
+For the Steam Deck path the expected target becomes:
+
+  VID 28DE
+  PID 1205
+
+Do not replace exact Addon ownership proof with a generic "Valve controller present" test.
+
+VIIPER `GetUSBDeviceIdentity` remains logical VIIPER identity only; it does not replace Windows PnP instance/container/ancestor evidence.
+
+===============================================================================
+10. OUTPUT-INDEPENDENT NORMALIZATION RULE
+===============================================================================
+
+Preferred architecture:
+
+  MSI physical report / DirectInput
+          ↓
+  verified physical parser
+          ↓
+  ControllerState
+          ↓
+  output-specific mapper
+          ├─ historical Gordon mapper
+          └─ new Steam Deck mapper
+
+Future motion path:
+
+  Windows sensor source
+          ↓
+  MotionState
+          ↓
+  Steam Deck mapper
+
+Do not let virtual report layout leak backward into physical acquisition.
+
+===============================================================================
+11. CURRENT REFERENCES
+===============================================================================
+
+For Steam Deck output behavior:
+
+  docs/Reference Research_Steam Deck VIIPER SteamOutput Input Reports.txt
+
+For CG3EM sensor correction:
+
+  docs/Reference Research_CG3EM Gyro Driver Correction_2026-08-15.txt
+
+For canonical VIIPER ownership/lifecycle:
+
+  docs/VIIPER_INTEGRATION.md
+  docs/VIIPER_MIGRATION_TODO.md
+  onehoon/VIIPER/FORK_ARCHITECTURE.md
+  onehoon/VIIPER/docs/libviiper/fork-api.md
+
+===============================================================================
+12. PRIMARY CONCLUSION
+===============================================================================
+
+The physical MSI Claw parser, acquisition identity, HidHide isolation, and recovery evidence remain reusable while the virtual target changes.
+
+Keep physical semantics normalized and target-independent; move Gordon/Steam Deck decisions into the output mapper only.

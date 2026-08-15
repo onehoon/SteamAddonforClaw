@@ -1,0 +1,571 @@
+Steam Input Addon for Claw
+Reference Research Notes — Steam Deck / VIIPER / SteamOutput / Input Reports
+
+Date: 2026-08-15
+Status: ACTIVE REFERENCE FOR STEAM DECK MIGRATION
+Purpose:
+  - Define the source-backed Steam Deck virtual-output contract before Addon implementation.
+  - Reuse the existing onehoon/VIIPER Steam Deck implementation instead of designing a new protocol.
+  - Preserve the distinction between generic Steam Deck ABI fields and MSI Claw-specific mapping policy.
+  - Provide the implementation basis for SD1-SD4 in docs/VIIPER_MIGRATION_TODO.md.
+
+===============================================================================
+0. REQUIRED ARCHITECTURE DOCUMENTS
+===============================================================================
+
+Before using this research for implementation, read from the selected VIIPER revision:
+
+  onehoon/VIIPER/FORK_ARCHITECTURE.md
+  onehoon/VIIPER/docs/libviiper/fork-api.md
+
+Addon-side required references:
+
+  README.md
+  docs/VIIPER_INTEGRATION.md
+  docs/VIIPER_MIGRATION_TODO.md
+  docs/VIIPER_IMPLEMENTATION_RULES.md
+
+The canonical embedded path is lib/viiper.
+Do not base new Addon integration on legacy clib or a generic controller manager.
+
+===============================================================================
+1. CURRENT BASELINES
+===============================================================================
+
+Addon transition baseline:
+
+  onehoon/SteamInputAddonforClaw
+  acdfd105f828dd78598a028d248c146b44833dc2
+
+Validated production VIIPER pin used by the current Gordon path:
+
+  onehoon/VIIPER
+  db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
+
+Steam Deck VIIPER development branch:
+
+  feature/canonical-steamdeck
+  created from db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
+
+The branch is development-only until an immutable reviewed commit is selected.
+
+===============================================================================
+2. WHY STEAM DECK IS THE NEW PRIMARY TARGET
+===============================================================================
+
+The Gordon implementation proved the Addon's canonical VIIPER lifecycle and safety architecture, but Gordon is not an ideal logical shape for a modern handheld controller.
+
+Important Gordon substitutions in the current Addon include:
+
+  physical right stick -> Gordon right pad X/Y
+  physical R3          -> Gordon right-pad press
+  M1/M2                -> two Gordon grip buttons
+
+Steam Deck provides native semantic fields for:
+
+  left stick
+  right stick
+  L3
+  R3
+  L4/R4/L5/R5 rear buttons
+  Steam
+  QuickAccess
+  analog triggers
+  digital L2/R2
+  raw motion fields
+  optional trackpads
+
+This makes Steam Deck a better long-term target for MSI Claw and possible future handhelds with more rear/OEM controls.
+
+Trackpads are not required on the physical device. The generic Steam Deck ABI should retain trackpad fields, while the Addon initially sends them neutral.
+
+===============================================================================
+3. EXISTING VIIPER STEAM DECK IMPLEMENTATION
+===============================================================================
+
+Source directory:
+
+  device/steamdeck
+
+Default profile:
+
+  steamdeck
+
+Default USB identity:
+
+  VID 0x28DE
+  PID 0x1205
+
+Input report length:
+
+  64 bytes
+
+Input report ID used by the implementation:
+
+  0x09
+
+The existing device implementation is the report/protocol authority.
+The canonical lib/viiper wrapper must convert an external typed state into device/steamdeck.InputState and call UpdateInputState().
+
+Do not create a second Steam Deck report encoder in lib/viiper or the Addon.
+
+===============================================================================
+4. EXISTING INPUTSTATE SEMANTICS
+===============================================================================
+
+The current VIIPER device/steamdeck.InputState includes:
+
+Buttons / digital state:
+
+  A
+  X
+  B
+  Y
+  L1
+  R1
+  L2Digital
+  R2Digital
+  L5
+  Menu
+  Steam
+  Options
+  DPadDown
+  DPadLeft
+  DPadRight
+  DPadUp
+  L3
+  RPadTouch
+  LPadTouch
+  RPadPress
+  LPadPress
+  R5
+  R3
+  RStickTouch
+  LStickTouch
+  R4
+  L4
+  QuickAccess
+
+Analog / motion state:
+
+  LPadX / LPadY
+  RPadX / RPadY
+  AccelX / AccelY / AccelZ
+  Pitch / Yaw / Roll
+  GyroQuatW / GyroQuatX / GyroQuatY / GyroQuatZ
+  LTrigger / RTrigger
+  LStickX / LStickY
+  RStickX / RStickY
+  LPadForce / RPadForce
+  LStickForce / RStickForce
+
+The implementation also owns Frame internally.
+External canonical callers should not own or increment Frame.
+
+===============================================================================
+5. REPORT FIELD LOCATIONS FROM CURRENT VIIPER IMPLEMENTATION
+===============================================================================
+
+The current device/steamdeck/inputstate.go report builder places semantic state at these byte ranges:
+
+  0..3   transport/report header
+  4..7   frame counter
+  8      A/X/B/Y, L1/R1, L2Digital/R2Digital bits
+  9      L5, Menu, Steam, Options, D-pad bits
+  10     L3, pad touch/press, R5 bits
+  11     R3 bit
+  13     stick touch, R4, L4 bits
+  14     QuickAccess bit
+  15     reserved byte
+  16..23 left/right trackpad X/Y
+  24..29 accelerometer raw slots
+  30..35 raw gyro slots historically named Pitch/Yaw/Roll
+  36..43 quaternion
+  44..47 analog triggers
+  48..55 left/right stick X/Y
+  56..63 pad/stick force values
+
+Known rear/stick-click locations in the current code include:
+
+  L5 -> byte 9
+  R5 -> byte 10
+  R3 -> byte 11
+  R4 -> byte 13
+  L4 -> byte 13
+
+These are implementation facts, not Addon mapping policy.
+
+===============================================================================
+6. INITIAL MSI CLAW -> STEAM DECK MAPPING POLICY
+===============================================================================
+
+The first Addon Steam Deck hardware smoke test should map only existing, already-normalized ControllerState fields.
+
+Recommended initial mapping:
+
+  A                  -> A
+  B                  -> B
+  X                  -> X
+  Y                  -> Y
+
+  DPadDown           -> DPadDown
+  DPadLeft           -> DPadLeft
+  DPadRight          -> DPadRight
+  DPadUp             -> DPadUp
+
+  LeftBumper         -> L1
+  RightBumper        -> R1
+
+  LeftTriggerFull    -> L2Digital
+  RightTriggerFull   -> R2Digital
+
+  Left analog trigger  -> LTrigger
+  Right analog trigger -> RTrigger
+
+  LeftStick.X/Y      -> LStickX/LStickY
+  RightStick.X/Y     -> RStickX/RStickY
+
+  LeftStickClick     -> L3
+  RightStickClick    -> R3
+
+  Back               -> Menu
+  Start              -> Options
+
+  M1 / right rear    -> R4
+  M2 / left rear     -> L4
+
+  L5                 -> false initially
+  R5                 -> false initially
+  Steam              -> false initially
+  QuickAccess        -> false for the first smoke test
+
+  all trackpad axes/touch/press/force -> neutral
+  all IMU fields                       -> neutral for the first smoke test
+
+The M1/M2 -> R4/L4 choice preserves physical right/left semantics and leaves the second rear pair available for future devices with four physical rear buttons.
+
+Do not steal unrelated OEM buttons to populate L5/R5.
+
+===============================================================================
+7. TRIGGER SEMANTICS
+===============================================================================
+
+MSI Claw physical input already preserves two independent trigger concepts:
+
+  analog travel
+  digital full-pull button
+
+The Steam Deck target also exposes two independent concepts:
+
+  LTrigger / RTrigger
+  L2Digital / R2Digital
+
+Therefore the Addon must preserve them independently.
+
+Example:
+
+  physical left analog = mid travel
+  physical LeftTriggerFull = true
+
+Expected Steam Deck state:
+
+  LTrigger = mapped mid travel
+  L2Digital = true
+
+Do not overwrite analog magnitude because the full-pull button is pressed.
+Do not derive the Addon's digital state solely from analog saturation.
+
+The current HHC SteamDeckTarget reference scales its 0..255 trigger source to 0..Int16.MaxValue (32767) for the VIIPER Steam Deck target. The Addon implementation may use the same range if the canonical ABI/report tests confirm it, but the exact mapper scaling must be pinned by focused tests rather than copied blindly.
+
+===============================================================================
+8. RIGHT STICK / R3
+===============================================================================
+
+Steam Deck has real right-stick fields:
+
+  RStickX
+  RStickY
+  R3
+
+This is a major difference from Gordon.
+
+The Addon must not carry forward the Gordon substitution:
+
+  RightStick -> RPadX/RPadY
+  R3         -> RPadPress
+
+Deck mapping should be direct:
+
+  RightStick -> RStickX/RStickY
+  R3         -> R3
+
+Trackpads stay neutral unless a future supported physical device actually has trackpads.
+
+===============================================================================
+9. REAR BUTTONS AND FUTURE HANDHELDS
+===============================================================================
+
+Steam Deck provides four independent rear buttons:
+
+  L4
+  R4
+  L5
+  R5
+
+MSI Claw currently provides two physical rear buttons used by the Addon:
+
+  M1 = right rear
+  M2 = left rear
+
+Initial policy:
+
+  M1 -> R4
+  M2 -> L4
+
+Future handhelds with four rear buttons can map all four without changing the Steam Deck ABI.
+
+The physical input layer should evolve toward capability-based auxiliary controls rather than encoding Gordon-specific LeftGrip/RightGrip assumptions.
+
+===============================================================================
+10. QUICK ACCESS / OEM1
+===============================================================================
+
+Steam Deck has an independent QuickAccess field.
+
+This creates a natural future mapping target for MSI OEM1/QAM behavior:
+
+  physical OEM1 -> SteamDeck QuickAccess
+
+This mapping is not part of the first SD3 smoke test.
+
+Before enabling it, the Addon must establish:
+
+  - a safe physical OEM1 observation source;
+  - ownership and coexistence behavior with MSI Center M;
+  - no regression to native recovery or other OEM-button functions;
+  - focused tests for the new device-capability state;
+  - real Steam Quick Access validation.
+
+Do not map WING or another unrelated native button merely to fill QuickAccess.
+
+===============================================================================
+11. MOTION / IMU FIELDS
+===============================================================================
+
+The existing Steam Deck report includes raw motion slots.
+
+Current VIIPER comments describe the raw Deck IMU slots such that Steam/SDL decode them into application-space axes X, Z, -Y. A caller starting from that application-space basis therefore needs to account for the axis transform rather than assuming field names are already in the final Steam basis.
+
+Current HHC SteamDeckTarget reference uses approximately:
+
+  gyro units: 16 counts per degree/second
+  accel units: 16384 counts per g
+
+and encodes its application-space values as:
+
+  raw accel X = +X
+  raw accel Y = -Z
+  raw accel Z = +Y
+
+  raw gyro X  = +X
+  raw gyro Y  = -Z
+  raw gyro Z  = +Y
+
+These values are useful implementation references, not a substitute for real MSI sensor validation.
+
+Before Addon production IMU routing:
+
+  - enumerate the actual Windows sensor source on each supported environment;
+  - determine its units and coordinate basis;
+  - normalize into an output-independent MotionState;
+  - verify the Steam Deck transform on real hardware;
+  - define freshness/stale-sample handling;
+  - leave motion neutral when no valid fresh sample exists.
+
+Do not derive raw motion from firmware gyro-to-mouse/right-stick output.
+
+Quaternion:
+
+The current VIIPER Steam Deck implementation intentionally leaves an unset quaternion at zero and does not force an identity quaternion. The first Addon IMU integration should preserve that behavior unless a real orientation/fusion source is deliberately added.
+
+===============================================================================
+12. CG3EM SENSOR DRIVER CORRECTION
+===============================================================================
+
+A 2026-08-12 CG3EM investigation observed:
+
+  Intel ISH present
+  firmware gyro-to-mouse working
+  no Windows Sensor inventory
+  ISensorManager.GetSensorsByCategory -> 0x80070490
+
+That observation is no longer evidence of a hardware/firmware limitation.
+
+The tested MSI Claw 8 EX AI+ machine later recovered Windows sensor access after the relevant driver stack was reinstalled.
+
+Correct interpretation:
+
+  - the old negative inventory represented that machine's driver state at the time;
+  - CG3EM raw Windows sensor capability must be re-enumerated after driver health is confirmed;
+  - sensor identity/rate/unit details still need a fresh captured hardware report before production gyro integration.
+
+See:
+
+  Reference Research_CG3EM Gyro Driver Correction_2026-08-15.txt
+
+===============================================================================
+13. CANONICAL LIB/VIIPER WRAPPER REQUIREMENT
+===============================================================================
+
+At the validated Gordon pin, device/steamdeck exists but does not yet have a typed canonical lib/viiper wrapper.
+
+The required first integration step is therefore:
+
+  existing device/steamdeck
+          ↓
+  typed canonical lib/viiper wrapper
+          ↓
+  generated C ABI
+          ↓
+  Addon C# binding
+
+Initial minimal canonical surface:
+
+  SteamDeckDeviceHandle
+  SteamDeckDeviceState
+  CreateSteamDeckDevice
+  SetSteamDeckDeviceState
+  RemoveSteamDeckDevice
+  RemoveSteamDeckDeviceEx
+
+Reuse:
+
+  GetUSBDeviceIdentity
+  AttachUSBDevice
+  DetachUSBDevice
+
+Do not create a generic controller-manager API.
+
+===============================================================================
+14. CALLBACK / RUMBLE SCOPE
+===============================================================================
+
+The initial input smoke test does not require an Addon-visible Steam Deck output callback.
+
+The current device/steamdeck output callback storage/dispatch must be reviewed against the hardened canonical callback lifecycle before public callback ABI is exposed.
+
+Therefore the first typed wrapper may intentionally omit:
+
+  SetSteamDeckOutputCallback
+  rumble callback integration
+  haptic callback integration
+
+This keeps SD1 narrow and avoids weakening the canonical callback teardown contract.
+
+Rumble/haptics remain a separate follow-up after basic input/lifecycle validation.
+
+===============================================================================
+15. ADDON SAFETY CONTRACT DOES NOT CHANGE
+===============================================================================
+
+Steam Deck must be integrated inside the existing Addon safety shell.
+
+Entry:
+
+  prepare / before-PnP snapshot
+  -> persist recovery mutation intent
+  -> mark virtual output identity uncertain
+  -> create/attach typed Steam Deck
+  -> resolve exact Addon-owned Windows PnP identity
+  -> checkpoint ownership
+  -> verify HidHide safety
+  -> neutral state
+  -> live publisher
+
+Teardown:
+
+  stop publisher
+  -> typed detach/remove
+  -> verify exact owned PnP node absent
+  -> clear ownership uncertainty
+  -> complete recovery mutation
+
+GetUSBDeviceIdentity is VIIPER logical identity only.
+It does not replace Windows PnP instance/container/ancestor evidence.
+
+===============================================================================
+16. FIRST HARDWARE ACCEPTANCE GATE
+===============================================================================
+
+Before production cutover, real MSI Claw testing must verify at least:
+
+  Steam sees the Addon-owned 28DE:1205 output
+  A/B/X/Y
+  D-pad
+  LB/RB
+  LT/RT analog
+  independent LT/RT full-pull digital
+  left stick
+  right stick
+  L3
+  R3
+  Back/Start
+  M1 -> R4
+  M2 -> L4
+  repeated enter/exit
+  Big Picture effective session
+  exact PnP removal
+  no stale usable Deck after teardown
+  HidHide safety
+  MSI Center M native recovery
+
+Not required for this first gate:
+
+  gyro
+  OEM1/QuickAccess
+  rumble/haptics
+  Game Bar Xbox360
+  physical trackpads
+
+===============================================================================
+17. IMPLEMENTATION ORDER
+===============================================================================
+
+  SD1  VIIPER typed Steam Deck ABI
+  SD2  Addon side-by-side Deck ABI/session/mapper/publisher
+  SD3  non-gyro real-hardware smoke test
+  SD4  production Gordon -> Deck cutover
+  SD5  OEM1 -> QuickAccess
+  SD6  Windows Sensor IMU -> Deck
+  SD7  Game Bar Deck-neutral + typed Xbox360
+  SD8  retire Addon Gordon production path after stability proof
+
+===============================================================================
+18. NON-GOALS FOR THE INITIAL MIGRATION
+===============================================================================
+
+Do not use the Steam Deck transition to:
+
+  - redesign usbip-win2 integration;
+  - remove recovery/PnP/HidHide safety;
+  - switch back to clib;
+  - delete VIIPER Gordon;
+  - break HHC/clib compatibility;
+  - invent Claw-specific fields in SteamDeckDeviceState;
+  - remove generic trackpad fields;
+  - implement a new gyro-to-mouse algorithm;
+  - enable every Steam Deck feature before basic input is proven.
+
+===============================================================================
+19. PRIMARY CONCLUSION
+===============================================================================
+
+The project should not implement a new Steam Deck protocol from scratch.
+
+The correct migration is:
+
+  preserve the proven Gordon lifecycle/safety architecture
+  + expose the existing VIIPER Steam Deck device through canonical typed lib/viiper
+  + map MSI Claw normalized controls directly into native Deck semantics
+  + validate 28DE:1205 on real hardware
+  + only then make Deck the production SteamOutput target.
