@@ -58,6 +58,32 @@ internal sealed class CanonicalSteamControllerInputPublisher
     private long _maxSetStateTicksSinceHeartbeat;
     private long _totalSetStateFailures;
 
+    // M5+ timing decomposition: production-worker-only, added to separate "Windows timer/wake
+    // scheduling" from "publisher work" from "occasional long stalls" after real-hardware M5 testing
+    // showed the high-resolution timer publisher stabilizing at ~231 Hz instead of the ~250 Hz target.
+    // Touched only from the single dedicated worker thread (WorkerLoop below), so no synchronization is
+    // needed. These stay at their zero defaults on the test/manual-tick IInputReportTickSource path,
+    // which never populates them -- they are meaningful for the production timer-driven path only.
+    private long _previousTimerWakeTimestamp;
+    private bool _hasPreviousTimerWake;
+    private int _timerWakeCountSinceHeartbeat;
+    // Distinct from _timerWakeCountSinceHeartbeat: _previousTimerWakeTimestamp intentionally survives a
+    // heartbeat reset (see EmitHeartbeatIfDue), so the first wake of a window still yields one interval
+    // sample carried over from the prior window -- the number of interval samples is not simply
+    // wakeCount - 1 within a single window.
+    private int _wakeToWakeSampleCountSinceHeartbeat;
+    private long _wakeToWakeTicksSumSinceHeartbeat;
+    private long _maxWakeToWakeTicksSinceHeartbeat;
+    private int _wakeOver425MsCountSinceHeartbeat;
+    private int _wakeOver5MsCountSinceHeartbeat;
+    private long _waitBlockedTicksSumSinceHeartbeat;
+    private long _maxWaitBlockedTicksSinceHeartbeat;
+    private long _publishWorkTicksSumSinceHeartbeat;
+    private long _maxPublishWorkTicksSinceHeartbeat;
+
+    private static readonly TimeSpan WakeWarnThreshold = TimeSpan.FromMilliseconds(4.25);
+    private static readonly TimeSpan WakeAlarmThreshold = TimeSpan.FromMilliseconds(5);
+
     internal CanonicalSteamControllerInputPublisher(
         IControllerStateSnapshotSource snapshot,
         ICanonicalSteamControllerStateSink sink,
@@ -204,6 +230,14 @@ internal sealed class CanonicalSteamControllerInputPublisher
     /// so a delayed/missed interval never causes a catch-up burst; the next wake just publishes whatever
     /// LatestState is current at that moment.
     /// </summary>
+    /// <remarks>
+    /// When Info diagnostics are enabled, also decomposes each iteration into three timings (wait-block,
+    /// wake-to-wake, publish-work) so a real-hardware heartbeat log can distinguish "the timer/wake itself
+    /// is slow" from "publisher work is extending the loop" from "occasional long stalls" -- see the
+    /// class-level remarks on the ~231 Hz vs ~250 Hz real-hardware M5 result this responds to. This never
+    /// changes the 4 ms timer/wait behavior itself; it only measures it. When diagnostics are off, no
+    /// Stopwatch sampling or timing arithmetic happens here beyond the one IsEnabled check per iteration.
+    /// </remarks>
     private void WorkerLoop(WindowsHighResolutionPeriodicTimer timer, ManualResetEvent stopEvent)
     {
         try
@@ -217,15 +251,69 @@ internal sealed class CanonicalSteamControllerInputPublisher
             WaitHandle[] handles = [stopEvent, timer];
             while (true)
             {
+                var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);
+                var waitStart = diagnosticsEnabled ? _timestampProvider() : 0;
+
                 var signaled = WaitHandle.WaitAny(handles);
-                if (signaled == 0) return; // stop event
-                if (!PublishCurrentStateOnce()) return;
+                if (signaled == 0) return; // stop event -- never counted as a timer wake
+
+                if (diagnosticsEnabled)
+                {
+                    var wake = _timestampProvider();
+                    RecordWaitBlocked(waitStart, wake);
+                    RecordTimerWake(wake);
+
+                    var keepGoing = PublishCurrentStateOnce();
+                    RecordPublishWork(wake, _timestampProvider());
+                    if (!keepGoing) return;
+                }
+                else if (!PublishCurrentStateOnce())
+                {
+                    return;
+                }
             }
         }
         catch (Exception exception)
         {
             ReportFault(exception);
         }
+    }
+
+    /// <summary>Test-only seam: lets a test drive the timing-decomposition accounting with known fake
+    /// timestamps directly, without needing a real WaitAny/timer wake to happen.</summary>
+    internal void RecordWaitBlockedForTests(long waitStart, long wake) => RecordWaitBlocked(waitStart, wake);
+    internal void RecordTimerWakeForTests(long wake) => RecordTimerWake(wake);
+    internal void RecordPublishWorkForTests(long publishStart, long publishEnd) => RecordPublishWork(publishStart, publishEnd);
+
+    private void RecordWaitBlocked(long waitStart, long wake)
+    {
+        var duration = wake - waitStart;
+        _waitBlockedTicksSumSinceHeartbeat += duration;
+        if (duration > _maxWaitBlockedTicksSinceHeartbeat) _maxWaitBlockedTicksSinceHeartbeat = duration;
+    }
+
+    private void RecordTimerWake(long wake)
+    {
+        _timerWakeCountSinceHeartbeat++;
+        if (_hasPreviousTimerWake)
+        {
+            var interval = wake - _previousTimerWakeTimestamp;
+            _wakeToWakeSampleCountSinceHeartbeat++;
+            _wakeToWakeTicksSumSinceHeartbeat += interval;
+            if (interval > _maxWakeToWakeTicksSinceHeartbeat) _maxWakeToWakeTicksSinceHeartbeat = interval;
+            var intervalSpan = Stopwatch.GetElapsedTime(0, interval);
+            if (intervalSpan >= WakeAlarmThreshold) _wakeOver5MsCountSinceHeartbeat++;
+            if (intervalSpan >= WakeWarnThreshold) _wakeOver425MsCountSinceHeartbeat++;
+        }
+        _previousTimerWakeTimestamp = wake;
+        _hasPreviousTimerWake = true;
+    }
+
+    private void RecordPublishWork(long publishStart, long publishEnd)
+    {
+        var duration = publishEnd - publishStart;
+        _publishWorkTicksSumSinceHeartbeat += duration;
+        if (duration > _maxPublishWorkTicksSinceHeartbeat) _maxPublishWorkTicksSinceHeartbeat = duration;
     }
 
     private async Task PublishAsync(IInputReportTickSource ticks, CancellationToken token)
@@ -297,6 +385,13 @@ internal sealed class CanonicalSteamControllerInputPublisher
 
         var elapsedMs = elapsed.TotalMilliseconds;
         var effectiveHz = elapsedMs > 0 ? _setStateCallsSinceHeartbeat / (elapsedMs / 1000.0) : 0.0;
+        var expectedTicksAt4Ms = elapsedMs / 4.0;
+
+        var wakeCount = _timerWakeCountSinceHeartbeat;
+        var wakeToWakeSampleCount = _wakeToWakeSampleCountSinceHeartbeat;
+        var averageWakeToWakeMs = wakeToWakeSampleCount > 0 ? Stopwatch.GetElapsedTime(0, _wakeToWakeTicksSumSinceHeartbeat / wakeToWakeSampleCount).TotalMilliseconds : 0.0;
+        var averageWaitBlockedMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _waitBlockedTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
+        var averagePublishWorkMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _publishWorkTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
 
         AppLog.Info("SteamOutput", "Canonical Steam Controller publisher heartbeat",
             ("SetStateCallsLastSecond", _setStateCallsSinceHeartbeat),
@@ -304,11 +399,35 @@ internal sealed class CanonicalSteamControllerInputPublisher
             ("SetStateFailures", _totalSetStateFailures),
             ("MaxSetStateDurationMs", Stopwatch.GetElapsedTime(0, _maxSetStateTicksSinceHeartbeat).TotalMilliseconds),
             ("HeartbeatElapsedMs", elapsedMs),
-            ("EffectiveSetStateHz", effectiveHz));
+            ("EffectiveSetStateHz", effectiveHz),
+            ("TimerWakeCount", wakeCount),
+            ("ExpectedTicksAt4ms", expectedTicksAt4Ms),
+            ("AverageWakeToWakeMs", averageWakeToWakeMs),
+            ("MaxWakeToWakeMs", Stopwatch.GetElapsedTime(0, _maxWakeToWakeTicksSinceHeartbeat).TotalMilliseconds),
+            ("AverageWaitBlockedMs", averageWaitBlockedMs),
+            ("MaxWaitBlockedMs", Stopwatch.GetElapsedTime(0, _maxWaitBlockedTicksSinceHeartbeat).TotalMilliseconds),
+            ("AveragePublishWorkMs", averagePublishWorkMs),
+            ("MaxPublishWorkMs", Stopwatch.GetElapsedTime(0, _maxPublishWorkTicksSinceHeartbeat).TotalMilliseconds),
+            ("WakeOver4_25MsCount", _wakeOver425MsCountSinceHeartbeat),
+            ("WakeOver5MsCount", _wakeOver5MsCountSinceHeartbeat));
 
         _lastHeartbeatTimestamp = now;
         _setStateCallsSinceHeartbeat = 0;
         _maxSetStateTicksSinceHeartbeat = 0;
+
+        _timerWakeCountSinceHeartbeat = 0;
+        _wakeToWakeSampleCountSinceHeartbeat = 0;
+        _wakeToWakeTicksSumSinceHeartbeat = 0;
+        _maxWakeToWakeTicksSinceHeartbeat = 0;
+        _wakeOver425MsCountSinceHeartbeat = 0;
+        _wakeOver5MsCountSinceHeartbeat = 0;
+        _waitBlockedTicksSumSinceHeartbeat = 0;
+        _maxWaitBlockedTicksSinceHeartbeat = 0;
+        _publishWorkTicksSumSinceHeartbeat = 0;
+        _maxPublishWorkTicksSinceHeartbeat = 0;
+        // _previousTimerWakeTimestamp / _hasPreviousTimerWake intentionally NOT reset here: the
+        // wake-to-wake interval spanning the heartbeat boundary itself (last tick before this heartbeat
+        // to the first tick after it) is still a real, valid sample for the next window.
     }
 
     private void ReportFault(Exception exception)
