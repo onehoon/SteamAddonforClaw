@@ -327,12 +327,12 @@ internal sealed class CanonicalSteamControllerInputPublisher
     {
         try
         {
-            // Stop must be index 0: WaitHandle.WaitAny returns the lowest-index signaled handle when
-            // several are signaled at once. If a slow SetState call runs past a deadline while StopAsync
-            // is concurrently signaling the stop event, both handles can be signaled by the time this
-            // thread comes back to wait -- putting the timer first would let one more publish start after
-            // stop was requested (and, under sustained SetState delay, could starve stop indefinitely).
-            // Stop must always win that race.
+            // Stop must remain index 0: WaitHandle.WaitAny returns the lowest-index signaled handle when
+            // several are signaled at once. During an ordinary armed wait, the timer may become signaled
+            // at the same moment StopAsync signals the stop event; stop must win that race so no new
+            // publish begins after shutdown has been requested. (The one-shot timer is not waiting, and so
+            // cannot become signaled, while a SetState call is in flight -- see the post-publish
+            // stopEvent.WaitOne(0) check below for that separate case.)
             WaitHandle[] handles = [stopEvent, timer];
             while (true)
             {
