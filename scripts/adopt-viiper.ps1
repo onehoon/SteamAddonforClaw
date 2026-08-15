@@ -14,20 +14,26 @@ section is reset to an evergreen human-review placeholder, never
 synthesized from the new header's content.
 
 Usage:
-  powershell.exe -File scripts/adopt-viiper.ps1 -StagingDirectory <dir>
+  powershell.exe -File scripts/adopt-viiper.ps1 -StagingDirectory <dir> -ExpectedCommit <40-char-sha>
 
 -StagingDirectory must be a directory already containing a verified
 libVIIPER.dll, libVIIPER.h, and viiper-artifact.json (e.g. the staging
-directory scripts/update-viiper.ps1 leaves behind). This script
-independently re-validates that payload's manifest and recomputes its
-hashes before adopting anything -- it does not simply trust that
-update-viiper.ps1 was run first.
+directory scripts/update-viiper.ps1 leaves behind). -ExpectedCommit must be
+the exact commit the caller actually requested/verified; this script
+independently re-validates that the staged manifest's commit matches it
+(not just that the manifest is internally well-formed), and independently
+recomputes the staged DLL/header hashes against the manifest -- it does not
+simply trust that update-viiper.ps1 was run first or that the staging
+directory's contents match what the caller intended to adopt.
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [string]$StagingDirectory,
+
+    [Parameter(Mandatory)]
+    [string]$ExpectedCommit,
 
     [string]$RepoRoot
 )
@@ -99,7 +105,10 @@ function Test-ViiperAdoptionManifest {
     this script fails closed even if invoked without update-viiper.ps1 having
     run first, and so the two scripts can evolve independently.
     #>
-    param([Parameter(Mandatory)] $Manifest)
+    param(
+        [Parameter(Mandatory)] $Manifest,
+        [Parameter(Mandatory)] [string] $ExpectedCommit
+    )
 
     function Assert-ManifestField {
         param($Actual, $Expected, [string] $Message)
@@ -124,6 +133,10 @@ function Test-ViiperAdoptionManifest {
 
     if ($Manifest.commit -notmatch '^[0-9a-fA-F]{40}$') {
         throw "Manifest commit is not exactly 40 hex characters: '$($Manifest.commit)'."
+    }
+
+    if ($Manifest.commit.ToLowerInvariant() -ne $ExpectedCommit.ToLowerInvariant()) {
+        throw "Manifest commit does not match the caller's expected target commit. Expected '$ExpectedCommit', actual '$($Manifest.commit)'. Refusing to adopt a staging payload for a different commit than what was actually requested/verified."
     }
 
     if ($Manifest.dll.sha256 -notmatch '^[0-9a-fA-F]{64}$') {
@@ -287,6 +300,11 @@ if ($MyInvocation.InvocationName -eq '.') {
     return
 }
 
+if ($ExpectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
+    throw "-ExpectedCommit must be exactly 40 hexadecimal characters. Got: '$ExpectedCommit'."
+}
+$ExpectedCommit = $ExpectedCommit.ToLowerInvariant()
+
 $viiperDir = Join-Path $RepoRoot 'src\SteamInputAddonforClaw\Dependencies\Viiper'
 $lockPath = Join-Path $viiperDir 'viiper.lock.json'
 $provenancePath = Join-Path $viiperDir 'PROVENANCE.md'
@@ -307,7 +325,7 @@ $currentDllHashLower = $currentDllHashUpper.ToLowerInvariant()
 $currentHeaderHashLower = $currentHeaderHashUpper.ToLowerInvariant()
 
 $manifest = Resolve-ViiperAdoptionManifest -StagingDirectory $StagingDirectory
-Test-ViiperAdoptionManifest -Manifest $manifest
+Test-ViiperAdoptionManifest -Manifest $manifest -ExpectedCommit $ExpectedCommit
 $payload = Test-ViiperAdoptionPayloadFiles -StagingDirectory $StagingDirectory -Manifest $manifest
 
 $targetCommit = $manifest.commit.ToLowerInvariant()

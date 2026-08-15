@@ -5,10 +5,10 @@ $scriptPath = Join-Path $repoRoot 'scripts\adopt-viiper.ps1'
 $realViiperDir = Join-Path $repoRoot 'src\SteamInputAddonforClaw\Dependencies\Viiper'
 
 # Dot-source to load the pure/testable functions. The script requires
-# -StagingDirectory even when dot-sourced (mandatory parameter binding
-# happens before the main-guard runs), but the main-guard returns before
-# doing anything with it.
-. $scriptPath -StagingDirectory 'unused-during-dot-source'
+# -StagingDirectory/-ExpectedCommit even when dot-sourced (mandatory
+# parameter binding happens before the main-guard runs), but the main-guard
+# returns before doing anything with them.
+. $scriptPath -StagingDirectory 'unused-during-dot-source' -ExpectedCommit ('0' * 40)
 
 function Assert-Equal {
     param($Expected, $Actual, [string] $Message)
@@ -205,12 +205,16 @@ function New-StagingDirectory {
 }
 
 function Invoke-Adopt {
-    param([Parameter(Mandatory)] [string] $RepoRoot, [Parameter(Mandatory)] [string] $StagingDirectory)
+    param(
+        [Parameter(Mandatory)] [string] $RepoRoot,
+        [Parameter(Mandatory)] [string] $StagingDirectory,
+        [string] $ExpectedCommit = $targetCommit
+    )
 
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath -StagingDirectory $StagingDirectory -RepoRoot $RepoRoot 2>&1
+        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath -StagingDirectory $StagingDirectory -ExpectedCommit $ExpectedCommit -RepoRoot $RepoRoot 2>&1
         $exitCode = $LASTEXITCODE
     }
     finally {
@@ -334,6 +338,15 @@ try {
     $wrongHeaderHashStaging = New-StagingDirectory -Commit $targetCommit -ManifestHeaderHashOverride ('0' * 64)
     $fixturesToClean += $wrongHeaderHashStaging
     Assert-Failure -Result (Invoke-Adopt -RepoRoot $fixture7.Root -StagingDirectory $wrongHeaderHashStaging) -Case 'header hash mismatch'
+
+    # --- manifest commit mismatch rejected (staged payload is for a different commit than requested) ---
+
+    $fixture7b = New-FixtureRepo
+    $fixturesToClean += $fixture7b.Root
+    $unexpectedCommitStaging = New-StagingDirectory -Commit $targetCommit
+    $fixturesToClean += $unexpectedCommitStaging
+    $wrongExpectedCommit = 'cccccccccccccccccccccccccccccccccccccccc'
+    Assert-Failure -Result (Invoke-Adopt -RepoRoot $fixture7b.Root -StagingDirectory $unexpectedCommitStaging -ExpectedCommit $wrongExpectedCommit) -Case 'manifest commit does not match caller-expected commit'
 
     # --- expected-current-value mismatch / replacement cardinality mismatch fail closed ---
     # Simulated by corrupting the fixture's PROVENANCE.md commit line so it no longer matches

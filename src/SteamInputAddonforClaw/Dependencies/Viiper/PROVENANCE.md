@@ -42,12 +42,34 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-ABI compatibility is not inferred by the dependency automation. Review the
-generated `libVIIPER.h` diff and the managed interop
-(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
-Replace this paragraph with the reviewed ABI delta -- including any changed
-struct layout, offsets, or exports -- once confirmed.
+This section holds the human-reviewed ABI delta for the currently embedded
+revision. A future dependency-automation adoption resets this section to an
+evergreen "review required" placeholder before anything is merged -- it is
+never synthesized from a new header, and a human must replace the
+placeholder with the actual reviewed delta (as below) before that PR can
+merge.
+
+Reviewed delta for `0b3627317d2008065d8ec231f94bf31af7527bbd` (adopted in
+Phase 2B2, from `ec64282c69e5587466b950332d7983fd53a7d778`): diffing the full
+exported function list of both generated headers shows exactly one added
+export, `SetSteamDeckOutputCallback` (and its `SteamDeckOutputCallback`
+delegate typedef); nothing else was added or removed.
+`SteamDeckDeviceState`/`SteamDeckDeviceRemoveResult` are byte-for-byte
+unchanged:
+
+```text
+sizeof(SteamDeckDeviceState) = 76
+sizeof(SteamDeckDeviceRemoveResult) = 4
+L2Digital = 6, R2Digital = 7, R3 = 22, QuickAccess = 27
+LPadX = 28, AccelX = 36, LTrigger = 56, LStickX = 60, RStickX = 64
+```
+
+The managed `ICanonicalViiperNativeApi` surface, `RequiredExports`, and
+callback-lifetime rooting (`CanonicalViiperNativeApi.cs`,
+`CanonicalViiperNativeTypes.cs`) were updated in the same change to bind
+`SetSteamDeckOutputCallback` and keep the native and managed ABI aligned. No
+production caller registers the Steam Deck output callback yet; Addon
+rumble/haptics handling remains a separate, later feature track.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
