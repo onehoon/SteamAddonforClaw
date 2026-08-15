@@ -24,7 +24,10 @@ internal sealed class ViiperRuntimeInspector(IRuntimePayloadFileSystem fileSyste
 {
     internal const string PayloadFileName = "libVIIPER.dll";
     internal static string PayloadRelativePath => Path.Combine("Dependencies", "Viiper", PayloadFileName);
-    internal const string ExpectedPayloadSha256 = "FEBD1D688426144E2973EC3914AEED14DCA35235AD0634E3DB4809101FA0999D";
+    // TEMPORARY: pins the D-pad diagnostic libVIIPER.dll build (see Dependencies/Viiper/PROVENANCE.md)
+    // rather than the validated VIIPER_INTEGRATION.md baseline. Must be reverted alongside the DLL
+    // once real-hardware D-pad diagnostic testing is complete.
+    internal const string ExpectedPayloadSha256 = "F469C23871EE528BDB390AF953E73A435B8D2DB2BBD68BCB4F17FA7362180F19";
 
     public ViiperRuntimeInspector()
         : this(new RuntimePayloadFileSystem(), Path.Combine(AppContext.BaseDirectory, PayloadRelativePath), new RuntimePayloadHashProvider())
