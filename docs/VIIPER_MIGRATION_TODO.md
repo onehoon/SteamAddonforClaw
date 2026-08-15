@@ -33,13 +33,13 @@ Steam Deck input hardware claim; SD3 lifecycle/recovery validation below
 remains unstarted.
 
 Phase 3 dependency automation: COMPLETE. The Addon-side receiver/adoption
-automation and the VIIPER-side sender workflow are wired end to end:
-`.github/workflows/viiper-dependency-update.yml` independently re-verifies a
-requested canonical VIIPER commit, validates the exact build artifact, and
-opens a Draft PR through `scripts/adopt-viiper.ps1` after a verified canonical
-build dispatch. It never infers managed ABI compatibility and never merges;
-every automated PR requires human review, and if the ABI changed, the required
-managed changes are added to that same PR before it can merge. This is
+automation and the VIIPER-side sender workflow are wired end to end and have
+been validated through the real pipeline: VIIPER `main` -> canonical build ->
+sender -> `repository_dispatch` -> Addon exact-artifact verification ->
+automated Draft dependency PR. It never infers managed ABI compatibility and
+never merges; every automated PR still requires manual human ABI/runtime
+review, and if the ABI changed, the required managed changes are added to that
+same PR before it can merge. This is
 dependency-automation tooling, not runtime/hardware validation -- it does not
 advance or substitute for SD3 below.
 

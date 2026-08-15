@@ -42,22 +42,26 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-The reviewed generated-header delta for the adopted VIIPER revision adds the
-following classified attachment results and exports:
+The reviewed generated-header delta from VIIPER
+`9ed7eeec6e92b3f54cd4ac6785da22db8725742d` to
+`3283d3a7bef190000cca583dd94375ab383c8c8f` adds the following classified
+attachment results and exports:
 
-- `USBDeviceAttachResult`: `SUCCESS = 0`, `RETRYABLE_FAILURE = 1`,
-  `UNSAFE_OUTCOME_UNKNOWN = 2`, `INVALID = 3`.
-- `USBDeviceDetachResult`: `SUCCESS = 0`, `RETRYABLE_FAILURE = 1`,
-  `UNSAFE_OUTCOME_UNKNOWN = 2`, `INVALID = 3`.
+- `USBDeviceAttachResult`: `Success = 0`, `RetryableFailure = 1`,
+  `UnsafeOutcomeUnknown = 2`, `Invalid = 3`.
+- `USBDeviceDetachResult`: `Success = 0`, `RetryableFailure = 1`,
+  `UnsafeOutcomeUnknown = 2`, `Invalid = 3`.
 - `AttachUSBDeviceEx(uintptr_t) -> USBDeviceAttachResult`.
 - `DetachUSBDeviceEx(uintptr_t) -> USBDeviceDetachResult`.
 
-The existing `AttachUSBDevice` and `DetachUSBDevice` exports remain present
-with their existing bool semantics. There are no Steam Deck struct, layout, or
-callback ABI changes in this adoption. The Addon production path does not yet
-use the new `*Ex` APIs; managed bindings and policy changes for classified
-attach/detach outcomes are intentionally deferred to the separate SD3
-lifecycle work. The current bool attach path remains conservative and
+The existing `AttachUSBDevice` and `DetachUSBDevice` bool exports remain
+available with their compatibility semantics. There are no
+`SteamDeckDeviceState` layout changes, no `SteamDeckDeviceRemoveResult`
+changes, and no Steam Deck callback ABI changes in this adoption. Existing
+Addon production code continues to use the legacy bool attach/detach surface;
+the new classified `*Ex` APIs are intentionally not adopted in managed runtime
+code in this dependency-only PR. Their use belongs to the separate SD3
+lifecycle/recovery work. The current bool attach path remains conservative and
 fail-closed, while device removal already uses `RemoveSteamDeckDeviceEx` for
 retryable and unsafe outcome classification.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
