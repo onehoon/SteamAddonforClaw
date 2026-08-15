@@ -8,7 +8,7 @@ VIIPER API. The active Steam virtual-output target is Steam Deck `28DE:1205`.
 | Item | Current contract |
 | --- | --- |
 | Canonical embedded API | `lib/viiper` typed ABI |
-| Embedded VIIPER revision | `9ed7eeec6e92b3f54cd4ac6785da22db8725742d` |
+| Embedded VIIPER revision | `a8a00efe7a5dce0c8d95de16795797a7daa7d82a` |
 | Active Steam output | Steam Deck `28DE:1205` only |
 | Addon integration | Session, mapper, publisher, identity resolver, safety stage implemented |
 | Hardware status | EX basic non-gyro input validated; lifecycle evidence remains pending |
@@ -88,6 +88,15 @@ interop before merging; if the ABI changed, the required managed changes are
 added to the same PR, not merged separately. Normal Addon CI and release stay
 network-independent of VIIPER -- only the dedicated dependency-update
 workflow fetches the external canonical artifact.
+
+The pinned VIIPER ABI includes classified `AttachUSBDeviceEx` /
+`DetachUSBDeviceEx` and the read-only `GetUSBDeviceAttachmentState` query. The
+current Addon production runtime continues to use the bool
+`AttachUSBDevice` / `DetachUSBDevice` compatibility surface. The attachment
+state query is VIIPER ownership evidence only, not Windows PnP, HID, XInput, or
+Steam readiness. Consumption of these classified/query APIs is deferred to
+SD3 lifecycle/recovery work; this PR does not claim SD3 implementation or
+hardware validation.
 
 ## 1. Upstream authority
 
