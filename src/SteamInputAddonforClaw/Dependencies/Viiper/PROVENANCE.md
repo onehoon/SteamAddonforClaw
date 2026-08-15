@@ -7,35 +7,35 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     ec64282c69e5587466b950332d7983fd53a7d778
+Commit:     0b3627317d2008065d8ec231f94bf31af7527bbd
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
 
 This revision provides the typed Steam Deck ABI used by the active Addon
-runtime. The active virtual output identity is `VID=0x28DE`, `PID=0x1205`.
+runtime, including the `SetSteamDeckOutputCallback` output-callback binding
+adopted in this revision (see "ABI changes in this revision" below). The
+active virtual output identity is `VID=0x28DE`, `PID=0x1205`.
 
 ## Build attestation
 
-The artifact was built from an isolated clean checkout with the literal
-official entrypoint:
+The artifact was fetched and independently re-verified from the canonical
+`onehoon/VIIPER` main-branch build for this exact commit using
+`scripts/update-viiper.ps1`, which validates the artifact's own
+`viiper-artifact.json` manifest plus recomputed DLL/header SHA-256 hashes
+before anything is adopted. That canonical build itself was produced with the
+literal official entrypoint:
 
 ```text
 just build-libVIIPER Release
 ```
 
-Toolchain:
+Artifact hashes (recomputed independently from the fetched files, matching
+the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
-Go:             go1.26.5 windows/amd64
-GCC/MinGW:      gcc.exe (MinGW-W64 x86_64-ucrt-posix-seh) 16.1.0
-```
-
-Artifact hashes:
-
-```text
-Generated header SHA-256: af470d32976b21dbaabe5413f873980ba76218d795138f03c766f33fbacbd3c1
-DLL SHA-256:              f8d2651b185d39544f53151d8c857b53b70cf6006de77bbd2574089c7317256b
+Generated header SHA-256: af9e08712fe9a33479e825ef5f8a6b2f0c283eb5e3e69027130484071049bced
+DLL SHA-256:              b2050ea357a6b663a97c5ede9ab01a134162ccb3661d96e318897f40a29b59ea
 ```
 
 The generated header confirms the pinned Deck ABI layout, including:
@@ -47,9 +47,29 @@ L2Digital = 6, R2Digital = 7, R3 = 22, QuickAccess = 27
 LPadX = 28, AccelX = 36, LTrigger = 56, LStickX = 60, RStickX = 64
 ```
 
-The build recipe may emit non-terminating version-resource warnings for the
-commit-prefix version. The recorded DLL/header pair and exported ABI remain
-the attested artifacts, and CI verifies their committed hashes.
+These offsets and the struct size are unchanged from the previously-adopted
+`ec64282c69e5587466b950332d7983fd53a7d778` revision. CI verifies the
+committed hashes.
+
+## ABI changes in this revision
+
+Adopting `0b3627317d2008065d8ec231f94bf31af7527bbd` (from
+`ec64282c69e5587466b950332d7983fd53a7d778`) adds exactly one new export
+compared to the previous revision, confirmed by diffing the full exported
+function list of both generated headers:
+
+```text
+SteamDeckOutputCallback     (new native delegate typedef)
+SetSteamDeckOutputCallback  (new export)
+```
+
+No other export was added or removed, and `SteamDeckDeviceState` /
+`SteamDeckDeviceRemoveResult` are byte-for-byte unchanged. This Addon
+revision adds the managed P/Invoke binding and callback-lifetime rooting for
+`SetSteamDeckOutputCallback` (`CanonicalViiperNativeApi.cs`,
+`CanonicalViiperNativeTypes.cs`) so the native and managed ABI move
+atomically. No production caller registers the Steam Deck output callback
+yet; Addon rumble/haptics handling remains a separate, later feature track.
 
 ## Addon integration alignment
 

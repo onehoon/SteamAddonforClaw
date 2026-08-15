@@ -8,7 +8,7 @@ VIIPER API. The active Steam virtual-output target is Steam Deck `28DE:1205`.
 | Item | Current contract |
 | --- | --- |
 | Canonical embedded API | `lib/viiper` typed ABI |
-| Embedded VIIPER revision | `ec64282c69e5587466b950332d7983fd53a7d778` |
+| Embedded VIIPER revision | `0b3627317d2008065d8ec231f94bf31af7527bbd` |
 | Active Steam output | Steam Deck `28DE:1205` only |
 | Addon integration | Session, mapper, publisher, identity resolver, safety stage implemented |
 | Hardware status | EX basic non-gyro input validated; lifecycle evidence remains pending |
@@ -42,6 +42,17 @@ authority; only a successful `main` push run for the exact requested commit is
 eligible. Actually adopting a verified artifact -- updating the vendored
 files, the lock, provenance, and (if the ABI changed) the managed P/Invoke
 bindings together -- is a separate, later, reviewed operation.
+
+Phase 2B2 performed the first such adoption: `ec64282c69e5587466b950332d7983fd53a7d778`
+-> `0b3627317d2008065d8ec231f94bf31af7527bbd`, using `scripts/update-viiper.ps1`
+to fetch and verify the canonical artifact before anything was changed. That
+revision adds exactly one native export, `SetSteamDeckOutputCallback`
+(and its `SteamDeckOutputCallback` delegate typedef); `SteamDeckDeviceState`
+and `SteamDeckDeviceRemoveResult` are unchanged. The managed
+`ICanonicalViiperNativeApi` surface, `RequiredExports`, and callback-lifetime
+rooting were updated in the same change to keep the native and managed ABI
+aligned. No production caller registers the Steam Deck output callback yet;
+Addon rumble/haptics handling remains a separate feature track.
 
 ## 1. Upstream authority
 
