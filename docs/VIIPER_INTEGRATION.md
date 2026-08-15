@@ -89,6 +89,15 @@ added to the same PR, not merged separately. Normal Addon CI and release stay
 network-independent of VIIPER -- only the dedicated dependency-update
 workflow fetches the external canonical artifact.
 
+The pinned VIIPER ABI includes classified `AttachUSBDeviceEx` /
+`DetachUSBDeviceEx` and the read-only `GetUSBDeviceAttachmentState` query. The
+current Addon production runtime continues to use the bool
+`AttachUSBDevice` / `DetachUSBDevice` compatibility surface. The attachment
+state query is VIIPER ownership evidence only, not Windows PnP, HID, XInput, or
+Steam readiness. Consumption of these classified/query APIs is deferred to
+SD3 lifecycle/recovery work; this PR does not claim SD3 implementation or
+hardware validation.
+
 ## 1. Upstream authority
 
 The architectural and API sources of truth are:

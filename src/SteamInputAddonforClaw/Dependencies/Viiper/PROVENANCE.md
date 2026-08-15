@@ -42,10 +42,41 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-ABI compatibility is not inferred by the dependency automation. Review the
-generated `libVIIPER.h` diff and the managed interop
-(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
+The reviewed cumulative generated-header delta from VIIPER
+`9ed7eeec6e92b3f54cd4ac6785da22db8725742d` to
+`a8a00efe7a5dce0c8d95de16795797a7daa7d82a` is:
+
+- `USBDeviceAttachResult`: `VIIPER_ATTACH_SUCCESS = 0`,
+  `VIIPER_ATTACH_RETRYABLE_FAILURE = 1`,
+  `VIIPER_ATTACH_UNSAFE_OUTCOME_UNKNOWN = 2`, `VIIPER_ATTACH_INVALID = 3`.
+- `USBDeviceDetachResult`: `VIIPER_DETACH_SUCCESS = 0`,
+  `VIIPER_DETACH_RETRYABLE_FAILURE = 1`,
+  `VIIPER_DETACH_UNSAFE_OUTCOME_UNKNOWN = 2`, `VIIPER_DETACH_INVALID = 3`.
+- `AttachUSBDeviceEx(uintptr_t)`.
+- `DetachUSBDeviceEx(uintptr_t)`.
+- `USBDeviceAttachmentState`: `VIIPER_ATTACHMENT_DETACHED = 0`,
+  `VIIPER_ATTACHMENT_ATTACHED = 1`,
+  `VIIPER_ATTACHMENT_OUTCOME_UNKNOWN = 2`.
+- `GetUSBDeviceAttachmentState(uintptr_t, USBDeviceAttachmentState*)`.
+
+The existing `AttachUSBDevice(uintptr_t)` and `DetachUSBDevice(uintptr_t)`
+bool exports remain available with compatibility semantics: they invoke the
+same classified mutation operation and return `true` only for `SUCCESS`.
+`GetUSBDeviceAttachmentState` is read-only and reports VIIPER's tracked
+localhost attachment ownership only. `ATTACHED` is not Windows PnP, HID,
+XInput, or Steam readiness; Addon-side exact PnP stabilization and ownership
+checks remain required. `OUTCOME_UNKNOWN` is a fail-closed native ownership
+state.
+
+`SteamDeckDeviceState` layout, `SteamDeckDeviceRemoveResult`,
+`SteamDeckOutputCallback`, and the existing typed Steam Deck
+create/state/remove exports are unchanged. The VIIPER #25 generated-header
+whitespace normalization is formatting-only and does not change the ABI.
+All new exports and types are additive, so the existing Addon managed ABI
+remains compatible. The current Addon production path does not call
+`AttachUSBDeviceEx`, `DetachUSBDeviceEx`, or
+`GetUSBDeviceAttachmentState`; managed adoption is intentionally deferred to
+SD3 lifecycle/recovery work.
 Replace this paragraph with the reviewed ABI delta -- including any changed
 struct layout, offsets, or exports -- once confirmed.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
