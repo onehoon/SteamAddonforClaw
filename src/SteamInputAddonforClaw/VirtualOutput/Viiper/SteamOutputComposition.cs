@@ -5,10 +5,8 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 internal static class SteamOutputComposition
 {
     internal const string Target = "SteamDeck";
-    internal const string VendorId = "0x28DE";
-    internal const string ProductId = "0x1205";
-
-    internal static Type ActiveStageType => typeof(CanonicalSteamDeckOutputStage);
+    internal static string VendorId => $"0x{SteamDeckVirtualDeviceIdentityPolicy.VendorId:X4}";
+    internal static string ProductId => $"0x{SteamDeckVirtualDeviceIdentityPolicy.ProductId:X4}";
 
     internal static void LogTargetSelected() => AppLog.Info(
         "SteamOutput",
