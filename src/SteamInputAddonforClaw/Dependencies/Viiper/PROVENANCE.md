@@ -77,8 +77,6 @@ remains compatible. The current Addon production path does not call
 `AttachUSBDeviceEx`, `DetachUSBDeviceEx`, or
 `GetUSBDeviceAttachmentState`; managed adoption is intentionally deferred to
 SD3 lifecycle/recovery work.
-Replace this paragraph with the reviewed ABI delta -- including any changed
-struct layout, offsets, or exports -- once confirmed.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
