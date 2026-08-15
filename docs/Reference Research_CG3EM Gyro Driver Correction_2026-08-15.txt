@@ -1,0 +1,127 @@
+Steam Input Addon for Claw
+Reference Research Erratum — CG3EM Windows Sensor / Gyro Driver Correction
+
+Date: 2026-08-15
+Device: MSI Claw 8 EX AI+ CG3EM / MS-1T91
+Status: ACTIVE CORRECTION
+
+===============================================================================
+0. PURPOSE
+===============================================================================
+
+This note corrects the interpretation of the 2026-08-12 CG3EM gyro re-analysis that observed:
+
+  Intel Integrated Sensor Solution (ISH) present
+  firmware gyro-to-mouse working in MSI Center M
+  no present Windows Sensor inventory
+  ISensorManager.GetSensorsByCategory(SENSOR_CATEGORY_ALL) -> 0x80070490
+
+The old live observation was real for that Windows installation at that time.
+The conclusion that CG3EM therefore lacked a host-readable Windows sensor path was not valid.
+
+===============================================================================
+1. CORRECTION
+===============================================================================
+
+The tested MSI Claw 8 EX AI+ system later recovered Windows sensor access after the relevant sensor/ISH driver stack was reinstalled.
+
+Therefore:
+
+  - the previous empty Windows Sensor inventory was a driver-state problem on the tested machine;
+  - `ISensorManager -> 0x80070490` from that session must not be used as evidence that CG3EM hardware cannot expose raw motion to Windows;
+  - Intel ISH presence plus firmware gyro behavior still do not, by themselves, identify the exact Windows raw sensor endpoint;
+  - a fresh sensor inventory and live sample capture must be performed on the repaired driver state before production gyro integration.
+
+===============================================================================
+2. WHAT REMAINS VALID FROM THE OLD RESEARCH
+===============================================================================
+
+The following architectural conclusions remain valid:
+
+1. Firmware gyro-to-mouse/right-stick behavior is not a raw IMU source for this Addon.
+
+   The Addon should not take already-mapped mouse/right-stick output and pretend it is raw angular velocity.
+
+2. Motion routing should be capability-based.
+
+   The Addon should discover usable Windows sensor sources rather than hard-code "CG3EM always has sensor X" or "CG3EM never has a raw sensor".
+
+3. Motion should be normalized before virtual-output mapping.
+
+   Preferred architecture:
+
+     Windows sensor acquisition
+            ↓
+     normalized MotionState
+            ↓
+     Steam Deck IMU mapper
+            ↓
+     canonical VIIPER
+            ↓
+     Steam Input
+
+4. No valid raw sample means neutral virtual IMU state.
+
+   Do not reuse stale non-zero angular velocity indefinitely.
+
+===============================================================================
+3. WHAT IS SUPERSEDED
+===============================================================================
+
+The following former interpretation is superseded:
+
+  "The current CG3EM hardware/firmware does not expose a host-readable raw chassis IMU to Windows."
+
+Correct replacement:
+
+  "One CG3EM test installation temporarily had no usable Windows Sensor inventory because of its driver state. Driver reinstallation restored Windows sensor access. Exact sensor identities, units, axes, and rates must be recaptured on the repaired environment before production use."
+
+===============================================================================
+4. REQUIRED NEW HARDWARE CAPTURE BEFORE SD6
+===============================================================================
+
+Before enabling Steam Deck gyro/accelerometer routing, collect and preserve at least:
+
+  - present Sensor-class PnP devices after driver repair;
+  - Intel ISH / child-device topology relevant to the working sensor stack;
+  - WinRT and/or legacy Sensor API discovery results;
+  - selected gyroscope identity;
+  - selected accelerometer identity;
+  - raw units reported by the API;
+  - coordinate orientation relative to the handheld;
+  - sample timestamps / practical update rate;
+  - behavior across app restart;
+  - behavior across sleep / hibernate / resume;
+  - behavior if the sensor disappears or stops updating.
+
+Do not freeze a Steam Deck coordinate transform until this fresh physical-source basis is known.
+
+===============================================================================
+5. RELATION TO STEAM DECK MIGRATION
+===============================================================================
+
+This correction removes the former environmental blocker for exploring real Steam Deck IMU passthrough on CG3EM.
+
+It does NOT make gyro part of the first Steam Deck smoke test.
+
+Migration order remains:
+
+  basic Deck typed ABI
+  -> basic Addon Deck input
+  -> real non-gyro hardware validation
+  -> production Deck cutover
+  -> fresh Windows sensor characterization
+  -> MotionState / Deck IMU integration
+
+See:
+
+  docs/VIIPER_MIGRATION_TODO.md
+  docs/Reference Research_Steam Deck VIIPER SteamOutput Input Reports.txt
+
+===============================================================================
+6. PRIMARY CONCLUSION
+===============================================================================
+
+The old `0x80070490` result described a broken driver state, not a proven CG3EM hardware limitation.
+
+Future work must treat Windows IMU availability as a discoverable runtime capability and validate the repaired sensor path directly on hardware.

@@ -1,514 +1,157 @@
 # Canonical VIIPER Migration TODO
 
-This document is the implementation backlog for moving **Steam Input Addon for Claw** from its current legacy `clib` integration to the hardened canonical `onehoon/VIIPER/lib/viiper` API.
+This is the active implementation backlog for Steam Input Addon for Claw's canonical VIIPER integration.
 
-It is intentionally separate from [`VIIPER_INTEGRATION.md`](./VIIPER_INTEGRATION.md):
+As of 2026-08-15, the product direction changed from further Classic Steam Controller (Gordon) feature expansion to a **Steam Deck (`28DE:1205`) primary virtual-output target**.
 
-- `VIIPER_INTEGRATION.md` defines the pinned integration contract and engineering reference.
-- `VIIPER_MIGRATION_TODO.md` tracks discovered gaps, implementation order, acceptance criteria, and hardware-validation work.
+The Gordon canonical migration remains the validated safety/lifecycle baseline. Its exact pre-transition documentation is archived under `docs/archive/gordon-baseline-2026-08-15/`.
 
-`README.md` remains the source of truth for product behavior. If this TODO conflicts with `README.md`, follow `README.md` and update this TODO.
+`README.md` is the product-behavior source of truth. `VIIPER_INTEGRATION.md` defines the native integration contract. `VIIPER_IMPLEMENTATION_RULES.md` defines the mandatory source-reading and validation rules.
 
 ---
 
 ## Status legend
 
 | State | Meaning |
-|---|---|
-| **BLOCKED** | Must not start until a dependency below is resolved. |
-| **TODO** | Ready to be assigned as a small implementation PR. |
+| --- | --- |
+| **BLOCKED** | Dependency not satisfied; do not start production implementation. |
+| **TODO** | Ready to assign as a small implementation PR. |
 | **IN PROGRESS** | Active implementation/review work. |
-| **VALIDATED** | Implemented, reviewed, tests/CI passed, and merged. |
-| **HARDWARE** | Requires physical MSI Claw validation before being promoted to validated production behavior. |
-| **DEFERRED** | Intentionally outside the current migration phase. |
+| **VALIDATED** | Implemented, reviewed, merged, and automated validation passed. |
+| **HARDWARE** | Requires real MSI Claw validation before promotion. |
+| **HISTORICAL** | Completed or superseded work retained as engineering evidence. |
+| **DEFERRED** | Intentionally outside the current critical path. |
 
-Rules for this backlog:
+Rules:
 
-1. Do not combine multiple numbered migration steps into one PR unless this document is explicitly updated first.
-2. Every production change must include focused automated tests.
-3. Run affected tests before and after each change, then full tests and Release build.
-4. Work on a task-specific branch based on the latest Addon `main`.
-5. Push a Draft PR and document changes, tests, limitations, and manual-test requirements.
-6. Never merge a PR before explicit user review.
-7. Keep unrelated UI, mapping, gyro, Game Bar, recovery redesign, or refactors out of a migration PR unless the step explicitly requires them.
+1. Keep numbered steps small and reviewable.
+2. Every production change needs focused automated tests.
+3. Do not mix unrelated gyro, Game Bar, UI, recovery redesign, or refactors into an ABI/lifecycle PR.
+4. Build the matching `libVIIPER.dll` and generated `dist/libVIIPER/libVIIPER.h` from the same VIIPER commit.
+5. Never merge before explicit maintainer review.
+6. Hardware validation is mandatory before a new virtual-output target becomes production default.
 
 ---
 
 # 1. Current baselines
 
-## Current Addon main baseline
+## Addon Gordon baseline
 
-The current authoritative Addon main baseline is:
-
-```text
-8cb85834cb2c8dc860b483ce5fbca3a8662722ee
-```
-
-This is the post-M4A corrective main baseline. Addon PR #150 and the
-classified-remove synchronization in PR #151 are merged and validated.
-
-Historical pre-M3 milestones are retained for migration traceability:
+The preserved Addon transition baseline is:
 
 ```text
-Historical M2 implementation merge:
-02c9bc7b5c2251437d69fd7424b437fb94a58f0d
-
-Historical pre-M2 runtime baseline / M1 merge:
-c9ae8f270014ccb649550fd1c0daf93e8a135ef0
-
-Historical documentation-sync milestone:
-33260eafb00c7cbffa59a009e265b3b0aa93e4f9
+repository: onehoon/SteamInputAddonforClaw
+commit:     acdfd105f828dd78598a028d248c146b44833dc2
 ```
 
-The current runtime baseline includes PR #140, **optional Steam Big Picture routing**.
+At this point the production `SteamOutput` path uses canonical Gordon and includes the real-hardware publisher scheduling work through PR #161.
 
-Important consequence: routing eligibility is no longer equivalent to only `RunningAppID != 0`.
+This baseline is no longer the target for new Gordon feature expansion. It remains the rollback/reference baseline while Steam Deck is proven.
 
-`EffectiveSteamSessionSource` is the upstream authority for whether routing should be active. It resolves, in priority order:
-
-```text
-actual Steam session
-→ optional Big Picture session
-→ Developer Test session
-→ inactive
-```
-
-The canonical VIIPER migration must not bypass this source or add a second Steam-session detector inside the VIIPER layer.
-
-## VIIPER baseline reviewed for this plan
-
-Current hardened VIIPER baseline:
+## Validated VIIPER production pin
 
 ```text
 repository: onehoon/VIIPER
 commit:     db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
 ```
 
-This baseline contains the PR8-PR11 lifecycle/ownership/callback/transport hardening, VIIPER PR #13's independent L2/R2 Gordon state extension, and VIIPER PR #14's classified Gordon removal result described in `VIIPER_INTEGRATION.md`. VIIPER M0 and the classified-remove corrective dependency are merged and **VALIDATED**.
+This is the validated Gordon-era canonical pin containing the hardened typed lifecycle, tracked USB/IP attach/detach ownership, caller-owned bus behavior, Gordon independent L2/R2 state, and classified Gordon remove result.
 
-The canonical Gordon state now records independent `L2`/`R2` digital full-pull inputs. The final semantics are `digital full-pull = explicit L2/R2 OR analog saturation`; explicit L2/R2 does not change analog trigger magnitude. The canonical `SteamControllerDeviceState` ABI size is **62 bytes**.
+## Steam Deck VIIPER development branch
 
-Any Addon DLL, generated header, or P/Invoke definition must come from the same pinned VIIPER commit/build: `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` and its matching canonical build. M4B adopts the verified canonical payload recorded below.
+```text
+repository: onehoon/VIIPER
+branch:     feature/canonical-steamdeck
+base:       db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
+```
+
+The branch is a development candidate only. Do not adopt its DLL/header into the Addon until the Steam Deck typed ABI PR is reviewed and an immutable commit is selected.
 
 ---
 
-# 2. Resolved VIIPER API gap — independent trigger full-pull buttons
+# 2. Historical Gordon migration
 
-**Status: VALIDATED — VIIPER PR #13 merged**
-
-## 2.1 Current Addon behavior
-
-The MSI Claw DirectInput mapper preserves analog trigger travel and digital full-pull buttons independently:
+The following work remains valid engineering evidence and must not be discarded merely because the primary output target is changing.
 
 ```text
-Buttons[6]  → LeftTriggerFull
-Buttons[7]  → RightTriggerFull
-RotationX   → analog left trigger
-RotationY   → analog right trigger
+M0  Gordon independent L2/R2 corrective API
+M1  exact usbip-win2 0.9.7.7 routing prerequisite gate
+M2  canonical C# ABI definitions and verification
+M3  ControllerState → typed Gordon mapper/parity
+M4  canonical DLL/runtime/session production cutover
+M5  real-hardware Gordon stabilization and publisher validation
 ```
 
-`ControllerState` therefore contains both:
+**Status: HISTORICAL / BASELINE PRESERVED**
 
-```text
-GamepadButtons.LeftTriggerFull
-GamepadButtons.RightTriggerFull
-TriggerState.Left
-TriggerState.Right
-```
+The important reusable results are:
 
-The existing raw Classic Steam Controller report path deliberately keeps these semantics independent.
+- canonical `lib/viiper` rather than `clib`;
+- typed opaque device handles;
+- caller-owned bus lifetime;
+- exact tracked localhost USB/IP attachment ownership;
+- fail-closed unknown attach/detach outcomes;
+- classified retryable/unsafe removal behavior;
+- callback/transport drain rules where a typed device exposes callbacks;
+- exact DLL/header/provenance coupling;
+- Addon before/after PnP ownership evidence;
+- recovery journal mutation ordering;
+- HidHide safety and exact addon-owned output identity;
+- neutral-before-live and stop-publisher-before-remove ordering.
 
-Example:
-
-```text
-left analog trigger = 64 / 255
-LeftTriggerFull      = true
-```
-
-Current Addon Gordon report:
-
-```text
-analog trigger magnitude = 64 / 255 equivalent
-L2 digital full-pull bit = ON
-```
-
-Existing regression tests explicitly require that the digital full-pull flag does **not** overwrite analog trigger magnitude.
-
-## 2.2 Pre-M0 canonical VIIPER typed-state gap
-
-The former canonical `SteamControllerDeviceState` exposed:
-
-```text
-L1, R1
-LTrigger, RTrigger
-```
-
-but no explicit `L2` / `R2` digital fields. VIIPER PR #13 added those fields and updated the canonical ABI.
-
-The Gordon implementation now derives the L2/R2 report bits from explicit `L2`/`R2` or analog `LTrigger`/`RTrigger` reaching the maximum raw value (`26000`).
-
-Before VIIPER PR #13, a direct migration would have changed behavior:
-
-```text
-Claw state:
-  analog = mid travel
-  digital full pull = true
-
-legacy Addon:
-  analog remains mid travel
-  full-pull bit = true
-
-canonical typed VIIPER today:
-  analog remains mid travel
-  full-pull bit = false
-```
-
-This is an input-parity regression and must not be accepted as part of migration.
-
-## 2.3 Validated VIIPER corrective change
-
-Preferred contract:
-
-```text
-SteamControllerDeviceState:
-    add L2
-    add R2
-
-InputState:
-    add L2
-    add R2
-
-wire report:
-    L2 report bit = explicit L2 || analog LTrigger reaches max
-    R2 report bit = explicit R2 || analog RTrigger reaches max
-```
-
-This preserves both behaviors:
-
-1. Addon can represent MSI Claw digital full-pull independently from analog magnitude.
-2. Existing VIIPER consumers that only set analog to max still receive the traditional digital full-pull bit.
-
-## 2.4 Validated VIIPER tests
-
-The corrective VIIPER PR must include at least:
-
-- explicit L2=true with mid-range analog left trigger → L2 bit set, analog fields unchanged;
-- explicit R2=true with mid-range analog right trigger → R2 bit set, analog fields unchanged;
-- L2/R2=false with analog max → existing auto-full behavior preserved;
-- neither explicit full nor analog max → bit clear;
-- canonical C ABI struct-size/field-offset verification updated;
-- generated/header ABI verification updated;
-- existing Gordon runtime/race tests still pass;
-- `go test ./...`;
-- focused `go test -race` for canonical/Gordon packages;
-- `go vet ./...`;
-- Windows canonical DLL/ABI CI green.
-
-## 2.5 Addon consequence after the corrective VIIPER PR merge
-
-The following are now the required inputs for the later Addon canonical ABI work:
-
-- pinned VIIPER commit in `VIIPER_INTEGRATION.md` and this TODO baseline;
-- future embedded DLL provenance;
-- C# native state layout specification;
-- any C ABI/header examples that include `SteamControllerDeviceState`.
-
-M3 is now validated as the typed `ControllerState` →
-`SteamControllerDeviceState` mapper and parity layer. Production routing
-remains on the legacy path until M4. M4 is the first production canonical
-runtime/payload cutover milestone. M3 does not call
-`SetSteamControllerDeviceState` from production.
+The old planned Gordon feature steps for rumble, persistent Gordon Game Bar work, and Gordon IMU are **superseded as the primary roadmap**. Do not start new Gordon feature work solely to complete the old M6-M8 sequence.
 
 ---
 
-# 3. Architecture that must survive migration
+# 3. Active Steam Deck migration
 
-These are not migration targets. They are existing Addon responsibilities that must be preserved while the native VIIPER boundary changes.
+## SD0. Preserve Gordon baseline
 
-## 3.1 Effective Steam session remains the routing authority
+**Status: VALIDATED**
 
-**Status: KEEP**
+Goal:
 
-Do not make `ViiperRuntimeManager`, `ClassicSteamControllerOutputStage`, or any new native wrapper inspect `RunningAppID` directly.
+- keep an explicit repository backup of the current Gordon implementation;
+- preserve the exact pre-transition documentation;
+- stop broad Gordon feature expansion while Deck is evaluated.
 
-Continue to let the existing routing stack decide entry/exit from the effective Steam session.
-
-This preserves:
-
-- ordinary Steam games;
-- Non-Steam Shortcuts;
-- optional Big Picture routing from PR #140;
-- Developer Test mode;
-- future session exclusions/policy implemented above the VIIPER layer.
-
-## 3.2 Existing routing pipeline structure remains
-
-**Status: KEEP**
-
-Current Stock Center M pipeline remains conceptually:
+This documentation PR preserves the former README/TODO/integration/reference blobs under:
 
 ```text
-NativeMode
-→ PhysicalInput
-→ PhysicalIsolation
-→ SteamOutput
+docs/archive/gordon-baseline-2026-08-15/
 ```
 
-Do not redesign the entire routing coordinator merely because VIIPER now has a stronger lifetime API.
-
-## 3.3 Existing SteamOutput safety order remains the Addon-side shell
-
-**Status: KEEP / adapt native calls only**
-
-Preserve the existing high-level safety sequence:
-
-```text
-prepare / before PnP snapshot
-→ record recovery mutation intent
-→ mark addon-owned output identity uncertain
-→ perform virtual-output mutation
-→ resolve exact new Windows PnP identity
-→ recovery ownership checkpoint
-→ verify HidHide does not block addon output
-→ neutral output
-→ start live publisher
-
-teardown:
-stop live publisher
-→ remove native virtual output
-→ verify exact owned PnP node absent
-→ clear addon ownership uncertainty
-→ complete recovery mutation
-```
-
-Canonical VIIPER should strengthen the native operation inside this shell, not replace the shell.
-
-## 3.4 Windows PnP identity remains Addon-owned evidence
-
-**Status: KEEP**
-
-`GetUSBDeviceIdentity` returns VIIPER logical bus/device identity only.
-
-It must not replace:
-
-- before/after PnP snapshots;
-- InstanceId evidence;
-- parent/ancestor/container correlation;
-- addon-owned virtual-device tracking;
-- recovery journal ownership evidence.
-
-## 3.5 External-controller veto remains removed
-
-**Status: KEEP**
-
-Do not reintroduce the old external physical controller veto as part of canonical migration. The current product direction allows Steam to handle multiple controllers.
+Do not delete VIIPER's `device/steamcontroller` implementation or break `clib` compatibility as part of the Addon transition.
 
 ---
 
-# 4. Migration sequence overview
+## SD1. Expose the existing Steam Deck implementation through canonical typed libVIIPER
 
-The migration must be executed in this order.
+**Status: IN PROGRESS**
 
-```text
-M0  VIIPER independent L2/R2 corrective API
- ↓
-M1  exact usbip-win2 version routing gate
- ↓
-M2  canonical C# ABI definitions and tests only
- ↓
-M3  ControllerState → typed Gordon state mapper
- ↓
-M4  canonical DLL payload + runtime/session lifecycle switch
- ↓
-M5  physical MSI Claw routing proof + remove legacy clib/raw path
- ↓
-M6  Gordon host-output / rumble integration
- ↓
-M7  Game Bar persistent Gordon + typed Xbox360
- ↓
-M8  gyro/IMU integration
-```
-
-Only M0-M5 are required for the initial non-gyro canonical migration.
-
-M6-M8 are follow-up capabilities and must remain separate PRs.
-
----
-
-# M0. VIIPER independent L2/R2 corrective API
-
-**Status: VALIDATED — VIIPER PR #13 merged**
-
-Repository: `onehoon/VIIPER`
-
-Scope:
-
-- only Gordon typed state/API/report behavior required for independent L2/R2;
-- update canonical ABI tests/header expectations;
-- no unrelated lifecycle, transport, Xbox360, SteamDeck, gyro, or Addon changes.
-
-Acceptance:
-
-- Section 2 semantics implemented;
-- all VIIPER tests and CI green;
-- PR reviewed and merged;
-- new immutable VIIPER commit becomes the Addon canonical baseline.
-
-After merge:
-
-- update `VIIPER_INTEGRATION.md`;
-- update this file;
-- record the merged VIIPER PR #13 baseline and keep M0 `VALIDATED`.
-
----
-
-# M1. Addon exact usbip-win2 version routing gate
-
-**Status: VALIDATED — Addon PR #144 merged**
-
-Merge commit:
+Repository:
 
 ```text
-c9ae8f270014ccb649550fd1c0daf93e8a135ef0
+onehoon/VIIPER
+feature/canonical-steamdeck
 ```
 
-Validated behavior:
+Goal:
+
+Expose existing `device/steamdeck` through the canonical typed `lib/viiper` ABI with the smallest surface needed for the first Addon input smoke test.
+
+Initial required surface:
 
 ```text
-exact usbip-win2 0.9.7.7 + healthy runtime evidence → Ready
-valid unsupported version → Incompatible
-missing/untrusted/malformed version evidence → Indeterminate
-genuine total absence → Missing
-exact supported version with unhealthy runtime evidence → Unusable
+SteamDeckDeviceHandle
+SteamDeckDeviceState
+CreateSteamDeckDevice
+SetSteamDeckDeviceState
+RemoveSteamDeckDevice
+RemoveSteamDeckDeviceEx
 ```
 
-`RoutingEligibilityPolicy` remained unchanged. The runtime prerequisite gate now supplies fail-closed, version-aware usbip-win2 readiness.
-
-Repository: `onehoon/SteamInputAddonforClaw`
-
-## Why
-
-The current `UsbIpWin2PrerequisiteInspector` considers usbip-win2 Ready from service/UDE/filter evidence but does not prove the installed package version is the version validated by the VIIPER fork.
-
-The Addon already bundles/provisions:
-
-```text
-usbip-win2 0.9.7.7
-```
-
-The canonical VIIPER integration contract requires exact supported-version validation before the first native attach.
-
-## Scope
-
-- add installed-version evidence to the usbip-win2 runtime prerequisite path;
-- require exact supported version `0.9.7.7` for routing readiness;
-- keep package installation/provisioning behavior intact unless a minimal compatibility adjustment is required;
-- fail closed when version inspection is unavailable, conflicting, malformed, or unsupported;
-- do not touch VIIPER native binding/runtime in this PR.
-
-## Important behavior
-
-Suggested outcomes:
-
-```text
-not installed
-→ Missing
-
-installed and exact 0.9.7.7 + service/device/filter healthy
-→ Ready
-
-installed but another version
-→ Incompatible or Unusable according to existing prerequisite semantics
-
-version cannot be established safely
-→ Indeterminate
-```
-
-Do not silently accept `0.9.7.8+` based on numeric "newer is better" logic.
-
-## Required tests
-
-- exact 0.9.7.7 → Ready when device/service/filter evidence is also good;
-- 0.9.7.8 → not Ready;
-- older version → not Ready;
-- missing DisplayVersion/version evidence → fail closed;
-- malformed version → fail closed;
-- package present but driver evidence unhealthy → existing Unusable semantics preserved;
-- routing policy sees `PrerequisitesNotReady` for unsupported/indeterminate version;
-- existing provisioning tests remain green.
-
-## Out of scope
-
-- replace embedded `libVIIPER.dll`;
-- canonical P/Invoke;
-- Gordon state mapping;
-- Game Bar/Xbox360;
-- UI redesign.
-
----
-
-# M2. Canonical C# ABI definitions and verification only
-
-**Status: VALIDATED — Addon PR #146 merged**
-
-Merge commit:
-
-```text
-02c9bc7b5c2251437d69fd7424b437fb94a58f0d
-```
-
-Validated result:
-
-- canonical C# ABI definitions were added side-by-side with the legacy path;
-- `USBServerConfig` and `SteamControllerDeviceState` layouts were pinned;
-- Gordon state ABI size is 62 bytes, with critical offsets `L1=4`, `R1=5`,
-  `L2=6`, `R2=7`, `Menu=8`, and `LPadX=24`;
-- native boolean boundaries use one-byte values, opaque handles use `nuint`,
-  canonical delegates use Cdecl, and device state is passed by value;
-- all 11 M2 canonical exports/signatures are pinned by tests;
-- callback roots are retained during registration, released after successful
-  device/bus/server teardown, and retained when bus/server teardown fails;
-- the exact pinned VIIPER revision was freshly built to regenerate and verify
-  the canonical header/DLL ABI;
-- production routing still uses the legacy `clib` integration and the
-  embedded Addon DLL was not replaced;
-- M3 was not started.
-
-## Goal
-
-Introduce the canonical native ABI into the Addon codebase without switching production routing to it yet.
-
-This is intentionally a compile/test-only migration step.
-
-## Add
-
-A small canonical native layer under the existing VIIPER area. Suggested conceptual split:
-
-```text
-VirtualOutput/Viiper/
-    CanonicalViiperNativeApi.cs
-    CanonicalViiperNativeTypes.cs
-```
-
-Names may be refined to fit current conventions.
-
-## Required native surface
-
-Server:
-
-```text
-NewUSBServer
-CloseUSBServer
-```
-
-Bus:
-
-```text
-CreateUSBBus
-RemoveUSBBus
-```
-
-Generic typed device:
+Reuse shared canonical APIs:
 
 ```text
 GetUSBDeviceIdentity
@@ -516,719 +159,291 @@ AttachUSBDevice
 DetachUSBDevice
 ```
 
-Gordon:
+Required behavior:
+
+- default Steam Deck identity `28DE:1205`;
+- `device/steamdeck` remains the report-format authority;
+- caller does not own the frame counter;
+- typed remove leaves the caller-owned bus alive;
+- wrong/stale/zero handles fail safely;
+- classified remove uses the same canonical success/retryable/unsafe/invalid semantics;
+- generated header and DLL are produced together;
+- no Claw-specific fields are added to the Steam Deck ABI;
+- trackpad fields remain in the generic ABI even though the Addon initially sends them neutral.
+
+### Deliberately excluded from the first SD1 PR
+
+The existing Steam Deck output callback path has not yet been hardened to the same callback-clear/capture synchronization contract as Gordon. The first minimal input wrapper therefore does **not** need to expose a canonical Steam Deck output callback.
+
+Out of scope:
+
+- rumble/haptics callback ABI;
+- Addon code;
+- gyro acquisition;
+- OEM1 mapping;
+- Game Bar;
+- Gordon removal;
+- Steam Deck protocol redesign.
+
+Validation baseline:
 
 ```text
-CreateSteamControllerDevice
-SetSteamControllerDeviceState
-SetSteamControllerOutputCallback
-RemoveSteamControllerDevice
+go test ./...
+go test -race ./internal/server/usb ./lib/viiper
+go vet ./...
+git diff --check
+just build-libVIIPER Release
 ```
 
-Xbox360 declarations may be postponed to M7 unless adding their types is trivial and does not expand this PR's production scope.
+Acceptance:
 
-## C# interop invariants
-
-- one-byte cgo boolean boundary represented explicitly as `byte`;
-- opaque native handles represented as `nuint`/`UIntPtr`;
-- Gordon buttons represented as bytes, not managed `bool` fields;
-- natural native struct alignment; do not guess `Pack=1`;
-- explicit `CallingConvention.Cdecl`;
-- callbacks have stable managed delegate types;
-- absolute bundled DLL load path only;
-- native module remains process-lifetime after load;
-- no unrestricted DLL search-path fallback.
-
-## Required tests
-
-- `Marshal.SizeOf` for every bound public struct;
-- `Marshal.OffsetOf` for Gordon fields, especially around new L2/R2 fields and 16-bit values;
-- native one-byte boolean delegate signatures reflected by testable wrapper behavior;
-- exact required export-name inventory;
-- delegate lifetime holder tests where possible without loading the production DLL;
-- legacy production `ViiperNativeApi` remains untouched and current tests still pass.
-
-## Explicit non-goal
-
-Production routing must still use the existing legacy path after M2 merges.
+- Draft PR reviewed;
+- canonical generated header contains the Steam Deck typed surface;
+- Windows DLL exports match the header;
+- ABI state layout is pinned by tests;
+- an immutable VIIPER commit is selected for Addon adoption.
 
 ---
 
-# M3. Typed Gordon state mapper with legacy raw-report parity oracle
+## SD2. Add side-by-side Steam Deck binding/session/mapper/publisher to the Addon
 
-**Status: VALIDATED — Addon PR #148 merged**
+**Status: BLOCKED on SD1**
 
-Merge commit:
-
-```text
-6b270bbcfcfd193d70ca520bc1844413eddd77c9
-```
-
-Validated result:
-
-- added the pure `ControllerState` → `SteamControllerDeviceState` mapper;
-- pinned button/D-pad source identity, Menu/Options, L3, right-pad policy,
-  unchanged right-pad coordinates, and M2→LGrip / M1→RGrip mapping;
-- preserved `value * 26000 / 255` trigger scaling and independent explicit
-  L2/R2 digital full-pull values;
-- covered canonical `explicit L2/R2 OR analog saturation` semantics, including
-  the intentional legacy difference at analog 255 with explicit full false;
-- kept left-pad, motion, quaternion, Steam, and battery input neutral, while
-  covering pinned VIIPER zero quaternion/battery wire defaults in test-only
-  semantics;
-- retained the legacy raw path as the parity oracle, with no production
-  canonical runtime cutover or frame ownership in the typed state.
-
-## Goal
-
-Create the Addon-side logical mapping:
+Repository:
 
 ```text
-ControllerState
-→ SteamControllerDeviceState
+onehoon/SteamInputAddonforClaw
 ```
-
-without switching the production native runtime yet.
-
-## Preserve current mapping semantics
-
-At minimum verify:
-
-```text
-A/B/X/Y
-D-pad
-LB/RB
-Back      → Gordon Menu
-Start     → Gordon Options
-LeftStickClick → L3
-RightStickClick → RPadPress
-M1/M2 rear buttons → independent Gordon grips according to existing project mapping
-right-stick coordinates → RPad coordinates
-right-stick activity/click → existing RPadTouch/RPadPress semantics
-left analog trigger → 0..26000
-right analog trigger → 0..26000
-LeftTriggerFull → explicit L2
-RightTriggerFull → explicit R2
-```
-
-Do not move deadzone/sensitivity/remapping into the Addon. Those remain Steam Input responsibilities.
-
-## Raw report builder as migration oracle
-
-Keep `ClassicSteamControllerReportBuilder` temporarily.
-
-For non-gyro inputs, construct:
-
-1. current raw Addon report;
-2. new typed Gordon state;
-3. expected Gordon wire semantics from the pinned VIIPER implementation.
-
-Use this to pin parity for important vectors before production cutover.
-
-The raw builder is removed only after physical routing proof in M5.
-
-## Required tests
-
-- complete neutral vector;
-- A/B/X/Y and D-pad;
-- M1/M2 independent grips;
-- right-stick touch threshold behavior preserved;
-- right-stick full negative/positive deflection;
-- analog triggers at 0, mid, 254, 255;
-- digital trigger full independent from analog magnitude;
-- Back/Start/L3/RPadPress;
-- no gyro values populated yet;
-- no frame field owned by Addon.
-
----
-
-# M4. Canonical DLL payload and runtime/session lifecycle cutover
-
-**Status: IN PROGRESS**
-
-M4 is intentionally split into two independently reviewable Addon steps.
-M4A is validated and complete; M4B is the current implementation step. M4 is
-not validated yet.
-
-Keep it focused on lifecycle parity. Do not add Game Bar/Xbox360 or gyro here.
-
-## 4.0 M4A / M4B split
-
-### M4A — canonical session/runtime foundation
-
-**Status: VALIDATED / COMPLETE — Addon PR #150 + #151**
-
-M4A owns:
-
-- the managed canonical native seam;
-- the canonical Gordon session/runtime owner;
-- typed native handle and caller-owned bus ownership;
-- explicit Create → Identity → Attach lifecycle;
-- typed `SetState` / `SetNeutral` primitives;
-- phased cleanup state and `PendingCleanupPhase`;
-- explicit retry of only the remaining native cleanup phase;
-- the typed nominal 250 Hz publisher;
-- fake-native lifecycle and publisher tests;
-- classified Gordon removal ABI and fail-closed cleanup mapping;
-- pre-Attach rollback coverage and same-state publisher regression coverage.
-
-M4A does not own production routing, payload replacement, PnP, RecoveryManager,
-HidHide, or production Steam-session orchestration.
-
-### M4B — canonical payload and production routing cutover
-
-**Status: CURRENT IMPLEMENTATION**
-
-M4B owns:
-
-- canonical DLL/header/provenance and payload hash adoption;
-- production composition and routing cutover;
-- recovery intent before native mutation and Attach;
-- Windows PnP ownership proof after Attach;
-- recovery ownership checkpoint and HidHide inspection;
-- neutral-before-live and publisher stop-before-Remove ordering;
-- PnP absence and recovery completion before bus/server cleanup;
-- ordinary Steam, Big Picture, and Developer Test integration.
-
-The existing production-cutover requirements below must be read according to
-this split: native foundation and fake-native phase/retry coverage belong to
-M4A; payload, recovery, PnP, HidHide, production composition, and routing
-integration belong to M4B.
-
-## 4.1 Embedded dependency update — M4B
-
-Replace the old payload built from `./clib/` with the verified Release Windows amd64 DLL built from the pinned canonical `./lib/viiper` baseline.
-
-Update together:
-
-```text
-Dependencies/Viiper/libVIIPER.dll
-Dependencies/Viiper/libVIIPER.h
-Dependencies/Viiper/PROVENANCE.md
-Dependencies/Viiper/LICENSE.txt if required
-ViiperRuntimeInspector expected SHA-256
-verify-publish-assets.ps1 expected SHA-256
-THIRD_PARTY_NOTICES.md if needed
-VIIPER_INTEGRATION.md baseline/hash/build recipe
-```
-
-Provenance must record:
-
-- exact VIIPER repository;
-- exact immutable commit/tag;
-- build command from `./lib/viiper`;
-- Go/toolchain information;
-- final generated header and DLL SHA-256 values;
-- native enum/state `sizeof` and offset checks against the final pair.
-
-Do not reuse the old `04FD...` hash. The final M4B payload hashes are:
-
-```text
-header: 99EC2B08FCC1B168B2AB58BFDDC0B76F74FBC5FFE0D4D2D19D2B25BE1B7CAEF7
-dll:    FEBD1D688426144E2973EC3914AEED14DCA35235AD0634E3DB4809101FA0999D
-```
-
-## 4.2 First production canonical lifetime — M4B
-
-For the initial migration, prefer **effective Steam session lifetime** for the canonical server and bus rather than immediately making them process-lifetime.
-
-Entry:
-
-```text
-effective Steam session becomes eligible
-→ existing routing pipeline prepares SteamOutput
-→ recovery intent / PnP-before evidence
-→ NewUSBServer
-→ CreateUSBBus
-→ CreateSteamControllerDevice(autoAttach=false, 28DE:1102)
-→ GetUSBDeviceIdentity for diagnostics only
-→ AttachUSBDevice
-→ resolve Windows PnP ownership
-→ recovery ownership checkpoint
-→ HidHide output inspection
-→ typed neutral state
-→ start typed live publisher
-```
-
-Exit:
-
-```text
-stop typed live publisher
-→ RemoveSteamControllerDevice
-   (callback clear + exact detach + managed transport drain + logical finalize)
-→ verify owned Windows PnP node absent
-→ clear Addon ownership uncertainty
-→ complete recovery mutation
-→ RemoveUSBBus
-→ CloseUSBServer
-```
-
-The exact point at which bus/server cleanup is allowed relative to recovery completion must be implemented conservatively so a bus/server cleanup failure cannot falsely claim the routing session is fully clean.
-
-## 4.3 Do not use autoAttach — M4A primitive / M4B orchestration
-
-Addon contract:
-
-```text
-autoAttachLocalhost = false
-```
-
-Creation and Windows-visible attach must remain separate operations so failure/recovery boundaries are explicit.
-
-## 4.4 Runtime ownership model — M4A foundation
-
-Replace legacy `uint deviceId` ownership as the mutation key with a typed native handle.
-
-Suggested logical owner record:
-
-```text
-SteamControllerHandle : nuint
-LogicalBusId          : uint
-LogicalDeviceId       : uint  // diagnostics only
-```
-
-All typed mutations use the native handle.
-
-Logical bus/device IDs are not Windows PnP identities.
-
-## 4.5 Strong cleanup state — M4A foundation
-
-The new runtime wrapper must not expose only a best-effort `StopIfUnused(): void` model.
-
-It must retain enough state to distinguish at least:
-
-```text
-inactive / clean
-active
-cleanup pending
-unrecoverable/unsafe native ownership outcome
-```
-
-Examples:
-
-- typed device removed, bus remove failed → do not pretend runtime cleanup is complete;
-- Phase B server close failed → retain the server handle and retry `CloseUSBServer`; do not replay completed Phase A;
-- attachment outcome unknown → fail closed and do not blind-retry destructive operations;
-- cleanup-pending runtime → reject a new routing entry until cleanup succeeds or process recovery policy takes over.
-
-Do not persist VIIPER handles to disk. Native handles are process-local.
-
-## 4.6 Typed publisher — M4A foundation
-
-Replace:
-
-```text
-ControllerState
-→ raw 64-byte report builder
-→ viiper_device_set_input
-```
-
-with:
-
-```text
-ControllerState
-→ typed Gordon state mapper
-→ SetSteamControllerDeviceState
-```
-
-Keep the existing 4ms/250Hz publication cadence initially unless physical validation shows a reason to change it.
-
-Addon no longer owns Gordon frame progression.
-
-VIIPER owns:
-
-- report serialization;
-- frame increment;
-- default battery behavior;
-- Gordon protocol details;
-- eventual gyro report gating according to host settings.
-
-## 4.7 Neutral behavior — M4B orchestration
-
-Neutral state must be sent through `SetSteamControllerDeviceState` before live publishing begins.
-
-Do not rely on a zeroed raw 64-byte report generated by Addon after cutover.
-
-## Required automated tests
-
-- server created exactly once per routing session;
-- caller-owned bus created explicitly;
-- Gordon created with `autoAttach=false` and `28DE:1102`;
-- Attach happens after recovery intent is established;
-- PnP ownership resolution remains after Attach, not before;
-- neutral typed state before live publisher;
-- live publisher uses typed state API;
-- publisher stops before typed Remove;
-- typed Remove failure prevents recovery completion;
-- PnP absence still required after successful Remove;
-- bus cleanup failure is surfaced and retained;
-- server Phase-B close failure can be retried without replaying logical teardown from the Addon wrapper;
-- new routing entry rejected while cleanup is pending;
-- `Dispose` does not silently discard failed native cleanup state without logging/fail-close handling;
-- Big Picture effective session enters/exits the same routing pipeline without native-layer special cases;
-- ordinary Steam and Developer Test behavior remains.
-
----
-
-# M5. Physical routing proof and legacy-path removal
-
-**Status: HARDWARE / BLOCKED until M4 is validated**
-
-Do not delete all legacy/reference code in M4. First use the canonical path on physical MSI Claw hardware.
-
-## Required physical checks
-
-### Canonical device creation
-
-- Steam sees one Classic Steam Controller;
-- VID/PID is `28DE:1102`;
-- PnP identity resolver proves the new node belongs to this Addon mutation;
-- no duplicate Gordon node remains after session exit.
-
-### Input parity
-
-- A/B/X/Y;
-- D-pad;
-- LB/RB;
-- Back/Start;
-- left-stick click;
-- right-stick click / right-pad press;
-- right-stick pad coordinates and touch behavior;
-- analog LT/RT full travel;
-- independent digital full-pull L2/R2 at mid analog travel;
-- M1/M2 are independent Steam Input grips.
-
-### Session behavior
-
-- ordinary Steam game;
-- Non-Steam Shortcut;
-- optional Big Picture routing enabled;
-- Big Picture → game → Big Picture transition does not unnecessarily tear down routing if the effective session remains active;
-- session exit removes Gordon cleanly;
-- repeated enter/exit cycles do not leak devices, buses, ports, or native state.
-
-### Recovery / safety
-
-- HidHide does not block addon-owned Gordon;
-- Stock Center M native state restored after clean exit;
-- failure path leaves recovery evidence rather than claiming success;
-- no hidden internal Claw state remains after clean rollback.
-
-## After hardware proof
-
-A small cleanup PR may then remove legacy-only production code:
-
-- old `clib` export binding;
-- `viiper_init` / `viiper_device_add_ex` runtime path;
-- raw production `viiper_device_set_input` path;
-- old runtime tests that no longer describe production semantics.
-
-`ClassicSteamControllerReportBuilder` may either be deleted or retained only as a clearly labeled protocol/reference test helper if it still provides unique validation value.
-
-Do not remove reference research documents merely because production no longer serializes raw reports.
-
----
-
-# M6. Gordon host-output callback and vibration/haptics
-
-**Status: DEFERRED until canonical non-gyro routing is stable**
 
 Goal:
 
+Add a parallel Steam Deck path without deleting the Gordon production path.
+
+Expected components:
+
 ```text
-SetSteamControllerOutputCallback
-→ copy 64-byte host payload immediately
-→ parse only commands needed by Addon/hardware output
-→ route supported rumble/haptic behavior to MSI Claw native capability
+SteamDeck native C# ABI definitions
+CanonicalSteamDeckSession
+SteamDeckDeviceStateMapper
+CanonicalSteamDeckInputPublisher
+```
+
+Do not aggressively generalize the proven Gordon path first. Add the Deck path in parallel, prove it, then extract common abstractions only where both implementations demonstrate the same invariant.
+
+Required initial mapping:
+
+```text
+A/B/X/Y         → A/B/X/Y
+D-pad           → D-pad
+LB/RB           → L1/R1
+LT/RT analog    → LTrigger/RTrigger
+LT/RT full-pull → L2Digital/R2Digital independently
+Left stick      → LStickX/Y
+Right stick     → RStickX/Y
+L3/R3           → L3/R3
+Back/Start      → Menu/Options
+M1 right rear   → R4
+M2 left rear    → L4
+L5/R5           → neutral initially
+QuickAccess     → neutral initially
+trackpads       → neutral
+IMU             → neutral
+```
+
+Preserve the existing Addon recovery/PnP/HidHide safety shell and `EffectiveSteamSessionSource` authority.
+
+Payload adoption must atomically update:
+
+```text
+VIIPER commit pin
+libVIIPER.dll
+matching generated libVIIPER.h
+PROVENANCE.md / hashes
+C# P/Invoke ABI
+ABI tests
+VIIPER_INTEGRATION.md
+this TODO
+```
+
+---
+
+## SD3. Real MSI Claw non-gyro Steam Deck smoke test
+
+**Status: HARDWARE / BLOCKED on SD2**
+
+First hardware proof must establish that the new output is visible and usable as a Steam Deck class device before production cutover.
+
+Minimum checks:
+
+- exact Addon-owned `28DE:1205` PnP creation and removal;
+- Steam recognition;
+- A/B/X/Y;
+- D-pad directions and diagonals;
+- LB/RB;
+- LT/RT analog;
+- independent LT/RT digital full-pull;
+- left and right sticks;
+- L3 and native R3;
+- Back/Start;
+- M1 → R4;
+- M2 → L4;
+- repeated routing enter/exit;
+- Big Picture effective session behavior;
+- no stale usable virtual controller after teardown;
+- HidHide does not block the Addon-owned output;
+- native MSI Center M controller recovery remains correct.
+
+Do not require gyro, QAM, rumble, or Game Bar for this gate.
+
+---
+
+## SD4. Production cutover from Gordon to Steam Deck
+
+**Status: BLOCKED on SD3**
+
+Goal:
+
+Make Steam Deck the production `SteamOutput` target only after the SD3 hardware gate passes.
+
+Requirements:
+
+- same routing eligibility authority;
+- same recovery ownership ordering;
+- same neutral-before-live rule;
+- same publisher stop-before-remove rule;
+- exact target-specific PnP identity (`28DE:1205`);
+- no fallback that silently creates both Gordon and Deck in normal production routing.
+
+Keep the Gordon implementation available as a short-term reference/fallback during initial Deck stabilization.
+
+---
+
+## SD5. OEM1 → Steam Deck Quick Access
+
+**Status: TODO after SD4**
+
+Goal:
+
+Represent a safely acquired physical OEM1 control as Steam Deck `QuickAccess` without stealing unrelated buttons or changing native firmware policy accidentally.
+
+Requirements before production mapping:
+
+- establish the physical OEM1 event source and ownership contract;
+- prove it can be observed without breaking MSI Center M recovery/safety behavior;
+- keep the physical input abstraction device-capability based rather than hard-coding a Gordon-specific auxiliary slot;
+- focused mapper tests;
+- real Steam Quick Access behavior validation.
+
+---
+
+## SD6. Windows Sensor IMU → Steam Deck motion
+
+**Status: TODO / HARDWARE**
+
+The earlier CG3EM `ISensorManager → 0x80070490` result is no longer evidence that the hardware lacks a host-readable IMU. The tested EX machine recovered Windows sensor access after the relevant driver stack was reinstalled.
+
+See:
+
+```text
+docs/Reference Research_CG3EM Gyro Driver Correction_2026-08-15.txt
+```
+
+Architecture target:
+
+```text
+Windows sensor source(s)
+        ↓
+normalized MotionState
+        ↓
+latest valid sample snapshot
+        ↓
+SteamDeckDeviceState IMU fields
+        ↓
+canonical VIIPER
 ```
 
 Requirements:
 
-- managed delegate retained through Remove completion;
-- callback never lets managed exceptions cross the unmanaged boundary;
-- callback does minimal synchronous work;
-- copy the native buffer before returning;
-- teardown relies on VIIPER callback clear/drain guarantees;
-- no callback-driven reentrant Addon global lock deadlocks.
-
-Rumble implementation details require a separate source/hardware review before this task is assigned.
+- capability discovery, not model-name assumptions;
+- record sensor identity and units from real hardware;
+- normalize angular velocity/acceleration in an output-independent `MotionState`;
+- define stale-sample/freshness behavior;
+- do not derive raw motion from firmware gyro-to-mouse output;
+- leave motion neutral when no valid fresh raw sample exists;
+- initially send raw accel/gyro only unless a real orientation source/fusion contract is proven.
 
 ---
 
-# M7. Game Bar persistent Gordon + typed Xbox360
+## SD7. Game Bar route with persistent Steam Deck + typed Xbox360
 
-**Status: DEFERRED until M5/M6 foundation is stable**
+**Status: BLOCKED on SD4**
 
-Target product behavior remains:
+Planned behavior during an effective Steam session:
 
 ```text
-normal Steam effective session:
-    Gordon attached + live
-    Xbox360 off
+normal Steam foreground
+  → same Steam Deck device live
 
-Game Bar foreground:
-    same Gordon remains attached
-    Gordon receives neutral states
-    temporary/logical Xbox360 becomes active
-    live Claw input → Xbox360
+Game Bar foreground
+  → same Steam Deck device remains attached but neutral
+  → typed Xbox360 device live
 
-Game Bar exits:
-    Xbox360 off/removed
-    same Gordon resumes live states
+Game Bar leaves foreground
+  → Xbox360 released/neutralized according to the final lifecycle design
+  → same Steam Deck device live again
 ```
 
-Do not disconnect/recreate Gordon merely because Game Bar foreground changed.
+Do not recreate/hotplug the Steam Deck merely because Game Bar gains foreground.
 
-This step will decide whether the canonical server/bus lifetime should remain session-lifetime while multiple typed devices coexist, or whether a longer-lived server/bus yields a cleaner implementation. Make that decision from the post-M5 production code rather than pre-optimizing M4.
-
-Required future pieces:
-
-- `GameBarDetector` using WinEvent foreground + process/package identity;
-- typed Xbox360 C# ABI;
-- Xbox360 state mapper;
-- Xbox360 rumble callback;
-- Gordon neutral/live mode switch without hotplug;
-- duplicate-input prevention;
-- rollback/recovery semantics for partial Xbox360 failures.
+Exact Xbox360 attach/detach reuse policy must be reviewed separately against the current typed VIIPER lifecycle.
 
 ---
 
-# M8. Gyro / IMU routing
+## SD8. Retire Addon Gordon production path
 
-**Status: DEFERRED / HARDWARE RESEARCH REQUIRED**
+**Status: BLOCKED on post-SD4 stability**
 
-Canonical VIIPER Gordon typed state already has:
+Only after Steam Deck production routing survives repeated real-hardware sessions, suspend/resume, and teardown validation:
+
+- remove obsolete Addon Gordon-only mapper/publisher/session/report-builder paths that are no longer needed;
+- retain historical docs under the archive;
+- do not delete VIIPER's Gordon implementation merely because the Addon no longer uses it;
+- do not break `clib` compatibility consumers;
+- update README/integration docs so Gordon is clearly historical rather than an alternate production target.
+
+---
+
+# 4. Parallel feature tracks
+
+The following are useful but not blockers for the initial Deck cutover:
+
+- Steam Deck host-output callback hardening;
+- rumble/haptics integration;
+- broader handheld capability abstraction for devices with four rear buttons or additional OEM controls;
+- later non-MSI device support;
+- performance/memory optimization unrelated to virtual-output correctness;
+- localization.
+
+Each should receive its own design/PR rather than expanding SD1-SD4.
+
+---
+
+# 5. Non-negotiable references for every VIIPER task
+
+Before implementing or reviewing VIIPER work, read:
 
 ```text
-AccelX/Y/Z
-GyroX/Y/Z
-GyroQuatW/X/Y/Z
+onehoon/VIIPER/FORK_ARCHITECTURE.md
+onehoon/VIIPER/docs/libviiper/fork-api.md
+SteamInputAddonforClaw/docs/VIIPER_MIGRATION_TODO.md
+SteamInputAddonforClaw/docs/VIIPER_INTEGRATION.md
+SteamInputAddonforClaw/docs/VIIPER_IMPLEMENTATION_RULES.md
 ```
 
-That is only the transport capability.
-
-The Addon still needs a validated MSI sensor source, scaling, orientation, calibration, and model capability plan.
-
-Keep EX/CG3EM and A2VM handling separate until hardware/source validation proves they can share one implementation.
-
-Do not invent gyro values from controller axes and do not enable gyro for A2VM merely because the native state struct has fields.
-
----
-
-# 5. Important implementation decisions already made
-
-These decisions should not be reopened casually during individual migration PRs.
-
-## D1 — Mapping/remapping remains Steam Input's responsibility
-
-Addon supplies physical normalized state and the virtual controller. It does not add:
-
-- per-game mapping profiles;
-- macro editor;
-- turbo editor;
-- keyboard/mouse remapping UI;
-- Action Set/Layer logic;
-- long/double-press logic.
-
-## D2 — DirectInput remains the preferred MSI Claw source
-
-M1/M2 are independent only on the DirectInput path and must never be reconstructed from XInput.
-
-## D3 — `EffectiveSteamSessionSource` controls routing lifetime
-
-Do not duplicate Steam detection in canonical VIIPER runtime code.
-
-## D4 — explicit Gordon attach
-
-Always create Gordon with:
+For Steam Deck report details also read:
 
 ```text
-autoAttachLocalhost=false
-VID=0x28DE
-PID=0x1102
+SteamInputAddonforClaw/docs/Reference Research_Steam Deck VIIPER SteamOutput Input Reports.txt
 ```
 
-then explicitly call `AttachUSBDevice` under Addon recovery ownership.
-
-## D5 — caller-owned bus means explicit Addon policy
-
-Typed device removal must not implicitly define bus lifetime.
-
-Initial migration may still choose to remove bus/server at the end of each effective Steam session. That is an explicit Addon decision and is compatible with caller-owned semantics.
-
-## D6 — no native handle persistence
-
-Recovery journal stores OS-visible mutations and ownership evidence, not cgo/native handles.
-
-## D7 — canonical VIIPER owns Gordon wire serialization
-
-After production cutover:
-
-- Addon owns normalized logical input state;
-- VIIPER owns frame numbers and 64-byte Gordon wire reports.
-
-## D8 — hardware proof before deleting all legacy parity tools
-
-Keep enough of the existing raw path to compare behavior until the typed route is proven on MSI Claw hardware.
-
----
-
-# 6. Known current-code mismatches to remove during migration
-
-Track these explicitly so they are not forgotten.
-
-## Legacy native exports
-
-Current production Addon still binds:
-
-```text
-viiper_init
-viiper_shutdown
-viiper_bus_create
-viiper_bus_remove
-viiper_device_add_ex
-viiper_device_remove
-viiper_device_set_input
-viiper_device_set_feedback_callback
-viiper_list_device_types
-viiper_last_error
-viiper_free_string
-```
-
-Target is canonical typed exports.
-
-## Historical pre-M4B embedded payload
-
-Current Addon dependency provenance still points to:
-
-```text
-steam-input-addon-baseline-1
-commit 209c882009caea4f3baf322b9b6020c1a921feed
-build ./clib/
-```
-
-Target payload must be rebuilt from the final canonical VIIPER commit after M0.
-
-## Legacy runtime lifetime
-
-Current `ViiperRuntimeManager`:
-
-- stores bus/device IDs rather than typed device handles;
-- automatically removes the bus when the final device is removed;
-- shuts down the logical native wrapper when unused;
-- uses raw report submission;
-- cannot express canonical close-failed/cleanup-pending semantics strongly enough.
-
-M4 replaces this model.
-
-## Legacy publisher
-
-Current publisher:
-
-- generates a raw 64-byte Gordon report every tick;
-- owns/report-tests Gordon frame progression;
-- calls raw `SetInput`.
-
-M3/M4 replace this with typed state submission.
-
-## Current usbip prerequisite
-
-Current runtime prerequisite checks service/UDE/filter presence but not the exact validated package version. M1 closes this gap.
-
----
-
-# 7. Failure-handling requirements for the canonical Addon wrapper
-
-These are acceptance requirements for M4 and later.
-
-| Failure | Required Addon behavior |
-|---|---|
-| canonical DLL missing/hash mismatch | routing not ready; remain passive |
-| required canonical export missing | fail closed; no routing mutation |
-| usbip-win2 not exact supported version | routing not ready; no Attach |
-| `NewUSBServer` fails | no native/MSI routing entry continuation |
-| `CreateUSBBus` fails | close server if safely possible; report failure |
-| Gordon logical create fails before Attach | no Windows PnP Gordon expected; safely clean server/bus |
-| Attach known failure | clean logical device/bus/server if ownership is known; restore Addon-side native mutations |
-| Attach outcome unknown | fail closed; preserve recovery evidence; no blind destructive retry |
-| PnP ownership cannot be proven | typed Remove + verified absence path; preserve uncertainty if absence cannot be established |
-| typed state publication rejected | stop publisher and fail-close routing |
-| typed Remove known logical failure | handle may remain; transport already drained; retain cleanup-pending state and retry remove, never reattach same handle |
-| PnP node remains after successful Remove | fail recovery completion; preserve evidence |
-| RemoveUSBBus failure | runtime cleanup pending; do not claim fully stopped |
-| Close Phase B failure | retain server handle; retry `CloseUSBServer`; do not replay completed Phase A |
-| managed callback exception | catch/log on managed side; never escape across native callback |
-| Addon process crash | process-local native handles are gone; startup recovery cleans persistent MSI/HidHide evidence only |
-
----
-
-# 8. CI expectations during migration
-
-Every Addon migration PR must use the repository's normal CI and, where relevant, add focused tests for the new native boundary.
-
-Minimum per PR:
-
-```text
-run related tests before change
-add focused regression tests
-run related tests after change
-dotnet test
-dotnet build -c Release
-git diff --check
-push task branch
-open Draft PR
-```
-
-For M2/M4 additionally validate:
-
-- canonical interop struct size/offset tests;
-- canonical export inventory;
-- embedded DLL load by exact path;
-- published asset hash verification;
-- provenance/header/DLL consistency;
-- no accidental legacy export use remains in production after M4.
-
-For M4/M5, physical MSI Claw testing is an explicit required follow-up and must be listed in the PR body even if automation is fully green.
-
----
-
-# 9. Task tracking table
-
-Update this table whenever a step changes state.
-
-| ID | Task | State | Dependency | Notes |
-|---|---|---|---|---|
-| M0 | VIIPER independent L2/R2 typed Gordon API | **VALIDATED** | none | VIIPER PR #13 merged at `3bd042d...`; canonical state ABI size 62 |
-| M1 | exact usbip-win2 0.9.7.7 routing gate | **VALIDATED** | M0 | Addon PR #144 merged at `c9ae8f27...`; exact usbip-win2 0.9.7.7 gate |
-| M2 | canonical C# ABI definitions/tests | **VALIDATED** | M1 | Addon PR #146 merged at `02c9bc7...`; no production wiring |
-| M3 | typed Gordon state mapper/parity tests | **VALIDATED** | M2 | Addon PR #148 merged at `6b270bbc...`; typed mapper/parity only; no production cutover |
-| M4 | canonical payload/runtime production cutover | **IN PROGRESS** | M3 | M4A validated; M4B is the current implementation |
-| M5 | physical routing proof + legacy cleanup | **BLOCKED / HARDWARE** | M4 | Required before deleting parity path |
-| M6 | Gordon host-output / rumble | **DEFERRED** | M5 | Separate research/PR |
-| M7 | Game Bar Gordon-neutral + typed X360 | **DEFERRED** | M5 | Minimize Gordon hotplug |
-| M8 | gyro/IMU routing | **DEFERRED / HARDWARE** | M5 | EX/A2VM capability-specific |
-
----
-
-# 10. How to resume this work in a new conversation
-
-A new implementation/review session should read, in order:
-
-```text
-1. README.md
-2. docs/VIIPER_INTEGRATION.md
-3. docs/VIIPER_MIGRATION_TODO.md
-4. latest Addon main code for the task's touched area
-5. pinned VIIPER source for the exact canonical API being consumed
-```
-
-Then:
-
-1. confirm the latest Addon `main` SHA;
-2. confirm the latest pinned VIIPER SHA in `VIIPER_INTEGRATION.md`;
-3. pick only the first non-VALIDATED dependency-ready task from the table above;
-4. do not assume this TODO is current if `main` has materially changed — reconcile and update it first;
-5. implement only that task plus its required tests;
-6. open a Draft PR and leave subsequent tasks untouched.
-
-This file is a living migration backlog. Findings discovered during implementation should be added here before broadening a PR's scope.
+No implementation should proceed from memory alone.
