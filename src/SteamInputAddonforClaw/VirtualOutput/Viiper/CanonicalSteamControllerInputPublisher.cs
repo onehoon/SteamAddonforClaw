@@ -217,23 +217,36 @@ internal sealed class CanonicalSteamControllerInputPublisher
         }
 
         var stopEvent = new ManualResetEvent(false);
-        var thread = new Thread(() => WorkerLoop(timer, stopEvent))
-        {
-            IsBackground = true,
-            Name = "SteamInputAddon.GordonPublisher",
-            Priority = ThreadPriority.Normal,
-        };
-
+        Thread thread;
         try
         {
+            // Construction, IsBackground/Name/Priority configuration, and Thread.Start() are all inside
+            // this one try: a failure at any of those steps (Thread.Start() can fail, e.g.
+            // OutOfMemoryException creating the OS thread; the property setters essentially never throw,
+            // but must not be allowed to leak the already-created timer/event if they somehow did) is
+            // handled identically -- clean up rather than leak a native handle, and never leave
+            // _workerThread pointing at a thread that was never started (StopAsync's Join would throw
+            // ThreadStateException on it).
+            thread = new Thread(() => WorkerLoop(timer, stopEvent))
+            {
+                IsBackground = true,
+                Name = "SteamInputAddon.GordonPublisher",
+                // Real MSI Claw testing showed the #159 deadline scheduler maintaining ~250 Hz under
+                // normal load but suffering severe scheduling starvation under CPU-heavy workloads
+                // (sustained windows as low as ~60-150 Hz, tens to hundreds of skipped deadlines per
+                // heartbeat, and occasional multi-hundred-millisecond stalls). This is a long-lived
+                // dedicated thread (kept for the whole routing session, not spun up per tick) whose
+                // per-wake CPU work is very short -- it spends most of each 4 ms interval waiting, not
+                // running -- so AboveNormal gives it a better chance to run promptly when CPU-heavy
+                // games saturate available CPU -- without raising the whole process's priority or realtime
+                // scheduling. This does not guarantee 250 Hz under saturation and does not eliminate all
+                // CPU starvation; see PR review notes for the hardware A/B comparison this is based on.
+                Priority = ThreadPriority.AboveNormal,
+            };
             (WorkerThreadStartOverrideForTests ?? (static t => t.Start()))(thread);
         }
         catch (Exception exception)
         {
-            // Thread.Start() can fail (e.g. OutOfMemoryException creating the OS thread); the timer and
-            // stop event were already successfully created, so clean those up rather than leaking a
-            // native handle, and never leave _workerThread pointing at a thread that was never started
-            // (StopAsync's Join would throw ThreadStateException on it).
             timer.Dispose();
             stopEvent.Dispose();
             throw new InvalidOperationException("Failed to start the canonical Gordon publisher worker thread.", exception);
