@@ -126,44 +126,48 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TARGET_COMMIT: ${{ steps.target.outputs.commit }}
         run: |
+          . ./scripts/viiper-existing-automation-check.ps1
+
           $branch = "automation/viiper-$($env:TARGET_COMMIT)"
 
-          # A failed lookup (auth problem, rate limit, API outage) must never be treated as "does
-          # not exist" -- that would defeat fail-closed idempotency. Distinguish the lookup failing
-          # from the lookup succeeding with an empty/absent result at every step below.
           $prJson = gh pr list --head $branch --state all --json number,isDraft,state
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to query existing automation PRs for branch '$branch' (gh exit code $LASTEXITCODE). Failing closed rather than assuming none exist."
-          }
+          $prQueryExitCode = $LASTEXITCODE
           # Assign first, then wrap in @() -- @($x | ConvertFrom-Json) wraps ConvertFrom-Json's
           # single emitted pipeline object (which for a JSON array is itself already an array) in
           # an extra outer array, so an empty JSON array "[]" would come out as Count=1, not 0.
-          $existingPrsParsed = $prJson | ConvertFrom-Json
+          $existingPrsParsed = if ($prQueryExitCode -eq 0) { $prJson | ConvertFrom-Json } else { @() }
           $existingPrs = @($existingPrsParsed)
-          if ($existingPrs.Count -gt 0) {
-            $pr = $existingPrs[0]
-            Write-Host "An automation PR for $($env:TARGET_COMMIT) already exists: #$($pr.number) (state=$($pr.state), draft=$($pr.isDraft)). Not creating a duplicate or force-pushing over it."
-            "branch=$branch" >> $env:GITHUB_OUTPUT
-            "exists=true" >> $env:GITHUB_OUTPUT
-            exit 0
-          }
 
-          # No PR, but the remote branch itself may still exist -- e.g. a prior run pushed the
-          # branch and then failed before opening the PR, or a human is working on it directly.
-          # Never force-push or silently reuse it. Use `git ls-remote --exit-code`, whose exit
-          # codes are unambiguous: 0 = ref found, 2 = no matching ref, anything else = the lookup
-          # itself failed (network/auth/etc) and must not be read as "branch does not exist".
-          git ls-remote --exit-code --heads origin "refs/heads/$branch" | Out-Null
+          # Deliberately plain `git ls-remote --heads` (no --exit-code): that flag makes git itself
+          # exit 2 for "no matching ref", and on the GitHub Actions Windows/pwsh runner that
+          # nonzero exit is promoted to a terminating NativeCommandExitException before this script
+          # ever gets to read $LASTEXITCODE -- discovered via the real first end-to-end run, where
+          # the target branch legitimately did not exist yet and the step still failed anyway.
+          # Plain `git ls-remote --heads` always exits 0 on a successful query regardless of
+          # whether any ref matched; only a genuine lookup failure (network/auth/etc) exits
+          # nonzero, so existence is classified from the *output*, not the exit code.
+          $remoteRefs = @(git ls-remote --heads origin "refs/heads/$branch")
           $lsRemoteExitCode = $LASTEXITCODE
-          if ($lsRemoteExitCode -eq 0) {
-            throw "Remote branch '$branch' already exists with no open or closed PR for it. Refusing to push over it (it may contain a partial automation run or manual work). Inspect and delete or rename it manually, then retry."
-          }
-          if ($lsRemoteExitCode -ne 2) {
-            throw "Failed to determine whether remote branch '$branch' exists (git ls-remote exit code $lsRemoteExitCode). Failing closed rather than assuming it does not exist."
-          }
 
-          "branch=$branch" >> $env:GITHUB_OUTPUT
-          "exists=false" >> $env:GITHUB_OUTPUT
+          $classification = Get-ViiperExistingAutomationClassification `
+            -PrQueryExitCode $prQueryExitCode -ExistingPrCount $existingPrs.Count `
+            -LsRemoteExitCode $lsRemoteExitCode -RemoteRefCount $remoteRefs.Count -Branch $branch
+
+          switch ($classification) {
+            'PrExists' {
+              $pr = $existingPrs[0]
+              Write-Host "An automation PR for $($env:TARGET_COMMIT) already exists: #$($pr.number) (state=$($pr.state), draft=$($pr.isDraft)). Not creating a duplicate or force-pushing over it."
+              "branch=$branch" >> $env:GITHUB_OUTPUT
+              "exists=true" >> $env:GITHUB_OUTPUT
+            }
+            'BranchExists' {
+              throw "Remote branch '$branch' already exists with no open or closed PR for it. Refusing to push over it (it may contain a partial automation run or manual work). Inspect and delete or rename it manually, then retry."
+            }
+            'Clean' {
+              "branch=$branch" >> $env:GITHUB_OUTPUT
+              "exists=false" >> $env:GITHUB_OUTPUT
+            }
+          }
 
       - name: Fetch and verify canonical artifact
         id: fetch
