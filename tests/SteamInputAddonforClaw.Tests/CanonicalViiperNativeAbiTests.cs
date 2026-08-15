@@ -564,15 +564,18 @@ public sealed class CanonicalViiperNativeAbiTests
         // root<-cbB, root<-cbA, leaving native holding cbB's function pointer while the managed
         // dictionary only rooted cbA -- cbB becomes GC-eligible while VIIPER can still invoke it.
         //
-        // A bare "run it N times and hope the scheduler overlaps" test does not actually prove
-        // mutual exclusion -- it can pass 200/200 runs against the old, unlocked implementation if
-        // the scheduler happens to run the two calls back-to-back every time. Instead, the fake
-        // native call itself detects concurrent entry: it increments a shared depth counter, sleeps
-        // briefly to force any unsynchronized second caller into the window, then decrements. Any
-        // depth > 1 observed here is conclusive proof two callers were inside the "native" call
+        // A bare "run it N times and hope the scheduler overlaps" test does not actually exercise
+        // the race with much confidence -- it can pass 200/200 runs against the old, unlocked
+        // implementation if the scheduler happens to run the two calls back-to-back every time.
+        // Instead, the fake native call itself detects concurrent entry: it increments a shared
+        // depth counter, sleeps briefly to force any unsynchronized second caller into the window,
+        // then decrements. A depth > 1 observed here means two callers were inside the "native" call
         // simultaneously, which the fix's lock (_callbackGate) around the native call and the root
-        // mutation must make impossible. Also asserts the managed root matches whichever call
-        // actually completed last, which the same atomicity guarantees.
+        // mutation is meant to make impossible. This is a high-confidence concurrent-entry-detection
+        // regression test, not a formal proof -- an OS scheduler could in principle still run one
+        // thread's call (Thread.Sleep included) to completion before starting the other, so this
+        // cannot guarantee it will always catch a reintroduced race. Also asserts the managed root
+        // matches whichever call actually completed last, which the same atomicity guarantees.
         var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
         Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
 
