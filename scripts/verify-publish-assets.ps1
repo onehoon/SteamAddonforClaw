@@ -45,7 +45,8 @@ if ((Get-FileHash -LiteralPath $usbIpInstaller -Algorithm SHA256).Hash -ne $expe
 }
 
 $viiperPayload = Join-Path $PublishDirectory 'Dependencies\Viiper\libVIIPER.dll'
-$expectedViiperSha256 = 'FEBD1D688426144E2973EC3914AEED14DCA35235AD0634E3DB4809101FA0999D'
+# TEMPORARY: pins the D-pad diagnostic build -- see Dependencies/Viiper/PROVENANCE.md.
+$expectedViiperSha256 = 'F469C23871EE528BDB390AF953E73A435B8D2DB2BBD68BCB4F17FA7362180F19'
 if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expectedViiperSha256) {
     throw 'Published VIIPER payload SHA-256 does not match its recorded provenance.'
 }
