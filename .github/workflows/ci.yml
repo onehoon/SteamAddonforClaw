@@ -27,6 +27,12 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Verify embedded VIIPER dependency
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-viiper.ps1
+
+      - name: Test VIIPER verification script
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/verify-viiper.tests.ps1
+
       - name: Restore
         run: dotnet restore SteamInputAddonforClaw.slnx
 

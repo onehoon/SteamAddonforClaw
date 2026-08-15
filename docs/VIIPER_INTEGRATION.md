@@ -18,6 +18,16 @@ VIIPER API. The active Steam virtual-output target is Steam Deck `28DE:1205`.
 The DLL, generated header, managed P/Invoke definitions, ABI tests, hashes,
 and this contract must all refer to the same VIIPER revision.
 
+`Dependencies/Viiper/viiper.lock.json` is the machine-readable identity record
+for the embedded dependency: pinned commit, build entrypoint, and DLL/header
+SHA-256 hashes. `scripts/verify-viiper.ps1` (run in CI and release) fails
+closed if the lock file, `PROVENANCE.md`, the vendored DLL/header, and the
+pin recorded above ever disagree. Normal Addon builds consume the vendored,
+reviewed dependency as-is — they do not fetch VIIPER from any network source,
+mutable or otherwise. Upgrading the pinned revision remains a separate,
+reviewed change; an automated updater for exact canonical VIIPER artifacts is
+planned for a later phase and does not exist yet.
+
 ## 1. Upstream authority
 
 The architectural and API sources of truth are:
