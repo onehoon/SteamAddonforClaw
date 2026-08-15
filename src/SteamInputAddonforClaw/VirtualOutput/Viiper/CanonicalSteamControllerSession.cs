@@ -69,7 +69,7 @@ internal sealed class CanonicalSteamControllerSession : ICanonicalSteamControlle
                 WriteBatchFlushIntervalMs = 1
             };
 
-            if (!_native.NewUSBServer(ref config, out _serverHandle))
+            if (!_native.NewUSBServer(ref config, out _serverHandle, CanonicalViiperDiagnosticLog.Callback))
             {
                 _serverHandle = 0;
                 return false;

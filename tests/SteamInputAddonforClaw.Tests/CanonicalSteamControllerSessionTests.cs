@@ -27,6 +27,11 @@ public sealed class CanonicalSteamControllerSessionTests
         Assert.Equal(CanonicalSteamControllerSessionState.Active, session.State);
         Assert.Equal((uint)42, session.BusId);
         Assert.Equal((uint)9, session.LogicalDeviceId);
+        // Pins the D-pad diagnostic wiring itself, not just the log callback's own behavior in
+        // isolation: a future accidental revert to NewUSBServer(..., logCallback: null) would fail
+        // this assertion even though CanonicalViiperDiagnosticLogTests (which call the callback
+        // directly) would still all pass.
+        Assert.Same(CanonicalViiperDiagnosticLog.Callback, native.LogCallback);
     }
 
     [Fact]
@@ -314,12 +319,14 @@ public sealed class CanonicalSteamControllerSessionTests
         internal bool AutoAttach { get; private set; }
         internal ushort Vendor { get; private set; }
         internal ushort Product { get; private set; }
+        internal ViiperLogCallback? LogCallback { get; private set; }
 
         public bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null)
         {
             Calls.Add("NewUSBServer");
             Config = config;
             Address = Marshal.PtrToStringUTF8(config.Addr);
+            LogCallback = logCallback;
             serverHandle = 10;
             return NewServerResult;
         }
