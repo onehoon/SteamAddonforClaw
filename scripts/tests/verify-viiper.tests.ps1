@@ -24,9 +24,22 @@ function New-Fixture {
 function Invoke-Verify {
     param([Parameter(Mandatory)] [string] $Root)
 
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath -RepoRoot $Root 2>&1
+    # Captured native stderr is promoted to a terminating error under
+    # $ErrorActionPreference = 'Stop' on PowerShell 7+. Suppress that
+    # promotion here so a failing child verification is observed via
+    # exit code/output, not thrown out of this harness.
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath -RepoRoot $Root 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+
     return [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
+        ExitCode = $exitCode
         Output   = ($output | Out-String)
     }
 }
@@ -53,11 +66,14 @@ try {
     #    real repo checkout. This is a regression test for RepoRoot
     #    resolution breaking under Windows PowerShell's -File launcher.
     Push-Location $repoRoot
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         $defaultOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
         $defaultExitCode = $LASTEXITCODE
     }
     finally {
+        $ErrorActionPreference = $previousPreference
         Pop-Location
     }
     if ($defaultExitCode -ne 0) {
