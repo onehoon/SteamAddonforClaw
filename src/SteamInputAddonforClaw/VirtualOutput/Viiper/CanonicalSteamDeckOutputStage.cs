@@ -147,6 +147,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             finally { timing.PnpResolveMs = Elapsed(started); }
             if (!resolved.Succeeded)
             {
+                SteamDeckVirtualDeviceIdentityDiagnostics.LogOnFailure(_before, identitySnapshot, resolved, _busId, _deviceId);
                 _potentialDeckInstanceIdsAtIdentityFailure = FindPotentialDeckInstanceIds(_before!, identitySnapshot);
                 return await FailAndRollbackCoreAsync(resolved.Reason).ConfigureAwait(false);
             }
@@ -181,6 +182,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             finally { timing.PublisherStartMs = Elapsed(started); }
             _state = LifecycleState.Active;
             AppLog.Debug("SteamOutput", "SteamDeckOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{SteamDeckVirtualDeviceIdentityPolicy.VendorId:X4}"), ("PID", $"{SteamDeckVirtualDeviceIdentityPolicy.ProductId:X4}"), ("NeutralAccepted", true));
+            AppLog.Debug("RoutingTrace", "Steam Deck output creation completed.", ("Event", "SteamDeckOutputCreated"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(timing.Started)), ("RuntimeStartMs", timing.RuntimeStartMs), ("CreateDeviceMs", timing.CreateDeviceMs), ("PnPResolveMs", timing.PnpResolveMs), ("RecoveryCheckpointMs", timing.RecoveryCheckpointMs), ("HidHideInspectionMs", timing.HidHideInspectionMs), ("NeutralReportMs", timing.NeutralReportMs), ("PublisherStartMs", timing.PublisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
             return RoutingStageOperationResult.Success("SteamDeckCreated");
         }
         catch (OperationCanceledException)
@@ -211,6 +213,13 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
 
     private async ValueTask<RoutingStageOperationResult> RollbackCoreAsync(CancellationToken cancellationToken)
     {
+        var totalStarted = Stopwatch.GetTimestamp();
+        long removeMs = 0, pnpAbsenceMs = 0;
+        RoutingStageOperationResult RollbackFailure(string reason)
+        {
+            AppLog.Debug("RoutingTrace", "Steam Deck output rollback failed.", ("Event", "SteamDeckOutputRollbackFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Failure"), ("Reason", reason));
+            return RoutingStageOperationResult.Failure(reason);
+        }
         if (_state == LifecycleState.Inactive) return RoutingStageOperationResult.Success("SteamOutputAlreadyInactive");
         if (_state == LifecycleState.Prepared)
         {
@@ -226,42 +235,52 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             await _publisher.StopAsync().ConfigureAwait(false);
             _publisher = null;
         }
-        if (_sessionId() is not { } session) return RoutingStageOperationResult.Failure("RecoverySessionUnavailable");
+        if (_sessionId() is not { } session) return RollbackFailure("RecoverySessionUnavailable");
         var hadResolvedIdentity = _owned is { Count: > 0 };
         var absent = _pnpAbsenceVerified;
-        if (_canonicalSession is null) return RoutingStageOperationResult.Failure("CanonicalSessionUnavailable");
+        if (_canonicalSession is null) return RollbackFailure("CanonicalSessionUnavailable");
         if (_canonicalSession.State is CanonicalSteamDeckSessionState.Unsafe)
-            return RoutingStageOperationResult.Failure("CanonicalSessionUnsafe");
+            return RollbackFailure("CanonicalSessionUnsafe");
         if (_canonicalSession.State is CanonicalSteamDeckSessionState.Active ||
             (_canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending &&
              _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval))
         {
-            var removed = _canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending &&
-                _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval
-                ? _canonicalSession.RetryPendingCleanup()
-                : _canonicalSession.RemoveDevice();
-            if (!removed) return RoutingStageOperationResult.Failure(_canonicalSession.State == CanonicalSteamDeckSessionState.Unsafe ? "CanonicalSessionUnsafe" : "VirtualDeviceRemoveFailed");
+            var removeStarted = Stopwatch.GetTimestamp();
+            try
+            {
+                var removed = _canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending &&
+                    _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval
+                    ? _canonicalSession.RetryPendingCleanup()
+                    : _canonicalSession.RemoveDevice();
+                if (!removed) return RollbackFailure(_canonicalSession.State == CanonicalSteamDeckSessionState.Unsafe ? "CanonicalSessionUnsafe" : "VirtualDeviceRemoveFailed");
+            }
+            finally { removeMs = Elapsed(removeStarted); }
         }
         if (!_pnpAbsenceVerified)
         {
-            absent = hadResolvedIdentity
-                ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
-                : _potentialDeckInstanceIdsAtIdentityFailure.Count > 0
-                    ? await WaitForAbsenceAsync(_potentialDeckInstanceIdsAtIdentityFailure, cancellationToken).ConfigureAwait(false)
-                    : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
-            if (!absent) return RoutingStageOperationResult.Failure("VirtualDevicePnPStillPresent");
+            var absenceStarted = Stopwatch.GetTimestamp();
+            try
+            {
+                absent = hadResolvedIdentity
+                    ? await WaitForAbsenceAsync(_owned!.Select(device => device.InstanceId), cancellationToken).ConfigureAwait(false)
+                    : _potentialDeckInstanceIdsAtIdentityFailure.Count > 0
+                        ? await WaitForAbsenceAsync(_potentialDeckInstanceIdsAtIdentityFailure, cancellationToken).ConfigureAwait(false)
+                        : await WaitForNoNewMatchingCandidatesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally { pnpAbsenceMs = Elapsed(absenceStarted); }
+            if (!absent) return RollbackFailure("VirtualDevicePnPStillPresent");
             _pnpAbsenceVerified = true;
         }
         if (!_ownershipUncertaintyCleared)
         {
             if (!_tracker.ClearUncertaintyAfterVerifiedAbsence(_enumerator.EnumeratePresentDevices(), new SteamDeckVirtualDeviceIdentityPolicy(), _before, _owned))
-                return RoutingStageOperationResult.Failure("UnrelatedMatchingVirtualDeviceStillPresent");
+                return RollbackFailure("UnrelatedMatchingVirtualDeviceStillPresent");
             _ownershipUncertaintyCleared = true;
         }
         if (!_recoveryMutationCompleted)
         {
             var complete = _recovery.CompleteAddonOwnedVirtualDeviceMutation(session, _mutationId);
-            if (!complete.IsSafeToContinue) return RoutingStageOperationResult.Failure("VirtualDeviceRecoveryCompletionFailed");
+            if (!complete.IsSafeToContinue) return RollbackFailure("VirtualDeviceRecoveryCompletionFailed");
             _recoveryMutationCompleted = true;
         }
         if (_canonicalSession.State is CanonicalSteamDeckSessionState.DeviceRemoved or CanonicalSteamDeckSessionState.CleanupPending)
@@ -269,9 +288,10 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             var cleaned = _canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending
                 ? _canonicalSession.RetryPendingCleanup()
                 : _canonicalSession.CompleteRuntimeCleanup();
-            if (!cleaned) return RoutingStageOperationResult.Failure("CanonicalSessionCleanupPending");
+            if (!cleaned) return RollbackFailure("CanonicalSessionCleanupPending");
         }
         AppLog.Debug("SteamOutput", "SteamDeckOutput inactive", ("BusId", _busId), ("DeviceId", _deviceId), ("PnPAbsent", absent), ("RecoveryMutationCompleted", _recoveryMutationCompleted));
+        AppLog.Debug("RoutingTrace", "Steam Deck output rollback completed.", ("Event", "SteamDeckOutputRollbackCompleted"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Success"), ("Reason", "SteamDeckRemoved"));
         _canonicalSession.Dispose();
         _canonicalSession = null;
         _deviceId = 0; _busId = 0; _owned = null; _before = null; _potentialDeckInstanceIdsAtIdentityFailure = [];
@@ -333,9 +353,21 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
 
     private async ValueTask<RoutingStageOperationResult> FailAndRollbackCoreAsync(string reason)
     {
+        var timing = _creationTiming;
+        AppLog.Debug("RoutingTrace", "Steam Deck output creation failed.", ("Event", "SteamDeckOutputCreationFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("FailedOperation", FailureOperation(reason)), ("TotalMs", timing is null ? 0 : Elapsed(timing.Started)), ("RuntimeStartMs", timing?.RuntimeStartMs ?? 0), ("CreateDeviceMs", timing?.CreateDeviceMs ?? 0), ("PnPResolveMs", timing?.PnpResolveMs ?? 0), ("RecoveryCheckpointMs", timing?.RecoveryCheckpointMs ?? 0), ("HidHideInspectionMs", timing?.HidHideInspectionMs ?? 0), ("NeutralReportMs", timing?.NeutralReportMs ?? 0), ("PublisherStartMs", timing?.PublisherStartMs ?? 0), ("Reason", reason));
         var rollback = await RollbackCoreAsync(CancellationToken.None).ConfigureAwait(false);
         return RoutingStageOperationResult.Failure($"{reason};Rollback={rollback.Reason}");
     }
+
+    private static string FailureOperation(string reason) => reason switch
+    {
+        "VirtualDeviceDidNotAppear" or "AmbiguousVirtualDeviceIdentity" => "PnPResolve",
+        "NeutralReportRejected" => "NeutralReport",
+        "VirtualDeviceRecoveryCheckpointFailed" => "RecoveryCheckpoint",
+        "HidHideOutputInspectionUnavailable" or "HidHideOutputAlreadyBlocked" => "HidHideInspection",
+        "VirtualDeviceRecoveryIntentFailed" => "RecoveryIntent",
+        _ => reason.Contains("Rollback", StringComparison.OrdinalIgnoreCase) ? "Rollback" : reason
+    };
 
     private static long Elapsed(long started) => (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 }

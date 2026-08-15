@@ -52,16 +52,18 @@ just build-libVIIPER Release
   `LTrigger = 56`, `LStickX = 60`, `RStickX = 64` (Gordon's `sizeof(SteamControllerDeviceState) =
   62` / `sizeof(SteamControllerDeviceRemoveResult) = 4` are unchanged by this commit).
 
-Deviation from the documented `scripts/inject-version.ps1` step: that script failed on this
-non-numeric commit-prefix version string (`ec64282`) mid-recipe (`Cannot convert value "ec64282"
-to type "System.Int32"`), which only affects the DLL's embedded Win32 version resource
-(`FileVersion`/`ProductVersion` metadata), not the exported ABI/symbols. The subsequent `go build`,
-`gendef`, and `go run ./lib/viiper/postbuild` steps completed normally and produced this DLL/header
-pair; `just licenses-libVIIPER` also completed and produced `licenses.txt`. The recipe's own final
-temp-file cleanup step then exited non-zero for an unrelated reason, after the artifact was already
-written. This is a build-script robustness issue in VIIPER's justfile against a short-hash version
-string, not a defect in the built ABI itself; it is reported here rather than worked around by
-hand-editing the artifact.
+Reproduced independently (isolated temp clone of `ec64282c69e5587466b950332d7983fd53a7d778`, not
+the `D:\repo\VIIPER` working tree, which was not checked out to a different commit or otherwise
+mutated): `just build-libVIIPER Release` completed with overall exit code `0`, and the resulting
+`dist/libVIIPER/libVIIPER.dll` hashed to the same SHA-256 recorded above
+(`f8d2651b185d39544f53151d8c857b53b70cf6006de77bbd2574089c7317256b`). Within that successful run,
+`scripts/inject-version.ps1` emitted a non-terminating version-resource warning on this non-numeric
+commit-prefix version string (`ec64282`): `Cannot convert value "ec64282" to type "System.Int32"`,
+followed by two related `goversioninfo` "could not be parsed" warnings. These only affect the DLL's
+embedded Win32 version resource (`FileVersion`/`ProductVersion` metadata), not the built ABI or
+exported symbols -- the recipe continues past them and the subsequent `go build`, `gendef`,
+`go run ./lib/viiper/postbuild`, and `just licenses-libVIIPER` steps all completed normally and
+produced this DLL/header pair and `licenses.txt`.
 
 The build does not use or redistribute Handheld Companion's bundled DLL, and no byte-for-byte
 equivalence claim is made. Rebuilds are traceable through the exact source, recipe, toolchain, and
@@ -71,7 +73,7 @@ rebuild.
 ## Addon adoption status
 
 This is the SD2 atomic adoption: the DLL, generated header, C# P/Invoke ABI (`CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeApi.cs`), ABI tests (`SteamDeckAbiTests.cs`), `docs/VIIPER_INTEGRATION.md`,
+`CanonicalViiperNativeApi.cs`), ABI tests (`CanonicalViiperNativeAbiTests.cs`), `docs/VIIPER_INTEGRATION.md`,
 and `docs/VIIPER_MIGRATION_TODO.md` are all updated together in the same change, and all describe
 VIIPER commit `ec64282c69e5587466b950332d7983fd53a7d778`.
 

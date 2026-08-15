@@ -170,6 +170,97 @@ public sealed class CanonicalSteamDeckSessionTests
         Assert.DoesNotContain("CloseUSBServer", native.Calls);
     }
 
+    [Fact]
+    public void NewUSBServer_failure_fails_closed_without_further_calls()
+    {
+        var native = new FakeNative { NewServerResult = false };
+        using var session = new CanonicalSteamDeckSession(native);
+
+        Assert.False(session.Start());
+        Assert.Equal(["NewUSBServer"], native.Calls);
+        Assert.Equal(CanonicalSteamDeckSessionState.Clean, session.State);
+    }
+
+    [Fact]
+    public void CreateUSBBus_failure_closes_the_server_it_already_opened()
+    {
+        var native = new FakeNative { CreateBusResult = false };
+        using var session = new CanonicalSteamDeckSession(native);
+
+        Assert.False(session.Start());
+        Assert.Equal(["NewUSBServer", "CreateUSBBus", "CloseUSBServer"], native.Calls);
+        Assert.Equal(CanonicalSteamDeckSessionState.Clean, session.State);
+    }
+
+    [Fact]
+    public void CreateSteamDeckDevice_failure_tears_down_the_bus_and_server_it_already_opened()
+    {
+        var native = new FakeNative { CreateDeviceResult = false };
+        using var session = new CanonicalSteamDeckSession(native);
+
+        Assert.False(session.Start());
+        Assert.Equal(["NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "RemoveUSBBus", "CloseUSBServer"], native.Calls);
+        Assert.Equal(CanonicalSteamDeckSessionState.Clean, session.State);
+    }
+
+    [Fact]
+    public void Identity_BusId_mismatch_is_treated_as_an_identity_failure_and_removes_the_unattached_device()
+    {
+        var native = new FakeNative { IdentityBusId = 999 }; // does not match the bus this session created (42)
+        using var session = new CanonicalSteamDeckSession(native);
+
+        Assert.False(session.Start());
+        Assert.Contains("GetUSBDeviceIdentity", native.Calls);
+        Assert.Contains("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.Contains("RemoveUSBBus", native.Calls);
+        Assert.Contains("CloseUSBServer", native.Calls);
+        Assert.DoesNotContain("AttachUSBDevice", native.Calls);
+        Assert.Equal(CanonicalSteamDeckSessionState.Clean, session.State);
+    }
+
+    [Fact]
+    public void Bus_removal_first_attempt_failure_then_retry_succeeds()
+    {
+        var native = new FakeNative { RemoveBusResults = new Queue<bool>([false, true]) };
+        using var session = new CanonicalSteamDeckSession(native);
+        Assert.True(session.Start());
+        Assert.True(session.RemoveDevice());
+
+        Assert.False(session.CompleteRuntimeCleanup());
+        Assert.Equal(CanonicalSteamDeckSessionState.CleanupPending, session.State);
+        Assert.Equal(CanonicalPendingCleanupPhase.BusRemoval, session.PendingCleanupPhase);
+        Assert.Equal(1, native.Calls.Count(x => x == "RemoveUSBBus"));
+
+        Assert.True(session.RetryPendingCleanup());
+        Assert.Equal(CanonicalSteamDeckSessionState.Clean, session.State);
+        Assert.Equal(2, native.Calls.Count(x => x == "RemoveUSBBus"));
+        // Retry must not re-invoke device removal a second time -- the device was already removed
+        // before the bus-removal phase began.
+        Assert.Equal(1, native.Calls.Count(x => x == "RemoveSteamDeckDeviceEx"));
+    }
+
+    [Fact]
+    public void Server_close_first_attempt_failure_then_retry_succeeds()
+    {
+        var native = new FakeNative { CloseResults = new Queue<bool>([false, true]) };
+        using var session = new CanonicalSteamDeckSession(native);
+        Assert.True(session.Start());
+        Assert.True(session.RemoveDevice());
+
+        Assert.False(session.CompleteRuntimeCleanup());
+        Assert.Equal(CanonicalSteamDeckSessionState.CleanupPending, session.State);
+        Assert.Equal(CanonicalPendingCleanupPhase.ServerClose, session.PendingCleanupPhase);
+        Assert.Equal(1, native.Calls.Count(x => x == "CloseUSBServer"));
+        // Bus removal already succeeded and must not be repeated on retry.
+        Assert.Equal(1, native.Calls.Count(x => x == "RemoveUSBBus"));
+
+        Assert.True(session.RetryPendingCleanup());
+        Assert.Equal(CanonicalSteamDeckSessionState.Clean, session.State);
+        Assert.Equal(2, native.Calls.Count(x => x == "CloseUSBServer"));
+        Assert.Equal(1, native.Calls.Count(x => x == "RemoveUSBBus"));
+        Assert.Equal(1, native.Calls.Count(x => x == "RemoveSteamDeckDeviceEx"));
+    }
+
     private sealed class FakeNative : ICanonicalViiperNativeApi
     {
         internal readonly List<string> Calls = [];

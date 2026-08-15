@@ -50,6 +50,25 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private long _maxSetStateTicksSinceHeartbeat;
     private long _totalSetStateFailures;
 
+    // Timing-decomposition diagnostics: production-worker-only, mirrored unchanged from
+    // CanonicalSteamControllerInputPublisher (see that class's remarks for the real-hardware
+    // rationale). Touched only from the single dedicated worker thread (WorkerLoop below), so no
+    // synchronization is needed. These stay at their zero defaults on the test/manual-tick
+    // IInputReportTickSource path, which never populates them.
+    private long _previousTimerWakeTimestamp;
+    private bool _hasPreviousTimerWake;
+    private int _timerWakeCountSinceHeartbeat;
+    private int _wakeToWakeSampleCountSinceHeartbeat;
+    private long _wakeToWakeTicksSumSinceHeartbeat;
+    private long _maxWakeToWakeTicksSinceHeartbeat;
+    private long _waitBlockedTicksSumSinceHeartbeat;
+    private long _maxWaitBlockedTicksSinceHeartbeat;
+    private long _publishWorkTicksSumSinceHeartbeat;
+    private long _maxPublishWorkTicksSinceHeartbeat;
+    private long _wakeLatenessTicksSumSinceHeartbeat;
+    private long _maxWakeLatenessTicksSinceHeartbeat;
+    private long _skippedDeadlineCountSinceHeartbeat;
+
     internal CanonicalSteamDeckInputPublisher(
         IControllerStateSnapshotSource snapshot,
         ICanonicalSteamDeckStateSink sink,
@@ -210,10 +229,23 @@ internal sealed class CanonicalSteamDeckInputPublisher
             WaitHandle[] handles = [stopEvent, timer];
             while (true)
             {
+                var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);
+                var waitStart = diagnosticsEnabled ? _timestampProvider() : 0;
+
                 var signaled = WaitHandle.WaitAny(handles);
                 if (signaled == 0) return; // stop event -- never counted as a timer wake
 
+                var wake = _timestampProvider();
+
+                if (diagnosticsEnabled)
+                {
+                    RecordWaitBlocked(waitStart, wake);
+                    RecordTimerWake(wake);
+                    RecordWakeLateness(wake, _nextDeadlineTicks);
+                }
+
                 var keepGoing = PublishCurrentStateOnce();
+                if (diagnosticsEnabled) RecordPublishWork(wake, _timestampProvider());
                 if (!keepGoing) return;
 
                 if (stopEvent.WaitOne(0)) return;
@@ -221,6 +253,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
                 var now = _timestampProvider();
                 var advance = CanonicalPublisherDeadlineMath.AdvanceDeadline(_nextDeadlineTicks, _periodTicks, now);
                 _nextDeadlineTicks = advance.NextDeadlineTicks;
+                if (diagnosticsEnabled && advance.SkippedCount > 0) _skippedDeadlineCountSinceHeartbeat += advance.SkippedCount;
 
                 ArmForDeadlineViaSeam(timer, _nextDeadlineTicks, now);
             }
@@ -231,11 +264,71 @@ internal sealed class CanonicalSteamDeckInputPublisher
         }
     }
 
+    /// <summary>Test-only seam: lets a test drive the timing-decomposition accounting with known fake
+    /// timestamps directly, without needing a real WaitAny/timer wake to happen.</summary>
+    internal void RecordWaitBlockedForTests(long waitStart, long wake) => RecordWaitBlocked(waitStart, wake);
+    internal void RecordTimerWakeForTests(long wake) => RecordTimerWake(wake);
+    internal void RecordPublishWorkForTests(long publishStart, long publishEnd) => RecordPublishWork(publishStart, publishEnd);
+    internal void RecordWakeLatenessForTests(long wake, long scheduledDeadline) => RecordWakeLateness(wake, scheduledDeadline);
+
+    private void RecordWaitBlocked(long waitStart, long wake)
+    {
+        var duration = wake - waitStart;
+        _waitBlockedTicksSumSinceHeartbeat += duration;
+        if (duration > _maxWaitBlockedTicksSinceHeartbeat) _maxWaitBlockedTicksSinceHeartbeat = duration;
+    }
+
+    private void RecordTimerWake(long wake)
+    {
+        _timerWakeCountSinceHeartbeat++;
+        if (_hasPreviousTimerWake)
+        {
+            var interval = wake - _previousTimerWakeTimestamp;
+            _wakeToWakeSampleCountSinceHeartbeat++;
+            _wakeToWakeTicksSumSinceHeartbeat += interval;
+            if (interval > _maxWakeToWakeTicksSinceHeartbeat) _maxWakeToWakeTicksSinceHeartbeat = interval;
+        }
+        _previousTimerWakeTimestamp = wake;
+        _hasPreviousTimerWake = true;
+    }
+
+    private void RecordPublishWork(long publishStart, long publishEnd)
+    {
+        var duration = publishEnd - publishStart;
+        _publishWorkTicksSumSinceHeartbeat += duration;
+        if (duration > _maxPublishWorkTicksSinceHeartbeat) _maxPublishWorkTicksSinceHeartbeat = duration;
+    }
+
+    /// <summary>How late <paramref name="wake"/> landed relative to the deadline that was scheduled for
+    /// it. Clamped to zero -- see <see cref="CanonicalSteamControllerInputPublisher"/>'s equivalent
+    /// method for the rationale.</summary>
+    private void RecordWakeLateness(long wake, long scheduledDeadline)
+    {
+        var lateness = wake - scheduledDeadline;
+        if (lateness < 0) lateness = 0;
+        _wakeLatenessTicksSumSinceHeartbeat += lateness;
+        if (lateness > _maxWakeLatenessTicksSinceHeartbeat) _maxWakeLatenessTicksSinceHeartbeat = lateness;
+    }
+
     private void ResetTimingDiagnosticsForNewRun()
     {
         _setStateCallsSinceHeartbeat = 0;
         _maxSetStateTicksSinceHeartbeat = 0;
         _totalSetStateFailures = 0;
+
+        _previousTimerWakeTimestamp = 0;
+        _hasPreviousTimerWake = false;
+        _timerWakeCountSinceHeartbeat = 0;
+        _wakeToWakeSampleCountSinceHeartbeat = 0;
+        _wakeToWakeTicksSumSinceHeartbeat = 0;
+        _maxWakeToWakeTicksSinceHeartbeat = 0;
+        _waitBlockedTicksSumSinceHeartbeat = 0;
+        _maxWaitBlockedTicksSinceHeartbeat = 0;
+        _publishWorkTicksSumSinceHeartbeat = 0;
+        _maxPublishWorkTicksSinceHeartbeat = 0;
+        _wakeLatenessTicksSumSinceHeartbeat = 0;
+        _maxWakeLatenessTicksSinceHeartbeat = 0;
+        _skippedDeadlineCountSinceHeartbeat = 0;
     }
 
     private async Task PublishAsync(IInputReportTickSource ticks, CancellationToken token)
@@ -292,17 +385,48 @@ internal sealed class CanonicalSteamDeckInputPublisher
         var elapsedMs = elapsed.TotalMilliseconds;
         var effectiveHz = elapsedMs > 0 ? _setStateCallsSinceHeartbeat / (elapsedMs / 1000.0) : 0.0;
 
+        var wakeCount = _timerWakeCountSinceHeartbeat;
+        var wakeToWakeSampleCount = _wakeToWakeSampleCountSinceHeartbeat;
+        var averageWakeToWakeMs = wakeToWakeSampleCount > 0 ? Stopwatch.GetElapsedTime(0, _wakeToWakeTicksSumSinceHeartbeat / wakeToWakeSampleCount).TotalMilliseconds : 0.0;
+        var averageWaitBlockedMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _waitBlockedTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
+        var averagePublishWorkMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _publishWorkTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
+        var averageWakeLatenessMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _wakeLatenessTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
+
         AppLog.Info("SteamOutput", "Canonical Steam Deck publisher heartbeat",
             ("SetStateCallsLastSecond", _setStateCallsSinceHeartbeat),
             ("TotalPublishedStateCount", _publishedStateCount),
             ("SetStateFailures", _totalSetStateFailures),
             ("MaxSetStateDurationMs", Stopwatch.GetElapsedTime(0, _maxSetStateTicksSinceHeartbeat).TotalMilliseconds),
             ("HeartbeatElapsedMs", elapsedMs),
-            ("EffectiveSetStateHz", effectiveHz));
+            ("EffectiveSetStateHz", effectiveHz),
+            ("TimerWakeCount", wakeCount),
+            ("AverageWakeToWakeMs", averageWakeToWakeMs),
+            ("MaxWakeToWakeMs", Stopwatch.GetElapsedTime(0, _maxWakeToWakeTicksSinceHeartbeat).TotalMilliseconds),
+            ("AverageWaitBlockedMs", averageWaitBlockedMs),
+            ("MaxWaitBlockedMs", Stopwatch.GetElapsedTime(0, _maxWaitBlockedTicksSinceHeartbeat).TotalMilliseconds),
+            ("AveragePublishWorkMs", averagePublishWorkMs),
+            ("MaxPublishWorkMs", Stopwatch.GetElapsedTime(0, _maxPublishWorkTicksSinceHeartbeat).TotalMilliseconds),
+            ("AverageWakeLatenessMs", averageWakeLatenessMs),
+            ("MaxWakeLatenessMs", Stopwatch.GetElapsedTime(0, _maxWakeLatenessTicksSinceHeartbeat).TotalMilliseconds),
+            ("SkippedDeadlineCount", _skippedDeadlineCountSinceHeartbeat));
 
         _lastHeartbeatTimestamp = now;
         _setStateCallsSinceHeartbeat = 0;
         _maxSetStateTicksSinceHeartbeat = 0;
+
+        _timerWakeCountSinceHeartbeat = 0;
+        _wakeToWakeSampleCountSinceHeartbeat = 0;
+        _wakeToWakeTicksSumSinceHeartbeat = 0;
+        _maxWakeToWakeTicksSinceHeartbeat = 0;
+        _waitBlockedTicksSumSinceHeartbeat = 0;
+        _maxWaitBlockedTicksSinceHeartbeat = 0;
+        _publishWorkTicksSumSinceHeartbeat = 0;
+        _maxPublishWorkTicksSinceHeartbeat = 0;
+        _wakeLatenessTicksSumSinceHeartbeat = 0;
+        _maxWakeLatenessTicksSinceHeartbeat = 0;
+        _skippedDeadlineCountSinceHeartbeat = 0;
+        // _previousTimerWakeTimestamp / _hasPreviousTimerWake intentionally NOT reset here -- mirrors
+        // CanonicalSteamControllerInputPublisher.EmitHeartbeatIfDue.
     }
 
     private void ReportFault(Exception exception)

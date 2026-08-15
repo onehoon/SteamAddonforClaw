@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Prerequisites;
 using Xunit;
@@ -6,6 +8,32 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class RuntimePrerequisiteInspectorTests
 {
+    [Fact]
+    public void ViiperExpectedHash_MatchesTheActualEmbeddedPayloadOnDisk()
+    {
+        // Guards against the constant and the shipped DLL drifting apart again (independent of
+        // any fake/mock hash provider, which can only validate comparison logic, not real drift).
+        var repoRoot = FindRepoRoot();
+        var payloadPath = Path.Combine(repoRoot, "src", "SteamInputAddonforClaw", "Dependencies", "Viiper", "libVIIPER.dll");
+
+        Assert.True(File.Exists(payloadPath), $"Expected embedded VIIPER payload at {payloadPath}");
+
+        var actualHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(payloadPath)));
+
+        Assert.Equal(ViiperRuntimeInspector.ExpectedPayloadSha256, actualHash, ignoreCase: true);
+    }
+
+    private static string FindRepoRoot([CallerFilePath] string thisFilePath = "")
+    {
+        var directory = new DirectoryInfo(Path.GetDirectoryName(thisFilePath)!);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ?? throw new InvalidOperationException("Could not locate repository root from test source path.");
+    }
+
     [Fact]
     public void ViiperInspection_Rejects_a_payload_with_an_unexpected_hash()
     {

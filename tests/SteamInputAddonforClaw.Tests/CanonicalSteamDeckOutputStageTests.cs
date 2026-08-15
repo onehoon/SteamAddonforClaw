@@ -1,0 +1,620 @@
+using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Recovery;
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Diagnostics;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+/// <summary>
+/// Steam Deck counterpart to <see cref="ClassicSteamControllerOutputStageTests"/>: same Addon safety-
+/// shell coverage (factory failure, neutral-before-live, bus/server cleanup retry without replaying
+/// device removal, PnP timeout, identity failure rollback, stale-node persistence, HidHide inspection
+/// failure/pre-existing block, recovery intent write failure, cancellation during creation, rollback
+/// ordering), exercised against <see cref="CanonicalSteamDeckOutputStage"/> and exact identity
+/// <c>28DE:1205</c>. There is no non-canonical/legacy runtime constructor on the Deck stage (unlike
+/// Gordon's dual Classic/Canonical constructors), so every test here goes through the single
+/// canonical session-factory constructor.
+/// </summary>
+[Collection("AppLog")]
+public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "ClawSteamDeckOutputTests", Guid.NewGuid().ToString("N"));
+    private readonly Guid _session = Guid.NewGuid();
+
+    [Fact]
+    public async Task SessionPathUsesTypedPublisherAndCleanupOrder()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var created = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.True(created.Succeeded, created.Reason);
+
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+        Assert.True(rollback.Succeeded, rollback.Reason);
+        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Dispose"], session.Trace);
+    }
+
+    [Fact]
+    public async Task BusRemovalRetryDoesNotReplayDeviceRemoval()
+    {
+        var session = new FakeCanonicalSession { CleanupFailure = CanonicalPendingCleanupPhase.BusRemoval };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(1, session.RemoveCalls);
+        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Retry:BusRemoval", "Dispose"], session.Trace);
+    }
+
+    [Fact]
+    public async Task ServerCloseRetryDoesNotReplayDeviceRemoval()
+    {
+        var session = new FakeCanonicalSession { CleanupFailure = CanonicalPendingCleanupPhase.ServerClose };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(1, session.RemoveCalls);
+        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Retry:ServerClose", "Dispose"], session.Trace);
+    }
+
+    [Fact]
+    public async Task FactoryFailureLeavesNoRecoveryBoundaryOrOwnershipUncertainty()
+    {
+        var stage = CreateFactoryFailure(new FakeEnumerator([[]]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("InvalidOperationException", result.Reason);
+        Assert.True(rollback.Succeeded);
+        Assert.Equal(RecoveryStatus.Success, new RecoveryManager(new RecoveryJournalStore(Path.Combine(_directory, "factory-failure-recovery.json"))).LoadJournal().Status);
+    }
+
+    [Fact]
+    public async Task SuccessfulCreationResolvesPnPAndSendsOneNeutralReport()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal(1, session.Trace.Count(t => t == "Neutral"));
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task HidHideInspectionFailureRollsBackAndLeavesNoOwnedRuntimeDevice()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide { Inspection = new(HidHideInspectionStatus.ConfigurationUnavailable, new HashSet<string>()) });
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, session.RemoveCalls);
+    }
+
+    [Fact]
+    public async Task PreExistingHidHideOutputBlockIsPreserved()
+    {
+        var session = new FakeCanonicalSession();
+        var hidHide = new FakeHidHide { Inspection = new(HidHideInspectionStatus.Available, new HashSet<string>(), ["owned"]) };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), hidHide);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("HidHideOutputAlreadyBlocked", result.Reason);
+        Assert.Contains("owned", hidHide.Inspection.HiddenDeviceEntries!);
+        Assert.Equal(1, session.RemoveCalls);
+    }
+
+    [Fact]
+    public async Task PnPTimeoutRollsBackAddDeviceSuccess()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], []]), new FakeHidHide(), TimeSpan.FromMilliseconds(1));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, session.RemoveCalls);
+    }
+
+    [Fact]
+    public async Task PnPTimeoutEmitsExactlyOneBoundedIdentityDiagnosticDumpNotOnePerPoll()
+    {
+        var session = new FakeCanonicalSession();
+        // ~100 polling iterations at the fixed 1ms poll interval used by the Create() helper.
+        var stage = Create(session, new FakeEnumerator([[], []]), new FakeHidHide(), TimeSpan.FromMilliseconds(100));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        var occurrences = log.Split("SteamDeckIdentityDiagnosticSummary").Length - 1;
+        Assert.Equal(1, occurrences);
+    }
+
+    [Fact]
+    public async Task IdentityFailureRollbackFailsWhenPotentialDeckNodeStaysPresentAfterRemoval()
+    {
+        // The usbip-win2 host ancestor record is missing from the snapshot, so identity resolution
+        // correctly fails closed (MissingUsbIpWin2Ancestor). But the 28DE:1205 node that appeared
+        // during the attempt does NOT actually disappear after RemoveDevice() in this fixture --
+        // rollback's absence verification must catch that using the exact InstanceId observed at
+        // failure time, not by re-running the same strict ownership predicate that already rejected
+        // it (which would trivially report "no matching candidate" -> false-positive absence).
+        var deck = Device("USB\\VID_28DE&PID_1205\\STAYS");
+        var enumerator = new DeckPresenceEnumerator(deck);
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, enumerator, new FakeHidHide(), TimeSpan.FromMilliseconds(50));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("VirtualDevicePnPStillPresent", result.Reason);
+        Assert.Equal(1, session.RemoveCalls);
+    }
+
+    [Fact]
+    public async Task IdentityFailureRollbackSucceedsAfterPotentialDeckNodeDisappears()
+    {
+        var deck = Device("USB\\VID_28DE&PID_1205\\DISAPPEARS");
+        var enumerator = new DeckPresenceEnumerator(deck);
+        var session = new FakeCanonicalSession { OnRemoveDeviceCalled = () => enumerator.DeviceRemoved = true };
+        var stage = Create(session, enumerator, new FakeHidHide(), TimeSpan.FromMilliseconds(50));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("Rollback=SteamDeckRemoved", result.Reason);
+        Assert.DoesNotContain("VirtualDevicePnPStillPresent", result.Reason);
+        Assert.Equal(1, session.RemoveCalls);
+    }
+
+    [Fact]
+    public async Task SuccessfulResolutionEmitsNoIdentityDiagnosticDump()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.DoesNotContain("SteamDeckIdentityDiagnosticSummary", log);
+        await stage.RollbackMutationAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task RecoveryIntentWriteFailureDoesNotEnterCreatingRollbackBoundary()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[]]), new FakeHidHide(), storeWriteFailsAfterSeed: true);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("VirtualDeviceRecoveryIntentFailed", result.Reason);
+        Assert.True(rollback.Succeeded);
+        // The intent write fails before Start()/Remove() are ever reached (no native mutation, no
+        // recovery boundary entered), but the lazily-created canonical session is still disposed by
+        // the Prepared-state rollback branch -- "Dispose" is the only trace entry.
+        Assert.Equal(["Dispose"], session.Trace);
+        Assert.Equal(0, session.RemoveCalls);
+    }
+
+    [Fact]
+    public async Task CallerCancellationDuringPnPWaitRollsBackIntentAndDevice()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], []]), new FakeHidHide(), TimeSpan.FromSeconds(5));
+        using var cancellation = new CancellationTokenSource();
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var creation = stage.ExecuteMutationAsync(cancellation.Token).AsTask();
+        Assert.True(SpinWait.SpinUntil(() => session.Trace.Contains("Start"), TimeSpan.FromSeconds(5)));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => creation);
+        Assert.Equal(1, session.RemoveCalls);
+        Assert.Equal(RecoveryStatus.NoRecoveryNeeded, new RecoveryManager(new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"))).LoadJournal().Status);
+    }
+
+    [Fact]
+    public async Task CancellationBoundaryStopsBeforeMutation()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[]]), new FakeHidHide());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await stage.PrepareMutationAsync(cancellation.Token));
+        Assert.Empty(session.Trace);
+    }
+
+    // Gordon's "BusCleanupFailureDoesNotBlockVerifiedDeviceMutationCompletion" (bus-removal failure
+    // reported as part of the legacy runtime's RemoveDevice() result must not block recovery mutation
+    // completion) does not apply here: the Deck stage has no legacy IViiperRuntime constructor, and
+    // on its single canonical session path a CompleteRuntimeCleanup() failure IS reported as a
+    // rollback failure by design (see CanonicalSteamDeckOutputStage.RollbackCoreAsync's
+    // "CanonicalSessionCleanupPending" branch) -- already covered by BusRemovalRetryDoesNotReplayDeviceRemoval
+    // and ServerCloseRetryDoesNotReplayDeviceRemoval above.
+
+    [Fact]
+    public async Task InactiveAndDoubleRollbackAreSuccessfulNoOps()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[]]), new FakeHidHide());
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+        Assert.True(rollback.Succeeded);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task LivePublisherStartsAfterNeutralAndStopsBeforeDeviceRemoval()
+    {
+        var session = new FakeCanonicalSession { BlockInput = true };
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        ticks.Tick(); await session.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var rollback = stage.RollbackMutationAsync(CancellationToken.None).AsTask();
+        await Task.Yield(); Assert.Equal(0, session.RemoveCalls);
+        session.ReleaseInput.TrySetResult();
+        Assert.True((await rollback).Succeeded);
+        Assert.True(session.Trace.IndexOf("Neutral") < session.Trace.IndexOf("Input"));
+        Assert.True(session.Trace.LastIndexOf("Input") < session.Trace.IndexOf("Remove"));
+    }
+
+    [Fact]
+    public async Task NeutralRejectionDoesNotStartPublisher()
+    {
+        var session = new FakeCanonicalSession { NeutralAccepted = false };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain("Input", session.Trace);
+    }
+
+    [Fact]
+    public async Task NeutralRejectionRetainsFailureOperationTimingAndLogsOnce()
+    {
+        var session = new FakeCanonicalSession { NeutralAccepted = false };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Equal(1, log.Split("Event=SteamDeckOutputCreationFailed", StringSplitOptions.None).Length - 1);
+        Assert.Contains("FailedOperation=NeutralReport", log);
+        Assert.Contains("NeutralReportMs=", log);
+        Assert.Equal(1, session.RemoveCalls);
+    }
+
+    [Fact]
+    public async Task RemoveDeviceFailureLogsRollbackTimingAndPreservesFailureResult()
+    {
+        var session = new FakeCanonicalSession { RemoveResult = false };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("VirtualDeviceRemoveFailed", result.Reason);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Equal(1, log.Split("Event=SteamDeckOutputRollbackFailed", StringSplitOptions.None).Length - 1);
+        Assert.Contains("Reason=VirtualDeviceRemoveFailed", log);
+        Assert.Contains("RemoveDeviceMs=", log);
+    }
+
+    [Fact]
+    public async Task LivePublisherFaultRequestsOneFailClosedNotification()
+    {
+        var session = new FakeCanonicalSession { InputAccepted = false };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var fault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stage.SetOutputFaultHandler(() => { fault.TrySetResult(); return ValueTask.CompletedTask; });
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        await fault.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    // --- Composite-device (28DE:1205 is a COMPOSITE USB device: keyboard + mouse + controller
+    // interfaces under one container) PnP identity resolution edge cases ------------------------
+
+    [Fact]
+    public async Task MultiplePnPNodesSharingSameContainerIdResolveToOneLogicalDeck()
+    {
+        var container = Guid.NewGuid();
+        var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
+        var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), keyboardLeaf, mouseLeaf], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task TwoDifferentContainerIdCandidateGroupsAreAmbiguous()
+    {
+        var containerA = Guid.NewGuid();
+        var containerB = Guid.NewGuid();
+        var leafA = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\A", containerA, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var leafB = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\B", containerB, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), leafA, leafB], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("AmbiguousVirtualDeviceIdentity", result.Reason);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task PreExistingDeckNodeIsNotMistakenForANewlyAppearedCandidate()
+    {
+        // A 28DE:1205 node already present BEFORE the mutation (e.g. a leftover node from a prior
+        // run) must not be treated as this attempt's newly created device -- the resolver only
+        // considers devices new since the `before` snapshot.
+        var preExisting = Device("USB\\VID_28DE&PID_1205\\PREEXISTING");
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[UsbIpHost(), preExisting], [UsbIpHost(), preExisting], [UsbIpHost(), preExisting]]), new FakeHidHide(), TimeSpan.FromMilliseconds(50));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task DeckNodeWithNoUsbIpWin2AncestorIsRejected()
+    {
+        // A 28DE:1205 node with the exact right VID/PID but with no usbip-win2 host ancestor in its
+        // device tree must be rejected, not resolved -- it cannot be an Addon-owned VIIPER device.
+        var orphan = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\ORPHAN", Guid.NewGuid(), null, [], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var session = new FakeCanonicalSession();
+        // Trailing [] entries: FakeEnumerator clamps to the last provided state once its poll count
+        // is exhausted, so rollback's own absence-verification polling (after the identity-resolution
+        // timeout above has already consumed several) settles on genuine absence rather than the
+        // orphan node appearing to persist forever.
+        var stage = Create(session, new FakeEnumerator([[], [orphan], [orphan], []]), new FakeHidHide(), TimeSpan.FromMilliseconds(50));
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task LateArrivingSiblingNodeAfterResolutionDoesNotCauseFalseStaleOrFalseResolvedDuringRollback()
+    {
+        // A sibling node under the same composite container appearing AFTER identity resolution has
+        // already completed must not confuse rollback's absence verification: rollback checks the
+        // exact InstanceIds that were resolved as owned, not "any 28DE:1205 node is now present" --
+        // so the resolved device itself is correctly confirmed absent (the removed InstanceId is
+        // gone) rather than "still present" just because a different node with the same VID/PID is
+        // now on the bus.
+        var container = Guid.NewGuid();
+        var resolvedLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\RESOLVED", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var lateSibling = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\LATE_SIBLING", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var session = new FakeCanonicalSession();
+        // Resolution sees only `resolvedLeaf`; the late sibling only shows up afterward, during
+        // rollback's own re-enumeration calls (absence check + ownership-uncertainty clear).
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), resolvedLeaf], [UsbIpHost(), lateSibling], [UsbIpHost(), lateSibling], [UsbIpHost(), lateSibling]]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.True(result.Succeeded, result.Reason);
+
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+        // Absence verification (the specific resolved InstanceId is gone) correctly succeeds -- not a
+        // false "stale node still present". But ownership-uncertainty clearing is a *separate*,
+        // deliberately stricter, fail-closed check: it does not treat a same-ContainerId sibling as
+        // automatically "the same logical device" -- a different, unverified InstanceId matching the
+        // policy is conservatively treated as an unrelated device that might still need the same
+        // ownership caution, and blocks the clear rather than risk a false "safe" resolution. That is
+        // the "handled safely" outcome here, not a bug: rollback fails closed instead of silently
+        // reporting success while an unidentified matching node is still present.
+        Assert.False(rollback.Succeeded);
+        Assert.Equal("UnrelatedMatchingVirtualDeviceStillPresent", rollback.Reason);
+        Assert.Equal(1, session.RemoveCalls);
+    }
+
+    private CanonicalSteamDeckOutputStage Create(FakeCanonicalSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null)
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"));
+        var recovery = new RecoveryManager(storeWriteFailsAfterSeed ? new FailingReplaceStore(store) : store);
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, _session, DateTimeOffset.UtcNow, null, new());
+        File.WriteAllText(Path.Combine(_directory, "recovery.json"), System.Text.Json.JsonSerializer.Serialize(journal));
+        return new(() => session, enumerator, new(new SteamDeckVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks);
+    }
+
+    private CanonicalSteamDeckOutputStage CreateFactoryFailure(IControllerDeviceEnumerator enumerator, FakeHidHide hid)
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "factory-failure-recovery.json");
+        var store = new RecoveryJournalStore(path);
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, _session, DateTimeOffset.UtcNow, null, new());
+        File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(journal));
+        return new(() => throw new InvalidOperationException("canonical DLL load failed"), enumerator, new(new SteamDeckVirtualDeviceIdentityPolicy()), new(), new RecoveryManager(store), () => _session, hid, new FakeSnapshot(), TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(1));
+    }
+
+    private const string UsbIpHostInstanceId = "ROOT\\USB\\0000";
+    private static ControllerDeviceInfo UsbIpHost() => new(UsbIpHostInstanceId, null, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "System", null, "usbip2_ude", null, null, true);
+    private static ControllerDeviceInfo Device(string id) => new(id, Guid.Empty, null, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+
+    public CanonicalSteamDeckOutputStageTests()
+    {
+        Directory.CreateDirectory(_directory);
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+    }
+
+    public void Dispose()
+    {
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = null;
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+    }
+
+    private sealed class FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states) : IControllerDeviceEnumerator
+    { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Count - 1)]; }
+
+    // Returns [] for the very first call (the "before" snapshot) and thereafter either [deck] or []
+    // depending on DeviceRemoved, regardless of how many times WaitForIdentityAsync polls.
+    private sealed class DeckPresenceEnumerator(ControllerDeviceInfo deck) : IControllerDeviceEnumerator
+    {
+        private bool _beforeCallConsumed;
+        public bool DeviceRemoved { get; set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            if (!_beforeCallConsumed) { _beforeCallConsumed = true; return []; }
+            return DeviceRemoved ? [] : [deck];
+        }
+    }
+
+    private sealed class FakeCanonicalSession : ICanonicalSteamDeckSession
+    {
+        public List<string> Trace { get; } = [];
+        public CanonicalPendingCleanupPhase? CleanupFailure { get; init; }
+        public bool BusRemoved { get; init; } = true;
+        public bool NeutralAccepted { get; init; } = true;
+        public bool InputAccepted { get; init; } = true;
+        public bool RemoveResult { get; init; } = true;
+        public bool BlockInput { get; init; }
+        public Action? OnRemoveDeviceCalled;
+        public int RemoveCalls { get; private set; }
+        public TaskCompletionSource InputEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseInput { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public CanonicalSteamDeckSessionState State { get; private set; } = CanonicalSteamDeckSessionState.Clean;
+        public CanonicalPendingCleanupPhase PendingCleanupPhase { get; private set; }
+        public uint? BusId => State == CanonicalSteamDeckSessionState.Clean ? null : 1u;
+        public uint? LogicalDeviceId => State == CanonicalSteamDeckSessionState.Clean ? null : 7u;
+
+        public bool Start() { Trace.Add("Start"); State = CanonicalSteamDeckSessionState.Active; return true; }
+
+        // The stage calls SetNeutral() directly for its one-time neutral report before starting the
+        // publisher; the publisher (constructed with this session as its sink) calls SetState()
+        // directly for every live tick thereafter. These are kept as genuinely distinct code paths
+        // here (rather than SetNeutral() delegating to SetState(default)) so tests can tell the two
+        // apart even though a real all-neutral ControllerState maps to a mapped state that is
+        // byte-identical to default(SteamDeckDeviceState).
+        public bool SetState(SteamDeckDeviceState state)
+        {
+            Trace.Add("Input");
+            InputEntered.TrySetResult();
+            if (BlockInput) ReleaseInput.Task.GetAwaiter().GetResult();
+            return InputAccepted;
+        }
+
+        public bool SetNeutral()
+        {
+            Trace.Add("Neutral");
+            return NeutralAccepted;
+        }
+
+        public bool RemoveDevice()
+        {
+            Trace.Add("Remove");
+            RemoveCalls++;
+            OnRemoveDeviceCalled?.Invoke();
+            // A known/classified remove failure (RemoveResult=false) leaves State unchanged (still
+            // Active) so the stage classifies it as "VirtualDeviceRemoveFailed" rather than
+            // "CanonicalSessionUnsafe" -- distinct from an actually-Unsafe session, which no test
+            // fixture here needs to simulate.
+            if (!RemoveResult) return false;
+            State = CanonicalSteamDeckSessionState.DeviceRemoved;
+            return true;
+        }
+
+        public bool RetryPendingCleanup()
+        {
+            Trace.Add($"Retry:{PendingCleanupPhase}");
+            PendingCleanupPhase = CanonicalPendingCleanupPhase.None;
+            State = CanonicalSteamDeckSessionState.Clean;
+            return true;
+        }
+
+        public bool CompleteRuntimeCleanup()
+        {
+            Trace.Add("CompleteCleanup");
+            if (!BusRemoved || CleanupFailure is { } failure)
+            {
+                PendingCleanupPhase = CleanupFailure ?? CanonicalPendingCleanupPhase.BusRemoval;
+                State = CanonicalSteamDeckSessionState.CleanupPending;
+                return false;
+            }
+            State = CanonicalSteamDeckSessionState.Clean;
+            return true;
+        }
+
+        public void Dispose() => Trace.Add("Dispose");
+    }
+
+    private sealed class FakeSnapshot : IControllerStateSnapshotSource
+    { public ControllerState LatestState => new(new AuxiliaryButtonState([false, false])); }
+
+    private sealed class ManualTicks : IInputReportTickSource
+    {
+        private readonly Queue<TaskCompletionSource<bool>> _waiters = new();
+        public ValueTask<bool> WaitForTickAsync(CancellationToken token)
+        { var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously); _waiters.Enqueue(waiter); token.Register(() => waiter.TrySetCanceled(token)); return new(waiter.Task); }
+        public void Tick() { Assert.NotEmpty(_waiters); _waiters.Dequeue().TrySetResult(true); }
+    }
+
+    private sealed class FakeHidHide : IHidHideClient
+    { public HidHideInspection Inspection { get; init; } = new(HidHideInspectionStatus.Available, new HashSet<string>()); public HidHideInspection Inspect() => Inspection; public bool AddApplication(string p) => true; public bool RemoveApplication(string p) => true; public bool AddHiddenDevice(string p) => true; public bool RemoveHiddenDevice(string p) => true; }
+
+    private sealed class FailingReplaceStore(RecoveryJournalStore inner) : IRecoveryJournalStore
+    {
+        public string JournalPath => inner.JournalPath;
+        public bool Exists() => inner.Exists();
+        public string ReadText() => inner.ReadText();
+        public void WriteNew(RecoveryJournal value) => inner.WriteNew(value);
+        public void ReplaceExisting(RecoveryJournal value) => throw new IOException("replace failed");
+        public void Delete() => inner.Delete();
+    }
+}
