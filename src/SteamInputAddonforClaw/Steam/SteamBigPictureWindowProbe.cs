@@ -15,6 +15,14 @@ internal sealed record WindowCandidateResult(bool IsCandidate, bool IsReliable, 
 internal readonly record struct BigPictureCandidateInspection(bool IsCandidate, bool IsReliable, uint ProcessId);
 
 /// <summary>
+/// Result of re-validating an already-authorized tracked HWND's lifetime/ownership. Deliberately lighter
+/// than <see cref="BigPictureCandidateInspection"/>: title/class are discovery-time evidence only, so an
+/// already-tracked window must not be required to still match them (a NAMECHANGE during Steam's startup
+/// churn must not un-authorize it).
+/// </summary>
+internal readonly record struct BigPictureTrackedWindowInspection(bool StillValid, bool IsReliable);
+
+/// <summary>
 /// Result of a one-shot EnumWindows scan for a BPM candidate. Used only for startup snapshot, end-of-protection
 /// reconciliation, and tracked-window replacement search -- never on a recurring/periodic basis.
 /// </summary>
@@ -41,6 +49,12 @@ internal interface ISteamBigPictureWindowProbe
     /// is returned; otherwise the first valid candidate found is returned.
     /// </summary>
     BigPictureScanResult ScanForCandidate(IntPtr preferredHwnd);
+
+    /// <summary>
+    /// Re-validates an already-tracked HWND's lifetime and ownership only -- no EnumWindows call, and no
+    /// title/class re-check (see <see cref="BigPictureTrackedWindowInspection"/>).
+    /// </summary>
+    BigPictureTrackedWindowInspection InspectTrackedWindow(IntPtr window, uint expectedProcessId);
 }
 
 internal sealed class SteamBigPictureWindowProbe : ISteamBigPictureWindowProbe
@@ -111,6 +125,17 @@ internal sealed class SteamBigPictureWindowProbe : ISteamBigPictureWindowProbe
         if (!titleResult.Value.StartsWith(TitlePrefix, StringComparison.OrdinalIgnoreCase)) return new(false, true, 0);
 
         return new(true, true, candidate.ProcessId);
+    }
+
+    public BigPictureTrackedWindowInspection InspectTrackedWindow(IntPtr window, uint expectedProcessId)
+    {
+        // Deliberately skips the class/title re-check: those are discovery-time evidence only, and Steam
+        // is free to rename the already-authorized BPM window during its startup churn.
+        var candidate = _candidateReader(window);
+        if (!candidate.IsReliable) return new(false, false);
+        if (!candidate.IsCandidate) return new(false, true); // window gone, or no longer owned by steamwebhelper
+        if (expectedProcessId != 0 && candidate.ProcessId != expectedProcessId) return new(false, true); // HWND reused by a different process
+        return new(true, true);
     }
 
     public BigPictureScanResult ScanForCandidate(IntPtr preferredHwnd)
@@ -252,25 +277,30 @@ internal sealed class WindowsSteamBigPictureEventHook : ISteamBigPictureEventHoo
     [DllImport("user32.dll")] private static extern bool UnhookWinEvent(IntPtr hook);
 }
 
-internal enum BigPictureSessionState { Inactive, EntryProtected, Active, Reacquiring }
+internal enum BigPictureSessionState { Inactive, EntryProtected, Active, Reconciling }
 
 /// <summary>
 /// Event-driven BPM (Steam Big Picture) session tracker.
 ///
-/// State machine: INACTIVE -> ENTRY_PROTECTED -> ACTIVE -> INACTIVE. Externally only the boolean
-/// IsActive is exposed (true for ENTRY_PROTECTED, ACTIVE, and REACQUIRING alike). A newly discovered
-/// candidate HWND authorizes a session and activates it immediately; the following 3-second
-/// ENTRY_PROTECTED window absorbs Steam's known startup window churn (the tracked HWND can be replaced
-/// any number of times without publishing an inactive transition). Once ACTIVE, the session tracks the
-/// exact HWND's lifetime -- HIDE/SHOW/NAMECHANGE/foreground changes are irrelevant; only destruction of
-/// the tracked HWND (with no replacement found) ends the session.
+/// State machine: INACTIVE -> ENTRY_PROTECTED -> ACTIVE -> INACTIVE, with a bounded RECONCILING detour out
+/// of ACTIVE. Externally only the boolean IsActive is exposed (true for ENTRY_PROTECTED, ACTIVE, and
+/// RECONCILING alike). A newly discovered candidate HWND authorizes a session and activates it
+/// immediately; the following 3-second ENTRY_PROTECTED window absorbs Steam's known startup window churn
+/// (the tracked HWND can be replaced any number of times without publishing an inactive transition). At
+/// the end of that window the tracked HWND's lifetime/ownership is re-validated directly -- title/class
+/// are discovery-time evidence only, so a NAMECHANGE during startup does not un-authorize the already-
+/// tracked window; a full EnumWindows scan is only used as a fallback when the tracked window itself can't
+/// be confirmed.
 ///
-/// REACQUIRING is entered instead of ending the session whenever a *transient* EnumWindows failure (not
-/// "no candidate found", an actual enumeration failure) leaves the watcher unable to confirm a specific
-/// HWND -- either at the end-of-protection reconciliation or after the tracked ACTIVE HWND was destroyed.
-/// The session stays externally active but relinquishes exact-HWND authority; the next valid BPM WinEvent
-/// re-anchors it straight back to ACTIVE. This keeps a transient probe failure from either getting stuck
-/// forever in ENTRY_PROTECTED or staying ACTIVE while tracking a HWND that is already gone.
+/// Once ACTIVE, the session tracks the exact HWND's lifetime -- HIDE/SHOW/NAMECHANGE/foreground changes
+/// are irrelevant. Destruction of the tracked HWND immediately relinquishes exact-HWND authority
+/// (RECONCILING, still externally active) *before* the one-shot EnumWindows replacement search runs, so a
+/// replacement CREATE WinEvent racing that search is still consumed rather than dropped (ACTIVE ignores
+/// discovery events; RECONCILING does not). RECONCILING is bounded to that single search: if it doesn't
+/// establish a replacement (found none, or the scan itself failed) the session ends -- an indefinite
+/// "waiting for some future WinEvent that may never come" state is deliberately avoided, since the tracked
+/// HWND's destruction is already strong termination evidence. A genuine reopen immediately afterward starts
+/// a brand-new session at no extra cost.
 ///
 /// No polling: all work is triggered by WinEvents, plus a single one-shot delayed callback per session for
 /// the startup protection window.
@@ -364,15 +394,16 @@ internal sealed class SteamBigPictureWatcher : IDisposable
                     ("InitialHwnd", hwnd), ("Pid", inspection.ProcessId), ("State", "EntryProtected"));
                 ScheduleProtectionTimer_NoLock(generation);
             }
-            else if (_state == BigPictureSessionState.Reacquiring)
+            else if (_state == BigPictureSessionState.Reconciling)
             {
-                // Lost exact-HWND authority earlier (a transient scan failure); a valid candidate here
-                // re-anchors the still-active session directly back to ACTIVE, no new protection window.
+                // The tracked HWND was just destroyed and a bounded replacement search is in flight (or
+                // about to run); this WinEvent races it and wins -- re-anchor immediately so the in-flight
+                // scan's result (checked against _state below) gets discarded rather than clobbering this.
                 _trackedHwnd = hwnd;
                 _trackedPid = inspection.ProcessId;
                 _state = BigPictureSessionState.Active;
-                Diagnostics.AppLog.Info("Steam.BigPicture", "Steam Big Picture tracked window re-acquired.",
-                    ("Hwnd", hwnd), ("Pid", inspection.ProcessId), ("Reason", "ReacquiredAfterTransientScanFailure"));
+                Diagnostics.AppLog.Info("Steam.BigPicture", "Steam Big Picture tracked window replaced.",
+                    ("CurrentHwnd", hwnd), ("Pid", inspection.ProcessId), ("Reason", "ReplacementObservedDuringReconciliation"));
             }
             else if (_trackedHwnd != hwnd)
             {
@@ -444,44 +475,42 @@ internal sealed class SteamBigPictureWatcher : IDisposable
     private void ProtectionElapsed(int generation)
     {
         IntPtr trackedHwndSnapshot;
+        uint trackedPidSnapshot;
         lock (_sync)
         {
             if (_disposed || !_started || _generation != generation || _state != BigPictureSessionState.EntryProtected) return;
             trackedHwndSnapshot = _trackedHwnd;
+            trackedPidSnapshot = _trackedPid;
         }
 
-        var scan = _probe.ScanForCandidate(trackedHwndSnapshot);
+        // Fast path: the tracked HWND (however many times it was transferred during startup churn) is
+        // re-validated directly by lifetime/ownership only -- no title/class re-check, and no EnumWindows
+        // call at all in the common case. A full scan is only a fallback for discovering a *different*
+        // candidate when the tracked one can no longer be confirmed.
+        var resolved = trackedHwndSnapshot != IntPtr.Zero
+            ? ResolveTrackedOrFallback(trackedHwndSnapshot, trackedPidSnapshot)
+            : _probe.ScanForCandidate(IntPtr.Zero);
         var raiseInactive = false;
 
         lock (_sync)
         {
             if (_disposed || !_started || _generation != generation || _state != BigPictureSessionState.EntryProtected) return;
 
-            if (scan.Found)
+            if (resolved.Found)
             {
                 var rebindCount = _rebindCount;
                 var elapsedMs = (long)(DateTimeOffset.UtcNow - _sessionStartedAt).TotalMilliseconds;
-                _trackedHwnd = scan.Hwnd;
-                _trackedPid = scan.ProcessId;
+                _trackedHwnd = resolved.Hwnd;
+                _trackedPid = resolved.ProcessId;
                 _state = BigPictureSessionState.Active;
                 Diagnostics.AppLog.Info("Steam.BigPicture", "Steam Big Picture startup stabilized.",
-                    ("InitialHwnd", _initialHwnd), ("FinalHwnd", scan.Hwnd), ("RebindCount", rebindCount), ("ElapsedMs", elapsedMs));
-            }
-            else if (!scan.EnumerationSucceeded)
-            {
-                // Transient full-enumeration failure on an already-authorized session must not revoke it,
-                // but ENTRY_PROTECTED cannot be held onto forever without a timer to re-check it. Drop to
-                // REACQUIRING instead: still externally active, no stale exact-HWND authority, and the next
-                // valid BPM WinEvent re-anchors it straight back to ACTIVE without any polling.
-                _state = BigPictureSessionState.Reacquiring;
-                _trackedHwnd = IntPtr.Zero;
-                Diagnostics.AppLog.Warn("Steam.BigPicture", "Steam Big Picture startup reconciliation scan failed; reacquiring.",
-                    null, ("PreviousHwnd", trackedHwndSnapshot));
+                    ("InitialHwnd", _initialHwnd), ("FinalHwnd", resolved.Hwnd), ("RebindCount", rebindCount), ("ElapsedMs", elapsedMs));
             }
             else
             {
-                // No candidate at all at the protection boundary: conservative single transition to
-                // inactive, not repeated churn (there is no timer to repeat -- this fires exactly once).
+                // Bounded: whether nothing was found or the fallback scan itself failed, the protection
+                // window only gets this one resolution attempt -- no indefinite ambiguous-active wait for a
+                // WinEvent that may never come. A genuine reopen right afterward starts a fresh session.
                 var elapsedMs = (long)(DateTimeOffset.UtcNow - _sessionStartedAt).TotalMilliseconds;
                 _state = BigPictureSessionState.Inactive;
                 _trackedHwnd = IntPtr.Zero;
@@ -495,65 +524,71 @@ internal sealed class SteamBigPictureWatcher : IDisposable
         if (raiseInactive) StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    private BigPictureScanResult ResolveTrackedOrFallback(IntPtr trackedHwnd, uint trackedPid)
+    {
+        var tracked = _probe.InspectTrackedWindow(trackedHwnd, trackedPid);
+        if (tracked.StillValid && tracked.IsReliable) return new(true, trackedHwnd, trackedPid, true);
+        return _probe.ScanForCandidate(IntPtr.Zero);
+    }
+
     private void HandleDestroy(IntPtr hwnd)
     {
-        BigPictureSessionState state;
         int generation;
+        uint previousPid;
         lock (_sync)
         {
             if (_disposed || !_started) return;
-            state = _state;
+            if (_state == BigPictureSessionState.Inactive) return;
+            if (hwnd != _trackedHwnd) return; // unrelated HWND destroyed (or nothing currently tracked) -- ignore
             generation = _generation;
-            if (state == BigPictureSessionState.Inactive) return;
-            if (hwnd != _trackedHwnd) return; // unrelated HWND destroyed -- ignore
 
-            if (state == BigPictureSessionState.EntryProtected)
+            if (_state == BigPictureSessionState.EntryProtected)
             {
                 // Sticky session, transferable HWND: destruction during startup churn is not termination.
                 // Clear the tracked HWND; either a later discovery event re-anchors it, or the end-of-
-                // protection reconciliation scan finds a replacement (or, conservatively, ends the session).
+                // protection reconciliation resolves it (see ProtectionElapsed).
                 _trackedHwnd = IntPtr.Zero;
                 return;
             }
+
+            // state == Active: tracked HWND destroyed. Strong termination evidence unless a replacement
+            // exists. Relinquish exact-HWND authority *before* the replacement scan runs: ACTIVE ignores
+            // discovery WinEvents, so a replacement CREATE racing the scan would otherwise be dropped.
+            // RECONCILING does not ignore them (see HandleDiscoveryEvent), so the race is resolved by
+            // whichever completes first, and the generation/state re-check below discards a stale scan
+            // result if a WinEvent already won.
+            previousPid = _trackedPid;
+            _trackedHwnd = IntPtr.Zero;
+            _state = BigPictureSessionState.Reconciling;
         }
 
-        // state == Active: tracked HWND destroyed. Strong termination evidence unless a replacement exists.
         var scan = _probe.ScanForCandidate(IntPtr.Zero);
         var raiseInactive = false;
 
         lock (_sync)
         {
-            if (_disposed || !_started || _generation != generation || _state != BigPictureSessionState.Active) return;
+            if (_disposed || !_started || _generation != generation || _state != BigPictureSessionState.Reconciling) return;
 
             if (scan.Found)
             {
-                var previousPid = _trackedPid;
                 _trackedHwnd = scan.Hwnd;
                 _trackedPid = scan.ProcessId;
+                _state = BigPictureSessionState.Active;
                 Diagnostics.AppLog.Info("Steam.BigPicture", "Steam Big Picture tracked window replaced.",
                     ("PreviousHwnd", hwnd), ("PreviousPid", previousPid), ("CurrentHwnd", scan.Hwnd), ("CurrentPid", scan.ProcessId), ("Reason", "TrackedWindowDestroyed"));
             }
-            else if (!scan.EnumerationSucceeded)
-            {
-                // Transient failure on an already-authorized session must not revoke it -- but the tracked
-                // HWND is confirmed gone, so ACTIVE cannot keep claiming exact-HWND authority over it either
-                // (ACTIVE ignores all non-destroy discovery events, so it would never recover). Drop to
-                // REACQUIRING: still externally active, tracked HWND cleared, and the next valid BPM
-                // WinEvent re-anchors it back to ACTIVE without polling.
-                _state = BigPictureSessionState.Reacquiring;
-                _trackedHwnd = IntPtr.Zero;
-                Diagnostics.AppLog.Warn("Steam.BigPicture", "Steam Big Picture replacement scan failed after tracked window destruction; reacquiring.",
-                    null, ("PreviousHwnd", hwnd), ("Pid", _trackedPid));
-            }
             else
             {
+                // Bounded: whether nothing was found or the scan itself failed, this is the one and only
+                // replacement attempt for this destruction -- no indefinite ambiguous-active wait for a
+                // WinEvent that may never come. The tracked HWND's destruction is already strong
+                // termination evidence; a genuine reopen right afterward starts a brand-new session.
                 var durationMs = (long)(DateTimeOffset.UtcNow - _sessionStartedAt).TotalMilliseconds;
                 _state = BigPictureSessionState.Inactive;
-                _trackedHwnd = IntPtr.Zero;
                 _generation++;
                 raiseInactive = true;
                 Diagnostics.AppLog.Info("Steam.BigPicture", "Steam Big Picture session ended.",
-                    ("Hwnd", hwnd), ("Pid", _trackedPid), ("Reason", "TrackedWindowDestroyed"), ("DurationMs", durationMs));
+                    ("Hwnd", hwnd), ("Pid", previousPid), ("Reason", "TrackedWindowDestroyed"), ("DurationMs", durationMs));
             }
         }
 

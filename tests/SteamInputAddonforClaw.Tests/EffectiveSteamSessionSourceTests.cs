@@ -308,6 +308,8 @@ public sealed class EffectiveSteamSessionSourceTests
             => window == FakeBigPictureHwnd && _active ? new(true, true, 111u) : new(false, true, 0);
         public BigPictureScanResult ScanForCandidate(IntPtr preferredHwnd)
             => _active ? new(true, FakeBigPictureHwnd, 111u, true) : new(false, IntPtr.Zero, 0, true);
+        public BigPictureTrackedWindowInspection InspectTrackedWindow(IntPtr window, uint expectedProcessId)
+            => window == FakeBigPictureHwnd && _active ? new(true, true) : new(false, true);
         public void SetActive(bool active) => _active = active;
     }
 
