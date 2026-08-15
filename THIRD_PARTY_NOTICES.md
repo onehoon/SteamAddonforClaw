@@ -6,11 +6,23 @@ This file lists third-party software distributed with, linked by, or referenced 
 
 The following are the direct NuGet dependencies currently declared by `src/SteamInputAddonforClaw/SteamInputAddonforClaw.csproj`.
 
+### CommunityToolkit.WinUI.Controls.SettingsControls
+
+- Version: 8.2.250402
+- License: MIT
+- Upstream: https://github.com/CommunityToolkit/Windows
+
 ### Microsoft.WindowsAppSDK
 
 - Version: 2.3.1
 - License: Microsoft Software License Terms (the package's `license.txt`)
 - Upstream: https://github.com/microsoft/WindowsAppSDK
+
+### System.Management
+
+- Version: 10.0.0
+- License: MIT
+- Upstream: https://github.com/dotnet/runtime
 
 ### Velopack
 
@@ -69,7 +81,7 @@ No DS4Windows source code is currently incorporated. Any direct reuse requires a
 - Copyright: 2025 enterTheVoidCode and ClawTweaks contributors
 - License: GNU AGPL v3
 
-ClawTweaks is a compatibility reference only. It is not a runtime dependency: this project does not import its source, depend on private IPC or internals, modify ClawTweaks, or steal or mutate ClawTweaks-owned virtual devices.
+ClawTweaks is a compatibility and technical reference only. It is not a runtime dependency: this project does not import its source, depend on ClawTweaks-specific internal APIs, modify ClawTweaks, or steal or mutate ClawTweaks-owned virtual devices. The projects are independently implemented.
 
 ## usbip-win2
 
