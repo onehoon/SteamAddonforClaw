@@ -187,6 +187,9 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         Assert.Contains("MaxPublishWorkMs=0", heartbeat);
         Assert.Contains("WakeOver4_25MsCount=0", heartbeat);
         Assert.Contains("WakeOver5MsCount=0", heartbeat);
+        Assert.Contains("AverageWakeLatenessMs=0", heartbeat);
+        Assert.Contains("MaxWakeLatenessMs=0", heartbeat);
+        Assert.Contains("SkippedDeadlineCount=0", heartbeat);
     }
 
     [Fact]
@@ -322,6 +325,59 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task TimingDiagnostics_WakeLatenessAccumulatesAverageAndMax()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var fakeNow = 0L;
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow);
+        publisher.Start();
+
+        var msToTicks = Stopwatch.Frequency / 1000.0;
+        // Two wakes, each ~0.3ms late relative to its own scheduled deadline: deadline 4.0ms/wake 4.3ms,
+        // then deadline 8.0ms/wake 8.29ms. Average lateness = (0.3+0.29)/2 = 0.295ms, max = 0.3ms.
+        publisher.RecordTimerWakeForTests((long)(4.3 * msToTicks));
+        publisher.RecordWakeLatenessForTests((long)(4.3 * msToTicks), (long)(4.0 * msToTicks));
+        publisher.RecordTimerWakeForTests((long)(8.29 * msToTicks));
+        publisher.RecordWakeLatenessForTests((long)(8.29 * msToTicks), (long)(8.0 * msToTicks));
+
+        fakeNow = Stopwatch.Frequency + 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var heartbeat = Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("publisher heartbeat"));
+        Assert.Contains("TimerWakeCount=2", heartbeat);
+        AssertFieldInRange(heartbeat, "AverageWakeLatenessMs", 0.28, 0.31);
+        AssertFieldInRange(heartbeat, "MaxWakeLatenessMs", 0.29, 0.31);
+    }
+
+    [Fact]
+    public async Task TimingDiagnostics_WakeLatenessClampsNegativeToZero()
+    {
+        // A wake can be observed at or fractionally before its own scheduled deadline depending on
+        // clock/timer granularity; that must report as zero lateness, not a negative value.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var fakeNow = 0L;
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow);
+        publisher.Start();
+
+        var msToTicks = Stopwatch.Frequency / 1000.0;
+        publisher.RecordTimerWakeForTests((long)(3.9 * msToTicks));
+        publisher.RecordWakeLatenessForTests((long)(3.9 * msToTicks), (long)(4.0 * msToTicks)); // "early" by 0.1ms
+
+        fakeNow = Stopwatch.Frequency + 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var heartbeat = Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("publisher heartbeat"));
+        Assert.Contains("AverageWakeLatenessMs=0", heartbeat);
+        Assert.Contains("MaxWakeLatenessMs=0", heartbeat);
+    }
+
+    [Fact]
     public async Task TimingDiagnostics_ResetAfterHeartbeatDoesNotCarryIntervalCountsOrSumsIntoTheNextWindow()
     {
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
@@ -335,6 +391,7 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         publisher.RecordTimerWakeForTests((long)(4 * msToTicks));
         publisher.RecordWaitBlockedForTests(0, (long)(4 * msToTicks));
         publisher.RecordPublishWorkForTests(0, (long)(1 * msToTicks));
+        publisher.RecordWakeLatenessForTests((long)(4 * msToTicks), (long)(3.5 * msToTicks));
 
         fakeNow = Stopwatch.Frequency + 1;
         await ticks.TickAsync(); await sink.WaitForCountAsync(1); // first heartbeat fires here
@@ -358,6 +415,9 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         Assert.Contains("MaxWaitBlockedMs=0", secondHeartbeat);
         Assert.Contains("AveragePublishWorkMs=0", secondHeartbeat);
         Assert.Contains("MaxPublishWorkMs=0", secondHeartbeat);
+        Assert.Contains("AverageWakeLatenessMs=0", secondHeartbeat);
+        Assert.Contains("MaxWakeLatenessMs=0", secondHeartbeat);
+        Assert.Contains("SkippedDeadlineCount=0", secondHeartbeat);
     }
 
     [Fact]
@@ -770,6 +830,50 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         {
             await publisher.StopAsync();
         }
+    }
+
+    [Fact]
+    public async Task Production_worker_reports_fault_and_stops_on_a_runtime_rearm_failure_without_a_fallback_scheduler()
+    {
+        // A real SetWaitableTimerEx re-arm failure after the timer was already successfully created and
+        // armed once (e.g. an OS resource exhaustion mid-run) must report the existing publisher fault
+        // and stop the worker -- not fall back to Task.Delay, a different timer, or silently keep running
+        // on a stale arm. Uses the ArmForDeadlineOverrideForTests seam: it performs the real arm for the
+        // very first call (so the worker starts up and gets one real, deterministic wake and publish),
+        // then simulates the native call failing on every arm after that.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var faults = 0;
+        var faultObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink, fault: _ => { Interlocked.Increment(ref faults); faultObserved.TrySetResult(true); });
+        var armCount = 0;
+        publisher.ArmForDeadlineOverrideForTests = (timer, deadlineTicks, nowTicks) =>
+        {
+            var count = Interlocked.Increment(ref armCount);
+            if (count == 1)
+            {
+                var remaining = deadlineTicks - nowTicks;
+                var due100ns = CanonicalPublisherDeadlineMath.ConvertToRelativeDueTime100ns(remaining, Stopwatch.Frequency);
+                timer.ArmRelative(TimeSpan.FromTicks(due100ns));
+                return;
+            }
+            throw new InvalidOperationException("simulated SetWaitableTimerEx re-arm failure");
+        };
+
+        publisher.Start();
+        try
+        {
+            await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+
+        Assert.Equal(1, faults);
+        Assert.False(publisher.IsRunning);
+        // Exactly one publish from the single real arm -- no fallback scheduler kept it running.
+        Assert.Equal(1, sink.Count);
     }
 
     private sealed class BlockingFirstCallSink(ManualResetEventSlim firstCallBlocked, ManualResetEventSlim releaseFirstCall) : ICanonicalSteamControllerStateSink

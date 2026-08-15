@@ -7,18 +7,42 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
 /// Publishes <see cref="IControllerStateSnapshotSource.LatestState"/> to the canonical VIIPER Gordon sink
-/// on a fixed period. Real-hardware M5 diagnostics showed the previous Task.Delay-based tick source only
-/// achieved ~83 Hz against a 250 Hz target (Gordon expects a steady ~4 ms cadence), so production now
-/// drives this from a dedicated worker thread waiting on a real Windows high-resolution periodic timer
-/// (<see cref="WindowsHighResolutionPeriodicTimer"/>) instead of an awaited delay -- the wait and the
-/// SetState call happen on the same thread, with no thread-pool continuation in between.
+/// on a monotonic 4ms logical schedule. Real-hardware M5 diagnostics showed the original Task.Delay-based
+/// tick source only achieved ~83 Hz against a 250 Hz target (Gordon expects a steady ~4 ms cadence), so
+/// production drives this from a dedicated worker thread waiting on a real Windows high-resolution
+/// waitable timer instead of an awaited delay -- the wait and the SetState call happen on the same
+/// thread, with no thread-pool continuation in between.
 /// </summary>
 /// <remarks>
+/// <para>
+/// An earlier revision of this publisher used a periodic timer (re-arming itself automatically every 4ms
+/// via <c>lPeriod</c>). Real MSI Claw hardware testing (Addon 0.1.71, PR #156 timing-decomposition
+/// diagnostics) showed that design stabilizing at ~230.8 Hz instead of ~250 Hz: average wake-to-wake
+/// interval ~4.3324ms, average wait-blocked time ~4.2885ms, average publish work only ~0.04345ms (so
+/// <c>SetState</c> was not the bottleneck), and 64.9% of wakes exceeded 4.25ms. A periodic timer's next
+/// fire time is always "one period after the timer last actually fired," so any per-wake lateness
+/// against the *original* schedule accumulates directly into the observed cadence instead of being
+/// self-correcting.
+/// </para>
+/// <para>
+/// Production now instead tracks a monotonic absolute logical deadline (in
+/// <see cref="Stopwatch"/> ticks: deadline₁ = origin + 4ms, deadline₂ = origin + 8ms, ...) and, after
+/// each publish, re-arms a <see cref="WindowsHighResolutionOneShotTimer"/> for only the time remaining
+/// until the *next* logical deadline -- not for a full 4ms again. A wake that lands 0.3ms late still
+/// only gets a 3.7ms wait until the next deadline, so lateness against the fixed 4/8/12ms... grid does
+/// not compound across wakes, even though each individual wake may still land slightly after its target
+/// (see <c>AverageWakeLatenessMs</c> in the heartbeat below -- staying near-constant while
+/// <c>AverageWakeToWakeMs</c> returns close to 4.0ms is the expected successful result, not a
+/// contradiction).
+/// </para>
+/// <para>
 /// The existing <see cref="IInputReportTickSource"/> async seam is kept for deterministic tests only: when
 /// a tick source is supplied explicitly (as every existing test does), <see cref="Start"/> uses the
-/// original async loop against it. Production composition never supplies one, so it always takes the
-/// dedicated-thread/high-resolution-timer path. Both paths funnel through the same
-/// <see cref="PublishCurrentStateOnce"/> so mapping, diagnostics, and fault handling are not duplicated.
+/// original async loop against it -- the deadline scheduler is entirely unused on that path. Production
+/// composition never supplies one, so it always takes the dedicated-thread/one-shot-timer path. Both
+/// paths funnel through the same <see cref="PublishCurrentStateOnce"/> so mapping, diagnostics, and fault
+/// handling are not duplicated.
+/// </para>
 /// </remarks>
 internal sealed class CanonicalSteamControllerInputPublisher
 {
@@ -40,11 +64,19 @@ internal sealed class CanonicalSteamControllerInputPublisher
     private int _publishedStateCount;
     private int _faultReported;
 
-    // Production path only: dedicated worker thread driven by a real Windows high-resolution periodic
-    // timer. Never used when a test supplies its own IInputReportTickSource.
-    private WindowsHighResolutionPeriodicTimer? _timer;
+    // Production path only: dedicated worker thread driven by a real Windows high-resolution one-shot
+    // timer, re-armed each iteration against the deadline schedule below. Never used when a test supplies
+    // its own IInputReportTickSource.
+    private WindowsHighResolutionOneShotTimer? _timer;
     private ManualResetEvent? _workerStopEvent;
     private Thread? _workerThread;
+
+    // Deadline scheduler state: production-worker-only. _periodTicks is computed once per Start() from
+    // ProductionPeriod; _nextDeadlineTicks is established synchronously in Start() (see
+    // WindowsHighResolutionOneShotTimer's remarks) and thereafter only ever touched from the dedicated
+    // worker thread inside WorkerLoop, so no synchronization is needed once the thread is running.
+    private long _periodTicks;
+    private long _nextDeadlineTicks;
 
     // M5 diagnostics: mapped (post-SteamControllerDeviceStateMapper) D-pad transition tracking. Instance
     // state (not static like ControllerStateDiagnostics) because multiple publishers can run in the same
@@ -60,7 +92,7 @@ internal sealed class CanonicalSteamControllerInputPublisher
 
     // M5+ timing decomposition: production-worker-only, added to separate "Windows timer/wake
     // scheduling" from "publisher work" from "occasional long stalls" after real-hardware M5 testing
-    // showed the high-resolution timer publisher stabilizing at ~231 Hz instead of the ~250 Hz target.
+    // showed the (then-periodic) timer publisher stabilizing at ~231 Hz instead of the ~250 Hz target.
     // Touched only from the single dedicated worker thread (WorkerLoop below), so no synchronization is
     // needed. These stay at their zero defaults on the test/manual-tick IInputReportTickSource path,
     // which never populates them -- they are meaningful for the production timer-driven path only.
@@ -80,6 +112,14 @@ internal sealed class CanonicalSteamControllerInputPublisher
     private long _maxWaitBlockedTicksSinceHeartbeat;
     private long _publishWorkTicksSumSinceHeartbeat;
     private long _maxPublishWorkTicksSinceHeartbeat;
+
+    // Deadline-scheduler diagnostics: how late each wake landed relative to its own scheduled logical
+    // deadline (not the interval between wakes -- see the class remarks), and how many logical deadlines
+    // were intentionally skipped (never waited for) because the worker was already past them. Reset every
+    // heartbeat, same as the block above.
+    private long _wakeLatenessTicksSumSinceHeartbeat;
+    private long _maxWakeLatenessTicksSinceHeartbeat;
+    private long _skippedDeadlineCountSinceHeartbeat;
 
     private static readonly TimeSpan WakeWarnThreshold = TimeSpan.FromMilliseconds(4.25);
     private static readonly TimeSpan WakeAlarmThreshold = TimeSpan.FromMilliseconds(5);
@@ -102,12 +142,13 @@ internal sealed class CanonicalSteamControllerInputPublisher
     internal int PublishedStateCount => _publishedStateCount;
 
     /// <summary>
-    /// Starts publishing. Production (no explicit tick source): creates and arms a real Windows
-    /// high-resolution periodic timer and starts a dedicated worker thread. This throws synchronously,
-    /// and cleans up any partially-created native handle, if the timer cannot be created or armed --
-    /// fail closed rather than silently falling back to the known-defective ~83 Hz Task.Delay behavior.
-    /// The caller's existing SteamOutput creation/rollback path handles the thrown exception exactly like
-    /// any other startup failure.
+    /// Starts publishing. Production (no explicit tick source): creates a real Windows high-resolution
+    /// timer, establishes the initial logical deadline, and synchronously arms the first one-shot wait
+    /// before starting the dedicated worker thread. This throws synchronously, and cleans up any
+    /// partially-created native handle, if the timer cannot be created or armed -- fail closed rather than
+    /// silently falling back to the known-defective ~83 Hz Task.Delay behavior. The caller's existing
+    /// SteamOutput creation/rollback path handles the thrown exception exactly like any other startup
+    /// failure.
     /// </summary>
     internal void Start()
     {
@@ -143,14 +184,32 @@ internal sealed class CanonicalSteamControllerInputPublisher
 
     private void StartProductionWorker()
     {
-        WindowsHighResolutionPeriodicTimer timer;
+        WindowsHighResolutionOneShotTimer timer;
         try
         {
-            timer = new WindowsHighResolutionPeriodicTimer(ProductionPeriod);
+            timer = new WindowsHighResolutionOneShotTimer();
         }
         catch (Exception exception)
         {
-            throw new InvalidOperationException("Failed to create or arm the canonical Gordon publisher's high-resolution timer.", exception);
+            throw new InvalidOperationException("Failed to create the canonical Gordon publisher's high-resolution timer.", exception);
+        }
+
+        // Unlike the old periodic timer, the deadline scheduler's origin is established here -- a fresh
+        // Start() must not reuse a previous run's logical schedule (mirrors ResetTimingDiagnosticsForNewRun's
+        // reasoning: an arbitrary real-world gap can separate a Stop() from a later Start() on the same
+        // instance, which production supports).
+        _periodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(ProductionPeriod, Stopwatch.Frequency);
+        var origin = _timestampProvider();
+        _nextDeadlineTicks = origin + _periodTicks;
+
+        try
+        {
+            ArmForDeadlineViaSeam(timer, _nextDeadlineTicks, origin);
+        }
+        catch (Exception exception)
+        {
+            timer.Dispose();
+            throw new InvalidOperationException("Failed to arm the canonical Gordon publisher's high-resolution timer.", exception);
         }
 
         var stopEvent = new ManualResetEvent(false);
@@ -180,6 +239,25 @@ internal sealed class CanonicalSteamControllerInputPublisher
         _workerStopEvent = stopEvent;
         _workerThread = thread;
     }
+
+    /// <summary>Arms <paramref name="timer"/> for the time remaining until <paramref name="deadlineTicks"/>
+    /// (a Stopwatch-tick absolute deadline), measured from <paramref name="nowTicks"/>.</summary>
+    private static void ArmForDeadline(WindowsHighResolutionOneShotTimer timer, long deadlineTicks, long nowTicks)
+    {
+        var remainingTicks = deadlineTicks - nowTicks;
+        var due100ns = CanonicalPublisherDeadlineMath.ConvertToRelativeDueTime100ns(remainingTicks, Stopwatch.Frequency);
+        timer.ArmRelative(TimeSpan.FromTicks(due100ns));
+    }
+
+    /// <summary>Test-only seam: lets a test simulate a re-arm failure partway through a run (e.g. a real
+    /// <c>SetWaitableTimerEx</c> failure after the timer has already been successfully created and armed
+    /// once) without needing to fake the native waitable-timer API at the publisher level. Used for both
+    /// the initial synchronous arm in <see cref="StartProductionWorker"/> and every re-arm inside
+    /// <see cref="WorkerLoop"/>, so a test can install it once before <see cref="Start"/>.</summary>
+    internal Action<WindowsHighResolutionOneShotTimer, long, long>? ArmForDeadlineOverrideForTests { get; set; }
+
+    private void ArmForDeadlineViaSeam(WindowsHighResolutionOneShotTimer timer, long deadlineTicks, long nowTicks) =>
+        (ArmForDeadlineOverrideForTests ?? ArmForDeadline)(timer, deadlineTicks, nowTicks);
 
     /// <summary>Test-only seam: lets a test make thread startup itself fail deterministically (Thread.Start()
     /// cannot be made to fail on demand) to exercise the partial-resource cleanup path above.</summary>
@@ -226,29 +304,31 @@ internal sealed class CanonicalSteamControllerInputPublisher
     }
 
     /// <summary>
-    /// Runs on the dedicated worker thread only. Waits for the timer or the stop event, then publishes
-    /// the current state exactly once per wake -- this is a latest-state publisher, not an event queue,
-    /// so a delayed/missed interval never causes a catch-up burst; the next wake just publishes whatever
-    /// LatestState is current at that moment.
+    /// Runs on the dedicated worker thread only. Waits for the timer or the stop event, publishes the
+    /// current state exactly once per wake -- this is a latest-state publisher, not an event queue, so a
+    /// delayed/missed deadline never causes a catch-up burst -- then re-arms the one-shot timer for only
+    /// the time remaining until the next logical deadline, skipping over any deadlines that already
+    /// expired while this iteration was running.
     /// </summary>
     /// <remarks>
-    /// When Info diagnostics are enabled, also decomposes each iteration into three timings (wait-block,
-    /// wake-to-wake, publish-work) so a real-hardware heartbeat log can distinguish "the timer/wake itself
-    /// is slow" from "publisher work is extending the loop" from "occasional long stalls" -- see the
-    /// class-level remarks on the ~231 Hz vs ~250 Hz real-hardware M5 result this responds to. This never
-    /// changes the 4 ms timer/wait behavior itself; it only measures it. When diagnostics are off, no
-    /// Stopwatch sampling or timing arithmetic happens here beyond the one IsEnabled check per iteration.
+    /// When Info diagnostics are enabled, also decomposes each iteration into wait-block, wake-to-wake,
+    /// publish-work, and wake-lateness-vs-schedule timings so a real-hardware heartbeat log can
+    /// distinguish "the timer/wake itself is slow" from "publisher work is extending the loop" from
+    /// "occasional long stalls" -- see the class-level remarks. This never changes the 4 ms logical
+    /// schedule itself; it only measures it. Scheduling itself always samples the clock (the deadline
+    /// arithmetic needs it regardless of logging), but when diagnostics are off, no additional timing
+    /// arithmetic, aggregate updates, or logging happen beyond that.
     /// </remarks>
-    private void WorkerLoop(WindowsHighResolutionPeriodicTimer timer, ManualResetEvent stopEvent)
+    private void WorkerLoop(WindowsHighResolutionOneShotTimer timer, ManualResetEvent stopEvent)
     {
         try
         {
             // Stop must be index 0: WaitHandle.WaitAny returns the lowest-index signaled handle when
-            // several are signaled at once. If a slow SetState call runs past a timer period while
-            // StopAsync is concurrently signaling the stop event, both handles can be signaled by the
-            // time this thread comes back to wait -- putting the timer first would let one more publish
-            // start after stop was requested (and, under sustained SetState delay, could starve stop
-            // indefinitely). Stop must always win that race.
+            // several are signaled at once. If a slow SetState call runs past a deadline while StopAsync
+            // is concurrently signaling the stop event, both handles can be signaled by the time this
+            // thread comes back to wait -- putting the timer first would let one more publish start after
+            // stop was requested (and, under sustained SetState delay, could starve stop indefinitely).
+            // Stop must always win that race.
             WaitHandle[] handles = [stopEvent, timer];
             while (true)
             {
@@ -258,20 +338,31 @@ internal sealed class CanonicalSteamControllerInputPublisher
                 var signaled = WaitHandle.WaitAny(handles);
                 if (signaled == 0) return; // stop event -- never counted as a timer wake
 
+                // Always sampled: the deadline scheduler needs "now" below regardless of diagnostics.
+                var wake = _timestampProvider();
+
                 if (diagnosticsEnabled)
                 {
-                    var wake = _timestampProvider();
                     RecordWaitBlocked(waitStart, wake);
                     RecordTimerWake(wake);
+                    RecordWakeLateness(wake, _nextDeadlineTicks);
+                }
 
-                    var keepGoing = PublishCurrentStateOnce();
-                    RecordPublishWork(wake, _timestampProvider());
-                    if (!keepGoing) return;
-                }
-                else if (!PublishCurrentStateOnce())
-                {
-                    return;
-                }
+                var keepGoing = PublishCurrentStateOnce();
+                if (diagnosticsEnabled) RecordPublishWork(wake, _timestampProvider());
+                if (!keepGoing) return;
+
+                // Re-check stop before re-arming: don't unnecessarily arm another wait after shutdown was
+                // requested while this iteration was publishing. This is a plain non-blocking poll, not a
+                // second WaitAny -- it must never itself block.
+                if (stopEvent.WaitOne(0)) return;
+
+                var now = _timestampProvider();
+                var advance = CanonicalPublisherDeadlineMath.AdvanceDeadline(_nextDeadlineTicks, _periodTicks, now);
+                _nextDeadlineTicks = advance.NextDeadlineTicks;
+                if (diagnosticsEnabled && advance.SkippedCount > 0) _skippedDeadlineCountSinceHeartbeat += advance.SkippedCount;
+
+                ArmForDeadlineViaSeam(timer, _nextDeadlineTicks, now);
             }
         }
         catch (Exception exception)
@@ -302,6 +393,9 @@ internal sealed class CanonicalSteamControllerInputPublisher
         _maxWaitBlockedTicksSinceHeartbeat = 0;
         _publishWorkTicksSumSinceHeartbeat = 0;
         _maxPublishWorkTicksSinceHeartbeat = 0;
+        _wakeLatenessTicksSumSinceHeartbeat = 0;
+        _maxWakeLatenessTicksSinceHeartbeat = 0;
+        _skippedDeadlineCountSinceHeartbeat = 0;
     }
 
     /// <summary>Test-only seam: lets a test drive the timing-decomposition accounting with known fake
@@ -309,6 +403,7 @@ internal sealed class CanonicalSteamControllerInputPublisher
     internal void RecordWaitBlockedForTests(long waitStart, long wake) => RecordWaitBlocked(waitStart, wake);
     internal void RecordTimerWakeForTests(long wake) => RecordTimerWake(wake);
     internal void RecordPublishWorkForTests(long publishStart, long publishEnd) => RecordPublishWork(publishStart, publishEnd);
+    internal void RecordWakeLatenessForTests(long wake, long scheduledDeadline) => RecordWakeLateness(wake, scheduledDeadline);
 
     private void RecordWaitBlocked(long waitStart, long wake)
     {
@@ -339,6 +434,18 @@ internal sealed class CanonicalSteamControllerInputPublisher
         var duration = publishEnd - publishStart;
         _publishWorkTicksSumSinceHeartbeat += duration;
         if (duration > _maxPublishWorkTicksSinceHeartbeat) _maxPublishWorkTicksSinceHeartbeat = duration;
+    }
+
+    /// <summary>How late <paramref name="wake"/> landed relative to the deadline that was scheduled for
+    /// it. Clamped to zero rather than allowed to go negative -- a wake can (rarely) be observed slightly
+    /// before its own scheduled deadline depending on timer/clock granularity, and that is not a
+    /// meaningful "negative lateness" for this diagnostic.</summary>
+    private void RecordWakeLateness(long wake, long scheduledDeadline)
+    {
+        var lateness = wake - scheduledDeadline;
+        if (lateness < 0) lateness = 0;
+        _wakeLatenessTicksSumSinceHeartbeat += lateness;
+        if (lateness > _maxWakeLatenessTicksSinceHeartbeat) _maxWakeLatenessTicksSinceHeartbeat = lateness;
     }
 
     private async Task PublishAsync(IInputReportTickSource ticks, CancellationToken token)
@@ -417,6 +524,7 @@ internal sealed class CanonicalSteamControllerInputPublisher
         var averageWakeToWakeMs = wakeToWakeSampleCount > 0 ? Stopwatch.GetElapsedTime(0, _wakeToWakeTicksSumSinceHeartbeat / wakeToWakeSampleCount).TotalMilliseconds : 0.0;
         var averageWaitBlockedMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _waitBlockedTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
         var averagePublishWorkMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _publishWorkTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
+        var averageWakeLatenessMs = wakeCount > 0 ? Stopwatch.GetElapsedTime(0, _wakeLatenessTicksSumSinceHeartbeat / wakeCount).TotalMilliseconds : 0.0;
 
         AppLog.Info("SteamOutput", "Canonical Steam Controller publisher heartbeat",
             ("SetStateCallsLastSecond", _setStateCallsSinceHeartbeat),
@@ -434,7 +542,10 @@ internal sealed class CanonicalSteamControllerInputPublisher
             ("AveragePublishWorkMs", averagePublishWorkMs),
             ("MaxPublishWorkMs", Stopwatch.GetElapsedTime(0, _maxPublishWorkTicksSinceHeartbeat).TotalMilliseconds),
             ("WakeOver4_25MsCount", _wakeOver425MsCountSinceHeartbeat),
-            ("WakeOver5MsCount", _wakeOver5MsCountSinceHeartbeat));
+            ("WakeOver5MsCount", _wakeOver5MsCountSinceHeartbeat),
+            ("AverageWakeLatenessMs", averageWakeLatenessMs),
+            ("MaxWakeLatenessMs", Stopwatch.GetElapsedTime(0, _maxWakeLatenessTicksSinceHeartbeat).TotalMilliseconds),
+            ("SkippedDeadlineCount", _skippedDeadlineCountSinceHeartbeat));
 
         _lastHeartbeatTimestamp = now;
         _setStateCallsSinceHeartbeat = 0;
@@ -450,6 +561,9 @@ internal sealed class CanonicalSteamControllerInputPublisher
         _maxWaitBlockedTicksSinceHeartbeat = 0;
         _publishWorkTicksSumSinceHeartbeat = 0;
         _maxPublishWorkTicksSinceHeartbeat = 0;
+        _wakeLatenessTicksSumSinceHeartbeat = 0;
+        _maxWakeLatenessTicksSinceHeartbeat = 0;
+        _skippedDeadlineCountSinceHeartbeat = 0;
         // _previousTimerWakeTimestamp / _hasPreviousTimerWake intentionally NOT reset here: the
         // wake-to-wake interval spanning the heartbeat boundary itself (last tick before this heartbeat
         // to the first tick after it) is still a real, valid sample for the next window.
@@ -461,5 +575,81 @@ internal sealed class CanonicalSteamControllerInputPublisher
         AppLog.Error("SteamOutput", "Canonical Steam Controller publisher fault.", exception,
             ("PublishedStateCount", _publishedStateCount));
         _fault?.Invoke(exception);
+    }
+}
+
+/// <summary>
+/// Pure, deterministically-testable arithmetic for the monotonic absolute-deadline scheduler used by
+/// <see cref="CanonicalSteamControllerInputPublisher"/>'s production worker. Kept separate from the
+/// publisher's instance state so the deadline-advance and clock-conversion logic can be tested directly
+/// without needing a running worker thread or real timer.
+/// </summary>
+internal static class CanonicalPublisherDeadlineMath
+{
+    /// <summary>Converts a <see cref="TimeSpan"/> period into an equivalent duration in
+    /// <see cref="Stopwatch"/> ticks for the given <paramref name="frequency"/> (<see cref="Stopwatch.Frequency"/>
+    /// in production; injectable here so tests aren't tied to the actual machine's QPC frequency).</summary>
+    internal static long StopwatchTicksFromTimeSpan(TimeSpan span, long frequency)
+    {
+        if (frequency <= 0) throw new ArgumentOutOfRangeException(nameof(frequency), frequency, "Frequency must be positive.");
+        // decimal (128-bit) avoids overflow for any realistic period/frequency combination and keeps
+        // full precision through the division; Math.Round to the nearest whole tick rather than
+        // truncating, so a period does not end up systematically slightly short.
+        var ticks = (decimal)span.Ticks * frequency / TimeSpan.TicksPerSecond;
+        return (long)Math.Round(ticks, MidpointRounding.AwayFromZero);
+    }
+
+    /// <summary>Converts a positive duration expressed in <see cref="Stopwatch"/> ticks into the
+    /// equivalent number of 100ns units (the unit <c>SetWaitableTimerEx</c>'s relative due time and
+    /// <see cref="TimeSpan.Ticks"/> both use). Always rounds up (ceiling) and never returns less than 1:
+    /// a genuinely-positive-but-tiny remaining duration must still arm a positive one-shot wait rather
+    /// than truncating to zero (which <see cref="WindowsHighResolutionOneShotTimer.ArmRelative"/> would
+    /// reject as non-positive).</summary>
+    internal static long ConvertToRelativeDueTime100ns(long remainingStopwatchTicks, long frequency)
+    {
+        if (remainingStopwatchTicks <= 0) throw new ArgumentOutOfRangeException(nameof(remainingStopwatchTicks), remainingStopwatchTicks, "The remaining duration must be positive.");
+        if (frequency <= 0) throw new ArgumentOutOfRangeException(nameof(frequency), frequency, "Frequency must be positive.");
+
+        var hundredNsUnits = (decimal)remainingStopwatchTicks * TimeSpan.TicksPerSecond / frequency;
+        var rounded = (long)Math.Ceiling(hundredNsUnits);
+        return rounded < 1 ? 1 : rounded;
+    }
+
+    /// <summary>Result of <see cref="AdvanceDeadline"/>: the next logical deadline to arm for, and how
+    /// many additional logical deadlines beyond the normal single-period step were skipped (never waited
+    /// for) because the worker was already past them by the time it finished the current publish.</summary>
+    internal readonly record struct DeadlineAdvanceResult(long NextDeadlineTicks, long SkippedCount);
+
+    /// <summary>
+    /// Advances the logical deadline schedule by exactly one period, then skips forward over any further
+    /// whole periods that have already expired relative to <paramref name="nowTicks"/>, so the returned
+    /// deadline is always strictly in the future. This is what keeps the schedule on the fixed
+    /// 4/8/12/16ms... grid instead of drifting: the *next* deadline is always computed from the *previous
+    /// deadline*, never from "now" -- "now" is only used to detect and skip deadlines that are already
+    /// unreachable, never to redefine the grid itself.
+    /// </summary>
+    /// <remarks>
+    /// In the steady-state case (the worker keeps up, even if each individual wake lands slightly late),
+    /// <see cref="DeadlineAdvanceResult.SkippedCount"/> is always 0 -- advancing by exactly one period is
+    /// the normal, expected behavior every iteration and is not itself counted as a "skip." A skip is
+    /// only counted for a whole additional period that gets bypassed with no wait or publish of its own,
+    /// which should be rare (a genuine multi-period stall) rather than routine.
+    /// </remarks>
+    internal static DeadlineAdvanceResult AdvanceDeadline(long currentDeadlineTicks, long periodTicks, long nowTicks)
+    {
+        if (periodTicks <= 0) throw new ArgumentOutOfRangeException(nameof(periodTicks), periodTicks, "The period must be positive.");
+
+        checked
+        {
+            var next = currentDeadlineTicks + periodTicks;
+            if (next > nowTicks) return new DeadlineAdvanceResult(next, 0);
+
+            // next is already unusable (at or before "now"): skip forward by whole periods until the
+            // deadline is strictly in the future. behindBy >= 0 here.
+            var behindBy = nowTicks - next;
+            var additionalSkips = behindBy / periodTicks + 1;
+            next += additionalSkips * periodTicks;
+            return new DeadlineAdvanceResult(next, additionalSkips);
+        }
     }
 }
