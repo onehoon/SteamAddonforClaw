@@ -1,10 +1,15 @@
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot)
+    [string]$RepoRoot
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrEmpty($RepoRoot)) {
+    $scriptDirectory = Split-Path -Parent ([System.IO.Path]::GetFullPath($MyInvocation.MyCommand.Path))
+    $RepoRoot = Split-Path -Parent $scriptDirectory
+}
 
 $viiperDir = Join-Path $RepoRoot 'src\SteamInputAddonforClaw\Dependencies\Viiper'
 $lockPath = Join-Path $viiperDir 'viiper.lock.json'
