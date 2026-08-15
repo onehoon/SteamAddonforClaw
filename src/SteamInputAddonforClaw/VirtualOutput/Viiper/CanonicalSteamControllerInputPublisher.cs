@@ -19,21 +19,25 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// via <c>lPeriod</c>). Real MSI Claw hardware testing (Addon 0.1.71, PR #156 timing-decomposition
 /// diagnostics) showed that design stabilizing at ~230.8 Hz instead of ~250 Hz: average wake-to-wake
 /// interval ~4.3324ms, average wait-blocked time ~4.2885ms, average publish work only ~0.04345ms (so
-/// <c>SetState</c> was not the bottleneck), and 64.9% of wakes exceeded 4.25ms. A periodic timer's next
-/// fire time is always "one period after the timer last actually fired," so any per-wake lateness
-/// against the *original* schedule accumulates directly into the observed cadence instead of being
-/// self-correcting.
+/// <c>SetState</c> was not the bottleneck), and 64.9% of wakes exceeded 4.25ms. This is the observed
+/// behavior at the publisher's own wait/wakeup boundary, not a documented guarantee about how
+/// <c>SetWaitableTimerEx</c>'s periodic re-activation is internally scheduled -- Microsoft's
+/// documentation says a periodic timer re-activates every <c>lPeriod</c> once its due time is reached,
+/// but does not specify whether that re-activation is measured from the timer's original schedule or
+/// from when it last actually fired. This change tests whether tracking an explicit monotonic deadline
+/// prevents the observed per-wake lateness from shifting the publication schedule, without asserting a
+/// specific claim about the periodic timer's internal implementation.
 /// </para>
 /// <para>
 /// Production now instead tracks a monotonic absolute logical deadline (in
 /// <see cref="Stopwatch"/> ticks: deadline₁ = origin + 4ms, deadline₂ = origin + 8ms, ...) and, after
 /// each publish, re-arms a <see cref="WindowsHighResolutionOneShotTimer"/> for only the time remaining
 /// until the *next* logical deadline -- not for a full 4ms again. A wake that lands 0.3ms late still
-/// only gets a 3.7ms wait until the next deadline, so lateness against the fixed 4/8/12ms... grid does
-/// not compound across wakes, even though each individual wake may still land slightly after its target
-/// (see <c>AverageWakeLatenessMs</c> in the heartbeat below -- staying near-constant while
-/// <c>AverageWakeToWakeMs</c> returns close to 4.0ms is the expected successful result, not a
-/// contradiction).
+/// only gets a 3.7ms wait until the next deadline, so lateness against the fixed 4/8/12ms... grid should
+/// not compound across wakes the way it can with a periodic re-arm, even though each individual wake may
+/// still land slightly after its own target (see <c>AverageWakeLatenessMs</c> in the heartbeat below --
+/// staying near-constant while <c>AverageWakeToWakeMs</c> returns close to 4.0ms is the expected
+/// successful result, not a contradiction).
 /// </para>
 /// <para>
 /// The existing <see cref="IInputReportTickSource"/> async seam is kept for deterministic tests only: when

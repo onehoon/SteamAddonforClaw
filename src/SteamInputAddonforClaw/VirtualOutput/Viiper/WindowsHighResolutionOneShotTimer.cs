@@ -14,9 +14,11 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// MSI Claw hardware testing (Addon 0.1.71, PR #156 diagnostics) showed that design's wake-to-wake
 /// interval averaging ~4.33ms against a 4.00ms period -- not because <c>SetState</c> work was slow
 /// (~0.043ms average) but because the wait/wakeup boundary itself was consistently a few tenths of a
-/// millisecond late (64.9% of wakes exceeded 4.25ms). Because a periodic timer's next fire time is
-/// always "period after the timer last fired" rather than "period after the *original* schedule," that
-/// per-wake lateness accumulated directly into the cadence instead of being self-correcting.
+/// millisecond late (64.9% of wakes exceeded 4.25ms). This describes what was actually observed at that
+/// boundary, not a documented guarantee about how the OS internally schedules a periodic timer's
+/// re-activation; explicitly tracking a monotonic logical deadline (see
+/// <see cref="CanonicalSteamControllerInputPublisher"/>) is a testable alternative to whatever the
+/// periodic timer was doing, not a claim that the periodic timer itself was behaving incorrectly.
 /// </para>
 /// <para>
 /// This type instead exposes only a single-shot arm (<see cref="ArmRelative"/>); the caller

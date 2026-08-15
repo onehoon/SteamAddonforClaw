@@ -683,12 +683,14 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
     [Fact]
     public async Task Production_worker_does_not_burst_catch_up_ticks_after_a_slow_publish()
     {
-        // A synchronization (auto-reset) waitable timer does not queue multiple missed signals -- if the
-        // worker is busy for several period-lengths, only one signal is still pending when it comes back
-        // to wait, so it publishes once and resumes normal cadence instead of firing a backlog of
-        // "catch up" calls. Block the very first SetState for well beyond several 4 ms periods, then
-        // assert the total call count shortly after unblocking is small (steady-cadence sized), not a
-        // burst proportional to the periods that elapsed while blocked.
+        // The worker is not waiting on the timer at all while a SetState call is in flight -- it only
+        // re-arms the one-shot timer after the publish returns, at which point AdvanceDeadline skips
+        // forward over any logical deadlines that already expired during the block and arms for the next
+        // one strictly in the future. So no signals can possibly queue up while blocked, and only one
+        // publish happens for the block regardless of how many periods it spanned. Block the very first
+        // SetState for well beyond several 4 ms periods, then assert the total call count shortly after
+        // unblocking is small (steady-cadence sized), not a burst proportional to the periods that
+        // elapsed while blocked.
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
         var firstCallBlocked = new ManualResetEventSlim(false);
         var releaseFirstCall = new ManualResetEventSlim(false);
@@ -717,12 +719,19 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
     }
 
     [Fact]
-    public async Task Production_stop_wins_the_race_when_both_stop_and_timer_are_signaled()
+    public async Task Production_stop_requested_while_SetState_is_blocked_exits_before_rearming()
     {
-        // Regression for WaitAny([timer, stopEvent]) returning the lowest signaled index: if the worker
-        // is still inside a slow SetState when StopAsync signals the stop event, and a timer period also
-        // elapses before SetState returns, both handles are signaled by the time the worker waits again.
-        // Stop must win that race -- the worker must exit without starting a second SetState call.
+        // Under the earlier periodic-timer design this exercised a genuine WaitAny([timer, stopEvent])
+        // race (a timer period could elapse -- and the timer re-signal itself -- while SetState was still
+        // blocked, so both handles could be signaled by the time the worker returned to wait; stop, at
+        // index 0, had to win that race). The one-shot timer is not waiting at all -- and so cannot become
+        // signaled again -- from the moment it fires until WorkerLoop explicitly re-arms it after the
+        // publish returns, so that specific both-signaled race can no longer occur here. What this test
+        // verifies now: StopAsync signals the stop event while a slow SetState call is still in flight;
+        // once SetState returns, the worker's stopEvent.WaitOne(0) check (run before computing the next
+        // deadline or re-arming) sees stop requested and exits -- no re-arm, no second SetState call. The
+        // WaitAny stop-priority ordering itself (stopEvent still at index 0) is unchanged and still
+        // matters for an ordinary wait where the timer could legitimately also be signaled.
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
         var firstCallBlocked = new ManualResetEventSlim(false);
         var releaseFirstCall = new ManualResetEventSlim(false);
@@ -739,8 +748,8 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
             // returns a Task, the stop event is already signaled.
             var stopTask = publisher.StopAsync();
 
-            // Let several 4 ms periods elapse while still blocked, so the timer is also signaled by the
-            // time the worker returns to WaitAny -- this is the race window from the review.
+            // Let some time elapse while still blocked, so the stop request is comfortably in place well
+            // before SetState returns and the worker gets to its post-publish stop check.
             await Task.Delay(50);
             releaseFirstCall.Set();
 
@@ -874,6 +883,39 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
         Assert.False(publisher.IsRunning);
         // Exactly one publish from the single real arm -- no fallback scheduler kept it running.
         Assert.Equal(1, sink.Count);
+    }
+
+    [Fact]
+    public async Task Production_initial_arm_failure_is_synchronous_and_restartable()
+    {
+        // Distinct from the runtime re-arm-failure test above: this is the very first ArmForDeadline call
+        // in StartProductionWorker, before the worker thread is even created. Start() must fail closed
+        // synchronously -- no worker thread, no leaked timer handle -- exactly like a timer-creation
+        // failure, and the publisher must be fully usable again afterward.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink)
+        {
+            ArmForDeadlineOverrideForTests = (_, _, _) => throw new InvalidOperationException("simulated initial SetWaitableTimerEx failure"),
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(publisher.Start);
+
+        Assert.Contains("timer", exception.Message);
+        Assert.False(publisher.IsRunning);
+
+        // Fully recoverable: removing the override and starting again works exactly like a first attempt,
+        // proving no handle or state was left behind by the failed initial arm.
+        publisher.ArmForDeadlineOverrideForTests = null;
+        publisher.Start();
+        try
+        {
+            await sink.WaitForCountAsync(1, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
     }
 
     private sealed class BlockingFirstCallSink(ManualResetEventSlim firstCallBlocked, ManualResetEventSlim releaseFirstCall) : ICanonicalSteamControllerStateSink
