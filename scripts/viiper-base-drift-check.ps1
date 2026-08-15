@@ -47,6 +47,39 @@ function Get-ViiperBaseDriftClassification {
     return 'BaseCurrent'
 }
 
+function Get-ViiperPostPushBaseDriftAction {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $AdoptionBaseSha,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $LatestMainSha,
+        [Parameter(Mandatory)] [int] $ResolveLatestMainExitCode,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $LocalHeadSha,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $RemoteBranchHeadSha
+    )
+
+    $classification = Get-ViiperBaseDriftClassification `
+        -AdoptionBaseSha $AdoptionBaseSha `
+        -LatestMainSha $LatestMainSha `
+        -ResolveLatestMainExitCode $ResolveLatestMainExitCode
+
+    foreach ($name in 'LocalHeadSha', 'RemoteBranchHeadSha') {
+        $value = Get-Variable -Name $name -ValueOnly
+        if ([string]::IsNullOrWhiteSpace($value) -or $value -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "$name is missing or not exactly 40 hex characters: '$value'. Failing closed rather than guessing branch ownership."
+        }
+    }
+
+    if ($classification -eq 'BaseCurrent') {
+        return 'Proceed'
+    }
+
+    if ($RemoteBranchHeadSha.ToLowerInvariant() -eq $LocalHeadSha.ToLowerInvariant()) {
+        return 'DeleteBranchAndFailClosed'
+    }
+
+    return 'FailClosedPreserveBranch'
+}
+
 if ($MyInvocation.InvocationName -eq '.') {
     return
 }

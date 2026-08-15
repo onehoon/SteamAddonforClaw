@@ -81,6 +81,22 @@ try {
         }
     }
 
+    # 7. Post-push race: if main advances after the push, delete only when the
+    # remote branch is still exactly this run's HEAD; otherwise preserve it.
+    $localHead = 'cccccccccccccccccccccccccccccccccccccccc'
+    Assert-Equal -Expected 'DeleteBranchAndFailClosed' -Actual (Get-ViiperPostPushBaseDriftAction `
+        -AdoptionBaseSha $baseA -LatestMainSha $baseB -ResolveLatestMainExitCode 0 `
+        -LocalHeadSha $localHead -RemoteBranchHeadSha $localHead) `
+        -Message 'Post-push stale-base race was not classified for safe branch deletion.'
+    Assert-Equal -Expected 'FailClosedPreserveBranch' -Actual (Get-ViiperPostPushBaseDriftAction `
+        -AdoptionBaseSha $baseA -LatestMainSha $baseB -ResolveLatestMainExitCode 0 `
+        -LocalHeadSha $localHead -RemoteBranchHeadSha $baseA) `
+        -Message 'Post-push branch ownership mismatch was not preserved fail-closed.'
+    Assert-Equal -Expected 'Proceed' -Actual (Get-ViiperPostPushBaseDriftAction `
+        -AdoptionBaseSha $baseA -LatestMainSha $baseA -ResolveLatestMainExitCode 0 `
+        -LocalHeadSha $localHead -RemoteBranchHeadSha $localHead) `
+        -Message 'Post-push unchanged base was not allowed to proceed.'
+
     Write-Host 'viiper-base-drift-check.ps1 tests passed.'
 }
 catch {

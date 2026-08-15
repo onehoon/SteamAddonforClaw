@@ -331,6 +331,7 @@ jobs:
           TARGET_COMMIT: ${{ steps.target.outputs.commit }}
           CURRENT_COMMIT: ${{ steps.eligibility.outputs.current_commit }}
           BRANCH: ${{ steps.existing.outputs.branch }}
+          ADOPTION_BASE_SHA: ${{ steps.adoption-base.outputs.sha }}
           RUN_ID: ${{ steps.fetch.outputs.run_id }}
           ARTIFACT_NAME: ${{ steps.fetch.outputs.artifact_name }}
         run: |
@@ -344,7 +345,54 @@ jobs:
           git checkout -b $env:BRANCH
           git add -A
           git commit -m "VIIPER dependency update: $($env:CURRENT_COMMIT.Substring(0,7)) -> $($env:TARGET_COMMIT.Substring(0,7))" -m "Mechanically adopted by the VIIPER Dependency Update workflow. Managed ABI compatibility has NOT been inferred or automatically adapted -- review required before merge."
+
+          # This is the authoritative pre-push base check. The earlier guard and final
+          # idempotency lookup both perform useful early rejection, but network work after
+          # either check can otherwise leave a TOCTOU window before this push.
+          . ./scripts/viiper-base-drift-check.ps1
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch origin/main immediately before push (git fetch exit code $LASTEXITCODE)."
+          }
+          $latestMainSha = git rev-parse origin/main
+          $resolveExitCode = $LASTEXITCODE
+          $classification = Get-ViiperBaseDriftClassification -AdoptionBaseSha $env:ADOPTION_BASE_SHA -LatestMainSha $latestMainSha -ResolveLatestMainExitCode $resolveExitCode
+          if ($classification -eq 'StaleBase') {
+            throw "Addon main changed immediately before pushing VIIPER dependency branch: base=$($env:ADOPTION_BASE_SHA) current=$latestMainSha. Aborting stale-base dependency PR creation."
+          }
+
           git push -u origin $env:BRANCH
+
+          # Close the remaining push-to-PR race. If main advanced after the push,
+          # delete only a branch whose remote head is exactly this run's commit.
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to re-fetch origin/main after push (git fetch exit code $LASTEXITCODE). Failing closed without deleting the branch."
+          }
+          $latestMainAfterPush = git rev-parse origin/main
+          $resolveAfterPushExitCode = $LASTEXITCODE
+          $remoteBranchRefs = @(git ls-remote --heads origin "refs/heads/$($env:BRANCH)")
+          $lsRemoteAfterPushExitCode = $LASTEXITCODE
+          if ($lsRemoteAfterPushExitCode -ne 0 -or $remoteBranchRefs.Count -ne 1) {
+            throw "Could not establish exact remote ownership of pushed branch '$($env:BRANCH)' after push. Failing closed without deleting the branch."
+          }
+          $remoteBranchHead = ($remoteBranchRefs[0] -split '\s+')[0]
+          $postPushAction = Get-ViiperPostPushBaseDriftAction `
+            -AdoptionBaseSha $env:ADOPTION_BASE_SHA `
+            -LatestMainSha $latestMainAfterPush `
+            -ResolveLatestMainExitCode $resolveAfterPushExitCode `
+            -LocalHeadSha (git rev-parse HEAD) `
+            -RemoteBranchHeadSha $remoteBranchHead
+          if ($postPushAction -eq 'DeleteBranchAndFailClosed') {
+            git push origin --delete $env:BRANCH
+            if ($LASTEXITCODE -ne 0) {
+              throw "Addon main advanced after push and cleanup of owned branch '$($env:BRANCH)' failed. Failing closed without creating a PR."
+            }
+            throw "Addon main advanced after pushing VIIPER dependency branch. Deleted the branch because its remote head matched this run's HEAD; no PR was created."
+          }
+          if ($postPushAction -eq 'FailClosedPreserveBranch') {
+            throw "Addon main advanced after push, but remote branch '$($env:BRANCH)' no longer points exclusively to this run's HEAD. Preserving the branch and refusing to create a PR."
+          }
 
           $shortSha = $env:TARGET_COMMIT.Substring(0, 7)
           $title = "VIIPER dependency update: $shortSha"
