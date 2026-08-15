@@ -53,4 +53,20 @@ internal sealed class AddonOwnedVirtualDeviceTracker : IControllerIdentityExclus
         Volatile.Write(ref _uncertainOwnership, 0);
         return true;
     }
+
+    // Steam Deck overload: same absence-verification rule as Gordon's above, evaluated against
+    // SteamDeckVirtualDeviceIdentityPolicy (28DE:1205) instead. Kept as a small overload rather than
+    // generalizing the Gordon policy type, per docs/VIIPER_MIGRATION_TODO.md SD2 step 14.
+    internal bool ClearUncertaintyAfterVerifiedAbsence(IEnumerable<ControllerDeviceInfo> present, SteamDeckVirtualDeviceIdentityPolicy policy,
+        IEnumerable<ControllerDeviceInfo>? before = null, IEnumerable<ControllerDeviceInfo>? owned = null)
+    {
+        var presentSnapshot = present as IReadOnlyList<ControllerDeviceInfo> ?? present.ToArray();
+        var beforeIds = (before ?? []).Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ownedIds = (owned ?? []).Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var currentByInstanceId = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(presentSnapshot);
+        if (presentSnapshot.Any(device => policy.IsMatchingCandidate(device, currentByInstanceId) && !beforeIds.Contains(device.InstanceId) && !ownedIds.Contains(device.InstanceId))) return false;
+        _instanceIds.Clear();
+        Volatile.Write(ref _uncertainOwnership, 0);
+        return true;
+    }
 }

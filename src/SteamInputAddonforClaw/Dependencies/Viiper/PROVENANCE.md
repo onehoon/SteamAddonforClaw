@@ -1,30 +1,32 @@
 # libVIIPER.dll provenance
 
-## ⚠ TEMPORARY DIAGNOSTIC BUILD — not a baseline promotion
+## SD2: Steam Deck typed ABI adopted (VIIPER main@ec64282c...)
 
-This payload is built from an **unmerged Draft** branch (`feature/dpad-runtime-boundary-diagnostic`
-on `onehoon/VIIPER`, PR [#15](https://github.com/onehoon/VIIPER/pull/15)), not from the validated
-`main` baseline recorded in `docs/VIIPER_INTEGRATION.md` / `docs/VIIPER_MIGRATION_TODO.md`. It adds
-only Debug-only, transition-gated D-pad runtime diagnostics (native ABI-decode stage + final Gordon
-report stage) on top of that baseline — no mapping, serialization, cadence, or protocol behavior
-change. It exists solely so real MSI Claw hardware testing can exercise those diagnostics; it is not
-intended to be merged or promoted as the new pinned VIIPER baseline.
+This payload atomically adopts the canonical Steam Deck typed ABI selected in
+`docs/VIIPER_MIGRATION_TODO.md` SD2, replacing the previous Gordon-era `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d`-based diagnostic payload. It supersedes the prior
+`da78d0fc77034afa48485def31dc1ba54960a04e` (VIIPER PR #15, Draft/unmerged D-pad diagnostic) payload
+recorded in this file's previous revision -- that diagnostic branch is no longer embedded.
 
-`docs/VIIPER_INTEGRATION.md` and `docs/VIIPER_MIGRATION_TODO.md` intentionally still record
-`db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` as the pinned baseline — see "Reverting" below.
+This build adds the minimal typed Steam Deck ABI (`SteamDeckDeviceHandle`,
+`SteamDeckDeviceState`, `SteamDeckDeviceRemoveResult`, `CreateSteamDeckDevice`,
+`SetSteamDeckDeviceState`, `RemoveSteamDeckDevice`, `RemoveSteamDeckDeviceEx`) alongside the
+existing Gordon ABI, unchanged. No Gordon or `clib` behavior was removed.
 
 ## Canonical corresponding source
 
 - Repository: https://github.com/onehoon/VIIPER
-- Diagnostic commit: `da78d0fc77034afa48485def31dc1ba54960a04e` (branch `feature/dpad-runtime-boundary-diagnostic`, PR #15 — Draft, unmerged)
-- Built on top of pinned baseline: `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d`
+- Commit: `ec64282c69e5587466b950332d7983fd53a7d778` (`main`, merged PR
+  [#16](https://github.com/onehoon/VIIPER/pull/16) — "Expose Steam Deck through canonical
+  libVIIPER API")
 - Lineage: `Alia5/VIIPER -> Valkirie/VIIPER -> onehoon/VIIPER`
 - License: GPL-3.0; the accompanying `LICENSE.txt` is copied from the pinned source.
 
 ## Build attestation
 
-Built with the literal official entrypoint, `just build-libVIIPER Release`, against a clean checkout
-of `da78d0fc77034afa48485def31dc1ba54960a04e` (PowerShell 7/`pwsh` installed for this purpose):
+Built with the literal official entrypoint, `just build-libVIIPER Release`, against a clean
+checkout of `ec64282c69e5587466b950332d7983fd53a7d778` in an isolated temporary clone (not the
+`D:\repo\VIIPER` working tree, which stayed on its own branch/PR #16-review state throughout and
+was not checked out to a different commit or otherwise mutated by this adoption):
 
 ```text
 just build-libVIIPER Release
@@ -41,18 +43,41 @@ just build-libVIIPER Release
 - Go: `go1.26.5 windows/amd64`
 - GCC/MinGW: `gcc.exe (MinGW-W64 x86_64-ucrt-posix-seh) 16.1.0`
 - Output: `libVIIPER.dll` (Windows x64)
-- Generated header SHA-256: `69D46A77E1E1FF925E986AC5E4A7B50362EB672350040C74AE0F33C3F72ED740`
-- DLL SHA-256: `F469C23871EE528BDB390AF953E73A435B8D2DB2BBD68BCB4F17FA7362180F19`
-- Canonical entrypoint: `just build-libVIIPER Release` (used verbatim for this artifact; not approximated by a raw `go build`)
-- Native ABI checks: `sizeof(SteamControllerDeviceRemoveResult) = 4`, `sizeof(SteamControllerDeviceState) = 62`, `L1 = 4`, `LPadX = 24` (unchanged from the pinned baseline — the diagnostic commit does not touch the ABI struct; confirmed via VIIPER's own ABI/offset tests before this build)
+- Generated header SHA-256: `9e01d6e51b95e4914508e6961e9f867883190be3d0191caa75868076e8ddd5ed`
+- DLL SHA-256: `f8d2651b185d39544f53151d8c857b53b70cf6006de77bbd2574089c7317256b`
+- Canonical entrypoint: `just build-libVIIPER Release` (used verbatim for this artifact)
+- Native ABI checks confirmed from the generated header itself (`dist/libVIIPER/libVIIPER.h`):
+  `sizeof(SteamDeckDeviceState) = 76`, `sizeof(SteamDeckDeviceRemoveResult) = 4`,
+  `L2Digital = 6`, `R2Digital = 7`, `R3 = 22`, `QuickAccess = 27`, `LPadX = 28`, `AccelX = 36`,
+  `LTrigger = 56`, `LStickX = 60`, `RStickX = 64` (Gordon's `sizeof(SteamControllerDeviceState) =
+  62` / `sizeof(SteamControllerDeviceRemoveResult) = 4` are unchanged by this commit).
 
-The build does not use or redistribute Handheld Companion's bundled DLL, and no byte-for-byte equivalence claim is made. Rebuilds are traceable through the exact source, recipe, toolchain, and artifact hash; CI verifies the committed artifact hash rather than demanding a byte-identical rebuild.
+Deviation from the documented `scripts/inject-version.ps1` step: that script failed on this
+non-numeric commit-prefix version string (`ec64282`) mid-recipe (`Cannot convert value "ec64282"
+to type "System.Int32"`), which only affects the DLL's embedded Win32 version resource
+(`FileVersion`/`ProductVersion` metadata), not the exported ABI/symbols. The subsequent `go build`,
+`gendef`, and `go run ./lib/viiper/postbuild` steps completed normally and produced this DLL/header
+pair; `just licenses-libVIIPER` also completed and produced `licenses.txt`. The recipe's own final
+temp-file cleanup step then exited non-zero for an unrelated reason, after the artifact was already
+written. This is a build-script robustness issue in VIIPER's justfile against a short-hash version
+string, not a defect in the built ABI itself; it is reported here rather than worked around by
+hand-editing the artifact.
 
-## Reverting after hardware testing
+The build does not use or redistribute Handheld Companion's bundled DLL, and no byte-for-byte
+equivalence claim is made. Rebuilds are traceable through the exact source, recipe, toolchain, and
+artifact hash; CI verifies the committed artifact hash rather than demanding a byte-identical
+rebuild.
 
-Once the D-pad root cause is identified from hardware logs, this diagnostic payload must be
-replaced again with a build from the normal, non-diagnostic VIIPER baseline (either the current
-`db70bdedbe36846c665c841ea9f6ae9bf01d0d3d`, or whatever baseline is current at that time) before
-this branch is merged, or this branch should not be merged at all and the diagnostic instrumentation
-removed from VIIPER PR #15 / Addon PR #157 instead. Do not let this temporary payload become the
-permanent embedded DLL.
+## Addon adoption status
+
+This is the SD2 atomic adoption: the DLL, generated header, C# P/Invoke ABI (`CanonicalViiperNativeTypes.cs`,
+`CanonicalViiperNativeApi.cs`), ABI tests (`SteamDeckAbiTests.cs`), `docs/VIIPER_INTEGRATION.md`,
+and `docs/VIIPER_MIGRATION_TODO.md` are all updated together in the same change, and all describe
+VIIPER commit `ec64282c69e5587466b950332d7983fd53a7d778`.
+
+The Steam Deck path (`CanonicalSteamDeckSession` / `SteamDeckDeviceStateMapper` /
+`CanonicalSteamDeckInputPublisher` / `CanonicalSteamDeckOutputStage`) exists side-by-side with the
+unmodified Gordon production path. The default production Steam routing output remains Gordon;
+Steam Deck is reachable only through the `STEAMINPUT_ADDON_DEV_STEAMDECK_OUTPUT=1` developer/test
+environment variable seam in `App.xaml.cs`, pending the SD3 real-hardware smoke test and SD4
+production cutover review (see `docs/VIIPER_MIGRATION_TODO.md`).

@@ -13,21 +13,21 @@ The exact pre-Steam-Deck-transition version of this document is preserved under 
 | Item | Status |
 | --- | --- |
 | Canonical embedded API | `lib/viiper` required |
-| Current Addon-embedded VIIPER pin | `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` (Gordon production payload) |
+| Current Addon-embedded VIIPER pin | `ec64282c69e5587466b950332d7983fd53a7d778` on `onehoon/VIIPER:main` (SD2 adopted; includes Gordon + Steam Deck typed ABI) |
 | Selected VIIPER pin for Steam Deck SD2 | `ec64282c69e5587466b950332d7983fd53a7d778` on `onehoon/VIIPER:main` |
-| Current Addon production virtual output | Classic Steam Controller / Gordon `28DE:1102` |
+| Current Addon production virtual output | Classic Steam Controller / Gordon `28DE:1102` (default); Steam Deck `28DE:1205` reachable only via the `STEAMINPUT_ADDON_DEV_STEAMDECK_OUTPUT=1` developer/test seam |
 | Current Addon transition baseline | `acdfd105f828dd78598a028d248c146b44833dc2` |
 | New primary target architecture | Steam Deck `28DE:1205` |
 | Steam Deck canonical typed wrapper | **VALIDATED / MERGED** via VIIPER PR #16 |
-| Addon Steam Deck native binding | **READY FOR SD2**; not yet adopted |
-| Steam Deck production cutover | **HARDWARE-GATED** |
+| Addon Steam Deck native binding | **SD2 ADOPTED** (side-by-side with Gordon; not the production default) |
+| Steam Deck production cutover | **HARDWARE-GATED** (SD3 real MSI Claw smoke test still pending) |
 | OEM1 → Quick Access | Planned after basic Deck validation |
 | Steam Deck IMU | Planned after basic Deck validation |
 | Game Bar typed Xbox360 | Planned after Deck cutover |
 
 The former `feature/canonical-steamdeck` branch has been merged and removed. Do not use a deleted branch as an integration authority. For SD2, the selected immutable native source revision is `onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778`.
 
-Do not confuse the selected SD2 source revision with the Addon's currently embedded native payload. The Addon still embeds the Gordon-era `db70bded...` payload until SD2 atomically updates the DLL/header, P/Invoke layout, provenance, hashes, tests, and documentation.
+SD2 has atomically adopted `ec64282c69e5587466b950332d7983fd53a7d778` as the Addon's embedded VIIPER pin: the Release `libVIIPER.dll`, the matching generated `libVIIPER.h`, the C# P/Invoke ABI, ABI tests, `PROVENANCE.md`/hashes, and this document were all updated together in the same change. The Gordon-era `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` payload is no longer embedded; Gordon's own ABI/behavior is unchanged by this commit (see `src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md` for the full build attestation).
 
 ---
 
@@ -309,12 +309,14 @@ VIIPER_MIGRATION_TODO.md
 
 Never combine a DLL from one commit with a header or managed layout from another.
 
-Until the full atomic adoption is committed in SD2, documentation must continue to distinguish:
+SD2 has completed this atomic adoption:
 
 ```text
-currently embedded Gordon payload: db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
-selected Steam Deck SD2 source:    ec64282c69e5587466b950332d7983fd53a7d778
+Addon-embedded VIIPER pin (Gordon + Steam Deck): ec64282c69e5587466b950332d7983fd53a7d778
 ```
+
+`src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md` records the DLL/header SHA-256
+hashes and full build attestation for this commit.
 
 ---
 
