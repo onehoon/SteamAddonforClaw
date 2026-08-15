@@ -82,6 +82,9 @@ public sealed class CanonicalViiperDiagnosticLogTests : IDisposable
 
     public void Dispose()
     {
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = null;
+        AppLog.MinimumLevelOverride = AppLogLevel.Info;
         if (Directory.Exists(_directory))
         {
             Directory.Delete(_directory, recursive: true);
