@@ -28,6 +28,10 @@ Addon-side required references:
 The canonical embedded path is lib/viiper.
 Do not base new Addon integration on legacy clib or a generic controller manager.
 
+For current SD2 work, the selected immutable VIIPER revision is:
+
+  ec64282c69e5587466b950332d7983fd53a7d778
+
 ===============================================================================
 1. CURRENT BASELINES
 ===============================================================================
@@ -37,17 +41,21 @@ Addon transition baseline:
   onehoon/SteamInputAddonforClaw
   acdfd105f828dd78598a028d248c146b44833dc2
 
-Validated production VIIPER pin used by the current Gordon path:
+Current Addon-embedded VIIPER pin used by the Gordon production path:
 
   onehoon/VIIPER
   db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
 
-Steam Deck VIIPER development branch:
+Selected canonical VIIPER pin for Steam Deck SD2 adoption:
 
-  feature/canonical-steamdeck
-  created from db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
+  onehoon/VIIPER main
+  ec64282c69e5587466b950332d7983fd53a7d778
+  PR #16 — Expose Steam Deck through canonical libVIIPER API
 
-The branch is development-only until an immutable reviewed commit is selected.
+The former feature/canonical-steamdeck development branch was merged and deleted.
+It is no longer an integration authority.
+
+Do not confuse the selected SD2 source revision with the Addon's currently embedded Gordon payload. The Addon keeps db70bded... until SD2 atomically adopts the matching ec64282... Release DLL/header, managed ABI, provenance, hashes, and tests.
 
 ===============================================================================
 2. WHY STEAM DECK IS THE NEW PRIMARY TARGET
@@ -105,7 +113,11 @@ Input report ID used by the implementation:
   0x09
 
 The existing device implementation is the report/protocol authority.
-The canonical lib/viiper wrapper must convert an external typed state into device/steamdeck.InputState and call UpdateInputState().
+The canonical lib/viiper wrapper in VIIPER main converts external SteamDeckDeviceState into device/steamdeck.InputState and calls UpdateInputState().
+
+Validated wrapper source revision:
+
+  ec64282c69e5587466b950332d7983fd53a7d778
 
 Do not create a second Steam Deck report encoder in lib/viiper or the Addon.
 
@@ -414,37 +426,42 @@ See:
   Reference Research_CG3EM Gyro Driver Correction_2026-08-15.txt
 
 ===============================================================================
-13. CANONICAL LIB/VIIPER WRAPPER REQUIREMENT
+13. CANONICAL LIB/VIIPER WRAPPER STATUS
 ===============================================================================
 
-At the validated Gordon pin, device/steamdeck exists but does not yet have a typed canonical lib/viiper wrapper.
+SD1 is complete.
 
-The required first integration step is therefore:
+VIIPER PR #16 exposed the existing device/steamdeck implementation through the canonical typed lib/viiper ABI and was merged to main at:
 
-  existing device/steamdeck
-          ↓
-  typed canonical lib/viiper wrapper
-          ↓
-  generated C ABI
-          ↓
-  Addon C# binding
+  ec64282c69e5587466b950332d7983fd53a7d778
 
-Initial minimal canonical surface:
+Validated minimal canonical surface:
 
   SteamDeckDeviceHandle
   SteamDeckDeviceState
+  SteamDeckDeviceRemoveResult
   CreateSteamDeckDevice
   SetSteamDeckDeviceState
   RemoveSteamDeckDevice
   RemoveSteamDeckDeviceEx
 
-Reuse:
+Shared APIs reused:
 
   GetUSBDeviceIdentity
   AttachUSBDevice
   DetachUSBDevice
 
-Do not create a generic controller-manager API.
+Validated ABI facts:
+
+  sizeof(SteamDeckDeviceState) = 76
+  sizeof(SteamDeckDeviceRemoveResult) = 4
+
+Critical state offsets are pinned by VIIPER tests. Canonical Windows CI validates Steam Deck generated-header declarations/signatures and the four DLL exports.
+
+No generic controller-manager API was introduced.
+No Gordon or clib behavior was removed.
+
+The next step is Addon SD2 adoption of the matching Release DLL/header and managed interop.
 
 ===============================================================================
 14. CALLBACK / RUMBLE SCOPE
@@ -452,17 +469,15 @@ Do not create a generic controller-manager API.
 
 The initial input smoke test does not require an Addon-visible Steam Deck output callback.
 
-The current device/steamdeck output callback storage/dispatch must be reviewed against the hardened canonical callback lifecycle before public callback ABI is exposed.
-
-Therefore the first typed wrapper may intentionally omit:
+The validated SD1 wrapper intentionally does not expose:
 
   SetSteamDeckOutputCallback
   rumble callback integration
   haptic callback integration
 
-This keeps SD1 narrow and avoids weakening the canonical callback teardown contract.
+The current device/steamdeck output callback storage/dispatch still needs a separate review against the hardened canonical callback lifecycle before public callback ABI is exposed.
 
-Rumble/haptics remain a separate follow-up after basic input/lifecycle validation.
+Keep SD2 input-focused. Rumble/haptics remain a separate follow-up after basic input/lifecycle validation.
 
 ===============================================================================
 15. ADDON SAFETY CONTRACT DOES NOT CHANGE
@@ -531,8 +546,8 @@ Not required for this first gate:
 17. IMPLEMENTATION ORDER
 ===============================================================================
 
-  SD1  VIIPER typed Steam Deck ABI
-  SD2  Addon side-by-side Deck ABI/session/mapper/publisher
+  SD1  VIIPER typed Steam Deck ABI — VALIDATED / MERGED TO MAIN
+  SD2  Addon side-by-side Deck ABI/session/mapper/publisher — NEXT
   SD3  non-gyro real-hardware smoke test
   SD4  production Gordon -> Deck cutover
   SD5  OEM1 -> QuickAccess
@@ -562,10 +577,11 @@ Do not use the Steam Deck transition to:
 
 The project should not implement a new Steam Deck protocol from scratch.
 
-The correct migration is:
+The correct migration is now:
 
   preserve the proven Gordon lifecycle/safety architecture
-  + expose the existing VIIPER Steam Deck device through canonical typed lib/viiper
+  + consume the validated canonical Steam Deck wrapper from VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778
+  + atomically adopt its matching Release DLL/header and managed ABI in Addon SD2
   + map MSI Claw normalized controls directly into native Deck semantics
   + validate 28DE:1205 on real hardware
   + only then make Deck the production SteamOutput target.
