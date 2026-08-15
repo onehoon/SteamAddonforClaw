@@ -299,18 +299,25 @@ public sealed class EffectiveSteamSessionSourceTests
         }
     }
 
+    private static readonly IntPtr FakeBigPictureHwnd = new(0x1234);
+
     private sealed class FakeBigPictureProbe(bool active) : ISteamBigPictureWindowProbe
     {
         private bool _active = active;
-        public SteamBigPictureProbeResult Capture() => new(_active, true, _active ? "Active" : "Inactive");
+        public BigPictureCandidateInspection InspectCandidate(IntPtr window)
+            => window == FakeBigPictureHwnd && _active ? new(true, true, 111u) : new(false, true, 0);
+        public BigPictureScanResult ScanForCandidate(IntPtr preferredHwnd)
+            => _active ? new(true, FakeBigPictureHwnd, 111u, true) : new(false, IntPtr.Zero, 0, true);
+        public BigPictureTrackedWindowInspection InspectTrackedWindow(IntPtr window, uint expectedProcessId)
+            => window == FakeBigPictureHwnd && _active ? new(true, true) : new(false, true);
         public void SetActive(bool active) => _active = active;
     }
 
     private sealed class FakeBigPictureEventHook : ISteamBigPictureEventHook
     {
-        private Action? _callback;
-        public bool Start(Action callback) { _callback = callback; return true; }
-        public void Raise() => _callback?.Invoke();
+        private Action<BigPictureWinEvent>? _callback;
+        public bool Start(Action<BigPictureWinEvent> callback) { _callback = callback; return true; }
+        public void Raise() => _callback?.Invoke(new BigPictureWinEvent(BigPictureWinEventType.Create, FakeBigPictureHwnd, 0, 0));
         public void Dispose() => _callback = null;
     }
 }
