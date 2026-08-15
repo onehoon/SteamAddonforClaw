@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
 
 namespace SteamInputAddonforClaw.Diagnostics;
@@ -154,8 +155,9 @@ internal static class AppLog
     }, timeout);
 
     /// <summary>
-    /// Reads a test log on the single writer thread after flushing the active writer. This avoids a
-    /// test opening the same file concurrently with a late background log entry after DrainForTests.
+    /// Reads a test log from the single writer thread after closing the active writer. This makes the
+    /// drain, handle close, and file read one FIFO operation, so a late background log entry cannot race
+    /// the test's read and the read never blocks behind the writer's own file handle.
     /// </summary>
     internal static string ReadAllTextForTests(string path) => ReadFileForTests(path, File.ReadAllText);
 
@@ -164,11 +166,16 @@ internal static class AppLog
     private static T ReadFileForTests<T>(string path, Func<string, T> read)
     {
         T? result = default;
+        Exception? error = null;
         Writer.RunOnWriterThreadForTests(() =>
         {
-            _openWriter?.Flush();
-            result = read(path);
+            _openWriter?.Dispose();
+            _openWriter = null;
+            _openDirectory = null;
+            try { result = read(path); }
+            catch (Exception exception) { error = exception; }
         });
+        if (error is not null) ExceptionDispatchInfo.Capture(error).Throw();
         return result!;
     }
 
