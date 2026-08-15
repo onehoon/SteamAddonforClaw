@@ -20,6 +20,19 @@ $noticesPath = Join-Path $RepoRoot 'THIRD_PARTY_NOTICES.md'
 $runtimeInspectorPath = Join-Path $RepoRoot 'src\SteamInputAddonforClaw\Prerequisites\ViiperRuntimeInspector.cs'
 $verifyPublishAssetsPath = Join-Path $RepoRoot 'scripts\verify-publish-assets.ps1'
 
+function Get-Utf8FileText {
+    <#
+    Reads a text file as UTF-8 explicitly, regardless of the process's default
+    console/system codepage -- Get-Content -Raw without an explicit encoding
+    decodes using the OS default codepage in Windows PowerShell 5.1, which can
+    misread non-ASCII bytes (e.g. an em dash in doc prose) on a non-UTF-8
+    system locale. Kept consistent with scripts/adopt-viiper.ps1's own helper
+    of the same name.
+    #>
+    param([Parameter(Mandatory)] [string] $Path)
+    return [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+}
+
 function Assert-Field {
     param(
         [Parameter(Mandatory)] $Actual,
@@ -100,7 +113,7 @@ if (-not (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
     throw "VIIPER provenance record was not found: $provenancePath"
 }
 
-$provenanceText = Get-Content -LiteralPath $provenancePath -Raw
+$provenanceText = Get-Utf8FileText -Path $provenancePath
 
 $provenanceCommitMatch = [regex]::Match($provenanceText, 'Commit:\s*([0-9a-fA-F]+)')
 if (-not $provenanceCommitMatch.Success) {
@@ -139,7 +152,7 @@ if (-not (Test-Path -LiteralPath $integrationDocPath -PathType Leaf)) {
     throw "VIIPER integration doc was not found: $integrationDocPath"
 }
 
-$integrationText = Get-Content -LiteralPath $integrationDocPath -Raw
+$integrationText = Get-Utf8FileText -Path $integrationDocPath
 $integrationMatch = [regex]::Match($integrationText, 'Embedded VIIPER revision\s*\|\s*`([0-9a-fA-F]+)`')
 if (-not $integrationMatch.Success) {
     throw "docs/VIIPER_INTEGRATION.md is missing a parseable 'Embedded VIIPER revision' pin."
@@ -154,7 +167,7 @@ if (-not (Test-Path -LiteralPath $migrationDocPath -PathType Leaf)) {
     throw "VIIPER migration doc was not found: $migrationDocPath"
 }
 
-$migrationText = Get-Content -LiteralPath $migrationDocPath -Raw
+$migrationText = Get-Utf8FileText -Path $migrationDocPath
 $migrationMatch = [regex]::Match($migrationText, 'onehoon/VIIPER@([0-9a-fA-F]+)')
 if (-not $migrationMatch.Success) {
     throw "docs/VIIPER_MIGRATION_TODO.md is missing a parseable 'onehoon/VIIPER@<commit>' pin."
@@ -171,7 +184,7 @@ if (-not (Test-Path -LiteralPath $noticesPath -PathType Leaf)) {
     throw "THIRD_PARTY_NOTICES.md was not found: $noticesPath"
 }
 
-$noticesText = Get-Content -LiteralPath $noticesPath -Raw
+$noticesText = Get-Utf8FileText -Path $noticesPath
 $noticesMatch = [regex]::Match($noticesText, '(?m)^- Source baseline: pinned commit `([0-9a-fA-F]+)`\r?$')
 if (-not $noticesMatch.Success) {
     throw "THIRD_PARTY_NOTICES.md is missing a parseable VIIPER 'Source baseline: pinned commit' pin."
@@ -188,7 +201,7 @@ if (-not (Test-Path -LiteralPath $runtimeInspectorPath -PathType Leaf)) {
     throw "ViiperRuntimeInspector.cs was not found: $runtimeInspectorPath"
 }
 
-$runtimeInspectorText = Get-Content -LiteralPath $runtimeInspectorPath -Raw
+$runtimeInspectorText = Get-Utf8FileText -Path $runtimeInspectorPath
 $runtimeInspectorMatch = [regex]::Match($runtimeInspectorText, 'ExpectedPayloadSha256\s*=\s*"([0-9a-fA-F]+)"')
 if (-not $runtimeInspectorMatch.Success) {
     throw "ViiperRuntimeInspector.cs is missing a parseable 'ExpectedPayloadSha256' constant."
@@ -203,7 +216,7 @@ if (-not (Test-Path -LiteralPath $verifyPublishAssetsPath -PathType Leaf)) {
     throw "scripts/verify-publish-assets.ps1 was not found: $verifyPublishAssetsPath"
 }
 
-$verifyPublishAssetsText = Get-Content -LiteralPath $verifyPublishAssetsPath -Raw
+$verifyPublishAssetsText = Get-Utf8FileText -Path $verifyPublishAssetsPath
 $verifyPublishAssetsMatch = [regex]::Match($verifyPublishAssetsText, "expectedViiperSha256\s*=\s*'([0-9a-fA-F]+)'")
 if (-not $verifyPublishAssetsMatch.Success) {
     throw "scripts/verify-publish-assets.ps1 is missing a parseable 'expectedViiperSha256' assignment."
