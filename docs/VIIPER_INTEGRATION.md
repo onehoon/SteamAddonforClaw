@@ -15,12 +15,12 @@ The exact pre-Steam-Deck-transition version of this document is preserved under 
 | Canonical embedded API | `lib/viiper` required |
 | Current Addon-embedded VIIPER pin | `ec64282c69e5587466b950332d7983fd53a7d778` on `onehoon/VIIPER:main` (SD2 adopted; includes Gordon + Steam Deck typed ABI) |
 | Selected VIIPER pin for Steam Deck SD2 | `ec64282c69e5587466b950332d7983fd53a7d778` on `onehoon/VIIPER:main` |
-| Current Addon production virtual output | Classic Steam Controller / Gordon `28DE:1102` (default); Steam Deck `28DE:1205` reachable only via the `STEAMINPUT_ADDON_DEV_STEAMDECK_OUTPUT=1` developer/test seam |
+| Current Addon active runtime virtual output | Steam Deck `28DE:1205` exclusively; Gordon `28DE:1102` is retained reference/rollback code and is not selected by runtime composition |
 | Current Addon transition baseline | `acdfd105f828dd78598a028d248c146b44833dc2` |
 | New primary target architecture | Steam Deck `28DE:1205` |
 | Steam Deck canonical typed wrapper | **VALIDATED / MERGED** via VIIPER PR #16 |
-| Addon Steam Deck native binding | **SD2 ADOPTED** (side-by-side with Gordon; not the production default) |
-| Steam Deck production cutover | **HARDWARE-GATED** (SD3 real MSI Claw smoke test still pending) |
+| Addon Steam Deck native binding | **SD2 ADOPTED / ACTIVE** |
+| Steam Deck hardware validation | **HARDWARE-GATED** (SD3 real MSI Claw smoke test still pending) |
 | OEM1 → Quick Access | Planned after basic Deck validation |
 | Steam Deck IMU | Planned after basic Deck validation |
 | Game Bar typed Xbox360 | Planned after Deck cutover |
@@ -137,7 +137,7 @@ The DLL module should be treated as process-lifetime once loaded. Do not unload 
 
 # 4. Validated Gordon baseline
 
-The current production Addon still uses the canonical Gordon path at the transition baseline:
+The preserved transition baseline used the canonical Gordon path:
 
 ```text
 Addon commit: acdfd105f828dd78598a028d248c146b44833dc2

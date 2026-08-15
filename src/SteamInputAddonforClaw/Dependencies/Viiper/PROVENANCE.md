@@ -78,8 +78,7 @@ and `docs/VIIPER_MIGRATION_TODO.md` are all updated together in the same change,
 VIIPER commit `ec64282c69e5587466b950332d7983fd53a7d778`.
 
 The Steam Deck path (`CanonicalSteamDeckSession` / `SteamDeckDeviceStateMapper` /
-`CanonicalSteamDeckInputPublisher` / `CanonicalSteamDeckOutputStage`) exists side-by-side with the
-unmodified Gordon production path. The default production Steam routing output remains Gordon;
-Steam Deck is reachable only through the `STEAMINPUT_ADDON_DEV_STEAMDECK_OUTPUT=1` developer/test
-environment variable seam in `App.xaml.cs`, pending the SD3 real-hardware smoke test and SD4
-production cutover review (see `docs/VIIPER_MIGRATION_TODO.md`).
+`CanonicalSteamDeckInputPublisher` / `CanonicalSteamDeckOutputStage`) is now the sole active Steam
+output composition. The Gordon implementation remains unmodified reference/rollback code and is
+not selected as a runtime fallback. SD3 real-hardware smoke testing is still pending (see
+`docs/VIIPER_MIGRATION_TODO.md`).
