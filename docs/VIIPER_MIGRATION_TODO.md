@@ -48,24 +48,31 @@ At this point the production `SteamOutput` path uses canonical Gordon and includ
 
 This baseline is no longer the target for new Gordon feature expansion. It remains the rollback/reference baseline while Steam Deck is proven.
 
-## Validated VIIPER production pin
+## Current Addon-embedded VIIPER pin
 
 ```text
 repository: onehoon/VIIPER
 commit:     db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
 ```
 
-This is the validated Gordon-era canonical pin containing the hardened typed lifecycle, tracked USB/IP attach/detach ownership, caller-owned bus behavior, Gordon independent L2/R2 state, and classified Gordon remove result.
+This remains the VIIPER payload currently embedded by the Gordon production path until SD2 atomically replaces the DLL/header/PInvoke/provenance set.
 
-## Steam Deck VIIPER development branch
+It is the validated Gordon-era canonical pin containing the hardened typed lifecycle, tracked USB/IP attach/detach ownership, caller-owned bus behavior, Gordon independent L2/R2 state, and classified Gordon remove result.
+
+## Selected canonical VIIPER pin for Steam Deck SD2
 
 ```text
 repository: onehoon/VIIPER
-branch:     feature/canonical-steamdeck
-base:       db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
+branch:     main
+commit:     ec64282c69e5587466b950332d7983fd53a7d778
+PR:         #16 — Expose Steam Deck through canonical libVIIPER API
 ```
 
-The branch is a development candidate only. Do not adopt its DLL/header into the Addon until the Steam Deck typed ABI PR is reviewed and an immutable commit is selected.
+PR #16 was reviewed, CI passed, and it was merged to VIIPER `main`. The former `feature/canonical-steamdeck` branch is no longer an integration authority.
+
+This commit adds the minimal typed Steam Deck ABI, pins its ABI layout, extends canonical header/DLL export CI coverage, and keeps Gordon/clib behavior intact. Use this immutable commit as the native source revision for SD2 unless a newer revision is explicitly selected and reviewed first.
+
+Do not claim that the Addon has adopted this pin until SD2 updates the matching Release DLL/header, managed interop, provenance, hashes, and tests together.
 
 ---
 
@@ -115,7 +122,7 @@ Goal:
 - preserve the exact pre-transition documentation;
 - stop broad Gordon feature expansion while Deck is evaluated.
 
-This documentation PR preserves the former README/TODO/integration/reference blobs under:
+The transition documentation preserves the former README/TODO/integration/reference blobs under:
 
 ```text
 docs/archive/gordon-baseline-2026-08-15/
@@ -127,31 +134,30 @@ Do not delete VIIPER's `device/steamcontroller` implementation or break `clib` c
 
 ## SD1. Expose the existing Steam Deck implementation through canonical typed libVIIPER
 
-**Status: IN PROGRESS**
+**Status: VALIDATED**
 
-Repository:
+Validated native revision:
 
 ```text
-onehoon/VIIPER
-feature/canonical-steamdeck
+repository: onehoon/VIIPER
+branch:     main
+commit:     ec64282c69e5587466b950332d7983fd53a7d778
+PR:         #16
 ```
 
-Goal:
-
-Expose existing `device/steamdeck` through the canonical typed `lib/viiper` ABI with the smallest surface needed for the first Addon input smoke test.
-
-Initial required surface:
+Implemented surface:
 
 ```text
 SteamDeckDeviceHandle
 SteamDeckDeviceState
+SteamDeckDeviceRemoveResult
 CreateSteamDeckDevice
 SetSteamDeckDeviceState
 RemoveSteamDeckDevice
 RemoveSteamDeckDeviceEx
 ```
 
-Reuse shared canonical APIs:
+Shared canonical APIs remain:
 
 ```text
 GetUSBDeviceIdentity
@@ -159,60 +165,40 @@ AttachUSBDevice
 DetachUSBDevice
 ```
 
-Required behavior:
+Validated behavior:
 
 - default Steam Deck identity `28DE:1205`;
 - `device/steamdeck` remains the report-format authority;
 - caller does not own the frame counter;
 - typed remove leaves the caller-owned bus alive;
 - wrong/stale/zero handles fail safely;
-- classified remove uses the same canonical success/retryable/unsafe/invalid semantics;
+- classified remove uses the canonical success/retryable/unsafe/invalid semantics;
 - generated header and DLL are produced together;
-- no Claw-specific fields are added to the Steam Deck ABI;
-- trackpad fields remain in the generic ABI even though the Addon initially sends them neutral.
+- no Claw-specific fields were added to the Steam Deck ABI;
+- trackpad fields remain in the generic ABI;
+- `SteamDeckDeviceState` size is pinned at 76 bytes with critical offsets pinned by tests;
+- `SteamDeckDeviceRemoveResult` size is pinned at 4 bytes;
+- canonical CI validates Steam Deck focused/race/vet coverage, generated-header signatures, and Windows DLL exports;
+- no public Steam Deck output callback/rumble/haptics ABI was added.
 
-### Deliberately excluded from the first SD1 PR
-
-The existing Steam Deck output callback path has not yet been hardened to the same callback-clear/capture synchronization contract as Gordon. The first minimal input wrapper therefore does **not** need to expose a canonical Steam Deck output callback.
-
-Out of scope:
-
-- rumble/haptics callback ABI;
-- Addon code;
-- gyro acquisition;
-- OEM1 mapping;
-- Game Bar;
-- Gordon removal;
-- Steam Deck protocol redesign.
-
-Validation baseline:
-
-```text
-go test ./...
-go test -race ./internal/server/usb ./lib/viiper
-go vet ./...
-git diff --check
-just build-libVIIPER Release
-```
-
-Acceptance:
-
-- Draft PR reviewed;
-- canonical generated header contains the Steam Deck typed surface;
-- Windows DLL exports match the header;
-- ABI state layout is pinned by tests;
-- an immutable VIIPER commit is selected for Addon adoption.
+The old `feature/canonical-steamdeck` branch is not part of the ongoing integration contract. VIIPER `main` at the selected immutable commit is the SD1 source of truth.
 
 ---
 
 ## SD2. Add side-by-side Steam Deck binding/session/mapper/publisher to the Addon
 
-**Status: BLOCKED on SD1**
+**Status: TODO / READY**
 
 Repository:
 
 ```text
 onehoon/SteamInputAddonforClaw
+```
+
+Native source pin for this step:
+
+```text
+onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778
 ```
 
 Goal:
@@ -264,6 +250,8 @@ ABI tests
 VIIPER_INTEGRATION.md
 this TODO
 ```
+
+Until that atomic adoption lands, `db70bded...` remains the Addon's embedded Gordon payload even though `ec64282...` is the selected SD2 source revision.
 
 ---
 
@@ -446,4 +434,4 @@ For Steam Deck report details also read:
 SteamInputAddonforClaw/docs/Reference Research_Steam Deck VIIPER SteamOutput Input Reports.txt
 ```
 
-No implementation should proceed from memory alone.
+For SD2, read the VIIPER documents and generated header from the selected immutable revision `ec64282c69e5587466b950332d7983fd53a7d778`. Do not proceed from the deleted development branch or from memory alone.
