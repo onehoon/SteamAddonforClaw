@@ -34,7 +34,7 @@ GCC/MinGW:      gcc.exe (MinGW-W64 x86_64-ucrt-posix-seh) 16.1.0
 Artifact hashes:
 
 ```text
-Generated header SHA-256: 9e01d6e51b95e4914508e6961e9f867883190be3d0191caa75868076e8ddd5ed
+Generated header SHA-256: af470d32976b21dbaabe5413f873980ba76218d795138f03c766f33fbacbd3c1
 DLL SHA-256:              f8d2651b185d39544f53151d8c857b53b70cf6006de77bbd2574089c7317256b
 ```
 
@@ -61,6 +61,7 @@ The following Addon files must remain aligned with this artifact:
 - `docs/VIIPER_INTEGRATION.md`
 - `docs/VIIPER_MIGRATION_TODO.md`
 - this provenance record
+- `Dependencies/Viiper/viiper.lock.json` (machine-readable identity; verified by `scripts/verify-viiper.ps1`)
 
 The active Addon composition uses the Steam Deck session, mapper, publisher,
 identity resolver, and output stage. MSI Claw EX basic non-gyro controller
