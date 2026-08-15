@@ -8,8 +8,9 @@ function New-Fixture {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) ("viiper-verify-test-" + [System.Guid]::NewGuid())
     $viiperDir = Join-Path $root 'src\SteamInputAddonforClaw\Dependencies\Viiper'
     $docsDir = Join-Path $root 'docs'
-    New-Item -ItemType Directory -Force -Path $viiperDir | Out-Null
-    New-Item -ItemType Directory -Force -Path $docsDir | Out-Null
+    $prereqDir = Join-Path $root 'src\SteamInputAddonforClaw\Prerequisites'
+    $scriptsDir = Join-Path $root 'scripts'
+    New-Item -ItemType Directory -Force -Path $viiperDir, $docsDir, $prereqDir, $scriptsDir | Out-Null
 
     Copy-Item -LiteralPath (Join-Path $realViiperDir 'libVIIPER.dll') -Destination $viiperDir
     Copy-Item -LiteralPath (Join-Path $realViiperDir 'libVIIPER.h') -Destination $viiperDir
@@ -17,6 +18,9 @@ function New-Fixture {
     Copy-Item -LiteralPath (Join-Path $realViiperDir 'PROVENANCE.md') -Destination $viiperDir
     Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\VIIPER_INTEGRATION.md') -Destination $docsDir
     Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\VIIPER_MIGRATION_TODO.md') -Destination $docsDir
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md') -Destination $root
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'src\SteamInputAddonforClaw\Prerequisites\ViiperRuntimeInspector.cs') -Destination $prereqDir
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts\verify-publish-assets.ps1') -Destination $scriptsDir
 
     return $root
 }
@@ -181,6 +185,30 @@ try {
     (Get-Content -LiteralPath $integrationDocPath -Raw) -replace 'Embedded VIIPER revision \| `[0-9a-fA-F]{40}`', ('Embedded VIIPER revision | `' + ('2' * 40) + '`') |
         Set-Content -LiteralPath $integrationDocPath
     Assert-Failure -Result (Invoke-Verify -Root $root) -Case 'authoritative documentation pin mismatch'
+
+    # 13. THIRD_PARTY_NOTICES.md source baseline mismatch fails.
+    $root = New-Fixture
+    $fixturesToClean += $root
+    $noticesPath = Join-Path $root 'THIRD_PARTY_NOTICES.md'
+    (Get-Content -LiteralPath $noticesPath -Raw) -replace 'Source baseline: pinned commit `[0-9a-fA-F]{40}`', ('Source baseline: pinned commit `' + ('3' * 40) + '`') |
+        Set-Content -LiteralPath $noticesPath
+    Assert-Failure -Result (Invoke-Verify -Root $root) -Case 'THIRD_PARTY_NOTICES.md source baseline mismatch'
+
+    # 14. ViiperRuntimeInspector.ExpectedPayloadSha256 mismatch fails.
+    $root = New-Fixture
+    $fixturesToClean += $root
+    $inspectorPath = Join-Path $root 'src\SteamInputAddonforClaw\Prerequisites\ViiperRuntimeInspector.cs'
+    (Get-Content -LiteralPath $inspectorPath -Raw) -replace 'ExpectedPayloadSha256 = "[0-9A-Fa-f]{64}"', ('ExpectedPayloadSha256 = "' + ('4' * 64) + '"') |
+        Set-Content -LiteralPath $inspectorPath
+    Assert-Failure -Result (Invoke-Verify -Root $root) -Case 'ViiperRuntimeInspector.ExpectedPayloadSha256 mismatch'
+
+    # 15. verify-publish-assets.ps1 expectedViiperSha256 mismatch fails.
+    $root = New-Fixture
+    $fixturesToClean += $root
+    $publishGatePath = Join-Path $root 'scripts\verify-publish-assets.ps1'
+    (Get-Content -LiteralPath $publishGatePath -Raw) -replace "expectedViiperSha256 = '[0-9A-Fa-f]{64}'", ("expectedViiperSha256 = '" + ('5' * 64) + "'") |
+        Set-Content -LiteralPath $publishGatePath
+    Assert-Failure -Result (Invoke-Verify -Root $root) -Case 'verify-publish-assets.ps1 expectedViiperSha256 mismatch'
 
     Write-Host 'VIIPER verification script tests passed.'
 }

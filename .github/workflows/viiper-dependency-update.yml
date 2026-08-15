@@ -1,0 +1,293 @@
+name: VIIPER Dependency Update
+
+# Automatically (or manually) fetches, independently re-verifies, and
+# mechanically adopts a canonical VIIPER artifact into a Draft PR. It never
+# infers ABI compatibility, edits managed P/Invoke code, or merges anything.
+#
+# Trust model: the event payload's commit SHA is only an input, never
+# authority. scripts/update-viiper.ps1 independently rediscovers and
+# verifies the exact commit's canonical push/main/success artifact and its
+# manifest before scripts/adopt-viiper.ps1 touches anything.
+
+on:
+  repository_dispatch:
+    types: [viiper-canonical-ready]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Exact 40-character VIIPER commit SHA to adopt'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: viiper-dependency-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Resolve target commit
+        id: target
+        shell: pwsh
+        env:
+          DISPATCH_COMMIT: ${{ github.event.client_payload.commit }}
+          DISPATCH_SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+          MANUAL_COMMIT: ${{ github.event.inputs.commit }}
+        run: |
+          $commit = if ($env:MANUAL_COMMIT) { $env:MANUAL_COMMIT } else { $env:DISPATCH_COMMIT }
+          if ([string]::IsNullOrWhiteSpace($commit)) {
+            throw 'No target commit was provided by either repository_dispatch.client_payload.commit or workflow_dispatch.inputs.commit.'
+          }
+          if ($commit -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "Target commit must be exactly 40 hexadecimal characters. Branch names, tags, and short SHAs are not accepted. Got: '$commit'."
+          }
+          $commit = $commit.ToLowerInvariant()
+          Write-Host "Target commit: $commit"
+          if ($env:DISPATCH_SOURCE_RUN_ID) {
+            Write-Host "Dispatch-reported source run (diagnostic only, not trusted as artifact authority): $env:DISPATCH_SOURCE_RUN_ID"
+          }
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+
+      - name: Generate GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.VIIPER_ADDON_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.VIIPER_ADDON_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            SteamInputAddonforClaw
+            VIIPER
+          permission-actions: read
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Check current pin and classify upgrade eligibility
+        id: eligibility
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_COMMIT: ${{ steps.target.outputs.commit }}
+        run: |
+          $lock = Get-Content -LiteralPath 'src/SteamInputAddonforClaw/Dependencies/Viiper/viiper.lock.json' -Raw | ConvertFrom-Json
+          $currentCommit = $lock.commit
+
+          # Reuse adopt-viiper.ps1's pure eligibility classifier rather than duplicating the logic.
+          . ./scripts/adopt-viiper.ps1 -StagingDirectory 'unused-for-dot-source' -ExpectedCommit ('0' * 40)
+
+          if ($env:TARGET_COMMIT -eq $currentCommit) {
+            $status = 'identical'
+          } else {
+            $compare = gh api "repos/onehoon/VIIPER/compare/$currentCommit...$($env:TARGET_COMMIT)" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to compare $currentCommit...$($env:TARGET_COMMIT) on onehoon/VIIPER via GitHub API."
+            }
+            $status = $compare.status
+          }
+
+          $eligibility = Test-ViiperUpgradeEligibility -CurrentCommit $currentCommit -TargetCommit $env:TARGET_COMMIT -CompareStatus $status
+          Write-Host "Current commit: $currentCommit"
+          Write-Host "Target commit:  $($env:TARGET_COMMIT)"
+          Write-Host "Compare status: $status"
+          Write-Host "Eligibility:    $eligibility"
+
+          if ($eligibility -eq 'Downgrade') {
+            Write-Host "Target commit is behind the current embedded revision. Not creating a downgrade PR; treating as a clean no-op."
+            $eligibility = 'NoOp'
+          }
+          if ($eligibility -eq 'FailClosed') {
+            throw "Cannot establish that $($env:TARGET_COMMIT) is a forward revision of $currentCommit on onehoon/VIIPER main (compare status: '$status'). Failing closed rather than guessing."
+          }
+
+          "eligibility=$eligibility" >> $env:GITHUB_OUTPUT
+          "current_commit=$currentCommit" >> $env:GITHUB_OUTPUT
+
+      - name: Check for an existing automation branch/PR
+        id: existing
+        if: steps.eligibility.outputs.eligibility == 'Eligible'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_COMMIT: ${{ steps.target.outputs.commit }}
+        run: |
+          $branch = "automation/viiper-$($env:TARGET_COMMIT)"
+
+          # A failed lookup (auth problem, rate limit, API outage) must never be treated as "does
+          # not exist" -- that would defeat fail-closed idempotency. Distinguish the lookup failing
+          # from the lookup succeeding with an empty/absent result at every step below.
+          $prJson = gh pr list --head $branch --state all --json number,isDraft,state
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to query existing automation PRs for branch '$branch' (gh exit code $LASTEXITCODE). Failing closed rather than assuming none exist."
+          }
+          # Assign first, then wrap in @() -- @($x | ConvertFrom-Json) wraps ConvertFrom-Json's
+          # single emitted pipeline object (which for a JSON array is itself already an array) in
+          # an extra outer array, so an empty JSON array "[]" would come out as Count=1, not 0.
+          $existingPrsParsed = $prJson | ConvertFrom-Json
+          $existingPrs = @($existingPrsParsed)
+          if ($existingPrs.Count -gt 0) {
+            $pr = $existingPrs[0]
+            Write-Host "An automation PR for $($env:TARGET_COMMIT) already exists: #$($pr.number) (state=$($pr.state), draft=$($pr.isDraft)). Not creating a duplicate or force-pushing over it."
+            "branch=$branch" >> $env:GITHUB_OUTPUT
+            "exists=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          # No PR, but the remote branch itself may still exist -- e.g. a prior run pushed the
+          # branch and then failed before opening the PR, or a human is working on it directly.
+          # Never force-push or silently reuse it. Use `git ls-remote --exit-code`, whose exit
+          # codes are unambiguous: 0 = ref found, 2 = no matching ref, anything else = the lookup
+          # itself failed (network/auth/etc) and must not be read as "branch does not exist".
+          git ls-remote --exit-code --heads origin "refs/heads/$branch" | Out-Null
+          $lsRemoteExitCode = $LASTEXITCODE
+          if ($lsRemoteExitCode -eq 0) {
+            throw "Remote branch '$branch' already exists with no open or closed PR for it. Refusing to push over it (it may contain a partial automation run or manual work). Inspect and delete or rename it manually, then retry."
+          }
+          if ($lsRemoteExitCode -ne 2) {
+            throw "Failed to determine whether remote branch '$branch' exists (git ls-remote exit code $lsRemoteExitCode). Failing closed rather than assuming it does not exist."
+          }
+
+          "branch=$branch" >> $env:GITHUB_OUTPUT
+          "exists=false" >> $env:GITHUB_OUTPUT
+
+      - name: Fetch and verify canonical artifact
+        id: fetch
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_COMMIT: ${{ steps.target.outputs.commit }}
+        run: |
+          $output = powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/update-viiper.ps1 -Commit $env:TARGET_COMMIT
+          $output | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $joined = $output -join "`n"
+          $runIdMatch = [regex]::Match($joined, 'Run ID:\s*(\d+)')
+          $artifactMatch = [regex]::Match($joined, 'Artifact:\s*(\S+)')
+          if (-not $runIdMatch.Success -or -not $artifactMatch.Success) {
+            throw 'Could not parse the discovered run ID / artifact name out of update-viiper.ps1 output for the PR body.'
+          }
+          "run_id=$($runIdMatch.Groups[1].Value)" >> $env:GITHUB_OUTPUT
+          "artifact_name=$($artifactMatch.Groups[1].Value)" >> $env:GITHUB_OUTPUT
+
+      - name: Mechanically adopt the verified artifact
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          TARGET_COMMIT: ${{ steps.target.outputs.commit }}
+        run: |
+          $staging = "artifacts/viiper-update/$($env:TARGET_COMMIT)"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/adopt-viiper.ps1 -StagingDirectory $staging -ExpectedCommit $env:TARGET_COMMIT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify adopted dependency identity
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-viiper.ps1
+
+      - name: Run dependency verification-script tests
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/verify-viiper.tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/update-viiper.tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/adopt-viiper.tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Restore
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        run: dotnet restore SteamInputAddonforClaw.slnx
+
+      - name: Build
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        run: dotnet build SteamInputAddonforClaw.slnx -c Release --no-restore
+
+      - name: Test
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          $testProjects = @(Get-ChildItem -Path tests -Filter *.csproj -Recurse -File)
+          foreach ($testProject in $testProjects) {
+            dotnet test $testProject.FullName -c Release --no-restore --blame-hang-timeout 3m --blame-hang-dump-type full
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: git diff --check
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        run: git diff --check
+
+      - name: Commit, push, and open Draft PR
+        if: steps.eligibility.outputs.eligibility == 'Eligible' && steps.existing.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_COMMIT: ${{ steps.target.outputs.commit }}
+          CURRENT_COMMIT: ${{ steps.eligibility.outputs.current_commit }}
+          BRANCH: ${{ steps.existing.outputs.branch }}
+          RUN_ID: ${{ steps.fetch.outputs.run_id }}
+          ARTIFACT_NAME: ${{ steps.fetch.outputs.artifact_name }}
+        run: |
+          git config user.name 'viiper-addon-dependency-bot[bot]'
+          git config user.email 'viiper-addon-dependency-bot[bot]@users.noreply.github.com'
+
+          $lock = Get-Content -LiteralPath 'src/SteamInputAddonforClaw/Dependencies/Viiper/viiper.lock.json' -Raw | ConvertFrom-Json
+          $dllHash = $lock.dll.sha256
+          $headerHash = $lock.header.sha256
+
+          git checkout -b $env:BRANCH
+          git add -A
+          git commit -m "VIIPER dependency update: $($env:CURRENT_COMMIT.Substring(0,7)) -> $($env:TARGET_COMMIT.Substring(0,7))" -m "Mechanically adopted by the VIIPER Dependency Update workflow. Managed ABI compatibility has NOT been inferred or automatically adapted -- review required before merge."
+          git push -u origin $env:BRANCH
+
+          $shortSha = $env:TARGET_COMMIT.Substring(0, 7)
+          $title = "VIIPER dependency update: $shortSha"
+          $backtick = [char]0x60
+          $codeSpan = { param($text) "$backtick$text$backtick" }
+          $bodyLines = @(
+            '## Automated VIIPER dependency update',
+            '',
+            "- Previous embedded commit: $(& $codeSpan $env:CURRENT_COMMIT)",
+            "- Requested exact target commit: $(& $codeSpan $env:TARGET_COMMIT)",
+            "- Eligible onehoon/VIIPER workflow run: $(& $codeSpan $env:RUN_ID) (https://github.com/onehoon/VIIPER/actions/runs/$($env:RUN_ID))",
+            "- Canonical artifact: $(& $codeSpan $env:ARTIFACT_NAME)",
+            "- DLL SHA-256: $(& $codeSpan $dllHash)",
+            "- Header SHA-256: $(& $codeSpan $headerHash)",
+            "- Independently re-verified via $(& $codeSpan 'scripts/update-viiper.ps1') against this exact canonical push/main/success artifact and its manifest before anything was adopted.",
+            "- Mechanically adopted via $(& $codeSpan 'scripts/adopt-viiper.ps1'): vendored DLL/header, $(& $codeSpan 'viiper.lock.json'), $(& $codeSpan 'PROVENANCE.md') identity fields, documented pins, $(& $codeSpan 'THIRD_PARTY_NOTICES.md') source identity, the runtime prerequisite hash, and the publish-gate hash.",
+            '',
+            '## Managed ABI compatibility has NOT been inferred or automatically adapted',
+            '',
+            "This automation never edits managed P/Invoke code, $(& $codeSpan 'RequiredExports'), struct/enum layouts, callback lifetime logic, or any runtime/session/mapper behavior. Review the generated $(& $codeSpan 'libVIIPER.h') diff and the managed interop before merging.",
+            '',
+            "- [ ] Generated $(& $codeSpan 'libVIIPER.h') diff reviewed",
+            "- [ ] Managed P/Invoke / $(& $codeSpan 'RequiredExports') compatibility reviewed",
+            '- [ ] Callback/lifecycle contract reviewed if affected',
+            '- [ ] Addon changes added to this PR if required',
+            "- [ ] $(& $codeSpan 'scripts/verify-viiper.ps1') passes",
+            '- [ ] Release build passes',
+            '- [ ] Full tests pass',
+            '- [ ] GitHub Actions green',
+            '- [ ] Hardware claims unchanged unless separately validated',
+            '',
+            'Do not merge until every item above is checked. This PR does not auto-merge.'
+          )
+          $body = $bodyLines -join "`n"
+
+          gh pr create --draft --title $title --body $body --head $env:BRANCH --base main

@@ -13,9 +13,8 @@ Entrypoint: just build-libVIIPER Release
 ```
 
 This revision provides the typed Steam Deck ABI used by the active Addon
-runtime, including the `SetSteamDeckOutputCallback` output-callback binding
-adopted in this revision (see "ABI changes in this revision" below). The
-active virtual output identity is `VID=0x28DE`, `PID=0x1205`.
+runtime (see "ABI review" below for the current revision's reviewed ABI
+delta). The active virtual output identity is `VID=0x28DE`, `PID=0x1205`.
 
 ## Build attestation
 
@@ -38,7 +37,25 @@ Generated header SHA-256: af9e08712fe9a33479e825ef5f8a6b2f0c283eb5e3e69027130484
 DLL SHA-256:              b2050ea357a6b663a97c5ede9ab01a134162ccb3661d96e318897f40a29b59ea
 ```
 
-The generated header confirms the pinned Deck ABI layout, including:
+CI verifies the committed hashes match this record and the vendored files.
+
+<!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
+## ABI review
+
+This section holds the human-reviewed ABI delta for the currently embedded
+revision. A future dependency-automation adoption resets this section to an
+evergreen "review required" placeholder before anything is merged -- it is
+never synthesized from a new header, and a human must replace the
+placeholder with the actual reviewed delta (as below) before that PR can
+merge.
+
+Reviewed delta for `0b3627317d2008065d8ec231f94bf31af7527bbd` (adopted in
+Phase 2B2, from `ec64282c69e5587466b950332d7983fd53a7d778`): diffing the full
+exported function list of both generated headers shows exactly one added
+export, `SetSteamDeckOutputCallback` (and its `SteamDeckOutputCallback`
+delegate typedef); nothing else was added or removed.
+`SteamDeckDeviceState`/`SteamDeckDeviceRemoveResult` are byte-for-byte
+unchanged:
 
 ```text
 sizeof(SteamDeckDeviceState) = 76
@@ -47,29 +64,13 @@ L2Digital = 6, R2Digital = 7, R3 = 22, QuickAccess = 27
 LPadX = 28, AccelX = 36, LTrigger = 56, LStickX = 60, RStickX = 64
 ```
 
-These offsets and the struct size are unchanged from the previously-adopted
-`ec64282c69e5587466b950332d7983fd53a7d778` revision. CI verifies the
-committed hashes.
-
-## ABI changes in this revision
-
-Adopting `0b3627317d2008065d8ec231f94bf31af7527bbd` (from
-`ec64282c69e5587466b950332d7983fd53a7d778`) adds exactly one new export
-compared to the previous revision, confirmed by diffing the full exported
-function list of both generated headers:
-
-```text
-SteamDeckOutputCallback     (new native delegate typedef)
-SetSteamDeckOutputCallback  (new export)
-```
-
-No other export was added or removed, and `SteamDeckDeviceState` /
-`SteamDeckDeviceRemoveResult` are byte-for-byte unchanged. This Addon
-revision adds the managed P/Invoke binding and callback-lifetime rooting for
-`SetSteamDeckOutputCallback` (`CanonicalViiperNativeApi.cs`,
-`CanonicalViiperNativeTypes.cs`) so the native and managed ABI move
-atomically. No production caller registers the Steam Deck output callback
-yet; Addon rumble/haptics handling remains a separate, later feature track.
+The managed `ICanonicalViiperNativeApi` surface, `RequiredExports`, and
+callback-lifetime rooting (`CanonicalViiperNativeApi.cs`,
+`CanonicalViiperNativeTypes.cs`) were updated in the same change to bind
+`SetSteamDeckOutputCallback` and keep the native and managed ABI aligned. No
+production caller registers the Steam Deck output callback yet; Addon
+rumble/haptics handling remains a separate, later feature track.
+<!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
 
