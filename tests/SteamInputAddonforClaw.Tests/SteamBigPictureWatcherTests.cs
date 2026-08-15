@@ -523,6 +523,72 @@ public sealed class SteamBigPictureWatcherTests
         Assert.Equal(2, transitions);
     }
 
+    [Fact]
+    public void ProtectionBoundary_ResolvedCandidateDestroyedBeforeAdoption_DoesNotCommitDeadHwnd()
+    {
+        var probe = new FakeProbe();
+        var hook = new FakeHook();
+        var scheduler = new ManualScheduler();
+        using var watcher = new SteamBigPictureWatcher(probe, hook, scheduler.Schedule);
+        var transitions = 0;
+        watcher.StateChanged += (_, _) => transitions++;
+        watcher.Start();
+
+        probe.AddCandidate(Hwnd1);
+        hook.Raise(BigPictureWinEventType.Create, Hwnd1);
+        Assert.Equal(1, transitions);
+
+        // The optimistic tracked-window validation succeeds, but Hwnd1 is destroyed immediately afterward
+        // -- before the watcher commits it as ACTIVE. Adoption must re-validate right before committing,
+        // inside the same lock, so this must not resurrect a dead HWND as the tracked ACTIVE window.
+        probe.AfterInspectTrackedWindow = () => probe.RemoveCandidate(Hwnd1);
+        scheduler.FireLast();
+
+        Assert.False(watcher.IsActive);
+        Assert.Equal(2, transitions);
+
+        // A genuine reopen right afterward is unaffected.
+        probe.AddCandidate(Hwnd2);
+        hook.Raise(BigPictureWinEventType.Create, Hwnd2);
+        Assert.True(watcher.IsActive);
+        Assert.Equal(3, transitions);
+    }
+
+    [Fact]
+    public void ActiveReplacementScan_ReplacementCandidateDestroyedBeforeAdoption_DoesNotCommitDeadHwnd()
+    {
+        var probe = new FakeProbe();
+        var hook = new FakeHook();
+        var scheduler = new ManualScheduler();
+        using var watcher = new SteamBigPictureWatcher(probe, hook, scheduler.Schedule);
+        var transitions = 0;
+        watcher.StateChanged += (_, _) => transitions++;
+        watcher.Start();
+
+        probe.AddCandidate(Hwnd1);
+        hook.Raise(BigPictureWinEventType.Create, Hwnd1);
+        scheduler.FireLast();
+        Assert.True(watcher.IsActive);
+        Assert.Equal(1, transitions);
+
+        // The replacement scan finds Hwnd2, but Hwnd2 is destroyed immediately afterward -- before the
+        // watcher commits it as the new tracked ACTIVE window. Adoption must re-validate right before
+        // committing, so this must not resurrect a dead HWND as tracked.
+        probe.RemoveCandidate(Hwnd1);
+        probe.AddCandidate(Hwnd2);
+        probe.AfterScan = () => probe.RemoveCandidate(Hwnd2);
+        hook.Raise(BigPictureWinEventType.Destroy, Hwnd1);
+
+        Assert.False(watcher.IsActive);
+        Assert.Equal(2, transitions);
+
+        // A genuine reopen right afterward is unaffected.
+        probe.AddCandidate(Hwnd3);
+        hook.Raise(BigPictureWinEventType.Create, Hwnd3);
+        Assert.True(watcher.IsActive);
+        Assert.Equal(3, transitions);
+    }
+
     private sealed class FakeProbe : ISteamBigPictureWindowProbe
     {
         private sealed record CandidateInfo(bool Reliable, uint Pid, bool TitleMatches);
@@ -540,6 +606,20 @@ public sealed class SteamBigPictureWatcherTests
         /// computes its own result -- simulates a WinEvent racing an in-flight EnumWindows scan.
         /// </summary>
         public Action? DuringScan { get; set; }
+
+        /// <summary>
+        /// If set, invoked (once) synchronously right after the next InspectTrackedWindow call computes its
+        /// result, before returning it -- simulates the tracked HWND being destroyed in the window between
+        /// an optimistic validation and its later commit.
+        /// </summary>
+        public Action? AfterInspectTrackedWindow { get; set; }
+
+        /// <summary>
+        /// If set, invoked (once) synchronously right after the next ScanForCandidate call computes its
+        /// result, before returning it -- simulates the resolved replacement HWND being destroyed in the
+        /// window between the scan producing a result and its later commit.
+        /// </summary>
+        public Action? AfterScan { get; set; }
 
         public void AddCandidate(IntPtr hwnd, uint pid = 100, bool reliable = true, bool titleMatches = true)
         {
@@ -569,10 +649,16 @@ public sealed class SteamBigPictureWatcherTests
 
         public BigPictureTrackedWindowInspection InspectTrackedWindow(IntPtr window, uint expectedProcessId)
         {
-            if (!_candidates.TryGetValue(window, out var info)) return new(false, true); // gone
-            if (!info.Reliable) return new(false, false);
-            if (expectedProcessId != 0 && info.Pid != expectedProcessId) return new(false, true);
-            return new(true, true); // alive, same owner -- title irrelevant
+            BigPictureTrackedWindowInspection result;
+            if (!_candidates.TryGetValue(window, out var info)) result = new(false, true); // gone
+            else if (!info.Reliable) result = new(false, false);
+            else if (expectedProcessId != 0 && info.Pid != expectedProcessId) result = new(false, true);
+            else result = new(true, true); // alive, same owner -- title irrelevant
+
+            var afterInspect = AfterInspectTrackedWindow;
+            AfterInspectTrackedWindow = null;
+            afterInspect?.Invoke();
+            return result;
         }
 
         public BigPictureScanResult ScanForCandidate(IntPtr preferredHwnd)
@@ -582,6 +668,16 @@ public sealed class SteamBigPictureWatcherTests
             DuringScan = null;
             duringScan?.Invoke();
 
+            var result = ComputeScanResult(preferredHwnd);
+
+            var afterScan = AfterScan;
+            AfterScan = null;
+            afterScan?.Invoke();
+            return result;
+        }
+
+        private BigPictureScanResult ComputeScanResult(IntPtr preferredHwnd)
+        {
             if (!EnumerationReliable) return new(false, IntPtr.Zero, 0, false);
 
             if (preferredHwnd != IntPtr.Zero && _candidates.TryGetValue(preferredHwnd, out var preferred) && preferred.Reliable && preferred.TitleMatches)

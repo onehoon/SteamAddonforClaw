@@ -302,6 +302,11 @@ internal enum BigPictureSessionState { Inactive, EntryProtected, Active, Reconci
 /// HWND's destruction is already strong termination evidence. A genuine reopen immediately afterward starts
 /// a brand-new session at no extra cost.
 ///
+/// Both resolution paths (protection-boundary and post-destroy replacement search) revalidate their
+/// resolved candidate's lifetime/ownership one more time immediately before adopting it, inside the same
+/// lock that performs the commit (see IsStillValid_NoLock) -- closing the window where the candidate could
+/// have been destroyed between producing that scan/inspection result and committing it as tracked.
+///
 /// No polling: all work is triggered by WinEvents, plus a single one-shot delayed callback per session for
 /// the startup protection window.
 /// </summary>
@@ -476,12 +481,18 @@ internal sealed class SteamBigPictureWatcher : IDisposable
     {
         IntPtr trackedHwndSnapshot;
         uint trackedPidSnapshot;
+        IDisposable? firedTimer;
         lock (_sync)
         {
             if (_disposed || !_started || _generation != generation || _state != BigPictureSessionState.EntryProtected) return;
             trackedHwndSnapshot = _trackedHwnd;
             trackedPidSnapshot = _trackedPid;
+            // This one-shot timer has now fired and served its purpose; release the reference immediately
+            // rather than holding it until the next session starts (or Dispose()).
+            firedTimer = _protectionTimer;
+            _protectionTimer = null;
         }
+        firedTimer?.Dispose();
 
         // Fast path: the tracked HWND (however many times it was transferred during startup churn) is
         // re-validated directly by lifetime/ownership only -- no title/class re-check, and no EnumWindows
@@ -496,7 +507,12 @@ internal sealed class SteamBigPictureWatcher : IDisposable
         {
             if (_disposed || !_started || _generation != generation || _state != BigPictureSessionState.EntryProtected) return;
 
-            if (resolved.Found)
+            // Final revalidation immediately before commit, inside this same critical section: the
+            // resolved candidate may have been destroyed in the window between producing `resolved` and
+            // taking this lock. Lightweight lifetime-only check (no EnumWindows), so it's safe to run here.
+            var committed = resolved.Found && IsStillValid_NoLock(resolved.Hwnd, resolved.ProcessId);
+
+            if (committed)
             {
                 var rebindCount = _rebindCount;
                 var elapsedMs = (long)(DateTimeOffset.UtcNow - _sessionStartedAt).TotalMilliseconds;
@@ -508,9 +524,10 @@ internal sealed class SteamBigPictureWatcher : IDisposable
             }
             else
             {
-                // Bounded: whether nothing was found or the fallback scan itself failed, the protection
-                // window only gets this one resolution attempt -- no indefinite ambiguous-active wait for a
-                // WinEvent that may never come. A genuine reopen right afterward starts a fresh session.
+                // Bounded: whether nothing was found, the fallback scan itself failed, or the resolved
+                // candidate died before adoption, the protection window only gets this one resolution
+                // attempt -- no indefinite ambiguous-active wait for a WinEvent that may never come. A
+                // genuine reopen right afterward starts a fresh session.
                 var elapsedMs = (long)(DateTimeOffset.UtcNow - _sessionStartedAt).TotalMilliseconds;
                 _state = BigPictureSessionState.Inactive;
                 _trackedHwnd = IntPtr.Zero;
@@ -522,6 +539,17 @@ internal sealed class SteamBigPictureWatcher : IDisposable
         }
 
         if (raiseInactive) StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Lightweight lifetime/ownership-only re-check (no EnumWindows) for a candidate about to be adopted.
+    /// Must be called from inside <see cref="_sync"/>, immediately before committing the candidate, to
+    /// close the window between producing a scan/inspection result and adopting it.
+    /// </summary>
+    private bool IsStillValid_NoLock(IntPtr hwnd, uint pid)
+    {
+        var revalidated = _probe.InspectTrackedWindow(hwnd, pid);
+        return revalidated.StillValid && revalidated.IsReliable;
     }
 
     private BigPictureScanResult ResolveTrackedOrFallback(IntPtr trackedHwnd, uint trackedPid)
@@ -569,7 +597,12 @@ internal sealed class SteamBigPictureWatcher : IDisposable
         {
             if (_disposed || !_started || _generation != generation || _state != BigPictureSessionState.Reconciling) return;
 
-            if (scan.Found)
+            // Final revalidation immediately before commit, inside this same critical section: the
+            // replacement candidate found by the scan may itself have been destroyed in the window between
+            // producing that result and taking this lock.
+            var committed = scan.Found && IsStillValid_NoLock(scan.Hwnd, scan.ProcessId);
+
+            if (committed)
             {
                 _trackedHwnd = scan.Hwnd;
                 _trackedPid = scan.ProcessId;
@@ -579,10 +612,11 @@ internal sealed class SteamBigPictureWatcher : IDisposable
             }
             else
             {
-                // Bounded: whether nothing was found or the scan itself failed, this is the one and only
-                // replacement attempt for this destruction -- no indefinite ambiguous-active wait for a
-                // WinEvent that may never come. The tracked HWND's destruction is already strong
-                // termination evidence; a genuine reopen right afterward starts a brand-new session.
+                // Bounded: whether nothing was found, the scan itself failed, or the replacement candidate
+                // died before adoption, this is the one and only replacement attempt for this destruction --
+                // no indefinite ambiguous-active wait for a WinEvent that may never come. The tracked HWND's
+                // destruction is already strong termination evidence; a genuine reopen right afterward
+                // starts a brand-new session.
                 var durationMs = (long)(DateTimeOffset.UtcNow - _sessionStartedAt).TotalMilliseconds;
                 _state = BigPictureSessionState.Inactive;
                 _generation++;
