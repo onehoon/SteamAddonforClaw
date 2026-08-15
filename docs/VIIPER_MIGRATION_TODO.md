@@ -52,12 +52,13 @@ This baseline is no longer the target for new Gordon feature expansion. It remai
 
 ```text
 repository: onehoon/VIIPER
-commit:     db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
+commit:     ec64282c69e5587466b950332d7983fd53a7d778
 ```
 
-This remains the VIIPER payload currently embedded by the Gordon production path until SD2 atomically replaces the DLL/header/PInvoke/provenance set.
-
-It is the validated Gordon-era canonical pin containing the hardened typed lifecycle, tracked USB/IP attach/detach ownership, caller-owned bus behavior, Gordon independent L2/R2 state, and classified Gordon remove result.
+SD2 atomically replaced the DLL/header/P-Invoke/provenance set with this commit. It contains both
+the hardened Gordon typed lifecycle (tracked USB/IP attach/detach ownership, caller-owned bus
+behavior, Gordon independent L2/R2 state, classified Gordon remove result -- all unchanged from the
+prior `db70bdedbe36846c665c841ea9f6ae9bf01d0d3d` pin) and the new minimal typed Steam Deck ABI.
 
 ## Selected canonical VIIPER pin for Steam Deck SD2
 
@@ -187,7 +188,27 @@ The old `feature/canonical-steamdeck` branch is not part of the ongoing integrat
 
 ## SD2. Add side-by-side Steam Deck binding/session/mapper/publisher to the Addon
 
-**Status: TODO / READY**
+**Status: IMPLEMENTED (automated tests only; SD3 hardware smoke test still pending)**
+
+Implemented in this PR:
+
+```text
+CanonicalViiperNativeTypes.cs   SteamDeckDeviceState (76 bytes, complete generic ABI)
+CanonicalViiperNativeApi.cs     SteamDeckDeviceRemoveResult + CreateSteamDeckDevice/
+                                 SetSteamDeckDeviceState/RemoveSteamDeckDevice/
+                                 RemoveSteamDeckDeviceEx bindings
+SteamDeckDeviceStateMapper.cs   ControllerState -> SteamDeckDeviceState
+CanonicalSteamDeckSession.cs    typed lifecycle (mirrors CanonicalSteamControllerSession)
+CanonicalSteamDeckInputPublisher.cs   ~250 Hz publisher (mirrors the Gordon publisher)
+SteamDeckVirtualDeviceIdentityPolicy.cs / ...Resolver.cs   exact 28DE:1205 identity
+CanonicalSteamDeckOutputStage.cs   same Addon safety shell as ClassicSteamControllerOutputStage
+```
+
+Wired only through the internal `STEAMINPUT_ADDON_DEV_STEAMDECK_OUTPUT=1` developer/test
+environment variable seam in `App.xaml.cs` -- not a public setting. Production routing default
+remains Gordon. The Gordon implementation (session/publisher/mapper/P-Invoke/tests) is unchanged.
+
+No hardware validation has been performed; SD3 remains the gate for that.
 
 Repository:
 
@@ -251,7 +272,7 @@ VIIPER_INTEGRATION.md
 this TODO
 ```
 
-Until that atomic adoption lands, `db70bded...` remains the Addon's embedded Gordon payload even though `ec64282...` is the selected SD2 source revision.
+This atomic adoption has landed: the Addon-embedded VIIPER pin is now `ec64282c69e5587466b950332d7983fd53a7d778` (see the updated "Current Addon-embedded VIIPER pin" section above and `src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md`).
 
 ---
 

@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>
@@ -15,9 +17,9 @@ internal static class LogFileTestHelper
     private const int MaxAttempts = 20;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(150);
 
-    internal static string ReadAllText(string path) => Retry(() => File.ReadAllText(path));
+    internal static string ReadAllText(string path) => Retry(() => AppLog.ReadAllTextForTests(path));
 
-    internal static string[] ReadAllLines(string path) => Retry(() => File.ReadAllLines(path));
+    internal static string[] ReadAllLines(string path) => Retry(() => AppLog.ReadAllLinesForTests(path));
 
     private static T Retry<T>(Func<T> read)
     {

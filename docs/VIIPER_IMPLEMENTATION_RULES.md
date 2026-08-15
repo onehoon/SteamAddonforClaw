@@ -285,7 +285,7 @@ onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778
 
 Do not mix a DLL from one VIIPER revision with a generated header, managed layout, documentation, or provenance from another revision.
 
-The Addon's currently embedded Gordon payload remains `db70bded...` until the SD2 atomic adoption change lands.
+The Addon's current embedded payload is the SD2-validated `ec64282c...` pair. Gordon remains the production output default, and its typed ABI/behavior is unchanged by SD2.
 
 ---
 

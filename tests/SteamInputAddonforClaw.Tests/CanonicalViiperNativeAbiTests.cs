@@ -64,11 +64,115 @@ public sealed class CanonicalViiperNativeAbiTests
             "NewUSBServer", "CloseUSBServer", "CreateUSBBus", "RemoveUSBBus",
             "GetUSBDeviceIdentity", "AttachUSBDevice", "DetachUSBDevice",
             "CreateSteamControllerDevice", "SetSteamControllerDeviceState",
-            "SetSteamControllerOutputCallback", "RemoveSteamControllerDevice", "RemoveSteamControllerDeviceEx"
+            "SetSteamControllerOutputCallback", "RemoveSteamControllerDevice", "RemoveSteamControllerDeviceEx",
+            "CreateSteamDeckDevice", "SetSteamDeckDeviceState", "RemoveSteamDeckDevice", "RemoveSteamDeckDeviceEx"
         };
 
         Assert.Equal(expected, CanonicalViiperNativeApi.RequiredExports);
         Assert.DoesNotContain(CanonicalViiperNativeApi.RequiredExports, name => name.StartsWith("viiper_", StringComparison.Ordinal));
+    }
+
+    // Steam Deck ABI (VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778, PR #16). Field order,
+    // widths, and offsets below are copied directly from the generated dist/libVIIPER/libVIIPER.h
+    // SteamDeckDeviceState struct produced by `just build-libVIIPER Release` at that commit -- not
+    // from memory. See src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md.
+    [Fact]
+    public void SteamDeckDeviceState_HasCanonicalSizeAndOffsets()
+    {
+        Assert.Equal(76, Marshal.SizeOf<SteamDeckDeviceState>());
+
+        var expected = new Dictionary<string, int>
+        {
+            ["A"] = 0, ["X"] = 1, ["B"] = 2, ["Y"] = 3,
+            ["L1"] = 4, ["R1"] = 5,
+            ["L2Digital"] = 6, ["R2Digital"] = 7,
+            ["L5"] = 8, ["Menu"] = 9,
+            ["Steam"] = 10, ["Options"] = 11,
+            ["DPadDown"] = 12, ["DPadLeft"] = 13, ["DPadRight"] = 14, ["DPadUp"] = 15,
+            ["L3"] = 16,
+            ["RPadTouch"] = 17, ["LPadTouch"] = 18, ["RPadPress"] = 19, ["LPadPress"] = 20,
+            ["R5"] = 21,
+            ["R3"] = 22,
+            ["RStickTouch"] = 23, ["LStickTouch"] = 24,
+            ["R4"] = 25, ["L4"] = 26,
+            ["QuickAccess"] = 27,
+            ["LPadX"] = 28, ["LPadY"] = 30,
+            ["RPadX"] = 32, ["RPadY"] = 34,
+            ["AccelX"] = 36, ["AccelY"] = 38, ["AccelZ"] = 40,
+            ["Pitch"] = 42, ["Yaw"] = 44, ["Roll"] = 46,
+            ["GyroQuatW"] = 48, ["GyroQuatX"] = 50, ["GyroQuatY"] = 52, ["GyroQuatZ"] = 54,
+            ["LTrigger"] = 56, ["RTrigger"] = 58,
+            ["LStickX"] = 60, ["LStickY"] = 62,
+            ["RStickX"] = 64, ["RStickY"] = 66,
+            ["LPadForce"] = 68, ["RPadForce"] = 70,
+            ["LStickForce"] = 72, ["RStickForce"] = 74
+        };
+
+        foreach (var (name, offset) in expected)
+            Assert.Equal(offset, Marshal.OffsetOf<SteamDeckDeviceState>(name).ToInt32());
+    }
+
+    [Fact]
+    public void SteamDeckDeviceState_CriticalOffsetsMatchGeneratedAbi()
+    {
+        // Subset called out explicitly by the SD2 work order, independent of the full-struct test
+        // above, so a future field reorder that happens to keep the full test passing still fails
+        // loudly on the fields the mapper actually depends on.
+        Assert.Equal(6, Marshal.OffsetOf<SteamDeckDeviceState>("L2Digital").ToInt32());
+        Assert.Equal(7, Marshal.OffsetOf<SteamDeckDeviceState>("R2Digital").ToInt32());
+        Assert.Equal(22, Marshal.OffsetOf<SteamDeckDeviceState>("R3").ToInt32());
+        Assert.Equal(27, Marshal.OffsetOf<SteamDeckDeviceState>("QuickAccess").ToInt32());
+        Assert.Equal(28, Marshal.OffsetOf<SteamDeckDeviceState>("LPadX").ToInt32());
+        Assert.Equal(36, Marshal.OffsetOf<SteamDeckDeviceState>("AccelX").ToInt32());
+        Assert.Equal(56, Marshal.OffsetOf<SteamDeckDeviceState>("LTrigger").ToInt32());
+        Assert.Equal(60, Marshal.OffsetOf<SteamDeckDeviceState>("LStickX").ToInt32());
+        Assert.Equal(64, Marshal.OffsetOf<SteamDeckDeviceState>("RStickX").ToInt32());
+    }
+
+    [Fact]
+    public void SteamDeckDeviceState_DoesNotExposeAFrameField()
+    {
+        // Frame ownership remains inside device/steamdeck; the external caller never owns or
+        // increments the report frame counter (docs/VIIPER_INTEGRATION.md section 5.1).
+        Assert.Null(typeof(SteamDeckDeviceState).GetField("Frame", BindingFlags.Instance | BindingFlags.NonPublic));
+    }
+
+    [Fact]
+    public void SteamDeckDeviceRemoveResult_IsFourByteEnum()
+    {
+        Assert.Equal(typeof(int), Enum.GetUnderlyingType(typeof(SteamDeckDeviceRemoveResult)));
+        Assert.Equal(4, Marshal.SizeOf<int>());
+        Assert.Equal(0, (int)SteamDeckDeviceRemoveResult.Success);
+        Assert.Equal(1, (int)SteamDeckDeviceRemoveResult.RetryableFailure);
+        Assert.Equal(2, (int)SteamDeckDeviceRemoveResult.UnsafeOutcomeUnknown);
+        Assert.Equal(3, (int)SteamDeckDeviceRemoveResult.Invalid);
+    }
+
+    [Fact]
+    public void SteamDeckDelegates_UseCdeclAndValidatedNativeReturnWidths()
+    {
+        AssertCdecl("CreateSteamDeckDeviceDelegate", typeof(byte));
+        AssertCdecl("SetSteamDeckDeviceStateDelegate", typeof(byte));
+        AssertCdecl("RemoveSteamDeckDeviceDelegate", typeof(byte));
+        AssertCdecl("RemoveSteamDeckDeviceExDelegate", typeof(SteamDeckDeviceRemoveResult));
+    }
+
+    [Fact]
+    public void SteamDeckDelegates_HaveTheExpectedParameterSignatures()
+    {
+        AssertParameters("CreateSteamDeckDeviceDelegate", typeof(nuint), typeof(nuint).MakeByRefType(), typeof(uint), typeof(byte), typeof(ushort), typeof(ushort));
+        AssertParameters("SetSteamDeckDeviceStateDelegate", typeof(nuint), typeof(SteamDeckDeviceState));
+        AssertParameters("RemoveSteamDeckDeviceDelegate", typeof(nuint));
+        AssertParameters("RemoveSteamDeckDeviceExDelegate", typeof(nuint));
+    }
+
+    private static void AssertCdecl(string delegateName, Type expectedReturnType)
+    {
+        var type = NestedDelegate(delegateName);
+        var convention = type.GetCustomAttribute<UnmanagedFunctionPointerAttribute>();
+        Assert.NotNull(convention);
+        Assert.Equal(CallingConvention.Cdecl, convention!.CallingConvention);
+        Assert.Equal(expectedReturnType, type.GetMethod("Invoke")!.ReturnType);
     }
 
     [Fact]
@@ -88,6 +192,8 @@ public sealed class CanonicalViiperNativeAbiTests
             var returnType = type.GetMethod("Invoke")!.ReturnType;
             if (type.Name == "RemoveSteamControllerDeviceExDelegate")
                 Assert.Equal(typeof(SteamControllerDeviceRemoveResult), returnType);
+            else if (type.Name == "RemoveSteamDeckDeviceExDelegate")
+                Assert.Equal(typeof(SteamDeckDeviceRemoveResult), returnType);
             else
                 Assert.Equal(typeof(byte), returnType);
         }
@@ -316,6 +422,15 @@ public sealed class CanonicalViiperNativeAbiTests
         private static readonly CanonicalViiperNativeApi.RemoveSteamControllerDeviceDelegate RemoveDevice = RemoveDeviceImpl;
         private static readonly CanonicalViiperNativeApi.RemoveSteamControllerDeviceExDelegate RemoveDeviceEx = RemoveDeviceExImpl;
 
+        // Steam Deck surface: stubbed only so CanonicalViiperNativeApi's constructor (which binds
+        // every required export, Gordon and Steam Deck alike) can resolve successfully in these
+        // Gordon-focused fake-native tests. Not exercised by assertions in this file -- see
+        // CanonicalSteamDeckSessionTests for the Steam Deck lifecycle fake.
+        private static readonly CanonicalViiperNativeApi.CreateSteamDeckDeviceDelegate CreateDeckDevice = CreateDeckDeviceImpl;
+        private static readonly CanonicalViiperNativeApi.SetSteamDeckDeviceStateDelegate SetDeckState = SetDeckStateImpl;
+        private static readonly CanonicalViiperNativeApi.RemoveSteamDeckDeviceDelegate RemoveDeckDevice = RemoveDeckDeviceImpl;
+        private static readonly CanonicalViiperNativeApi.RemoveSteamDeckDeviceExDelegate RemoveDeckDeviceEx = RemoveDeckDeviceExImpl;
+
         [ThreadStatic]
         private static bool _failCloseServer;
 
@@ -356,7 +471,11 @@ public sealed class CanonicalViiperNativeAbiTests
             ["SetSteamControllerDeviceState"] = Marshal.GetFunctionPointerForDelegate(SetState),
             ["SetSteamControllerOutputCallback"] = Marshal.GetFunctionPointerForDelegate(SetCallback),
             ["RemoveSteamControllerDevice"] = Marshal.GetFunctionPointerForDelegate(RemoveDevice),
-            ["RemoveSteamControllerDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveDeviceEx)
+            ["RemoveSteamControllerDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveDeviceEx),
+            ["CreateSteamDeckDevice"] = Marshal.GetFunctionPointerForDelegate(CreateDeckDevice),
+            ["SetSteamDeckDeviceState"] = Marshal.GetFunctionPointerForDelegate(SetDeckState),
+            ["RemoveSteamDeckDevice"] = Marshal.GetFunctionPointerForDelegate(RemoveDeckDevice),
+            ["RemoveSteamDeckDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveDeckDeviceEx)
         };
 
         internal static nint Resolve(nint _, string name) => Pointers[name];
@@ -404,5 +523,16 @@ public sealed class CanonicalViiperNativeAbiTests
 
         private static byte SetCallbackImpl(nuint _, SteamControllerOutputCallback? __) => 1;
 
+        private static byte CreateDeckDeviceImpl(nuint _, out nuint handle, uint __, byte ___, ushort ____, ushort _____)
+        {
+            handle = 3;
+            return 1;
+        }
+
+        private static byte SetDeckStateImpl(nuint _, SteamDeckDeviceState __) => 1;
+
+        private static byte RemoveDeckDeviceImpl(nuint _) => 1;
+
+        private static SteamDeckDeviceRemoveResult RemoveDeckDeviceExImpl(nuint _) => SteamDeckDeviceRemoveResult.Success;
     }
 }

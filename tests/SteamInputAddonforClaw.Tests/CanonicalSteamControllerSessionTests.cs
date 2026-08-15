@@ -344,5 +344,15 @@ public sealed class CanonicalSteamControllerSessionTests
         public bool RemoveSteamControllerDevice(nuint deviceHandle) { Calls.Add("RemoveSteamControllerDevice"); return true; }
         public SteamControllerDeviceRemoveResult RemoveSteamControllerDeviceEx(nuint deviceHandle)
         { Calls.Add("RemoveSteamControllerDeviceEx"); return RemoveDeviceResults.Count == 0 ? SteamControllerDeviceRemoveResult.Success : RemoveDeviceResults.Dequeue(); }
+
+        // Steam Deck surface: unused by these Gordon-focused tests, stubbed only so this fake
+        // still satisfies ICanonicalViiperNativeApi. See CanonicalSteamDeckSessionTests for the
+        // Steam Deck lifecycle fake.
+        public bool CreateSteamDeckDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct)
+        { Calls.Add("CreateSteamDeckDevice"); deviceHandle = 0; return false; }
+        public bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); return false; }
+        public bool RemoveSteamDeckDevice(nuint deviceHandle) { Calls.Add("RemoveSteamDeckDevice"); return false; }
+        public SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle)
+        { Calls.Add("RemoveSteamDeckDeviceEx"); return SteamDeckDeviceRemoveResult.Invalid; }
     }
 }
