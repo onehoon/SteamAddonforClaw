@@ -282,12 +282,15 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         ticks.Tick(); await session.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // Live input started strictly after Neutral (Trace snapshot taken at the first SetState call
+        // must already contain Start+Neutral and nothing past it).
+        Assert.Equal(["Start", "Neutral"], session.Trace.Take(session.InputObservedAfterTraceCount));
         var rollback = stage.RollbackMutationAsync(CancellationToken.None).AsTask();
+        // Live input still blocked inside SetState -- device removal must not have started yet.
         await Task.Yield(); Assert.Equal(0, session.RemoveCalls);
         session.ReleaseInput.TrySetResult();
         Assert.True((await rollback).Succeeded);
-        Assert.True(session.Trace.IndexOf("Neutral") < session.Trace.IndexOf("Input"));
-        Assert.True(session.Trace.LastIndexOf("Input") < session.Trace.IndexOf("Remove"));
+        Assert.Contains("Remove", session.Trace);
     }
 
     [Fact]
@@ -538,13 +541,18 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         // The stage calls SetNeutral() directly for its one-time neutral report before starting the
         // publisher; the publisher (constructed with this session as its sink) calls SetState()
-        // directly for every live tick thereafter. These are kept as genuinely distinct code paths
-        // here (rather than SetNeutral() delegating to SetState(default)) so tests can tell the two
-        // apart even though a real all-neutral ControllerState maps to a mapped state that is
-        // byte-identical to default(SteamDeckDeviceState).
+        // directly for every live tick thereafter. Deliberately does NOT add to Trace (mirroring
+        // Gordon's CanonicalFakeSession.SetState, which is also trace-silent): several tests here
+        // (e.g. SessionPathUsesTypedPublisherAndCleanupOrder) exercise the real production
+        // high-resolution-timer publisher with no manual tick source, so SetState can legitimately
+        // fire an unbounded, non-deterministic number of times on a background thread between Neutral
+        // and Remove -- tracing it there would make Trace assertions flaky. Ordering relative to
+        // Neutral/Remove is instead observed via InputObservedAfterTraceCount below, using tests that
+        // drive ticks manually (ManualTicks) for determinism.
+        public int InputObservedAfterTraceCount { get; private set; } = -1;
         public bool SetState(SteamDeckDeviceState state)
         {
-            Trace.Add("Input");
+            if (InputObservedAfterTraceCount < 0) InputObservedAfterTraceCount = Trace.Count;
             InputEntered.TrySetResult();
             if (BlockInput) ReleaseInput.Task.GetAwaiter().GetResult();
             return InputAccepted;
