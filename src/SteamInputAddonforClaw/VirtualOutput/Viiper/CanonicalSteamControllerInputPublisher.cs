@@ -113,6 +113,7 @@ internal sealed class CanonicalSteamControllerInputPublisher
     {
         if (IsRunning) throw new InvalidOperationException("The canonical Steam Controller publisher is already running.");
         _lastHeartbeatTimestamp = _timestampProvider();
+        ResetTimingDiagnosticsForNewRun();
 
         if (_ticks is not null)
         {
@@ -277,6 +278,30 @@ internal sealed class CanonicalSteamControllerInputPublisher
         {
             ReportFault(exception);
         }
+    }
+
+    /// <summary>
+    /// Clears all timing-decomposition state, including <see cref="_previousTimerWakeTimestamp"/> /
+    /// <see cref="_hasPreviousTimerWake"/> (which a heartbeat reset intentionally leaves alone -- see
+    /// <see cref="EmitHeartbeatIfDue"/>). Called once per <see cref="Start"/>: unlike the heartbeat
+    /// boundary, a Stop-then-Start on the same publisher instance can have an arbitrarily long gap
+    /// between them, so carrying the last wake timestamp across that gap would make the very first
+    /// timer wake of the new run look like a multi-second-long "wake-to-wake interval" outlier.
+    /// </summary>
+    private void ResetTimingDiagnosticsForNewRun()
+    {
+        _previousTimerWakeTimestamp = 0;
+        _hasPreviousTimerWake = false;
+        _timerWakeCountSinceHeartbeat = 0;
+        _wakeToWakeSampleCountSinceHeartbeat = 0;
+        _wakeToWakeTicksSumSinceHeartbeat = 0;
+        _maxWakeToWakeTicksSinceHeartbeat = 0;
+        _wakeOver425MsCountSinceHeartbeat = 0;
+        _wakeOver5MsCountSinceHeartbeat = 0;
+        _waitBlockedTicksSumSinceHeartbeat = 0;
+        _maxWaitBlockedTicksSinceHeartbeat = 0;
+        _publishWorkTicksSumSinceHeartbeat = 0;
+        _maxPublishWorkTicksSinceHeartbeat = 0;
     }
 
     /// <summary>Test-only seam: lets a test drive the timing-decomposition accounting with known fake

@@ -361,13 +361,65 @@ public sealed class CanonicalSteamControllerInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task TimingDiagnostics_StopThenStartDoesNotCarryTheLastWakeTimestampAcrossTheGap()
+    {
+        // Unlike a heartbeat reset (which intentionally keeps _previousTimerWakeTimestamp so the
+        // interval spanning the boundary is still a valid sample), a Stop-then-Start on the same
+        // publisher instance can have an arbitrarily long real-world gap between them -- production
+        // supports exactly this (a new routing session reusing the same publisher). Without a reset in
+        // Start(), the first timer wake of the new run would be diffed against the last wake of the
+        // previous run and misreported as e.g. a multi-second WakeToWake outlier.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var fakeNow = 0L;
+        var publisher = new CanonicalSteamControllerInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow);
+        publisher.Start();
+
+        publisher.RecordTimerWakeForTests(0);
+        fakeNow = Stopwatch.Frequency + 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1); // heartbeat fires, leaves _hasPreviousTimerWake set
+        await publisher.StopAsync();
+
+        // Simulate a large real-world gap before the same instance is started again.
+        fakeNow += 5 * Stopwatch.Frequency;
+        publisher.Start();
+
+        var secondRunWake = fakeNow;
+        publisher.RecordTimerWakeForTests(secondRunWake);
+        fakeNow = secondRunWake + Stopwatch.Frequency + 1;
+        // ManualTicks.TickAsync() dequeues its waiter queue FIFO but a cancelled wait from the first
+        // run's loop (cancelled by StopAsync, not dequeued) is still sitting at the front; one throwaway
+        // tick flushes that stale entry so the next one actually reaches the restarted loop's new wait.
+        await ticks.TickAsync();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n').Where(line => line.Contains("publisher heartbeat")).ToArray();
+        Assert.Equal(2, lines.Length);
+        var afterRestart = lines[1];
+        Assert.Contains("TimerWakeCount=1", afterRestart);
+        Assert.Contains("AverageWakeToWakeMs=0", afterRestart);
+        Assert.Contains("MaxWakeToWakeMs=0", afterRestart);
+        Assert.Contains("WakeOver4_25MsCount=0", afterRestart);
+        Assert.Contains("WakeOver5MsCount=0", afterRestart);
+    }
+
+    [Fact]
     public async Task Production_worker_timing_diagnostics_wire_up_end_to_end_with_the_real_timer()
     {
         // Real production path (dedicated worker + real high-resolution timer), with a fake clock that
         // forces the heartbeat to fire almost immediately in wall-clock time so this stays fast and
-        // deterministic without asserting any specific Hz. TimerWakeCount must equal PublishedStateCount
-        // for a clean run with no SetState failures -- if the stop event's wake were ever miscounted as a
-        // timer wake, this equality would break.
+        // deterministic without asserting any specific Hz. For a clean run with no SetState failures,
+        // every normal timer wake corresponds to exactly one successful publish, so TimerWakeCount must
+        // equal PublishedStateCount. Note this does NOT by itself prove the stop event's wake is never
+        // miscounted as a timer wake: StopAsync runs only after the heartbeat above is already read, and
+        // WorkerLoop returns immediately on a stop wake without calling PublishCurrentStateOnce (the only
+        // path that can trigger another heartbeat), so a hypothetical regression that counted the stop
+        // wake would not surface as a logged heartbeat here for this assertion to catch. That guarantee
+        // instead rests on WorkerLoop's `if (signaled == 0) return;` running before any counter is
+        // touched (see the comment there) -- a one-line, directly-readable invariant that doesn't need
+        // its own seam.
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
         var sink = new FakeSink();
         var realElapsed = Stopwatch.StartNew();
