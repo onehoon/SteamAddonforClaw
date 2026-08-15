@@ -11,7 +11,7 @@ internal enum SteamControllerDeviceRemoveResult : int
 }
 
 // Mirrors VIIPER's SteamDeckDeviceRemoveResult enum (dist/libVIIPER/libVIIPER.h,
-// ec64282c69e5587466b950332d7983fd53a7d778). Distinct managed type from
+// 0b3627317d2008065d8ec231f94bf31af7527bbd). Distinct managed type from
 // SteamControllerDeviceRemoveResult even though the values are identical -- Gordon and Steam Deck
 // are separate typed devices in VIIPER with their own enums, and keeping them separate here avoids
 // silently coupling the two typed lifecycles together.
@@ -38,11 +38,10 @@ internal interface ICanonicalViiperNativeApi
     bool RemoveSteamControllerDevice(nuint deviceHandle);
     SteamControllerDeviceRemoveResult RemoveSteamControllerDeviceEx(nuint deviceHandle);
 
-    // Steam Deck typed surface (VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778, PR #16).
-    // Intentionally no Steam Deck output-callback binding: VIIPER does not yet expose one (see
-    // docs/VIIPER_INTEGRATION.md section 5.2) so none is added here either.
+    // Steam Deck typed surface (VIIPER main@0b3627317d2008065d8ec231f94bf31af7527bbd).
     bool CreateSteamDeckDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct);
     bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state);
+    bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback);
     bool RemoveSteamDeckDevice(nuint deviceHandle);
     SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle);
 }
@@ -65,6 +64,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         "RemoveSteamControllerDeviceEx",
         "CreateSteamDeckDevice",
         "SetSteamDeckDeviceState",
+        "SetSteamDeckOutputCallback",
         "RemoveSteamDeckDevice",
         "RemoveSteamDeckDeviceEx"
     ];
@@ -83,10 +83,17 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     private readonly RemoveSteamControllerDeviceExDelegate _removeSteamControllerDeviceEx;
     private readonly CreateSteamDeckDeviceDelegate _createSteamDeckDevice;
     private readonly SetSteamDeckDeviceStateDelegate _setSteamDeckDeviceState;
+    private readonly SetSteamDeckOutputCallbackDelegate _setSteamDeckOutputCallback;
     private readonly RemoveSteamDeckDeviceDelegate _removeSteamDeckDevice;
     private readonly RemoveSteamDeckDeviceExDelegate _removeSteamDeckDeviceEx;
     private readonly object _callbackGate = new();
     private readonly Dictionary<nuint, SteamControllerOutputCallback> _outputCallbacks = [];
+    // Kept separate from _outputCallbacks (SteamControllerOutputCallback-typed) even though both
+    // dictionaries key on device handle: Steam Deck and Steam Controller callbacks are distinct
+    // managed delegate types, and a shared dictionary would force one of them to be stored as
+    // object/erase the delegate type, losing the compile-time guarantee that a Deck handle can
+    // never be invoked through a Controller-shaped callback or vice versa.
+    private readonly Dictionary<nuint, SteamDeckOutputCallback> _steamDeckOutputCallbacks = [];
     private readonly Dictionary<nuint, ViiperLogCallback> _logCallbacks = [];
     private readonly Dictionary<nuint, (nuint ServerHandle, uint BusId)> _deviceOwnership = [];
 
@@ -107,6 +114,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         _removeSteamControllerDeviceEx = Bind<RemoveSteamControllerDeviceExDelegate>(library, resolve, "RemoveSteamControllerDeviceEx");
         _createSteamDeckDevice = Bind<CreateSteamDeckDeviceDelegate>(library, resolve, "CreateSteamDeckDevice");
         _setSteamDeckDeviceState = Bind<SetSteamDeckDeviceStateDelegate>(library, resolve, "SetSteamDeckDeviceState");
+        _setSteamDeckOutputCallback = Bind<SetSteamDeckOutputCallbackDelegate>(library, resolve, "SetSteamDeckOutputCallback");
         _removeSteamDeckDevice = Bind<RemoveSteamDeckDeviceDelegate>(library, resolve, "RemoveSteamDeckDevice");
         _removeSteamDeckDeviceEx = Bind<RemoveSteamDeckDeviceExDelegate>(library, resolve, "RemoveSteamDeckDeviceEx");
     }
@@ -240,6 +248,28 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     public bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state)
         => Succeeded(_setSteamDeckDeviceState(deviceHandle, state));
 
+    public bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback)
+    {
+        // The native call and the managed root mutation must be one serialized operation, not two
+        // independent steps: two threads racing SetSteamDeckOutputCallback on the same handle could
+        // otherwise interleave as native<-cb1, native<-cb2, root<-cb2, root<-cb1, leaving native
+        // holding cb2's function pointer while the managed root only keeps cb1 alive -- cb2 becomes
+        // GC-eligible while VIIPER can still invoke it. Holding _callbackGate across both the native
+        // call and the corresponding dictionary mutation makes the pair atomic with respect to any
+        // other Set/Clear on this API instance, as well as the teardown-driven root release paths
+        // below, which already run under the same lock.
+        lock (_callbackGate)
+        {
+            var succeeded = Succeeded(_setSteamDeckOutputCallback(deviceHandle, callback));
+            if (succeeded)
+            {
+                if (callback is null) _steamDeckOutputCallbacks.Remove(deviceHandle);
+                else _steamDeckOutputCallbacks[deviceHandle] = callback;
+            }
+            return succeeded;
+        }
+    }
+
     public bool RemoveSteamDeckDevice(nuint deviceHandle)
     {
         var succeeded = Succeeded(_removeSteamDeckDevice(deviceHandle));
@@ -260,6 +290,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         lock (_callbackGate)
         {
             _outputCallbacks.Remove(deviceHandle);
+            _steamDeckOutputCallbacks.Remove(deviceHandle);
             _deviceOwnership.Remove(deviceHandle);
         }
     }
@@ -271,6 +302,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
             if (!predicate(ownership)) continue;
 
             _outputCallbacks.Remove(deviceHandle);
+            _steamDeckOutputCallbacks.Remove(deviceHandle);
             _deviceOwnership.Remove(deviceHandle);
         }
     }
@@ -333,6 +365,9 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate byte SetSteamDeckDeviceStateDelegate(nuint handle, SteamDeckDeviceState state);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte SetSteamDeckOutputCallbackDelegate(nuint handle, SteamDeckOutputCallback? callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate byte RemoveSteamDeckDeviceDelegate(nuint handle);

@@ -65,7 +65,8 @@ public sealed class CanonicalViiperNativeAbiTests
             "GetUSBDeviceIdentity", "AttachUSBDevice", "DetachUSBDevice",
             "CreateSteamControllerDevice", "SetSteamControllerDeviceState",
             "SetSteamControllerOutputCallback", "RemoveSteamControllerDevice", "RemoveSteamControllerDeviceEx",
-            "CreateSteamDeckDevice", "SetSteamDeckDeviceState", "RemoveSteamDeckDevice", "RemoveSteamDeckDeviceEx"
+            "CreateSteamDeckDevice", "SetSteamDeckDeviceState", "SetSteamDeckOutputCallback",
+            "RemoveSteamDeckDevice", "RemoveSteamDeckDeviceEx"
         };
 
         Assert.Equal(expected, CanonicalViiperNativeApi.RequiredExports);
@@ -153,6 +154,7 @@ public sealed class CanonicalViiperNativeAbiTests
     {
         AssertCdecl("CreateSteamDeckDeviceDelegate", typeof(byte));
         AssertCdecl("SetSteamDeckDeviceStateDelegate", typeof(byte));
+        AssertCdecl("SetSteamDeckOutputCallbackDelegate", typeof(byte));
         AssertCdecl("RemoveSteamDeckDeviceDelegate", typeof(byte));
         AssertCdecl("RemoveSteamDeckDeviceExDelegate", typeof(SteamDeckDeviceRemoveResult));
     }
@@ -162,8 +164,26 @@ public sealed class CanonicalViiperNativeAbiTests
     {
         AssertParameters("CreateSteamDeckDeviceDelegate", typeof(nuint), typeof(nuint).MakeByRefType(), typeof(uint), typeof(byte), typeof(ushort), typeof(ushort));
         AssertParameters("SetSteamDeckDeviceStateDelegate", typeof(nuint), typeof(SteamDeckDeviceState));
+        AssertParameters("SetSteamDeckOutputCallbackDelegate", typeof(nuint), typeof(SteamDeckOutputCallback));
         AssertParameters("RemoveSteamDeckDeviceDelegate", typeof(nuint));
         AssertParameters("RemoveSteamDeckDeviceExDelegate", typeof(nuint));
+    }
+
+    [Fact]
+    public void SteamDeckOutputCallback_IsCdeclAndHasTheExpectedParameterSignature()
+    {
+        Assert.Equal(CallingConvention.Cdecl, typeof(SteamDeckOutputCallback).GetCustomAttribute<UnmanagedFunctionPointerAttribute>()!.CallingConvention);
+
+        var parameters = typeof(SteamDeckOutputCallback).GetMethod("Invoke")!.GetParameters();
+        Assert.Equal(typeof(nuint), parameters[0].ParameterType);
+        Assert.Equal(typeof(nint), parameters[1].ParameterType);
+        Assert.Equal(typeof(uint), parameters[2].ParameterType);
+    }
+
+    [Fact]
+    public void SteamDeckOutputCallback_IsADistinctDelegateTypeFromSteamControllerOutputCallback()
+    {
+        Assert.NotEqual(typeof(SteamControllerOutputCallback), typeof(SteamDeckOutputCallback));
     }
 
     private static void AssertCdecl(string delegateName, Type expectedReturnType)
@@ -373,6 +393,272 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.Throws<ArgumentException>(() => CanonicalViiperNativeApi.Load("libVIIPER.dll"));
     }
 
+    [Fact]
+    public void SteamDeckCallback_CanBeRegisteredAndIsRooted()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+
+        CollectGarbage();
+
+        Assert.True(weak.TryGetTarget(out _));
+    }
+
+    [Fact]
+    public void SteamDeckCallback_ClearingWithNullReleasesTheRootUnderNativeSuccess()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+
+        Assert.True(api.SetSteamDeckOutputCallback(deviceHandle, null));
+        CollectGarbage();
+
+        Assert.False(weak.TryGetTarget(out _));
+    }
+
+    [Fact]
+    public void SteamDeckCallback_RegistrationFailureDoesNotCreateAFalseRoot()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+
+        FakeExports.FailSetDeckCallback = true;
+        try
+        {
+            var weak = AttemptAndDiscardSteamDeckOutputCallback(api, deviceHandle);
+            CollectGarbage();
+
+            Assert.False(weak.TryGetTarget(out _));
+        }
+        finally
+        {
+            FakeExports.FailSetDeckCallback = false;
+        }
+    }
+
+    // Isolated in its own (non-inlined) method so the only strong reference to the callback is a
+    // local that goes out of scope when this method returns, before the caller runs GC.Collect() --
+    // matching RegisterOutputCallback/RegisterSteamDeckOutputCallback's isolation, which the
+    // GC-rooting assertions throughout this file rely on to be reliable.
+    private static WeakReference<SteamDeckOutputCallback> AttemptAndDiscardSteamDeckOutputCallback(CanonicalViiperNativeApi api, nuint deviceHandle)
+    {
+        var marker = new object();
+        var callback = new SteamDeckOutputCallback((_, _, _) => GC.KeepAlive(marker));
+        var weak = new WeakReference<SteamDeckOutputCallback>(callback);
+        Assert.False(api.SetSteamDeckOutputCallback(deviceHandle, callback));
+        return weak;
+    }
+
+    [Fact]
+    public void SteamDeckCallback_ClearingFailureDoesNotIncorrectlyClaimSafeCleanup()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+
+        FakeExports.FailSetDeckCallback = true;
+        try
+        {
+            Assert.False(api.SetSteamDeckOutputCallback(deviceHandle, null));
+            CollectGarbage();
+
+            // The native clear was rejected, so the managed root must still be intact: a caller
+            // that (incorrectly) treated the false return as "safely cleared" would otherwise be
+            // exposed to a dangling expectation that VIIPER can no longer invoke the callback.
+            Assert.True(weak.TryGetTarget(out _));
+        }
+        finally
+        {
+            FakeExports.FailSetDeckCallback = false;
+        }
+    }
+
+    [Fact]
+    public void SteamDeckCallback_DeviceRemovalExSuccessReleasesTheRoot()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+
+        Assert.Equal(SteamDeckDeviceRemoveResult.Success, api.RemoveSteamDeckDeviceEx(deviceHandle));
+        CollectGarbage();
+
+        Assert.False(weak.TryGetTarget(out _));
+    }
+
+    [Fact]
+    public void SteamDeckCallback_ExNonSuccessRetainsOwnedRoot()
+    {
+        foreach (var result in new[]
+        {
+            SteamDeckDeviceRemoveResult.RetryableFailure,
+            SteamDeckDeviceRemoveResult.UnsafeOutcomeUnknown,
+            SteamDeckDeviceRemoveResult.Invalid
+        })
+        {
+            var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+            Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+            var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+            FakeExports.RemoveDeckDeviceExResult = result;
+            try
+            {
+                Assert.Equal(result, api.RemoveSteamDeckDeviceEx(deviceHandle));
+                CollectGarbage();
+                Assert.True(weak.TryGetTarget(out _));
+            }
+            finally
+            {
+                FakeExports.RemoveDeckDeviceExResult = SteamDeckDeviceRemoveResult.Success;
+            }
+        }
+    }
+
+    [Fact]
+    public void SteamDeckCallback_RemoveBusFailureKeepsOwnedRootRooted()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+
+        FakeExports.FailRemoveBus = true;
+        try
+        {
+            Assert.False(api.RemoveUSBBus(1, 1));
+            CollectGarbage();
+            Assert.True(weak.TryGetTarget(out _));
+        }
+        finally
+        {
+            FakeExports.FailRemoveBus = false;
+        }
+    }
+
+    [Fact]
+    public void SteamDeckCallback_CloseServerFailureKeepsOwnedRootRooted()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+        var weak = RegisterSteamDeckOutputCallback(api, deviceHandle);
+
+        FakeExports.FailCloseServer = true;
+        try
+        {
+            Assert.False(api.CloseUSBServer(1));
+            CollectGarbage();
+            Assert.True(weak.TryGetTarget(out _));
+        }
+        finally
+        {
+            FakeExports.FailCloseServer = false;
+        }
+    }
+
+    [Fact]
+    public void SteamDeckCallback_ConcurrentSetCallsCannotEnterTheNativeCallConcurrently()
+    {
+        // Regression test for a race where the native SetSteamDeckOutputCallback call and the
+        // managed dictionary mutation were two separate, non-atomic steps: two threads racing to
+        // set different callbacks on the same handle could interleave as native<-cbA, native<-cbB,
+        // root<-cbB, root<-cbA, leaving native holding cbB's function pointer while the managed
+        // dictionary only rooted cbA -- cbB becomes GC-eligible while VIIPER can still invoke it.
+        //
+        // A bare "run it N times and hope the scheduler overlaps" test does not actually exercise
+        // the race with much confidence -- it can pass 200/200 runs against the old, unlocked
+        // implementation if the scheduler happens to run the two calls back-to-back every time.
+        // Instead, the fake native call itself detects concurrent entry: it increments a shared
+        // depth counter, sleeps briefly to force any unsynchronized second caller into the window,
+        // then decrements. A depth > 1 observed here means two callers were inside the "native" call
+        // simultaneously, which the fix's lock (_callbackGate) around the native call and the root
+        // mutation is meant to make impossible. This is a high-confidence concurrent-entry-detection
+        // regression test, not a formal proof -- an OS scheduler could in principle still run one
+        // thread's call (Thread.Sleep included) to completion before starting the other, so this
+        // cannot guarantee it will always catch a reintroduced race. Also asserts the managed root
+        // matches whichever call actually completed last, which the same atomicity guarantees.
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deviceHandle, 1, false, 0, 0));
+
+        var rootsField = typeof(CanonicalViiperNativeApi).GetField("_steamDeckOutputCallbacks", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        FakeExports.TrackLastSetDeckCallback = true;
+        FakeExports.DetectConcurrentSetDeckCallbackEntry = true;
+        try
+        {
+            for (var iteration = 0; iteration < 20; iteration++)
+            {
+                SteamDeckOutputCallback callbackA = (_, _, _) => { };
+                SteamDeckOutputCallback callbackB = (_, _, _) => { };
+                var barrier = new Barrier(2);
+
+                var threadA = new Thread(() =>
+                {
+                    barrier.SignalAndWait();
+                    api.SetSteamDeckOutputCallback(deviceHandle, callbackA);
+                });
+                var threadB = new Thread(() =>
+                {
+                    barrier.SignalAndWait();
+                    api.SetSteamDeckOutputCallback(deviceHandle, callbackB);
+                });
+
+                threadA.Start();
+                threadB.Start();
+                threadA.Join();
+                threadB.Join();
+
+                Assert.False(FakeExports.ConcurrentSetDeckCallbackEntryDetected, "Two threads entered the native SetSteamDeckOutputCallback call concurrently -- the native call and the managed root mutation are not serialized.");
+
+                var roots = (Dictionary<nuint, SteamDeckOutputCallback>)rootsField.GetValue(api)!;
+                Assert.True(roots.TryGetValue(deviceHandle, out var rootedCallback));
+                Assert.Same(FakeExports.LastSetDeckCallback, rootedCallback);
+            }
+        }
+        finally
+        {
+            FakeExports.TrackLastSetDeckCallback = false;
+            FakeExports.LastSetDeckCallback = null;
+            FakeExports.DetectConcurrentSetDeckCallbackEntry = false;
+            FakeExports.ConcurrentSetDeckCallbackEntryDetected = false;
+        }
+    }
+
+    [Fact]
+    public void SteamDeckCallback_ServerCloseReleasesOwnedRootsAndControllerCallbacksAreUnaffectedByDeckLifecycle()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamControllerDevice(1, out var controllerHandle, 1, false, 0, 0));
+        var controllerWeak = RegisterOutputCallback(api, controllerHandle);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deckHandle, 1, false, 0, 0));
+        var deckWeak = RegisterSteamDeckOutputCallback(api, deckHandle);
+
+        Assert.NotEqual(controllerHandle, deckHandle);
+
+        Assert.True(api.CloseUSBServer(1));
+        CollectGarbage();
+
+        Assert.False(controllerWeak.TryGetTarget(out _));
+        Assert.False(deckWeak.TryGetTarget(out _));
+    }
+
+    [Fact]
+    public void SteamDeckAndSteamControllerCallbacks_CannotOverwriteEachOthersRoots()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateSteamControllerDevice(1, out var controllerHandle, 1, false, 0, 0));
+        var controllerWeak = RegisterOutputCallback(api, controllerHandle);
+        Assert.True(api.CreateSteamDeckDevice(1, out var deckHandle, 1, false, 0, 0));
+        var deckWeak = RegisterSteamDeckOutputCallback(api, deckHandle);
+
+        // Removing only the Steam Controller device must not disturb the independently-rooted
+        // Steam Deck callback, proving the two callback dictionaries are not aliased.
+        Assert.Equal(SteamControllerDeviceRemoveResult.Success, api.RemoveSteamControllerDeviceEx(controllerHandle));
+        CollectGarbage();
+
+        Assert.False(controllerWeak.TryGetTarget(out _));
+        Assert.True(deckWeak.TryGetTarget(out _));
+    }
+
     private static void AssertParameters(string delegateName, params Type[] expected)
     {
         var actual = NestedDelegate(delegateName).GetMethod("Invoke")!.GetParameters().Select(parameter => parameter.ParameterType).ToArray();
@@ -385,6 +671,15 @@ public sealed class CanonicalViiperNativeAbiTests
         var callback = new SteamControllerOutputCallback((_, _, _) => GC.KeepAlive(marker));
         var weak = new WeakReference<SteamControllerOutputCallback>(callback);
         Assert.True(api.SetSteamControllerOutputCallback(deviceHandle, callback));
+        return weak;
+    }
+
+    private static WeakReference<SteamDeckOutputCallback> RegisterSteamDeckOutputCallback(CanonicalViiperNativeApi api, nuint deviceHandle)
+    {
+        var marker = new object();
+        var callback = new SteamDeckOutputCallback((_, _, _) => GC.KeepAlive(marker));
+        var weak = new WeakReference<SteamDeckOutputCallback>(callback);
+        Assert.True(api.SetSteamDeckOutputCallback(deviceHandle, callback));
         return weak;
     }
 
@@ -428,6 +723,7 @@ public sealed class CanonicalViiperNativeAbiTests
         // CanonicalSteamDeckSessionTests for the Steam Deck lifecycle fake.
         private static readonly CanonicalViiperNativeApi.CreateSteamDeckDeviceDelegate CreateDeckDevice = CreateDeckDeviceImpl;
         private static readonly CanonicalViiperNativeApi.SetSteamDeckDeviceStateDelegate SetDeckState = SetDeckStateImpl;
+        private static readonly CanonicalViiperNativeApi.SetSteamDeckOutputCallbackDelegate SetDeckCallback = SetDeckCallbackImpl;
         private static readonly CanonicalViiperNativeApi.RemoveSteamDeckDeviceDelegate RemoveDeckDevice = RemoveDeckDeviceImpl;
         private static readonly CanonicalViiperNativeApi.RemoveSteamDeckDeviceExDelegate RemoveDeckDeviceEx = RemoveDeckDeviceExImpl;
 
@@ -440,11 +736,45 @@ public sealed class CanonicalViiperNativeAbiTests
         [ThreadStatic]
         private static SteamControllerDeviceRemoveResult _removeDeviceExResult;
 
+        [ThreadStatic]
+        private static SteamDeckDeviceRemoveResult _removeDeckDeviceExResult;
+
+        [ThreadStatic]
+        private static bool _failSetDeckCallback;
+
         internal static SteamControllerDeviceRemoveResult RemoveDeviceExResult
         {
             get => _removeDeviceExResult;
             set => _removeDeviceExResult = value;
         }
+
+        internal static SteamDeckDeviceRemoveResult RemoveDeckDeviceExResult
+        {
+            get => _removeDeckDeviceExResult;
+            set => _removeDeckDeviceExResult = value;
+        }
+
+        internal static bool FailSetDeckCallback
+        {
+            get => _failSetDeckCallback;
+            set => _failSetDeckCallback = value;
+        }
+
+        // Only tracked while TrackLastSetDeckCallback is explicitly enabled (by the concurrency
+        // regression test below) -- otherwise this static field would itself become an unintended
+        // extra GC root for every other test's registered callback, defeating the very
+        // root-released-after-teardown assertions those tests make. Deliberately NOT [ThreadStatic]:
+        // it mirrors VIIPER's single native callback slot per device handle, shared across whichever
+        // managed thread last successfully set it.
+        internal static bool TrackLastSetDeckCallback;
+        internal static SteamDeckOutputCallback? LastSetDeckCallback;
+
+        // Deliberately not [ThreadStatic]: used to detect two threads inside the fake
+        // SetSteamDeckOutputCallback body at once (see SetDeckCallbackImpl and the concurrency
+        // regression test above).
+        private static int _concurrentSetDeckCallbackDepth;
+        internal static bool DetectConcurrentSetDeckCallbackEntry;
+        internal static volatile bool ConcurrentSetDeckCallbackEntryDetected;
 
         internal static bool FailCloseServer
         {
@@ -474,6 +804,7 @@ public sealed class CanonicalViiperNativeAbiTests
             ["RemoveSteamControllerDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveDeviceEx),
             ["CreateSteamDeckDevice"] = Marshal.GetFunctionPointerForDelegate(CreateDeckDevice),
             ["SetSteamDeckDeviceState"] = Marshal.GetFunctionPointerForDelegate(SetDeckState),
+            ["SetSteamDeckOutputCallback"] = Marshal.GetFunctionPointerForDelegate(SetDeckCallback),
             ["RemoveSteamDeckDevice"] = Marshal.GetFunctionPointerForDelegate(RemoveDeckDevice),
             ["RemoveSteamDeckDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveDeckDeviceEx)
         };
@@ -531,8 +862,26 @@ public sealed class CanonicalViiperNativeAbiTests
 
         private static byte SetDeckStateImpl(nuint _, SteamDeckDeviceState __) => 1;
 
+        private static byte SetDeckCallbackImpl(nuint _, SteamDeckOutputCallback? __)
+        {
+            if (DetectConcurrentSetDeckCallbackEntry)
+            {
+                var depth = Interlocked.Increment(ref _concurrentSetDeckCallbackDepth);
+                if (depth > 1) ConcurrentSetDeckCallbackEntryDetected = true;
+                // Widens the window so an unsynchronized concurrent caller is virtually certain to
+                // land inside it -- without this, a caller that raced in unsynchronized could still
+                // slip through between the increment and decrement below on a fast machine.
+                Thread.Sleep(5);
+                Interlocked.Decrement(ref _concurrentSetDeckCallbackDepth);
+            }
+
+            if (FailSetDeckCallback) return 0;
+            if (TrackLastSetDeckCallback) LastSetDeckCallback = __;
+            return 1;
+        }
+
         private static byte RemoveDeckDeviceImpl(nuint _) => 1;
 
-        private static SteamDeckDeviceRemoveResult RemoveDeckDeviceExImpl(nuint _) => SteamDeckDeviceRemoveResult.Success;
+        private static SteamDeckDeviceRemoveResult RemoveDeckDeviceExImpl(nuint _) => RemoveDeckDeviceExResult;
     }
 }

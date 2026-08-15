@@ -8,7 +8,7 @@ Steam Deck typed VIIPER path with identity `28DE:1205`.
 The embedded VIIPER revision is:
 
 ```text
-onehoon/VIIPER@ec64282c69e5587466b950332d7983fd53a7d778
+onehoon/VIIPER@0b3627317d2008065d8ec231f94bf31af7527bbd
 ```
 
 The Addon-side session, mapper, publisher, PnP identity resolver, and safety
@@ -18,11 +18,19 @@ recovery, native teardown, or failure-path condition.
 
 Phase 2B1 tooling status: `scripts/update-viiper.ps1` can fetch and
 independently verify the canonical Windows libVIIPER artifact for an exact,
-already-built `onehoon/VIIPER` commit into a disposable staging directory. It
-does not adopt any artifact and does not change the embedded revision above.
-Adopting a newer verified commit -- including the native/managed ABI move
-required for `SteamDeckOutputCallback`/`SetSteamDeckOutputCallback` -- remains
-a separate, later, reviewed Phase 2B2 operation.
+already-built `onehoon/VIIPER` commit into a disposable staging directory.
+
+Phase 2B2 adopted the canonical artifact above (from
+`ec64282c69e5587466b950332d7983fd53a7d778`) and aligned the managed Steam
+Deck callback ABI: the native revision adds exactly one export,
+`SetSteamDeckOutputCallback`, and the managed `ICanonicalViiperNativeApi`
+surface, `RequiredExports`, and callback-lifetime rooting were updated in the
+same change. This is dependency/ABI adoption only -- it does not implement
+rumble/haptics, does not change Steam routing/Game Bar/X360/lifecycle policy,
+and does not claim any additional hardware validation. Basic non-gyro
+hardware validation from before this adoption remains the only established
+Steam Deck input hardware claim; SD3 lifecycle/recovery validation below
+remains unstarted.
 
 ## Active roadmap
 

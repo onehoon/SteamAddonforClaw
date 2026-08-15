@@ -16,6 +16,13 @@ internal delegate void ViiperLogCallback(ViiperLogLevel level, nint message);
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate void SteamControllerOutputCallback(nuint handle, nint data, uint length);
 
+// Distinct managed delegate type from SteamControllerOutputCallback even though the shape is
+// identical -- Steam Deck and Steam Controller are separate typed devices in VIIPER with their own
+// native callback typedefs (VIIPER main@0b3627317d2008065d8ec231f94bf31af7527bbd), and keeping the
+// managed delegates separate avoids silently coupling the two typed callback lifecycles together.
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate void SteamDeckOutputCallback(nuint handle, nint data, uint length);
+
 [StructLayout(LayoutKind.Sequential)]
 internal struct USBServerConfig
 {
