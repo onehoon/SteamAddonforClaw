@@ -68,6 +68,24 @@ internal sealed class GordonDPadDiagnosticSession(
     private bool _windowsHidHasMask;
     private byte _lastWindowsHidMask;
 
+    // Serializes every attach/detach transition (Direct HID open, Raw Input register/unregister, window
+    // subclassing) onto a single chain, so a 1-second reconciliation tick can never start a new
+    // attach/detach while a previous one from an earlier tick is still in flight -- without this, two
+    // overlapping AttachAsync calls could race each other's DetachReaderAsync/RawInput
+    // register-unregister/WNDPROC-subclass calls against each other. _attachingDevicePath additionally
+    // dedups: a reconcile tick that keeps selecting the *same* candidate while an attach for it is
+    // already queued/running does not queue a redundant second attach for it.
+    private Task _pendingTransition = Task.CompletedTask;
+    private string? _attachingDevicePath;
+
+    private void QueueTransition(Func<Task> operation)
+    {
+        lock (_sync)
+        {
+            _pendingTransition = _pendingTransition.ContinueWith(_ => operation(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+        }
+    }
+
     internal GordonDPadDiagnosticSnapshot Snapshot
     {
         get
@@ -119,6 +137,7 @@ internal sealed class GordonDPadDiagnosticSession(
         Timer? reconcileTimer;
         Action<string>? hubHandler;
         GordonDPadDiagnosticWriter? writer;
+        Task pendingTransition;
         lock (_sync)
         {
             if (_captureState == GordonDPadCaptureState.Stopped) return;
@@ -128,6 +147,8 @@ internal sealed class GordonDPadDiagnosticSession(
             _hubHandler = null;
             writer = _writer;
             _writer = null;
+            pendingTransition = _pendingTransition;
+            _attachingDevicePath = null;
             _captureState = GordonDPadCaptureState.Stopped;
             _gordonState = GordonConnectionState.NotAvailable;
             _windowsHidMode = WindowsHidObservationMode.NotAvailable;
@@ -137,6 +158,11 @@ internal sealed class GordonDPadDiagnosticSession(
 
         if (reconcileTimer is not null) await reconcileTimer.DisposeAsync().ConfigureAwait(false);
         if (hubHandler is not null) GordonDPadDiagnosticHub.LineObserved -= hubHandler;
+
+        // Bounded wait for any attach/detach transition an earlier reconcile tick already queued -- it
+        // may briefly (re)create a reader/registration after the state above was cleared, so the
+        // unconditional detach/unregister below runs again afterward to mop that up.
+        try { await pendingTransition.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false); } catch { /* bounded; never hang shutdown */ }
 
         await DetachReaderAsync().ConfigureAwait(false);
         rawInputObserver.Unregister();
@@ -223,8 +249,11 @@ internal sealed class GordonDPadDiagnosticSession(
         }
         if (wasAttached)
         {
-            _ = DetachReaderAsync();
-            rawInputObserver.Unregister();
+            QueueTransition(async () =>
+            {
+                await DetachReaderAsync().ConfigureAwait(false);
+                rawInputObserver.Unregister();
+            });
             WriteStatusLine("GordonRemoved");
         }
     }
@@ -238,8 +267,11 @@ internal sealed class GordonDPadDiagnosticSession(
             _captureState = GordonDPadCaptureState.WaitingForGordon;
             _statusMessage = $"Ambiguous: {selection.AllCandidates.Count} matching HID devices present; none correlate to the Addon-owned Gordon. Not auto-attaching.";
         }
-        _ = DetachReaderAsync();
-        rawInputObserver.Unregister();
+        QueueTransition(async () =>
+        {
+            await DetachReaderAsync().ConfigureAwait(false);
+            rawInputObserver.Unregister();
+        });
         WriteStatusLine($"Ambiguous {selection.AllCandidates.Count} candidates, none correlated to owned Gordon");
     }
 
@@ -253,56 +285,68 @@ internal sealed class GordonDPadDiagnosticSession(
                 _gordonState = GordonConnectionState.Connected;
                 return; // already attached to this exact device -- nothing to do.
             }
+            if (_attachingDevicePath == candidate.DevicePath) return; // an attach for this exact candidate is already queued/running.
+            _attachingDevicePath = candidate.DevicePath;
         }
 
-        _ = AttachAsync(candidate, ownershipConfirmed);
+        QueueTransition(() => AttachAsync(candidate, ownershipConfirmed));
     }
 
     private async Task AttachAsync(GordonHidCandidate candidate, bool ownershipConfirmed)
     {
-        await DetachReaderAsync().ConfigureAwait(false);
-        rawInputObserver.Unregister();
-
-        var reader = directHidReaderFactory(candidate.DevicePath, candidate.InputReportByteLength);
-        var opened = false;
-        try { opened = await reader.OpenAsync().ConfigureAwait(false); }
-        catch { opened = false; }
-
-        if (opened)
+        try
         {
-            var cts = new CancellationTokenSource();
+            await DetachReaderAsync().ConfigureAwait(false);
+            rawInputObserver.Unregister();
+
+            var reader = directHidReaderFactory(candidate.DevicePath, candidate.InputReportByteLength);
+            var opened = false;
+            try { opened = await reader.OpenAsync().ConfigureAwait(false); }
+            catch { opened = false; }
+
+            if (opened)
+            {
+                var cts = new CancellationTokenSource();
+                lock (_sync)
+                {
+                    _directHidReader = reader;
+                    _readerCts = cts;
+                    _attachedDevicePath = candidate.DevicePath;
+                    _windowsHidMode = WindowsHidObservationMode.DirectHid;
+                    _gordonState = GordonConnectionState.Connected;
+                    _captureState = GordonDPadCaptureState.Active;
+                    _statusMessage = ownershipConfirmed ? null : "Attached to the only matching Gordon HID device present; ownership not cryptographically confirmed.";
+                }
+                _readerTask = reader.RunAsync(
+                    report => HandleWindowsHidReport(report, "DirectHID"),
+                    exception => SetStatus("Direct HID read failed: " + exception.Message),
+                    cts.Token);
+                WriteStatusLine($"Attached via DirectHID path={candidate.DevicePath} ownershipConfirmed={ownershipConfirmed}");
+                return;
+            }
+
+            try { await reader.DisposeAsync().ConfigureAwait(false); } catch { /* best-effort */ }
+
+            var registered = rawInputObserver.Register(_ownerWindowHandle, candidate.DevicePath, report => HandleWindowsHidReport(report, "RawInput"));
             lock (_sync)
             {
-                _directHidReader = reader;
-                _readerCts = cts;
                 _attachedDevicePath = candidate.DevicePath;
-                _windowsHidMode = WindowsHidObservationMode.DirectHid;
-                _gordonState = GordonConnectionState.Connected;
-                _captureState = GordonDPadCaptureState.Active;
-                _statusMessage = ownershipConfirmed ? null : "Attached to the only matching Gordon HID device present; ownership not cryptographically confirmed.";
+                _windowsHidMode = registered ? WindowsHidObservationMode.RawInput : WindowsHidObservationMode.NotAvailable;
+                _gordonState = registered ? GordonConnectionState.Connected : GordonConnectionState.NotAvailable;
+                _captureState = registered ? GordonDPadCaptureState.Active : GordonDPadCaptureState.WaitingForGordon;
+                _statusMessage = registered
+                    ? (ownershipConfirmed ? "Direct HID unavailable; using Raw Input fallback." : "Direct HID unavailable; using Raw Input fallback. Ownership not cryptographically confirmed.")
+                    : "Neither Direct HID nor Raw Input could observe the Gordon device.";
             }
-            _readerTask = reader.RunAsync(
-                report => HandleWindowsHidReport(report, "DirectHID"),
-                exception => SetStatus("Direct HID read failed: " + exception.Message),
-                cts.Token);
-            WriteStatusLine($"Attached via DirectHID path={candidate.DevicePath} ownershipConfirmed={ownershipConfirmed}");
-            return;
+            WriteStatusLine(registered ? "Attached via RawInput fallback" : "Attach failed: neither DirectHID nor RawInput available");
         }
-
-        try { await reader.DisposeAsync().ConfigureAwait(false); } catch { /* best-effort */ }
-
-        var registered = rawInputObserver.Register(_ownerWindowHandle, report => HandleWindowsHidReport(report, "RawInput"));
-        lock (_sync)
+        finally
         {
-            _attachedDevicePath = candidate.DevicePath;
-            _windowsHidMode = registered ? WindowsHidObservationMode.RawInput : WindowsHidObservationMode.NotAvailable;
-            _gordonState = registered ? GordonConnectionState.Connected : GordonConnectionState.NotAvailable;
-            _captureState = registered ? GordonDPadCaptureState.Active : GordonDPadCaptureState.WaitingForGordon;
-            _statusMessage = registered
-                ? (ownershipConfirmed ? "Direct HID unavailable; using Raw Input fallback." : "Direct HID unavailable; using Raw Input fallback. Ownership not cryptographically confirmed.")
-                : "Neither Direct HID nor Raw Input could observe the Gordon device.";
+            lock (_sync)
+            {
+                if (_attachingDevicePath == candidate.DevicePath) _attachingDevicePath = null;
+            }
         }
-        WriteStatusLine(registered ? "Attached via RawInput fallback" : "Attach failed: neither DirectHID nor RawInput available");
     }
 
     private void HandleWindowsHidReport(byte[] report, string source)

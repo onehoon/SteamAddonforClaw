@@ -188,6 +188,57 @@ public sealed class GordonDPadDiagnosticSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task SingleCandidate_DirectHidFails_RawInputRegistersWithTheSelectedDevicePath()
+    {
+        // Regression: the Raw Input fallback must be told exactly which candidate the selector chose, so
+        // it can filter WM_INPUT to that specific device rather than accepting any Gordon-shaped
+        // (matching VID/PID/usage) device -- otherwise a real Steam Controller or a stale Gordon node
+        // sharing the same VID/PID/usage could contaminate the capture.
+        var resolver = new FakePathResolver();
+        var candidate = new GordonHidCandidate(@"\\?\hid#exact", @"HID\EXACT", 1, 0x28DE, 0x1102, 0xFF00, 0x01, 64);
+        resolver.Candidates = [candidate];
+        var rawInput = new FakeRawInputObserver(register: true);
+        var session = CreateSession(resolver: resolver, readerFactory: (_, _) => new FakeDirectHidReader(open: false), rawInput: rawInput);
+
+        session.Start(0);
+        await WaitUntil(() => rawInput.Registered);
+
+        Assert.Equal(candidate.DevicePath, rawInput.ExpectedDevicePath);
+        await session.StopAsync();
+    }
+
+    [Fact]
+    public async Task OverlappingReconcileTicksDoNotCreateDuplicateAttachesOrRegistrations()
+    {
+        // Regression: a slow/blocked OpenAsync spanning multiple 1s reconcile ticks must not cause a
+        // later tick to start a second, overlapping attach for the same still-selected candidate -- that
+        // could otherwise race DetachReaderAsync/RawInput register-unregister/WNDPROC-subclass calls
+        // against each other.
+        var resolver = new FakePathResolver();
+        resolver.Candidates = [new GordonHidCandidate(@"\\?\hid#only", @"HID\ONLY", 1, 0x28DE, 0x1102, 0xFF00, 0x01, 64)];
+        var openGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readerCreatedCount = 0;
+        IDirectHidReader Factory(string _, int _2)
+        {
+            Interlocked.Increment(ref readerCreatedCount);
+            return new SlowOpenFakeDirectHidReader(openGate.Task);
+        }
+        var rawInput = new FakeRawInputObserver(register: true);
+        var session = CreateSession(resolver: resolver, readerFactory: Factory, rawInput: rawInput);
+
+        session.Start(0);
+        // Let at least two 1-second reconciliation ticks fire while OpenAsync is still blocked.
+        await Task.Delay(2500);
+        openGate.SetResult(true);
+        await WaitUntil(() => session.Snapshot.WindowsHidMode == WindowsHidObservationMode.DirectHid, TimeSpan.FromSeconds(3));
+        await Task.Delay(200); // let the single attach fully settle before asserting
+
+        Assert.Equal(1, readerCreatedCount);
+        Assert.True(rawInput.RegisterCallCount <= 1, $"Expected at most one RawInput registration, got {rawInput.RegisterCallCount}.");
+        await session.StopAsync();
+    }
+
+    [Fact]
     public async Task NeitherDirectHidNorRawInputAvailable_RemainsWaitingWithNotAvailableMode()
     {
         var resolver = new FakePathResolver();
@@ -266,11 +317,31 @@ public sealed class GordonDPadDiagnosticSessionTests : IDisposable
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    private sealed class SlowOpenFakeDirectHidReader(Task<bool> openGate) : IDirectHidReader
+    {
+        public bool IsOpen { get; private set; }
+
+        public async Task<bool> OpenAsync()
+        {
+            await openGate.ConfigureAwait(false);
+            IsOpen = true;
+            return true;
+        }
+
+        public Task RunAsync(Action<byte[]> onReport, Action<Exception> onFault, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class FakeRawInputObserver(bool register) : IRawInputGordonObserver
     {
         internal bool Registered { get; private set; }
-        public bool Register(nint ownerWindowHandle, Action<byte[]> onReport)
+        internal string? ExpectedDevicePath { get; private set; }
+        internal int RegisterCallCount { get; private set; }
+        public bool Register(nint ownerWindowHandle, string expectedDevicePath, Action<byte[]> onReport)
         {
+            RegisterCallCount++;
+            ExpectedDevicePath = expectedDevicePath;
             Registered = register;
             return register;
         }
