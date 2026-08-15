@@ -384,9 +384,10 @@ jobs:
             -LocalHeadSha (git rev-parse HEAD) `
             -RemoteBranchHeadSha $remoteBranchHead
           if ($postPushAction -eq 'DeleteBranchAndFailClosed') {
-            git push origin --delete $env:BRANCH
+            $lease = "refs/heads/$($env:BRANCH):$remoteBranchHead"
+            git push origin "--force-with-lease=$lease" ":refs/heads/$($env:BRANCH)"
             if ($LASTEXITCODE -ne 0) {
-              throw "Addon main advanced after push and cleanup of owned branch '$($env:BRANCH)' failed. Failing closed without creating a PR."
+              throw "Addon main advanced after push, but conditional cleanup of branch '$($env:BRANCH)' failed because its remote ref changed or deletion was rejected. Preserving the branch and failing closed without creating a PR."
             }
             throw "Addon main advanced after pushing VIIPER dependency branch. Deleted the branch because its remote head matched this run's HEAD; no PR was created."
           }

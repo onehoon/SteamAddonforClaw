@@ -69,15 +69,15 @@ function Get-ViiperPostPushBaseDriftAction {
         }
     }
 
+    if ($RemoteBranchHeadSha.ToLowerInvariant() -ne $LocalHeadSha.ToLowerInvariant()) {
+        return 'FailClosedPreserveBranch'
+    }
+
     if ($classification -eq 'BaseCurrent') {
         return 'Proceed'
     }
 
-    if ($RemoteBranchHeadSha.ToLowerInvariant() -eq $LocalHeadSha.ToLowerInvariant()) {
-        return 'DeleteBranchAndFailClosed'
-    }
-
-    return 'FailClosedPreserveBranch'
+    return 'DeleteBranchAndFailClosed'
 }
 
 if ($MyInvocation.InvocationName -eq '.') {

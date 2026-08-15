@@ -96,6 +96,10 @@ try {
         -AdoptionBaseSha $baseA -LatestMainSha $baseA -ResolveLatestMainExitCode 0 `
         -LocalHeadSha $localHead -RemoteBranchHeadSha $localHead) `
         -Message 'Post-push unchanged base was not allowed to proceed.'
+    Assert-Equal -Expected 'FailClosedPreserveBranch' -Actual (Get-ViiperPostPushBaseDriftAction `
+        -AdoptionBaseSha $baseA -LatestMainSha $baseA -ResolveLatestMainExitCode 0 `
+        -LocalHeadSha $localHead -RemoteBranchHeadSha $baseA) `
+        -Message 'A changed remote branch was allowed to proceed while main was unchanged.'
 
     Write-Host 'viiper-base-drift-check.ps1 tests passed.'
 }
