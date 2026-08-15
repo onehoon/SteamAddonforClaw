@@ -46,9 +46,14 @@ internal sealed class AddonOwnedVirtualDeviceTracker : IControllerIdentityExclus
     {
         var presentSnapshot = present as IReadOnlyList<ControllerDeviceInfo> ?? present.ToArray();
         var beforeIds = (before ?? []).Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var ownedIds = (owned ?? []).Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // `owned` is intentionally NOT used to exclude matches here: a reappearance of the EXACT
+        // previously-owned instance id must NOT be excused just because it used to be legitimately
+        // owned. At this point in the teardown sequence (after native remove + verified absence) that
+        // node is owned-that-should-now-be-gone, so its reappearance has to block the uncertainty
+        // clear, not be waved through. The parameter is kept for call-site/API compatibility.
+        _ = owned;
         var currentByInstanceId = ViiperVirtualDeviceIdentityPolicy.BuildInstanceIndex(presentSnapshot);
-        if (presentSnapshot.Any(device => policy.IsMatchingCandidate(device, currentByInstanceId) && !beforeIds.Contains(device.InstanceId) && !ownedIds.Contains(device.InstanceId))) return false;
+        if (presentSnapshot.Any(device => policy.IsMatchingCandidate(device, currentByInstanceId) && !beforeIds.Contains(device.InstanceId))) return false;
         _instanceIds.Clear();
         Volatile.Write(ref _uncertainOwnership, 0);
         return true;
@@ -62,9 +67,11 @@ internal sealed class AddonOwnedVirtualDeviceTracker : IControllerIdentityExclus
     {
         var presentSnapshot = present as IReadOnlyList<ControllerDeviceInfo> ?? present.ToArray();
         var beforeIds = (before ?? []).Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var ownedIds = (owned ?? []).Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // See the Gordon overload above: `owned` must NOT excuse a reappearance of the exact
+        // previously-owned instance id from the "still present" check. Kept for API compatibility.
+        _ = owned;
         var currentByInstanceId = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(presentSnapshot);
-        if (presentSnapshot.Any(device => policy.IsMatchingCandidate(device, currentByInstanceId) && !beforeIds.Contains(device.InstanceId) && !ownedIds.Contains(device.InstanceId))) return false;
+        if (presentSnapshot.Any(device => policy.IsMatchingCandidate(device, currentByInstanceId) && !beforeIds.Contains(device.InstanceId))) return false;
         _instanceIds.Clear();
         Volatile.Write(ref _uncertainOwnership, 0);
         return true;
