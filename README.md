@@ -12,7 +12,7 @@ The addon exists to expose the built-in handheld controller to Steam while leavi
 >
 > The current production implementation on `main` still uses the canonical VIIPER **Classic Steam Controller / Gordon** output (`28DE:1102`). That implementation is the preserved safety and lifecycle baseline.
 >
-> The new primary virtual-controller target is **Steam Deck** (`28DE:1205`). Steam Deck support is not yet production-ready. The VIIPER fork is first being extended with a canonical typed Steam Deck wrapper, then the Addon will adopt it side-by-side, perform real MSI Claw hardware validation, and only then cut production routing over from Gordon.
+> The new primary virtual-controller target is **Steam Deck** (`28DE:1205`). The minimal canonical typed Steam Deck wrapper is now merged into VIIPER `main` at `ec64282c69e5587466b950332d7983fd53a7d778`. The next step is Addon-side adoption of the matching Release DLL/header and side-by-side Steam Deck session/mapper/publisher work. Steam Deck is still not the Addon's production output until real MSI Claw hardware validation passes.
 >
 > The exact pre-transition Gordon documentation is archived under `docs/archive/gordon-baseline-2026-08-15/`.
 
@@ -29,26 +29,32 @@ The addon exists to expose the built-in handheld controller to Steam while leavi
 | Canonical VIIPER Gordon output | Current production baseline |
 | Gordon output identity | `28DE:1102` |
 | Steam Deck output identity | Target `28DE:1205` |
-| VIIPER canonical Steam Deck typed wrapper | In progress on `onehoon/VIIPER:feature/canonical-steamdeck` |
-| Addon Steam Deck binding/session/mapper | Not started; blocked on the VIIPER typed wrapper |
-| Steam Deck hardware smoke test | Pending |
+| VIIPER canonical Steam Deck typed wrapper | **Validated and merged to `onehoon/VIIPER:main` at `ec64282c69e5587466b950332d7983fd53a7d778`** |
+| Addon Steam Deck binding/session/mapper | Ready for SD2; not yet implemented |
+| Steam Deck hardware smoke test | Pending SD2 implementation |
 | OEM1 → Steam Deck Quick Access | Planned after basic Deck input validation |
 | Gyro/accelerometer → Steam Deck IMU | Planned after basic Deck input validation |
 | Game Bar temporary Xbox360 route | Planned after Deck cutover |
 
-Current Addon baseline used for this transition:
+Current Addon Gordon transition baseline:
 
 ```text
 acdfd105f828dd78598a028d248c146b44833dc2
 ```
 
-Current validated VIIPER production pin used by the Gordon path:
+Current Addon-embedded VIIPER pin used by the Gordon production path:
 
 ```text
 db70bdedbe36846c665c841ea9f6ae9bf01d0d3d
 ```
 
-The development Steam Deck VIIPER branch was created from that validated VIIPER baseline. Do not treat the branch head as a new Addon pin until its canonical ABI is reviewed, built, and explicitly adopted.
+Selected canonical VIIPER source pin for Steam Deck SD2 adoption:
+
+```text
+ec64282c69e5587466b950332d7983fd53a7d778
+```
+
+Do not confuse those two pins. The Steam Deck typed ABI exists in VIIPER `main`, but the Addon has not yet atomically adopted its matching Release DLL/header, managed interop layout, provenance, and hashes.
 
 ---
 
@@ -270,8 +276,8 @@ Current high-level order:
 
 ```text
 SD0  preserve Gordon baseline and archive its documentation
-SD1  expose existing device/steamdeck through canonical typed libVIIPER
-SD2  add side-by-side Addon Steam Deck ABI/session/mapper/publisher
+SD1  expose existing device/steamdeck through canonical typed libVIIPER — VALIDATED
+SD2  add side-by-side Addon Steam Deck ABI/session/mapper/publisher — NEXT
 SD3  real MSI Claw non-gyro Steam Deck smoke test
 SD4  cut production SteamOutput from Gordon to Steam Deck
 SD5  map OEM1 to Steam Deck Quick Access
