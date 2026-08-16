@@ -10,6 +10,7 @@ using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Prerequisites;
@@ -168,9 +169,7 @@ public partial class App : Application
 
             _msiClawNativeModeSession = msiRoutingComposition.NativeModeSession;
             _physicalInputSource = msiRoutingComposition.PhysicalInputSource;
-            var nativeModeStage = msiRoutingComposition.NativeModeStage;
-            var physicalInputStage = msiRoutingComposition.PhysicalInputStage;
-            var physicalIsolationStage = msiRoutingComposition.PhysicalIsolationStage;
+            IHandheldRoutingComposition handheldRoutingComposition = msiRoutingComposition;
 
             var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
             SteamOutputComposition.LogTargetSelected();
@@ -181,15 +180,15 @@ public partial class App : Application
                 addonOwnedVirtualDeviceTracker,
                 _recoveryManager!,
                 () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
-                new HidHideDriverClient(), _physicalInputSource);
+                new HidHideDriverClient(), handheldRoutingComposition.ControllerStateSource);
             IRoutingPipelineStage steamOutputStage = deckStage;
             Action attachOutputFaultHandler = () => deckStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator!.FailClosedAsync().ConfigureAwait(false); });
-            var pipelineExecutor = new RoutingPipelineExecutor([nativeModeStage, physicalInputStage, physicalIsolationStage, steamOutputStage]);
+            var pipelineExecutor = new RoutingPipelineExecutor([.. handheldRoutingComposition.Stages, steamOutputStage]);
             var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(pipelineExecutor);
             _routingRuntimeCoordinator = new RoutingPipelineRuntimeCoordinator(
                 statusProvider,
                 pipelineSessionCoordinator,
-                [_msiClawNativeModeSession]);
+                handheldRoutingComposition.SessionBoundaryParticipants);
             attachOutputFaultHandler();
         }
         _userTerminationGuard = new UserTerminationGuard(
