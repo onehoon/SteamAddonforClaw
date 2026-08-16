@@ -117,7 +117,7 @@ public partial class App : Application
         }
     }
 
-    private void StartNormalRuntime(AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, MsiClawDeviceAdapter msiClawAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, IStockCenterMStartupBaseline? stockCenterMBaseline, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
+    private void StartNormalRuntime(AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, IHandheldDeviceAdapter handheldDeviceAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, IStockCenterMStartupBaseline? stockCenterMBaseline, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
         var settingsStore = new SettingsStore(VelopackAppPaths.SettingsPath);
@@ -146,7 +146,6 @@ public partial class App : Application
 
         var recoverySafetyState = new RecoverySafetyState(recoverySafe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
         var powerGate = new PowerMutationGate();
-        var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         var statusProvider = new SystemStatusProvider(
             new WindowsDeviceInformationProvider(),
             new WindowsDeviceProbeContextFactory(),
@@ -159,15 +158,13 @@ public partial class App : Application
             () => _effectiveSteamSessionSource?.State ?? SteamSessionState.FromRunningAppId(0),
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             () => addonOwnedVirtualDeviceTracker.HasUncertainOwnership);
-        if (nativeState is not null)
+        var handheldRoutingComposition = new HandheldRoutingCompositionFactory().Create(
+            handheldDeviceAdapter,
+            _recoveryManager!,
+            powerGate,
+            recoverySafetyState);
+        if (handheldRoutingComposition is not null)
         {
-            var msiRoutingComposition = new MsiClawRoutingComposition(
-                nativeState,
-                _recoveryManager!,
-                powerGate,
-                recoverySafetyState);
-
-            IHandheldRoutingComposition handheldRoutingComposition = msiRoutingComposition;
             _handheldRoutingComposition = handheldRoutingComposition;
             _routingSafetySession = handheldRoutingComposition.SafetySession;
 
