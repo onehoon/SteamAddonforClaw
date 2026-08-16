@@ -110,4 +110,4 @@ consistent. Hardware-dependent claims require actual device evidence.
 
 ## License
 
-This project is licensed under GPL-3.0-or-later. See [`LICENSE`](LICENSE).
+This project is licensed under AGPL-3.0-only. See [`LICENSE`](LICENSE).
