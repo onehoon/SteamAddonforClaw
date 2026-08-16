@@ -113,10 +113,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
     internal int PublishedStateCount => _publishedStateCount;
 
     /// <summary>
-    /// Starts publishing. See <see cref="CanonicalSteamControllerInputPublisher.Start"/> for the
-    /// detailed fail-closed startup rationale this mirrors: on the production (no explicit tick
-    /// source) path this throws synchronously and cleans up any partially-created native handle if
-    /// the timer cannot be created or armed, rather than silently falling back to a defective cadence.
+    /// Starts publishing. On the production (no explicit tick source) path this throws synchronously
+    /// and cleans up any partially-created native handle if the timer cannot be created or armed --
+    /// fail closed rather than silently falling back to a defective cadence.
     /// </summary>
     internal void Start()
     {
@@ -207,20 +206,21 @@ internal sealed class CanonicalSteamDeckInputPublisher
         timer.ArmRelative(TimeSpan.FromTicks(due100ns));
     }
 
-    /// <summary>Test-only seam mirroring <see cref="CanonicalSteamControllerInputPublisher.ArmForDeadlineOverrideForTests"/>.</summary>
+    /// <summary>Test-only seam for deterministic initial-arm and runtime re-arm failure coverage.</summary>
     internal Action<WindowsHighResolutionOneShotTimer, long, long>? ArmForDeadlineOverrideForTests { get; set; }
 
     private void ArmForDeadlineViaSeam(WindowsHighResolutionOneShotTimer timer, long deadlineTicks, long nowTicks) =>
         (ArmForDeadlineOverrideForTests ?? ArmForDeadline)(timer, deadlineTicks, nowTicks);
 
-    /// <summary>Test-only seam mirroring <see cref="CanonicalSteamControllerInputPublisher.WorkerThreadStartOverrideForTests"/>.</summary>
+    /// <summary>Test-only seam for deterministic worker-thread-start failure and configuration coverage.</summary>
     internal Action<Thread>? WorkerThreadStartOverrideForTests { get; set; }
 
     /// <summary>
-    /// Signals the worker to stop and waits for it to actually exit. Fail closed on a join timeout
-    /// for the same reason as <see cref="CanonicalSteamControllerInputPublisher"/>: the caller
-    /// proceeds from a successful StopAsync() straight into native Steam Deck device removal, so a
-    /// timed-out join must not silently allow that race -- it throws instead.
+    /// Signals the worker to stop and waits for it to actually exit. The caller proceeds from a
+    /// successful <see cref="StopAsync"/> straight into native Steam Deck device removal, so the join
+    /// must complete before that removal so an in-flight <c>SetState</c> call cannot race the native
+    /// handle being torn down. Fail closed on a join timeout -- a timed-out join must not silently
+    /// allow that race, so it throws instead of returning as if the worker had stopped.
     /// </summary>
     private async Task StopProductionWorkerAsync()
     {
@@ -329,8 +329,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
     }
 
     /// <summary>How late <paramref name="wake"/> landed relative to the deadline that was scheduled for
-    /// it. Clamped to zero -- see <see cref="CanonicalSteamControllerInputPublisher"/>'s equivalent
-    /// method for the rationale.</summary>
+    /// it. Clamped to zero rather than allowed to go negative -- a wake can (rarely) be observed
+    /// slightly before its own scheduled deadline depending on timer/clock granularity, and that is
+    /// not a meaningful "negative lateness" for this diagnostic.</summary>
     private void RecordWakeLateness(long wake, long scheduledDeadline)
     {
         var lateness = wake - scheduledDeadline;
@@ -462,8 +463,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _wakeLatenessTicksSumSinceHeartbeat = 0;
         _maxWakeLatenessTicksSinceHeartbeat = 0;
         _skippedDeadlineCountSinceHeartbeat = 0;
-        // _previousTimerWakeTimestamp / _hasPreviousTimerWake intentionally NOT reset here -- mirrors
-        // CanonicalSteamControllerInputPublisher.EmitHeartbeatIfDue.
+        // _previousTimerWakeTimestamp / _hasPreviousTimerWake intentionally NOT reset here: the
+        // wake-to-wake interval spanning the heartbeat boundary itself (last tick before this
+        // heartbeat to the first tick after it) is still a real, valid sample for the next window.
     }
 
     private void ReportFault(Exception exception)
