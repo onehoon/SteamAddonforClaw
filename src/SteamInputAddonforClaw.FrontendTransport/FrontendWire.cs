@@ -24,7 +24,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetRouteInSteamBigPicture, SetLogLevel, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetRouteInSteamBigPicture, SetLogLevel, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport }
 internal enum FrontendNotificationKind { StateInvalidated }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -37,7 +37,7 @@ internal sealed record SetDeveloperTestModeRequest(bool Enabled);
 internal static class FrontendWireCodec
 {
     internal const int MaxFrameBytes = 1024 * 1024;
-    internal static readonly JsonSerializerOptions Json = new() { Converters = { new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) } };
+    internal static readonly JsonSerializerOptions Json = new() { Converters = { new FrontendRpcMethodJsonConverter(), new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) } };
     internal static async Task WriteAsync(Stream stream, FrontendWireEnvelope envelope, SemaphoreSlim gate, CancellationToken token)
     {
         var data = JsonSerializer.SerializeToUtf8Bytes(envelope, Json);
@@ -53,7 +53,8 @@ internal static class FrontendWireCodec
         var length = BinaryPrimitives.ReadInt32LittleEndian(prefix);
         if (length <= 0 || length > MaxFrameBytes) throw new FrontendProtocolException("Invalid frame length.");
         var data = new byte[length]; await ReadExactlyAsync(stream, data, token).ConfigureAwait(false);
-        return JsonSerializer.Deserialize<FrontendWireEnvelope>(data, Json) ?? throw new FrontendProtocolException("Invalid JSON frame.");
+        try { return JsonSerializer.Deserialize<FrontendWireEnvelope>(data, Json) ?? throw new FrontendProtocolException("Invalid JSON frame."); }
+        catch (JsonException exception) { throw new FrontendProtocolException($"Invalid JSON frame: {exception.Message}"); }
     }
     internal static async Task ReadExactlyAsync(Stream stream, Memory<byte> target, CancellationToken token)
     { var offset = 0; while (offset < target.Length) { var read = await stream.ReadAsync(target[offset..], token).ConfigureAwait(false); if (read == 0) throw new EndOfStreamException(); offset += read; } }
@@ -62,5 +63,27 @@ internal static class FrontendWireCodec
     {
         var element = value ?? throw new FrontendProtocolException("Missing payload.");
         return element.Deserialize<T>(Json) ?? throw new FrontendProtocolException("Invalid payload.");
+    }
+}
+
+internal sealed class FrontendRpcMethodJsonConverter : JsonConverter<FrontendRpcMethod>
+{
+    public override FrontendRpcMethod Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+            throw new JsonException("RPC method must be a string.");
+
+        var value = reader.GetString();
+        return value is not null && Enum.TryParse<FrontendRpcMethod>(value, ignoreCase: false, out var method) && method != FrontendRpcMethod.Unknown
+            ? method
+            : FrontendRpcMethod.Unknown;
+    }
+
+    public override void Write(Utf8JsonWriter writer, FrontendRpcMethod value, JsonSerializerOptions options)
+    {
+        if (value == FrontendRpcMethod.Unknown || !Enum.IsDefined(value))
+            throw new JsonException("Unknown RPC method cannot be written.");
+
+        writer.WriteStringValue(value.ToString());
     }
 }
