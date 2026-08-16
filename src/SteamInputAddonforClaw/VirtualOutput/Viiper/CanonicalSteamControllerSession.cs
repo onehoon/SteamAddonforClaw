@@ -12,14 +12,6 @@ internal enum CanonicalSteamControllerSessionState
     Unsafe
 }
 
-internal enum CanonicalPendingCleanupPhase
-{
-    None,
-    DeviceRemoval,
-    BusRemoval,
-    ServerClose
-}
-
 internal sealed class CanonicalSteamControllerSession : ICanonicalSteamControllerSession
 {
     private const string LoopbackAddress = "127.0.0.1:3241";
