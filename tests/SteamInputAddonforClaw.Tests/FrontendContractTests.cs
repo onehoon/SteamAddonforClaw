@@ -82,6 +82,15 @@ public sealed class FrontendContractTests
     }
 
     [Fact]
+    public void PrerequisiteSetupResult_distinguishes_not_installable_from_blocked()
+    {
+        Assert.NotEqual(FrontendPrerequisiteSetupResultKind.NotInstallable, FrontendPrerequisiteSetupResultKind.Blocked);
+        Assert.Contains(
+            FrontendPrerequisiteSetupResultKind.NotInstallable,
+            Enum.GetValues<FrontendPrerequisiteSetupResultKind>());
+    }
+
+    [Fact]
     public void EnvironmentReportResult_round_trips_through_SystemTextJson()
     {
         var value = new FrontendEnvironmentReportResult(false, "boom");

@@ -85,10 +85,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var setup = EvaluateFirstTimeSetup(current);
         var mapped = FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(current, _runtime.CaptureRoutingStatus()), setup);
         if (!PrerequisiteSetupPromptPolicy.IsInstallable(setup))
-            return new(FrontendPrerequisiteSetupResultKind.Blocked, mapped);
+            return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
         var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
         var result = await PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(setup, _setupRunner, executable, ElevatedPrerequisiteSetup.Argument, cancellationToken).ConfigureAwait(false);
-        if (result is null) return new(FrontendPrerequisiteSetupResultKind.Blocked, mapped);
+        // RunIfInstallableAsync returns null only when its safety policy declines to launch.
+        // Preserve that distinction from an elevated helper that actually returns Blocked.
+        if (result is null) return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
         var resultKind = MapResultKind(ElevatedPrerequisiteSetup.TranslateExitCode(result));
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return new(resultKind, await CaptureStatusAsync(cancellationToken).ConfigureAwait(false));

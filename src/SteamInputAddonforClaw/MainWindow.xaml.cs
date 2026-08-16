@@ -273,6 +273,9 @@ public sealed partial class MainWindow : Window
     {
         if (Content.XamlRoot is null) return;
 
+        if (resultKind == FrontendPrerequisiteSetupResultKind.NotInstallable)
+            return;
+
         if (resultKind == FrontendPrerequisiteSetupResultKind.RebootRequired)
         {
             var restartDialog = new ContentDialog
@@ -299,7 +302,7 @@ public sealed partial class MainWindow : Window
                 XamlRoot = Content.XamlRoot
             }.ShowAsync();
         }
-        // Ready/Installed/Cancelled need no dialog: Ready/Installed complete silently (Status
+        // Ready/Installed/Cancelled/NotInstallable need no dialog: Ready/Installed complete silently (Status
         // already reflects the new state), and Cancelled mirrors the prompt's own "Not now" path.
     }
 

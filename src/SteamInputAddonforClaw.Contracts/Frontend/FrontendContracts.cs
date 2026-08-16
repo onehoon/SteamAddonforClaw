@@ -9,7 +9,7 @@ public enum FrontendSoftwareInstallationStatus { Installed, NotInstalled, Indete
 public enum FrontendSoftwareRuntimeStatus { Running, NotRunning, Starting, Indeterminate }
 public enum FrontendPrerequisiteStatus { Ready, Missing, Present, Unusable, Incompatible, Indeterminate }
 public enum FrontendRoutingOperationalState { Passive, OverrideActive, Indeterminate }
-public enum FrontendPrerequisiteSetupResultKind { Ready, Installed, RebootRequired, Cancelled, Blocked, Failed, AlreadyInProgress }
+public enum FrontendPrerequisiteSetupResultKind { Ready, Installed, RebootRequired, Cancelled, NotInstallable, Blocked, Failed, AlreadyInProgress }
 public enum FrontendRoutingEligibilityReason
 {
     SteamInactive,
