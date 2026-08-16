@@ -36,7 +36,19 @@ public partial class App : Application
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _singleInstanceGate.RegisterActivation(ShowMainWindow);
         _processHost = new AddonProcessHost(_showMainWindow ? null : ["--background"]);
-        _ = StartAsync();
+        StartApplicationDispatched();
+    }
+
+    private async void StartApplicationDispatched()
+    {
+        try
+        {
+            await StartAsync();
+        }
+        catch (Exception exception)
+        {
+            HandleFatalStartupFailure("Startup coordination failed.", exception);
+        }
     }
 
     private async Task StartAsync()
@@ -71,27 +83,25 @@ public partial class App : Application
         }
         catch (Exception exception)
         {
-            AppLog.Error(
-                "Startup",
-                "Runtime startup failed.",
-                exception);
-
-            _isExplicitExit = true;
-
-            try
-            {
-                ShutdownApplicationOnce();
-            }
-            catch (Exception cleanupException)
-            {
-                AppLog.Error(
-                    "Startup",
-                    "Runtime cleanup after startup failure failed.",
-                    cleanupException);
-            }
-
-            Exit();
+            HandleFatalStartupFailure("Runtime startup failed.", exception);
         }
+    }
+
+    private void HandleFatalStartupFailure(string message, Exception exception)
+    {
+        AppLog.Error("Startup", message, exception);
+        _isExplicitExit = true;
+
+        try
+        {
+            ShutdownApplicationOnce();
+        }
+        catch (Exception cleanupException)
+        {
+            AppLog.Error("Startup", "Runtime cleanup after startup failure failed.", cleanupException);
+        }
+
+        Exit();
     }
 
     private async Task StartNormalRuntimeAsync()
