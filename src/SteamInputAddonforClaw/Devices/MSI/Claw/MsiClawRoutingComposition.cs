@@ -69,4 +69,6 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     IControllerStateSnapshotSource IHandheldRoutingComposition.ControllerStateSource => PhysicalInputSource;
 
     IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> IHandheldRoutingComposition.SessionBoundaryParticipants => _sessionBoundaryParticipants;
+
+    IRoutingSafetySession? IHandheldRoutingComposition.SafetySession => NativeModeSession;
 }

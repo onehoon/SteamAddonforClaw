@@ -14,8 +14,10 @@ namespace SteamInputAddonforClaw.Devices.Abstractions;
 /// native-mode/physical-input/physical-isolation properties -- that would encode today's MSI
 /// topology into a supposedly generic contract. A future backend without native-mode or physical
 /// isolation is not required to fake those concepts; it can return however many stages it
-/// actually needs. Likewise this type carries no lifecycle capabilities (recovery session id,
-/// fail-closed, disposal, ...) -- those are handled separately.
+/// actually needs. <see cref="SafetySession"/> exposes an optional routing-safety capability
+/// (recovery session id, activity/recovery-boundary state, fail-closed) for backends that have
+/// one, but this composition does not own or aggregate backend disposal in this phase -- a
+/// backend without a meaningful safety session may return null.
 /// </remarks>
 internal interface IHandheldRoutingComposition
 {
@@ -24,4 +26,6 @@ internal interface IHandheldRoutingComposition
     IControllerStateSnapshotSource ControllerStateSource { get; }
 
     IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> SessionBoundaryParticipants { get; }
+
+    IRoutingSafetySession? SafetySession { get; }
 }

@@ -425,6 +425,34 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.Equal(MsiClawIdentityConfidence.Strong, modeController.Identities[0].Confidence);
     }
 
+    [Fact]
+    public async Task IRoutingSafetySession_view_observes_the_same_state_and_forwards_FailClosedAsync()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices);
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        var gate = new PowerMutationGate(initiallyOpen: true);
+        await using var coordinator = CreateCoordinator(devices, modeController, gate, recoverySafety);
+        IRoutingSafetySession safetySession = coordinator;
+
+        Assert.True(await coordinator.ObserveRoutingDecisionAsync(Eligible(), 1));
+
+        // The generic view must observe the exact same underlying state as the concrete type --
+        // not a copy or a separately tracked value.
+        Assert.Equal(coordinator.IsActive, safetySession.IsActive);
+        Assert.Equal(coordinator.HasOwnedRecoveryBoundary, safetySession.HasOwnedRecoveryBoundary);
+        Assert.Equal(coordinator.CurrentRecoverySessionId, safetySession.CurrentRecoverySessionId);
+
+        await safetySession.FailClosedAsync("CanonicalRoutingReconciliationFailed");
+
+        // FailClosedAsync called through the interface must reach the same fail-close
+        // implementation as calling the concrete method directly: mode restored, power gate
+        // still open, recovery safety still Safe.
+        Assert.Equal(MsiClawNativeMode.XInput, devices.Mode);
+        Assert.True(gate.IsOpen);
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+    }
+
     private static MsiClawNativeModeSessionCoordinator CreateCoordinator(
         FakeDeviceEnumerator devices,
         FakeModeController modeController,

@@ -8,7 +8,7 @@ using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
-internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IMsiClawNativeModeStageSession, IRoutingRuntimeSessionBoundaryParticipant, IRoutingRecoverySessionProvider
+internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeStageSession, IRoutingRuntimeSessionBoundaryParticipant, IRoutingSafetySession
 {
     private readonly MsiClawNativeStateManager _nativeState;
     private readonly RecoveryManager _recovery;
@@ -224,6 +224,12 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IAsyncDisposable, IM
 
     public async ValueTask DisposeAsync()
     { try { await StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { } _gate.Dispose(); }
+
+    Task IRoutingSafetySession.LatchRoutingFaultAsync(string reason, CancellationToken cancellationToken)
+        => LatchRoutingFaultAsync(reason, cancellationToken);
+
+    Task IRoutingSafetySession.FailClosedAsync(string reason, CancellationToken cancellationToken)
+        => FailClosedAsync(reason, cancellationToken);
 
     private void LatchRoutingFaultCore(string reason)
     {
