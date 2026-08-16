@@ -41,9 +41,7 @@ public partial class App : Application
     private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
-    private IHandheldRoutingComposition? _handheldRoutingComposition;
-    private IRoutingSafetySession? _routingSafetySession;
-    private RoutingPipelineRuntimeCoordinator? _routingRuntimeCoordinator;
+    private AddonRoutingRuntime? _routingRuntime;
     private UserTerminationGuard? _userTerminationGuard;
 
     public App()
@@ -158,46 +156,23 @@ public partial class App : Application
             () => _effectiveSteamSessionSource?.State ?? SteamSessionState.FromRunningAppId(0),
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             () => addonOwnedVirtualDeviceTracker.HasUncertainOwnership);
-        var handheldRoutingComposition = new HandheldRoutingCompositionFactory().Create(
+        _routingRuntime = AddonRoutingRuntime.Create(
             handheldDeviceAdapter,
+            statusProvider,
+            addonOwnedVirtualDeviceTracker,
             _recoveryManager!,
             powerGate,
             recoverySafetyState);
-        if (handheldRoutingComposition is not null)
-        {
-            _handheldRoutingComposition = handheldRoutingComposition;
-            _routingSafetySession = handheldRoutingComposition.SafetySession;
-
-            var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
-            SteamOutputComposition.LogTargetSelected();
-            var deckStage = new CanonicalSteamDeckOutputStage(
-                () => new CanonicalSteamDeckSession(CanonicalViiperNativeApi.Load(canonicalViiperPath)),
-                new WindowsControllerDeviceEnumerator(),
-                new SteamDeckVirtualDeviceIdentityResolver(new SteamDeckVirtualDeviceIdentityPolicy()),
-                addonOwnedVirtualDeviceTracker,
-                _recoveryManager!,
-                () => _routingSafetySession?.CurrentRecoverySessionId,
-                new HidHideDriverClient(), handheldRoutingComposition.ControllerStateSource);
-            IRoutingPipelineStage steamOutputStage = deckStage;
-            Action attachOutputFaultHandler = () => deckStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator!.FailClosedAsync().ConfigureAwait(false); });
-            var pipelineExecutor = new RoutingPipelineExecutor([.. handheldRoutingComposition.Stages, steamOutputStage]);
-            var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(pipelineExecutor);
-            _routingRuntimeCoordinator = new RoutingPipelineRuntimeCoordinator(
-                statusProvider,
-                pipelineSessionCoordinator,
-                handheldRoutingComposition.SessionBoundaryParticipants);
-            attachOutputFaultHandler();
-        }
         _userTerminationGuard = new UserTerminationGuard(
-            () => _routingRuntimeCoordinator?.CaptureTerminationSnapshot() ?? default,
-            () => _routingSafetySession?.IsActive == true,
-            () => _routingSafetySession?.HasOwnedRecoveryBoundary == true,
+            () => _routingRuntime?.CaptureTerminationSnapshot() ?? default,
+            () => _routingRuntime?.IsSafetySessionActive == true,
+            () => _routingRuntime?.HasOwnedRecoveryBoundary == true,
             () => recoverySafetyState.Current == RecoverySafety.Safe && _recoveryManager?.HasIncompleteRecovery == true);
         var powerParticipants = new List<IPowerSuspendParticipant>();
-        if (_routingRuntimeCoordinator is not null) powerParticipants.Add(_routingRuntimeCoordinator);
+        if (_routingRuntime is not null) powerParticipants.Add(_routingRuntime);
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants, async token =>
         {
-            if (_routingRuntimeCoordinator is null) return true;
+            if (_routingRuntime is null) return true;
             _resumeFreshReconcileSuppression.Begin();
             _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() =>
             {
@@ -205,7 +180,7 @@ public partial class App : Application
                 _effectiveSteamSessionSource?.Refresh();
             });
             return await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
-                freshReconcile: token => _routingRuntimeCoordinator.ReconcileFreshAfterResumeAsync(token).AsTask(),
+                freshReconcile: token => _routingRuntime.ReconcileFreshAfterResumeAsync(token),
                 completeSuppression: _resumeFreshReconcileSuppression.Complete,
                 deferredReconcile: () => ReconcileRoutingAsync(),
                 requestStatusRefresh: () => _mainWindow?.RequestStatusRefresh(),
@@ -217,23 +192,17 @@ public partial class App : Application
             if (stockCenterMBaseline is null) return false;
             return (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
         },
-        hasResidualRoutingCleanup: () => _routingRuntimeCoordinator?.HasResidualSessionState == true,
+        hasResidualRoutingCleanup: () => _routingRuntime?.HasResidualSessionState == true,
         retryResidualRoutingCleanup: async token =>
         {
-            if (_routingRuntimeCoordinator is null) return true;
-            return await _routingRuntimeCoordinator.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false);
+            if (_routingRuntime is null) return true;
+            return await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false);
         });
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
-            () => _routingRuntimeCoordinator?.CancelInFlightTransition());
+            () => _routingRuntime?.CancelInFlightTransition());
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
-        RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => _routingRuntimeCoordinator is null
-            ? RoutingRuntimeStatusSnapshot.Unavailable
-            : new(
-                Available: true,
-                OperationalState: _routingRuntimeCoordinator.CurrentOperationalState,
-                SteamOutputActive: _routingRuntimeCoordinator.ActiveSessionHasSteamOutputEnabled,
-                NativeDirectInputActive: _routingSafetySession?.IsActive == true);
+        RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => _routingRuntime?.CaptureStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider,
             developerTestModeState: _developerTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
         _mainWindow.Closed += OnMainWindowClosed;
@@ -266,7 +235,7 @@ public partial class App : Application
 
     private async Task ReconcileRoutingAsync(CancellationToken cancellationToken = default)
     {
-        var runtime = _routingRuntimeCoordinator;
+        var runtime = _routingRuntime;
         if (runtime is null) return;
         await RoutingReconcileStatusRefresh.RunAsync(async () =>
         {
@@ -283,8 +252,7 @@ public partial class App : Application
                 AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation failed; routing is being failed closed.", exception);
                 try
                 {
-                    if (_routingSafetySession is not null)
-                        await _routingSafetySession.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
+                    await runtime.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
                     var rollback = await runtime.FailClosedAsync().ConfigureAwait(false);
                     if (!rollback.Succeeded)
                         AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));
@@ -327,30 +295,11 @@ public partial class App : Application
         _systemTrayIcon = null;
         _powerWatcher?.Dispose();
         _powerWatcher = null;
-        if (_routingRuntimeCoordinator is not null)
-        {
-            try
-            {
-                var shutdown = _routingRuntimeCoordinator.ShutdownAsync().AsTask().GetAwaiter().GetResult();
-                if (!shutdown.Succeeded && _routingSafetySession is not null)
-                    _routingSafetySession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).GetAwaiter().GetResult();
-            }
-            catch (Exception exception)
-            {
-                AppLog.Error("Routing.Runtime", "Routing pipeline shutdown failed; attempting NativeMode fail-close.", exception);
-                if (_routingSafetySession is not null)
-                {
-                    try { _routingSafetySession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).GetAwaiter().GetResult(); }
-                    catch (Exception failClosedException) { AppLog.Error("NativeMode", "NativeMode shutdown fail-close failed.", failClosedException); }
-                }
-            }
-            _routingRuntimeCoordinator = null;
-        }
+        if (_routingRuntime is not null) _routingRuntime.ShutdownAsync().GetAwaiter().GetResult();
         if (_powerCoordinator is not null) _powerCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _powerCoordinator = null;
-        if (_handheldRoutingComposition is not null) _handheldRoutingComposition.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _handheldRoutingComposition = null;
-        _routingSafetySession = null;
+        if (_routingRuntime is not null) _routingRuntime.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _routingRuntime = null;
         AppLog.Info("Runtime cleanup completed.");
         // Shutdown ownership lives solely in Program.Main's `finally` (runs once Application.Start
         // returns, i.e. after this method), so it drains exactly this entry plus everything queued
