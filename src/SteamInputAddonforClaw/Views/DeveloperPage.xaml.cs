@@ -15,6 +15,9 @@ public sealed partial class DeveloperPage : UserControl
     private bool _isInitializingTestMode;
     private bool _isInitializingLogLevel;
     private int _isGeneratingEnvironmentDiscoveryReport;
+    private bool _lastKnownTestMode;
+    private FrontendLogLevel _lastKnownLogLevel;
+    private string _logDirectoryPath = string.Empty;
 
     public event EventHandler? BackRequested;
     public event EventHandler? ClawSensorProbeRequested;
@@ -31,6 +34,9 @@ public sealed partial class DeveloperPage : UserControl
     {
         _frontend = frontend;
         _bootstrap = bootstrap;
+        _lastKnownTestMode = bootstrap.Developer.TestModeEnabled;
+        _lastKnownLogLevel = bootstrap.Settings.LogLevel;
+        _logDirectoryPath = bootstrap.LogDirectoryPath;
         _isPrerequisiteSetupInProgress = isPrerequisiteSetupInProgress;
 
         _isInitializingTestMode = true;
@@ -61,7 +67,7 @@ public sealed partial class DeveloperPage : UserControl
     {
         try
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_bootstrap?.LogDirectoryPath ?? AppLog.DirectoryPath}\"") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_logDirectoryPath}\"") { UseShellExecute = true });
         }
         catch (Exception exception)
         {
@@ -74,11 +80,14 @@ public sealed partial class DeveloperPage : UserControl
         if (_isInitializingTestMode || _isPrerequisiteSetupInProgress?.Invoke() == true || _frontend is null) return;
         try
         {
-            await _frontend.SetDeveloperTestModeAsync(TestModeToggleSwitch.IsOn);
+            var result = await _frontend.SetDeveloperTestModeAsync(TestModeToggleSwitch.IsOn);
+            _lastKnownTestMode = result.TestModeEnabled;
+            SetTestModeToggle(_lastKnownTestMode);
         }
         catch (Exception exception)
         {
             AppLog.Warn("DeveloperMenu", "Developer test mode update failed.", exception);
+            await RefreshAuthoritativeStateAsync(() => SetTestModeToggle(_lastKnownTestMode));
         }
     }
 
@@ -88,12 +97,48 @@ public sealed partial class DeveloperPage : UserControl
         var level = value switch { "Debug" => FrontendLogLevel.Debug, "Info" => FrontendLogLevel.Info, _ => FrontendLogLevel.Off };
         try
         {
-            await _frontend.SetLogLevelAsync(level);
+            var result = await _frontend.SetLogLevelAsync(level);
+            _lastKnownLogLevel = result.LogLevel;
+            SetLogLevel(_lastKnownLogLevel);
         }
         catch (Exception exception)
         {
             AppLog.Warn("DeveloperMenu", "Log level update failed.", exception);
+            await RefreshAuthoritativeStateAsync(() => SetLogLevel(_lastKnownLogLevel));
         }
+    }
+
+    private async Task RefreshAuthoritativeStateAsync(Action fallback)
+    {
+        try
+        {
+            var bootstrap = await _frontend!.GetBootstrapAsync();
+            _bootstrap = bootstrap;
+            _lastKnownTestMode = bootstrap.Developer.TestModeEnabled;
+            _lastKnownLogLevel = bootstrap.Settings.LogLevel;
+            _logDirectoryPath = bootstrap.LogDirectoryPath;
+            SetTestModeToggle(_lastKnownTestMode);
+            SetLogLevel(_lastKnownLogLevel);
+        }
+        catch (Exception refreshException)
+        {
+            AppLog.Warn("DeveloperMenu", "Developer settings state refresh failed.", refreshException);
+            fallback();
+        }
+    }
+
+    private void SetTestModeToggle(bool value)
+    {
+        _isInitializingTestMode = true;
+        TestModeToggleSwitch.IsOn = value;
+        _isInitializingTestMode = false;
+    }
+
+    private void SetLogLevel(FrontendLogLevel level)
+    {
+        _isInitializingLogLevel = true;
+        LogLevelComboBox.SelectedIndex = level switch { FrontendLogLevel.Info => 1, FrontendLogLevel.Debug => 2, _ => 0 };
+        _isInitializingLogLevel = false;
     }
 
     private async void GenerateEnvironmentDiscoveryReportButton_Click(object sender, RoutedEventArgs args)
