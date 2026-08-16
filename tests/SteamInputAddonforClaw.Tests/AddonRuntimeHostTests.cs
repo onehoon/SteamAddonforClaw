@@ -57,11 +57,13 @@ public sealed class AddonRuntimeHostTests
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
-        var routingRuntime = CreateRoutingRuntime(statusProvider);
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
         Assert.NotNull(routingRuntime);
 
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
-            new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
+            powerGate, recoverySafetyState, recoverySafe: true,
             hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false));
         var refreshCount = 0;
         var refreshRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -94,13 +96,14 @@ public sealed class AddonRuntimeHostTests
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
-        var routingRuntime = CreateRoutingRuntime(statusProvider);
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
         Assert.NotNull(routingRuntime);
 
         var source = new FakeSource(succeeds: true);
-        var powerGate = new PowerMutationGate(initiallyOpen: true);
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
-            powerGate, new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
+            powerGate, recoverySafetyState, recoverySafe: true,
             hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true), notificationSource: source);
         var refreshCount = 0;
         host.StatusRefreshRequested += (_, _) => Interlocked.Increment(ref refreshCount);
@@ -131,6 +134,60 @@ public sealed class AddonRuntimeHostTests
 
             Assert.Equal(2, refreshCount);
             Assert.Equal(2, statusProvider.CaptureCount);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Steam_transition_during_the_fresh_resume_reconcile_suppression_window_is_deferred_and_replayed_exactly_once()
+    {
+        // C5b2 regression, re-proven through the C5c Host-owned power boundary: a real Steam
+        // state transition that lands strictly between the fresh resume reconcile's
+        // ResumeFreshReconcileSuppression.Begin() and Complete() must be deferred (not fired
+        // immediately, not dropped), then replayed as exactly one normal reconcile once the fresh
+        // reconcile finishes -- never two independent/overlapping reconciles.
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var statusProvider = new BlockingStatusProvider(Snapshot(WaitingForSteam()));
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+
+        var source = new FakeSource(succeeds: true);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
+            powerGate, recoverySafetyState, recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true), notificationSource: source);
+        var refreshCount = 0;
+        host.StatusRefreshRequested += (_, _) => Interlocked.Increment(ref refreshCount);
+        host.StartPowerObservation();
+
+        try
+        {
+            await source.RaiseAsync(4);
+            await source.RaiseAsync(18);
+
+            // The fresh reconcile has called Begin() and is now blocked inside its own status
+            // capture -- exactly the window ResumeFreshReconcileSuppression exists to guard.
+            await statusProvider.FirstCaptureStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, statusProvider.CaptureCount);
+
+            // A real Steam transition landing in that window must be suppressed (deferred), not
+            // fire an extra, overlapping reconcile while the fresh one is still in flight.
+            steamRuntime.DeveloperTestModeState.SetEnabled(true);
+            Assert.Equal(1, statusProvider.CaptureCount);
+
+            statusProvider.ReleaseFirstCapture();
+
+            // Completion of the fresh reconcile must replay the deferred transition as exactly
+            // one normal reconcile.
+            Assert.True(SpinWait.SpinUntil(() => refreshCount >= 2, TimeSpan.FromSeconds(5)));
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+
+            Assert.Equal(2, statusProvider.CaptureCount);
+            Assert.Equal(2, refreshCount);
         }
         finally
         {
@@ -214,12 +271,14 @@ public sealed class AddonRuntimeHostTests
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
-        var routingRuntime = CreateRoutingRuntime(statusProvider);
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
         Assert.NotNull(routingRuntime);
 
         var source = new FakeSource(succeeds: true);
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
-            new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
+            powerGate, recoverySafetyState, recoverySafe: true,
             hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false), notificationSource: source);
         host.StartPowerObservation();
 
@@ -239,12 +298,14 @@ public sealed class AddonRuntimeHostTests
     {
         var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
-        var routingRuntime = CreateRoutingRuntime(statusProvider);
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
         Assert.NotNull(routingRuntime);
 
         var source = new FakeSource(succeeds: true);
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
-            new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
+            powerGate, recoverySafetyState, recoverySafe: true,
             hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true), notificationSource: source);
         host.StartPowerObservation();
 
@@ -262,13 +323,16 @@ public sealed class AddonRuntimeHostTests
         await host.DisposeAsync();
     }
 
-    private static AddonRoutingRuntime? CreateRoutingRuntime(ISystemStatusProvider statusProvider) => AddonRoutingRuntime.Create(
+    /// <summary>Accepts the same PowerMutationGate/RecoverySafetyState instances the caller passes
+    /// to AddonRuntimeHost, matching production composition where App constructs both once and
+    /// threads them into AddonRoutingRuntime.Create and AddonRuntimeHost's constructor.</summary>
+    private static AddonRoutingRuntime? CreateRoutingRuntime(ISystemStatusProvider statusProvider, PowerMutationGate powerGate, RecoverySafetyState recoverySafetyState) => AddonRoutingRuntime.Create(
         new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
         statusProvider,
         new AddonOwnedVirtualDeviceTracker(),
         new RecoveryManager(new MemoryJournalStore()),
-        new PowerMutationGate(initiallyOpen: true),
-        new RecoverySafetyState(RecoverySafety.Safe));
+        powerGate,
+        recoverySafetyState);
 
     private sealed class FakeBigPicturePreference : ISteamBigPictureRoutingPreference
     {
@@ -290,6 +354,29 @@ public sealed class AddonRuntimeHostTests
         {
             Interlocked.Increment(ref _captureCount);
             return Task.FromResult(snapshot ?? throw new InvalidOperationException("Not exercised."));
+        }
+    }
+
+    /// <summary>A status provider whose first CaptureAsync call blocks until released, so a test
+    /// can trigger work strictly inside a reconcile's in-flight window rather than approximating
+    /// it with a fixed delay.</summary>
+    private sealed class BlockingStatusProvider(SystemStatusSnapshot snapshot) : ISystemStatusProvider
+    {
+        private readonly TaskCompletionSource _firstCaptureStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseFirstCapture = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _captureCount;
+        internal int CaptureCount => Volatile.Read(ref _captureCount);
+        internal Task FirstCaptureStarted => _firstCaptureStarted.Task;
+        internal void ReleaseFirstCapture() => _releaseFirstCapture.TrySetResult();
+
+        public async Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _captureCount) == 1)
+            {
+                _firstCaptureStarted.TrySetResult();
+                await _releaseFirstCapture.Task.ConfigureAwait(false);
+            }
+            return snapshot;
         }
     }
 
