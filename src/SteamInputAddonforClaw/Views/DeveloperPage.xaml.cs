@@ -1,8 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Settings;
 using System.Diagnostics;
 
@@ -10,9 +9,8 @@ namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class DeveloperPage : UserControl
 {
-    private StartupSettingsCoordinator? _startupSettings;
-    private DeveloperTestModeState? _developerTestModeState;
-    private IEnvironmentDiscoveryReportGenerator? _environmentDiscoveryReportGenerator;
+    private IAddonFrontendControl? _frontend;
+    private FrontendBootstrapSnapshot? _bootstrap;
     private Func<bool>? _isPrerequisiteSetupInProgress;
     private bool _isInitializingTestMode;
     private bool _isInitializingLogLevel;
@@ -27,25 +25,23 @@ public sealed partial class DeveloperPage : UserControl
     }
 
     internal void Initialize(
-        StartupSettingsCoordinator startupSettings,
-        DeveloperTestModeState? developerTestModeState,
-        IEnvironmentDiscoveryReportGenerator environmentDiscoveryReportGenerator,
+        IAddonFrontendControl frontend,
+        FrontendBootstrapSnapshot bootstrap,
         Func<bool> isPrerequisiteSetupInProgress)
     {
-        _startupSettings = startupSettings;
-        _developerTestModeState = developerTestModeState;
-        _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator;
+        _frontend = frontend;
+        _bootstrap = bootstrap;
         _isPrerequisiteSetupInProgress = isPrerequisiteSetupInProgress;
 
         _isInitializingTestMode = true;
-        TestModeToggleSwitch.IsOn = developerTestModeState?.IsEnabled == true;
+        TestModeToggleSwitch.IsOn = bootstrap.Developer.TestModeEnabled;
         _isInitializingTestMode = false;
 
         _isInitializingLogLevel = true;
-        LogLevelComboBox.SelectedIndex = startupSettings.Settings.LogLevel switch
+        LogLevelComboBox.SelectedIndex = bootstrap.Settings.LogLevel switch
         {
-            AppLogPreference.Info => 1,
-            AppLogPreference.Debug => 2,
+            FrontendLogLevel.Info => 1,
+            FrontendLogLevel.Debug => 2,
             _ => 0,
         };
         _isInitializingLogLevel = false;
@@ -76,14 +72,14 @@ public sealed partial class DeveloperPage : UserControl
     private void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
         if (!_isInitializingTestMode && _isPrerequisiteSetupInProgress?.Invoke() != true)
-            _developerTestModeState?.SetEnabled(TestModeToggleSwitch.IsOn);
+            _ = _frontend?.SetDeveloperTestModeAsync(TestModeToggleSwitch.IsOn);
     }
 
     private void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
         if (_isInitializingLogLevel || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
-        var level = AppSettingsPolicy.Normalize(value);
-        _startupSettings?.ChangeLogLevel(level);
+        var level = value switch { "Debug" => FrontendLogLevel.Debug, "Info" => FrontendLogLevel.Info, _ => FrontendLogLevel.Off };
+        _ = _frontend?.SetLogLevelAsync(level);
     }
 
     private async void GenerateEnvironmentDiscoveryReportButton_Click(object sender, RoutedEventArgs args)
@@ -94,8 +90,8 @@ public sealed partial class DeveloperPage : UserControl
         SetEnvironmentDiscoveryStatus("Generating...");
         try
         {
-            await _environmentDiscoveryReportGenerator!.GenerateAsync();
-            SetEnvironmentDiscoveryStatus(string.Empty);
+            var result = await _frontend!.GenerateEnvironmentReportAsync();
+            SetEnvironmentDiscoveryStatus(result.Succeeded ? string.Empty : "Report generation failed.\r\nSee the application log for details.");
         }
         catch (Exception exception)
         {

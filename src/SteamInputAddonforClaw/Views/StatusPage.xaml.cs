@@ -2,8 +2,7 @@ using CommunityToolkit.WinUI.Controls;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using SteamInputAddonforClaw.Prerequisites;
-using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Views;
@@ -22,35 +21,32 @@ public sealed partial class StatusPage : UserControl
         RefreshStatusButton.IsEnabled = !isRefreshing;
     }
 
-    internal void Render(SystemStatusSnapshot snapshot, FirstTimeSetupAddonPresentation addonPresentation, RoutingRuntimeStatusSnapshot routingStatus)
+    internal void Render(FrontendStatusSnapshot snapshot)
     {
-        DeviceManufacturerText.Text = StatusPresentation.FormatManufacturerForDisplay(snapshot.Device.Manufacturer);
+        DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
         DeviceModelText.Text = snapshot.Device.Model;
-        DeviceSupportText.Text = StatusPresentation.FormatDeviceCompatibility(snapshot.HardwareCompatibility.Status);
-        DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoardProduct} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
+        DeviceSupportText.Text = snapshot.Hardware.Status;
+        DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoard} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
 
-        SteamGameStatusText.Text = StatusPresentation.FormatSteamGame(snapshot.Steam);
-        var stateTrusted = StatusPresentation.IsControllerStateTrusted(snapshot);
-        // No independent, non-probing signal currently confirms the native mode is XInput ahead
-        // of routing entry; fail conservative and omit the "(XInput)" qualifier rather than guess.
-        ControllerStatusText.Text = StatusPresentation.FormatControllerStatus(stateTrusted, routingStatus, nativeXInputVerified: false);
+        SteamGameStatusText.Text = snapshot.Steam.Source == "BigPicture" ? "Big Picture Mode" : snapshot.Steam.AppId != 0 ? "Running" : "Not Running";
+        ControllerStatusText.Text = snapshot.Routing.OperationalState == "OverrideActive" && snapshot.Routing.SteamOutputActive && snapshot.Routing.NativeDirectInputActive ? "Steam Controller (DInput)" : snapshot.Hardware.Status == "Supported" && snapshot.RecoverySafe ? "MSI Center M Native" : "Unavailable";
 
-        var isWarning = StatusPresentation.IsWarning(snapshot);
+        var isWarning = !snapshot.RecoverySafe || snapshot.AddonOwnedOutputIdentityUncertain || snapshot.SetupStatus != FrontendSetupStatus.Complete;
         StatusInfoBar.Severity = InfoBarSeverity.Warning;
-        StatusInfoBar.Message = addonPresentation.Reason;
+        StatusInfoBar.Message = snapshot.SetupReason;
         StatusInfoBar.IsOpen = isWarning;
 
         var software = snapshot.ControllerSoftware
-            .Select(item => new StatusCardViewModel(item.DisplayName, ControllerSoftwareStatusFormatter.Format(item), item.Reason))
+            .Select(item => new StatusCardViewModel(item.DisplayName, $"{item.Installation} / {item.Runtime}", item.Reason))
             .ToList();
         RenderGroup(ControllerSoftwareExpander, software, "installed",
             status => status is not ("Not installed" or "Indeterminate"));
 
         var routing = new List<StatusCardViewModel>
         {
-            new("HidHide", snapshot.Prerequisites.HidHide.Status.ToString(), snapshot.Prerequisites.HidHide.Reason),
-            new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
-            new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
+            new("HidHide", snapshot.Prerequisites.HidHideStatus, snapshot.Prerequisites.HidHideReason),
+            new("usbip-win2", snapshot.Prerequisites.UsbIpStatus, snapshot.Prerequisites.UsbIpReason),
+            new("VIIPER", snapshot.Prerequisites.ViiperStatus, snapshot.Prerequisites.ViiperReason)
         };
         RenderGroup(RoutingComponentsExpander, routing, "ready",
             status => string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase));

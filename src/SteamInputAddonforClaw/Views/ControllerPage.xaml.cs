@@ -1,29 +1,29 @@
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml;
-using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class ControllerPage : UserControl
 {
-    private StartupSettingsCoordinator? _startupSettings;
+    private IAddonFrontendControl? _frontend;
     private bool _isLoading;
     public ControllerPage()
     {
         InitializeComponent();
     }
 
-    internal void Initialize(StartupSettingsCoordinator startupSettings)
+    internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap)
     {
-        _startupSettings = startupSettings;
+        _frontend = frontend;
         _isLoading = true;
-        RouteInSteamBigPictureToggleSwitch.IsOn = startupSettings.RouteInSteamBigPicture;
+        RouteInSteamBigPictureToggleSwitch.IsOn = bootstrap.Settings.RouteInSteamBigPicture;
         _isLoading = false;
     }
 
     private void RouteInSteamBigPictureToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
-        if (_isLoading || _startupSettings is null) return;
-        _startupSettings.ChangeRouteInSteamBigPicture(RouteInSteamBigPictureToggleSwitch.IsOn);
+        if (_isLoading || _frontend is null) return;
+        _ = _frontend.SetRouteInSteamBigPictureAsync(RouteInSteamBigPictureToggleSwitch.IsOn);
     }
 }

@@ -1,12 +1,12 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class SettingsPage : UserControl
 {
-    private StartupSettingsCoordinator? _startupSettings;
+    private IAddonFrontendControl? _frontend;
     private bool _isLoadingStartupSettings;
 
     public event EventHandler? DeveloperMenuRequested;
@@ -16,25 +16,30 @@ public sealed partial class SettingsPage : UserControl
         InitializeComponent();
     }
 
-    internal void Initialize(StartupSettingsCoordinator startupSettings, string startupRegistrationMessage)
+    internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap)
     {
-        _startupSettings = startupSettings;
+        _frontend = frontend;
         _isLoadingStartupSettings = true;
-        LaunchAtWindowsStartupToggleSwitch.IsOn = startupSettings.Settings.LaunchAtWindowsStartup;
+        LaunchAtWindowsStartupToggleSwitch.IsOn = bootstrap.Settings.LaunchAtWindowsStartup;
         _isLoadingStartupSettings = false;
-        LaunchAtStartupCard.Description = startupRegistrationMessage;
+        LaunchAtStartupCard.Description = bootstrap.StartupRegistrationMessage;
     }
 
     private void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
-        if (_isLoadingStartupSettings || _startupSettings is null)
+        if (_isLoadingStartupSettings || _frontend is null)
         {
             return;
         }
 
         var launchAtWindowsStartup = LaunchAtWindowsStartupToggleSwitch.IsOn;
-        var result = _startupSettings.ChangeLaunchAtWindowsStartup(launchAtWindowsStartup);
-        LaunchAtStartupCard.Description = result.Message;
+        _ = UpdateLaunchAtStartupAsync(launchAtWindowsStartup);
+    }
+
+    private async Task UpdateLaunchAtStartupAsync(bool enabled)
+    {
+        var result = await _frontend!.SetLaunchAtWindowsStartupAsync(enabled);
+        LaunchAtStartupCard.Description = result.RegistrationMessage;
     }
 
     private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)

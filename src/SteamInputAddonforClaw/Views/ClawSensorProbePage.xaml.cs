@@ -3,7 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
-using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using System.Diagnostics;
 
 namespace SteamInputAddonforClaw.Views;
@@ -12,7 +12,7 @@ public sealed partial class ClawSensorProbePage : UserControl
 {
     private ClawSensorProbeCoordinator _clawSensorProbe = new();
     private DispatcherQueueTimer? _clawSensorProbeUiTimer;
-    private Func<SystemStatusSnapshot?>? _latestSystemStatusProvider;
+    private Func<FrontendStatusSnapshot?>? _latestSystemStatusProvider;
 
     public event EventHandler? ReturnToDeveloperMenuRequested;
 
@@ -21,7 +21,7 @@ public sealed partial class ClawSensorProbePage : UserControl
         InitializeComponent();
     }
 
-    internal void Initialize(Func<SystemStatusSnapshot?> latestSystemStatusProvider)
+    internal void Initialize(Func<FrontendStatusSnapshot?> latestSystemStatusProvider)
     {
         _latestSystemStatusProvider = latestSystemStatusProvider;
     }
@@ -68,14 +68,14 @@ public sealed partial class ClawSensorProbePage : UserControl
             _clawSensorProbe.Start();
             var latest = _latestSystemStatusProvider?.Invoke();
             var device = latest?.Device;
-            var hardware = latest?.HardwareCompatibility;
-            var resolvedModel = hardware?.DeviceModel?.Value ?? "Unknown / unresolved";
-            _clawSensorProbe.SetDeviceIdentity(device?.Manufacturer ?? "Unavailable", device?.Model ?? "Unavailable", device?.BaseBoardProduct ?? "Unavailable", resolvedModel);
-            _clawSensorProbe.SetHardwareCompatibility(hardware?.Status.ToString() ?? "Indeterminate", hardware?.DeviceFamily?.Value ?? "Unavailable", hardware?.DeviceModel?.Value ?? "Unavailable", hardware?.Reason ?? "Not captured");
+            var hardware = latest?.Hardware;
+            var resolvedModel = hardware?.Model ?? "Unknown / unresolved";
+            _clawSensorProbe.SetDeviceIdentity(device?.Manufacturer ?? "Unavailable", device?.Model ?? "Unavailable", device?.BaseBoard ?? "Unavailable", resolvedModel);
+            _clawSensorProbe.SetHardwareCompatibility(hardware?.Status ?? "Indeterminate", hardware?.Family ?? "Unavailable", hardware?.Model ?? "Unavailable", hardware?.Reason ?? "Not captured");
             ClawSensorProbeDeviceText.Text = $"Device: {device?.Manufacturer ?? "Unavailable"} {device?.Model ?? "Unavailable"}";
-            ClawSensorProbeModelText.Text = $"Model: {resolvedModel} | Production compatibility: {hardware?.Status.ToString() ?? "Indeterminate"}";
-            ClawSensorProbeBoardText.Text = $"Base board: {device?.BaseBoardProduct ?? "Unavailable"}";
-            if (!ClawSensorProbeCoordinator.AllowsReadOnlyDiagnostic(hardware))
+            ClawSensorProbeModelText.Text = $"Model: {resolvedModel} | Production compatibility: {hardware?.Status ?? "Indeterminate"}";
+            ClawSensorProbeBoardText.Text = $"Base board: {device?.BaseBoard ?? "Unavailable"}";
+            if (hardware is null || hardware.Status != "Supported")
                 throw new InvalidOperationException("This diagnostic is available only on an identified MSI Claw device.");
             await _clawSensorProbe.StartCaptureAsync(_clawSensorProbe.LifecycleCancellation);
             var discovery = _clawSensorProbe.Discovery;

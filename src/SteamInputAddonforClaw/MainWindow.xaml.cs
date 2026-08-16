@@ -3,42 +3,24 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Install;
-using SteamInputAddonforClaw.Settings;
-using SteamInputAddonforClaw.Steam;
-using SteamInputAddonforClaw.Devices;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
-using SteamInputAddonforClaw.Recovery;
-using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Windowing;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Windows.Foundation;
 using WinRT.Interop;
-using SteamInputAddonforClaw.Status;
-using SteamInputAddonforClaw.Prerequisites;
 using System.Diagnostics;
-using SteamInputAddonforClaw.Startup;
-using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
-using SteamInputAddonforClaw.Developer;
-using SteamInputAddonforClaw.Routing;
 using Microsoft.UI.Dispatching;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly StartupSettingsCoordinator _startupSettings;
+    private readonly IAddonFrontendControl _frontend;
+    private readonly FrontendBootstrapSnapshot _bootstrap;
     private readonly MainNavigationState _navigationState = new();
-    private readonly ISystemStatusProvider _systemStatusProvider;
-    private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
-    private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
-    private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
-    private readonly DeveloperTestModeState? _developerTestModeState;
-    private readonly Func<RoutingRuntimeStatusSnapshot> _routingRuntimeStatusProvider;
-    private SystemStatusSnapshot? _latestSystemStatus;
+    private FrontendStatusSnapshot? _latestSystemStatus;
     private int _isRefreshingStatus;
     private int _statusRefreshPending;
     private bool _setupPromptActive;
@@ -47,34 +29,12 @@ public sealed partial class MainWindow : Window
     private bool _setupPromptPendingActivation;
     private bool _prerequisiteSetupInProgress;
 
-    public MainWindow(
-        StartupSettingsCoordinator startupSettings,
-        string startupRegistrationMessage)
-        : this(startupSettings, startupRegistrationMessage, null)
-    {
-    }
-
     internal MainWindow(
-        StartupSettingsCoordinator startupSettings,
-        string startupRegistrationMessage,
-        RecoveryManager? recoveryManager,
-        ISystemStatusProvider? systemStatusProvider = null,
-        IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
-        IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
-        DeveloperTestModeState? developerTestModeState = null,
-        IElevatedProcessRunner? prerequisiteSetupRunner = null,
-        Func<RoutingRuntimeStatusSnapshot>? routingRuntimeStatusProvider = null)
+        IAddonFrontendControl frontend,
+        FrontendBootstrapSnapshot bootstrap)
     {
-        _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
-        _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
-        _hidHideReceiptStore = hidHideReceiptStore ?? new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
-        _prerequisiteSetupRunner = prerequisiteSetupRunner ?? new ElevatedProcessRunner();
-        _developerTestModeState = developerTestModeState;
-        _routingRuntimeStatusProvider = routingRuntimeStatusProvider ?? (() => RoutingRuntimeStatusSnapshot.Unavailable);
-        _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
-            new WindowsEnvironmentDiscoverySnapshotSource(),
-            new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
-            new EnvironmentDiscoveryReportWriter());
+        _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
+        _bootstrap = bootstrap ?? throw new ArgumentNullException(nameof(bootstrap));
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -82,18 +42,21 @@ public sealed partial class MainWindow : Window
         ApplyDefaultWindowSize();
         Closed += OnWindowClosed;
         Activated += OnWindowActivated;
-        SettingsContent.Initialize(_startupSettings, startupRegistrationMessage);
-        ControllerContent.Initialize(_startupSettings);
+        SettingsContent.Initialize(_frontend, _bootstrap);
+        ControllerContent.Initialize(_frontend, _bootstrap);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
-        DeveloperMenuContent.Initialize(_startupSettings, _developerTestModeState, _environmentDiscoveryReportGenerator, () => _prerequisiteSetupInProgress);
+        DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
         DeveloperMenuContent.ClawSensorProbeRequested += (_, _) => OpenClawSensorProbe();
         ClawSensorProbeContent.Initialize(() => _latestSystemStatus);
+        _frontend.StateInvalidated += OnFrontendStateInvalidated;
         ClawSensorProbeContent.ReturnToDeveloperMenuRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
         MainNavigationView.SelectedItem = StatusNavigationItem;
         _ = RefreshSystemStatusAsync();
     }
+
+    private void OnFrontendStateInvalidated(object? sender, EventArgs args) => RequestStatusRefresh();
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
@@ -105,11 +68,6 @@ public sealed partial class MainWindow : Window
         }
         _windowActivatedForUser = true;
         _ = RefreshSystemStatusAsync();
-    }
-
-    public void UpdateSteamSessionState(SteamSessionState state)
-    {
-        RequestStatusRefresh();
     }
 
     internal void RequestStatusRefresh()
@@ -131,7 +89,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnDeveloperMenuRequested(object? sender, EventArgs args)
     {
-        if (_startupSettings.SuppressDeveloperMenuWarning)
+        if (_bootstrap.Settings.SuppressDeveloperMenuWarning)
         {
             OpenDeveloperMenu();
             return;
@@ -173,7 +131,7 @@ public sealed partial class MainWindow : Window
 
         if (suppressWarningCheckBox.IsChecked == true)
         {
-            _startupSettings.SuppressDeveloperMenuWarningPermanently();
+            await _frontend.SuppressDeveloperMenuWarningAsync();
         }
 
         OpenDeveloperMenu();
@@ -216,7 +174,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         StatusContent.SetRefreshing(true);
-        try { RenderSystemStatus(await _systemStatusProvider.CaptureAsync()); }
+        try { RenderSystemStatus(await _frontend.CaptureStatusAsync()); }
         catch (Exception exception) { AppLog.Warn("Status", "System status refresh failed.", exception, ("Reason", "SnapshotCaptureFailed")); }
         finally
         {
@@ -227,13 +185,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void RenderSystemStatus(SystemStatusSnapshot snapshot)
+    private void RenderSystemStatus(FrontendStatusSnapshot snapshot)
     {
         _latestSystemStatus = snapshot;
-        var setup = EvaluateFirstTimeSetup(snapshot);
-        var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
-        StatusContent.Render(snapshot, addonPresentation, _routingRuntimeStatusProvider());
-        if (PrerequisiteSetupPromptPolicy.IsInstallable(setup))
+        StatusContent.Render(snapshot);
+        if (snapshot.CanInstallRequiredComponents)
         {
             if (_windowActivatedForUser)
                 _ = PromptForPrerequisiteSetupAsync();
@@ -288,6 +244,7 @@ public sealed partial class MainWindow : Window
         finally { _setupPromptActive = false; }
     }
 
+    #if false
     private FirstTimeSetupAssessment EvaluateFirstTimeSetup(SystemStatusSnapshot snapshot)
     {
         var receipt = _hidHideReceiptStore.Load();
@@ -416,6 +373,32 @@ public sealed partial class MainWindow : Window
         // production; the real runtime always supplies the tracker-backed provider explicitly). Fail safe
         // (uncertain = true) rather than silently fail open.
         () => SteamSessionState.FromRunningAppId(0), () => true, () => true);
+    }
+
+    #endif
+
+    private async Task RunPrerequisiteSetupAsync()
+    {
+        if (_prerequisiteSetupInProgress) return;
+        _prerequisiteSetupInProgress = true;
+        UpdatePrerequisiteSetupBusyUi();
+        try
+        {
+            await _frontend.RunPrerequisiteSetupAsync();
+            await RefreshSystemStatusAsync();
+        }
+        finally
+        {
+            _prerequisiteSetupInProgress = false;
+            UpdatePrerequisiteSetupBusyUi();
+        }
+    }
+
+    private void UpdatePrerequisiteSetupBusyUi()
+    {
+        PrerequisiteSetupBusyOverlay.Visibility = _prerequisiteSetupInProgress ? Visibility.Visible : Visibility.Collapsed;
+        MainNavigationView.IsHitTestVisible = !_prerequisiteSetupInProgress;
+        StatusContent.SetRefreshing(_prerequisiteSetupInProgress);
     }
 
     private async void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)

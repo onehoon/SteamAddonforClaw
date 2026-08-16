@@ -5,7 +5,6 @@ using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Hosting;
-using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw;
 
@@ -37,8 +36,6 @@ public partial class App : Application
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _singleInstanceGate.RegisterActivation(ShowMainWindow);
         _processHost = new AddonProcessHost(_showMainWindow ? null : ["--background"]);
-        _processHost.SteamSessionStateChanged += OnRuntimeSteamSessionStateChanged;
-        _processHost.StatusRefreshRequested += OnRuntimeStatusRefreshRequested;
         _ = StartAsync();
     }
 
@@ -61,9 +58,9 @@ public partial class App : Application
         var processHost = _processHost!;
         processHost.InitializeRuntime();
         processHost.StartPowerObservation();
-        RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => processHost.CaptureRoutingStatus();
-        _mainWindow = new MainWindow(processHost.StartupSettings, processHost.StartupRegistrationMessage, processHost.RuntimeRecoveryManager, processHost.StatusProvider,
-            developerTestModeState: processHost.DeveloperTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
+        var frontend = processHost.FrontendControl;
+        var bootstrap = frontend.GetBootstrapAsync().GetAwaiter().GetResult();
+        _mainWindow = new MainWindow(frontend, bootstrap);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
@@ -79,12 +76,6 @@ public partial class App : Application
         _ = processHost.ReconcileAsync();
 
     }
-
-    private void OnRuntimeSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args) =>
-        _mainWindow?.UpdateSteamSessionState(args.Current);
-
-    private void OnRuntimeStatusRefreshRequested(object? sender, EventArgs args) =>
-        _mainWindow?.RequestStatusRefresh();
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {

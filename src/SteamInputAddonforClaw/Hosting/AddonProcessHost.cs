@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Developer;
@@ -33,6 +34,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _runtimeInitialized;
     private int _disposed;
     private int _startupStarted;
+    private IAddonFrontendControl? _frontendControl;
 
     internal AddonProcessHost(string[]? updateRestartArguments)
     {
@@ -48,6 +50,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal ISystemStatusProvider StatusProvider { get; private set; } = null!;
     internal DeveloperTestModeState DeveloperTestModeState => _runtimeHost?.DeveloperTestModeState ?? throw new InvalidOperationException("Runtime has not been initialized.");
     internal bool IsTrayAvailable => _systemTrayIcon?.IsAvailable == true;
+    internal IAddonFrontendControl FrontendControl => _frontendControl ?? throw new InvalidOperationException("Frontend control has not been initialized.");
 
     internal async Task<AddonProcessStartupOutcome> RunStartupAsync()
     {
@@ -108,6 +111,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _runtimeHost = composition.RuntimeHost;
         _runtimeHost.SteamSessionStateChanged += OnRuntimeSteamSessionStateChanged;
         _runtimeHost.StatusRefreshRequested += OnRuntimeStatusRefreshRequested;
+        _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
+            StartupSettings, StatusProvider, GetRuntimeHost(), DeveloperTestModeState, StartupRegistrationMessage);
         _startupComposition = null;
     }
 
