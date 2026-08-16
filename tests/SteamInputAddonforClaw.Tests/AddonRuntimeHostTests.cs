@@ -146,6 +146,89 @@ public sealed class AddonRuntimeHostTests
         }
     }
 
+    [Fact]
+    public async Task ReconcileFreshAfterResumeAsync_suppresses_a_transition_during_the_window_then_runs_exactly_one_deferred_reconcile()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var statusProvider = new SlowFirstCaptureStatusProvider(Snapshot(WaitingForSteam()));
+        var routingRuntime = AddonRoutingRuntime.Create(
+            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
+            statusProvider,
+            new AddonOwnedVirtualDeviceTracker(),
+            new RecoveryManager(new MemoryJournalStore()),
+            new PowerMutationGate(initiallyOpen: true),
+            new RecoverySafetyState(RecoverySafety.Safe));
+        Assert.NotNull(routingRuntime);
+
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime);
+        var refreshCount = 0;
+        var secondRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.StatusRefreshRequested += (_, _) =>
+        {
+            if (Interlocked.Increment(ref refreshCount) == 2) secondRefresh.TrySetResult();
+        };
+
+        try
+        {
+            var resumeTask = host.ReconcileFreshAfterResumeAsync(CancellationToken.None);
+
+            // By the time the fresh reconcile's first status capture has started, Begin() and
+            // ExecuteExplicitRefresh() have already run synchronously -- suppression is owned.
+            // A Steam transition now must be suppressed as "pending", not cause an immediate
+            // extra normal reconcile.
+            await statusProvider.FirstCaptureStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            steamRuntime.DeveloperTestModeState.SetEnabled(true);
+            statusProvider.ReleaseFirstCapture();
+
+            Assert.True(await resumeTask);
+
+            // The suppressed transition must produce exactly one deferred normal reconcile once
+            // the fresh reconcile completes -- fresh (1) + deferred (1) = 2, no extra reconcile.
+            await secondRefresh.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+
+            Assert.Equal(2, refreshCount);
+            Assert.Equal(2, statusProvider.CaptureCount);
+        }
+        finally
+        {
+            await host.ShutdownRoutingAsync();
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReconcileFreshAfterResumeAsync_after_StopSteamObservation_does_not_touch_the_disposed_Steam_runtime()
+    {
+        var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var routingRuntime = AddonRoutingRuntime.Create(
+            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
+            statusProvider,
+            new AddonOwnedVirtualDeviceTracker(),
+            new RecoveryManager(new MemoryJournalStore()),
+            new PowerMutationGate(initiallyOpen: true),
+            new RecoverySafetyState(RecoverySafety.Safe));
+        Assert.NotNull(routingRuntime);
+
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime);
+
+        // Simulates a resume notification already queued in PowerTransitionCoordinator before
+        // shutdown began, running only after App has stopped Steam observation (and disposed the
+        // owned SteamSessionRuntime). ReconcileFreshAfterResumeAsync must not throw
+        // ObjectDisposedException -- it must skip the Steam refresh and still complete fresh
+        // routing reconciliation.
+        host.StopSteamObservation();
+
+        var succeeded = await host.ReconcileFreshAfterResumeAsync(CancellationToken.None);
+
+        Assert.True(succeeded);
+        Assert.Equal(1, statusProvider.CaptureCount);
+
+        await host.ShutdownRoutingAsync();
+        await host.DisposeAsync();
+    }
+
     private sealed class FakeBigPicturePreference : ISteamBigPictureRoutingPreference
     {
         public bool RouteInSteamBigPicture => false;
@@ -166,6 +249,31 @@ public sealed class AddonRuntimeHostTests
         {
             Interlocked.Increment(ref _captureCount);
             return Task.FromResult(snapshot ?? throw new InvalidOperationException("Not exercised."));
+        }
+    }
+
+    /// <summary>Blocks the first CaptureAsync call until released, so a test can deterministically
+    /// interject an action after the routing coordinator's fresh reconcile has actually started
+    /// (i.e. after AddonRuntimeHost's synchronous Begin()/ExecuteExplicitRefresh have already run)
+    /// without an arbitrary delay.</summary>
+    private sealed class SlowFirstCaptureStatusProvider(SystemStatusSnapshot snapshot) : ISystemStatusProvider
+    {
+        private int _captureCount;
+        private readonly TaskCompletionSource _firstCaptureStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseFirstCapture = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal int CaptureCount => Volatile.Read(ref _captureCount);
+        internal Task FirstCaptureStarted => _firstCaptureStarted.Task;
+        internal void ReleaseFirstCapture() => _releaseFirstCapture.TrySetResult();
+
+        public async Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _captureCount) == 1)
+            {
+                _firstCaptureStarted.TrySetResult();
+                await _releaseFirstCapture.Task.ConfigureAwait(false);
+            }
+            return snapshot;
         }
     }
 

@@ -34,6 +34,16 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable, IPowerSuspendParticip
     private readonly SteamSessionRuntime _steamRuntime;
     private readonly AddonRoutingRuntime? _routingRuntime;
     private readonly ResumeFreshReconcileSuppression _resumeFreshReconcileSuppression = new();
+
+    // Guards against a resume notification that was already queued in PowerTransitionCoordinator
+    // before shutdown began running ReconcileFreshAfterResumeAsync's Steam refresh concurrently
+    // with (or after) StopSteamObservation disposing the same SteamSessionRuntime --
+    // SteamSessionWatcher.Refresh() throws ObjectDisposedException once disposed. Both
+    // StopSteamObservation and the Steam-touching section of ReconcileFreshAfterResumeAsync take
+    // this lock, so whichever runs first either fully disposes before the other's refresh
+    // attempt is even considered, or fully refreshes (a fast, synchronous, non-reentrant
+    // registry read) before disposal can start.
+    private readonly Lock _steamLifecycleLock = new();
     private bool _steamStopped;
 
     internal AddonRuntimeHost(SteamSessionRuntime steamRuntime, AddonRoutingRuntime? routingRuntime)
@@ -68,14 +78,24 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable, IPowerSuspendParticip
     /// Resume reconciliation: explicit Steam refresh (suppressing the state-change notification
     /// it produces from also triggering a normal reconcile), then fresh routing reconciliation --
     /// exactly the flow previously inlined in App's power-resume callback. Returns
-    /// <see langword="true"/> immediately when routing is unavailable.
+    /// <see langword="true"/> immediately when routing is unavailable. Safe to call after
+    /// <see cref="StopSteamObservation"/> -- e.g. a resume notification queued in
+    /// <c>PowerTransitionCoordinator</c> before shutdown began, running afterward -- the Steam
+    /// refresh is skipped in that case rather than touching the disposed
+    /// <see cref="SteamSessionRuntime"/>; fresh routing reconciliation still proceeds.
     /// </summary>
     internal async Task<bool> ReconcileFreshAfterResumeAsync(CancellationToken cancellationToken)
     {
         if (_routingRuntime is null) return true;
         var routingRuntime = _routingRuntime;
         _resumeFreshReconcileSuppression.Begin();
-        _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() => _steamRuntime.Refresh());
+        _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() =>
+        {
+            lock (_steamLifecycleLock)
+            {
+                if (!_steamStopped) _steamRuntime.Refresh();
+            }
+        });
         return await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
             freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
             completeSuppression: _resumeFreshReconcileSuppression.Complete,
@@ -89,10 +109,13 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable, IPowerSuspendParticip
     /// <summary>Stops Steam/Big Picture session observation. Idempotent.</summary>
     internal void StopSteamObservation()
     {
-        if (_steamStopped) return;
-        _steamStopped = true;
-        _steamRuntime.StateChanged -= OnSteamSessionStateChanged;
-        _steamRuntime.Dispose();
+        lock (_steamLifecycleLock)
+        {
+            if (_steamStopped) return;
+            _steamStopped = true;
+            _steamRuntime.StateChanged -= OnSteamSessionStateChanged;
+            _steamRuntime.Dispose();
+        }
     }
 
     private void OnSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args)
