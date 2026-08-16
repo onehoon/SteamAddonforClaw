@@ -9,11 +9,9 @@ using SteamInputAddonforClaw.Routing;
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 /// <summary>
-/// Composes the MSI Claw-specific routing input stages (native-mode session, native-mode stage,
-/// physical input source/stage, physical isolation stage) that previously were constructed
-/// directly in <c>App.xaml.cs</c>. This class owns construction only -- the caller retains
-/// lifetime/cleanup ownership of the created objects exactly as before; this type does not
-/// implement <see cref="IAsyncDisposable"/> and must not be given disposal responsibility.
+/// Composes and owns the MSI Claw-specific routing input stages (native-mode session,
+/// native-mode stage, physical input source/stage, physical isolation stage) that previously
+/// were constructed directly in <c>App.xaml.cs</c>.
 /// </summary>
 /// <remarks>
 /// Also implements <see cref="IHandheldRoutingComposition"/>, the generic view the routing/output
@@ -21,6 +19,15 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 /// second composition. The concrete properties remain for App lifecycle callers that still need
 /// them directly; removing that remaining coupling is intentionally deferred to follow-up
 /// architecture work.
+///
+/// <para>
+/// This class owns <see cref="NativeModeSession"/> and <see cref="PhysicalInputSource"/> --
+/// <see cref="DisposeAsync"/> disposes them, in that order, matching the disposal order the
+/// caller previously performed itself. <see cref="NativeModeStage"/>,
+/// <see cref="PhysicalInputStage"/>, and <see cref="PhysicalIsolationStage"/> hold no resources
+/// of their own beyond references to <see cref="NativeModeSession"/>/<see cref="PhysicalInputSource"/>,
+/// so they are not separately disposed.
+/// </para>
 /// </remarks>
 internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 {
@@ -71,4 +78,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> IHandheldRoutingComposition.SessionBoundaryParticipants => _sessionBoundaryParticipants;
 
     IRoutingSafetySession? IHandheldRoutingComposition.SafetySession => NativeModeSession;
+
+    public async ValueTask DisposeAsync()
+    {
+        await NativeModeSession.DisposeAsync().ConfigureAwait(false);
+        await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
+    }
 }
