@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     cb29c1727996f50debfc7836c1febd6c70008811
+Commit:     89ce1426883ea5001b5788000df272db7532f0e1
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc
-DLL SHA-256:              baa271a8859fc1864ea03898cec2ee3f708c85ae924e27ff7edd990e1ea57d33
+DLL SHA-256:              a676f27299cf4c0f645f4fe4048ee8adafec40b18997b15c0135534995b44456
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,52 +42,12 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-The reviewed generated-header delta from VIIPER
-`a8a00efe7a5dce0c8d95de16795797a7daa7d82a` to
-`cb29c1727996f50debfc7836c1febd6c70008811` is: none. The generated
-`libVIIPER.h` is byte-identical between the two revisions (same SHA-256,
-`e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`, and
-directly diffed with zero output). The DLL SHA-256 changed
-(`baa271a8859fc1864ea03898cec2ee3f708c85ae924e27ff7edd990e1ea57d33`) because
-the change is internal instrumentation, not because any exported surface
-changed.
-
-Upstream VIIPER PR #26 ("Add USB attachment timing diagnostics") adds
-optional, internal latency measurement around the existing classified
-`attachDeviceLockedResult` / `detachDeviceLockedResult` call paths (canonical
-Go layer) and the Windows native IOCTL / command-fallback backends
-(`internal/server/api/autoattach_windows.go`,
-`internal/server/api/autoattach_contract.go`). It touches only
-`.go` sources and test files; no `.c`/`.h`/cgo export declaration changed, as
-independently confirmed by both the generated-header diff above and the
-upstream commit's own file list (`internal/server/api/autoattach_contract.go`,
-`internal/server/api/autoattach_contract_test.go`,
-`internal/server/api/autoattach_windows.go`,
-`internal/server/api/autoattach_windows_test.go`,
-`lib/viiper/attachment_timing_test.go`, `lib/viiper/viiper.go`). The upstream
-commit message itself independently states the header and DLL export list
-were confirmed byte-identical to pre-change `main`.
-
-Confirmed by this review:
-
-- no exported function signatures added, removed, or changed;
-- no `SteamDeckDeviceState`, `SteamDeckDeviceRemoveResult`, or any other
-  struct/enum layout change;
-- `SetSteamDeckOutputCallback` and the rest of the typed Steam Deck ABI
-  (`SteamDeckDeviceHandle`, `CreateSteamDeckDevice`,
-  `SetSteamDeckDeviceState`, `RemoveSteamDeckDevice`,
-  `RemoveSteamDeckDeviceEx`) are unchanged;
-- the classified `AttachUSBDeviceEx` / `DetachUSBDeviceEx` and read-only
-  `GetUSBDeviceAttachmentState` exports (and their result enums) reviewed as
-  part of the prior `a8a00ef` adoption are unchanged;
-- no managed P/Invoke adaptation is required: `CanonicalViiperNativeApi.cs`,
-  `CanonicalViiperNativeTypes.cs`, and `CanonicalViiperNativeAbiTests.cs`
-  needed no changes and were not touched by this adoption;
-- no Addon routing, session, mapper, or lifecycle behavior changes -- this is
-  a dependency identity/ABI review only;
-- no hardware-validation claim is expanded by this adoption; MSI Claw EX
-  basic non-gyro controller input remains the only established Steam Deck
-  input hardware claim, and SD3 lifecycle/recovery validation remains next.
+ABI compatibility is not inferred by the dependency automation. Review the
+generated `libVIIPER.h` diff and the managed interop
+(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
+`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
+Replace this paragraph with the reviewed ABI delta -- including any changed
+struct layout, offsets, or exports -- once confirmed.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
