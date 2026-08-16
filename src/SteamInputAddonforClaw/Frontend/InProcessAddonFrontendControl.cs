@@ -18,7 +18,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly AddonRuntimeHost? _runtime;
     private readonly Func<RoutingRuntimeStatusSnapshot> _captureRoutingStatus;
     private readonly DeveloperTestModeState _developer;
-    private readonly string _registrationMessage;
+    private string _registrationMessage;
     private readonly IFrontendPrerequisiteSetupExecutor _setupExecutor;
     private readonly Func<string?> _processPath;
 
@@ -53,8 +53,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         var result = _settings.ChangeLaunchAtWindowsStartup(enabled);
+        _registrationMessage = result.Message;
         StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return Task.FromResult(new FrontendLaunchAtStartupResult(MapSettings(), result.Message));
+        return Task.FromResult(new FrontendLaunchAtStartupResult(MapSettings(), _registrationMessage));
     }
 
     public Task<FrontendSettingsSnapshot> SetRouteInSteamBigPictureAsync(bool enabled, CancellationToken cancellationToken = default)
