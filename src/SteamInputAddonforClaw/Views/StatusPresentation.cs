@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
@@ -44,12 +45,12 @@ internal static class StatusPresentation
     /// actual controller status. RoutingEligibilityPolicy checks these same conditions first and
     /// fails routing safe on them, so Status must not guess a controller state past this point.
     /// </summary>
-    internal static bool IsControllerStateTrusted(SystemStatusSnapshot snapshot) =>
+    internal static bool IsControllerStateTrusted(FrontendStatusSnapshot snapshot) =>
         snapshot.RecoverySafe
         && !snapshot.AddonOwnedOutputIdentityUncertain
-        && snapshot.HardwareCompatibility.Status == HardwareCompatibilityStatus.Supported
-        && snapshot.Compatibility.Status == ControllerEnvironmentCompatibilityStatus.Supported
-        && snapshot.RoutingDecision.Reason is not (RoutingDecisionReason.DeviceCompatibilityIndeterminate or RoutingDecisionReason.ControllerEnvironmentIndeterminate);
+        && snapshot.Hardware.Status == nameof(HardwareCompatibilityStatus.Supported)
+        && snapshot.ControllerEnvironmentStatus == nameof(ControllerEnvironmentCompatibilityStatus.Supported)
+        && snapshot.Routing.EligibilityReason is not (nameof(RoutingDecisionReason.DeviceCompatibilityIndeterminate) or nameof(RoutingDecisionReason.ControllerEnvironmentIndeterminate));
 
     /// <summary>
     /// Reports what controller path is actually active, derived from RoutingRuntimeStatusSnapshot
@@ -81,16 +82,16 @@ internal static class StatusPresentation
     /// True when the addon's derived operational status is a safety-boundary condition that must
     /// stay visible as a warning InfoBar on supported hardware.
     /// </summary>
-    internal static bool IsWarning(SystemStatusSnapshot snapshot)
+    internal static bool IsWarning(FrontendStatusSnapshot snapshot)
     {
         if (snapshot.AddonOwnedOutputIdentityUncertain)
             return true;
 
-        if (snapshot.HardwareCompatibility.Status == HardwareCompatibilityStatus.Unsupported)
+        if (snapshot.Hardware.Status == nameof(HardwareCompatibilityStatus.Unsupported))
             return false;
 
         return !snapshot.RecoverySafe
-        || snapshot.RoutingDecision.Reason is RoutingDecisionReason.DeviceCompatibilityIndeterminate or RoutingDecisionReason.ControllerEnvironmentIndeterminate
-        || snapshot.Addon.Status is AddonOperationalStatus.SetupRequired or AddonOperationalStatus.RecoveryRequired or AddonOperationalStatus.Unsupported;
+        || snapshot.Routing.EligibilityReason is nameof(RoutingDecisionReason.DeviceCompatibilityIndeterminate) or nameof(RoutingDecisionReason.ControllerEnvironmentIndeterminate)
+        || snapshot.AddonStatus is nameof(AddonOperationalStatus.SetupRequired) or nameof(AddonOperationalStatus.RecoveryRequired) or nameof(AddonOperationalStatus.Unsupported);
     }
 }

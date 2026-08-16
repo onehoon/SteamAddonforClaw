@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Views;
@@ -195,7 +196,7 @@ public sealed class StatusPresentationTests
     public void IsWarning_NormalReadyState_IsNotWarning() =>
         Assert.False(StatusPresentation.IsWarning(Snapshot()));
 
-    private static SystemStatusSnapshot Snapshot(
+    private static FrontendStatusSnapshot Snapshot(
         bool recoverySafe = true,
         bool addonOwnedOutputIdentityUncertain = false,
         RoutingDecisionReason routingReason = RoutingDecisionReason.Eligible,
@@ -203,14 +204,13 @@ public sealed class StatusPresentationTests
         HardwareCompatibilityStatus hardwareStatus = HardwareCompatibilityStatus.Supported,
         ControllerEnvironmentCompatibilityStatus environmentStatus = ControllerEnvironmentCompatibilityStatus.Supported) =>
         new(
-            new DeviceStatusSnapshot("Test", "Test", "Test", []),
-            new HardwareCompatibilityAssessment(hardwareStatus, null, null, "Test"),
+            new("Test", "Test", "Test", []),
+            new(hardwareStatus.ToString(), "", "", "Test"),
             [],
-            new ControllerEnvironmentCompatibilityAssessment(environmentStatus, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported),
-            null!,
-            new SteamStatusSnapshot(false, 0),
-            new RoutingDecision(RoutingDecisionKind.Eligible, routingReason),
-            new AddonStatusSnapshot(addonStatus, "Test"),
-            recoverySafe,
-            addonOwnedOutputIdentityUncertain);
+            environmentStatus.ToString(), "Test",
+            new("", "", "", "", "", ""),
+            new(false, 0, SteamSessionSource.Actual.ToString()),
+            new(routingReason.ToString(), RoutingOperationalState.Passive.ToString(), false, false),
+            addonStatus.ToString(), "Test", recoverySafe, addonOwnedOutputIdentityUncertain,
+            FrontendSetupStatus.Indeterminate, "", false);
 }
