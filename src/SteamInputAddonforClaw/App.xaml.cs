@@ -41,8 +41,8 @@ public partial class App : Application
     private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
+    private IHandheldRoutingComposition? _handheldRoutingComposition;
     private IRoutingSafetySession? _routingSafetySession;
-    private MsiClawInputSource? _physicalInputSource;
     private RoutingPipelineRuntimeCoordinator? _routingRuntimeCoordinator;
     private UserTerminationGuard? _userTerminationGuard;
 
@@ -168,8 +168,8 @@ public partial class App : Application
                 recoverySafetyState);
 
             IHandheldRoutingComposition handheldRoutingComposition = msiRoutingComposition;
+            _handheldRoutingComposition = handheldRoutingComposition;
             _routingSafetySession = handheldRoutingComposition.SafetySession;
-            _physicalInputSource = msiRoutingComposition.PhysicalInputSource;
 
             var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
             SteamOutputComposition.LogTargetSelected();
@@ -351,10 +351,9 @@ public partial class App : Application
         }
         if (_powerCoordinator is not null) _powerCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _powerCoordinator = null;
-        if (_routingSafetySession is not null) _routingSafetySession.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        if (_handheldRoutingComposition is not null) _handheldRoutingComposition.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _handheldRoutingComposition = null;
         _routingSafetySession = null;
-        if (_physicalInputSource is not null) _physicalInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _physicalInputSource = null;
         AppLog.Info("Runtime cleanup completed.");
         // Shutdown ownership lives solely in Program.Main's `finally` (runs once Application.Start
         // returns, i.e. after this method), so it drains exactly this entry plus everything queued

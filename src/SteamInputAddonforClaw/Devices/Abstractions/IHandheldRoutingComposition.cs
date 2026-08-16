@@ -16,10 +16,18 @@ namespace SteamInputAddonforClaw.Devices.Abstractions;
 /// isolation is not required to fake those concepts; it can return however many stages it
 /// actually needs. <see cref="SafetySession"/> exposes an optional routing-safety capability
 /// (recovery session id, activity/recovery-boundary state, fail-closed) for backends that have
-/// one, but this composition does not own or aggregate backend disposal in this phase -- a
-/// backend without a meaningful safety session may return null.
+/// one -- a backend without a meaningful safety session may return null.
+///
+/// <para>
+/// The composition owns the backend resources represented by these views. <see cref="Stages"/>,
+/// <see cref="ControllerStateSource"/>, <see cref="SessionBoundaryParticipants"/>, and
+/// <see cref="SafetySession"/> are borrowed references into resources the composition created and
+/// must not be disposed independently by consumers. <see cref="IAsyncDisposable.DisposeAsync"/>
+/// releases those backend-owned resources; callers must dispose the composition only after
+/// routing and power orchestration built on top of it have already been stopped.
+/// </para>
 /// </remarks>
-internal interface IHandheldRoutingComposition
+internal interface IHandheldRoutingComposition : IAsyncDisposable
 {
     IReadOnlyList<IRoutingPipelineStage> Stages { get; }
 
