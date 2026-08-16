@@ -7,8 +7,9 @@ namespace SteamInputAddonforClaw.Devices;
 
 /// <summary>
 /// Composition root that selects and constructs the device-specific
-/// <see cref="IHandheldRoutingComposition"/> for a resolved <see cref="IHandheldDeviceAdapter"/>.
-/// This is the one place allowed to know which concrete routing composition (currently only
+/// <see cref="IHandheldRoutingComposition"/> for the <see cref="IHandheldDeviceAdapter"/> supplied
+/// by the application composition root. This is the one place allowed to know which concrete
+/// routing composition (currently only
 /// <see cref="MsiClawRoutingComposition"/>) an adapter needs; that vendor awareness must not leak
 /// into <c>RoutingPipelineRuntimeCoordinator</c>, <c>RoutingPipelineExecutor</c>, the Steam Deck
 /// output stage, or <see cref="IHandheldRoutingComposition"/> itself.
