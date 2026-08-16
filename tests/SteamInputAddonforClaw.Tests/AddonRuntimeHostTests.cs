@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
@@ -20,19 +21,16 @@ public sealed class AddonRuntimeHostTests
     public async Task Host_with_unavailable_routing_remains_valid_and_passive()
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
-        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
+            new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false));
 
-        Assert.False(host.IsRoutingAvailable);
         Assert.Equal(RoutingRuntimeStatusSnapshot.Unavailable, host.CaptureRoutingStatus());
-        Assert.False(host.IsSafetySessionActive);
-        Assert.False(host.HasOwnedRecoveryBoundary);
-        Assert.False(host.HasResidualSessionState);
+        Assert.True(host.EvaluateUserTermination().CanTerminate);
 
-        // No fallback routing backend must appear, and neither operation must throw.
+        // No fallback routing backend must appear, and normal reconcile must not throw.
         await host.ReconcileAsync();
-        Assert.True(await host.ReconcileFreshAfterResumeAsync(CancellationToken.None));
 
-        await host.ShutdownRoutingAsync();
         await host.DisposeAsync();
     }
 
@@ -40,7 +38,9 @@ public sealed class AddonRuntimeHostTests
     public async Task Host_republishes_Steam_state_transitions_to_subscribers()
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
-        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
+            new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false));
         SteamSessionStateChangedEventArgs? observed = null;
         host.SteamSessionStateChanged += (_, args) => observed = args;
 
@@ -49,7 +49,6 @@ public sealed class AddonRuntimeHostTests
         Assert.NotNull(observed);
         Assert.Equal(SteamSessionSource.DeveloperTest, observed.Current.Source);
 
-        await host.ShutdownRoutingAsync();
         await host.DisposeAsync();
     }
 
@@ -58,16 +57,14 @@ public sealed class AddonRuntimeHostTests
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
-        var routingRuntime = AddonRoutingRuntime.Create(
-            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
-            statusProvider,
-            new AddonOwnedVirtualDeviceTracker(),
-            new RecoveryManager(new MemoryJournalStore()),
-            new PowerMutationGate(initiallyOpen: true),
-            new RecoverySafetyState(RecoverySafety.Safe));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
         Assert.NotNull(routingRuntime);
 
-        var host = new AddonRuntimeHost(steamRuntime, routingRuntime);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
+            powerGate, recoverySafetyState, recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false));
         var refreshCount = 0;
         var refreshRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.StatusRefreshRequested += (_, _) =>
@@ -90,7 +87,6 @@ public sealed class AddonRuntimeHostTests
         }
         finally
         {
-            await host.ShutdownRoutingAsync();
             await host.DisposeAsync();
         }
     }
@@ -100,37 +96,37 @@ public sealed class AddonRuntimeHostTests
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
-        var routingRuntime = AddonRoutingRuntime.Create(
-            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
-            statusProvider,
-            new AddonOwnedVirtualDeviceTracker(),
-            new RecoveryManager(new MemoryJournalStore()),
-            new PowerMutationGate(initiallyOpen: true),
-            new RecoverySafetyState(RecoverySafety.Safe));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
         Assert.NotNull(routingRuntime);
 
-        var host = new AddonRuntimeHost(steamRuntime, routingRuntime);
+        var source = new FakeSource(succeeds: true);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
+            powerGate, recoverySafetyState, recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true), notificationSource: source);
         var refreshCount = 0;
         host.StatusRefreshRequested += (_, _) => Interlocked.Increment(ref refreshCount);
+        host.StartPowerObservation();
 
         try
         {
-            // No Steam transition occurs during this window (nothing toggles state), so the
-            // resume path itself must not fabricate an extra reconcile or refresh: exactly the
-            // fresh reconcile (Begin -> ExecuteExplicitRefresh -> RunResumeFreshAsync -> Complete)
-            // and its own single finally-guaranteed status refresh, nothing more -- proving
-            // Begin/ExecuteExplicitRefresh/Complete/deferredReconcile are wired without an extra
-            // hop and without double-refreshing.
-            var succeeded = await host.ReconcileFreshAfterResumeAsync(CancellationToken.None);
+            // Drive a real suspend/resume pair through the notification source -- the same
+            // production path App used to wire up manually -- and confirm the resume fresh
+            // reconcile (Begin -> ExecuteExplicitRefresh -> RunResumeFreshAsync -> Complete)
+            // reaches Host's routing runtime exactly once, with exactly one status refresh.
+            await source.RaiseAsync(4);
+            await source.RaiseAsync(18);
 
-            Assert.True(succeeded);
+            Assert.True(SpinWait.SpinUntil(() => statusProvider.CaptureCount >= 1, TimeSpan.FromSeconds(5)));
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+
             Assert.Equal(1, refreshCount);
             Assert.Equal(1, statusProvider.CaptureCount);
 
-            // Prove suppression was actually released (Complete() correctly wired to the real
-            // ResumeFreshReconcileSuppression instance) rather than left permanently "owned": a
-            // real Steam transition occurring strictly after resume completes must still reach a
-            // normal reconcile, not be silently suppressed forever.
+            // Prove suppression was actually released (Complete() correctly wired) rather than
+            // left permanently "owned": a real Steam transition occurring strictly after resume
+            // completes must still reach a normal reconcile, not be silently suppressed forever.
             var postResumeRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             host.StatusRefreshRequested += (_, _) => postResumeRefresh.TrySetResult();
             steamRuntime.DeveloperTestModeState.SetEnabled(true);
@@ -141,93 +137,202 @@ public sealed class AddonRuntimeHostTests
         }
         finally
         {
-            await host.ShutdownRoutingAsync();
             await host.DisposeAsync();
         }
     }
 
     [Fact]
-    public async Task ReconcileFreshAfterResumeAsync_suppresses_a_transition_during_the_window_then_runs_exactly_one_deferred_reconcile()
+    public async Task Steam_transition_during_the_fresh_resume_reconcile_suppression_window_is_deferred_and_replayed_exactly_once()
     {
+        // C5b2 regression, re-proven through the C5c Host-owned power boundary: a real Steam
+        // state transition that lands strictly between the fresh resume reconcile's
+        // ResumeFreshReconcileSuppression.Begin() and Complete() must be deferred (not fired
+        // immediately, not dropped), then replayed as exactly one normal reconcile once the fresh
+        // reconcile finishes -- never two independent/overlapping reconciles.
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
-        var statusProvider = new SlowFirstCaptureStatusProvider(Snapshot(WaitingForSteam()));
-        var routingRuntime = AddonRoutingRuntime.Create(
-            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
-            statusProvider,
-            new AddonOwnedVirtualDeviceTracker(),
-            new RecoveryManager(new MemoryJournalStore()),
-            new PowerMutationGate(initiallyOpen: true),
-            new RecoverySafetyState(RecoverySafety.Safe));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var statusProvider = new BlockingStatusProvider(Snapshot(WaitingForSteam()));
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
         Assert.NotNull(routingRuntime);
 
-        var host = new AddonRuntimeHost(steamRuntime, routingRuntime);
+        var source = new FakeSource(succeeds: true);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
+            powerGate, recoverySafetyState, recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true), notificationSource: source);
         var refreshCount = 0;
-        var secondRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        host.StatusRefreshRequested += (_, _) =>
-        {
-            if (Interlocked.Increment(ref refreshCount) == 2) secondRefresh.TrySetResult();
-        };
+        host.StatusRefreshRequested += (_, _) => Interlocked.Increment(ref refreshCount);
+        host.StartPowerObservation();
 
         try
         {
-            var resumeTask = host.ReconcileFreshAfterResumeAsync(CancellationToken.None);
+            await source.RaiseAsync(4);
+            await source.RaiseAsync(18);
 
-            // By the time the fresh reconcile's first status capture has started, Begin() and
-            // ExecuteExplicitRefresh() have already run synchronously -- suppression is owned.
-            // A Steam transition now must be suppressed as "pending", not cause an immediate
-            // extra normal reconcile.
+            // The fresh reconcile has called Begin() and is now blocked inside its own status
+            // capture -- exactly the window ResumeFreshReconcileSuppression exists to guard.
             await statusProvider.FirstCaptureStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, statusProvider.CaptureCount);
+
+            // A real Steam transition landing in that window must be suppressed (deferred), not
+            // fire an extra, overlapping reconcile while the fresh one is still in flight.
             steamRuntime.DeveloperTestModeState.SetEnabled(true);
+            Assert.Equal(1, statusProvider.CaptureCount);
+
             statusProvider.ReleaseFirstCapture();
 
-            Assert.True(await resumeTask);
-
-            // The suppressed transition must produce exactly one deferred normal reconcile once
-            // the fresh reconcile completes -- fresh (1) + deferred (1) = 2, no extra reconcile.
-            await secondRefresh.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            // Completion of the fresh reconcile must replay the deferred transition as exactly
+            // one normal reconcile.
+            Assert.True(SpinWait.SpinUntil(() => refreshCount >= 2, TimeSpan.FromSeconds(5)));
             await Task.Delay(TimeSpan.FromMilliseconds(50));
 
-            Assert.Equal(2, refreshCount);
             Assert.Equal(2, statusProvider.CaptureCount);
+            Assert.Equal(2, refreshCount);
         }
         finally
         {
-            await host.ShutdownRoutingAsync();
             await host.DisposeAsync();
         }
     }
 
     [Fact]
-    public async Task ReconcileFreshAfterResumeAsync_after_StopSteamObservation_does_not_touch_the_disposed_Steam_runtime()
+    public async Task StartPowerObservation_opens_the_gate_when_registration_succeeds_and_recovery_is_safe()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var source = new FakeSource(succeeds: true);
+        var powerGate = new PowerMutationGate();
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
+            powerGate, new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false), notificationSource: source);
+
+        host.StartPowerObservation();
+
+        Assert.Equal(1, source.RegisterCallCount);
+        Assert.True(powerGate.IsOpen);
+
+        await host.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task StartPowerObservation_leaves_the_gate_closed_when_registration_fails()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var source = new FakeSource(succeeds: false);
+        var powerGate = new PowerMutationGate();
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
+            powerGate, new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false), notificationSource: source);
+
+        host.StartPowerObservation();
+
+        Assert.False(powerGate.IsOpen);
+
+        await host.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task StartPowerObservation_leaves_the_gate_closed_when_recovery_is_unsafe_even_if_registration_succeeds()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var source = new FakeSource(succeeds: true);
+        var powerGate = new PowerMutationGate();
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
+            powerGate, new RecoverySafetyState(RecoverySafety.Unsafe), recoverySafe: false,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false), notificationSource: source);
+
+        host.StartPowerObservation();
+
+        Assert.False(powerGate.IsOpen);
+
+        await host.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task EvaluateUserTermination_blocks_on_owned_live_recovery_mutation()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
+            new PowerMutationGate(initiallyOpen: true), recoverySafetyState, recoverySafe: true,
+            hasIncompleteRecovery: () => true, establishBaseline: _ => Task.FromResult(false));
+
+        // recoverySafetyState.Current == Safe && hasIncompleteRecovery() == true -- the exact
+        // existing conjunction UserTerminationGuard uses for RecoveryMutationOwned.
+        var decision = host.EvaluateUserTermination();
+
+        Assert.False(decision.CanTerminate);
+        Assert.Equal(UserTerminationBlockReason.RecoveryMutationOwned, decision.Reason);
+
+        await host.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DisposeAsync_is_idempotent_and_a_post_disposal_notification_does_not_reenter_runtime_work()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+
+        var source = new FakeSource(succeeds: true);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
+            powerGate, recoverySafetyState, recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false), notificationSource: source);
+        host.StartPowerObservation();
+
+        await host.DisposeAsync();
+        await host.DisposeAsync(); // must not throw
+
+        // A notification arriving after full disposal (PowerTransitionWatcher itself disposed)
+        // must not re-enter routing/Steam work.
+        await source.RaiseAsync(4);
+        await Task.Delay(TimeSpan.FromMilliseconds(50));
+
+        Assert.Equal(0, statusProvider.CaptureCount);
+    }
+
+    [Fact]
+    public async Task Resume_notification_processed_after_PrepareForShutdown_does_not_touch_the_disposed_Steam_runtime()
     {
         var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
-        var routingRuntime = AddonRoutingRuntime.Create(
-            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
-            statusProvider,
-            new AddonOwnedVirtualDeviceTracker(),
-            new RecoveryManager(new MemoryJournalStore()),
-            new PowerMutationGate(initiallyOpen: true),
-            new RecoverySafetyState(RecoverySafety.Safe));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
         Assert.NotNull(routingRuntime);
 
-        var host = new AddonRuntimeHost(steamRuntime, routingRuntime);
+        var source = new FakeSource(succeeds: true);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
+            powerGate, recoverySafetyState, recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true), notificationSource: source);
+        host.StartPowerObservation();
 
         // Simulates a resume notification already queued in PowerTransitionCoordinator before
-        // shutdown began, running only after App has stopped Steam observation (and disposed the
-        // owned SteamSessionRuntime). ReconcileFreshAfterResumeAsync must not throw
-        // ObjectDisposedException -- it must skip the Steam refresh and still complete fresh
-        // routing reconciliation.
-        host.StopSteamObservation();
+        // App-level shutdown began, running only after Steam observation has been stopped (and
+        // the owned SteamSessionRuntime disposed). This must not throw ObjectDisposedException --
+        // the Steam refresh is skipped, and fresh routing reconciliation still completes.
+        host.PrepareForShutdown();
 
-        var succeeded = await host.ReconcileFreshAfterResumeAsync(CancellationToken.None);
+        await source.RaiseAsync(4);
+        await source.RaiseAsync(18);
 
-        Assert.True(succeeded);
-        Assert.Equal(1, statusProvider.CaptureCount);
+        Assert.True(SpinWait.SpinUntil(() => statusProvider.CaptureCount >= 1, TimeSpan.FromSeconds(5)));
 
-        await host.ShutdownRoutingAsync();
         await host.DisposeAsync();
     }
+
+    /// <summary>Accepts the same PowerMutationGate/RecoverySafetyState instances the caller passes
+    /// to AddonRuntimeHost, matching production composition where App constructs both once and
+    /// threads them into AddonRoutingRuntime.Create and AddonRuntimeHost's constructor.</summary>
+    private static AddonRoutingRuntime? CreateRoutingRuntime(ISystemStatusProvider statusProvider, PowerMutationGate powerGate, RecoverySafetyState recoverySafetyState) => AddonRoutingRuntime.Create(
+        new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
+        statusProvider,
+        new AddonOwnedVirtualDeviceTracker(),
+        new RecoveryManager(new MemoryJournalStore()),
+        powerGate,
+        recoverySafetyState);
 
     private sealed class FakeBigPicturePreference : ISteamBigPictureRoutingPreference
     {
@@ -252,16 +357,14 @@ public sealed class AddonRuntimeHostTests
         }
     }
 
-    /// <summary>Blocks the first CaptureAsync call until released, so a test can deterministically
-    /// interject an action after the routing coordinator's fresh reconcile has actually started
-    /// (i.e. after AddonRuntimeHost's synchronous Begin()/ExecuteExplicitRefresh have already run)
-    /// without an arbitrary delay.</summary>
-    private sealed class SlowFirstCaptureStatusProvider(SystemStatusSnapshot snapshot) : ISystemStatusProvider
+    /// <summary>A status provider whose first CaptureAsync call blocks until released, so a test
+    /// can trigger work strictly inside a reconcile's in-flight window rather than approximating
+    /// it with a fixed delay.</summary>
+    private sealed class BlockingStatusProvider(SystemStatusSnapshot snapshot) : ISystemStatusProvider
     {
-        private int _captureCount;
         private readonly TaskCompletionSource _firstCaptureStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _releaseFirstCapture = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
+        private int _captureCount;
         internal int CaptureCount => Volatile.Read(ref _captureCount);
         internal Task FirstCaptureStarted => _firstCaptureStarted.Task;
         internal void ReleaseFirstCapture() => _releaseFirstCapture.TrySetResult();
@@ -275,6 +378,21 @@ public sealed class AddonRuntimeHostTests
             }
             return snapshot;
         }
+    }
+
+    /// <summary>Mirrors PowerTransitionTests.cs's FakeSource: a real IPowerSuspendResumeNotificationSource
+    /// so resume/suspend wiring is exercised through the same production path App used to wire up
+    /// manually, not a bespoke Host-only shortcut.</summary>
+    private sealed class FakeSource(bool succeeds) : IPowerSuspendResumeNotificationSource
+    {
+        private int _registerCallCount;
+        internal int RegisterCallCount => Volatile.Read(ref _registerCallCount);
+
+        public event Action<uint>? Notification;
+        public bool TryRegister(out int nativeError) { Interlocked.Increment(ref _registerCallCount); nativeError = succeeds ? 0 : 5; return succeeds; }
+        public void Raise(uint code) => Notification?.Invoke(code);
+        public Task RaiseAsync(uint code) { Raise(code); return Task.CompletedTask; }
+        public void Dispose() { }
     }
 
     private static SystemStatusSnapshot Snapshot(RoutingDecision decision) =>
