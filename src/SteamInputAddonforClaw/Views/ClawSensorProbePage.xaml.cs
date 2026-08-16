@@ -70,12 +70,17 @@ public sealed partial class ClawSensorProbePage : UserControl
             var device = latest?.Device;
             var hardware = latest?.Hardware;
             var resolvedModel = hardware?.Model ?? "Unknown / unresolved";
+            var hardwareStatusText = hardware?.Status.ToString() ?? "Indeterminate";
             _clawSensorProbe.SetDeviceIdentity(device?.Manufacturer ?? "Unavailable", device?.Model ?? "Unavailable", device?.BaseBoard ?? "Unavailable", resolvedModel);
-            _clawSensorProbe.SetHardwareCompatibility(hardware?.Status ?? "Indeterminate", hardware?.Family ?? "Unavailable", hardware?.Model ?? "Unavailable", hardware?.Reason ?? "Not captured");
+            _clawSensorProbe.SetHardwareCompatibility(hardwareStatusText, hardware?.Family ?? "Unavailable", hardware?.Model ?? "Unavailable", hardware?.Reason ?? "Not captured");
             ClawSensorProbeDeviceText.Text = $"Device: {device?.Manufacturer ?? "Unavailable"} {device?.Model ?? "Unavailable"}";
-            ClawSensorProbeModelText.Text = $"Model: {resolvedModel} | Production compatibility: {hardware?.Status ?? "Indeterminate"}";
+            ClawSensorProbeModelText.Text = $"Model: {resolvedModel} | Production compatibility: {hardwareStatusText}";
             ClawSensorProbeBoardText.Text = $"Base board: {device?.BaseBoard ?? "Unavailable"}";
-            if (hardware is null || hardware.Status != "Supported")
+            // Read-only diagnostic eligibility is gated on identified MSI Claw *family*, not on
+            // production hardware-model compatibility -- mirrors
+            // ClawSensorProbeCoordinator.AllowsReadOnlyDiagnostic so an MSI Claw device with
+            // Indeterminate/Unsupported model compatibility can still run this diagnostic.
+            if (!string.Equals(hardware?.Family, "msi.claw", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("This diagnostic is available only on an identified MSI Claw device.");
             await _clawSensorProbe.StartCaptureAsync(_clawSensorProbe.LifecycleCancellation);
             var discovery = _clawSensorProbe.Discovery;

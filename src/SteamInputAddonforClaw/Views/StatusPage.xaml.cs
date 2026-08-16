@@ -23,30 +23,34 @@ public sealed partial class StatusPage : UserControl
 
     internal void Render(FrontendStatusSnapshot snapshot)
     {
-        DeviceManufacturerText.Text = snapshot.Device.Manufacturer;
+        DeviceManufacturerText.Text = StatusPresentation.FormatManufacturerForDisplay(snapshot.Device.Manufacturer);
         DeviceModelText.Text = snapshot.Device.Model;
-        DeviceSupportText.Text = snapshot.Hardware.Status;
+        DeviceSupportText.Text = StatusPresentation.FormatDeviceCompatibility(snapshot.Hardware.Status);
         DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoard} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
 
-        SteamGameStatusText.Text = snapshot.Steam.Source == "BigPicture" ? "Big Picture Mode" : snapshot.Steam.AppId != 0 ? "Running" : "Not Running";
-        ControllerStatusText.Text = snapshot.Routing.OperationalState == "OverrideActive" && snapshot.Routing.SteamOutputActive && snapshot.Routing.NativeDirectInputActive ? "Steam Controller (DInput)" : snapshot.Hardware.Status == "Supported" && snapshot.RecoverySafe ? "MSI Center M Native" : "Unavailable";
+        SteamGameStatusText.Text = StatusPresentation.FormatSteamGame(snapshot.Steam);
 
-        var isWarning = !snapshot.RecoverySafe || snapshot.AddonOwnedOutputIdentityUncertain || snapshot.SetupStatus != FrontendSetupStatus.Complete;
+        var stateTrusted = StatusPresentation.IsControllerStateTrusted(snapshot);
+        // No independent, non-probing signal currently confirms the native mode is XInput ahead
+        // of routing entry; fail conservative and omit the "(XInput)" qualifier rather than guess.
+        ControllerStatusText.Text = StatusPresentation.FormatControllerStatus(stateTrusted, snapshot.Routing, nativeXInputVerified: false);
+
+        var isWarning = StatusPresentation.IsWarning(snapshot);
         StatusInfoBar.Severity = InfoBarSeverity.Warning;
-        StatusInfoBar.Message = snapshot.SetupReason;
+        StatusInfoBar.Message = snapshot.AddonReason;
         StatusInfoBar.IsOpen = isWarning;
 
         var software = snapshot.ControllerSoftware
-            .Select(item => new StatusCardViewModel(item.DisplayName, $"{item.Installation} / {item.Runtime}", item.Reason))
+            .Select(item => new StatusCardViewModel(item.DisplayName, StatusPresentation.FormatControllerSoftwareStatus(item), item.Reason))
             .ToList();
         RenderGroup(ControllerSoftwareExpander, software, "installed",
             status => status is not ("Not installed" or "Indeterminate"));
 
         var routing = new List<StatusCardViewModel>
         {
-            new("HidHide", snapshot.Prerequisites.HidHideStatus, snapshot.Prerequisites.HidHideReason),
-            new("usbip-win2", snapshot.Prerequisites.UsbIpStatus, snapshot.Prerequisites.UsbIpReason),
-            new("VIIPER", snapshot.Prerequisites.ViiperStatus, snapshot.Prerequisites.ViiperReason)
+            new("HidHide", snapshot.Prerequisites.HidHideStatus.ToString(), snapshot.Prerequisites.HidHideReason),
+            new("usbip-win2", snapshot.Prerequisites.UsbIpStatus.ToString(), snapshot.Prerequisites.UsbIpReason),
+            new("VIIPER", snapshot.Prerequisites.ViiperStatus.ToString(), snapshot.Prerequisites.ViiperReason)
         };
         RenderGroup(RoutingComponentsExpander, routing, "ready",
             status => string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase));

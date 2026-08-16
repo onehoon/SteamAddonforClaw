@@ -41,7 +41,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         var snapshot = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
         var setup = EvaluateFirstTimeSetup(snapshot);
-        return ApplySetup(FrontendSnapshotMapper.Map(snapshot, _runtime.CaptureRoutingStatus()), setup);
+        return FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(snapshot, _runtime.CaptureRoutingStatus()), setup);
     }
 
     public Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken cancellationToken = default)
@@ -83,16 +83,27 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         var current = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
         var setup = EvaluateFirstTimeSetup(current);
-        var mapped = ApplySetup(FrontendSnapshotMapper.Map(current, _runtime.CaptureRoutingStatus()), setup);
-        if (!setup.CanInstallRequiredComponents)
-            return new("Blocked", mapped);
+        var mapped = FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(current, _runtime.CaptureRoutingStatus()), setup);
+        if (!PrerequisiteSetupPromptPolicy.IsInstallable(setup))
+            return new(FrontendPrerequisiteSetupResultKind.Blocked, mapped);
         var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
         var result = await PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(setup, _setupRunner, executable, ElevatedPrerequisiteSetup.Argument, cancellationToken).ConfigureAwait(false);
-        if (result is null) return new("Blocked", mapped);
-        var resultKind = ElevatedPrerequisiteSetup.TranslateExitCode(result).ToString();
+        if (result is null) return new(FrontendPrerequisiteSetupResultKind.Blocked, mapped);
+        var resultKind = MapResultKind(ElevatedPrerequisiteSetup.TranslateExitCode(result));
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return new(resultKind, await CaptureStatusAsync(cancellationToken).ConfigureAwait(false));
     }
+
+    private static FrontendPrerequisiteSetupResultKind MapResultKind(ElevatedPrerequisiteSetup.ResultKind kind) => kind switch
+    {
+        ElevatedPrerequisiteSetup.ResultKind.Ready => FrontendPrerequisiteSetupResultKind.Ready,
+        ElevatedPrerequisiteSetup.ResultKind.Installed => FrontendPrerequisiteSetupResultKind.Installed,
+        ElevatedPrerequisiteSetup.ResultKind.RebootRequired => FrontendPrerequisiteSetupResultKind.RebootRequired,
+        ElevatedPrerequisiteSetup.ResultKind.Cancelled => FrontendPrerequisiteSetupResultKind.Cancelled,
+        ElevatedPrerequisiteSetup.ResultKind.Blocked => FrontendPrerequisiteSetupResultKind.Blocked,
+        ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress => FrontendPrerequisiteSetupResultKind.AlreadyInProgress,
+        _ => FrontendPrerequisiteSetupResultKind.Failed
+    };
 
     public async Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default)
     {
@@ -109,13 +120,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     private FrontendSettingsSnapshot MapSettings() => new(_settings.Settings.LaunchAtWindowsStartup, _settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.RouteInSteamBigPicture, _settings.SuppressDeveloperMenuWarning);
-
-    private static FrontendStatusSnapshot ApplySetup(FrontendStatusSnapshot snapshot, FirstTimeSetupAssessment setup) => snapshot with
-    {
-        SetupStatus = setup.Status switch { FirstTimeSetupStatus.Complete => FrontendSetupStatus.Complete, FirstTimeSetupStatus.Required => FrontendSetupStatus.Required, FirstTimeSetupStatus.RestartRequired => FrontendSetupStatus.RestartRequired, FirstTimeSetupStatus.Blocked => FrontendSetupStatus.Blocked, _ => FrontendSetupStatus.Indeterminate },
-        SetupReason = setup.Reason.ToString(),
-        CanInstallRequiredComponents = setup.CanInstallRequiredComponents
-    };
 
     private FirstTimeSetupAssessment EvaluateFirstTimeSetup(SystemStatusSnapshot snapshot)
     {

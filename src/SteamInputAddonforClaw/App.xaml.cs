@@ -50,16 +50,19 @@ public partial class App : Application
         }
 
         if (outcome == AddonProcessStartupOutcome.RuntimeReady)
-            _dispatcherQueue?.TryEnqueue(StartNormalRuntime);
+            _dispatcherQueue?.TryEnqueue(() => _ = StartNormalRuntimeAsync());
     }
 
-    private void StartNormalRuntime()
+    private async Task StartNormalRuntimeAsync()
     {
         var processHost = _processHost!;
         processHost.InitializeRuntime();
         processHost.StartPowerObservation();
         var frontend = processHost.FrontendControl;
-        var bootstrap = frontend.GetBootstrapAsync().GetAwaiter().GetResult();
+        // Awaited rather than blocked on: this call is in-process today, but the same contract
+        // will be served by a named-pipe client in a later revision, where a blocking
+        // .GetAwaiter().GetResult() here would stall the UI thread on real IPC I/O.
+        var bootstrap = await frontend.GetBootstrapAsync().ConfigureAwait(true);
         _mainWindow = new MainWindow(frontend, bootstrap);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;

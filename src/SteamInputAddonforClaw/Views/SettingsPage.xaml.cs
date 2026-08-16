@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -25,21 +26,22 @@ public sealed partial class SettingsPage : UserControl
         LaunchAtStartupCard.Description = bootstrap.StartupRegistrationMessage;
     }
 
-    private void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    private async void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
         if (_isLoadingStartupSettings || _frontend is null)
         {
             return;
         }
 
-        var launchAtWindowsStartup = LaunchAtWindowsStartupToggleSwitch.IsOn;
-        _ = UpdateLaunchAtStartupAsync(launchAtWindowsStartup);
-    }
-
-    private async Task UpdateLaunchAtStartupAsync(bool enabled)
-    {
-        var result = await _frontend!.SetLaunchAtWindowsStartupAsync(enabled);
-        LaunchAtStartupCard.Description = result.RegistrationMessage;
+        try
+        {
+            var result = await _frontend.SetLaunchAtWindowsStartupAsync(LaunchAtWindowsStartupToggleSwitch.IsOn);
+            LaunchAtStartupCard.Description = result.RegistrationMessage;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Settings", "Launch-at-startup update failed.", exception);
+        }
     }
 
     private void DeveloperMenuButton_Click(object sender, RoutedEventArgs args)

@@ -21,6 +21,10 @@ public sealed partial class MainWindow : Window
     private readonly FrontendBootstrapSnapshot _bootstrap;
     private readonly MainNavigationState _navigationState = new();
     private FrontendStatusSnapshot? _latestSystemStatus;
+    // Bootstrap is captured once at startup and never re-fetched; a mutation made through the
+    // frontend (e.g. suppressing the developer menu warning) must update this live flag directly,
+    // or the same process would keep re-showing a warning the user already dismissed.
+    private bool _suppressDeveloperMenuWarning;
     private int _isRefreshingStatus;
     private int _statusRefreshPending;
     private bool _setupPromptActive;
@@ -35,6 +39,7 @@ public sealed partial class MainWindow : Window
     {
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         _bootstrap = bootstrap ?? throw new ArgumentNullException(nameof(bootstrap));
+        _suppressDeveloperMenuWarning = bootstrap.Settings.SuppressDeveloperMenuWarning;
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -89,7 +94,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnDeveloperMenuRequested(object? sender, EventArgs args)
     {
-        if (_bootstrap.Settings.SuppressDeveloperMenuWarning)
+        if (_suppressDeveloperMenuWarning)
         {
             OpenDeveloperMenu();
             return;
@@ -131,7 +136,8 @@ public sealed partial class MainWindow : Window
 
         if (suppressWarningCheckBox.IsChecked == true)
         {
-            await _frontend.SuppressDeveloperMenuWarningAsync();
+            var settings = await _frontend.SuppressDeveloperMenuWarningAsync();
+            _suppressDeveloperMenuWarning = settings.SuppressDeveloperMenuWarning;
         }
 
         OpenDeveloperMenu();
@@ -251,14 +257,50 @@ public sealed partial class MainWindow : Window
         UpdatePrerequisiteSetupBusyUi();
         try
         {
-            await _frontend.RunPrerequisiteSetupAsync();
-            await RefreshSystemStatusAsync();
+            var result = await _frontend.RunPrerequisiteSetupAsync();
+            AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", result.Result));
+            RenderSystemStatus(result.Status);
+            await ShowPrerequisiteSetupResultDialogAsync(result.Result);
         }
         finally
         {
             _prerequisiteSetupInProgress = false;
             UpdatePrerequisiteSetupBusyUi();
         }
+    }
+
+    private async Task ShowPrerequisiteSetupResultDialogAsync(FrontendPrerequisiteSetupResultKind resultKind)
+    {
+        if (Content.XamlRoot is null) return;
+
+        if (resultKind == FrontendPrerequisiteSetupResultKind.RebootRequired)
+        {
+            var restartDialog = new ContentDialog
+            {
+                Title = "Restart required",
+                Content = "Windows needs to restart to finish setting up Steam Input Addon for Claw.",
+                PrimaryButtonText = "Restart now",
+                CloseButtonText = "Later",
+                XamlRoot = Content.XamlRoot
+            };
+            if (await restartDialog.ShowAsync() == ContentDialogResult.Primary)
+                Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false });
+        }
+        else if (resultKind is FrontendPrerequisiteSetupResultKind.Blocked or FrontendPrerequisiteSetupResultKind.AlreadyInProgress or FrontendPrerequisiteSetupResultKind.Failed)
+        {
+            var message = resultKind == FrontendPrerequisiteSetupResultKind.AlreadyInProgress
+                ? "Another setup operation is already in progress."
+                : "Setup couldn't be completed. Check Status or the application log for details.";
+            await new ContentDialog
+            {
+                Title = "Setup unavailable",
+                Content = message,
+                CloseButtonText = "OK",
+                XamlRoot = Content.XamlRoot
+            }.ShowAsync();
+        }
+        // Ready/Installed/Cancelled need no dialog: Ready/Installed complete silently (Status
+        // already reflects the new state), and Cancelled mirrors the prompt's own "Not now" path.
     }
 
     private void UpdatePrerequisiteSetupBusyUi()

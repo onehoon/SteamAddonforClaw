@@ -61,7 +61,7 @@ public sealed partial class DeveloperPage : UserControl
     {
         try
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{AppLog.DirectoryPath}\"") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_bootstrap?.LogDirectoryPath ?? AppLog.DirectoryPath}\"") { UseShellExecute = true });
         }
         catch (Exception exception)
         {
@@ -69,17 +69,31 @@ public sealed partial class DeveloperPage : UserControl
         }
     }
 
-    private void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    private async void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
-        if (!_isInitializingTestMode && _isPrerequisiteSetupInProgress?.Invoke() != true)
-            _ = _frontend?.SetDeveloperTestModeAsync(TestModeToggleSwitch.IsOn);
+        if (_isInitializingTestMode || _isPrerequisiteSetupInProgress?.Invoke() == true || _frontend is null) return;
+        try
+        {
+            await _frontend.SetDeveloperTestModeAsync(TestModeToggleSwitch.IsOn);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("DeveloperMenu", "Developer test mode update failed.", exception);
+        }
     }
 
-    private void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    private async void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
-        if (_isInitializingLogLevel || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
+        if (_isInitializingLogLevel || _frontend is null || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
         var level = value switch { "Debug" => FrontendLogLevel.Debug, "Info" => FrontendLogLevel.Info, _ => FrontendLogLevel.Off };
-        _ = _frontend?.SetLogLevelAsync(level);
+        try
+        {
+            await _frontend.SetLogLevelAsync(level);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("DeveloperMenu", "Log level update failed.", exception);
+        }
     }
 
     private async void GenerateEnvironmentDiscoveryReportButton_Click(object sender, RoutedEventArgs args)

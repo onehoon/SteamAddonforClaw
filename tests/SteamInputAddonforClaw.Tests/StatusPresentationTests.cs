@@ -3,7 +3,6 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Views;
-using SteamInputAddonforClaw.Steam;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -23,20 +22,53 @@ public sealed class StatusPresentationTests
     public void FormatManufacturerForDisplay_UnknownManufacturer_PreservesTrimmedValue() =>
         Assert.Equal("Acme Devices", StatusPresentation.FormatManufacturerForDisplay("  Acme Devices  "));
 
-    [Theory]
-    [InlineData(123u, SteamSessionSource.Actual, "Running")]
-    [InlineData(0u, SteamSessionSource.Actual, "Not Running")]
-    [InlineData(0u, SteamSessionSource.BigPicture, "Big Picture Mode")]
-    [InlineData(uint.MaxValue, SteamSessionSource.DeveloperTest, "Not Running")]
-    public void FormatSteamGame_ReflectsActualGameIdentity(uint appId, SteamSessionSource source, string expected) =>
-        Assert.Equal(expected, StatusPresentation.FormatSteamGame(new SteamStatusSnapshot(appId != 0 || source != SteamSessionSource.Actual, appId, source)));
+    [Fact]
+    public void FormatSteamGame_Actual_WithAppId_ReportsRunning() =>
+        Assert.Equal("Running", StatusPresentation.FormatSteamGame(new FrontendSteamSnapshot(true, 123, FrontendSteamSource.Actual)));
 
     [Fact]
-    public void FormatControllerStatus_PassiveWithoutVerifiedXInput_OmitsQualifier()
+    public void FormatSteamGame_Actual_WithoutAppId_ReportsNotRunning() =>
+        Assert.Equal("Not Running", StatusPresentation.FormatSteamGame(new FrontendSteamSnapshot(false, 0, FrontendSteamSource.Actual)));
+
+    [Fact]
+    public void FormatSteamGame_BigPicture_ReportsBigPictureModeRegardlessOfAppId() =>
+        Assert.Equal("Big Picture Mode", StatusPresentation.FormatSteamGame(new FrontendSteamSnapshot(false, 0, FrontendSteamSource.BigPicture)));
+
+    [Fact]
+    public void FormatSteamGame_DeveloperTest_ReportsNotRunningEvenWithAppId()
+    {
+        // Regression: DeveloperTest is a synthetic source used for diagnostics and must never be
+        // presented as an actual running game, no matter what AppId accompanies it.
+        var status = StatusPresentation.FormatSteamGame(new FrontendSteamSnapshot(true, uint.MaxValue, FrontendSteamSource.DeveloperTest));
+        Assert.Equal("Not Running", status);
+    }
+
+    [Fact]
+    public void FormatControllerSoftwareStatus_Running_ReportsRunningRegardlessOfInstallation() =>
+        Assert.Equal("Running", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.Indeterminate, FrontendSoftwareRuntimeStatus.Running, "")));
+
+    [Fact]
+    public void FormatControllerSoftwareStatus_Starting_ReportsStarting() =>
+        Assert.Equal("Starting", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.Installed, FrontendSoftwareRuntimeStatus.Starting, "")));
+
+    [Fact]
+    public void FormatControllerSoftwareStatus_IndeterminateRuntime_ReportsIndeterminate() =>
+        Assert.Equal("Indeterminate", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.Installed, FrontendSoftwareRuntimeStatus.Indeterminate, "")));
+
+    [Fact]
+    public void FormatControllerSoftwareStatus_InstalledButNotRunning_ReportsInstalledSlashNotRunning() =>
+        Assert.Equal("Installed / Not running", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.Installed, FrontendSoftwareRuntimeStatus.NotRunning, "")));
+
+    [Fact]
+    public void FormatControllerSoftwareStatus_NotInstalled_ReportsNotInstalled() =>
+        Assert.Equal("Not installed", StatusPresentation.FormatControllerSoftwareStatus(new("MsiCenterM", "MSI Center M", FrontendSoftwareInstallationStatus.NotInstalled, FrontendSoftwareRuntimeStatus.NotRunning, "")));
+
+    [Fact]
+    public void FormatControllerSoftwareStatus_PassiveWithoutVerifiedXInput_OmitsQualifier()
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new(Available: true, OperationalState: RoutingOperationalState.Passive, SteamOutputActive: false, NativeDirectInputActive: false),
+            routingStatus: new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false);
 
         Assert.Equal("MSI Center M Native", status);
@@ -47,7 +79,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new(Available: true, OperationalState: RoutingOperationalState.Passive, SteamOutputActive: false, NativeDirectInputActive: false),
+            routingStatus: new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: true);
 
         Assert.Equal("MSI Center M Native (XInput)", status);
@@ -58,7 +90,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new(Available: true, OperationalState: RoutingOperationalState.OverrideActive, SteamOutputActive: true, NativeDirectInputActive: true),
+            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: true, NativeDirectInputActive: true),
             nativeXInputVerified: false);
 
         Assert.Equal("Steam Controller (DInput)", status);
@@ -72,7 +104,7 @@ public sealed class StatusPresentationTests
         // never passed into this mapper, precisely so it cannot be mistaken for actual entry.
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new(Available: true, OperationalState: RoutingOperationalState.Passive, SteamOutputActive: false, NativeDirectInputActive: false),
+            routingStatus: new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false);
 
         Assert.NotEqual("Steam Controller (DInput)", status);
@@ -83,7 +115,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new(Available: true, OperationalState: RoutingOperationalState.OverrideActive, SteamOutputActive: false, NativeDirectInputActive: true),
+            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: false, NativeDirectInputActive: true),
             nativeXInputVerified: false);
 
         Assert.NotEqual("Steam Controller (DInput)", status);
@@ -94,10 +126,23 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new(Available: true, OperationalState: RoutingOperationalState.OverrideActive, SteamOutputActive: true, NativeDirectInputActive: false),
+            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: true, NativeDirectInputActive: false),
             nativeXInputVerified: false);
 
         Assert.NotEqual("Steam Controller (DInput)", status);
+    }
+
+    [Fact]
+    public void FormatControllerStatus_OverrideActiveWithIncompleteProof_ReportsUnavailableRatherThanNative()
+    {
+        // Regression: OverrideActive with incomplete Steam-output/DInput proof must fail
+        // conservative to Unavailable, not silently fall through to "MSI Center M Native".
+        var status = StatusPresentation.FormatControllerStatus(
+            stateTrusted: true,
+            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
+            nativeXInputVerified: false);
+
+        Assert.Equal("Unavailable", status);
     }
 
     [Fact]
@@ -105,7 +150,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: false,
-            routingStatus: new(Available: true, OperationalState: RoutingOperationalState.OverrideActive, SteamOutputActive: true, NativeDirectInputActive: true),
+            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: true, NativeDirectInputActive: true),
             nativeXInputVerified: false);
 
         Assert.Equal("Unavailable", status);
@@ -142,7 +187,7 @@ public sealed class StatusPresentationTests
         Assert.Equal("Unavailable", StatusPresentation.FormatControllerStatus(
             StatusPresentation.IsControllerStateTrusted(
                 Snapshot(hardwareStatus: HardwareCompatibilityStatus.Unsupported, routingReason: RoutingDecisionReason.UnsupportedDevice)),
-            new(Available: true, OperationalState: RoutingOperationalState.Passive, SteamOutputActive: false, NativeDirectInputActive: false),
+            new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false));
 
     [Fact]
@@ -150,14 +195,14 @@ public sealed class StatusPresentationTests
         Assert.Equal("Unavailable", StatusPresentation.FormatControllerStatus(
             StatusPresentation.IsControllerStateTrusted(
                 Snapshot(environmentStatus: ControllerEnvironmentCompatibilityStatus.Unsupported, routingReason: RoutingDecisionReason.ControllerEnvironmentUnsupported)),
-            new(Available: true, OperationalState: RoutingOperationalState.Passive, SteamOutputActive: false, NativeDirectInputActive: false),
+            new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false));
 
     [Fact]
     public void FormatControllerStatus_UnavailableRuntime_ReportsUnavailable() =>
         Assert.Equal("Unavailable", StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: RoutingRuntimeStatusSnapshot.Unavailable,
+            routingStatus: new("Eligible", FrontendRoutingOperationalState.Passive, Available: false, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false));
 
     [Fact]
@@ -205,12 +250,13 @@ public sealed class StatusPresentationTests
         ControllerEnvironmentCompatibilityStatus environmentStatus = ControllerEnvironmentCompatibilityStatus.Supported) =>
         new(
             new("Test", "Test", "Test", []),
-            new(hardwareStatus.ToString(), "", "", "Test"),
+            new(hardwareStatus == HardwareCompatibilityStatus.Supported ? FrontendHardwareStatus.Supported : hardwareStatus == HardwareCompatibilityStatus.Unsupported ? FrontendHardwareStatus.Unsupported : FrontendHardwareStatus.Indeterminate, "", "", "Test"),
             [],
-            environmentStatus.ToString(), "Test",
-            new("", "", "", "", "", ""),
-            new(false, 0, SteamSessionSource.Actual.ToString()),
-            new(routingReason.ToString(), RoutingOperationalState.Passive.ToString(), false, false),
+            environmentStatus == ControllerEnvironmentCompatibilityStatus.Supported ? FrontendControllerEnvironmentStatus.Supported : environmentStatus == ControllerEnvironmentCompatibilityStatus.Unsupported ? FrontendControllerEnvironmentStatus.Unsupported : FrontendControllerEnvironmentStatus.Indeterminate,
+            "Test",
+            new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
+            new(false, 0, FrontendSteamSource.Actual),
+            new(routingReason.ToString(), FrontendRoutingOperationalState.Passive, true, false, false),
             addonStatus.ToString(), "Test", recoverySafe, addonOwnedOutputIdentityUncertain,
             FrontendSetupStatus.Indeterminate, "", false);
 }

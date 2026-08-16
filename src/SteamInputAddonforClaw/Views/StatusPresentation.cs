@@ -1,15 +1,14 @@
-using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
-using SteamInputAddonforClaw.Steam;
 
 namespace SteamInputAddonforClaw.Views;
 
 /// <summary>
-/// Pure, UI-framework-free mapping from runtime state to Status page display strings. Kept
-/// separate from StatusPage code-behind so the mapping rules can be unit tested without a
-/// UI thread.
+/// Pure, UI-framework-free mapping from the frontend contract snapshot to Status page display
+/// strings. Kept separate from StatusPage code-behind so the mapping rules can be unit tested
+/// without a UI thread, and so StatusPage.Render has no reason to reimplement any of this policy
+/// inline.
 /// </summary>
 internal static class StatusPresentation
 {
@@ -26,18 +25,32 @@ internal static class StatusPresentation
         };
     }
 
-    internal static string FormatDeviceCompatibility(HardwareCompatibilityStatus status) => status switch
+    internal static string FormatDeviceCompatibility(FrontendHardwareStatus status) => status switch
     {
-        HardwareCompatibilityStatus.Supported => "Supported",
-        HardwareCompatibilityStatus.Unsupported => "Unsupported",
+        FrontendHardwareStatus.Supported => "Supported",
+        FrontendHardwareStatus.Unsupported => "Unsupported",
         _ => "Compatibility unknown"
     };
 
-    internal static string FormatSteamGame(SteamStatusSnapshot steam) => steam.Source switch
+    internal static string FormatSteamGame(FrontendSteamSnapshot steam) => steam.Source switch
     {
-        SteamSessionSource.BigPicture => "Big Picture Mode",
-        SteamSessionSource.Actual when steam.RunningAppId != 0 => "Running",
+        FrontendSteamSource.BigPicture => "Big Picture Mode",
+        FrontendSteamSource.Actual when steam.AppId != 0 => "Running",
         _ => "Not Running"
+    };
+
+    /// <summary>
+    /// Mirrors the pre-frontend-contract ControllerSoftwareStatusFormatter exactly: Runtime state
+    /// takes priority, falling back to Installation only when Runtime carries no positive signal.
+    /// </summary>
+    internal static string FormatControllerSoftwareStatus(FrontendSoftwareSnapshot item) => item.Runtime switch
+    {
+        FrontendSoftwareRuntimeStatus.Running => "Running",
+        FrontendSoftwareRuntimeStatus.Starting => "Starting",
+        FrontendSoftwareRuntimeStatus.Indeterminate => "Indeterminate",
+        _ when item.Installation == FrontendSoftwareInstallationStatus.Installed => "Installed / Not running",
+        _ when item.Installation == FrontendSoftwareInstallationStatus.NotInstalled => "Not installed",
+        _ => "Indeterminate"
     };
 
     /// <summary>
@@ -48,29 +61,29 @@ internal static class StatusPresentation
     internal static bool IsControllerStateTrusted(FrontendStatusSnapshot snapshot) =>
         snapshot.RecoverySafe
         && !snapshot.AddonOwnedOutputIdentityUncertain
-        && snapshot.Hardware.Status == nameof(HardwareCompatibilityStatus.Supported)
-        && snapshot.ControllerEnvironmentStatus == nameof(ControllerEnvironmentCompatibilityStatus.Supported)
+        && snapshot.Hardware.Status == FrontendHardwareStatus.Supported
+        && snapshot.ControllerEnvironmentStatus == FrontendControllerEnvironmentStatus.Supported
         && snapshot.Routing.EligibilityReason is not (nameof(RoutingDecisionReason.DeviceCompatibilityIndeterminate) or nameof(RoutingDecisionReason.ControllerEnvironmentIndeterminate));
 
     /// <summary>
-    /// Reports what controller path is actually active, derived from RoutingRuntimeStatusSnapshot
-    /// (actual pipeline session/plan state), never from RoutingDecisionKind.Eligible or
-    /// AddonOperationalStatus.Ready alone -- those only mean routing is *eligible* to start, not
-    /// that it has actually entered and the Steam output stage is live.
+    /// Reports what controller path is actually active, derived from the frontend routing
+    /// snapshot (actual pipeline session/plan state), never from eligibility alone -- eligibility
+    /// only means routing is *eligible* to start, not that it has actually entered and the Steam
+    /// output stage is live.
     /// </summary>
     internal static string FormatControllerStatus(
         bool stateTrusted,
-        RoutingRuntimeStatusSnapshot routingStatus,
+        FrontendRoutingSnapshot routingStatus,
         bool nativeXInputVerified)
     {
         if (!stateTrusted || !routingStatus.Available) return "Unavailable";
 
-        if (routingStatus.OperationalState == RoutingOperationalState.OverrideActive
+        if (routingStatus.OperationalState == FrontendRoutingOperationalState.OverrideActive
             && routingStatus.SteamOutputActive
             && routingStatus.NativeDirectInputActive)
             return "Steam Controller (DInput)";
 
-        if (routingStatus.OperationalState == RoutingOperationalState.OverrideActive)
+        if (routingStatus.OperationalState == FrontendRoutingOperationalState.OverrideActive)
             // Override is engaged but the active plan doesn't prove the stock Steam output path
             // (e.g. a non-stock controller-manager plan) -- fail conservative rather than guess.
             return "Unavailable";
@@ -87,7 +100,7 @@ internal static class StatusPresentation
         if (snapshot.AddonOwnedOutputIdentityUncertain)
             return true;
 
-        if (snapshot.Hardware.Status == nameof(HardwareCompatibilityStatus.Unsupported))
+        if (snapshot.Hardware.Status == FrontendHardwareStatus.Unsupported)
             return false;
 
         return !snapshot.RecoverySafe
