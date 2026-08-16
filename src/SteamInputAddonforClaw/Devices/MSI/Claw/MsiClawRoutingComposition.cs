@@ -1,7 +1,10 @@
+using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Recovery;
+using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -12,13 +15,23 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 /// lifetime/cleanup ownership of the created objects exactly as before; this type does not
 /// implement <see cref="IAsyncDisposable"/> and must not be given disposal responsibility.
 /// </summary>
-internal sealed class MsiClawRoutingComposition
+/// <remarks>
+/// Also implements <see cref="IHandheldRoutingComposition"/>, the generic view the routing/output
+/// layer consumes -- a thin projection over the same already-created objects below, not a
+/// second composition. The concrete properties remain for App lifecycle callers that still need
+/// them directly; removing that remaining coupling is intentionally deferred to follow-up
+/// architecture work.
+/// </remarks>
+internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 {
     internal MsiClawNativeModeSessionCoordinator NativeModeSession { get; }
     internal MsiClawNativeModeStage NativeModeStage { get; }
     internal MsiClawInputSource PhysicalInputSource { get; }
     internal MsiClawPhysicalInputStage PhysicalInputStage { get; }
     internal MsiClawPhysicalIsolationStage PhysicalIsolationStage { get; }
+
+    private readonly IReadOnlyList<IRoutingPipelineStage> _stages;
+    private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
 
     internal MsiClawRoutingComposition(
         MsiClawNativeStateManager nativeState,
@@ -46,5 +59,14 @@ internal sealed class MsiClawRoutingComposition
             recovery,
             new HidHideDriverClient(),
             () => Environment.ProcessPath);
+
+        _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage];
+        _sessionBoundaryParticipants = [NativeModeSession];
     }
+
+    IReadOnlyList<IRoutingPipelineStage> IHandheldRoutingComposition.Stages => _stages;
+
+    IControllerStateSnapshotSource IHandheldRoutingComposition.ControllerStateSource => PhysicalInputSource;
+
+    IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> IHandheldRoutingComposition.SessionBoundaryParticipants => _sessionBoundaryParticipants;
 }
