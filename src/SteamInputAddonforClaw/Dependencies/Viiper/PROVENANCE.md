@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     89ce1426883ea5001b5788000df272db7532f0e1
+Commit:     566e4f88577a14c574ed7bf47e37bd75ea78f8d9
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc
-DLL SHA-256:              a676f27299cf4c0f645f4fe4048ee8adafec40b18997b15c0135534995b44456
+DLL SHA-256:              a4edca701979dbec3ed35ebd5e4cc0fb77819dab846367387761fe73dd7fd835
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,48 +42,41 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-The reviewed generated-header delta from VIIPER
-`cb29c1727996f50debfc7836c1febd6c70008811` to
-`89ce1426883ea5001b5788000df272db7532f0e1` is: none. The canonical artifact's
-`libVIIPER.h` remains byte-identical to the previously reviewed header (same
-SHA-256,
-`e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`).
-The DLL SHA-256 changed to
-`a676f27299cf4c0f645f4fe4048ee8adafec40b18997b15c0135534995b44456`
-because VIIPER PR #27 adds internal embedded diagnostic-log ownership; it does
-not change the public C ABI or exported typed-device contract.
+The reviewed VIIPER delta from
+`89ce1426883ea5001b5788000df272db7532f0e1` to
+`566e4f88577a14c574ed7bf47e37bd75ea78f8d9` contains two internal Steam Deck
+protocol-correctness fixes:
 
-VIIPER PR #27 ("Make embedded libVIIPER own its diagnostic log") changes the
-canonical runtime's diagnostic persistence only. On Windows, `NewUSBServer`
-now independently attempts to write a single daily `libVIIPER.log` beside the
-loaded DLL. File persistence is bounded/non-blocking and asynchronous;
-`CloseUSBServer` performs only a best-effort bounded flush after releasing its
-lifecycle lock. The optional `VIIPERLogCallback` remains synchronous with the
-same signature and semantics as an observer/mirror. Per-input/per-frame state
-and publisher paths are not logged through this mechanism, and logging/file
-failures do not alter attach/detach/removal classifications or lifecycle
-results.
+- `d8543793783d31b1f0f96c74157d9bca038f595e` corrects setting `0x09` to
+  `MousePointerEnabled` semantics and removes the incorrect controller-mode
+  side effect; `SetControllerMode` remains the sole controller-mode mutation
+  path.
+- `566e4f88577a14c574ed7bf47e37bd75ea78f8d9` corrects internal parsing of the
+  Steam Deck `0xEB` rumble command (`RumbleType`, 16-bit intensity, left/right
+  speeds, and signed gain bytes).
 
-Confirmed by this review:
+The canonical generated `libVIIPER.h` is byte-identical to the previously
+reviewed embedded header: its SHA-256 remains
+`e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`.
+Neither VIIPER commit changes `lib/viiper`'s exported C declarations or typed
+Steam Deck ABI surface. No exported function signature, callback typedef,
+enum, struct layout, field offset, or packing change occurred.
 
-- no exported function signature was added, removed, or changed;
-- no `SteamDeckDeviceState`, `SteamDeckDeviceRemoveResult`, callback typedef,
-  enum, struct layout, field offset, or packing change occurred;
-- `NewUSBServer`, `SetSteamDeckOutputCallback`, and the full typed Steam Deck
-  ABI remain source/ABI compatible with the current managed bindings;
-- the classified `AttachUSBDeviceEx` / `DetachUSBDeviceEx` and read-only
-  `GetUSBDeviceAttachmentState` contracts are unchanged;
-- `CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-  `CanonicalViiperNativeAbiTests.cs`, and `RequiredExports` require no managed
-  adaptation;
-- the Addon may continue passing `CanonicalViiperDiagnosticLog.Callback` to
-  `NewUSBServer`; the callback remains rooted by the existing managed lifetime
-  logic, while VIIPER's native file sink is an additional independent sink;
-- no Addon routing, Steam Deck mapping, publisher, attachment-ownership,
-  teardown, or recovery policy change is required by this dependency update;
-- no hardware-validation claim is expanded. MSI Claw EX basic non-gyro input
-  remains the established claim, and SD3 lifecycle/recovery validation remains
-  next.
+The `RumbleCommand` model changed only inside `device/steamdeck`; it is not a
+public C ABI type. `SetSteamDeckOutputCallback` continues to expose the same
+raw normalized byte callback contract (`device handle`, `const uint8_t*`,
+`uint32_t length`), so the Addon's managed callback/PInvoke surface and
+`RequiredExports` remain compatible without adaptation.
+
+Accordingly, no changes are required to `CanonicalViiperNativeApi.cs`,
+`CanonicalViiperNativeTypes.cs`, `CanonicalViiperNativeAbiTests.cs`, routing,
+Steam Deck mapping, publisher behavior, attachment ownership, teardown, or
+recovery policy. The dependency update changes only the vendored native
+implementation plus its mechanical pin/provenance/hash alignment.
+
+No hardware-validation claim is expanded. MSI Claw EX basic non-gyro input
+remains the established claim; lifecycle/recovery, rumble/haptics, gyro, and
+IMU validation remain separate work.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
