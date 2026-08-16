@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
+using SteamInputAddonforClaw.Routing;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;

@@ -41,7 +41,7 @@ public partial class App : Application
     private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
-    private MsiClawNativeModeSessionCoordinator? _msiClawNativeModeSession;
+    private IRoutingSafetySession? _routingSafetySession;
     private MsiClawInputSource? _physicalInputSource;
     private RoutingPipelineRuntimeCoordinator? _routingRuntimeCoordinator;
     private UserTerminationGuard? _userTerminationGuard;
@@ -167,9 +167,9 @@ public partial class App : Application
                 powerGate,
                 recoverySafetyState);
 
-            _msiClawNativeModeSession = msiRoutingComposition.NativeModeSession;
-            _physicalInputSource = msiRoutingComposition.PhysicalInputSource;
             IHandheldRoutingComposition handheldRoutingComposition = msiRoutingComposition;
+            _routingSafetySession = handheldRoutingComposition.SafetySession;
+            _physicalInputSource = msiRoutingComposition.PhysicalInputSource;
 
             var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
             SteamOutputComposition.LogTargetSelected();
@@ -179,7 +179,7 @@ public partial class App : Application
                 new SteamDeckVirtualDeviceIdentityResolver(new SteamDeckVirtualDeviceIdentityPolicy()),
                 addonOwnedVirtualDeviceTracker,
                 _recoveryManager!,
-                () => _msiClawNativeModeSession?.CurrentRecoverySessionId,
+                () => _routingSafetySession?.CurrentRecoverySessionId,
                 new HidHideDriverClient(), handheldRoutingComposition.ControllerStateSource);
             IRoutingPipelineStage steamOutputStage = deckStage;
             Action attachOutputFaultHandler = () => deckStage.SetOutputFaultHandler(async () => { await _routingRuntimeCoordinator!.FailClosedAsync().ConfigureAwait(false); });
@@ -193,8 +193,8 @@ public partial class App : Application
         }
         _userTerminationGuard = new UserTerminationGuard(
             () => _routingRuntimeCoordinator?.CaptureTerminationSnapshot() ?? default,
-            () => _msiClawNativeModeSession?.IsActive == true,
-            () => _msiClawNativeModeSession?.HasOwnedRecoveryBoundary == true,
+            () => _routingSafetySession?.IsActive == true,
+            () => _routingSafetySession?.HasOwnedRecoveryBoundary == true,
             () => recoverySafetyState.Current == RecoverySafety.Safe && _recoveryManager?.HasIncompleteRecovery == true);
         var powerParticipants = new List<IPowerSuspendParticipant>();
         if (_routingRuntimeCoordinator is not null) powerParticipants.Add(_routingRuntimeCoordinator);
@@ -236,7 +236,7 @@ public partial class App : Application
                 Available: true,
                 OperationalState: _routingRuntimeCoordinator.CurrentOperationalState,
                 SteamOutputActive: _routingRuntimeCoordinator.ActiveSessionHasSteamOutputEnabled,
-                NativeDirectInputActive: _msiClawNativeModeSession?.IsActive == true);
+                NativeDirectInputActive: _routingSafetySession?.IsActive == true);
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider,
             developerTestModeState: _developerTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
         _mainWindow.Closed += OnMainWindowClosed;
@@ -286,8 +286,8 @@ public partial class App : Application
                 AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation failed; routing is being failed closed.", exception);
                 try
                 {
-                    if (_msiClawNativeModeSession is not null)
-                        await _msiClawNativeModeSession.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
+                    if (_routingSafetySession is not null)
+                        await _routingSafetySession.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
                     var rollback = await runtime.FailClosedAsync().ConfigureAwait(false);
                     if (!rollback.Succeeded)
                         AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));
@@ -335,15 +335,15 @@ public partial class App : Application
             try
             {
                 var shutdown = _routingRuntimeCoordinator.ShutdownAsync().AsTask().GetAwaiter().GetResult();
-                if (!shutdown.Succeeded && _msiClawNativeModeSession is not null)
-                    _msiClawNativeModeSession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).GetAwaiter().GetResult();
+                if (!shutdown.Succeeded && _routingSafetySession is not null)
+                    _routingSafetySession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).GetAwaiter().GetResult();
             }
             catch (Exception exception)
             {
                 AppLog.Error("Routing.Runtime", "Routing pipeline shutdown failed; attempting NativeMode fail-close.", exception);
-                if (_msiClawNativeModeSession is not null)
+                if (_routingSafetySession is not null)
                 {
-                    try { _msiClawNativeModeSession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).GetAwaiter().GetResult(); }
+                    try { _routingSafetySession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).GetAwaiter().GetResult(); }
                     catch (Exception failClosedException) { AppLog.Error("NativeMode", "NativeMode shutdown fail-close failed.", failClosedException); }
                 }
             }
@@ -351,8 +351,8 @@ public partial class App : Application
         }
         if (_powerCoordinator is not null) _powerCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _powerCoordinator = null;
-        if (_msiClawNativeModeSession is not null) _msiClawNativeModeSession.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _msiClawNativeModeSession = null;
+        if (_routingSafetySession is not null) _routingSafetySession.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _routingSafetySession = null;
         if (_physicalInputSource is not null) _physicalInputSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _physicalInputSource = null;
         AppLog.Info("Runtime cleanup completed.");
