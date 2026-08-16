@@ -89,6 +89,15 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         var current = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
         var setup = _setupExecutor.Evaluate(current);
+        AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
+            ("HidHideStatus", current.Prerequisites.HidHide.Status),
+            ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
+            ("CompatibilityStatus", current.Compatibility.Status),
+            ("CompatibilityReason", current.Compatibility.Reason),
+            ("SteamActive", current.Steam.IsActive),
+            ("RecoverySafe", current.RecoverySafe),
+            ("AddonOwnedOutputIdentityUncertain", current.AddonOwnedOutputIdentityUncertain),
+            ("SetupStatus", setup.Status));
         var mapped = FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(current, _captureRoutingStatus()), setup);
         if (!PrerequisiteSetupPromptPolicy.IsInstallable(setup))
             return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
