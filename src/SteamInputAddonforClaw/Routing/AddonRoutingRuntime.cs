@@ -84,8 +84,6 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator);
     }
 
-    internal RoutingOperationalState CurrentOperationalState => _coordinator.CurrentOperationalState;
-    internal bool ActiveSessionHasSteamOutputEnabled => _coordinator.ActiveSessionHasSteamOutputEnabled;
     internal bool HasResidualSessionState => _coordinator.HasResidualSessionState;
     internal bool IsSafetySessionActive => _safetySession?.IsActive == true;
     internal bool HasOwnedRecoveryBoundary => _safetySession?.HasOwnedRecoveryBoundary == true;
