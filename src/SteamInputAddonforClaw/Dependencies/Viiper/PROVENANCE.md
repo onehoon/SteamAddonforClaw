@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     566e4f88577a14c574ed7bf47e37bd75ea78f8d9
+Commit:     348bf6f8695e69c629cbb8c358173440d2d7588a
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc
-DLL SHA-256:              a4edca701979dbec3ed35ebd5e4cc0fb77819dab846367387761fe73dd7fd835
+DLL SHA-256:              eb0ad8742c75bcde619c82d5bfc4b8e7e93fabe9727494cd9baa219747234ee1
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -43,40 +43,37 @@ CI verifies the committed hashes match this record and the vendored files.
 ## ABI review
 
 The reviewed VIIPER delta from
-`89ce1426883ea5001b5788000df272db7532f0e1` to
-`566e4f88577a14c574ed7bf47e37bd75ea78f8d9` contains two internal Steam Deck
-protocol-correctness fixes:
+`566e4f88577a14c574ed7bf47e37bd75ea78f8d9` to
+`348bf6f8695e69c629cbb8c358173440d2d7588a` is an internal Steam Deck
+host-output parser safety fix.
 
-- `d8543793783d31b1f0f96c74157d9bca038f595e` corrects setting `0x09` to
-  `MousePointerEnabled` semantics and removes the incorrect controller-mode
-  side effect; `SetControllerMode` remains the sole controller-mode mutation
-  path.
-- `566e4f88577a14c574ed7bf47e37bd75ea78f8d9` corrects internal parsing of the
-  Steam Deck `0xEB` rumble command (`RumbleType`, 16-bit intensity, left/right
-  speeds, and signed gain bytes).
+The VIIPER change is confined to `device/steamdeck/inputstate.go` plus focused
+regression tests. `AsRumble`, `AsHaptic`, and `AsHapticPulse` now reject
+captured commands shorter than the minimum parser length, and `AsPlayAudio`
+rejects a payload length that exceeds the actual captured output length rather
+than reading zero-filled bytes from the fixed backing buffer. The change does
+not alter the normalized raw host-output bytes delivered through the canonical
+C callback.
 
 The canonical generated `libVIIPER.h` is byte-identical to the previously
 reviewed embedded header: its SHA-256 remains
 `e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`.
-Neither VIIPER commit changes `lib/viiper`'s exported C declarations or typed
-Steam Deck ABI surface. No exported function signature, callback typedef,
-enum, struct layout, field offset, or packing change occurred.
+No `lib/viiper` exported C declaration changed. No exported function signature,
+callback typedef, enum, struct layout, field offset, packing, or
+`RequiredExports` change occurred.
 
-The `RumbleCommand` model changed only inside `device/steamdeck`; it is not a
-public C ABI type. `SetSteamDeckOutputCallback` continues to expose the same
-raw normalized byte callback contract (`device handle`, `const uint8_t*`,
-`uint32_t length`), so the Addon's managed callback/PInvoke surface and
-`RequiredExports` remain compatible without adaptation.
+`SetSteamDeckOutputCallback` therefore retains the same raw normalized byte
+callback contract (`device handle`, `const uint8_t*`, `uint32_t length`). No
+changes are required to `CanonicalViiperNativeApi.cs`,
+`CanonicalViiperNativeTypes.cs`, `CanonicalViiperNativeAbiTests.cs`, callback
+lifetime rooting, routing, Steam Deck mapping, publisher behavior, attachment
+ownership, teardown, or recovery policy.
 
-Accordingly, no changes are required to `CanonicalViiperNativeApi.cs`,
-`CanonicalViiperNativeTypes.cs`, `CanonicalViiperNativeAbiTests.cs`, routing,
-Steam Deck mapping, publisher behavior, attachment ownership, teardown, or
-recovery policy. The dependency update changes only the vendored native
-implementation plus its mechanical pin/provenance/hash alignment.
-
-No hardware-validation claim is expanded. MSI Claw EX basic non-gyro input
-remains the established claim; lifecycle/recovery, rumble/haptics, gyro, and
-IMU validation remain separate work.
+This dependency update changes only the vendored native implementation plus
+its mechanical pin/provenance/hash alignment. No hardware-validation claim is
+expanded. MSI Claw EX basic non-gyro input remains the established claim;
+lifecycle/recovery, rumble/haptics, gyro, and IMU validation remain separate
+work.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment

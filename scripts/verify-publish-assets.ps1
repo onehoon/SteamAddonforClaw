@@ -46,7 +46,7 @@ if ((Get-FileHash -LiteralPath $usbIpInstaller -Algorithm SHA256).Hash -ne $expe
 
 $viiperPayload = Join-Path $PublishDirectory 'Dependencies\Viiper\libVIIPER.dll'
 # Pins the Phase 2B2 Steam Deck output-callback ABI adoption (VIIPER main@0b362731...) -- see Dependencies/Viiper/PROVENANCE.md.
-$expectedViiperSha256 = 'A4EDCA701979DBEC3ED35EBD5E4CC0FB77819DAB846367387761FE73DD7FD835'
+$expectedViiperSha256 = 'EB0AD8742C75BCDE619C82D5BFC4B8E7E93FABE9727494CD9BAA219747234EE1'
 if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expectedViiperSha256) {
     throw 'Published VIIPER payload SHA-256 does not match its recorded provenance.'
 }
