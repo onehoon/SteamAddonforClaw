@@ -51,8 +51,10 @@ internal static class SteamDeckDeviceStateMapper
             L3 = ToByte(buttons.LeftStickClick),
             R3 = ToByte(buttons.RightStickClick),
 
-            Menu = ToByte(buttons.Back),
-            Options = ToByte(buttons.Start),
+            // Steam Deck Menu = MENU / Start
+            // Steam Deck Options = VIEW / Back
+            Menu = ToByte(buttons.Start),
+            Options = ToByte(buttons.Back),
 
             // M1 = right rear -> R4, M2 = left rear -> L4 (see AuxiliaryButtonSlot).
             R4 = ToByte(state.Auxiliary[(int)AuxiliaryButtonSlot.RightRear]),

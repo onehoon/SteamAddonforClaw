@@ -98,12 +98,25 @@ public sealed class SteamDeckDeviceStateMapperTests
     }
 
     [Fact]
-    public void Back_and_start_map_to_menu_and_options()
+    public void Start_maps_to_SteamDeck_Menu()
     {
-        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, true, true, false, false, false, false);
+        // Independent of Back -- a prior version of this mapper had Start and Back swapped, and a
+        // test that set both simultaneously could not have caught that regression.
+        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false);
         var mapped = SteamDeckDeviceStateMapper.Map(State(buttons: buttons));
 
         Assert.Equal(1, mapped.Menu);
+        Assert.Equal(0, mapped.Options);
+    }
+
+    [Fact]
+    public void Back_maps_to_SteamDeck_Options()
+    {
+        // Independent of Start -- see Start_maps_to_SteamDeck_Menu.
+        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false);
+        var mapped = SteamDeckDeviceStateMapper.Map(State(buttons: buttons));
+
+        Assert.Equal(0, mapped.Menu);
         Assert.Equal(1, mapped.Options);
     }
 

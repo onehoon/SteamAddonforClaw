@@ -13,7 +13,7 @@ public sealed class FullNonGyroPipelineTests
         var buttons = new bool[17];
         buttons[1] = true; // A
         buttons[4] = true; // LeftBumper -> L1
-        buttons[9] = true; // Start -> Options
+        buttons[9] = true; // Start -> Menu
         buttons[10] = true; // LeftStickClick -> L3
         buttons[11] = true; // RightStickClick -> R3
         buttons[15] = true; // M1 -> R4
@@ -25,7 +25,7 @@ public sealed class FullNonGyroPipelineTests
 
         Assert.Equal(1, deck.A);
         Assert.Equal(1, deck.L1);
-        Assert.Equal(1, deck.Options);
+        Assert.Equal(1, deck.Menu);
         Assert.Equal(1, deck.L3);
         Assert.Equal(1, deck.R3);
         Assert.Equal(1, deck.DPadUp);
