@@ -259,13 +259,15 @@ public sealed partial class MainWindow : Window
         {
             var result = await _frontend.RunPrerequisiteSetupAsync();
             AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", result.Result));
-            RenderSystemStatus(result.Status);
+            if (result.Status is not null)
+                RenderSystemStatus(result.Status);
             await ShowPrerequisiteSetupResultDialogAsync(result.Result);
         }
         finally
         {
             _prerequisiteSetupInProgress = false;
             UpdatePrerequisiteSetupBusyUi();
+            RequestStatusRefresh();
         }
     }
 

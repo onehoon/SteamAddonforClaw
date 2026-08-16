@@ -107,8 +107,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         // Preserve that distinction from an elevated helper that actually returns Blocked.
         if (result is null) return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
         var resultKind = MapResultKind(ElevatedPrerequisiteSetup.TranslateExitCode(result));
+        FrontendStatusSnapshot? postStatus = null;
+        try
+        {
+            postStatus = await CaptureStatusAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("PrerequisiteSetup", "Post-setup status refresh failed.", exception, ("Result", resultKind));
+        }
         StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return new(resultKind, await CaptureStatusAsync(cancellationToken).ConfigureAwait(false));
+        return new(resultKind, postStatus);
     }
 
     private static FrontendPrerequisiteSetupResultKind MapResultKind(ElevatedPrerequisiteSetup.ResultKind kind) => kind switch

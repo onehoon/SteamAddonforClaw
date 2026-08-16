@@ -22,7 +22,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
         var result = await control.RunPrerequisiteSetupAsync();
 
         Assert.Equal(FrontendPrerequisiteSetupResultKind.NotInstallable, result.Result);
-        Assert.Equal("fresh", result.Status.Device.Model);
+        Assert.Equal("fresh", result.Status!.Device.Model);
         Assert.Equal(1, executor.EvaluateCallCount);
         Assert.Equal(0, executor.RunCallCount);
     }
@@ -43,7 +43,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
         Assert.Equal(expected, result.Result);
         Assert.Equal(1, executor.RunCallCount);
         Assert.Equal("test-runtime.exe", executor.ExecutablePath);
-        Assert.Equal("post", result.Status.Device.Model);
+        Assert.Equal("post", result.Status!.Device.Model);
     }
 
     [Fact]
@@ -57,13 +57,42 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
 
         var result = await control.RunPrerequisiteSetupAsync();
 
-        Assert.Equal("post", result.Status.Device.Model);
+        Assert.Equal("post", result.Status!.Device.Model);
+    }
+
+    [Theory]
+    [InlineData(3010, FrontendPrerequisiteSetupResultKind.RebootRequired)]
+    [InlineData(3, FrontendPrerequisiteSetupResultKind.Blocked)]
+    public async Task Helper_outcome_survives_post_status_refresh_failure(int exitCode, FrontendPrerequisiteSetupResultKind expected)
+    {
+        var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
+        {
+            Result = new(ElevatedProcessResultKind.Completed, exitCode)
+        };
+        var control = CreateControl(new ThrowingStatusProvider(Snapshot("pre")), executor);
+
+        var result = await control.RunPrerequisiteSetupAsync();
+
+        Assert.Equal(expected, result.Result);
+        Assert.Null(result.Status);
+        Assert.Equal(1, executor.RunCallCount);
     }
 
     private static InProcessAddonFrontendControl CreateControl(IReadOnlyList<SystemStatusSnapshot> snapshots, FakeExecutor executor)
     {
-        var status = new QueueStatusProvider(snapshots);
-        return new InProcessAddonFrontendControl(null!, status, null, null!, "", executor, () => "test-runtime.exe", () => new(true, RoutingOperationalState.Passive, false, false));
+        return CreateControl(new QueueStatusProvider(snapshots), executor);
+    }
+
+    private static InProcessAddonFrontendControl CreateControl(ISystemStatusProvider status, FakeExecutor executor) =>
+        new(null!, status, null, null!, "", executor, () => "test-runtime.exe", () => new(true, RoutingOperationalState.Passive, false, false));
+
+    private sealed class ThrowingStatusProvider(SystemStatusSnapshot initial) : ISystemStatusProvider
+    {
+        private int _captureCount;
+        public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) =>
+            Interlocked.Increment(ref _captureCount) == 1
+                ? Task.FromResult(initial)
+                : throw new InvalidOperationException("post-status probe failed");
     }
 
     private static SystemStatusSnapshot Snapshot(string model) => new(
