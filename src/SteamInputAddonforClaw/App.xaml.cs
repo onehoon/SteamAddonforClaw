@@ -1,33 +1,23 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Steam;
-using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
-using SteamInputAddonforClaw.Recovery;
-using SteamInputAddonforClaw.Devices.Abstractions;
-using SteamInputAddonforClaw.Devices;
-using SteamInputAddonforClaw.Runtime;
-using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Hosting;
 using SteamInputAddonforClaw.Routing;
-using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw;
 
 public partial class App : Application
 {
     private MainWindow? _mainWindow;
-    private readonly CancellationTokenSource _startupCancellationTokenSource = new();
     private DispatcherQueue? _dispatcherQueue;
     private bool _showMainWindow;
-    private SystemTrayIcon? _systemTrayIcon;
-    private NativeTrayHostWindow? _trayHostWindow;
-    private RecoveryManager? _recoveryManager;
     private bool _isExplicitExit;
     private int _shutdownStarted;
     private readonly SingleInstanceGate _singleInstanceGate;
-    private AddonRuntimeHost? _runtimeHost;
+    private AddonProcessHost? _processHost;
 
     public App()
         : this(arguments: null, Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized."))
@@ -46,71 +36,39 @@ public partial class App : Application
     {
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _singleInstanceGate.RegisterActivation(ShowMainWindow);
+        _processHost = new AddonProcessHost(_showMainWindow ? null : ["--background"]);
+        _processHost.SteamSessionStateChanged += OnRuntimeSteamSessionStateChanged;
+        _processHost.StatusRefreshRequested += OnRuntimeStatusRefreshRequested;
         _ = StartAsync();
     }
 
     private async Task StartAsync()
     {
-        AppLog.Info("Startup coordination started.");
-        var startupComposition = AddonStartupCompositionFactory.Create(_showMainWindow ? null : ["--background"]);
-        _recoveryManager = startupComposition.RuntimeRecoveryManager;
+        var outcome = await _processHost!.RunStartupAsync().ConfigureAwait(false);
+        if (outcome == AddonProcessStartupOutcome.UpdateRestartScheduled)
+        {
+            AppLog.Info("Startup scheduled an update restart.");
+            _dispatcherQueue?.TryEnqueue(ExitAfterScheduledUpdate);
+            return;
+        }
 
-        try
-        {
-            var startupResult = await startupComposition.Coordinator.RunAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
-            if (!startupResult.ShouldStartRuntime)
-            {
-                AppLog.Info("Startup scheduled an update restart.");
-                _dispatcherQueue?.TryEnqueue(ExitAfterScheduledUpdate);
-                return;
-            }
-
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(startupComposition.AddonOwnedVirtualDeviceTracker, startupComposition.DeviceRegistry, startupComposition.HandheldDeviceAdapter, startupComposition.ControllerEnvironmentAssessmentProvider, startupComposition.StockCenterMBaseline, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
-        }
-        catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
-        {
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("Startup coordination failed.", exception);
-            throw;
-        }
+        if (outcome == AddonProcessStartupOutcome.RuntimeReady)
+            _dispatcherQueue?.TryEnqueue(StartNormalRuntime);
     }
 
-    private void StartNormalRuntime(AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, IHandheldDeviceAdapter handheldDeviceAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, IStockCenterMStartupBaseline? stockCenterMBaseline, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
+    private void StartNormalRuntime()
     {
-        AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
-        var composition = AddonRuntimeCompositionFactory.Create(
-            handheldDeviceAdapter,
-            deviceRegistry,
-            controllerEnvironmentAssessmentProvider,
-            addonOwnedVirtualDeviceTracker,
-            _recoveryManager!,
-            stockCenterMBaseline,
-            recoverySafe);
-
-        _runtimeHost = composition.RuntimeHost;
-        _runtimeHost.SteamSessionStateChanged += OnRuntimeSteamSessionStateChanged;
-        _runtimeHost.StatusRefreshRequested += OnRuntimeStatusRefreshRequested;
-        _runtimeHost.StartPowerObservation();
-        RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => _runtimeHost?.CaptureRoutingStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
-        _mainWindow = new MainWindow(composition.StartupSettings, composition.StartupRegistrationMessage, _recoveryManager, composition.StatusProvider,
-            developerTestModeState: _runtimeHost.DeveloperTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
+        var processHost = _processHost!;
+        processHost.InitializeRuntime();
+        processHost.StartPowerObservation();
+        RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => processHost.CaptureRoutingStatus();
+        _mainWindow = new MainWindow(processHost.StartupSettings, processHost.StartupRegistrationMessage, processHost.RuntimeRecoveryManager, processHost.StatusProvider,
+            developerTestModeState: processHost.DeveloperTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
-        try
+        if (!processHost.TryInitializeTray(ShowMainWindow, RestartApplication, ExitApplication))
         {
-            _trayHostWindow = new NativeTrayHostWindow();
-            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, ShowMainWindow, RestartApplication, ExitApplication, GetUserTerminationDecision);
-        }
-        catch (Exception exception)
-        {
-            _systemTrayIcon?.Dispose();
-            _systemTrayIcon = null;
-            _trayHostWindow?.Dispose();
-            _trayHostWindow = null;
-            Debug.WriteLine($"System tray initialization failed; showing the main window. {exception}");
             _showMainWindow = true;
         }
         if (_showMainWindow)
@@ -118,7 +76,7 @@ public partial class App : Application
             _mainWindow.Activate();
             AppLog.Info("Main window activated.");
         }
-        _ = _runtimeHost.ReconcileAsync();
+        _ = processHost.ReconcileAsync();
 
     }
 
@@ -145,24 +103,17 @@ public partial class App : Application
             return;
         }
 
-        _startupCancellationTokenSource.Cancel();
-        _runtimeHost?.PrepareForShutdown();
-
-        _systemTrayIcon?.Dispose();
-        _systemTrayIcon = null;
-        _trayHostWindow?.Dispose();
-        _trayHostWindow = null;
-        if (_runtimeHost is not null)
+        if (_processHost is not null)
         {
-            _runtimeHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            _runtimeHost = null;
+            _processHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _processHost = null;
         }
         AppLog.Info("Runtime cleanup completed.");
     }
 
     private void OnMainWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
-        if (ApplicationLifecyclePolicy.OnWindowClose(_isExplicitExit) == ApplicationCloseAction.HideWindow && _systemTrayIcon?.IsAvailable == true)
+        if (ApplicationLifecyclePolicy.OnWindowClose(_isExplicitExit) == ApplicationCloseAction.HideWindow && _processHost?.IsTrayAvailable == true)
         {
             args.Cancel = true;
             _mainWindow?.AppWindow.Hide();
@@ -170,7 +121,7 @@ public partial class App : Application
             return;
         }
 
-        if (!_isExplicitExit && _systemTrayIcon?.IsAvailable != true)
+        if (!_isExplicitExit && _processHost?.IsTrayAvailable != true)
         {
             var termination = GetUserTerminationDecision();
             if (!termination.CanTerminate)
@@ -185,7 +136,7 @@ public partial class App : Application
     }
 
     private UserTerminationDecision GetUserTerminationDecision() =>
-        _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);
+        _processHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);
 
     private void ShowMainWindow()
     {
@@ -259,7 +210,7 @@ public partial class App : Application
     {
         _isExplicitExit = true;
         AppLog.Info("Update shutdown requested.");
-        _startupCancellationTokenSource.Cancel();
+        _processHost?.CancelStartup();
         Exit();
     }
 }
