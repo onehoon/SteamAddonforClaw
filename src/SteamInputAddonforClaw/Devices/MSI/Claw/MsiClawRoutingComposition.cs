@@ -16,9 +16,8 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 /// <remarks>
 /// Also implements <see cref="IHandheldRoutingComposition"/>, the generic view the routing/output
 /// layer consumes -- a thin projection over the same already-created objects below, not a
-/// second composition. The concrete properties remain for App lifecycle callers that still need
-/// them directly; removing that remaining coupling is intentionally deferred to follow-up
-/// architecture work.
+/// second composition. The concrete properties remain for focused MSI implementation/tests;
+/// removing any no-longer-needed concrete surface is deferred to later cleanup.
 ///
 /// <para>
 /// This class owns <see cref="NativeModeSession"/> and <see cref="PhysicalInputSource"/> --

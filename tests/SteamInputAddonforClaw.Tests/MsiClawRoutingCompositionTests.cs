@@ -12,11 +12,11 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class MsiClawRoutingCompositionTests
 {
     [Fact]
-    public void SafetySession_ControllerStateSource_and_SessionBoundaryParticipant_are_the_same_owned_instances()
+    public async Task SafetySession_ControllerStateSource_and_SessionBoundaryParticipant_are_the_same_owned_instances()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
         var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
-        var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
+        await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
         IHandheldRoutingComposition handheld = composition;
 
         Assert.Same(composition.NativeModeSession, handheld.SafetySession);
