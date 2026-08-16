@@ -93,11 +93,11 @@ jobs:
             throw 'Failed to resolve the checked-out commit to use as the adoption base SHA.'
           }
 
-          # Defense-in-depth for the checkout step above: on a Re-run, GitHub Actions has been
-          # observed to still resolve the historical event SHA even with an explicit branch ref,
-          # silently rewinding the checkout after it briefly discovered current main. Re-fetch
-          # main immediately and confirm the checkout actually landed on it before any adoption
-          # work begins, rather than trusting the checkout step alone.
+          # Defense-in-depth for the checkout step above: the previous workflow, which did not
+          # specify an explicit branch ref, was observed on Re-run to resolve the historical
+          # event SHA. Re-fetch main immediately and confirm that this checkout actually landed
+          # on current main before any adoption work begins, rather than trusting the checkout
+          # step alone.
           git fetch origin main
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to fetch origin/main to sanity-check the checkout (git fetch exit code $LASTEXITCODE)."
