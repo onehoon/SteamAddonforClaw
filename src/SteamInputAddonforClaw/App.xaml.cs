@@ -22,6 +22,7 @@ public partial class App : Application
     private DispatcherQueue? _dispatcherQueue;
     private bool _showMainWindow;
     private SystemTrayIcon? _systemTrayIcon;
+    private NativeTrayHostWindow? _trayHostWindow;
     private RecoveryManager? _recoveryManager;
     private bool _isExplicitExit;
     private int _shutdownStarted;
@@ -100,10 +101,15 @@ public partial class App : Application
 
         try
         {
-            _systemTrayIcon = new SystemTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(_mainWindow), ShowMainWindow, RestartApplication, ExitApplication, GetUserTerminationDecision);
+            _trayHostWindow = new NativeTrayHostWindow();
+            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, ShowMainWindow, RestartApplication, ExitApplication, GetUserTerminationDecision);
         }
         catch (Exception exception)
         {
+            _systemTrayIcon?.Dispose();
+            _systemTrayIcon = null;
+            _trayHostWindow?.Dispose();
+            _trayHostWindow = null;
             Debug.WriteLine($"System tray initialization failed; showing the main window. {exception}");
             _showMainWindow = true;
         }
@@ -144,6 +150,8 @@ public partial class App : Application
 
         _systemTrayIcon?.Dispose();
         _systemTrayIcon = null;
+        _trayHostWindow?.Dispose();
+        _trayHostWindow = null;
         if (_runtimeHost is not null)
         {
             _runtimeHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
