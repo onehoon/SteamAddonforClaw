@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "repository": "onehoon/VIIPER",
-  "commit": "cb29c1727996f50debfc7836c1febd6c70008811",
+  "commit": "89ce1426883ea5001b5788000df272db7532f0e1",
   "build_entrypoint": "just build-libVIIPER Release",
   "platform": "windows",
   "architecture": "amd64",
   "dll": {
     "file": "libVIIPER.dll",
-    "sha256": "BAA271A8859FC1864EA03898CEC2EE3F708C85AE924E27FF7EDD990E1EA57D33"
+    "sha256": "A676F27299CF4C0F645F4FE4048EE8ADAFEC40B18997B15C0135534995B44456"
   },
   "header": {
     "file": "libVIIPER.h",
