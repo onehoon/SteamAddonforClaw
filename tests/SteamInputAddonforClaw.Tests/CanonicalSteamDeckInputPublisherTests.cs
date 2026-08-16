@@ -8,11 +8,8 @@ using Xunit;
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>
-/// Steam Deck counterpart to <see cref="CanonicalSteamControllerInputPublisherTests"/>: same manual-
-/// tick and production-worker coverage (scheduler, fault semantics, timing diagnostics, lifecycle
-/// safety), exercised against <see cref="CanonicalSteamDeckInputPublisher"/>. Deduplicated D-pad
-/// transition logging is a Gordon-specific concern (that publisher logs a mapped D-pad transition
-/// message the Deck publisher does not emit) and is intentionally not mirrored here.
+/// Manual-tick and production-worker coverage (scheduler, fault semantics, timing diagnostics,
+/// lifecycle safety) for <see cref="CanonicalSteamDeckInputPublisher"/>.
 /// </summary>
 [Collection("AppLog")]
 public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
@@ -151,7 +148,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
-    public async Task Heartbeat_reports_Gordon_parity_timing_fields()
+    public async Task Heartbeat_reports_timing_decomposition_fields()
     {
         var state = new ControllerState(default, default, default, default, new AuxiliaryButtonState([false, false]));
         var source = new Snapshot(state);
@@ -178,8 +175,8 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         Assert.Contains("MaxSetStateDurationMs=", heartbeat);
         Assert.Contains("HeartbeatElapsedMs=", heartbeat);
         Assert.Contains("EffectiveSetStateHz=", heartbeat);
-        // Timing-decomposition parity fields (Minor 1): present with zero defaults on the manual-tick
-        // path, which never drives WorkerLoop.
+        // Timing-decomposition fields: present with zero defaults on the manual-tick path, which
+        // never drives WorkerLoop.
         Assert.Contains("TimerWakeCount=0", heartbeat);
         Assert.Contains("ExpectedTicksAt4ms=", heartbeat);
         Assert.Contains("AverageWakeToWakeMs=0", heartbeat);
@@ -196,7 +193,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
-    public async Task TimingDiagnostics_WakeOverThresholdCountsIncrementLikeGordon()
+    public async Task TimingDiagnostics_WakeOverThresholdCountsIncrementWhenIntervalExceedsThresholds()
     {
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
         var sink = new FakeSink(); var ticks = new ManualTicks();
@@ -327,6 +324,206 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         var text = heartbeat.Split(field + "=")[1].Split(' ')[0].TrimEnd('\r');
         var value = double.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
         Assert.InRange(value, low, high);
+    }
+
+    [Fact]
+    public async Task TimingDiagnostics_FirstTimerWakeDoesNotInventAWakeToWakeInterval()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var fakeNow = 0L;
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow);
+        publisher.Start();
+
+        // A single, first-ever timer wake: no previous wake exists, so no wake-to-wake sample should be
+        // recorded (an average over zero samples must report 0, not a bogus/huge computed value).
+        publisher.RecordTimerWakeForTests((long)(123 * (Stopwatch.Frequency / 1000.0)));
+
+        fakeNow = Stopwatch.Frequency + 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var heartbeat = Assert.Single(LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n'), line => line.Contains("publisher heartbeat"));
+        Assert.Contains("TimerWakeCount=1", heartbeat);
+        Assert.Contains("AverageWakeToWakeMs=0", heartbeat);
+        Assert.Contains("MaxWakeToWakeMs=0", heartbeat);
+    }
+
+    [Fact]
+    public async Task TimingDiagnostics_ResetAfterHeartbeatDoesNotCarryIntervalCountsOrSumsIntoTheNextWindow()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var fakeNow = 0L;
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow);
+        publisher.Start();
+
+        var msToTicks = Stopwatch.Frequency / 1000.0;
+        publisher.RecordTimerWakeForTests(0);
+        publisher.RecordTimerWakeForTests((long)(4 * msToTicks));
+        publisher.RecordWaitBlockedForTests(0, (long)(4 * msToTicks));
+        publisher.RecordPublishWorkForTests(0, (long)(1 * msToTicks));
+        publisher.RecordWakeLatenessForTests((long)(4 * msToTicks), (long)(3.5 * msToTicks));
+
+        fakeNow = Stopwatch.Frequency + 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1); // first heartbeat fires here
+
+        // A second window: only one more timer wake, no wait-blocked/publish-work samples at all this
+        // time. If the previous window's sums/counts leaked through, this heartbeat would still show
+        // stale non-zero wait-blocked/publish-work data or an inflated wake count.
+        publisher.RecordTimerWakeForTests((long)(4 * msToTicks) + (long)(4 * msToTicks));
+        fakeNow = 2 * Stopwatch.Frequency + 2;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n').Where(line => line.Contains("publisher heartbeat")).ToArray();
+        Assert.Equal(2, lines.Length);
+        var secondHeartbeat = lines[1];
+        // Only the carried-over wake-to-wake interval from the window boundary (4ms, from the last wake
+        // of window 1 to the one wake of window 2) should show up -- not window 1's own first interval.
+        Assert.Contains("TimerWakeCount=1", secondHeartbeat);
+        Assert.Contains("AverageWaitBlockedMs=0", secondHeartbeat);
+        Assert.Contains("MaxWaitBlockedMs=0", secondHeartbeat);
+        Assert.Contains("AveragePublishWorkMs=0", secondHeartbeat);
+        Assert.Contains("MaxPublishWorkMs=0", secondHeartbeat);
+        Assert.Contains("AverageWakeLatenessMs=0", secondHeartbeat);
+        Assert.Contains("MaxWakeLatenessMs=0", secondHeartbeat);
+        Assert.Contains("SkippedDeadlineCount=0", secondHeartbeat);
+    }
+
+    [Fact]
+    public async Task TimingDiagnostics_StopThenStartDoesNotCarryTheLastWakeTimestampAcrossTheGap()
+    {
+        // Unlike a heartbeat reset (which intentionally keeps _previousTimerWakeTimestamp so the
+        // interval spanning the boundary is still a valid sample), a Stop-then-Start on the same
+        // publisher instance can have an arbitrarily long real-world gap between them -- production
+        // supports exactly this (a new routing session reusing the same publisher). Without a reset in
+        // Start(), the first timer wake of the new run would be diffed against the last wake of the
+        // previous run and misreported as e.g. a multi-second WakeToWake outlier.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var fakeNow = 0L;
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, timestampProvider: () => fakeNow);
+        publisher.Start();
+
+        publisher.RecordTimerWakeForTests(0);
+        fakeNow = Stopwatch.Frequency + 1;
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1); // heartbeat fires, leaves _hasPreviousTimerWake set
+        await publisher.StopAsync();
+
+        // Simulate a large real-world gap before the same instance is started again.
+        fakeNow += 5 * Stopwatch.Frequency;
+        publisher.Start();
+
+        var secondRunWake = fakeNow;
+        publisher.RecordTimerWakeForTests(secondRunWake);
+        fakeNow = secondRunWake + Stopwatch.Frequency + 1;
+        // ManualTicks.TickAsync() dequeues its waiter queue FIFO but a cancelled wait from the first
+        // run's loop (cancelled by StopAsync, not dequeued) is still sitting at the front; one throwaway
+        // tick flushes that stale entry so the next one actually reaches the restarted loop's new wait.
+        await ticks.TickAsync();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        await publisher.StopAsync();
+
+        AppLog.DrainForTests();
+        var lines = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath).Split('\n').Where(line => line.Contains("publisher heartbeat")).ToArray();
+        Assert.Equal(2, lines.Length);
+        var afterRestart = lines[1];
+        Assert.Contains("TimerWakeCount=1", afterRestart);
+        Assert.Contains("AverageWakeToWakeMs=0", afterRestart);
+        Assert.Contains("MaxWakeToWakeMs=0", afterRestart);
+        Assert.Contains("WakeOver4_25MsCount=0", afterRestart);
+        Assert.Contains("WakeOver5MsCount=0", afterRestart);
+    }
+
+    [Fact]
+    public async Task Production_worker_timing_diagnostics_wire_up_end_to_end_with_the_real_timer()
+    {
+        // Real production path (dedicated worker + real high-resolution timer), with a fake clock that
+        // forces the heartbeat to fire almost immediately in wall-clock time so this stays fast and
+        // deterministic without asserting any specific Hz. For a clean run with no SetState failures,
+        // every normal timer wake corresponds to exactly one successful publish, so TimerWakeCount must
+        // equal PublishedStateCount. Note this does NOT by itself prove the stop event's wake is never
+        // miscounted as a timer wake: StopAsync runs only after the heartbeat above is already read, and
+        // WorkerLoop returns immediately on a stop wake without calling PublishCurrentStateOnce (the only
+        // path that can trigger another heartbeat), so a hypothetical regression that counted the stop
+        // wake would not surface as a logged heartbeat here for this assertion to catch. That guarantee
+        // instead rests on WorkerLoop's `if (signaled == 0) return;` running before any counter is
+        // touched -- a one-line, directly-readable invariant that doesn't need its own seam.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink();
+        var realElapsed = Stopwatch.StartNew();
+        long TimestampProvider() => realElapsed.ElapsedMilliseconds >= 5 ? Stopwatch.Frequency + 1 : 0;
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, timestampProvider: TimestampProvider);
+
+        publisher.Start();
+        try
+        {
+            await sink.WaitForCountAsync(2, TimeSpan.FromSeconds(2));
+            // Give a couple more real ticks a chance to land so at least one heartbeat has fired.
+            await Task.Delay(50);
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        var heartbeat = log.Split('\n').LastOrDefault(line => line.Contains("publisher heartbeat"));
+        Assert.NotNull(heartbeat);
+        var wakeCountText = heartbeat!.Split("TimerWakeCount=")[1].Split(' ')[0];
+        var publishedText = heartbeat.Split("TotalPublishedStateCount=")[1].Split(' ')[0];
+        Assert.Equal(int.Parse(publishedText, System.Globalization.CultureInfo.InvariantCulture), int.Parse(wakeCountText, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task Production_stop_requested_while_SetState_is_blocked_exits_before_rearming()
+    {
+        // Under the earlier periodic-timer design this exercised a genuine WaitAny([timer, stopEvent])
+        // race (a timer period could elapse -- and the timer re-signal itself -- while SetState was still
+        // blocked, so both handles could be signaled by the time the worker returned to wait; stop, at
+        // index 0, had to win that race). The one-shot timer is not waiting at all -- and so cannot become
+        // signaled again -- from the moment it fires until WorkerLoop explicitly re-arms it after the
+        // publish returns, so that specific both-signaled race can no longer occur here. What this test
+        // verifies now: StopAsync signals the stop event while a slow SetState call is still in flight;
+        // once SetState returns, the worker's stopEvent.WaitOne(0) check (run before computing the next
+        // deadline or re-arming) sees stop requested and exits -- no re-arm, no second SetState call. The
+        // WaitAny stop-priority ordering itself (stopEvent still at index 0) is unchanged and still
+        // matters for an ordinary wait where the timer could legitimately also be signaled.
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var firstCallBlocked = new ManualResetEventSlim(false);
+        var releaseFirstCall = new ManualResetEventSlim(false);
+        var sink = new BlockingFirstCallSink(firstCallBlocked, releaseFirstCall);
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink);
+
+        publisher.Start();
+        try
+        {
+            Assert.True(firstCallBlocked.Wait(TimeSpan.FromSeconds(2)), "The first SetState call never started.");
+
+            // Begin stopping while the worker is still blocked inside the first SetState. StopAsync's
+            // stop-event Set() runs synchronously before its first await, so by the time this call
+            // returns a Task, the stop event is already signaled.
+            var stopTask = publisher.StopAsync();
+
+            // Let some time elapse while still blocked, so the stop request is comfortably in place well
+            // before SetState returns and the worker gets to its post-publish stop check.
+            await Task.Delay(50);
+            releaseFirstCall.Set();
+
+            await stopTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            // No-op if the above already completed the stop; a safety net if an assertion failed first.
+            await publisher.StopAsync();
+        }
+
+        Assert.Equal(1, sink.Count);
+        Assert.False(publisher.IsRunning);
     }
 
     [Fact]

@@ -16,14 +16,11 @@ internal sealed record SteamDeckVirtualDeviceIdentitySummary(
     int LogicalCandidateGroupCount);
 
 /// <summary>
-/// Steam Deck counterpart to <see cref="ViiperVirtualDeviceIdentityDiagnostics"/>: a bounded,
-/// diagnostic-only summary of a failed (NoNewCandidate/Ambiguous) PnP identity resolution against
-/// <see cref="SteamDeckVirtualDeviceIdentityPolicy"/>. Kept as a small parallel class -- like
-/// <see cref="SteamDeckVirtualDeviceIdentityPolicy"/> itself -- rather than generalizing Gordon's
-/// diagnostics class, which is hardcoded to Gordon's VID/PID and naming. This matters specifically
-/// because the Steam Deck (<c>28DE:1205</c>) is a composite USB device (keyboard + mouse +
-/// controller interfaces under one container), so a failed resolution on first real hardware will be
-/// harder to read from the bare resolver result alone than Gordon's simpler topology.
+/// A bounded, diagnostic-only summary of a failed (NoNewCandidate/Ambiguous) PnP identity resolution
+/// against <see cref="SteamDeckVirtualDeviceIdentityPolicy"/>. This matters specifically because the
+/// Steam Deck (<c>28DE:1205</c>) is a composite USB device (keyboard + mouse + controller interfaces
+/// under one container), so a failed resolution on first real hardware can be harder to read from the
+/// bare resolver result alone.
 /// </summary>
 internal static class SteamDeckVirtualDeviceIdentityDiagnostics
 {

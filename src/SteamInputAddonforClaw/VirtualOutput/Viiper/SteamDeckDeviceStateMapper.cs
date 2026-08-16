@@ -5,14 +5,14 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// <summary>
 /// Maps the Addon's physical <see cref="ControllerState"/> into the canonical VIIPER
 /// <see cref="SteamDeckDeviceState"/> (VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778, PR
-/// #16). This is a simple parallel implementation next to <see cref="SteamControllerDeviceStateMapper"/>,
-/// not a shared abstraction -- see docs/VIIPER_MIGRATION_TODO.md SD2.
+/// #16).
 /// </summary>
 /// <remarks>
-/// Unlike Gordon, Steam Deck has native right-stick and R3 fields, so this mapper does not carry
-/// forward Gordon's right-pad substitution (RightStick -> RPadX/Y, R3 -> RPadPress). Trackpad,
-/// IMU/quaternion, L5/R5, Steam, and QuickAccess fields are intentionally left neutral for this
-/// first non-gyro smoke test -- see docs/VIIPER_MIGRATION_TODO.md SD2/SD5/SD6.
+/// Steam Deck has native right-stick and R3 fields, so this mapper writes them directly (RightStick
+/// -> RStickX/Y, R3 -> native R3) rather than substituting them into trackpad fields. Trackpad,
+/// IMU/quaternion, L5/R5, Steam, and QuickAccess fields are intentionally left neutral until their
+/// separate feature tracks are implemented and hardware-validated -- see
+/// docs/VIIPER_MIGRATION_TODO.md SD5/SD6.
 /// </remarks>
 internal static class SteamDeckDeviceStateMapper
 {

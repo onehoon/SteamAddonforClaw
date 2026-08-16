@@ -98,18 +98,18 @@ public sealed class RecoveryManagerTests : IDisposable
         var mutationId = Guid.NewGuid();
 
         Assert.Equal(RecoveryStatus.Success, manager.RecordAddonOwnedVirtualDeviceIntent(
-            session.RecoverySessionId, mutationId, "steamcontroller", 0x28DE, 0x1102, []).Status);
+            session.RecoverySessionId, mutationId, "steamdeck", 0x28DE, 0x1205, []).Status);
         Assert.Equal(RecoveryStatus.Success, manager.ResolveAddonOwnedVirtualDeviceIdentity(
-            session.RecoverySessionId, mutationId, ["USB\\VID_28DE&PID_1102\\owned"]).Status);
+            session.RecoverySessionId, mutationId, ["USB\\VID_28DE&PID_1205\\owned"]).Status);
 
         var loaded = manager.LoadJournal().Journal!;
         var entry = Assert.Single(loaded.Mutations.AddonOwnedVirtualDeviceEntries!);
         Assert.Equal(RecoveryManager.CurrentSchemaVersion, loaded.SchemaVersion);
         Assert.Equal(mutationId, entry.MutationId);
-        Assert.Equal("steamcontroller", entry.DeviceType);
+        Assert.Equal("steamdeck", entry.DeviceType);
         Assert.Equal((ushort)0x28DE, entry.VendorId);
-        Assert.Equal((ushort)0x1102, entry.ProductId);
-        Assert.Equal("USB\\VID_28DE&PID_1102\\owned", Assert.Single(entry.ResolvedInstanceIds));
+        Assert.Equal((ushort)0x1205, entry.ProductId);
+        Assert.Equal("USB\\VID_28DE&PID_1205\\owned", Assert.Single(entry.ResolvedInstanceIds));
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public sealed class RecoveryManagerTests : IDisposable
         var mutationId = Guid.NewGuid();
         var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, Snapshot(),
             new(DeviceNativeStateChanged: true, HidHideDeviceAdditions: ["HID\\Claw"], ExecutableWhitelistAdditions: ["C:\\addon.exe"],
-                AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["USB\\VID_28DE&PID_1102\\owned"])]));
+                AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamdeck", 0x28DE, 0x1205, [], ["USB\\VID_28DE&PID_1205\\owned"])]));
 
         var json = JsonSerializer.Serialize(journal);
 
@@ -135,8 +135,8 @@ public sealed class RecoveryManagerTests : IDisposable
         manager.RecordHidHideWhitelistAddition(native.RecoverySessionId, "C:\\addon.exe");
         manager.RecordHidHideDeviceAddition(native.RecoverySessionId, "HID\\Claw");
         var mutationId = Guid.NewGuid();
-        manager.RecordAddonOwnedVirtualDeviceIntent(native.RecoverySessionId, mutationId, "steamcontroller", 0x28DE, 0x1102, []);
-        manager.ResolveAddonOwnedVirtualDeviceIdentity(native.RecoverySessionId, mutationId, ["USB\\VID_28DE&PID_1102\\owned"]);
+        manager.RecordAddonOwnedVirtualDeviceIntent(native.RecoverySessionId, mutationId, "steamdeck", 0x28DE, 0x1205, []);
+        manager.ResolveAddonOwnedVirtualDeviceIdentity(native.RecoverySessionId, mutationId, ["USB\\VID_28DE&PID_1205\\owned"]);
 
         var loaded = manager.LoadJournal();
 
@@ -150,7 +150,7 @@ public sealed class RecoveryManagerTests : IDisposable
         Assert.Contains("HID\\Claw", journal.Mutations.HidHideDeviceAdditions!);
         var entry = Assert.Single(journal.Mutations.AddonOwnedVirtualDeviceEntries!);
         Assert.Equal(mutationId, entry.MutationId);
-        Assert.Equal("USB\\VID_28DE&PID_1102\\owned", Assert.Single(entry.ResolvedInstanceIds));
+        Assert.Equal("USB\\VID_28DE&PID_1205\\owned", Assert.Single(entry.ResolvedInstanceIds));
     }
 
     [Fact]

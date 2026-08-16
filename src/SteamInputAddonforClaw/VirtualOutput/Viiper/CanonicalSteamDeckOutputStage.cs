@@ -9,18 +9,14 @@ using SteamInputAddonforClaw.Diagnostics;
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
-/// Steam Deck counterpart to <see cref="ClassicSteamControllerOutputStage"/>: the same Addon safety
-/// shell (prepare/before-PnP snapshot -> recovery intent -> uncertain ownership -> create/attach ->
-/// resolve PnP identity -> recovery checkpoint -> HidHide inspection -> neutral -> live publisher,
-/// and the mirrored teardown ordering), driving the typed Steam Deck ABI
-/// (<see cref="CanonicalSteamDeckSession"/> / <see cref="CanonicalSteamDeckInputPublisher"/>)
-/// against exact identity <c>28DE:1205</c> instead of Gordon's <c>28DE:1102</c>.
+/// The production Steam output routing stage: the Addon safety shell around the canonical typed
+/// Steam Deck path -- prepare/before-PnP snapshot, recovery intent, ownership uncertainty,
+/// create/attach the typed Deck device, resolve the exact <c>28DE:1205</c> PnP identity, recovery
+/// checkpoint, HidHide inspection, neutral, live publisher -- and the mirrored ordered teardown,
+/// driving <see cref="CanonicalSteamDeckSession"/> / <see cref="CanonicalSteamDeckInputPublisher"/>.
+/// Failures at any stage (native, publisher, HidHide, or recovery) fail closed rather than continuing
+/// through an alternate output.
 /// </summary>
-/// <remarks>
-/// This is a side-by-side SD2 implementation, not a production cutover: see
-/// docs/VIIPER_MIGRATION_TODO.md SD2/SD3/SD4. It is intentionally not wired into the normal
-/// production routing pipeline; see the Developer-Test-only composition seam in App.xaml.cs.
-/// </remarks>
 internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
 {
     private enum LifecycleState { Inactive, Prepared, IntentRecorded, Creating, Active, RollingBack }

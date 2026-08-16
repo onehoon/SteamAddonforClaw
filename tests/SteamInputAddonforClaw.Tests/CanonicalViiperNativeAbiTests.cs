@@ -7,45 +7,6 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class CanonicalViiperNativeAbiTests
 {
-    private static readonly string[] StateByteFields =
-    [
-        "A", "X", "B", "Y", "L1", "R1", "L2", "R2", "Menu", "Steam", "Options",
-        "DPadDown", "DPadLeft", "DPadRight", "DPadUp", "L3", "LGrip", "RGrip",
-        "LPadTouch", "RPadTouch", "LPadPress", "RPadPress", "LPadAndStick"
-    ];
-
-    [Fact]
-    public void SteamControllerDeviceState_HasCanonicalSizeAndOffsets()
-    {
-        Assert.Equal(62, Marshal.SizeOf<SteamControllerDeviceState>());
-
-        var expected = new Dictionary<string, int>
-        {
-            ["A"] = 0, ["X"] = 1, ["B"] = 2, ["Y"] = 3,
-            ["L1"] = 4, ["R1"] = 5, ["L2"] = 6, ["R2"] = 7,
-            ["Menu"] = 8, ["Steam"] = 9, ["Options"] = 10,
-            ["DPadDown"] = 11, ["DPadLeft"] = 12, ["DPadRight"] = 13, ["DPadUp"] = 14,
-            ["L3"] = 15, ["LGrip"] = 16, ["RGrip"] = 17,
-            ["LPadTouch"] = 18, ["RPadTouch"] = 19, ["LPadPress"] = 20, ["RPadPress"] = 21, ["LPadAndStick"] = 22,
-            ["LPadX"] = 24, ["LPadY"] = 26, ["RPadX"] = 28, ["RPadY"] = 30,
-            ["LTrigger"] = 32, ["RTrigger"] = 34, ["LStickX"] = 36, ["LStickY"] = 38,
-            ["AccelX"] = 40, ["AccelY"] = 42, ["AccelZ"] = 44,
-            ["GyroX"] = 46, ["GyroY"] = 48, ["GyroZ"] = 50,
-            ["GyroQuatW"] = 52, ["GyroQuatX"] = 54, ["GyroQuatY"] = 56, ["GyroQuatZ"] = 58,
-            ["BatteryMilliVolts"] = 60
-        };
-
-        foreach (var (name, offset) in expected)
-            Assert.Equal(offset, Marshal.OffsetOf<SteamControllerDeviceState>(name).ToInt32());
-    }
-
-    [Fact]
-    public void SteamControllerDeviceState_LogicalFieldsAreByteWidth()
-    {
-        foreach (var name in StateByteFields)
-            Assert.Equal(typeof(byte), typeof(SteamControllerDeviceState).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.FieldType);
-    }
-
     [Fact]
     public void USBServerConfig_HasCanonicalX64Layout()
     {
@@ -57,20 +18,23 @@ public sealed class CanonicalViiperNativeAbiTests
     }
 
     [Fact]
-    public void RequiredExports_PinTheCanonicalGordonSurface()
+    public void RequiredExports_PinTheAddonConsumedCanonicalSurface()
     {
         var expected = new[]
         {
             "NewUSBServer", "CloseUSBServer", "CreateUSBBus", "RemoveUSBBus",
             "GetUSBDeviceIdentity", "AttachUSBDevice", "DetachUSBDevice",
-            "CreateSteamControllerDevice", "SetSteamControllerDeviceState",
-            "SetSteamControllerOutputCallback", "RemoveSteamControllerDevice", "RemoveSteamControllerDeviceEx",
             "CreateSteamDeckDevice", "SetSteamDeckDeviceState", "SetSteamDeckOutputCallback",
             "RemoveSteamDeckDevice", "RemoveSteamDeckDeviceEx"
         };
 
         Assert.Equal(expected, CanonicalViiperNativeApi.RequiredExports);
         Assert.DoesNotContain(CanonicalViiperNativeApi.RequiredExports, name => name.StartsWith("viiper_", StringComparison.Ordinal));
+        Assert.DoesNotContain("CreateSteamControllerDevice", CanonicalViiperNativeApi.RequiredExports);
+        Assert.DoesNotContain("SetSteamControllerDeviceState", CanonicalViiperNativeApi.RequiredExports);
+        Assert.DoesNotContain("SetSteamControllerOutputCallback", CanonicalViiperNativeApi.RequiredExports);
+        Assert.DoesNotContain("RemoveSteamControllerDevice", CanonicalViiperNativeApi.RequiredExports);
+        Assert.DoesNotContain("RemoveSteamControllerDeviceEx", CanonicalViiperNativeApi.RequiredExports);
     }
 
     // Steam Deck ABI (VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778, PR #16). Field order,
@@ -180,12 +144,6 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.Equal(typeof(uint), parameters[2].ParameterType);
     }
 
-    [Fact]
-    public void SteamDeckOutputCallback_IsADistinctDelegateTypeFromSteamControllerOutputCallback()
-    {
-        Assert.NotEqual(typeof(SteamControllerOutputCallback), typeof(SteamDeckOutputCallback));
-    }
-
     private static void AssertCdecl(string delegateName, Type expectedReturnType)
     {
         var type = NestedDelegate(delegateName);
@@ -210,43 +168,13 @@ public sealed class CanonicalViiperNativeAbiTests
             Assert.NotNull(convention);
             Assert.Equal(CallingConvention.Cdecl, convention!.CallingConvention);
             var returnType = type.GetMethod("Invoke")!.ReturnType;
-            if (type.Name == "RemoveSteamControllerDeviceExDelegate")
-                Assert.Equal(typeof(SteamControllerDeviceRemoveResult), returnType);
-            else if (type.Name == "RemoveSteamDeckDeviceExDelegate")
+            if (type.Name == "RemoveSteamDeckDeviceExDelegate")
                 Assert.Equal(typeof(SteamDeckDeviceRemoveResult), returnType);
             else
                 Assert.Equal(typeof(byte), returnType);
         }
 
-        Assert.Equal(typeof(int), Enum.GetUnderlyingType(typeof(SteamControllerDeviceRemoveResult)));
-        Assert.Equal(4, Marshal.SizeOf<int>());
-        Assert.Equal(0, (int)SteamControllerDeviceRemoveResult.Success);
-        Assert.Equal(1, (int)SteamControllerDeviceRemoveResult.RetryableFailure);
-        Assert.Equal(2, (int)SteamControllerDeviceRemoveResult.UnsafeOutcomeUnknown);
-        Assert.Equal(3, (int)SteamControllerDeviceRemoveResult.Invalid);
-
         Assert.Equal(CallingConvention.Cdecl, typeof(ViiperLogCallback).GetCustomAttribute<UnmanagedFunctionPointerAttribute>()!.CallingConvention);
-        Assert.Equal(CallingConvention.Cdecl, typeof(SteamControllerOutputCallback).GetCustomAttribute<UnmanagedFunctionPointerAttribute>()!.CallingConvention);
-    }
-
-    [Fact]
-    public void CanonicalDelegatesUsePointerSizedHandlesAndStateByValue()
-    {
-        var create = NestedDelegate("CreateSteamControllerDeviceDelegate").GetMethod("Invoke")!.GetParameters();
-        Assert.Equal(typeof(nuint), create[0].ParameterType);
-        Assert.Equal(typeof(nuint).MakeByRefType(), create[1].ParameterType);
-        Assert.Equal(typeof(uint), create[2].ParameterType);
-        Assert.Equal(typeof(byte), create[3].ParameterType);
-
-        var setState = NestedDelegate("SetSteamControllerDeviceStateDelegate").GetMethod("Invoke")!.GetParameters();
-        Assert.Equal(typeof(nuint), setState[0].ParameterType);
-        Assert.Equal(typeof(SteamControllerDeviceState), setState[1].ParameterType);
-        Assert.False(setState[1].ParameterType.IsByRef);
-
-        var callback = typeof(SteamControllerOutputCallback).GetMethod("Invoke")!.GetParameters();
-        Assert.Equal(typeof(nuint), callback[0].ParameterType);
-        Assert.Equal(typeof(nint), callback[1].ParameterType);
-        Assert.Equal(typeof(uint), callback[2].ParameterType);
     }
 
     [Fact]
@@ -259,132 +187,6 @@ public sealed class CanonicalViiperNativeAbiTests
         AssertParameters("GetUsbDeviceIdentityDelegate", typeof(nuint), typeof(uint).MakeByRefType(), typeof(uint).MakeByRefType());
         AssertParameters("AttachUsbDeviceDelegate", typeof(nuint));
         AssertParameters("DetachUsbDeviceDelegate", typeof(nuint));
-        AssertParameters("CreateSteamControllerDeviceDelegate", typeof(nuint), typeof(nuint).MakeByRefType(), typeof(uint), typeof(byte), typeof(ushort), typeof(ushort));
-        AssertParameters("SetSteamControllerDeviceStateDelegate", typeof(nuint), typeof(SteamControllerDeviceState));
-        AssertParameters("SetSteamControllerOutputCallbackDelegate", typeof(nuint), typeof(SteamControllerOutputCallback));
-        AssertParameters("RemoveSteamControllerDeviceDelegate", typeof(nuint));
-        AssertParameters("RemoveSteamControllerDeviceExDelegate", typeof(nuint));
-    }
-
-    [Fact]
-    public void CanonicalApi_RootsRegisteredOutputCallback()
-    {
-        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-        var weak = RegisterOutputCallback(api, 42);
-
-        CollectGarbage();
-
-        Assert.True(weak.TryGetTarget(out _));
-    }
-
-    [Fact]
-    public void CanonicalApi_RemovingBusReleasesOwnedOutputCallbacks()
-    {
-        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-        Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
-        var weak = RegisterOutputCallback(api, deviceHandle);
-
-        Assert.True(api.RemoveUSBBus(1, 1));
-        CollectGarbage();
-
-        Assert.False(weak.TryGetTarget(out _));
-    }
-
-    [Fact]
-    public void CanonicalApi_ClosingServerReleasesOwnedOutputAndLogCallbacks()
-    {
-        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-        var logWeak = RegisterLogCallback(api);
-        Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
-        var outputWeak = RegisterOutputCallback(api, deviceHandle);
-
-        Assert.True(api.CloseUSBServer(1));
-        CollectGarbage();
-
-        Assert.False(logWeak.TryGetTarget(out _));
-        Assert.False(outputWeak.TryGetTarget(out _));
-    }
-
-    [Fact]
-    public void CanonicalApi_RemoveBusFailureKeepsOwnedOutputCallbackRooted()
-    {
-        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-        Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
-        var weak = RegisterOutputCallback(api, deviceHandle);
-
-        FakeExports.FailRemoveBus = true;
-        try
-        {
-            Assert.False(api.RemoveUSBBus(1, 1));
-            CollectGarbage();
-            Assert.True(weak.TryGetTarget(out _));
-        }
-        finally
-        {
-            FakeExports.FailRemoveBus = false;
-        }
-    }
-
-    [Fact]
-    public void CanonicalApi_CloseServerFailureKeepsOutputAndLogCallbacksRooted()
-    {
-        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-        var logWeak = RegisterLogCallback(api);
-        Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
-        var outputWeak = RegisterOutputCallback(api, deviceHandle);
-
-        FakeExports.FailCloseServer = true;
-        try
-        {
-            Assert.False(api.CloseUSBServer(1));
-            CollectGarbage();
-            Assert.True(logWeak.TryGetTarget(out _));
-            Assert.True(outputWeak.TryGetTarget(out _));
-        }
-        finally
-        {
-            FakeExports.FailCloseServer = false;
-        }
-    }
-
-    [Fact]
-    public void CanonicalApi_ExSuccessReleasesOwnedOutputCallback()
-    {
-        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-        Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
-        var weak = RegisterOutputCallback(api, deviceHandle);
-
-        Assert.Equal(SteamControllerDeviceRemoveResult.Success, api.RemoveSteamControllerDeviceEx(deviceHandle));
-        CollectGarbage();
-
-        Assert.False(weak.TryGetTarget(out _));
-    }
-
-    [Fact]
-    public void CanonicalApi_ExNonSuccessRetainsOwnedOutputCallback()
-    {
-        foreach (var result in new[]
-        {
-            SteamControllerDeviceRemoveResult.RetryableFailure,
-            SteamControllerDeviceRemoveResult.UnsafeOutcomeUnknown,
-            SteamControllerDeviceRemoveResult.Invalid
-        })
-        {
-            var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-            Assert.True(api.CreateSteamControllerDevice(1, out var deviceHandle, 1, false, 0, 0));
-            var weak = RegisterOutputCallback(api, deviceHandle);
-            FakeExports.RemoveDeviceExResult = result;
-            try
-            {
-                Assert.Equal(result, api.RemoveSteamControllerDeviceEx(deviceHandle));
-                CollectGarbage();
-                Assert.True(weak.TryGetTarget(out _));
-            }
-            finally
-            {
-                FakeExports.RemoveDeviceExResult = SteamControllerDeviceRemoveResult.Success;
-            }
-        }
     }
 
     [Fact]
@@ -440,8 +242,8 @@ public sealed class CanonicalViiperNativeAbiTests
 
     // Isolated in its own (non-inlined) method so the only strong reference to the callback is a
     // local that goes out of scope when this method returns, before the caller runs GC.Collect() --
-    // matching RegisterOutputCallback/RegisterSteamDeckOutputCallback's isolation, which the
-    // GC-rooting assertions throughout this file rely on to be reliable.
+    // matching RegisterSteamDeckOutputCallback's isolation, which the GC-rooting assertions
+    // throughout this file rely on to be reliable.
     private static WeakReference<SteamDeckOutputCallback> AttemptAndDiscardSteamDeckOutputCallback(CanonicalViiperNativeApi api, nuint deviceHandle)
     {
         var marker = new object();
@@ -624,54 +426,43 @@ public sealed class CanonicalViiperNativeAbiTests
     }
 
     [Fact]
-    public void SteamDeckCallback_ServerCloseReleasesOwnedRootsAndControllerCallbacksAreUnaffectedByDeckLifecycle()
+    public void SteamDeckCallback_ServerCloseReleasesOwnedRootsAndLogCallback()
     {
         var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-        Assert.True(api.CreateSteamControllerDevice(1, out var controllerHandle, 1, false, 0, 0));
-        var controllerWeak = RegisterOutputCallback(api, controllerHandle);
+        var logWeak = RegisterLogCallback(api);
         Assert.True(api.CreateSteamDeckDevice(1, out var deckHandle, 1, false, 0, 0));
         var deckWeak = RegisterSteamDeckOutputCallback(api, deckHandle);
-
-        Assert.NotEqual(controllerHandle, deckHandle);
 
         Assert.True(api.CloseUSBServer(1));
         CollectGarbage();
 
-        Assert.False(controllerWeak.TryGetTarget(out _));
+        Assert.False(logWeak.TryGetTarget(out _));
         Assert.False(deckWeak.TryGetTarget(out _));
     }
 
     [Fact]
-    public void SteamDeckAndSteamControllerCallbacks_CannotOverwriteEachOthersRoots()
+    public void LogCallback_CloseServerFailureKeepsLogCallbackRooted()
     {
         var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
-        Assert.True(api.CreateSteamControllerDevice(1, out var controllerHandle, 1, false, 0, 0));
-        var controllerWeak = RegisterOutputCallback(api, controllerHandle);
-        Assert.True(api.CreateSteamDeckDevice(1, out var deckHandle, 1, false, 0, 0));
-        var deckWeak = RegisterSteamDeckOutputCallback(api, deckHandle);
+        var logWeak = RegisterLogCallback(api);
 
-        // Removing only the Steam Controller device must not disturb the independently-rooted
-        // Steam Deck callback, proving the two callback dictionaries are not aliased.
-        Assert.Equal(SteamControllerDeviceRemoveResult.Success, api.RemoveSteamControllerDeviceEx(controllerHandle));
-        CollectGarbage();
-
-        Assert.False(controllerWeak.TryGetTarget(out _));
-        Assert.True(deckWeak.TryGetTarget(out _));
+        FakeExports.FailCloseServer = true;
+        try
+        {
+            Assert.False(api.CloseUSBServer(1));
+            CollectGarbage();
+            Assert.True(logWeak.TryGetTarget(out _));
+        }
+        finally
+        {
+            FakeExports.FailCloseServer = false;
+        }
     }
 
     private static void AssertParameters(string delegateName, params Type[] expected)
     {
         var actual = NestedDelegate(delegateName).GetMethod("Invoke")!.GetParameters().Select(parameter => parameter.ParameterType).ToArray();
         Assert.Equal(expected, actual);
-    }
-
-    private static WeakReference<SteamControllerOutputCallback> RegisterOutputCallback(CanonicalViiperNativeApi api, nuint deviceHandle)
-    {
-        var marker = new object();
-        var callback = new SteamControllerOutputCallback((_, _, _) => GC.KeepAlive(marker));
-        var weak = new WeakReference<SteamControllerOutputCallback>(callback);
-        Assert.True(api.SetSteamControllerOutputCallback(deviceHandle, callback));
-        return weak;
     }
 
     private static WeakReference<SteamDeckOutputCallback> RegisterSteamDeckOutputCallback(CanonicalViiperNativeApi api, nuint deviceHandle)
@@ -711,16 +502,7 @@ public sealed class CanonicalViiperNativeAbiTests
         private static readonly CanonicalViiperNativeApi.GetUsbDeviceIdentityDelegate Identity = IdentityImpl;
         private static readonly CanonicalViiperNativeApi.AttachUsbDeviceDelegate Attach = AttachImpl;
         private static readonly CanonicalViiperNativeApi.DetachUsbDeviceDelegate Detach = DetachImpl;
-        private static readonly CanonicalViiperNativeApi.CreateSteamControllerDeviceDelegate CreateDevice = CreateDeviceImpl;
-        private static readonly CanonicalViiperNativeApi.SetSteamControllerDeviceStateDelegate SetState = SetStateImpl;
-        private static readonly CanonicalViiperNativeApi.SetSteamControllerOutputCallbackDelegate SetCallback = SetCallbackImpl;
-        private static readonly CanonicalViiperNativeApi.RemoveSteamControllerDeviceDelegate RemoveDevice = RemoveDeviceImpl;
-        private static readonly CanonicalViiperNativeApi.RemoveSteamControllerDeviceExDelegate RemoveDeviceEx = RemoveDeviceExImpl;
 
-        // Steam Deck surface: stubbed only so CanonicalViiperNativeApi's constructor (which binds
-        // every required export, Gordon and Steam Deck alike) can resolve successfully in these
-        // Gordon-focused fake-native tests. Not exercised by assertions in this file -- see
-        // CanonicalSteamDeckSessionTests for the Steam Deck lifecycle fake.
         private static readonly CanonicalViiperNativeApi.CreateSteamDeckDeviceDelegate CreateDeckDevice = CreateDeckDeviceImpl;
         private static readonly CanonicalViiperNativeApi.SetSteamDeckDeviceStateDelegate SetDeckState = SetDeckStateImpl;
         private static readonly CanonicalViiperNativeApi.SetSteamDeckOutputCallbackDelegate SetDeckCallback = SetDeckCallbackImpl;
@@ -734,19 +516,10 @@ public sealed class CanonicalViiperNativeAbiTests
         private static bool _failRemoveBus;
 
         [ThreadStatic]
-        private static SteamControllerDeviceRemoveResult _removeDeviceExResult;
-
-        [ThreadStatic]
         private static SteamDeckDeviceRemoveResult _removeDeckDeviceExResult;
 
         [ThreadStatic]
         private static bool _failSetDeckCallback;
-
-        internal static SteamControllerDeviceRemoveResult RemoveDeviceExResult
-        {
-            get => _removeDeviceExResult;
-            set => _removeDeviceExResult = value;
-        }
 
         internal static SteamDeckDeviceRemoveResult RemoveDeckDeviceExResult
         {
@@ -797,11 +570,6 @@ public sealed class CanonicalViiperNativeAbiTests
             ["GetUSBDeviceIdentity"] = Marshal.GetFunctionPointerForDelegate(Identity),
             ["AttachUSBDevice"] = Marshal.GetFunctionPointerForDelegate(Attach),
             ["DetachUSBDevice"] = Marshal.GetFunctionPointerForDelegate(Detach),
-            ["CreateSteamControllerDevice"] = Marshal.GetFunctionPointerForDelegate(CreateDevice),
-            ["SetSteamControllerDeviceState"] = Marshal.GetFunctionPointerForDelegate(SetState),
-            ["SetSteamControllerOutputCallback"] = Marshal.GetFunctionPointerForDelegate(SetCallback),
-            ["RemoveSteamControllerDevice"] = Marshal.GetFunctionPointerForDelegate(RemoveDevice),
-            ["RemoveSteamControllerDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveDeviceEx),
             ["CreateSteamDeckDevice"] = Marshal.GetFunctionPointerForDelegate(CreateDeckDevice),
             ["SetSteamDeckDeviceState"] = Marshal.GetFunctionPointerForDelegate(SetDeckState),
             ["SetSteamDeckOutputCallback"] = Marshal.GetFunctionPointerForDelegate(SetDeckCallback),
@@ -817,17 +585,11 @@ public sealed class CanonicalViiperNativeAbiTests
             return 1;
         }
 
-        private static byte HandleOnlyImpl(nuint _) => 1;
-
         private static byte CloseServerImpl(nuint _) => FailCloseServer ? (byte)0 : (byte)1;
 
         private static byte AttachImpl(nuint _) => 1;
 
         private static byte DetachImpl(nuint _) => 1;
-
-        private static byte RemoveDeviceImpl(nuint _) => 1;
-
-        private static SteamControllerDeviceRemoveResult RemoveDeviceExImpl(nuint _) => RemoveDeviceExResult;
 
         private static byte CreateBusImpl(nuint _, ref uint busId)
         {
@@ -843,16 +605,6 @@ public sealed class CanonicalViiperNativeAbiTests
             deviceId = 1;
             return 1;
         }
-
-        private static byte CreateDeviceImpl(nuint _, out nuint handle, uint __, byte ___, ushort ____, ushort _____)
-        {
-            handle = 2;
-            return 1;
-        }
-
-        private static byte SetStateImpl(nuint _, SteamControllerDeviceState __) => 1;
-
-        private static byte SetCallbackImpl(nuint _, SteamControllerOutputCallback? __) => 1;
 
         private static byte CreateDeckDeviceImpl(nuint _, out nuint handle, uint __, byte ___, ushort ____, ushort _____)
         {

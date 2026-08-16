@@ -178,7 +178,7 @@ public sealed class StartupCoordinatorTests
                 HidHideDeviceAdditions: ["HID\\Claw"],
                 ExecutableWhitelistAdditions: ["C:\\addon.exe"],
                 OriginalHidHideActiveState: false,
-                AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamcontroller", 0x28DE, 0x1102, [], ["USB\\VID_28DE&PID_1102\\owned"])]));
+                AddonOwnedVirtualDeviceEntries: [new(mutationId, "steamdeck", 0x28DE, 0x1205, [], ["USB\\VID_28DE&PID_1205\\owned"])]));
         var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),

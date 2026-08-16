@@ -3,20 +3,19 @@ using SteamInputAddonforClaw.Controllers.Detection;
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
-/// Steam Deck counterpart to <see cref="ViiperVirtualDeviceIdentityPolicy"/>: exact target identity
-/// VID <c>28DE</c> PID <c>1205</c>, not a broad "Valve device"/VID-only match. Kept as a small
-/// parallel policy (same usbip-win2 ancestor-ownership rule, different VID/PID) rather than
-/// generalizing Gordon's policy class, per docs/VIIPER_MIGRATION_TODO.md SD2 step 14 -- Gordon's
-/// existing <c>28DE:1102</c> assumptions are untouched.
+/// The exact target Steam Deck identity: VID <c>28DE</c> PID <c>1205</c>, not a broad "Valve
+/// device"/VID-only match. Instance identity comparisons are case-insensitive and matching also
+/// requires proof of a usbip-win2 UDE ancestor, so a coincidentally identical VID/PID on unrelated
+/// hardware cannot be mistaken for the Addon's own virtual device.
 /// </summary>
 internal sealed class SteamDeckVirtualDeviceIdentityPolicy
 {
     internal const ushort VendorId = 0x28DE;
     internal const ushort ProductId = 0x1205;
 
-    // Same hardware-observed usbip-win2 UDE host identity Gordon's policy trusts -- see
-    // ViiperVirtualDeviceIdentityPolicy for the rationale. Real Steam Deck PnP nodes do not carry
-    // any USBIP/VIIPER text themselves either.
+    // Hardware-observed usbip-win2 UDE host identity. Real Steam Deck PnP nodes do not carry any
+    // USBIP/VIIPER text themselves either -- this is how the policy proves the candidate device is
+    // one of ours rather than a coincidentally identical VID/PID on unrelated hardware.
     private const string UsbIpWin2Service = "usbip2_ude";
     private const string UsbIpWin2HardwareId = @"ROOT\USBIP_WIN2\UDE";
 

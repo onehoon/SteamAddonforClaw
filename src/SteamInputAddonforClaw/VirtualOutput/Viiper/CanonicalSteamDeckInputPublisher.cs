@@ -6,16 +6,39 @@ using SteamInputAddonforClaw.Input;
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
-/// Steam Deck counterpart to <see cref="CanonicalSteamControllerInputPublisher"/>: publishes
-/// <see cref="IControllerStateSnapshotSource.LatestState"/>, mapped through
-/// <see cref="SteamDeckDeviceStateMapper"/>, to the canonical VIIPER Steam Deck sink on the same
-/// ~250 Hz (4 ms) monotonic-deadline schedule as the proven Gordon publisher, driven by a dedicated
-/// worker thread waiting on <see cref="WindowsHighResolutionOneShotTimer"/> and re-armed via
-/// <see cref="CanonicalPublisherDeadlineMath"/> -- see that class and
-/// <see cref="CanonicalSteamControllerInputPublisher"/> for the detailed real-hardware timing
-/// rationale this reuses unchanged. This is a deliberate simple duplication for SD2, not a shared
-/// publisher framework refactor -- see docs/VIIPER_MIGRATION_TODO.md SD2.
+/// Publishes <see cref="IControllerStateSnapshotSource.LatestState"/>, mapped through
+/// <see cref="SteamDeckDeviceStateMapper"/>, to the canonical VIIPER Steam Deck sink on a monotonic
+/// absolute ~250 Hz (4 ms) deadline schedule, driven by a dedicated worker thread waiting on
+/// <see cref="WindowsHighResolutionOneShotTimer"/> and re-armed via
+/// <see cref="CanonicalPublisherDeadlineMath"/>.
 /// </summary>
+/// <remarks>
+/// <para>
+/// This scheduling design is the result of real MSI Claw hardware testing. An earlier
+/// <c>Task.Delay</c>-based tick source only achieved ~83 Hz against the 250 Hz target. A later
+/// periodic high-resolution timer (re-arming itself automatically every 4 ms via <c>lPeriod</c>)
+/// stabilized at ~230.8 Hz instead: average wake-to-wake interval ~4.3324 ms, average wait-blocked
+/// time ~4.2885 ms, average publish work only ~0.04345 ms (so <c>SetState</c> itself was not the
+/// bottleneck), and 64.9% of wakes exceeded 4.25 ms -- the wait/wakeup boundary itself was
+/// consistently a few tenths of a millisecond late.
+/// </para>
+/// <para>
+/// This publisher instead tracks a monotonic absolute logical deadline (in
+/// <see cref="System.Diagnostics.Stopwatch"/> ticks) and, after each publish, re-arms the one-shot
+/// timer for only the time remaining until the *next* logical deadline -- not for a full 4 ms
+/// again -- so a late wake shortens the following wait instead of shifting the whole schedule
+/// forward. <see cref="IInputReportTickSource"/> remains a deterministic async test seam; production
+/// always uses the dedicated-thread/one-shot-timer path below, never the tick-source path.
+/// </para>
+/// <para>
+/// Real CPU-heavy testing showed scheduler starvation could still occur even with the deadline
+/// scheduler (sustained windows as low as ~60-150 Hz under saturation), which motivated running the
+/// worker thread at <see cref="ThreadPriority.AboveNormal"/> -- this improves scheduling opportunity
+/// but does not guarantee 250 Hz under saturation. Shutdown must join the worker thread before native
+/// device teardown so an in-flight <c>SetState</c> call cannot race the native handle being removed;
+/// a join timeout fails closed (throws) rather than pretending the worker stopped.
+/// </para>
+/// </remarks>
 internal sealed class CanonicalSteamDeckInputPublisher
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(1);
@@ -52,10 +75,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private long _maxSetStateTicksSinceHeartbeat;
     private long _totalSetStateFailures;
 
-    // Timing-decomposition diagnostics: production-worker-only, mirrored unchanged from
-    // CanonicalSteamControllerInputPublisher (see that class's remarks for the real-hardware
-    // rationale). Touched only from the single dedicated worker thread (WorkerLoop below), so no
-    // synchronization is needed. These stay at their zero defaults on the test/manual-tick
+    // Timing-decomposition diagnostics: production-worker-only (see the class remarks above for the
+    // real-hardware rationale). Touched only from the single dedicated worker thread (WorkerLoop
+    // below), so no synchronization is needed. These stay at their zero defaults on the test/manual-tick
     // IInputReportTickSource path, which never populates them.
     private long _previousTimerWakeTimestamp;
     private bool _hasPreviousTimerWake;
@@ -91,10 +113,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
     internal int PublishedStateCount => _publishedStateCount;
 
     /// <summary>
-    /// Starts publishing. See <see cref="CanonicalSteamControllerInputPublisher.Start"/> for the
-    /// detailed fail-closed startup rationale this mirrors: on the production (no explicit tick
-    /// source) path this throws synchronously and cleans up any partially-created native handle if
-    /// the timer cannot be created or armed, rather than silently falling back to a defective cadence.
+    /// Starts publishing. On the production (no explicit tick source) path this throws synchronously
+    /// and cleans up any partially-created native handle if the timer cannot be created or armed --
+    /// fail closed rather than silently falling back to a defective cadence.
     /// </summary>
     internal void Start()
     {
@@ -185,20 +206,21 @@ internal sealed class CanonicalSteamDeckInputPublisher
         timer.ArmRelative(TimeSpan.FromTicks(due100ns));
     }
 
-    /// <summary>Test-only seam mirroring <see cref="CanonicalSteamControllerInputPublisher.ArmForDeadlineOverrideForTests"/>.</summary>
+    /// <summary>Test-only seam for deterministic initial-arm and runtime re-arm failure coverage.</summary>
     internal Action<WindowsHighResolutionOneShotTimer, long, long>? ArmForDeadlineOverrideForTests { get; set; }
 
     private void ArmForDeadlineViaSeam(WindowsHighResolutionOneShotTimer timer, long deadlineTicks, long nowTicks) =>
         (ArmForDeadlineOverrideForTests ?? ArmForDeadline)(timer, deadlineTicks, nowTicks);
 
-    /// <summary>Test-only seam mirroring <see cref="CanonicalSteamControllerInputPublisher.WorkerThreadStartOverrideForTests"/>.</summary>
+    /// <summary>Test-only seam for deterministic worker-thread-start failure and configuration coverage.</summary>
     internal Action<Thread>? WorkerThreadStartOverrideForTests { get; set; }
 
     /// <summary>
-    /// Signals the worker to stop and waits for it to actually exit. Fail closed on a join timeout
-    /// for the same reason as <see cref="CanonicalSteamControllerInputPublisher"/>: the caller
-    /// proceeds from a successful StopAsync() straight into native Steam Deck device removal, so a
-    /// timed-out join must not silently allow that race -- it throws instead.
+    /// Signals the worker to stop and waits for it to actually exit. The caller proceeds from a
+    /// successful <see cref="StopAsync"/> straight into native Steam Deck device removal, so the join
+    /// must complete before that removal so an in-flight <c>SetState</c> call cannot race the native
+    /// handle being torn down. Fail closed on a join timeout -- a timed-out join must not silently
+    /// allow that race, so it throws instead of returning as if the worker had stopped.
     /// </summary>
     private async Task StopProductionWorkerAsync()
     {
@@ -307,8 +329,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
     }
 
     /// <summary>How late <paramref name="wake"/> landed relative to the deadline that was scheduled for
-    /// it. Clamped to zero -- see <see cref="CanonicalSteamControllerInputPublisher"/>'s equivalent
-    /// method for the rationale.</summary>
+    /// it. Clamped to zero rather than allowed to go negative -- a wake can (rarely) be observed
+    /// slightly before its own scheduled deadline depending on timer/clock granularity, and that is
+    /// not a meaningful "negative lateness" for this diagnostic.</summary>
     private void RecordWakeLateness(long wake, long scheduledDeadline)
     {
         var lateness = wake - scheduledDeadline;
@@ -440,8 +463,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
         _wakeLatenessTicksSumSinceHeartbeat = 0;
         _maxWakeLatenessTicksSinceHeartbeat = 0;
         _skippedDeadlineCountSinceHeartbeat = 0;
-        // _previousTimerWakeTimestamp / _hasPreviousTimerWake intentionally NOT reset here -- mirrors
-        // CanonicalSteamControllerInputPublisher.EmitHeartbeatIfDue.
+        // _previousTimerWakeTimestamp / _hasPreviousTimerWake intentionally NOT reset here: the
+        // wake-to-wake interval spanning the heartbeat boundary itself (last tick before this
+        // heartbeat to the first tick after it) is still a real, valid sample for the next window.
     }
 
     private void ReportFault(Exception exception)

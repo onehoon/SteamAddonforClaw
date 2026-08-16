@@ -235,10 +235,10 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
 
         var ticks = new PublisherManualTicks();
-        var runtime = new PublisherFailingRuntime();
+        var sink = new PublisherFailingSink();
         var failClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var publisher = new ClassicSteamControllerInputPublisher(
-            new PublisherSnapshot(), runtime, 7, ticks,
+        var publisher = new CanonicalSteamDeckInputPublisher(
+            new PublisherSnapshot(), sink, ticks,
             exception => _ = Task.Run(async () => { var result = await bridge.Bridge.FailClosedAsync(); if (result.Succeeded) failClosed.TrySetResult(); }));
         publisher.Start(); await Task.Yield(); ticks.Tick();
 
@@ -733,13 +733,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
 
     private sealed class PublisherSnapshot : IControllerStateSnapshotSource
     { public ControllerState LatestState => new(new AuxiliaryButtonState([false, false])); }
-    private sealed class PublisherFailingRuntime : IViiperRuntime
+    private sealed class PublisherFailingSink : ICanonicalSteamDeckStateSink
     {
-        public IReadOnlyCollection<uint> OwnedDeviceIds => [7]; public uint BusId => 1;
-        public void Start() { } public uint CreateDevice() => 7; public bool SetNeutral(uint id) => true;
-        public bool SetInput(uint id, byte[] report) => false;
-        public ViiperDeviceRemovalResult RemoveDevice(uint bus, uint id) => new(true, true);
-        public void StopIfUnused() { } public void Dispose() { }
+        public bool SetState(SteamDeckDeviceState state) => false;
     }
     private sealed class PublisherManualTicks : IInputReportTickSource
     {

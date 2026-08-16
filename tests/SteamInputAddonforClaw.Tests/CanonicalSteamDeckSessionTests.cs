@@ -5,9 +5,8 @@ using Xunit;
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>
-/// Steam Deck counterpart to <see cref="CanonicalSteamControllerSessionTests"/>: same lifecycle
-/// invariants (classified remove, fail-closed unsafe/invalid, caller-owned bus preserved across
-/// device removal, non-destructive Dispose), exercised against <see cref="CanonicalSteamDeckSession"/>.
+/// Lifecycle invariants for <see cref="CanonicalSteamDeckSession"/>: classified remove, fail-closed
+/// unsafe/invalid, caller-owned bus preserved across device removal, non-destructive Dispose.
 /// </summary>
 public sealed class CanonicalSteamDeckSessionTests
 {
@@ -293,16 +292,6 @@ public sealed class CanonicalSteamDeckSessionTests
         public bool GetUSBDeviceIdentity(nuint deviceHandle, out uint busId, out uint deviceId) { Calls.Add("GetUSBDeviceIdentity"); busId = IdentityBusId; deviceId = 9; return IdentityResult; }
         public bool AttachUSBDevice(nuint deviceHandle) { Calls.Add("AttachUSBDevice"); return AttachResult; }
         public bool DetachUSBDevice(nuint deviceHandle) { Calls.Add("DetachUSBDevice"); return true; }
-
-        // Gordon surface: unused by these Steam-Deck-focused tests, stubbed only so this fake still
-        // satisfies ICanonicalViiperNativeApi.
-        public bool CreateSteamControllerDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct)
-        { Calls.Add("CreateSteamControllerDevice"); deviceHandle = 0; return false; }
-        public bool SetSteamControllerDeviceState(nuint deviceHandle, SteamControllerDeviceState state) { Calls.Add("SetSteamControllerDeviceState"); return false; }
-        public bool SetSteamControllerOutputCallback(nuint deviceHandle, SteamControllerOutputCallback? callback) { Calls.Add("SetSteamControllerOutputCallback"); return false; }
-        public bool RemoveSteamControllerDevice(nuint deviceHandle) { Calls.Add("RemoveSteamControllerDevice"); return false; }
-        public SteamControllerDeviceRemoveResult RemoveSteamControllerDeviceEx(nuint deviceHandle)
-        { Calls.Add("RemoveSteamControllerDeviceEx"); return SteamControllerDeviceRemoveResult.Invalid; }
 
         public bool CreateSteamDeckDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct)
         { Calls.Add("CreateSteamDeckDevice"); deviceHandle = 20; AutoAttach = autoAttachLocalhost; Vendor = idVendor; Product = idProduct; return CreateDeviceResult; }
