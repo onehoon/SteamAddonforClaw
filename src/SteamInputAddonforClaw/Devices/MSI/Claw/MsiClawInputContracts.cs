@@ -42,11 +42,6 @@ internal interface IMsiClawPreparedInputSource : IAsyncDisposable
     Task StopAsync();
 }
 
-internal interface IControllerStateSnapshotSource
-{
-    ControllerState LatestState { get; }
-}
-
 internal sealed record MsiClawPhysicalInputIdentity(Guid InstanceGuid, string DevicePath, string PnpInstanceId, string PhysicalIdentity);
 
 internal interface IMsiClawPhysicalInputIdentityProvider

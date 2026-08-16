@@ -1,7 +1,6 @@
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Input;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Power;
 using Xunit;

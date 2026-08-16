@@ -2,7 +2,6 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Diagnostics;
 using Xunit;

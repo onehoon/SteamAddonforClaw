@@ -3,8 +3,8 @@ using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.HidHide;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Input;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
