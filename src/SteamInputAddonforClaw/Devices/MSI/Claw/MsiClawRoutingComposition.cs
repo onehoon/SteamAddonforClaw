@@ -18,9 +18,9 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 /// <remarks>
 /// Also implements <see cref="IHandheldRoutingComposition"/>, the generic view the routing/output
 /// layer consumes -- a thin projection over the same already-created objects below, not a
-/// second composition. The concrete properties remain for the App fields/lifecycle callers that
-/// still need them directly; see docs/VIIPER_MIGRATION_TODO.md for the planned follow-up that
-/// removes that remaining coupling.
+/// second composition. The concrete properties remain for App lifecycle callers that still need
+/// them directly; removing that remaining coupling is intentionally deferred to follow-up
+/// architecture work.
 /// </remarks>
 internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 {
