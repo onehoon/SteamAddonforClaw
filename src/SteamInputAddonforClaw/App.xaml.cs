@@ -1,25 +1,17 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Dispatching;
-using SteamInputAddonforClaw.Controllers.Detection;
-using SteamInputAddonforClaw.Install;
-using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Recovery;
-using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Devices.Abstractions;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
-using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
-using SteamInputAddonforClaw.Power;
-using SteamInputAddonforClaw.Developer;
 
 namespace SteamInputAddonforClaw;
 
@@ -59,35 +51,12 @@ public partial class App : Application
     private async Task StartAsync()
     {
         AppLog.Info("Startup coordination started.");
-        var deviceEnumerator = new WindowsControllerDeviceEnumerator();
-        var msiClawAdapter = new MsiClawDeviceAdapter(deviceEnumerator);
-        var addonOwnedVirtualDeviceTracker = new AddonOwnedVirtualDeviceTracker();
-        var classifier = new ControllerDeviceClassifier(msiClawAdapter.InternalControllerMatcher, addonOwnedVirtualDeviceTracker);
-        var deviceRegistry = new HandheldDeviceRegistry([msiClawAdapter]);
-        var controllerSoftwareProviders = new IControllerSoftwareStatusProvider[]
-        {
-            new MsiCenterMSoftwareStatusProvider(),
-            new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
-            new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
-        };
-        var controllerEnvironmentAssessmentProvider = new ControllerEnvironmentAssessmentProvider(controllerSoftwareProviders);
-        var recoveryJournalStore = new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath);
-        _recoveryManager = new RecoveryManager(recoveryJournalStore);
-        var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
-        var stockCenterMBaseline = nativeState is null ? null : new StockCenterMStartupBaseline(nativeState);
-        var coordinator = new StartupCoordinator(
-            new SilentUpdateGate(_showMainWindow ? null : ["--background"]),
-            controllerEnvironmentAssessmentProvider,
-            new ControllerEnvironmentWaiter(deviceEnumerator, classifier),
-            recoveryJournalStore: recoveryJournalStore,
-            stockCenterMBaseline: stockCenterMBaseline,
-            hidHideRecoveryCleaner: new StartupHidHideRecoveryCleaner(new HidHideDriverClient()),
-            probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
-            hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
+        var startupComposition = AddonStartupCompositionFactory.Create(_showMainWindow ? null : ["--background"]);
+        _recoveryManager = startupComposition.RuntimeRecoveryManager;
 
         try
         {
-            var startupResult = await coordinator.RunAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            var startupResult = await startupComposition.Coordinator.RunAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
             if (!startupResult.ShouldStartRuntime)
             {
                 AppLog.Info("Startup scheduled an update restart.");
@@ -95,7 +64,7 @@ public partial class App : Application
                 return;
             }
 
-            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(addonOwnedVirtualDeviceTracker, deviceRegistry, msiClawAdapter, controllerEnvironmentAssessmentProvider, stockCenterMBaseline, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
+            _dispatcherQueue?.TryEnqueue(() => StartNormalRuntime(startupComposition.AddonOwnedVirtualDeviceTracker, startupComposition.DeviceRegistry, startupComposition.HandheldDeviceAdapter, startupComposition.ControllerEnvironmentAssessmentProvider, startupComposition.StockCenterMBaseline, startupResult.EnvironmentMode, startupResult.EnvironmentReadiness, startupResult.RecoverySafe));
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)
         {
