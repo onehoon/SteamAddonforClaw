@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
