@@ -98,7 +98,6 @@ public partial class App : Application
     {
         var processHost = _processHost!;
         processHost.InitializeRuntime();
-        processHost.StartPowerObservation();
         var frontend = processHost.FrontendControl;
         // Awaited rather than blocked on: this call is in-process today, but the same contract
         // will be served by a named-pipe client in a later revision, where a blocking
@@ -107,6 +106,7 @@ public partial class App : Application
         _mainWindow = new MainWindow(frontend, bootstrap);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
+        processHost.StartPowerObservation();
 
         if (!processHost.TryInitializeTray(ShowMainWindow, RestartApplication, ExitApplication))
         {
