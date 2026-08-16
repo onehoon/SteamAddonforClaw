@@ -8,7 +8,6 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
-using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
