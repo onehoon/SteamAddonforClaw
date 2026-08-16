@@ -591,7 +591,6 @@ typedef struct {
 	int16_t LStickX, LStickY;
 	int16_t RStickX, RStickY;
 	uint16_t LPadForce, RPadForce;
-	uint16_t LStickForce, RStickForce;
 } SteamDeckDeviceState;
 
 #line 1 "cgo-generated-wrapper"
