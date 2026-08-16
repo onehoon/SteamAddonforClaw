@@ -58,7 +58,8 @@ internal static class Xbox360DeviceStateMapper
             RX = state.RightStick.X,
             RY = state.RightStick.Y,
 
-            Reserved = new byte[6],
+            // Reserved0..Reserved5 are left unassigned: the struct's default is already all
+            // zeros, and there is no source data to derive them from.
         };
     }
 }

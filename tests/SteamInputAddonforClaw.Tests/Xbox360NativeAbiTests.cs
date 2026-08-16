@@ -22,6 +22,11 @@ public sealed class Xbox360NativeAbiTests
         Assert.Equal(8, Marshal.OffsetOf<Xbox360DeviceState>("LY").ToInt32());
         Assert.Equal(10, Marshal.OffsetOf<Xbox360DeviceState>("RX").ToInt32());
         Assert.Equal(12, Marshal.OffsetOf<Xbox360DeviceState>("RY").ToInt32());
-        Assert.Equal(14, Marshal.OffsetOf<Xbox360DeviceState>("Reserved").ToInt32());
+        Assert.Equal(14, Marshal.OffsetOf<Xbox360DeviceState>("Reserved0").ToInt32());
+        Assert.Equal(15, Marshal.OffsetOf<Xbox360DeviceState>("Reserved1").ToInt32());
+        Assert.Equal(16, Marshal.OffsetOf<Xbox360DeviceState>("Reserved2").ToInt32());
+        Assert.Equal(17, Marshal.OffsetOf<Xbox360DeviceState>("Reserved3").ToInt32());
+        Assert.Equal(18, Marshal.OffsetOf<Xbox360DeviceState>("Reserved4").ToInt32());
+        Assert.Equal(19, Marshal.OffsetOf<Xbox360DeviceState>("Reserved5").ToInt32());
     }
 }

@@ -80,6 +80,29 @@ public sealed class Xbox360DeviceStateMapperTests
         Assert.Equal(value, mapped.RT);
     }
 
+    [Fact]
+    public void Left_and_right_trigger_values_are_not_swapped()
+    {
+        // Equal-value cases above can't catch LT/RT being accidentally cross-wired; this proves
+        // each side lands in its own field.
+        var mapped = Xbox360DeviceStateMapper.Map(State(triggers: new TriggerState(17, 231)));
+
+        Assert.Equal((byte)17, mapped.LT);
+        Assert.Equal((byte)231, mapped.RT);
+    }
+
+    [Fact]
+    public void Digital_full_pull_trigger_flags_do_not_set_any_button_bit()
+    {
+        // LeftTriggerFull/RightTriggerFull exist on GamepadButtons but have no Xbox 360 button
+        // equivalent -- they must not leak into Buttons (Guide included).
+        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true);
+        var mapped = Xbox360DeviceStateMapper.Map(State(buttons: buttons));
+
+        Assert.Equal(0u, mapped.Buttons);
+        Assert.Equal(0u, mapped.Buttons & Xbox360ButtonBits.Guide);
+    }
+
     [Theory]
     [InlineData((short)0)]
     public void Stick_axes_are_preserved_unchanged_at_zero(short value)
@@ -158,9 +181,12 @@ public sealed class Xbox360DeviceStateMapperTests
             triggers: new TriggerState(255, 255),
             auxiliary: new AuxiliaryButtonState(new[] { true, true })));
 
-        Assert.NotNull(mapped.Reserved);
-        Assert.Equal(6, mapped.Reserved.Length);
-        Assert.All(mapped.Reserved, b => Assert.Equal(0, b));
+        Assert.Equal(0, mapped.Reserved0);
+        Assert.Equal(0, mapped.Reserved1);
+        Assert.Equal(0, mapped.Reserved2);
+        Assert.Equal(0, mapped.Reserved3);
+        Assert.Equal(0, mapped.Reserved4);
+        Assert.Equal(0, mapped.Reserved5);
     }
 
     private static ControllerState State(

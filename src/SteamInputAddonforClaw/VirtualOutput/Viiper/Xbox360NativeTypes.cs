@@ -17,8 +17,17 @@ internal struct Xbox360DeviceState
     internal short RX;
     internal short RY;
 
-    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 6)]
-    internal byte[] Reserved;
+    // Six inline value fields rather than a byte[]: a reference-type array field would make this
+    // struct non-blittable and force a fresh managed allocation on every Map() call -- a real cost
+    // once a future publisher calls this at Steam Deck-like report rates. Inline fields keep the
+    // struct fully blittable and allocation-free, and give it a genuinely zero-valued default (no
+    // explicit initialization needed for a neutral state).
+    internal byte Reserved0;
+    internal byte Reserved1;
+    internal byte Reserved2;
+    internal byte Reserved3;
+    internal byte Reserved4;
+    internal byte Reserved5;
 }
 
 // Bit values from the generated header's XBOX360_BUTTON_* defines. The lower 16 bits are used;
