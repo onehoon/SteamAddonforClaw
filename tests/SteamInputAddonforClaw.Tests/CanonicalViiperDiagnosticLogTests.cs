@@ -44,11 +44,11 @@ public sealed class CanonicalViiperDiagnosticLogTests : IDisposable
     [Fact]
     public void WarnDPadMessage_IsForwardedAsWarn()
     {
-        Invoke(ViiperLogLevel.Warn, "VIIPER.DPad Stage=GordonReportInvariant Expected=0x01 Actual=0x00");
+        Invoke(ViiperLogLevel.Warn, "VIIPER.DPad Stage=ReportInvariant Expected=0x01 Actual=0x00");
         AppLog.DrainForTests();
 
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
-        Assert.Contains("VIIPER.DPad Stage=GordonReportInvariant", log);
+        Assert.Contains("VIIPER.DPad Stage=ReportInvariant", log);
         Assert.Contains("[WARN]", log);
     }
 

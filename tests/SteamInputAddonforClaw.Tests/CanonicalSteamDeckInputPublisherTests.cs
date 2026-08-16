@@ -8,11 +8,8 @@ using Xunit;
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>
-/// Steam Deck counterpart to <see cref="CanonicalSteamControllerInputPublisherTests"/>: same manual-
-/// tick and production-worker coverage (scheduler, fault semantics, timing diagnostics, lifecycle
-/// safety), exercised against <see cref="CanonicalSteamDeckInputPublisher"/>. Deduplicated D-pad
-/// transition logging is a Gordon-specific concern (that publisher logs a mapped D-pad transition
-/// message the Deck publisher does not emit) and is intentionally not mirrored here.
+/// Manual-tick and production-worker coverage (scheduler, fault semantics, timing diagnostics,
+/// lifecycle safety) for <see cref="CanonicalSteamDeckInputPublisher"/>.
 /// </summary>
 [Collection("AppLog")]
 public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
@@ -151,7 +148,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
-    public async Task Heartbeat_reports_Gordon_parity_timing_fields()
+    public async Task Heartbeat_reports_timing_decomposition_fields()
     {
         var state = new ControllerState(default, default, default, default, new AuxiliaryButtonState([false, false]));
         var source = new Snapshot(state);
@@ -178,8 +175,8 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         Assert.Contains("MaxSetStateDurationMs=", heartbeat);
         Assert.Contains("HeartbeatElapsedMs=", heartbeat);
         Assert.Contains("EffectiveSetStateHz=", heartbeat);
-        // Timing-decomposition parity fields (Minor 1): present with zero defaults on the manual-tick
-        // path, which never drives WorkerLoop.
+        // Timing-decomposition fields: present with zero defaults on the manual-tick path, which
+        // never drives WorkerLoop.
         Assert.Contains("TimerWakeCount=0", heartbeat);
         Assert.Contains("ExpectedTicksAt4ms=", heartbeat);
         Assert.Contains("AverageWakeToWakeMs=0", heartbeat);
@@ -196,7 +193,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
-    public async Task TimingDiagnostics_WakeOverThresholdCountsIncrementLikeGordon()
+    public async Task TimingDiagnostics_WakeOverThresholdCountsIncrementWhenIntervalExceedsThresholds()
     {
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
         var sink = new FakeSink(); var ticks = new ManualTicks();

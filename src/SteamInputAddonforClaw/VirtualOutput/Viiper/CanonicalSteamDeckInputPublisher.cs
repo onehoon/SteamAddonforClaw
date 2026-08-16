@@ -6,16 +6,39 @@ using SteamInputAddonforClaw.Input;
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
-/// Steam Deck counterpart to <see cref="CanonicalSteamControllerInputPublisher"/>: publishes
-/// <see cref="IControllerStateSnapshotSource.LatestState"/>, mapped through
-/// <see cref="SteamDeckDeviceStateMapper"/>, to the canonical VIIPER Steam Deck sink on the same
-/// ~250 Hz (4 ms) monotonic-deadline schedule as the proven Gordon publisher, driven by a dedicated
-/// worker thread waiting on <see cref="WindowsHighResolutionOneShotTimer"/> and re-armed via
-/// <see cref="CanonicalPublisherDeadlineMath"/> -- see that class and
-/// <see cref="CanonicalSteamControllerInputPublisher"/> for the detailed real-hardware timing
-/// rationale this reuses unchanged. This is a deliberate simple duplication for SD2, not a shared
-/// publisher framework refactor -- see docs/VIIPER_MIGRATION_TODO.md SD2.
+/// Publishes <see cref="IControllerStateSnapshotSource.LatestState"/>, mapped through
+/// <see cref="SteamDeckDeviceStateMapper"/>, to the canonical VIIPER Steam Deck sink on a monotonic
+/// absolute ~250 Hz (4 ms) deadline schedule, driven by a dedicated worker thread waiting on
+/// <see cref="WindowsHighResolutionOneShotTimer"/> and re-armed via
+/// <see cref="CanonicalPublisherDeadlineMath"/>.
 /// </summary>
+/// <remarks>
+/// <para>
+/// This scheduling design is the result of real MSI Claw hardware testing. An earlier
+/// <c>Task.Delay</c>-based tick source only achieved ~83 Hz against the 250 Hz target. A later
+/// periodic high-resolution timer (re-arming itself automatically every 4 ms via <c>lPeriod</c>)
+/// stabilized at ~230.8 Hz instead: average wake-to-wake interval ~4.3324 ms, average wait-blocked
+/// time ~4.2885 ms, average publish work only ~0.04345 ms (so <c>SetState</c> itself was not the
+/// bottleneck), and 64.9% of wakes exceeded 4.25 ms -- the wait/wakeup boundary itself was
+/// consistently a few tenths of a millisecond late.
+/// </para>
+/// <para>
+/// This publisher instead tracks a monotonic absolute logical deadline (in
+/// <see cref="System.Diagnostics.Stopwatch"/> ticks) and, after each publish, re-arms the one-shot
+/// timer for only the time remaining until the *next* logical deadline -- not for a full 4 ms
+/// again -- so a late wake shortens the following wait instead of shifting the whole schedule
+/// forward. <see cref="IInputReportTickSource"/> remains a deterministic async test seam; production
+/// always uses the dedicated-thread/one-shot-timer path below, never the tick-source path.
+/// </para>
+/// <para>
+/// Real CPU-heavy testing showed scheduler starvation could still occur even with the deadline
+/// scheduler (sustained windows as low as ~60-150 Hz under saturation), which motivated running the
+/// worker thread at <see cref="ThreadPriority.AboveNormal"/> -- this improves scheduling opportunity
+/// but does not guarantee 250 Hz under saturation. Shutdown must join the worker thread before native
+/// device teardown so an in-flight <c>SetState</c> call cannot race the native handle being removed;
+/// a join timeout fails closed (throws) rather than pretending the worker stopped.
+/// </para>
+/// </remarks>
 internal sealed class CanonicalSteamDeckInputPublisher
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(1);
@@ -52,10 +75,9 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private long _maxSetStateTicksSinceHeartbeat;
     private long _totalSetStateFailures;
 
-    // Timing-decomposition diagnostics: production-worker-only, mirrored unchanged from
-    // CanonicalSteamControllerInputPublisher (see that class's remarks for the real-hardware
-    // rationale). Touched only from the single dedicated worker thread (WorkerLoop below), so no
-    // synchronization is needed. These stay at their zero defaults on the test/manual-tick
+    // Timing-decomposition diagnostics: production-worker-only (see the class remarks above for the
+    // real-hardware rationale). Touched only from the single dedicated worker thread (WorkerLoop
+    // below), so no synchronization is needed. These stay at their zero defaults on the test/manual-tick
     // IInputReportTickSource path, which never populates them.
     private long _previousTimerWakeTimestamp;
     private bool _hasPreviousTimerWake;

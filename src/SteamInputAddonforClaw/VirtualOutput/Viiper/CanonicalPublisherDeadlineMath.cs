@@ -4,7 +4,7 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
 /// Pure, deterministically-testable arithmetic for the monotonic absolute-deadline scheduler used by
-/// <see cref="CanonicalSteamControllerInputPublisher"/>'s production worker. Kept separate from the
+/// <see cref="CanonicalSteamDeckInputPublisher"/>'s production worker. Kept separate from the
 /// publisher's instance state so the deadline-advance and clock-conversion logic can be tested directly
 /// without needing a running worker thread or real timer.
 /// </summary>

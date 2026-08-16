@@ -10,14 +10,11 @@ using Xunit;
 namespace SteamInputAddonforClaw.Tests;
 
 /// <summary>
-/// Steam Deck counterpart to <see cref="ClassicSteamControllerOutputStageTests"/>: same Addon safety-
-/// shell coverage (factory failure, neutral-before-live, bus/server cleanup retry without replaying
+/// Addon safety-shell coverage for <see cref="CanonicalSteamDeckOutputStage"/> against exact identity
+/// <c>28DE:1205</c>: factory failure, neutral-before-live, bus/server cleanup retry without replaying
 /// device removal, PnP timeout, identity failure rollback, stale-node persistence, HidHide inspection
-/// failure/pre-existing block, recovery intent write failure, cancellation during creation, rollback
-/// ordering), exercised against <see cref="CanonicalSteamDeckOutputStage"/> and exact identity
-/// <c>28DE:1205</c>. There is no non-canonical/legacy runtime constructor on the Deck stage (unlike
-/// Gordon's dual Classic/Canonical constructors), so every test here goes through the single
-/// canonical session-factory constructor.
+/// failure/pre-existing block, recovery intent write failure, cancellation during creation, and
+/// rollback ordering. Every test here goes through the single canonical session-factory constructor.
 /// </summary>
 [Collection("AppLog")]
 public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
@@ -254,10 +251,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.Empty(session.Trace);
     }
 
-    // Gordon's "BusCleanupFailureDoesNotBlockVerifiedDeviceMutationCompletion" (bus-removal failure
-    // reported as part of the legacy runtime's RemoveDevice() result must not block recovery mutation
-    // completion) does not apply here: the Deck stage has no legacy IViiperRuntime constructor, and
-    // on its single canonical session path a CompleteRuntimeCleanup() failure IS reported as a
+    // On the single canonical session path, a CompleteRuntimeCleanup() failure IS reported as a
     // rollback failure by design (see CanonicalSteamDeckOutputStage.RollbackCoreAsync's
     // "CanonicalSessionCleanupPending" branch) -- already covered by BusRemovalRetryDoesNotReplayDeviceRemoval
     // and ServerCloseRetryDoesNotReplayDeviceRemoval above.
@@ -641,9 +635,8 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         // The stage calls SetNeutral() directly for its one-time neutral report before starting the
         // publisher; the publisher (constructed with this session as its sink) calls SetState()
-        // directly for every live tick thereafter. Deliberately does NOT add to Trace (mirroring
-        // Gordon's CanonicalFakeSession.SetState, which is also trace-silent): several tests here
-        // (e.g. SessionPathUsesTypedPublisherAndCleanupOrder) exercise the real production
+        // directly for every live tick thereafter. Deliberately does NOT add to Trace: several tests
+        // here (e.g. SessionPathUsesTypedPublisherAndCleanupOrder) exercise the real production
         // high-resolution-timer publisher with no manual tick source, so SetState can legitimately
         // fire an unbounded, non-deterministic number of times on a background thread between Neutral
         // and Remove -- tracing it there would make Trace assertions flaky. Ordering relative to

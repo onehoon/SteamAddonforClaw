@@ -1,7 +1,6 @@
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
-using SteamInputAddonforClaw.Input;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -9,17 +8,35 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class FullNonGyroPipelineTests
 {
     [Fact]
-    public void Maps_full_non_gyro_state_and_grips()
+    public void Maps_full_non_gyro_state_to_deck()
     {
-        var buttons = new bool[17]; buttons[1] = true; buttons[4] = true; buttons[9] = true; buttons[10] = true; buttons[11] = true; buttons[15] = true; buttons[16] = true;
+        var buttons = new bool[17];
+        buttons[1] = true; // A
+        buttons[4] = true; // LeftBumper -> L1
+        buttons[9] = true; // Start -> Options
+        buttons[10] = true; // LeftStickClick -> L3
+        buttons[11] = true; // RightStickClick -> R3
+        buttons[15] = true; // M1 -> R4
+        buttons[16] = true; // M2 -> L4
         var raw = new DirectInputState(buttons, 0, 65535, 65535, 32768, 65535, 0, [4500]);
+
         Assert.True(MsiClawControllerStateMapper.TryMap(raw, out var state));
-        Assert.True(state.Buttons.A && state.Buttons.LeftBumper && state.Buttons.Start && state.Buttons.LeftStickClick && state.Buttons.RightStickClick);
-        Assert.True(state.Buttons.DPadUp && state.Buttons.DPadRight && state.Auxiliary[0] && state.Auxiliary[1]);
-        Assert.Equal(short.MinValue, state.LeftStick.X); Assert.Equal(short.MinValue, state.LeftStick.Y);
-        Assert.Equal(byte.MaxValue, state.Triggers.Right);
-        var steam = ClassicSteamControllerInputMapper.Map(state); var report = new byte[64]; ClassicSteamControllerReportBuilder.Write(report, 7, steam);
-        Assert.Equal(0x80 | 0x08, report[8]); Assert.Equal(0x40 | 0x80 | 0x03, report[9]); Assert.Equal(0x01 | 0x04 | 0x10 | 0x40, report[10]); Assert.Equal(26000, BitConverter.ToInt16(report, 26));
+        var deck = SteamDeckDeviceStateMapper.Map(state);
+
+        Assert.Equal(1, deck.A);
+        Assert.Equal(1, deck.L1);
+        Assert.Equal(1, deck.Options);
+        Assert.Equal(1, deck.L3);
+        Assert.Equal(1, deck.R3);
+        Assert.Equal(1, deck.DPadUp);
+        Assert.Equal(1, deck.DPadRight);
+        Assert.Equal(1, deck.R4);
+        Assert.Equal(1, deck.L4);
+        Assert.Equal(short.MinValue, deck.LStickX);
+        Assert.Equal(short.MinValue, deck.LStickY);
+        Assert.Equal(short.MaxValue, deck.RStickX);
+        Assert.Equal(short.MaxValue, deck.RStickY);
+        Assert.Equal((ushort)32767, deck.RTrigger);
     }
 
     [Fact]
@@ -31,14 +48,17 @@ public sealed class FullNonGyroPipelineTests
     }
 
     [Theory]
-    [InlineData(true, false, 0x80, 0x00)]
-    [InlineData(false, true, 0x00, 0x01)]
-    public void Maps_M2_to_left_grip_and_M1_to_right_grip(bool m2, bool m1, byte expectedByte9, byte expectedByte10)
+    [InlineData(true, false, 1, 0)]
+    [InlineData(false, true, 0, 1)]
+    public void Maps_M1_to_R4_and_M2_to_L4(bool m1, bool m2, byte expectedR4, byte expectedL4)
     {
         var buttons = new bool[17]; buttons[15] = m1; buttons[16] = m2;
         Assert.True(MsiClawControllerStateMapper.TryMap(new DirectInputState(buttons, 32768, 32768, 32768, 0, 0, 0, [-1]), out var state));
-        var report = new byte[64]; ClassicSteamControllerReportBuilder.Write(report, 0, ClassicSteamControllerInputMapper.Map(state));
-        Assert.Equal(expectedByte9, report[9] & 0x80); Assert.Equal(expectedByte10, report[10] & 0x01);
+
+        var deck = SteamDeckDeviceStateMapper.Map(state);
+
+        Assert.Equal(expectedR4, deck.R4);
+        Assert.Equal(expectedL4, deck.L4);
     }
 
     [Theory]
@@ -47,96 +67,6 @@ public sealed class FullNonGyroPipelineTests
     {
         Assert.True(MsiClawControllerStateMapper.TryMap(new DirectInputState(new bool[17], 32768, raw, 32768, 0, 0, 0, [-1]), out var state));
         Assert.Equal(expected, state.LeftStick.Y);
-    }
-
-    [Fact]
-    public void Center_offset_does_not_activate_right_pad_and_duplicate_trigger_fields_match()
-    {
-        var input = new ClassicSteamControllerInput(default, default, new(1, -1), new(128, 64), false, false, false, false);
-        var report = new byte[64]; ClassicSteamControllerReportBuilder.Write(report, 0, input);
-        Assert.Equal(0, report[10] & 0x10);
-        Assert.Equal(report[24..26], report[50..52]); Assert.Equal(report[26..28], report[52..54]);
-    }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(128, 13050)]
-    [InlineData(255, 26000)]
-    public void Trigger_raw_scaling_preserves_the_26000_contract(byte value, short expected)
-    {
-        var report = new byte[64];
-        ClassicSteamControllerReportBuilder.Write(report, 0, new(default, default, default, new(value, value), false, false, false, false));
-        Assert.Equal(expected, BitConverter.ToInt16(report, 24));
-        Assert.Equal(expected, BitConverter.ToInt16(report, 26));
-    }
-
-    [Fact]
-    public void Digital_full_triggers_and_right_stick_are_preserved_without_guide()
-    {
-        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true);
-        var report = new byte[64];
-        ClassicSteamControllerReportBuilder.Write(report, 0, new(buttons, default, new(123, -456), new(0, 255), false, false, true, true));
-        Assert.Equal(0x03, report[8] & 0x03);
-        Assert.Equal(0, report[9] & 0x20);
-        Assert.Equal(123, BitConverter.ToInt16(report, 20));
-        Assert.Equal(-456, BitConverter.ToInt16(report, 22));
-        Assert.Equal(0x10, report[10] & 0x10);
-        Assert.Equal(0x04, report[10] & 0x04);
-        Assert.Equal(0x4000, BitConverter.ToUInt16(report, 40));
-        Assert.Equal(3000, BitConverter.ToUInt16(report, 62));
-    }
-
-    [Fact]
-    public void Digital_trigger_full_click_flag_does_not_force_viiper_full_click_derivation()
-    {
-        // VIIPER derives its own host-visible full-click bits purely from the raw analog
-        // magnitude reaching the top of travel (see RebuildHostVisibleTriggerBits below) -- our
-        // local TriggerFull button flag must not force the raw value to max on top of that, or
-        // partial physical travel would be reported to Steam as a full pull.
-        var buttons = new GamepadButtons(false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true);
-        var input = new ClassicSteamControllerInput(buttons, default, default, new(0, 100), false, false, false, false);
-        var report = new byte[64];
-        ClassicSteamControllerReportBuilder.Write(report, 0, input);
-
-        var hostVisible = RebuildHostVisibleTriggerBits(report);
-
-        Assert.Equal(0, BitConverter.ToUInt16(report, 24));
-        Assert.Equal(100 * 26000 / 255, BitConverter.ToUInt16(report, 26));
-        Assert.False(hostVisible.leftFull);
-        Assert.False(hostVisible.rightFull);
-        // Our own local digital button bit is still passed through unchanged.
-        Assert.Equal(0x03, report[8] & 0x03);
-    }
-
-    [Fact]
-    public void Partial_trigger_without_full_click_preserves_analog_value()
-    {
-        var input = new ClassicSteamControllerInput(default, default, default, new(128, 0), false, false, false, false);
-        var report = new byte[64];
-        ClassicSteamControllerReportBuilder.Write(report, 0, input);
-
-        Assert.Equal(13050, BitConverter.ToUInt16(report, 24));
-        Assert.False(RebuildHostVisibleTriggerBits(report).leftFull);
-    }
-
-    [Fact]
-    public void Maximum_analog_trigger_without_digital_full_click_round_trips_as_full()
-    {
-        var input = new ClassicSteamControllerInput(default, default, default, new(255, 0), false, false, false, false);
-        var report = new byte[64];
-        ClassicSteamControllerReportBuilder.Write(report, 0, input);
-
-        Assert.True(RebuildHostVisibleTriggerBits(report).leftFull);
-    }
-
-    private static (bool leftFull, bool rightFull) RebuildHostVisibleTriggerBits(byte[] report)
-    {
-        // Pinned VIIPER InputState.UnmarshalBinary/buildReport behavior: trigger
-        // full-click bits are reconstructed from the raw trigger fields.
-        var leftRaw = BitConverter.ToUInt16(report, 24);
-        var rightRaw = BitConverter.ToUInt16(report, 26);
-        static byte TriggerRawToByte(ushort raw) => (byte)Math.Clamp(raw * 255 / 26000, 0, 255);
-        return (TriggerRawToByte(leftRaw) >= 0xFF, TriggerRawToByte(rightRaw) >= 0xFF);
     }
 
     [Theory]

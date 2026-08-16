@@ -81,7 +81,7 @@ internal static class ControllerStateDiagnostics
     /// Logs the raw DirectInput POV value whenever it changes, independent of whether the
     /// mapped ControllerState changed. This is diagnostic-only and exists to distinguish:
     /// raw POV never changing (A), POV changing but the mapped D-pad not following (B), or
-    /// both being correct while Steam/Gordon output still does not respond (C).
+    /// both being correct while Steam/virtual output still does not respond (C).
     /// </summary>
     internal static void LogPovIfChanged(int session, int pov)
     {

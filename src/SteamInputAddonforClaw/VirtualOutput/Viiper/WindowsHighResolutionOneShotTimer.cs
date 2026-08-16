@@ -17,12 +17,12 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// millisecond late (64.9% of wakes exceeded 4.25ms). This describes what was actually observed at that
 /// boundary, not a documented guarantee about how the OS internally schedules a periodic timer's
 /// re-activation; explicitly tracking a monotonic logical deadline (see
-/// <see cref="CanonicalSteamControllerInputPublisher"/>) is a testable alternative to whatever the
+/// <see cref="CanonicalSteamDeckInputPublisher"/>) is a testable alternative to whatever the
 /// periodic timer was doing, not a claim that the periodic timer itself was behaving incorrectly.
 /// </para>
 /// <para>
 /// This type instead exposes only a single-shot arm (<see cref="ArmRelative"/>); the caller
-/// (<see cref="CanonicalSteamControllerInputPublisher"/>) is responsible for tracking a monotonic
+/// (<see cref="CanonicalSteamDeckInputPublisher"/>) is responsible for tracking a monotonic
 /// absolute logical deadline in <see cref="System.Diagnostics.Stopwatch"/> ticks and re-arming this
 /// timer, each time, for only the remaining time until the *next* logical deadline -- so a late wake
 /// shortens the following wait instead of shifting the whole schedule forward. The same native timer

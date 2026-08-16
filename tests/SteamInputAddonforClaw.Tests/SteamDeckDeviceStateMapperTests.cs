@@ -93,7 +93,7 @@ public sealed class SteamDeckDeviceStateMapperTests
 
         Assert.Equal(1, mapped.L3);
         Assert.Equal(1, mapped.R3);
-        // Steam Deck has a native R3 field -- unlike Gordon, R3 must never be routed to RPadPress.
+        // Steam Deck has a native R3 field -- R3 must never be routed to RPadPress.
         Assert.Equal(0, mapped.RPadPress);
     }
 
@@ -129,8 +129,8 @@ public sealed class SteamDeckDeviceStateMapperTests
         Assert.Equal((short)-222, mapped.LStickY);
         Assert.Equal((short)333, mapped.RStickX);
         Assert.Equal((short)-444, mapped.RStickY);
-        // Steam Deck has native right-stick fields -- unlike Gordon, the right stick must never be
-        // routed through RPadX/Y.
+        // Steam Deck has native right-stick fields -- the right stick must never be routed through
+        // RPadX/Y.
         Assert.Equal(0, mapped.RPadX);
         Assert.Equal(0, mapped.RPadY);
     }
