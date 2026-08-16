@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     d1510dd559b284d9bebb50007d38b12d3ab5f822
+Commit:     e10b5f02945b1322f33c33468e583546600ba000
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc
-DLL SHA-256:              304f85467069d48ebcfb7cda9c50f65a5f8b38c2e7bc597b832a6ba997fa9483
+DLL SHA-256:              e6d0a13f58bd204f9259634f208d362a4c7044c7697c3b3b0d5afde6fb66b275
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,44 +42,33 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-Reviewed VIIPER `348bf6f8695e69c629cbb8c358173440d2d7588a` ->
-`d1510dd559b284d9bebb50007d38b12d3ab5f822`. The upstream commit is test-only:
-it changes only `device/steamdeck/steamdeck_test.go`, adding exhaustive Steam
-Deck mapping regression tests. No VIIPER production implementation changed.
+Reviewed VIIPER `d1510dd559b284d9bebb50007d38b12d3ab5f822` ->
+`e10b5f02945b1322f33c33468e583546600ba000`. The final target restores and
+retains the same canonical managed/native Steam Deck ABI already consumed by
+the Addon: the generated `libVIIPER.h` is byte-identical to the previously
+reviewed header and its SHA-256 remains
+`e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`.
+`SteamDeckDeviceState` therefore remains 76 bytes, ending with
+`LPadForce`/`RPadForce`/`LStickForce`/`RStickForce` at offsets 68/70/72/74.
+No exported function, callback typedef, enum, struct field order, field offset,
+packing, managed P/Invoke signature, or `RequiredExports` entry changes versus
+the currently embedded Addon contract. No managed ABI adaptation is required.
 
-The canonical generated `libVIIPER.h` is byte-identical to the previously
-reviewed embedded header: its SHA-256 remains
-`e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`. No
-exported function, callback typedef, enum, struct layout, field offset,
-packing, P/Invoke, or `RequiredExports` change occurred. No managed ABI
-adaptation is required, and none was made: `CanonicalViiperNativeApi.cs`,
-`CanonicalViiperNativeTypes.cs`, and `CanonicalViiperNativeAbiTests.cs` are
-unchanged.
+The revision does contain a native Steam Deck input-report transport correction:
+VIIPER now always declares the full 64-byte input report length in report byte 3
+and preserves the established final four-byte stick-sensor tail at bytes 60:64.
+The intermediate 72-byte VIIPER revision in this commit range is not the adopted
+ABI contract; `e10b5f0` restores the 76-byte state before this artifact is built.
+The Addon already exposes the matching `LStickForce`/`RStickForce` managed
+fields and currently leaves them neutral, so this wire correction requires no
+mapper, publisher, P/Invoke, callback, routing, lifecycle, attachment, recovery,
+or HidHide code change.
 
-The new upstream exhaustive tests independently confirmed the canonical
-Steam Deck center-button semantics:
-
-- `SteamDeckDeviceState.Menu` = the native `MENU` / `Start` semantic.
-- `SteamDeckDeviceState.Options` = the native `VIEW` / `Back` semantic.
-
-Cross-checking that against `SteamDeckDeviceStateMapper` surfaced a
-pre-existing Addon consumer bug: the mapper had these two reversed (`Menu`
-was driven from `Back`, `Options` from `Start`). This is corrected in the
-same change as this dependency update, together with independent regression
-tests (`Start_maps_to_SteamDeck_Menu`, `Back_maps_to_SteamDeck_Options`) that
-set only one of Start/Back at a time, so the pair cannot silently swap again
-undetected. `LStickForce`/`RStickForce` remain neutral (`0`); a separate
-VIIPER protocol-level discrepancy involving those fields is intentionally
-out of scope here and remains a separate investigation.
-
-No other Steam Deck field mapping (A/B/X/Y, D-pad, L1/R1, L2Digital/
-R2Digital, L3/R3, analog trigger scaling, stick axes, M1->R4/M2->L4) changed;
-each was checked against the new upstream exhaustive tests and found already
-correct.
-
-No hardware-validation claim is expanded. MSI Claw EX basic non-gyro input
-remains the established claim; lifecycle/recovery, rumble/haptics, gyro, and
-IMU validation remain separate work.
+The exhaustive Steam Deck button/D-pad/Menu-View semantics remain unchanged,
+including `Start -> Menu` and `Back -> Options`. No hardware-validation claim
+is expanded: MSI Claw EX basic non-gyro input remains the established claim;
+lifecycle/recovery, rumble/haptics, gyro, and IMU validation remain separate
+work.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
