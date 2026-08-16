@@ -110,63 +110,21 @@ public partial class App : Application
     private void StartNormalRuntime(AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker, HandheldDeviceRegistry deviceRegistry, IHandheldDeviceAdapter handheldDeviceAdapter, IControllerEnvironmentAssessmentProvider controllerEnvironmentAssessmentProvider, IStockCenterMStartupBaseline? stockCenterMBaseline, ControllerEnvironmentMode environmentMode, ControllerEnvironmentReadiness environmentReadiness, bool recoverySafe)
     {
         AppLog.Info($"Starting runtime. Environment={environmentMode}; Readiness={environmentReadiness}.");
-        var settingsStore = new SettingsStore(VelopackAppPaths.SettingsPath);
-        var settings = settingsStore.Load();
-        AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
-        var startupRegistration = new WindowsTaskSchedulerStartupManager();
-        var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
-        var steamRuntime = new SteamSessionRuntime(startupSettings);
-        var startupRegistrationResult = startupSettings.Repair();
-
-        if (recoverySafe)
-        {
-            steamRuntime.StartRoutingObservation();
-        }
-        else
-        {
-            AppLog.Warn("Recovery", "Steam/controller routing remains stopped because recovery is unsafe.", null, ("Action", "Passive"));
-        }
-
-        var recoverySafetyState = new RecoverySafetyState(recoverySafe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
-        var powerGate = new PowerMutationGate();
-        var statusProvider = new SystemStatusProvider(
-            new WindowsDeviceInformationProvider(),
-            new WindowsDeviceProbeContextFactory(),
-            new HardwareCompatibilityEvaluator(deviceRegistry),
-            controllerEnvironmentAssessmentProvider,
-            new RuntimePrerequisiteInspector(
-                new HidHidePrerequisiteInspector(new HidHideDriverClient()),
-                new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()),
-                new ViiperRuntimeInspector()),
-            () => steamRuntime.State,
-            () => recoverySafetyState.Current == RecoverySafety.Safe,
-            () => addonOwnedVirtualDeviceTracker.HasUncertainOwnership);
-        var routingRuntime = AddonRoutingRuntime.Create(
+        var composition = AddonRuntimeCompositionFactory.Create(
             handheldDeviceAdapter,
-            statusProvider,
+            deviceRegistry,
+            controllerEnvironmentAssessmentProvider,
             addonOwnedVirtualDeviceTracker,
             _recoveryManager!,
-            powerGate,
-            recoverySafetyState);
+            stockCenterMBaseline,
+            recoverySafe);
 
-        var recoveryManager = _recoveryManager!;
-        Func<CancellationToken, Task<bool>> establishBaseline = stockCenterMBaseline is null
-            ? _ => Task.FromResult(false)
-            : async token => (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
-
-        _runtimeHost = new AddonRuntimeHost(
-            steamRuntime,
-            routingRuntime,
-            powerGate,
-            recoverySafetyState,
-            recoverySafe,
-            () => recoveryManager.HasIncompleteRecovery,
-            establishBaseline);
+        _runtimeHost = composition.RuntimeHost;
         _runtimeHost.SteamSessionStateChanged += OnRuntimeSteamSessionStateChanged;
         _runtimeHost.StatusRefreshRequested += OnRuntimeStatusRefreshRequested;
         _runtimeHost.StartPowerObservation();
         RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => _runtimeHost?.CaptureRoutingStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
-        _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider,
+        _mainWindow = new MainWindow(composition.StartupSettings, composition.StartupRegistrationMessage, _recoveryManager, composition.StatusProvider,
             developerTestModeState: _runtimeHost.DeveloperTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
