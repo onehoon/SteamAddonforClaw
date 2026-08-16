@@ -54,12 +54,13 @@ public sealed class AddonRuntimeHostTests
     }
 
     [Fact]
-    public async Task Steam_state_transition_drives_a_normal_reconcile_and_a_single_status_refresh()
+    public async Task Steam_state_transition_drives_exactly_one_normal_reconcile_and_exactly_one_status_refresh()
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
         var routingRuntime = AddonRoutingRuntime.Create(
             new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
-            new FakeStatusProvider(Snapshot(WaitingForSteam())),
+            statusProvider,
             new AddonOwnedVirtualDeviceTracker(),
             new RecoveryManager(new MemoryJournalStore()),
             new PowerMutationGate(initiallyOpen: true),
@@ -67,15 +68,76 @@ public sealed class AddonRuntimeHostTests
         Assert.NotNull(routingRuntime);
 
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime);
+        var refreshCount = 0;
         var refreshRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        host.StatusRefreshRequested += (_, _) => refreshRequested.TrySetResult();
+        host.StatusRefreshRequested += (_, _) =>
+        {
+            Interlocked.Increment(ref refreshCount);
+            refreshRequested.TrySetResult();
+        };
 
         try
         {
             // The state-change handler triggers the normal reconcile fire-and-forget; wait for
-            // ReconcileSafelyAsync's finally-guaranteed status refresh rather than a fixed delay.
+            // ReconcileSafelyAsync's finally-guaranteed status refresh rather than a fixed delay,
+            // then settle briefly to catch a duplicate refresh/reconcile a bug could still cause.
             steamRuntime.DeveloperTestModeState.SetEnabled(true);
             await refreshRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+
+            Assert.Equal(1, refreshCount);
+            Assert.Equal(1, statusProvider.CaptureCount);
+        }
+        finally
+        {
+            await host.ShutdownRoutingAsync();
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReconcileFreshAfterResumeAsync_reconciles_exactly_once_refreshes_status_exactly_once_and_does_not_leave_suppression_stuck()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var routingRuntime = AddonRoutingRuntime.Create(
+            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
+            statusProvider,
+            new AddonOwnedVirtualDeviceTracker(),
+            new RecoveryManager(new MemoryJournalStore()),
+            new PowerMutationGate(initiallyOpen: true),
+            new RecoverySafetyState(RecoverySafety.Safe));
+        Assert.NotNull(routingRuntime);
+
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime);
+        var refreshCount = 0;
+        host.StatusRefreshRequested += (_, _) => Interlocked.Increment(ref refreshCount);
+
+        try
+        {
+            // No Steam transition occurs during this window (nothing toggles state), so the
+            // resume path itself must not fabricate an extra reconcile or refresh: exactly the
+            // fresh reconcile (Begin -> ExecuteExplicitRefresh -> RunResumeFreshAsync -> Complete)
+            // and its own single finally-guaranteed status refresh, nothing more -- proving
+            // Begin/ExecuteExplicitRefresh/Complete/deferredReconcile are wired without an extra
+            // hop and without double-refreshing.
+            var succeeded = await host.ReconcileFreshAfterResumeAsync(CancellationToken.None);
+
+            Assert.True(succeeded);
+            Assert.Equal(1, refreshCount);
+            Assert.Equal(1, statusProvider.CaptureCount);
+
+            // Prove suppression was actually released (Complete() correctly wired to the real
+            // ResumeFreshReconcileSuppression instance) rather than left permanently "owned": a
+            // real Steam transition occurring strictly after resume completes must still reach a
+            // normal reconcile, not be silently suppressed forever.
+            var postResumeRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            host.StatusRefreshRequested += (_, _) => postResumeRefresh.TrySetResult();
+            steamRuntime.DeveloperTestModeState.SetEnabled(true);
+            await postResumeRefresh.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(2, refreshCount);
+            Assert.Equal(2, statusProvider.CaptureCount);
         }
         finally
         {
@@ -97,8 +159,14 @@ public sealed class AddonRuntimeHostTests
 
     private sealed class FakeStatusProvider(SystemStatusSnapshot? snapshot = null) : ISystemStatusProvider
     {
-        public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(snapshot ?? throw new InvalidOperationException("Not exercised."));
+        private int _captureCount;
+        internal int CaptureCount => Volatile.Read(ref _captureCount);
+
+        public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _captureCount);
+            return Task.FromResult(snapshot ?? throw new InvalidOperationException("Not exercised."));
+        }
     }
 
     private static SystemStatusSnapshot Snapshot(RoutingDecision decision) =>
