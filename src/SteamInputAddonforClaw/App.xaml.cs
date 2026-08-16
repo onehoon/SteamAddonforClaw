@@ -33,10 +33,7 @@ public partial class App : Application
     private RecoveryManager? _recoveryManager;
     private bool _isExplicitExit;
     private readonly SingleInstanceGate _singleInstanceGate;
-    private PowerTransitionWatcher? _powerWatcher;
-    private PowerTransitionCoordinator? _powerCoordinator;
     private AddonRuntimeHost? _runtimeHost;
-    private UserTerminationGuard? _userTerminationGuard;
 
     public App()
         : this(arguments: null, Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized."))
@@ -150,35 +147,23 @@ public partial class App : Application
             _recoveryManager!,
             powerGate,
             recoverySafetyState);
-        _runtimeHost = new AddonRuntimeHost(steamRuntime, routingRuntime);
+
+        var recoveryManager = _recoveryManager!;
+        Func<CancellationToken, Task<bool>> establishBaseline = stockCenterMBaseline is null
+            ? _ => Task.FromResult(false)
+            : async token => (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
+
+        _runtimeHost = new AddonRuntimeHost(
+            steamRuntime,
+            routingRuntime,
+            powerGate,
+            recoverySafetyState,
+            recoverySafe,
+            () => recoveryManager.HasIncompleteRecovery,
+            establishBaseline);
         _runtimeHost.SteamSessionStateChanged += OnRuntimeSteamSessionStateChanged;
         _runtimeHost.StatusRefreshRequested += OnRuntimeStatusRefreshRequested;
-        _userTerminationGuard = new UserTerminationGuard(
-            () => _runtimeHost?.CaptureTerminationSnapshot() ?? default,
-            () => _runtimeHost?.IsSafetySessionActive == true,
-            () => _runtimeHost?.HasOwnedRecoveryBoundary == true,
-            () => recoverySafetyState.Current == RecoverySafety.Safe && _recoveryManager?.HasIncompleteRecovery == true);
-        var powerParticipants = new List<IPowerSuspendParticipant>();
-        if (_runtimeHost.IsRoutingAvailable) powerParticipants.Add(_runtimeHost);
-        _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants,
-            token => _runtimeHost is null ? Task.FromResult(true) : _runtimeHost.ReconcileFreshAfterResumeAsync(token),
-        recoveryEnabled: recoverySafe,
-        hasIncompleteRecovery: () => _recoveryManager?.HasIncompleteRecovery == true,
-        establishBaseline: async token =>
-        {
-            if (stockCenterMBaseline is null) return false;
-            return (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
-        },
-        hasResidualRoutingCleanup: () => _runtimeHost?.HasResidualSessionState == true,
-        retryResidualRoutingCleanup: async token =>
-        {
-            if (_runtimeHost is null) return true;
-            return await _runtimeHost.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false);
-        });
-        _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
-            () => _runtimeHost?.CancelInFlightRoutingTransition());
-        if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
-        else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
+        _runtimeHost.StartPowerObservation();
         RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => _runtimeHost?.CaptureRoutingStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider,
             developerTestModeState: _runtimeHost.DeveloperTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
@@ -217,17 +202,15 @@ public partial class App : Application
         }
 
         _startupCancellationTokenSource.Cancel();
-        _runtimeHost?.StopSteamObservation();
+        _runtimeHost?.PrepareForShutdown();
 
         _systemTrayIcon?.Dispose();
         _systemTrayIcon = null;
-        _powerWatcher?.Dispose();
-        _powerWatcher = null;
-        if (_runtimeHost is not null) _runtimeHost.ShutdownRoutingAsync().GetAwaiter().GetResult();
-        if (_powerCoordinator is not null) _powerCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _powerCoordinator = null;
-        if (_runtimeHost is not null) _runtimeHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _runtimeHost = null;
+        if (_runtimeHost is not null)
+        {
+            _runtimeHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _runtimeHost = null;
+        }
         AppLog.Info("Runtime cleanup completed.");
         // Shutdown ownership lives solely in Program.Main's `finally` (runs once Application.Start
         // returns, i.e. after this method), so it drains exactly this entry plus everything queued
@@ -259,7 +242,7 @@ public partial class App : Application
     }
 
     private UserTerminationDecision GetUserTerminationDecision() =>
-        _userTerminationGuard?.Evaluate() ?? new(true, UserTerminationBlockReason.None);
+        _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);
 
     private void ShowMainWindow()
     {

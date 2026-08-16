@@ -1,4 +1,6 @@
 using SteamInputAddonforClaw.Developer;
+using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Steam;
@@ -6,85 +8,129 @@ using SteamInputAddonforClaw.Steam;
 namespace SteamInputAddonforClaw.Runtime;
 
 /// <summary>
-/// The first UI-independent application-facing runtime boundary: owns the Steam/Big Picture
+/// The single UI-independent owner of the running Addon runtime: the Steam/Big Picture
 /// session-observation graph (<see cref="SteamSessionRuntime"/>), the optional routing runtime
 /// (<see cref="AddonRoutingRuntime"/> -- null is a valid, passive state when no routing
-/// composition is available), and the normal-reconcile resume-suppression policy that
-/// previously lived directly in <c>App.xaml.cs</c>. No dependency on WinUI, the main window, or
-/// the system tray -- UI communication happens only through the generic
-/// <see cref="SteamSessionStateChanged"/>/<see cref="StatusRefreshRequested"/> events.
+/// composition is available), normal/resume reconcile orchestration
+/// (<see cref="ResumeFreshReconcileSuppression"/>), suspend/resume power orchestration
+/// (<c>PowerTransitionCoordinator</c>/<c>PowerTransitionWatcher</c>), and user-termination safety
+/// (<c>UserTerminationGuard</c>). No dependency on WinUI, the main window, the system tray, or any
+/// device-specific (MSI/CenterM) type -- UI communication happens only through the generic
+/// <see cref="SteamSessionStateChanged"/>/<see cref="StatusRefreshRequested"/> events, and the
+/// device-specific stock-mode baseline capability arrives only as a generic
+/// <c>Func&lt;CancellationToken, Task&lt;bool&gt;&gt;</c> callback.
 /// </summary>
 /// <remarks>
-/// This is C5b2 scope: Steam/BPM ownership and normal/resume reconcile orchestration move here.
-/// Power ownership (<c>PowerMutationGate</c>, <c>RecoverySafetyState</c>,
-/// <c>PowerTransitionCoordinator</c>, <c>PowerTransitionWatcher</c>) and top-level application
-/// shutdown ordering remain App-owned -- that is C5c.
+/// This is C5c: the last major Runtime Core ownership step. The application shell retains only
+/// startup/bootstrap, WinUI/MainWindow, and the system tray.
 ///
 /// <para>
-/// <see cref="DisposeAsync"/> stops Steam observation (idempotently -- safe even if
-/// <see cref="StopSteamObservation"/> was already called) and disposes the owned routing runtime's
-/// backend resources. It deliberately does <b>not</b> perform routing shutdown itself: the caller
-/// must call <see cref="ShutdownRoutingAsync"/>, and stop any other external orchestration
-/// referencing this host (e.g. the power coordinator), before disposing it -- the same
-/// shutdown-before-dispose precondition <see cref="AddonRoutingRuntime"/> already documents.
+/// Lifecycle: construct, subscribe to the two events, call <see cref="StartPowerObservation"/>
+/// once dependents (e.g. <c>MainWindow</c>) are ready to receive the events it may synchronously
+/// raise, then eventually call <see cref="PrepareForShutdown"/> (stops Steam observation; safe to
+/// call multiple times) followed by <see cref="DisposeAsync"/> (idempotent full runtime shutdown:
+/// stops power observation, shuts down routing, disposes the power coordinator, then disposes the
+/// routing backend -- in that order). The caller does not need to separately shut down routing or
+/// dispose power objects; <see cref="DisposeAsync"/> owns the complete remaining sequence.
 /// </para>
 /// </remarks>
-internal sealed class AddonRuntimeHost : IAsyncDisposable, IPowerSuspendParticipant
+internal sealed class AddonRuntimeHost : IAsyncDisposable
 {
     private readonly SteamSessionRuntime _steamRuntime;
     private readonly AddonRoutingRuntime? _routingRuntime;
     private readonly ResumeFreshReconcileSuppression _resumeFreshReconcileSuppression = new();
+    private readonly PowerMutationGate _powerGate;
+    private readonly RecoverySafetyState _recoverySafetyState;
+    private readonly PowerTransitionCoordinator _powerCoordinator;
+    private readonly PowerTransitionWatcher _powerWatcher;
+    private readonly UserTerminationGuard _userTerminationGuard;
 
     // Guards against a resume notification that was already queued in PowerTransitionCoordinator
     // before shutdown began running ReconcileFreshAfterResumeAsync's Steam refresh concurrently
-    // with (or after) StopSteamObservation disposing the same SteamSessionRuntime --
+    // with (or after) PrepareForShutdown disposing the same SteamSessionRuntime --
     // SteamSessionWatcher.Refresh() throws ObjectDisposedException once disposed. Both
-    // StopSteamObservation and the Steam-touching section of ReconcileFreshAfterResumeAsync take
+    // PrepareForShutdown and the Steam-touching section of ReconcileFreshAfterResumeAsync take
     // this lock, so whichever runs first either fully disposes before the other's refresh
     // attempt is even considered, or fully refreshes (a fast, synchronous, non-reentrant
     // registry read) before disposal can start.
     private readonly Lock _steamLifecycleLock = new();
     private bool _steamStopped;
+    private int _disposed;
 
-    internal AddonRuntimeHost(SteamSessionRuntime steamRuntime, AddonRoutingRuntime? routingRuntime)
+    internal AddonRuntimeHost(
+        SteamSessionRuntime steamRuntime,
+        AddonRoutingRuntime? routingRuntime,
+        PowerMutationGate powerGate,
+        RecoverySafetyState recoverySafetyState,
+        bool recoverySafe,
+        Func<bool> hasIncompleteRecovery,
+        Func<CancellationToken, Task<bool>> establishBaseline,
+        IPowerSuspendResumeNotificationSource? notificationSource = null)
     {
         _steamRuntime = steamRuntime;
         _routingRuntime = routingRuntime;
+        _powerGate = powerGate;
+        _recoverySafetyState = recoverySafetyState;
         _steamRuntime.StateChanged += OnSteamSessionStateChanged;
+
+        var powerParticipants = new List<IPowerSuspendParticipant>();
+        if (_routingRuntime is not null) powerParticipants.Add(_routingRuntime);
+        _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants,
+            token => ReconcileFreshAfterResumeAsync(token),
+            recoveryEnabled: recoverySafe,
+            hasIncompleteRecovery: hasIncompleteRecovery,
+            establishBaseline: establishBaseline,
+            hasResidualRoutingCleanup: () => _routingRuntime?.HasResidualSessionState == true,
+            retryResidualRoutingCleanup: async token =>
+                _routingRuntime is null || await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false));
+        _powerWatcher = new PowerTransitionWatcher(notificationSource ?? new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
+            () => _routingRuntime?.CancelInFlightTransition());
+
+        _userTerminationGuard = new UserTerminationGuard(
+            () => _routingRuntime?.CaptureTerminationSnapshot() ?? default,
+            () => _routingRuntime?.IsSafetySessionActive == true,
+            () => _routingRuntime?.HasOwnedRecoveryBoundary == true,
+            () => recoverySafetyState.Current == RecoverySafety.Safe && hasIncompleteRecovery());
     }
 
     internal DeveloperTestModeState DeveloperTestModeState => _steamRuntime.DeveloperTestModeState;
-    internal bool IsRoutingAvailable => _routingRuntime is not null;
 
     internal event EventHandler<SteamSessionStateChangedEventArgs>? SteamSessionStateChanged;
     internal event EventHandler? StatusRefreshRequested;
 
     internal RoutingRuntimeStatusSnapshot CaptureRoutingStatus() => _routingRuntime?.CaptureStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
-    internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() => _routingRuntime?.CaptureTerminationSnapshot() ?? default;
-    internal bool IsSafetySessionActive => _routingRuntime?.IsSafetySessionActive == true;
-    internal bool HasOwnedRecoveryBoundary => _routingRuntime?.HasOwnedRecoveryBoundary == true;
-    internal bool HasResidualSessionState => _routingRuntime?.HasResidualSessionState == true;
 
-    internal void CancelInFlightRoutingTransition() => _routingRuntime?.CancelInFlightTransition();
-
-    internal async Task<bool> RetryResidualCleanupForResumeAsync(CancellationToken cancellationToken) =>
-        _routingRuntime is null || await _routingRuntime.RetryResidualCleanupForResumeAsync(cancellationToken).ConfigureAwait(false);
+    internal UserTerminationDecision EvaluateUserTermination() => _userTerminationGuard.Evaluate();
 
     /// <summary>Normal (non-resume) reconcile, via the safe C5b1 path. No-op when routing is unavailable.</summary>
     internal Task ReconcileAsync(CancellationToken cancellationToken = default) =>
         _routingRuntime is null ? Task.CompletedTask : _routingRuntime.ReconcileSafelyAsync(RequestStatusRefresh, cancellationToken);
 
     /// <summary>
+    /// Registers for suspend/resume notifications and opens the mutation gate if registration
+    /// succeeded and recovery is safe -- exactly the startup sequence previously inlined in App.
+    /// Registration failure is fail-closed: the gate stays closed. Call once, after subscribing to
+    /// this host's events, before anything else may depend on power observation being active.
+    /// </summary>
+    internal void StartPowerObservation()
+    {
+        if (!_powerWatcher.Start())
+            AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
+        else if (_recoverySafetyState.Current == RecoverySafety.Safe)
+            _powerGate.OpenAfterRecovery();
+    }
+
+    /// <summary>
     /// Resume reconciliation: explicit Steam refresh (suppressing the state-change notification
     /// it produces from also triggering a normal reconcile), then fresh routing reconciliation --
     /// exactly the flow previously inlined in App's power-resume callback. Returns
     /// <see langword="true"/> immediately when routing is unavailable. Safe to call after
-    /// <see cref="StopSteamObservation"/> -- e.g. a resume notification queued in
+    /// <see cref="PrepareForShutdown"/> -- e.g. a resume notification queued in
     /// <c>PowerTransitionCoordinator</c> before shutdown began, running afterward -- the Steam
     /// refresh is skipped in that case rather than touching the disposed
     /// <see cref="SteamSessionRuntime"/>; fresh routing reconciliation still proceeds.
     /// </summary>
-    internal async Task<bool> ReconcileFreshAfterResumeAsync(CancellationToken cancellationToken)
+    private async Task<bool> ReconcileFreshAfterResumeAsync(CancellationToken cancellationToken)
     {
         if (_routingRuntime is null) return true;
         var routingRuntime = _routingRuntime;
@@ -104,10 +150,12 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable, IPowerSuspendParticip
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    internal Task ShutdownRoutingAsync() => _routingRuntime is null ? Task.CompletedTask : _routingRuntime.ShutdownAsync();
-
-    /// <summary>Stops Steam/Big Picture session observation. Idempotent.</summary>
-    internal void StopSteamObservation()
+    /// <summary>
+    /// Stops Steam/Big Picture session observation -- the first phase of runtime shutdown.
+    /// Idempotent. Does not stop power observation, shut down routing, or dispose power objects;
+    /// see <see cref="DisposeAsync"/> for the remaining sequence.
+    /// </summary>
+    internal void PrepareForShutdown()
     {
         lock (_steamLifecycleLock)
         {
@@ -126,14 +174,19 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable, IPowerSuspendParticip
 
     private void RequestStatusRefresh() => StatusRefreshRequested?.Invoke(this, EventArgs.Empty);
 
-    public string Name => _routingRuntime?.Name ?? "AddonRuntimeHost";
-
-    public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken) =>
-        _routingRuntime?.QuiesceForSuspendAsync(deadline, cycle, epoch, cancellationToken) ?? Task.FromResult(true);
-
+    /// <summary>
+    /// Full runtime shutdown, idempotent: stops Steam observation (if not already stopped),
+    /// disposes power observation, shuts down routing, disposes the power coordinator, then
+    /// disposes the routing backend -- preserving the exact effective ordering App previously
+    /// performed itself.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        StopSteamObservation();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        PrepareForShutdown();
+        _powerWatcher.Dispose();
+        if (_routingRuntime is not null) await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
+        await _powerCoordinator.DisposeAsync().ConfigureAwait(false);
         if (_routingRuntime is not null) await _routingRuntime.DisposeAsync().ConfigureAwait(false);
     }
 }
