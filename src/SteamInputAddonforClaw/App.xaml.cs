@@ -32,6 +32,7 @@ public partial class App : Application
     private SystemTrayIcon? _systemTrayIcon;
     private RecoveryManager? _recoveryManager;
     private bool _isExplicitExit;
+    private int _shutdownStarted;
     private readonly SingleInstanceGate _singleInstanceGate;
     private AddonRuntimeHost? _runtimeHost;
 
@@ -201,6 +202,16 @@ public partial class App : Application
             return;
         }
 
+        ShutdownApplicationOnce();
+    }
+
+    private void ShutdownApplicationOnce()
+    {
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
+        {
+            return;
+        }
+
         _startupCancellationTokenSource.Cancel();
         _runtimeHost?.PrepareForShutdown();
 
@@ -212,9 +223,6 @@ public partial class App : Application
             _runtimeHost = null;
         }
         AppLog.Info("Runtime cleanup completed.");
-        // Shutdown ownership lives solely in Program.Main's `finally` (runs once Application.Start
-        // returns, i.e. after this method), so it drains exactly this entry plus everything queued
-        // before it -- without also blocking here for up to its own separate timeout.
     }
 
     private void OnMainWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
@@ -268,6 +276,7 @@ public partial class App : Application
             _isExplicitExit = true;
             AppLog.Info("Explicit application exit requested.");
             _mainWindow?.Close();
+            ShutdownApplicationOnce();
             Exit();
         });
     }
@@ -301,6 +310,7 @@ public partial class App : Application
                 AppLog.Info("App", "Application restart process started.", ("ProcessId", process?.Id), ("Started", process is not null));
                 _isExplicitExit = true;
                 _mainWindow?.Close();
+                ShutdownApplicationOnce();
                 Exit();
             }
             catch (Exception exception)

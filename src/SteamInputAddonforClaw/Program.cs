@@ -21,8 +21,9 @@ public static class Program
         // Sole owner of AppLog.Shutdown(): guarantees it runs exactly once, on every exit path out of
         // Main -- the several early `return`s below (elevated prerequisite setup, secondary-instance
         // activation, restart timeout) that never reach a MainWindow at all, the fatal-startup-exception
-        // path, and the normal path (Application.Start blocks until the WinUI app -- including
-        // App.xaml.cs's OnMainWindowClosed -- has fully exited, so this still runs after that).
+        // path, and the normal path (Application.Start blocks until the WinUI app has fully exited).
+        // App owns runtime shutdown independently of MainWindow existence; Program still owns only
+        // the final AppLog shutdown.
         try
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
