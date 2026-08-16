@@ -5,11 +5,6 @@ using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
-internal interface IInputReportTickSource
-{
-    ValueTask<bool> WaitForTickAsync(CancellationToken cancellationToken);
-}
-
 internal sealed class PeriodicInputReportTickSource(TimeSpan interval) : IInputReportTickSource
 {
     private readonly long _intervalTicks = Stopwatch.Frequency * interval.Ticks / TimeSpan.TicksPerSecond;
