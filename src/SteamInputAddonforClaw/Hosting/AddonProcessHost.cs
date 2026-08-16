@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Developer;
@@ -33,21 +34,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _runtimeInitialized;
     private int _disposed;
     private int _startupStarted;
+    private IAddonFrontendControl? _frontendControl;
 
     internal AddonProcessHost(string[]? updateRestartArguments)
     {
         _updateRestartArguments = updateRestartArguments;
     }
 
-    internal event EventHandler<SteamSessionStateChangedEventArgs>? SteamSessionStateChanged;
-    internal event EventHandler? StatusRefreshRequested;
-
-    internal StartupSettingsCoordinator StartupSettings { get; private set; } = null!;
-    internal string StartupRegistrationMessage { get; private set; } = string.Empty;
-    internal RecoveryManager RuntimeRecoveryManager { get; private set; } = null!;
-    internal ISystemStatusProvider StatusProvider { get; private set; } = null!;
-    internal DeveloperTestModeState DeveloperTestModeState => _runtimeHost?.DeveloperTestModeState ?? throw new InvalidOperationException("Runtime has not been initialized.");
     internal bool IsTrayAvailable => _systemTrayIcon?.IsAvailable == true;
+    internal IAddonFrontendControl FrontendControl => _frontendControl ?? throw new InvalidOperationException("Frontend control has not been initialized.");
 
     internal async Task<AddonProcessStartupOutcome> RunStartupAsync()
     {
@@ -58,7 +53,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         AppLog.Info("Startup coordination started.");
         var startupComposition = AddonStartupCompositionFactory.Create(_updateRestartArguments);
         _startupComposition = startupComposition;
-        RuntimeRecoveryManager = startupComposition.RuntimeRecoveryManager;
 
         try
         {
@@ -102,20 +96,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startupComposition.StockCenterMBaseline,
             startupResult.RecoverySafe);
 
-        StartupSettings = composition.StartupSettings;
-        StartupRegistrationMessage = composition.StartupRegistrationMessage;
-        StatusProvider = composition.StatusProvider;
         _runtimeHost = composition.RuntimeHost;
-        _runtimeHost.SteamSessionStateChanged += OnRuntimeSteamSessionStateChanged;
-        _runtimeHost.StatusRefreshRequested += OnRuntimeStatusRefreshRequested;
+        _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
+            composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage);
         _startupComposition = null;
     }
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
 
     internal Task ReconcileAsync(CancellationToken cancellationToken = default) => GetRuntimeHost().ReconcileAsync(cancellationToken);
-
-    internal RoutingRuntimeStatusSnapshot CaptureRoutingStatus() => GetRuntimeHost().CaptureRoutingStatus();
 
     internal UserTerminationDecision EvaluateUserTermination() =>
         _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);
@@ -160,10 +149,4 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     }
 
     private AddonRuntimeHost GetRuntimeHost() => _runtimeHost ?? throw new InvalidOperationException("Runtime has not been initialized.");
-
-    private void OnRuntimeSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args) =>
-        SteamSessionStateChanged?.Invoke(this, args);
-
-    private void OnRuntimeStatusRefreshRequested(object? sender, EventArgs args) =>
-        StatusRefreshRequested?.Invoke(this, args);
 }

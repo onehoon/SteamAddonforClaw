@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="src/SteamInputAddonforClaw/SteamInputAddonforClaw.csproj" />
+  <Project Path="src/SteamInputAddonforClaw.Contracts/SteamInputAddonforClaw.Contracts.csproj" />
   <Project Path="tests/SteamInputAddonforClaw.Tests/SteamInputAddonforClaw.Tests.csproj" />
 </Solution>

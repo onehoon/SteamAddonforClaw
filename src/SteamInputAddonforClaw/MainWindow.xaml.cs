@@ -3,42 +3,28 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Install;
-using SteamInputAddonforClaw.Settings;
-using SteamInputAddonforClaw.Steam;
-using SteamInputAddonforClaw.Devices;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
-using SteamInputAddonforClaw.Recovery;
-using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Windowing;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Windows.Foundation;
 using WinRT.Interop;
-using SteamInputAddonforClaw.Status;
-using SteamInputAddonforClaw.Prerequisites;
 using System.Diagnostics;
-using SteamInputAddonforClaw.Startup;
-using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
-using SteamInputAddonforClaw.Developer;
-using SteamInputAddonforClaw.Routing;
 using Microsoft.UI.Dispatching;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly StartupSettingsCoordinator _startupSettings;
+    private readonly IAddonFrontendControl _frontend;
+    private readonly FrontendBootstrapSnapshot _bootstrap;
     private readonly MainNavigationState _navigationState = new();
-    private readonly ISystemStatusProvider _systemStatusProvider;
-    private readonly IEnvironmentDiscoveryReportGenerator _environmentDiscoveryReportGenerator;
-    private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore;
-    private readonly IElevatedProcessRunner _prerequisiteSetupRunner;
-    private readonly DeveloperTestModeState? _developerTestModeState;
-    private readonly Func<RoutingRuntimeStatusSnapshot> _routingRuntimeStatusProvider;
-    private SystemStatusSnapshot? _latestSystemStatus;
+    private FrontendStatusSnapshot? _latestSystemStatus;
+    // Bootstrap is captured once at startup and never re-fetched; a mutation made through the
+    // frontend (e.g. suppressing the developer menu warning) must update this live flag directly,
+    // or the same process would keep re-showing a warning the user already dismissed.
+    private bool _suppressDeveloperMenuWarning;
     private int _isRefreshingStatus;
     private int _statusRefreshPending;
     private bool _setupPromptActive;
@@ -47,34 +33,13 @@ public sealed partial class MainWindow : Window
     private bool _setupPromptPendingActivation;
     private bool _prerequisiteSetupInProgress;
 
-    public MainWindow(
-        StartupSettingsCoordinator startupSettings,
-        string startupRegistrationMessage)
-        : this(startupSettings, startupRegistrationMessage, null)
-    {
-    }
-
     internal MainWindow(
-        StartupSettingsCoordinator startupSettings,
-        string startupRegistrationMessage,
-        RecoveryManager? recoveryManager,
-        ISystemStatusProvider? systemStatusProvider = null,
-        IEnvironmentDiscoveryReportGenerator? environmentDiscoveryReportGenerator = null,
-        IHidHideProvisioningReceiptStore? hidHideReceiptStore = null,
-        DeveloperTestModeState? developerTestModeState = null,
-        IElevatedProcessRunner? prerequisiteSetupRunner = null,
-        Func<RoutingRuntimeStatusSnapshot>? routingRuntimeStatusProvider = null)
+        IAddonFrontendControl frontend,
+        FrontendBootstrapSnapshot bootstrap)
     {
-        _startupSettings = startupSettings ?? throw new ArgumentNullException(nameof(startupSettings));
-        _systemStatusProvider = systemStatusProvider ?? CreateDefaultSystemStatusProvider();
-        _hidHideReceiptStore = hidHideReceiptStore ?? new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
-        _prerequisiteSetupRunner = prerequisiteSetupRunner ?? new ElevatedProcessRunner();
-        _developerTestModeState = developerTestModeState;
-        _routingRuntimeStatusProvider = routingRuntimeStatusProvider ?? (() => RoutingRuntimeStatusSnapshot.Unavailable);
-        _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator ?? new EnvironmentDiscoveryReportGenerator(
-            new WindowsEnvironmentDiscoverySnapshotSource(),
-            new EnvironmentDiscoveryReportStore(AppLog.DirectoryPath),
-            new EnvironmentDiscoveryReportWriter());
+        _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
+        _bootstrap = bootstrap ?? throw new ArgumentNullException(nameof(bootstrap));
+        _suppressDeveloperMenuWarning = bootstrap.Settings.SuppressDeveloperMenuWarning;
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -82,18 +47,21 @@ public sealed partial class MainWindow : Window
         ApplyDefaultWindowSize();
         Closed += OnWindowClosed;
         Activated += OnWindowActivated;
-        SettingsContent.Initialize(_startupSettings, startupRegistrationMessage);
-        ControllerContent.Initialize(_startupSettings);
+        SettingsContent.Initialize(_frontend, _bootstrap);
+        ControllerContent.Initialize(_frontend, _bootstrap);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
-        DeveloperMenuContent.Initialize(_startupSettings, _developerTestModeState, _environmentDiscoveryReportGenerator, () => _prerequisiteSetupInProgress);
+        DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
         DeveloperMenuContent.ClawSensorProbeRequested += (_, _) => OpenClawSensorProbe();
         ClawSensorProbeContent.Initialize(() => _latestSystemStatus);
+        _frontend.StateInvalidated += OnFrontendStateInvalidated;
         ClawSensorProbeContent.ReturnToDeveloperMenuRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
         MainNavigationView.SelectedItem = StatusNavigationItem;
         _ = RefreshSystemStatusAsync();
     }
+
+    private void OnFrontendStateInvalidated(object? sender, EventArgs args) => RequestStatusRefresh();
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
@@ -105,11 +73,6 @@ public sealed partial class MainWindow : Window
         }
         _windowActivatedForUser = true;
         _ = RefreshSystemStatusAsync();
-    }
-
-    public void UpdateSteamSessionState(SteamSessionState state)
-    {
-        RequestStatusRefresh();
     }
 
     internal void RequestStatusRefresh()
@@ -131,7 +94,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnDeveloperMenuRequested(object? sender, EventArgs args)
     {
-        if (_startupSettings.SuppressDeveloperMenuWarning)
+        if (_suppressDeveloperMenuWarning)
         {
             OpenDeveloperMenu();
             return;
@@ -173,7 +136,8 @@ public sealed partial class MainWindow : Window
 
         if (suppressWarningCheckBox.IsChecked == true)
         {
-            _startupSettings.SuppressDeveloperMenuWarningPermanently();
+            var settings = await _frontend.SuppressDeveloperMenuWarningAsync();
+            _suppressDeveloperMenuWarning = settings.SuppressDeveloperMenuWarning;
         }
 
         OpenDeveloperMenu();
@@ -216,7 +180,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         StatusContent.SetRefreshing(true);
-        try { RenderSystemStatus(await _systemStatusProvider.CaptureAsync()); }
+        try { RenderSystemStatus(await _frontend.CaptureStatusAsync()); }
         catch (Exception exception) { AppLog.Warn("Status", "System status refresh failed.", exception, ("Reason", "SnapshotCaptureFailed")); }
         finally
         {
@@ -227,13 +191,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void RenderSystemStatus(SystemStatusSnapshot snapshot)
+    private void RenderSystemStatus(FrontendStatusSnapshot snapshot)
     {
         _latestSystemStatus = snapshot;
-        var setup = EvaluateFirstTimeSetup(snapshot);
-        var addonPresentation = FirstTimeSetupPresentation.GetAddonPresentation(setup, snapshot.Prerequisites, snapshot.Addon);
-        StatusContent.Render(snapshot, addonPresentation, _routingRuntimeStatusProvider());
-        if (PrerequisiteSetupPromptPolicy.IsInstallable(setup))
+        StatusContent.Render(snapshot);
+        if (snapshot.CanInstallRequiredComponents)
         {
             if (_windowActivatedForUser)
                 _ = PromptForPrerequisiteSetupAsync();
@@ -288,32 +250,6 @@ public sealed partial class MainWindow : Window
         finally { _setupPromptActive = false; }
     }
 
-    private FirstTimeSetupAssessment EvaluateFirstTimeSetup(SystemStatusSnapshot snapshot)
-    {
-        var receipt = _hidHideReceiptStore.Load();
-        var usbReceipt = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath).Load();
-        var hidPackage = new WindowsHidHidePackageProbe().Inspect();
-        var usbPackage = new WindowsUsbIpWin2PackageProbe().Inspect();
-        var storage = ProvisioningStorageSecurity.Inspect(VelopackAppPaths.ProvisioningStateDirectory);
-        var hidHideState = receipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
-            ? ComponentProvisioningState.Corrupt
-            : receipt.Receipt is not null ? ToComponentProvisioningState(receipt.Receipt.State)
-            : File.Exists(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath) ? ComponentProvisioningState.Legacy
-            : ComponentProvisioningState.None;
-        var usbIpState = usbReceipt.IsCorrupt || storage.Status is ProvisioningStorageStatus.Unsafe or ProvisioningStorageStatus.Indeterminate
-            ? ComponentProvisioningState.Corrupt
-            : usbReceipt.Receipt is not null ? ToComponentProvisioningState(usbReceipt.Receipt.State)
-            : ComponentProvisioningState.None;
-        var hidBootChanged = receipt.Receipt is { State: HidHideProvisioningReceiptState.InstalledPendingReboot } hidPending && BootSession.HasChangedSince(hidPending.StartedAtUtc);
-        var usbBootChanged = usbReceipt.Receipt is { State: UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot } usbPending && BootSession.HasChangedSince(usbPending.StartedAtUtc);
-        var hidInstallation = ComponentInstallationAssessmentPolicy.AssessHidHide(hidPackage, snapshot.Prerequisites.HidHide, HidHidePackageMetadata.BundledVersion.ToString());
-        var usbInstallation = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
-        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(
-            snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.AddonOwnedOutputIdentityUncertain,
-            new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source),
-            snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstallation, usbInstallation, new(hidHideState, usbIpState, hidBootChanged, usbBootChanged)));
-    }
-
     private async Task RunPrerequisiteSetupAsync()
     {
         if (_prerequisiteSetupInProgress) return;
@@ -321,60 +257,55 @@ public sealed partial class MainWindow : Window
         UpdatePrerequisiteSetupBusyUi();
         try
         {
-            var current = await _systemStatusProvider.CaptureAsync();
-            var currentSetup = EvaluateFirstTimeSetup(current);
-            AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
-                ("HidHideStatus", current.Prerequisites.HidHide.Status),
-                ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
-                ("CompatibilityStatus", current.Compatibility.Status),
-                ("CompatibilityReason", current.Compatibility.Reason),
-                ("SteamActive", current.Steam.IsActive),
-                ("RecoverySafe", current.RecoverySafe));
-            if (!PrerequisiteSetupPromptPolicy.IsInstallable(currentSetup))
-            {
-                RenderSystemStatus(current);
-                return;
-            }
-            var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unavailable.");
-            var result = await PrerequisiteSetupRunnerPolicy.RunIfInstallableAsync(
-                currentSetup, _prerequisiteSetupRunner, executable, ElevatedPrerequisiteSetup.Argument, CancellationToken.None);
-            if (result is null) return;
-            var resultKind = ElevatedPrerequisiteSetup.TranslateExitCode(result);
-            AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", resultKind));
-            if (resultKind == ElevatedPrerequisiteSetup.ResultKind.RebootRequired)
-            {
-                var restartDialog = new ContentDialog
-                {
-                    Title = "Restart required",
-                    Content = "Windows needs to restart to finish setting up Steam Input Addon for Claw.",
-                    PrimaryButtonText = "Restart now",
-                    CloseButtonText = "Later",
-                    XamlRoot = Content.XamlRoot
-                };
-                if (await restartDialog.ShowAsync() == ContentDialogResult.Primary)
-                    Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false });
-            }
-            else if (resultKind is ElevatedPrerequisiteSetup.ResultKind.Blocked or ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress ||
-                     resultKind is ElevatedPrerequisiteSetup.ResultKind.Failed)
-            {
-                var message = resultKind == ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress
-                    ? "Another setup operation is already in progress."
-                    : "Setup couldn't be completed. Check Status or the application log for details.";
-                await new ContentDialog
-                {
-                    Title = "Setup unavailable",
-                    Content = message,
-                    CloseButtonText = "OK",
-                    XamlRoot = Content.XamlRoot
-                }.ShowAsync();
-            }
+            var result = await _frontend.RunPrerequisiteSetupAsync();
+            AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup finished.", ("Result", result.Result));
+            if (result.Status is not null)
+                RenderSystemStatus(result.Status);
+            await ShowPrerequisiteSetupResultDialogAsync(result.Result);
         }
         finally
         {
             _prerequisiteSetupInProgress = false;
             UpdatePrerequisiteSetupBusyUi();
-            await RefreshSystemStatusAsync();
+            RequestStatusRefresh();
         }
+    }
+
+    private async Task ShowPrerequisiteSetupResultDialogAsync(FrontendPrerequisiteSetupResultKind resultKind)
+    {
+        if (Content.XamlRoot is null) return;
+
+        if (resultKind == FrontendPrerequisiteSetupResultKind.NotInstallable)
+            return;
+
+        if (resultKind == FrontendPrerequisiteSetupResultKind.RebootRequired)
+        {
+            var restartDialog = new ContentDialog
+            {
+                Title = "Restart required",
+                Content = "Windows needs to restart to finish setting up Steam Input Addon for Claw.",
+                PrimaryButtonText = "Restart now",
+                CloseButtonText = "Later",
+                XamlRoot = Content.XamlRoot
+            };
+            if (await restartDialog.ShowAsync() == ContentDialogResult.Primary)
+                Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false });
+        }
+        else if (resultKind is FrontendPrerequisiteSetupResultKind.Blocked or FrontendPrerequisiteSetupResultKind.AlreadyInProgress or FrontendPrerequisiteSetupResultKind.Failed)
+        {
+            var message = resultKind == FrontendPrerequisiteSetupResultKind.AlreadyInProgress
+                ? "Another setup operation is already in progress."
+                : "Setup couldn't be completed. Check Status or the application log for details.";
+            await new ContentDialog
+            {
+                Title = "Setup unavailable",
+                Content = message,
+                CloseButtonText = "OK",
+                XamlRoot = Content.XamlRoot
+            }.ShowAsync();
+        }
+        // Ready/Installed/Cancelled/NotInstallable need no dialog: Ready/Installed complete silently (Status
+        // already reflects the new state), and Cancelled mirrors the prompt's own "Not now" path.
     }
 
     private void UpdatePrerequisiteSetupBusyUi()
@@ -382,40 +313,6 @@ public sealed partial class MainWindow : Window
         PrerequisiteSetupBusyOverlay.Visibility = _prerequisiteSetupInProgress ? Visibility.Visible : Visibility.Collapsed;
         MainNavigationView.IsHitTestVisible = !_prerequisiteSetupInProgress;
         StatusContent.SetRefreshing(_prerequisiteSetupInProgress);
-    }
-
-    private static ComponentProvisioningState ToComponentProvisioningState(HidHideProvisioningReceiptState state) => state switch
-    {
-        HidHideProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned,
-        HidHideProvisioningReceiptState.InstallStarted => ComponentProvisioningState.InstallStarted,
-        HidHideProvisioningReceiptState.InstalledPendingReboot => ComponentProvisioningState.PendingReboot,
-        HidHideProvisioningReceiptState.AttemptFailed => ComponentProvisioningState.AttemptFailed,
-        HidHideProvisioningReceiptState.AttemptCancelled => ComponentProvisioningState.AttemptCancelled,
-        _ => ComponentProvisioningState.Indeterminate
-    };
-    private static ComponentProvisioningState ToComponentProvisioningState(UsbIpWin2ProvisioningReceiptState state) => state switch
-    {
-        UsbIpWin2ProvisioningReceiptState.Provisioned => ComponentProvisioningState.Provisioned,
-        UsbIpWin2ProvisioningReceiptState.InstallStarted => ComponentProvisioningState.InstallStarted,
-        UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot => ComponentProvisioningState.PendingReboot,
-        UsbIpWin2ProvisioningReceiptState.AttemptFailed => ComponentProvisioningState.AttemptFailed,
-        UsbIpWin2ProvisioningReceiptState.AttemptCancelled => ComponentProvisioningState.AttemptCancelled,
-        _ => ComponentProvisioningState.Indeterminate
-    };
-    private static ISystemStatusProvider CreateDefaultSystemStatusProvider()
-    {
-        var devices = new WindowsControllerDeviceEnumerator();
-        var adapter = new MsiClawDeviceAdapter(devices);
-        return new SystemStatusProvider(new WindowsDeviceInformationProvider(),
-        new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), devices),
-        new HardwareCompatibilityEvaluator(new HandheldDeviceRegistry([adapter])),
-        [new MsiCenterMSoftwareStatusProvider(), new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()), new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())],
-        new RuntimePrerequisiteInspector(new HidHidePrerequisiteInspector(new HidHideDriverClient()), new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(devices), new WindowsUsbIpWin2PackageProbe()), new ViiperRuntimeInspector()),
-        // This fallback path has no real AddonOwnedVirtualDeviceTracker to observe (it is only reached by
-        // the public parameterless-provider MainWindow constructor, which App.xaml.cs never uses in
-        // production; the real runtime always supplies the tracker-backed provider explicitly). Fail safe
-        // (uncertain = true) rather than silently fail open.
-        () => SteamSessionState.FromRunningAppId(0), () => true, () => true);
     }
 
     private async void MainNavigationView_PointerPressed(object sender, PointerRoutedEventArgs args)

@@ -2,8 +2,7 @@ using CommunityToolkit.WinUI.Controls;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using SteamInputAddonforClaw.Prerequisites;
-using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Views;
@@ -22,35 +21,36 @@ public sealed partial class StatusPage : UserControl
         RefreshStatusButton.IsEnabled = !isRefreshing;
     }
 
-    internal void Render(SystemStatusSnapshot snapshot, FirstTimeSetupAddonPresentation addonPresentation, RoutingRuntimeStatusSnapshot routingStatus)
+    internal void Render(FrontendStatusSnapshot snapshot)
     {
         DeviceManufacturerText.Text = StatusPresentation.FormatManufacturerForDisplay(snapshot.Device.Manufacturer);
         DeviceModelText.Text = snapshot.Device.Model;
-        DeviceSupportText.Text = StatusPresentation.FormatDeviceCompatibility(snapshot.HardwareCompatibility.Status);
-        DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoardProduct} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
+        DeviceSupportText.Text = StatusPresentation.FormatDeviceCompatibility(snapshot.Hardware.Status);
+        DeviceBoardGpuText.Text = $"Board: {snapshot.Device.BaseBoard} · GPU: {string.Join(", ", snapshot.Device.GpuModels)}";
 
         SteamGameStatusText.Text = StatusPresentation.FormatSteamGame(snapshot.Steam);
+
         var stateTrusted = StatusPresentation.IsControllerStateTrusted(snapshot);
         // No independent, non-probing signal currently confirms the native mode is XInput ahead
         // of routing entry; fail conservative and omit the "(XInput)" qualifier rather than guess.
-        ControllerStatusText.Text = StatusPresentation.FormatControllerStatus(stateTrusted, routingStatus, nativeXInputVerified: false);
+        ControllerStatusText.Text = StatusPresentation.FormatControllerStatus(stateTrusted, snapshot.Routing, nativeXInputVerified: false);
 
         var isWarning = StatusPresentation.IsWarning(snapshot);
         StatusInfoBar.Severity = InfoBarSeverity.Warning;
-        StatusInfoBar.Message = addonPresentation.Reason;
+        StatusInfoBar.Message = snapshot.AddonReason;
         StatusInfoBar.IsOpen = isWarning;
 
         var software = snapshot.ControllerSoftware
-            .Select(item => new StatusCardViewModel(item.DisplayName, ControllerSoftwareStatusFormatter.Format(item), item.Reason))
+            .Select(item => new StatusCardViewModel(item.DisplayName, StatusPresentation.FormatControllerSoftwareStatus(item), item.Reason))
             .ToList();
         RenderGroup(ControllerSoftwareExpander, software, "installed",
             status => status is not ("Not installed" or "Indeterminate"));
 
         var routing = new List<StatusCardViewModel>
         {
-            new("HidHide", snapshot.Prerequisites.HidHide.Status.ToString(), snapshot.Prerequisites.HidHide.Reason),
-            new("usbip-win2", snapshot.Prerequisites.UsbIpWin2.Status.ToString(), snapshot.Prerequisites.UsbIpWin2.Reason),
-            new("VIIPER", snapshot.Prerequisites.Viiper.Status.ToString(), snapshot.Prerequisites.Viiper.Reason)
+            new("HidHide", snapshot.Prerequisites.HidHideStatus.ToString(), snapshot.Prerequisites.HidHideReason),
+            new("usbip-win2", snapshot.Prerequisites.UsbIpStatus.ToString(), snapshot.Prerequisites.UsbIpReason),
+            new("VIIPER", snapshot.Prerequisites.ViiperStatus.ToString(), snapshot.Prerequisites.ViiperReason)
         };
         RenderGroup(RoutingComponentsExpander, routing, "ready",
             status => string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase));

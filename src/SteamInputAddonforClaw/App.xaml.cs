@@ -5,7 +5,6 @@ using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
 using SteamInputAddonforClaw.Hosting;
-using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw;
 
@@ -37,9 +36,19 @@ public partial class App : Application
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _singleInstanceGate.RegisterActivation(ShowMainWindow);
         _processHost = new AddonProcessHost(_showMainWindow ? null : ["--background"]);
-        _processHost.SteamSessionStateChanged += OnRuntimeSteamSessionStateChanged;
-        _processHost.StatusRefreshRequested += OnRuntimeStatusRefreshRequested;
-        _ = StartAsync();
+        StartApplicationDispatched();
+    }
+
+    private async void StartApplicationDispatched()
+    {
+        try
+        {
+            await StartAsync();
+        }
+        catch (Exception exception)
+        {
+            HandleFatalStartupFailure("Startup coordination failed.", exception);
+        }
     }
 
     private async Task StartAsync()
@@ -53,19 +62,61 @@ public partial class App : Application
         }
 
         if (outcome == AddonProcessStartupOutcome.RuntimeReady)
-            _dispatcherQueue?.TryEnqueue(StartNormalRuntime);
+        {
+            if (_dispatcherQueue?.TryEnqueue(StartNormalRuntimeDispatched) != true)
+            {
+                AppLog.Error(
+                    "Startup",
+                    "Runtime startup could not be dispatched to the UI thread.",
+                    new InvalidOperationException("DispatcherQueue rejected runtime startup."));
+
+                _processHost?.CancelStartup();
+            }
+        }
     }
 
-    private void StartNormalRuntime()
+    private async void StartNormalRuntimeDispatched()
+    {
+        try
+        {
+            await StartNormalRuntimeAsync();
+        }
+        catch (Exception exception)
+        {
+            HandleFatalStartupFailure("Runtime startup failed.", exception);
+        }
+    }
+
+    private void HandleFatalStartupFailure(string message, Exception exception)
+    {
+        AppLog.Error("Startup", message, exception);
+        _isExplicitExit = true;
+
+        try
+        {
+            ShutdownApplicationOnce();
+        }
+        catch (Exception cleanupException)
+        {
+            AppLog.Error("Startup", "Runtime cleanup after startup failure failed.", cleanupException);
+        }
+
+        Exit();
+    }
+
+    private async Task StartNormalRuntimeAsync()
     {
         var processHost = _processHost!;
         processHost.InitializeRuntime();
-        processHost.StartPowerObservation();
-        RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => processHost.CaptureRoutingStatus();
-        _mainWindow = new MainWindow(processHost.StartupSettings, processHost.StartupRegistrationMessage, processHost.RuntimeRecoveryManager, processHost.StatusProvider,
-            developerTestModeState: processHost.DeveloperTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
+        var frontend = processHost.FrontendControl;
+        // Awaited rather than blocked on: this call is in-process today, but the same contract
+        // will be served by a named-pipe client in a later revision, where a blocking
+        // .GetAwaiter().GetResult() here would stall the UI thread on real IPC I/O.
+        var bootstrap = await frontend.GetBootstrapAsync().ConfigureAwait(true);
+        _mainWindow = new MainWindow(frontend, bootstrap);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
+        processHost.StartPowerObservation();
 
         if (!processHost.TryInitializeTray(ShowMainWindow, RestartApplication, ExitApplication))
         {
@@ -79,12 +130,6 @@ public partial class App : Application
         _ = processHost.ReconcileAsync();
 
     }
-
-    private void OnRuntimeSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args) =>
-        _mainWindow?.UpdateSteamSessionState(args.Current);
-
-    private void OnRuntimeStatusRefreshRequested(object? sender, EventArgs args) =>
-        _mainWindow?.RequestStatusRefresh();
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {

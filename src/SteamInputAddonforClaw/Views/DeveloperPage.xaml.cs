@@ -1,8 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Settings;
 using System.Diagnostics;
 
@@ -10,13 +9,15 @@ namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class DeveloperPage : UserControl
 {
-    private StartupSettingsCoordinator? _startupSettings;
-    private DeveloperTestModeState? _developerTestModeState;
-    private IEnvironmentDiscoveryReportGenerator? _environmentDiscoveryReportGenerator;
+    private IAddonFrontendControl? _frontend;
+    private FrontendBootstrapSnapshot? _bootstrap;
     private Func<bool>? _isPrerequisiteSetupInProgress;
     private bool _isInitializingTestMode;
     private bool _isInitializingLogLevel;
     private int _isGeneratingEnvironmentDiscoveryReport;
+    private bool _lastKnownTestMode;
+    private FrontendLogLevel _lastKnownLogLevel;
+    private string _logDirectoryPath = string.Empty;
 
     public event EventHandler? BackRequested;
     public event EventHandler? ClawSensorProbeRequested;
@@ -27,25 +28,26 @@ public sealed partial class DeveloperPage : UserControl
     }
 
     internal void Initialize(
-        StartupSettingsCoordinator startupSettings,
-        DeveloperTestModeState? developerTestModeState,
-        IEnvironmentDiscoveryReportGenerator environmentDiscoveryReportGenerator,
+        IAddonFrontendControl frontend,
+        FrontendBootstrapSnapshot bootstrap,
         Func<bool> isPrerequisiteSetupInProgress)
     {
-        _startupSettings = startupSettings;
-        _developerTestModeState = developerTestModeState;
-        _environmentDiscoveryReportGenerator = environmentDiscoveryReportGenerator;
+        _frontend = frontend;
+        _bootstrap = bootstrap;
+        _lastKnownTestMode = bootstrap.Developer.TestModeEnabled;
+        _lastKnownLogLevel = bootstrap.Settings.LogLevel;
+        _logDirectoryPath = bootstrap.LogDirectoryPath;
         _isPrerequisiteSetupInProgress = isPrerequisiteSetupInProgress;
 
         _isInitializingTestMode = true;
-        TestModeToggleSwitch.IsOn = developerTestModeState?.IsEnabled == true;
+        TestModeToggleSwitch.IsOn = bootstrap.Developer.TestModeEnabled;
         _isInitializingTestMode = false;
 
         _isInitializingLogLevel = true;
-        LogLevelComboBox.SelectedIndex = startupSettings.Settings.LogLevel switch
+        LogLevelComboBox.SelectedIndex = bootstrap.Settings.LogLevel switch
         {
-            AppLogPreference.Info => 1,
-            AppLogPreference.Debug => 2,
+            FrontendLogLevel.Info => 1,
+            FrontendLogLevel.Debug => 2,
             _ => 0,
         };
         _isInitializingLogLevel = false;
@@ -65,7 +67,7 @@ public sealed partial class DeveloperPage : UserControl
     {
         try
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{AppLog.DirectoryPath}\"") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_logDirectoryPath}\"") { UseShellExecute = true });
         }
         catch (Exception exception)
         {
@@ -73,17 +75,70 @@ public sealed partial class DeveloperPage : UserControl
         }
     }
 
-    private void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    private async void TestModeToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
-        if (!_isInitializingTestMode && _isPrerequisiteSetupInProgress?.Invoke() != true)
-            _developerTestModeState?.SetEnabled(TestModeToggleSwitch.IsOn);
+        if (_isInitializingTestMode || _isPrerequisiteSetupInProgress?.Invoke() == true || _frontend is null) return;
+        try
+        {
+            var result = await _frontend.SetDeveloperTestModeAsync(TestModeToggleSwitch.IsOn);
+            _lastKnownTestMode = result.TestModeEnabled;
+            SetTestModeToggle(_lastKnownTestMode);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("DeveloperMenu", "Developer test mode update failed.", exception);
+            await RefreshAuthoritativeStateAsync(() => SetTestModeToggle(_lastKnownTestMode));
+        }
     }
 
-    private void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    private async void LogLevelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
-        if (_isInitializingLogLevel || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
-        var level = AppSettingsPolicy.Normalize(value);
-        _startupSettings?.ChangeLogLevel(level);
+        if (_isInitializingLogLevel || _frontend is null || LogLevelComboBox.SelectedItem is not ComboBoxItem item || item.Content is not string value) return;
+        var level = value switch { "Debug" => FrontendLogLevel.Debug, "Info" => FrontendLogLevel.Info, _ => FrontendLogLevel.Off };
+        try
+        {
+            var result = await _frontend.SetLogLevelAsync(level);
+            _lastKnownLogLevel = result.LogLevel;
+            SetLogLevel(_lastKnownLogLevel);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("DeveloperMenu", "Log level update failed.", exception);
+            await RefreshAuthoritativeStateAsync(() => SetLogLevel(_lastKnownLogLevel));
+        }
+    }
+
+    private async Task RefreshAuthoritativeStateAsync(Action fallback)
+    {
+        try
+        {
+            var bootstrap = await _frontend!.GetBootstrapAsync();
+            _bootstrap = bootstrap;
+            _lastKnownTestMode = bootstrap.Developer.TestModeEnabled;
+            _lastKnownLogLevel = bootstrap.Settings.LogLevel;
+            _logDirectoryPath = bootstrap.LogDirectoryPath;
+            SetTestModeToggle(_lastKnownTestMode);
+            SetLogLevel(_lastKnownLogLevel);
+        }
+        catch (Exception refreshException)
+        {
+            AppLog.Warn("DeveloperMenu", "Developer settings state refresh failed.", refreshException);
+            fallback();
+        }
+    }
+
+    private void SetTestModeToggle(bool value)
+    {
+        _isInitializingTestMode = true;
+        TestModeToggleSwitch.IsOn = value;
+        _isInitializingTestMode = false;
+    }
+
+    private void SetLogLevel(FrontendLogLevel level)
+    {
+        _isInitializingLogLevel = true;
+        LogLevelComboBox.SelectedIndex = level switch { FrontendLogLevel.Info => 1, FrontendLogLevel.Debug => 2, _ => 0 };
+        _isInitializingLogLevel = false;
     }
 
     private async void GenerateEnvironmentDiscoveryReportButton_Click(object sender, RoutedEventArgs args)
@@ -94,8 +149,8 @@ public sealed partial class DeveloperPage : UserControl
         SetEnvironmentDiscoveryStatus("Generating...");
         try
         {
-            await _environmentDiscoveryReportGenerator!.GenerateAsync();
-            SetEnvironmentDiscoveryStatus(string.Empty);
+            var result = await _frontend!.GenerateEnvironmentReportAsync();
+            SetEnvironmentDiscoveryStatus(result.Succeeded ? string.Empty : "Report generation failed.\r\nSee the application log for details.");
         }
         catch (Exception exception)
         {
