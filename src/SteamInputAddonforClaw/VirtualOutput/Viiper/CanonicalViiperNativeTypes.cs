@@ -29,10 +29,16 @@ internal struct USBServerConfig
 }
 
 // Mirrors the generated dist/libVIIPER/libVIIPER.h SteamDeckDeviceState struct from VIIPER
-// main@ec64282c69e5587466b950332d7983fd53a7d778 (PR #16) field-for-field, in the exact declared
-// order. This is the complete generic canonical Steam Deck state (76 bytes) -- including
+// main@522d573f67a693500ef96174aef318f62e8caeef field-for-field, in the exact declared order.
+// This is the complete generic canonical Steam Deck state (72 bytes) -- including
 // trackpad/IMU/rear-button fields the Addon does not yet populate -- not an MSI Claw-specific
 // subset. Do not remove fields merely because SD2's mapper currently sends them neutral.
+//
+// The canonical ABI ends at LPadForce (offset 68) / RPadForce (offset 70). VIIPER 522d573
+// removed the non-canonical LStickForce/RStickForce tail fields present in earlier revisions --
+// they had no corresponding field in the declared Valve/SDL/Linux Steam Deck payload. Do not
+// reintroduce them; CanonicalViiperNativeAbiTests pins both the 72-byte size and the corrected
+// tail offsets.
 [StructLayout(LayoutKind.Sequential)]
 internal struct SteamDeckDeviceState
 {
@@ -86,6 +92,4 @@ internal struct SteamDeckDeviceState
     internal short RStickY;
     internal ushort LPadForce;
     internal ushort RPadForce;
-    internal ushort LStickForce;
-    internal ushort RStickForce;
 }

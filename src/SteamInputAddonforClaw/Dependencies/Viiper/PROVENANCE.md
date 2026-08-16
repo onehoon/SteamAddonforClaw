@@ -42,12 +42,40 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-ABI compatibility is not inferred by the dependency automation. Review the
-generated `libVIIPER.h` diff and the managed interop
-(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
-Replace this paragraph with the reviewed ABI delta -- including any changed
-struct layout, offsets, or exports -- once confirmed.
+Reviewed VIIPER `d1510dd559b284d9bebb50007d38b12d3ab5f822` ->
+`522d573f67a693500ef96174aef318f62e8caeef`. **This is a breaking
+`SteamDeckDeviceState` ABI change**, not a mechanical no-op adoption.
+
+Upstream removed the non-canonical `LStickForce`/`RStickForce` tail fields
+from the canonical Steam Deck state struct -- they had no corresponding
+field in the declared Valve/SDL/Linux Steam Deck payload. The native struct
+shrank from 76 to 72 bytes; `LPadForce` (offset 68) and `RPadForce`
+(offset 70) are now the native tail. Every preceding field offset is
+unchanged. No Steam Deck export was added or removed, and no callback
+typedef changed -- `SetSteamDeckDeviceState(nuint, SteamDeckDeviceState)`
+retains its exact signature (the struct is still passed by value; the
+narrower layout is the only difference), so `RequiredExports` required no
+change.
+
+The Addon's managed `SteamDeckDeviceState` (`CanonicalViiperNativeTypes.cs`)
+was updated to the matching 72-byte definition, with `LStickForce`/
+`RStickForce` removed and every surviving field left in its original
+declared order. `SteamDeckDeviceStateMapper`'s references to the removed
+fields were removed; trackpad pressure (`LPadForce`/`RPadForce`) remains a
+valid canonical field and stays neutral, unchanged, in the current Addon
+feature scope. `CanonicalViiperNativeAbiTests` was updated to pin the
+72-byte size and the corrected tail offsets, and a new regression
+(`SteamDeckDeviceState_DoesNotExposeRemovedStickForceTailFields`) asserts
+via reflection that `LStickForce`/`RStickForce` are absent from the managed
+type, so an accidental reintroduction of the obsolete 76-byte tail fails
+loudly.
+
+Routing, lifecycle, attachment, and recovery behavior are unchanged -- this
+PR is VIIPER dependency adoption plus exact managed ABI alignment for the
+72-byte Steam Deck state, nothing more. No hardware-validation claim is
+expanded: MSI Claw EX basic non-gyro input remains the established claim;
+lifecycle/recovery, rumble/haptics, gyro, and IMU validation remain separate
+work.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment

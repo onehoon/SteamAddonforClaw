@@ -158,6 +158,22 @@ The Addon uses the generated header and the matching managed definitions from
 the same build. The generic output callback remains available in the native
 API; Addon rumble and haptics adoption is a separate feature track.
 
+VIIPER `522d573f67a693500ef96174aef318f62e8caeef` corrected the canonical
+`SteamDeckDeviceState` from 76 to 72 bytes: the non-canonical `LStickForce`
+and `RStickForce` tail fields, which had no corresponding field in the
+declared Valve/SDL/Linux Steam Deck payload, no longer exist in the ABI. The
+native state now ends at `LPadForce` (offset 68) / `RPadForce` (offset 70);
+every earlier field offset is unchanged. No Steam Deck export was added or
+removed, and no callback typedef changed. The Addon's managed
+`SteamDeckDeviceState` (`CanonicalViiperNativeTypes.cs`) and
+`SteamDeckDeviceStateMapper` were updated to match, and
+`CanonicalViiperNativeAbiTests` pins the 72-byte size and corrected tail
+offsets, plus a regression asserting `LStickForce`/`RStickForce` are absent.
+This is ABI alignment only -- trackpad pressure (`LPadForce`/`RPadForce`)
+remains a valid canonical field and stays neutral in the current Addon
+feature scope; no stick-force support is claimed and no hardware-validation
+claim is expanded.
+
 ## 5. Steam Deck state mapping
 
 The mapper preserves the normalized physical state and maps it to native Deck

@@ -69,9 +69,9 @@ internal static class SteamDeckDeviceStateMapper
             RStickY = state.RightStick.Y,
 
             // Neutral for the first SD2 smoke test: L5/R5, Steam, QuickAccess, all trackpad
-            // touch/press/axes/force, stick touch/force, IMU, and quaternion. Left as struct
-            // defaults (0/false) below -- listed here for reviewability, not because they need an
-            // explicit assignment.
+            // touch/press/axes/force, IMU, and quaternion. Left as struct defaults (0/false)
+            // below -- listed here for reviewability, not because they need an explicit
+            // assignment.
             L5 = 0,
             R5 = 0,
             Steam = 0,
@@ -88,8 +88,6 @@ internal static class SteamDeckDeviceStateMapper
             RPadY = 0,
             LPadForce = 0,
             RPadForce = 0,
-            LStickForce = 0,
-            RStickForce = 0,
             AccelX = 0,
             AccelY = 0,
             AccelZ = 0,

@@ -37,14 +37,16 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.DoesNotContain("RemoveSteamControllerDeviceEx", CanonicalViiperNativeApi.RequiredExports);
     }
 
-    // Steam Deck ABI (VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778, PR #16). Field order,
-    // widths, and offsets below are copied directly from the generated dist/libVIIPER/libVIIPER.h
+    // Steam Deck ABI (VIIPER main@522d573f67a693500ef96174aef318f62e8caeef). Field order, widths,
+    // and offsets below are copied directly from the generated dist/libVIIPER/libVIIPER.h
     // SteamDeckDeviceState struct produced by `just build-libVIIPER Release` at that commit -- not
-    // from memory. See src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md.
+    // from memory. See src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md. This revision
+    // corrected the canonical struct from 76 to 72 bytes by removing the non-canonical
+    // LStickForce/RStickForce tail fields; the ABI now ends at LPadForce/RPadForce.
     [Fact]
     public void SteamDeckDeviceState_HasCanonicalSizeAndOffsets()
     {
-        Assert.Equal(76, Marshal.SizeOf<SteamDeckDeviceState>());
+        Assert.Equal(72, Marshal.SizeOf<SteamDeckDeviceState>());
 
         var expected = new Dictionary<string, int>
         {
@@ -69,8 +71,7 @@ public sealed class CanonicalViiperNativeAbiTests
             ["LTrigger"] = 56, ["RTrigger"] = 58,
             ["LStickX"] = 60, ["LStickY"] = 62,
             ["RStickX"] = 64, ["RStickY"] = 66,
-            ["LPadForce"] = 68, ["RPadForce"] = 70,
-            ["LStickForce"] = 72, ["RStickForce"] = 74
+            ["LPadForce"] = 68, ["RPadForce"] = 70
         };
 
         foreach (var (name, offset) in expected)
@@ -92,6 +93,20 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.Equal(56, Marshal.OffsetOf<SteamDeckDeviceState>("LTrigger").ToInt32());
         Assert.Equal(60, Marshal.OffsetOf<SteamDeckDeviceState>("LStickX").ToInt32());
         Assert.Equal(64, Marshal.OffsetOf<SteamDeckDeviceState>("RStickX").ToInt32());
+        Assert.Equal(68, Marshal.OffsetOf<SteamDeckDeviceState>("LPadForce").ToInt32());
+        Assert.Equal(70, Marshal.OffsetOf<SteamDeckDeviceState>("RPadForce").ToInt32());
+    }
+
+    [Fact]
+    public void SteamDeckDeviceState_DoesNotExposeRemovedStickForceTailFields()
+    {
+        // VIIPER 522d573 removed the non-canonical 76-byte tail fields LStickForce/RStickForce.
+        // Reflection (rather than an OffsetOf/compile-time check) is deliberate here: OffsetOf
+        // throws ArgumentException for a nonexistent field name, which would make this test
+        // indistinguishable from a typo; GetField returning null is what actually proves the field
+        // is gone. This must fail loudly if either field is ever reintroduced.
+        Assert.Null(typeof(SteamDeckDeviceState).GetField("LStickForce", BindingFlags.Instance | BindingFlags.NonPublic));
+        Assert.Null(typeof(SteamDeckDeviceState).GetField("RStickForce", BindingFlags.Instance | BindingFlags.NonPublic));
     }
 
     [Fact]

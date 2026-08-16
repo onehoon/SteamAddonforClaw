@@ -27,8 +27,6 @@ public sealed class SteamDeckDeviceStateMapperTests
         Assert.Equal(0, mapped.RPadY);
         Assert.Equal(0, mapped.LPadForce);
         Assert.Equal(0, mapped.RPadForce);
-        Assert.Equal(0, mapped.LStickForce);
-        Assert.Equal(0, mapped.RStickForce);
         Assert.Equal(0, mapped.AccelX);
         Assert.Equal(0, mapped.AccelY);
         Assert.Equal(0, mapped.AccelZ);
