@@ -1,6 +1,4 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Routing;
-using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -63,7 +61,9 @@ internal static class StatusPresentation
         && !snapshot.AddonOwnedOutputIdentityUncertain
         && snapshot.Hardware.Status == FrontendHardwareStatus.Supported
         && snapshot.ControllerEnvironmentStatus == FrontendControllerEnvironmentStatus.Supported
-        && snapshot.Routing.EligibilityReason is not (nameof(RoutingDecisionReason.DeviceCompatibilityIndeterminate) or nameof(RoutingDecisionReason.ControllerEnvironmentIndeterminate));
+        && snapshot.Routing.EligibilityReason is not (FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate
+            or FrontendRoutingEligibilityReason.ControllerEnvironmentIndeterminate
+            or FrontendRoutingEligibilityReason.Indeterminate);
 
     /// <summary>
     /// Reports what controller path is actually active, derived from the frontend routing
@@ -77,6 +77,9 @@ internal static class StatusPresentation
         bool nativeXInputVerified)
     {
         if (!stateTrusted || !routingStatus.Available) return "Unavailable";
+
+        if (routingStatus.OperationalState == FrontendRoutingOperationalState.Indeterminate)
+            return "Unavailable";
 
         if (routingStatus.OperationalState == FrontendRoutingOperationalState.OverrideActive
             && routingStatus.SteamOutputActive
@@ -104,7 +107,12 @@ internal static class StatusPresentation
             return false;
 
         return !snapshot.RecoverySafe
-        || snapshot.Routing.EligibilityReason is nameof(RoutingDecisionReason.DeviceCompatibilityIndeterminate) or nameof(RoutingDecisionReason.ControllerEnvironmentIndeterminate)
-        || snapshot.AddonStatus is nameof(AddonOperationalStatus.SetupRequired) or nameof(AddonOperationalStatus.RecoveryRequired) or nameof(AddonOperationalStatus.Unsupported);
+        || snapshot.Routing.EligibilityReason is FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate
+            or FrontendRoutingEligibilityReason.ControllerEnvironmentIndeterminate
+            or FrontendRoutingEligibilityReason.Indeterminate
+        || snapshot.AddonStatus is FrontendAddonOperationalStatus.SetupRequired
+            or FrontendAddonOperationalStatus.RecoveryRequired
+            or FrontendAddonOperationalStatus.Unsupported
+            or FrontendAddonOperationalStatus.Indeterminate;
     }
 }

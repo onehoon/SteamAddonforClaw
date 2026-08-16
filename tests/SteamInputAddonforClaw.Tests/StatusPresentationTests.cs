@@ -1,7 +1,4 @@
-using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Routing;
-using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Views;
 using Xunit;
 
@@ -68,7 +65,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false);
 
         Assert.Equal("MSI Center M Native", status);
@@ -79,7 +76,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: true);
 
         Assert.Equal("MSI Center M Native (XInput)", status);
@@ -90,7 +87,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: true, NativeDirectInputActive: true),
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: true, NativeDirectInputActive: true),
             nativeXInputVerified: false);
 
         Assert.Equal("Steam Controller (DInput)", status);
@@ -104,7 +101,7 @@ public sealed class StatusPresentationTests
         // never passed into this mapper, precisely so it cannot be mistaken for actual entry.
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false);
 
         Assert.NotEqual("Steam Controller (DInput)", status);
@@ -115,7 +112,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: false, NativeDirectInputActive: true),
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: false, NativeDirectInputActive: true),
             nativeXInputVerified: false);
 
         Assert.NotEqual("Steam Controller (DInput)", status);
@@ -126,7 +123,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: true, NativeDirectInputActive: false),
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: true, NativeDirectInputActive: false),
             nativeXInputVerified: false);
 
         Assert.NotEqual("Steam Controller (DInput)", status);
@@ -139,7 +136,7 @@ public sealed class StatusPresentationTests
         // conservative to Unavailable, not silently fall through to "MSI Center M Native".
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false);
 
         Assert.Equal("Unavailable", status);
@@ -150,7 +147,7 @@ public sealed class StatusPresentationTests
     {
         var status = StatusPresentation.FormatControllerStatus(
             stateTrusted: false,
-            routingStatus: new("Eligible", FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: true, NativeDirectInputActive: true),
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.OverrideActive, Available: true, SteamOutputActive: true, NativeDirectInputActive: true),
             nativeXInputVerified: false);
 
         Assert.Equal("Unavailable", status);
@@ -166,43 +163,43 @@ public sealed class StatusPresentationTests
 
     [Fact]
     public void IsControllerStateTrusted_DeviceCompatibilityIndeterminate_IsFalse() =>
-        Assert.False(StatusPresentation.IsControllerStateTrusted(Snapshot(routingReason: RoutingDecisionReason.DeviceCompatibilityIndeterminate)));
+        Assert.False(StatusPresentation.IsControllerStateTrusted(Snapshot(routingReason: FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate)));
 
     [Fact]
     public void IsControllerStateTrusted_ControllerEnvironmentIndeterminate_IsFalse() =>
-        Assert.False(StatusPresentation.IsControllerStateTrusted(Snapshot(routingReason: RoutingDecisionReason.ControllerEnvironmentIndeterminate)));
+        Assert.False(StatusPresentation.IsControllerStateTrusted(Snapshot(routingReason: FrontendRoutingEligibilityReason.ControllerEnvironmentIndeterminate)));
 
     [Fact]
     public void IsControllerStateTrusted_UnsupportedDevice_IsFalse() =>
         Assert.False(StatusPresentation.IsControllerStateTrusted(
-            Snapshot(hardwareStatus: HardwareCompatibilityStatus.Unsupported, routingReason: RoutingDecisionReason.UnsupportedDevice)));
+            Snapshot(hardwareStatus: FrontendHardwareStatus.Unsupported, routingReason: FrontendRoutingEligibilityReason.UnsupportedDevice)));
 
     [Fact]
     public void IsControllerStateTrusted_UnsupportedControllerEnvironment_IsFalse() =>
         Assert.False(StatusPresentation.IsControllerStateTrusted(
-            Snapshot(environmentStatus: ControllerEnvironmentCompatibilityStatus.Unsupported, routingReason: RoutingDecisionReason.ControllerEnvironmentUnsupported)));
+            Snapshot(environmentStatus: FrontendControllerEnvironmentStatus.Unsupported, routingReason: FrontendRoutingEligibilityReason.ControllerEnvironmentUnsupported)));
 
     [Fact]
     public void FormatControllerStatus_UnsupportedDevice_ReportsUnavailable() =>
         Assert.Equal("Unavailable", StatusPresentation.FormatControllerStatus(
             StatusPresentation.IsControllerStateTrusted(
-                Snapshot(hardwareStatus: HardwareCompatibilityStatus.Unsupported, routingReason: RoutingDecisionReason.UnsupportedDevice)),
-            new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
+                Snapshot(hardwareStatus: FrontendHardwareStatus.Unsupported, routingReason: FrontendRoutingEligibilityReason.UnsupportedDevice)),
+            new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false));
 
     [Fact]
     public void FormatControllerStatus_UnsupportedControllerEnvironment_ReportsUnavailable() =>
         Assert.Equal("Unavailable", StatusPresentation.FormatControllerStatus(
             StatusPresentation.IsControllerStateTrusted(
-                Snapshot(environmentStatus: ControllerEnvironmentCompatibilityStatus.Unsupported, routingReason: RoutingDecisionReason.ControllerEnvironmentUnsupported)),
-            new("Eligible", FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
+                Snapshot(environmentStatus: FrontendControllerEnvironmentStatus.Unsupported, routingReason: FrontendRoutingEligibilityReason.ControllerEnvironmentUnsupported)),
+            new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.Passive, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false));
 
     [Fact]
     public void FormatControllerStatus_UnavailableRuntime_ReportsUnavailable() =>
         Assert.Equal("Unavailable", StatusPresentation.FormatControllerStatus(
             stateTrusted: true,
-            routingStatus: new("Eligible", FrontendRoutingOperationalState.Passive, Available: false, SteamOutputActive: false, NativeDirectInputActive: false),
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.Passive, Available: false, SteamOutputActive: false, NativeDirectInputActive: false),
             nativeXInputVerified: false));
 
     [Fact]
@@ -217,13 +214,13 @@ public sealed class StatusPresentationTests
     public void IsWarning_UnsupportedHardware_HidesRecoveryWarning() =>
         Assert.False(StatusPresentation.IsWarning(Snapshot(
             recoverySafe: false,
-            hardwareStatus: HardwareCompatibilityStatus.Unsupported)));
+            hardwareStatus: FrontendHardwareStatus.Unsupported)));
 
     [Fact]
     public void IsWarning_UnsupportedHardware_WithUncertainAddonOutput_RemainsWarning() =>
         Assert.True(StatusPresentation.IsWarning(Snapshot(
             addonOwnedOutputIdentityUncertain: true,
-            hardwareStatus: HardwareCompatibilityStatus.Unsupported)));
+            hardwareStatus: FrontendHardwareStatus.Unsupported)));
 
     [Fact]
     public void IsWarning_AddonOwnedOutputIdentityUncertain_RemainsWarning() =>
@@ -231,32 +228,51 @@ public sealed class StatusPresentationTests
 
     [Fact]
     public void IsWarning_CompatibilityIndeterminate_RemainsVisible() =>
-        Assert.True(StatusPresentation.IsWarning(Snapshot(routingReason: RoutingDecisionReason.DeviceCompatibilityIndeterminate)));
+        Assert.True(StatusPresentation.IsWarning(Snapshot(routingReason: FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate)));
 
     [Fact]
     public void IsWarning_SetupRequired_IsWarning() =>
-        Assert.True(StatusPresentation.IsWarning(Snapshot(addonStatus: AddonOperationalStatus.SetupRequired)));
+        Assert.True(StatusPresentation.IsWarning(Snapshot(addonStatus: FrontendAddonOperationalStatus.SetupRequired)));
 
     [Fact]
     public void IsWarning_NormalReadyState_IsNotWarning() =>
         Assert.False(StatusPresentation.IsWarning(Snapshot()));
 
+    [Fact]
+    public void IsControllerStateTrusted_IndeterminateEligibilityReason_IsFalse() =>
+        Assert.False(StatusPresentation.IsControllerStateTrusted(Snapshot(routingReason: FrontendRoutingEligibilityReason.Indeterminate)));
+
+    [Fact]
+    public void FormatControllerStatus_IndeterminateOperationalState_ReportsUnavailable() =>
+        Assert.Equal("Unavailable", StatusPresentation.FormatControllerStatus(
+            stateTrusted: true,
+            routingStatus: new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.Indeterminate, Available: true, SteamOutputActive: false, NativeDirectInputActive: false),
+            nativeXInputVerified: false));
+
+    [Fact]
+    public void FormatSteamGame_IndeterminateSource_ReportsNotRunning() =>
+        Assert.Equal("Not Running", StatusPresentation.FormatSteamGame(new FrontendSteamSnapshot(true, 123, FrontendSteamSource.Indeterminate)));
+
+    [Fact]
+    public void IsWarning_IndeterminateAddonStatus_IsWarning() =>
+        Assert.True(StatusPresentation.IsWarning(Snapshot(addonStatus: FrontendAddonOperationalStatus.Indeterminate)));
+
     private static FrontendStatusSnapshot Snapshot(
         bool recoverySafe = true,
         bool addonOwnedOutputIdentityUncertain = false,
-        RoutingDecisionReason routingReason = RoutingDecisionReason.Eligible,
-        AddonOperationalStatus addonStatus = AddonOperationalStatus.Ready,
-        HardwareCompatibilityStatus hardwareStatus = HardwareCompatibilityStatus.Supported,
-        ControllerEnvironmentCompatibilityStatus environmentStatus = ControllerEnvironmentCompatibilityStatus.Supported) =>
+        FrontendRoutingEligibilityReason routingReason = FrontendRoutingEligibilityReason.Eligible,
+        FrontendAddonOperationalStatus addonStatus = FrontendAddonOperationalStatus.Ready,
+        FrontendHardwareStatus hardwareStatus = FrontendHardwareStatus.Supported,
+        FrontendControllerEnvironmentStatus environmentStatus = FrontendControllerEnvironmentStatus.Supported) =>
         new(
             new("Test", "Test", "Test", []),
-            new(hardwareStatus == HardwareCompatibilityStatus.Supported ? FrontendHardwareStatus.Supported : hardwareStatus == HardwareCompatibilityStatus.Unsupported ? FrontendHardwareStatus.Unsupported : FrontendHardwareStatus.Indeterminate, "", "", "Test"),
+            new(hardwareStatus, "", "", "Test"),
             [],
-            environmentStatus == ControllerEnvironmentCompatibilityStatus.Supported ? FrontendControllerEnvironmentStatus.Supported : environmentStatus == ControllerEnvironmentCompatibilityStatus.Unsupported ? FrontendControllerEnvironmentStatus.Unsupported : FrontendControllerEnvironmentStatus.Indeterminate,
+            environmentStatus,
             "Test",
             new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
             new(false, 0, FrontendSteamSource.Actual),
-            new(routingReason.ToString(), FrontendRoutingOperationalState.Passive, true, false, false),
-            addonStatus.ToString(), "Test", recoverySafe, addonOwnedOutputIdentityUncertain,
+            new(routingReason, FrontendRoutingOperationalState.Passive, true, false, false),
+            addonStatus, "Test", recoverySafe, addonOwnedOutputIdentityUncertain,
             FrontendSetupStatus.Indeterminate, "", false);
 }

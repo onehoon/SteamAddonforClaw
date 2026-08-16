@@ -16,8 +16,8 @@ internal static class FrontendSnapshotMapper
         MapControllerEnvironmentStatus(snapshot.Compatibility.Status), snapshot.Compatibility.Reason.ToString(),
         new(MapPrerequisite(snapshot.Prerequisites.HidHide.Status), snapshot.Prerequisites.HidHide.Reason, MapPrerequisite(snapshot.Prerequisites.UsbIpWin2.Status), snapshot.Prerequisites.UsbIpWin2.Reason, MapPrerequisite(snapshot.Prerequisites.Viiper.Status), snapshot.Prerequisites.Viiper.Reason),
         new(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, MapSteamSource(snapshot.Steam.Source)),
-        new(snapshot.RoutingDecision.Reason.ToString(), MapOperationalState(routing.OperationalState), routing.Available, routing.SteamOutputActive, routing.NativeDirectInputActive),
-        snapshot.Addon.Status.ToString(), snapshot.Addon.Reason, snapshot.RecoverySafe, snapshot.AddonOwnedOutputIdentityUncertain,
+        new(MapRoutingReason(snapshot.RoutingDecision.Reason), MapOperationalState(routing.OperationalState), routing.Available, routing.SteamOutputActive, routing.NativeDirectInputActive),
+        MapAddonStatus(snapshot.Addon.Status), snapshot.Addon.Reason, snapshot.RecoverySafe, snapshot.AddonOwnedOutputIdentityUncertain,
         FrontendSetupStatus.Indeterminate, "Status must be refreshed before setup evaluation.", false);
 
     internal static FrontendStatusSnapshot ApplySetup(FrontendStatusSnapshot snapshot, FirstTimeSetupAssessment setup) => snapshot with
@@ -43,9 +43,36 @@ internal static class FrontendSnapshotMapper
 
     private static FrontendSteamSource MapSteamSource(SteamSessionSource source) => source switch
     {
+        SteamSessionSource.Actual => FrontendSteamSource.Actual,
         SteamSessionSource.BigPicture => FrontendSteamSource.BigPicture,
         SteamSessionSource.DeveloperTest => FrontendSteamSource.DeveloperTest,
-        _ => FrontendSteamSource.Actual
+        _ => FrontendSteamSource.Indeterminate
+    };
+
+    private static FrontendRoutingEligibilityReason MapRoutingReason(RoutingDecisionReason reason) => reason switch
+    {
+        RoutingDecisionReason.SteamInactive => FrontendRoutingEligibilityReason.SteamInactive,
+        RoutingDecisionReason.AddonOwnedOutputIdentityUncertain => FrontendRoutingEligibilityReason.AddonOwnedOutputIdentityUncertain,
+        RoutingDecisionReason.RecoveryUnsafe => FrontendRoutingEligibilityReason.RecoveryUnsafe,
+        RoutingDecisionReason.UnsupportedDevice => FrontendRoutingEligibilityReason.UnsupportedDevice,
+        RoutingDecisionReason.DeviceCompatibilityIndeterminate => FrontendRoutingEligibilityReason.DeviceCompatibilityIndeterminate,
+        RoutingDecisionReason.ControllerEnvironmentUnsupported => FrontendRoutingEligibilityReason.ControllerEnvironmentUnsupported,
+        RoutingDecisionReason.ControllerEnvironmentIndeterminate => FrontendRoutingEligibilityReason.ControllerEnvironmentIndeterminate,
+        RoutingDecisionReason.PrerequisitesNotReady => FrontendRoutingEligibilityReason.PrerequisitesNotReady,
+        RoutingDecisionReason.Eligible => FrontendRoutingEligibilityReason.Eligible,
+        _ => FrontendRoutingEligibilityReason.Indeterminate
+    };
+
+    private static FrontendAddonOperationalStatus MapAddonStatus(AddonOperationalStatus status) => status switch
+    {
+        AddonOperationalStatus.Ready => FrontendAddonOperationalStatus.Ready,
+        AddonOperationalStatus.WaitingForSteam => FrontendAddonOperationalStatus.WaitingForSteam,
+        AddonOperationalStatus.Passive => FrontendAddonOperationalStatus.Passive,
+        AddonOperationalStatus.Unsupported => FrontendAddonOperationalStatus.Unsupported,
+        AddonOperationalStatus.SetupRequired => FrontendAddonOperationalStatus.SetupRequired,
+        AddonOperationalStatus.RecoveryRequired => FrontendAddonOperationalStatus.RecoveryRequired,
+        AddonOperationalStatus.Indeterminate => FrontendAddonOperationalStatus.Indeterminate,
+        _ => FrontendAddonOperationalStatus.Indeterminate
     };
 
     private static FrontendSoftwareInstallationStatus MapInstallation(SoftwareInstallationStatus status) => status switch
@@ -75,8 +102,9 @@ internal static class FrontendSnapshotMapper
 
     private static FrontendRoutingOperationalState MapOperationalState(RoutingOperationalState state) => state switch
     {
+        RoutingOperationalState.Passive => FrontendRoutingOperationalState.Passive,
         RoutingOperationalState.OverrideActive => FrontendRoutingOperationalState.OverrideActive,
-        _ => FrontendRoutingOperationalState.Passive
+        _ => FrontendRoutingOperationalState.Indeterminate
     };
 
     private static FrontendSetupStatus MapSetupStatus(FirstTimeSetupStatus status) => status switch

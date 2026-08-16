@@ -19,8 +19,8 @@ public sealed class FrontendContractTests
         FrontendControllerEnvironmentStatus.Supported, "StockCenterMOnlySupported",
         new(FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, "", FrontendPrerequisiteStatus.Ready, ""),
         new(true, 480, FrontendSteamSource.BigPicture),
-        new("Eligible", FrontendRoutingOperationalState.OverrideActive, true, true, true),
-        "Ready", "Eligible", true, false,
+        new(FrontendRoutingEligibilityReason.Eligible, FrontendRoutingOperationalState.OverrideActive, true, true, true),
+        FrontendAddonOperationalStatus.Ready, "Eligible", true, false,
         FrontendSetupStatus.Complete, "Complete", false);
 
     [Fact]
@@ -176,6 +176,42 @@ public sealed class FrontendContractTests
     }
 
     [Fact]
+    public void Mapper_translates_routing_reason_to_frontend_enum() =>
+        Assert.Equal(FrontendRoutingEligibilityReason.PrerequisitesNotReady, Snapshot(routingReason: RoutingDecisionReason.PrerequisitesNotReady).Routing.EligibilityReason);
+
+    [Fact]
+    public void Mapper_translates_addon_status_to_frontend_enum() =>
+        Assert.Equal(FrontendAddonOperationalStatus.WaitingForSteam, Snapshot(addonStatus: AddonOperationalStatus.WaitingForSteam).AddonStatus);
+
+    [Fact]
+    public void Mapper_unknown_steam_source_fails_closed_to_indeterminate()
+    {
+        var unknownSteam = (SteamSessionSource)int.MaxValue;
+        Assert.Equal(FrontendSteamSource.Indeterminate, Snapshot(steamSource: unknownSteam).Steam.Source);
+    }
+
+    [Fact]
+    public void Mapper_unknown_routing_operational_state_fails_closed_to_indeterminate()
+    {
+        var unknownOperational = (RoutingOperationalState)int.MaxValue;
+        Assert.Equal(FrontendRoutingOperationalState.Indeterminate, Snapshot(routingOperationalState: unknownOperational).Routing.OperationalState);
+    }
+
+    [Fact]
+    public void Mapper_unknown_routing_reason_fails_closed_to_indeterminate()
+    {
+        var unknownRoutingReason = (RoutingDecisionReason)int.MaxValue;
+        Assert.Equal(FrontendRoutingEligibilityReason.Indeterminate, Snapshot(routingReason: unknownRoutingReason).Routing.EligibilityReason);
+    }
+
+    [Fact]
+    public void Mapper_unknown_addon_status_fails_closed_to_indeterminate()
+    {
+        var unknownAddonStatus = (AddonOperationalStatus)int.MaxValue;
+        Assert.Equal(FrontendAddonOperationalStatus.Indeterminate, Snapshot(addonStatus: unknownAddonStatus).AddonStatus);
+    }
+
+    [Fact]
     public void ApplySetup_translates_every_setup_status()
     {
         foreach (var (status, expected) in new (FirstTimeSetupStatus, FrontendSetupStatus)[]
@@ -220,7 +256,8 @@ public sealed class FrontendContractTests
         bool routingAvailable = true,
         bool steamOutputActive = false,
         bool nativeDirectInputActive = false,
-        PrerequisiteStatus hidHideStatus = PrerequisiteStatus.Ready)
+        PrerequisiteStatus hidHideStatus = PrerequisiteStatus.Ready,
+        AddonOperationalStatus addonStatus = AddonOperationalStatus.Ready)
     {
         var runtime = new SystemStatusSnapshot(
             new("MSI", "Claw", "BOARD", []),
@@ -230,7 +267,7 @@ public sealed class FrontendContractTests
             new(new(PrerequisiteKind.HidHide, hidHideStatus, "Test"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Test")),
             new(steamActive, steamAppId, steamSource),
             new(RoutingDecisionKind.Eligible, routingReason),
-            new(AddonOperationalStatus.Ready, "Test"),
+            new(addonStatus, "Test"),
             recoverySafe,
             addonOwnedOutputIdentityUncertain);
 
