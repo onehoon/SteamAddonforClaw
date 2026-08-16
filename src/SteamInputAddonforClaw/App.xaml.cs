@@ -50,7 +50,48 @@ public partial class App : Application
         }
 
         if (outcome == AddonProcessStartupOutcome.RuntimeReady)
-            _dispatcherQueue?.TryEnqueue(() => _ = StartNormalRuntimeAsync());
+        {
+            if (_dispatcherQueue?.TryEnqueue(StartNormalRuntimeDispatched) != true)
+            {
+                AppLog.Error(
+                    "Startup",
+                    "Runtime startup could not be dispatched to the UI thread.",
+                    new InvalidOperationException("DispatcherQueue rejected runtime startup."));
+
+                _processHost?.CancelStartup();
+            }
+        }
+    }
+
+    private async void StartNormalRuntimeDispatched()
+    {
+        try
+        {
+            await StartNormalRuntimeAsync();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error(
+                "Startup",
+                "Runtime startup failed.",
+                exception);
+
+            _isExplicitExit = true;
+
+            try
+            {
+                ShutdownApplicationOnce();
+            }
+            catch (Exception cleanupException)
+            {
+                AppLog.Error(
+                    "Startup",
+                    "Runtime cleanup after startup failure failed.",
+                    cleanupException);
+            }
+
+            Exit();
+        }
     }
 
     private async Task StartNormalRuntimeAsync()
