@@ -1,0 +1,107 @@
+using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Frontend;
+using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Status;
+using SteamInputAddonforClaw.Steam;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+public sealed class FrontendPrerequisiteSetupBridgeTests
+{
+    [Fact]
+    public async Task Fresh_non_installable_revalidation_does_not_launch_and_returns_fresh_status()
+    {
+        var fresh = Snapshot("fresh");
+        var executor = new FakeExecutor(new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.SteamActive, false));
+        var control = CreateControl([fresh], executor);
+
+        var result = await control.RunPrerequisiteSetupAsync();
+
+        Assert.Equal(FrontendPrerequisiteSetupResultKind.NotInstallable, result.Result);
+        Assert.Equal("fresh", result.Status.Device.Model);
+        Assert.Equal(1, executor.EvaluateCallCount);
+        Assert.Equal(0, executor.RunCallCount);
+    }
+
+    [Theory]
+    [InlineData(3, FrontendPrerequisiteSetupResultKind.Blocked)]
+    [InlineData(3010, FrontendPrerequisiteSetupResultKind.RebootRequired)]
+    public async Task Launched_helper_result_is_translated(int exitCode, FrontendPrerequisiteSetupResultKind expected)
+    {
+        var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
+        {
+            Result = new(ElevatedProcessResultKind.Completed, exitCode)
+        };
+        var control = CreateControl([Snapshot("pre"), Snapshot("post")], executor);
+
+        var result = await control.RunPrerequisiteSetupAsync();
+
+        Assert.Equal(expected, result.Result);
+        Assert.Equal(1, executor.RunCallCount);
+        Assert.Equal("test-runtime.exe", executor.ExecutablePath);
+        Assert.Equal("post", result.Status.Device.Model);
+    }
+
+    [Fact]
+    public async Task Post_helper_status_is_not_the_stale_pre_execution_status()
+    {
+        var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
+        {
+            Result = new(ElevatedProcessResultKind.Completed, 0)
+        };
+        var control = CreateControl([Snapshot("pre"), Snapshot("post")], executor);
+
+        var result = await control.RunPrerequisiteSetupAsync();
+
+        Assert.Equal("post", result.Status.Device.Model);
+    }
+
+    private static InProcessAddonFrontendControl CreateControl(IReadOnlyList<SystemStatusSnapshot> snapshots, FakeExecutor executor)
+    {
+        var status = new QueueStatusProvider(snapshots);
+        return new InProcessAddonFrontendControl(null!, status, null, null!, "", executor, () => "test-runtime.exe", () => new(true, RoutingOperationalState.Passive, false, false));
+    }
+
+    private static SystemStatusSnapshot Snapshot(string model) => new(
+        new("MSI", model, "BOARD", []),
+        new(HardwareCompatibilityStatus.Supported, null, null, "Test"),
+        [],
+        new(ControllerEnvironmentCompatibilityStatus.Supported, ControllerEnvironmentCompatibilityReason.StockCenterMOnlySupported),
+        new(new(PrerequisiteKind.HidHide, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.UsbIpWin2, PrerequisiteStatus.Ready, "Test"), new(PrerequisiteKind.Viiper, PrerequisiteStatus.Ready, "Test")),
+        new(false, 0),
+        new(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible),
+        new(AddonOperationalStatus.Ready, "Test"), true, false);
+
+    private sealed class QueueStatusProvider(IEnumerable<SystemStatusSnapshot> snapshots) : ISystemStatusProvider
+    {
+        private readonly Queue<SystemStatusSnapshot> _snapshots = new(snapshots);
+        public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) => Task.FromResult(_snapshots.Count > 1 ? _snapshots.Dequeue() : _snapshots.Peek());
+    }
+
+    private sealed class FakeExecutor(FirstTimeSetupAssessment assessment) : IFrontendPrerequisiteSetupExecutor
+    {
+        public ElevatedProcessResult? Result { get; init; }
+        public int EvaluateCallCount { get; private set; }
+        public int RunCallCount { get; private set; }
+        public string? ExecutablePath { get; private set; }
+        public FirstTimeSetupAssessment? SuppliedAssessment { get; private set; }
+
+        public FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot)
+        {
+            EvaluateCallCount++;
+            return assessment;
+        }
+
+        public Task<ElevatedProcessResult?> RunAsync(FirstTimeSetupAssessment suppliedAssessment, string executablePath, CancellationToken cancellationToken)
+        {
+            RunCallCount++;
+            SuppliedAssessment = suppliedAssessment;
+            ExecutablePath = executablePath;
+            return Task.FromResult(Result);
+        }
+    }
+}
