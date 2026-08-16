@@ -233,36 +233,12 @@ public partial class App : Application
         if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) _ = ReconcileRoutingAsync();
     }
 
-    private async Task ReconcileRoutingAsync(CancellationToken cancellationToken = default)
+    private Task ReconcileRoutingAsync(CancellationToken cancellationToken = default)
     {
         var runtime = _routingRuntime;
-        if (runtime is null) return;
-        await RoutingReconcileStatusRefresh.RunAsync(async () =>
-        {
-            try
-            {
-                var result = await runtime.ReconcileAsync(cancellationToken).ConfigureAwait(false);
-                if (!result.Succeeded)
-                    AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,
-                        ("Action", result.Action), ("State", result.State), ("Reason", result.Reason));
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-            catch (Exception exception)
-            {
-                AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation failed; routing is being failed closed.", exception);
-                try
-                {
-                    await runtime.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
-                    var rollback = await runtime.FailClosedAsync().ConfigureAwait(false);
-                    if (!rollback.Succeeded)
-                        AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));
-                }
-                catch (Exception rollbackException)
-                {
-                    AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback threw an exception.", rollbackException);
-                }
-            }
-        }, () => _mainWindow?.RequestStatusRefresh()).ConfigureAwait(false);
+        return runtime is null
+            ? Task.CompletedTask
+            : runtime.ReconcileSafelyAsync(() => _mainWindow?.RequestStatusRefresh(), cancellationToken);
     }
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)

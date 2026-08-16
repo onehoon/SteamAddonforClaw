@@ -96,11 +96,6 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
     internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() => _coordinator.CaptureTerminationSnapshot();
 
-    internal Task<RoutingPipelineSessionReconcileResult> ReconcileAsync(CancellationToken cancellationToken = default) =>
-        _coordinator.ReconcileAsync(cancellationToken).AsTask();
-
-    internal Task<RoutingPipelineSessionReconcileResult> FailClosedAsync() => _coordinator.FailClosedAsync().AsTask();
-
     internal Task<bool> ReconcileFreshAfterResumeAsync(CancellationToken cancellationToken) =>
         _coordinator.ReconcileFreshAfterResumeAsync(cancellationToken).AsTask();
 
@@ -109,8 +104,45 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
     internal void CancelInFlightTransition() => _coordinator.CancelInFlightTransition();
 
-    internal Task LatchRoutingFaultAsync(string reason, CancellationToken cancellationToken = default) =>
-        _safetySession is null ? Task.CompletedTask : _safetySession.LatchRoutingFaultAsync(reason, cancellationToken);
+    /// <summary>
+    /// Normal (non-resume) routing reconciliation, with the exact failure policy
+    /// <c>App.xaml.cs</c> previously performed inline: an unsuccessful result is logged; an
+    /// unexpected exception (other than cancellation the caller itself requested) is logged, the
+    /// safety session's routing fault is latched, and the coordinator is failed closed, with the
+    /// rollback outcome itself logged if it fails. <paramref name="requestStatusRefresh"/> is
+    /// guaranteed to run exactly once, on every path, via
+    /// <see cref="RoutingReconcileStatusRefresh.RunAsync"/>. Resume reconciliation
+    /// (<see cref="ReconcileFreshAfterResumeAsync"/>) is a separate path with separate policy,
+    /// owned by the caller.
+    /// </summary>
+    internal Task ReconcileSafelyAsync(Action requestStatusRefresh, CancellationToken cancellationToken = default) =>
+        RoutingReconcileStatusRefresh.RunAsync(async () =>
+        {
+            try
+            {
+                var result = await _coordinator.ReconcileAsync(cancellationToken).ConfigureAwait(false);
+                if (!result.Succeeded)
+                    AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,
+                        ("Action", result.Action), ("State", result.State), ("Reason", result.Reason));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation failed; routing is being failed closed.", exception);
+                try
+                {
+                    if (_safetySession is not null)
+                        await _safetySession.LatchRoutingFaultAsync("CanonicalRoutingReconciliationFailed", CancellationToken.None).ConfigureAwait(false);
+                    var rollback = await _coordinator.FailClosedAsync().ConfigureAwait(false);
+                    if (!rollback.Succeeded)
+                        AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));
+                }
+                catch (Exception rollbackException)
+                {
+                    AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback threw an exception.", rollbackException);
+                }
+            }
+        }, requestStatusRefresh);
 
     /// <summary>
     /// Stops routing via the existing coordinator shutdown, falling back to the safety session's

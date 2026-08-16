@@ -86,13 +86,81 @@ public sealed class AddonRoutingRuntimeTests
         }
     }
 
-    private static AddonRoutingRuntime? CreateMsiRuntime() => AddonRoutingRuntime.Create(
+    [Fact]
+    public async Task ReconcileSafelyAsync_requests_a_status_refresh_exactly_once_on_success()
+    {
+        var runtime = CreateMsiRuntime(new FakeStatusProvider(Snapshot(WaitingForSteam())));
+        Assert.NotNull(runtime);
+        try
+        {
+            var refreshCount = 0;
+            await runtime.ReconcileSafelyAsync(() => refreshCount++);
+
+            Assert.Equal(1, refreshCount);
+        }
+        finally
+        {
+            await runtime.ShutdownAsync();
+            await runtime.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReconcileSafelyAsync_contains_an_unexpected_exception_and_still_refreshes_status()
+    {
+        var runtime = CreateMsiRuntime(new FakeStatusProvider(throwOnCapture: true));
+        Assert.NotNull(runtime);
+        try
+        {
+            var refreshCount = 0;
+
+            // Must not propagate: the production failure policy (log, latch safety fault,
+            // fail closed, log any rollback failure) runs entirely inside ReconcileSafelyAsync.
+            await runtime.ReconcileSafelyAsync(() => refreshCount++);
+
+            Assert.Equal(1, refreshCount);
+        }
+        finally
+        {
+            await runtime.ShutdownAsync();
+            await runtime.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReconcileSafelyAsync_treats_caller_requested_cancellation_as_non_faulting()
+    {
+        var runtime = CreateMsiRuntime(new FakeStatusProvider(Snapshot(WaitingForSteam())));
+        Assert.NotNull(runtime);
+        try
+        {
+            var refreshCount = 0;
+
+            // A pre-cancelled token is observed by the coordinator's own transition gate wait,
+            // not by the status provider -- this must not be treated as a routing failure.
+            await runtime.ReconcileSafelyAsync(() => refreshCount++, new CancellationToken(true));
+
+            Assert.Equal(1, refreshCount);
+        }
+        finally
+        {
+            await runtime.ShutdownAsync();
+            await runtime.DisposeAsync();
+        }
+    }
+
+    private static AddonRoutingRuntime? CreateMsiRuntime(ISystemStatusProvider? statusProvider = null) => AddonRoutingRuntime.Create(
         new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
-        new FakeStatusProvider(),
+        statusProvider ?? new FakeStatusProvider(),
         new AddonOwnedVirtualDeviceTracker(),
         new RecoveryManager(new MemoryJournalStore()),
         new PowerMutationGate(initiallyOpen: true),
         new RecoverySafetyState(RecoverySafety.Safe));
+
+    private static SystemStatusSnapshot Snapshot(RoutingDecision decision) =>
+        new(new("Test", "Test", "Test", []), null!, [], null!, null!, null!, decision, null!, true, false);
+
+    private static RoutingDecision WaitingForSteam() => new(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive);
 
     private sealed class EmptyDeviceEnumerator : IControllerDeviceEnumerator
     {
@@ -114,10 +182,11 @@ public sealed class AddonRoutingRuntimeTests
         }
     }
 
-    private sealed class FakeStatusProvider : ISystemStatusProvider
+    private sealed class FakeStatusProvider(SystemStatusSnapshot? snapshot = null, bool throwOnCapture = false) : ISystemStatusProvider
     {
-        public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Not exercised by construction-only tests.");
+        public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) => throwOnCapture
+            ? throw new InvalidOperationException("Simulated status capture failure.")
+            : Task.FromResult(snapshot ?? throw new InvalidOperationException("Not exercised by construction-only tests."));
     }
 
     private sealed class MemoryJournalStore : IRecoveryJournalStore
