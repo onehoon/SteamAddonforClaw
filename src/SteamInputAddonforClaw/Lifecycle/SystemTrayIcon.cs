@@ -3,6 +3,13 @@ using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Lifecycle;
 
+internal enum TrayNotificationAction
+{
+    None,
+    Activate,
+    ContextMenu
+}
+
 internal sealed class SystemTrayIcon : IDisposable
 {
     private const uint NIM_ADD = 0x00000000;
@@ -14,9 +21,8 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint NOTIFYICON_VERSION_4 = 4;
     private const uint WM_APP = 0x8000;
     private const uint WM_USER = 0x0400;
-    private const uint WM_LBUTTONUP = 0x0202;
-    private const uint WM_LBUTTONDBLCLK = 0x0203;
-    private const uint WM_RBUTTONUP = 0x0205;
+    private const uint NIN_SELECT = WM_USER + 0;
+    private const uint NIN_KEYSELECT = WM_USER + 1;
     private const uint WM_CONTEXTMENU = 0x007B;
     private const uint WM_NULL = 0;
     private const uint TPM_RETURNCMD = 0x0100;
@@ -104,23 +110,52 @@ internal sealed class SystemTrayIcon : IDisposable
         }
         else if (message == WM_APP + 1)
         {
-            var notification = (uint)((ulong)lParam.ToInt64() & 0xffff);
-            if (notification == WM_LBUTTONUP || notification == WM_LBUTTONDBLCLK || notification == WM_USER)
+            var notification = GetNotificationCode(lParam);
+            switch (ClassifyNotification(notification))
             {
-                AppLog.Info("Tray", "Tray activation requested.");
-                _open();
-            }
-            else if (notification == WM_RBUTTONUP || notification == WM_CONTEXTMENU)
-            {
-                AppLog.Info("Tray", "Tray context menu requested.");
-                ShowMenu();
+                case TrayNotificationAction.Activate:
+                    AppLog.Info("Tray", "Tray activation requested.");
+                    _open();
+                    break;
+                case TrayNotificationAction.ContextMenu:
+                    AppLog.Info("Tray", "Tray context menu requested.");
+                    ShowMenu(DecodeCallbackPoint(wParam));
+                    break;
             }
         }
 
         return DefSubclassProc(window, message, wParam, lParam);
     }
 
-    private void ShowMenu()
+    /// <summary>NOTIFYICON_VERSION_4 packs the notification code into the low word of lParam.</summary>
+    internal static uint GetNotificationCode(IntPtr lParam) => (uint)((ulong)lParam.ToInt64() & 0xffff);
+
+    /// <summary>
+    /// Classifies a v4 callback notification into a single logical action so one physical gesture
+    /// (mouse or keyboard) maps to exactly one action, instead of also matching the legacy raw
+    /// mouse-message notifications a v4 client no longer needs to handle.
+    /// </summary>
+    internal static TrayNotificationAction ClassifyNotification(uint notification) => notification switch
+    {
+        NIN_SELECT or NIN_KEYSELECT => TrayNotificationAction.Activate,
+        WM_CONTEXTMENU => TrayNotificationAction.ContextMenu,
+        _ => TrayNotificationAction.None
+    };
+
+    /// <summary>
+    /// NOTIFYICON_VERSION_4 packs the WM_CONTEXTMENU anchor as signed screen coordinates in wParam
+    /// (LOWORD = X, HIWORD = Y). Signed decoding matters for monitors positioned left of/above the
+    /// primary monitor, where these coordinates are negative.
+    /// </summary>
+    internal static POINT DecodeCallbackPoint(IntPtr wParam)
+    {
+        var packed = (ulong)wParam.ToInt64();
+        var x = unchecked((short)(packed & 0xffff));
+        var y = unchecked((short)((packed >> 16) & 0xffff));
+        return new POINT { X = x, Y = y };
+    }
+
+    private void ShowMenu(POINT point)
     {
         var menu = CreatePopupMenu();
         try
@@ -131,7 +166,6 @@ internal sealed class SystemTrayIcon : IDisposable
             var terminationFlags = TerminationMenuFlags(termination.CanTerminate);
             AppendMenuW(menu, terminationFlags, 2, "Restart");
             AppendMenuW(menu, terminationFlags, 3, "Exit");
-            GetCursorPos(out var point);
             SetForegroundWindow(_windowHandle);
             var command = TrackPopupMenuEx(menu, TPM_RETURNCMD, point.X, point.Y, _windowHandle, IntPtr.Zero);
             if (command == 1)
@@ -164,7 +198,7 @@ internal sealed class SystemTrayIcon : IDisposable
     };
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct NOTIFYICONDATA { public int cbSize; public IntPtr hWnd; public uint uID; public uint uFlags; public uint uCallbackMessage; public IntPtr hIcon; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip; public uint dwState; public uint dwStateMask; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szInfo; public uint uTimeoutOrVersion; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle; public uint dwInfoFlags; public Guid guidItem; public IntPtr hBalloonIcon; public uint uVersion { set => uTimeoutOrVersion = value; } }
-    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)] internal struct POINT { public int X; public int Y; }
     private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern bool Shell_NotifyIconW(uint message, ref NOTIFYICONDATA data);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr ExtractIconW(IntPtr instance, string fileName, uint index);
@@ -176,7 +210,6 @@ internal sealed class SystemTrayIcon : IDisposable
     [DllImport("user32.dll")] private static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool AppendMenuW(IntPtr menu, uint flags, uint id, string? text);
     [DllImport("user32.dll")] private static extern bool DestroyMenu(IntPtr menu);
-    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT point);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern uint TrackPopupMenuEx(IntPtr menu, uint flags, int x, int y, IntPtr window, IntPtr rectangle);
     [DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
