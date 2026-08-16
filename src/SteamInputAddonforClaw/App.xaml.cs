@@ -14,6 +14,7 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
@@ -25,9 +26,6 @@ namespace SteamInputAddonforClaw;
 public partial class App : Application
 {
     private MainWindow? _mainWindow;
-    private SteamRunningAppIdRegistrySource? _runningAppIdSource;
-    private SteamSessionWatcher? _steamSessionWatcher;
-    private SteamBigPictureWatcher? _steamBigPictureWatcher;
     private readonly CancellationTokenSource _startupCancellationTokenSource = new();
     private DispatcherQueue? _dispatcherQueue;
     private bool _showMainWindow;
@@ -35,13 +33,9 @@ public partial class App : Application
     private RecoveryManager? _recoveryManager;
     private bool _isExplicitExit;
     private readonly SingleInstanceGate _singleInstanceGate;
-    private DeveloperTestModeState? _developerTestModeState;
-    private EffectiveSteamSessionSource? _effectiveSteamSessionSource;
-    private readonly ResumeFreshReconcileSuppression _resumeFreshReconcileSuppression = new();
-    private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private PowerTransitionWatcher? _powerWatcher;
     private PowerTransitionCoordinator? _powerCoordinator;
-    private AddonRoutingRuntime? _routingRuntime;
+    private AddonRuntimeHost? _runtimeHost;
     private UserTerminationGuard? _userTerminationGuard;
 
     public App()
@@ -123,19 +117,12 @@ public partial class App : Application
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
         var startupRegistration = new WindowsTaskSchedulerStartupManager();
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
-        _runningAppIdSource = new SteamRunningAppIdRegistrySource();
-        _steamSessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
-        _steamBigPictureWatcher = new SteamBigPictureWatcher();
-        _developerTestModeState = new DeveloperTestModeState();
-        _steamBigPictureWatcher.Start();
-        _effectiveSteamSessionSource = new EffectiveSteamSessionSource(_steamSessionWatcher, _steamBigPictureWatcher, _developerTestModeState, startupSettings);
-        _effectiveSteamSessionSource.StateChanged += OnEffectiveSteamSessionStateChanged;
+        var steamRuntime = new SteamSessionRuntime(startupSettings);
         var startupRegistrationResult = startupSettings.Repair();
 
         if (recoverySafe)
         {
-            _steamSessionWatcher.Start();
-            _effectiveSteamSessionSource.Refresh();
+            steamRuntime.StartRoutingObservation();
         }
         else
         {
@@ -153,58 +140,48 @@ public partial class App : Application
                 new HidHidePrerequisiteInspector(new HidHideDriverClient()),
                 new UsbIpWin2PrerequisiteInspector(new WindowsUsbIpWin2DeviceProbe(new WindowsControllerDeviceEnumerator()), new WindowsUsbIpWin2PackageProbe()),
                 new ViiperRuntimeInspector()),
-            () => _effectiveSteamSessionSource?.State ?? SteamSessionState.FromRunningAppId(0),
+            () => steamRuntime.State,
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             () => addonOwnedVirtualDeviceTracker.HasUncertainOwnership);
-        _routingRuntime = AddonRoutingRuntime.Create(
+        var routingRuntime = AddonRoutingRuntime.Create(
             handheldDeviceAdapter,
             statusProvider,
             addonOwnedVirtualDeviceTracker,
             _recoveryManager!,
             powerGate,
             recoverySafetyState);
+        _runtimeHost = new AddonRuntimeHost(steamRuntime, routingRuntime);
+        _runtimeHost.SteamSessionStateChanged += OnRuntimeSteamSessionStateChanged;
+        _runtimeHost.StatusRefreshRequested += OnRuntimeStatusRefreshRequested;
         _userTerminationGuard = new UserTerminationGuard(
-            () => _routingRuntime?.CaptureTerminationSnapshot() ?? default,
-            () => _routingRuntime?.IsSafetySessionActive == true,
-            () => _routingRuntime?.HasOwnedRecoveryBoundary == true,
+            () => _runtimeHost?.CaptureTerminationSnapshot() ?? default,
+            () => _runtimeHost?.IsSafetySessionActive == true,
+            () => _runtimeHost?.HasOwnedRecoveryBoundary == true,
             () => recoverySafetyState.Current == RecoverySafety.Safe && _recoveryManager?.HasIncompleteRecovery == true);
         var powerParticipants = new List<IPowerSuspendParticipant>();
-        if (_routingRuntime is not null) powerParticipants.Add(_routingRuntime);
-        _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants, async token =>
-        {
-            if (_routingRuntime is null) return true;
-            _resumeFreshReconcileSuppression.Begin();
-            _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() =>
-            {
-                _steamSessionWatcher?.Refresh();
-                _effectiveSteamSessionSource?.Refresh();
-            });
-            return await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
-                freshReconcile: token => _routingRuntime.ReconcileFreshAfterResumeAsync(token),
-                completeSuppression: _resumeFreshReconcileSuppression.Complete,
-                deferredReconcile: () => ReconcileRoutingAsync(),
-                requestStatusRefresh: () => _mainWindow?.RequestStatusRefresh(),
-                cancellationToken: token).ConfigureAwait(false);
-        }, recoveryEnabled: recoverySafe,
+        if (_runtimeHost.IsRoutingAvailable) powerParticipants.Add(_runtimeHost);
+        _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants,
+            token => _runtimeHost is null ? Task.FromResult(true) : _runtimeHost.ReconcileFreshAfterResumeAsync(token),
+        recoveryEnabled: recoverySafe,
         hasIncompleteRecovery: () => _recoveryManager?.HasIncompleteRecovery == true,
         establishBaseline: async token =>
         {
             if (stockCenterMBaseline is null) return false;
             return (await stockCenterMBaseline.EstablishAsync(token).ConfigureAwait(false)).Succeeded;
         },
-        hasResidualRoutingCleanup: () => _routingRuntime?.HasResidualSessionState == true,
+        hasResidualRoutingCleanup: () => _runtimeHost?.HasResidualSessionState == true,
         retryResidualRoutingCleanup: async token =>
         {
-            if (_routingRuntime is null) return true;
-            return await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false);
+            if (_runtimeHost is null) return true;
+            return await _runtimeHost.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false);
         });
         _powerWatcher = new PowerTransitionWatcher(new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
-            () => _routingRuntime?.CancelInFlightTransition());
+            () => _runtimeHost?.CancelInFlightRoutingTransition());
         if (!_powerWatcher.Start()) AppLog.Error("Power.Notify", "Suspend/resume notification registration failed.", new InvalidOperationException("PowerRegisterSuspendResumeNotification failed."));
         else if (recoverySafetyState.Current == RecoverySafety.Safe) powerGate.OpenAfterRecovery();
-        RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => _routingRuntime?.CaptureStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
+        RoutingRuntimeStatusSnapshot CaptureRoutingRuntimeStatus() => _runtimeHost?.CaptureRoutingStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
         _mainWindow = new MainWindow(startupSettings, startupRegistrationResult.Message, _recoveryManager, statusProvider,
-            developerTestModeState: _developerTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
+            developerTestModeState: _runtimeHost.DeveloperTestModeState, routingRuntimeStatusProvider: CaptureRoutingRuntimeStatus);
         _mainWindow.Closed += OnMainWindowClosed;
         _mainWindow.AppWindow.Closing += OnMainWindowClosing;
 
@@ -222,24 +199,15 @@ public partial class App : Application
             _mainWindow.Activate();
             AppLog.Info("Main window activated.");
         }
-        _ = ReconcileRoutingAsync();
+        _ = _runtimeHost.ReconcileAsync();
 
     }
 
-    private void OnEffectiveSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args)
-    {
-        _diagnosticSessions.Observe(_runningAppIdSource?.GetRunningAppId() ?? 0, args.Current.RunningAppId, args.Current.Source.ToString());
+    private void OnRuntimeSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args) =>
         _mainWindow?.UpdateSteamSessionState(args.Current);
-        if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) _ = ReconcileRoutingAsync();
-    }
 
-    private Task ReconcileRoutingAsync(CancellationToken cancellationToken = default)
-    {
-        var runtime = _routingRuntime;
-        return runtime is null
-            ? Task.CompletedTask
-            : runtime.ReconcileSafelyAsync(() => _mainWindow?.RequestStatusRefresh(), cancellationToken);
-    }
+    private void OnRuntimeStatusRefreshRequested(object? sender, EventArgs args) =>
+        _mainWindow?.RequestStatusRefresh();
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
@@ -249,33 +217,17 @@ public partial class App : Application
         }
 
         _startupCancellationTokenSource.Cancel();
-        _diagnosticSessions.Complete();
+        _runtimeHost?.StopSteamObservation();
 
-        if (_effectiveSteamSessionSource is not null)
-        {
-            _effectiveSteamSessionSource.StateChanged -= OnEffectiveSteamSessionStateChanged;
-            _effectiveSteamSessionSource.Dispose();
-            _effectiveSteamSessionSource = null;
-        }
-        if (_steamSessionWatcher is not null)
-        {
-            _steamSessionWatcher.Dispose();
-            _steamSessionWatcher = null;
-        }
-        _steamBigPictureWatcher?.Dispose();
-        _steamBigPictureWatcher = null;
-
-        _runningAppIdSource?.Dispose();
-        _runningAppIdSource = null;
         _systemTrayIcon?.Dispose();
         _systemTrayIcon = null;
         _powerWatcher?.Dispose();
         _powerWatcher = null;
-        if (_routingRuntime is not null) _routingRuntime.ShutdownAsync().GetAwaiter().GetResult();
+        if (_runtimeHost is not null) _runtimeHost.ShutdownRoutingAsync().GetAwaiter().GetResult();
         if (_powerCoordinator is not null) _powerCoordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _powerCoordinator = null;
-        if (_routingRuntime is not null) _routingRuntime.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _routingRuntime = null;
+        if (_runtimeHost is not null) _runtimeHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _runtimeHost = null;
         AppLog.Info("Runtime cleanup completed.");
         // Shutdown ownership lives solely in Program.Main's `finally` (runs once Application.Start
         // returns, i.e. after this method), so it drains exactly this entry plus everything queued
@@ -381,51 +333,5 @@ public partial class App : Application
         AppLog.Info("Update shutdown requested.");
         _startupCancellationTokenSource.Cancel();
         Exit();
-    }
-}
-
-internal sealed class ResumeFreshReconcileSuppression
-{
-    private readonly Lock _sync = new();
-    private int _owned;
-    private int _pending;
-
-    public void Begin()
-    {
-        lock (_sync)
-        {
-            _pending = 0;
-            _owned = 1;
-        }
-    }
-
-    public bool TrySuppressStateChange()
-    {
-        lock (_sync)
-        {
-            if (_owned == 0) return false;
-            _pending = 1;
-            return true;
-        }
-    }
-
-    public void ExecuteExplicitRefresh(Action refresh)
-    {
-        lock (_sync)
-        {
-            refresh();
-            _pending = 0;
-        }
-    }
-
-    public bool Complete(bool freshSucceeded)
-    {
-        lock (_sync)
-        {
-            _owned = 0;
-            var pending = _pending != 0;
-            _pending = 0;
-            return freshSucceeded && pending;
-        }
     }
 }
