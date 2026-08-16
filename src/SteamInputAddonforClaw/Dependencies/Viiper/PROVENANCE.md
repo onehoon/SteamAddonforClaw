@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     348bf6f8695e69c629cbb8c358173440d2d7588a
+Commit:     d1510dd559b284d9bebb50007d38b12d3ab5f822
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc
-DLL SHA-256:              eb0ad8742c75bcde619c82d5bfc4b8e7e93fabe9727494cd9baa219747234ee1
+DLL SHA-256:              304f85467069d48ebcfb7cda9c50f65a5f8b38c2e7bc597b832a6ba997fa9483
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,38 +42,44 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-The reviewed VIIPER delta from
-`566e4f88577a14c574ed7bf47e37bd75ea78f8d9` to
-`348bf6f8695e69c629cbb8c358173440d2d7588a` is an internal Steam Deck
-host-output parser safety fix.
-
-The VIIPER change is confined to `device/steamdeck/inputstate.go` plus focused
-regression tests. `AsRumble`, `AsHaptic`, and `AsHapticPulse` now reject
-captured commands shorter than the minimum parser length, and `AsPlayAudio`
-rejects a payload length that exceeds the actual captured output length rather
-than reading zero-filled bytes from the fixed backing buffer. The change does
-not alter the normalized raw host-output bytes delivered through the canonical
-C callback.
+Reviewed VIIPER `348bf6f8695e69c629cbb8c358173440d2d7588a` ->
+`d1510dd559b284d9bebb50007d38b12d3ab5f822`. The upstream commit is test-only:
+it changes only `device/steamdeck/steamdeck_test.go`, adding exhaustive Steam
+Deck mapping regression tests. No VIIPER production implementation changed.
 
 The canonical generated `libVIIPER.h` is byte-identical to the previously
 reviewed embedded header: its SHA-256 remains
-`e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`.
-No `lib/viiper` exported C declaration changed. No exported function signature,
-callback typedef, enum, struct layout, field offset, packing, or
-`RequiredExports` change occurred.
+`e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`. No
+exported function, callback typedef, enum, struct layout, field offset,
+packing, P/Invoke, or `RequiredExports` change occurred. No managed ABI
+adaptation is required, and none was made: `CanonicalViiperNativeApi.cs`,
+`CanonicalViiperNativeTypes.cs`, and `CanonicalViiperNativeAbiTests.cs` are
+unchanged.
 
-`SetSteamDeckOutputCallback` therefore retains the same raw normalized byte
-callback contract (`device handle`, `const uint8_t*`, `uint32_t length`). No
-changes are required to `CanonicalViiperNativeApi.cs`,
-`CanonicalViiperNativeTypes.cs`, `CanonicalViiperNativeAbiTests.cs`, callback
-lifetime rooting, routing, Steam Deck mapping, publisher behavior, attachment
-ownership, teardown, or recovery policy.
+The new upstream exhaustive tests independently confirmed the canonical
+Steam Deck center-button semantics:
 
-This dependency update changes only the vendored native implementation plus
-its mechanical pin/provenance/hash alignment. No hardware-validation claim is
-expanded. MSI Claw EX basic non-gyro input remains the established claim;
-lifecycle/recovery, rumble/haptics, gyro, and IMU validation remain separate
-work.
+- `SteamDeckDeviceState.Menu` = the native `MENU` / `Start` semantic.
+- `SteamDeckDeviceState.Options` = the native `VIEW` / `Back` semantic.
+
+Cross-checking that against `SteamDeckDeviceStateMapper` surfaced a
+pre-existing Addon consumer bug: the mapper had these two reversed (`Menu`
+was driven from `Back`, `Options` from `Start`). This is corrected in the
+same change as this dependency update, together with independent regression
+tests (`Start_maps_to_SteamDeck_Menu`, `Back_maps_to_SteamDeck_Options`) that
+set only one of Start/Back at a time, so the pair cannot silently swap again
+undetected. `LStickForce`/`RStickForce` remain neutral (`0`); a separate
+VIIPER protocol-level discrepancy involving those fields is intentionally
+out of scope here and remains a separate investigation.
+
+No other Steam Deck field mapping (A/B/X/Y, D-pad, L1/R1, L2Digital/
+R2Digital, L3/R3, analog trigger scaling, stick axes, M1->R4/M2->L4) changed;
+each was checked against the new upstream exhaustive tests and found already
+correct.
+
+No hardware-validation claim is expanded. MSI Claw EX basic non-gyro input
+remains the established claim; lifecycle/recovery, rumble/haptics, gyro, and
+IMU validation remain separate work.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
