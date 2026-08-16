@@ -72,6 +72,10 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
+          # Explicit branch ref so a GitHub Actions Re-run checks out current Addon main
+          # rather than the original workflow run's historical event SHA (see the sanity
+          # check immediately below).
+          ref: refs/heads/main
 
       - name: Capture adoption base SHA
         id: adoption-base
@@ -82,10 +86,30 @@ jobs:
           # main base" below) so a main merge that lands while this run is in flight (e.g. the previous
           # VIIPER dependency PR merging while this run's adoption work is already executing) is caught
           # instead of silently producing a stale-base mechanical commit.
+          . ./scripts/viiper-base-drift-check.ps1
+
           $sha = git rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sha)) {
             throw 'Failed to resolve the checked-out commit to use as the adoption base SHA.'
           }
+
+          # Defense-in-depth for the checkout step above: on a Re-run, GitHub Actions has been
+          # observed to still resolve the historical event SHA even with an explicit branch ref,
+          # silently rewinding the checkout after it briefly discovered current main. Re-fetch
+          # main immediately and confirm the checkout actually landed on it before any adoption
+          # work begins, rather than trusting the checkout step alone.
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch origin/main to sanity-check the checkout (git fetch exit code $LASTEXITCODE)."
+          }
+          $freshMainSha = git rev-parse origin/main
+          $resolveExitCode = $LASTEXITCODE
+
+          $classification = Get-ViiperBaseDriftClassification -AdoptionBaseSha $sha -LatestMainSha $freshMainSha -ResolveLatestMainExitCode $resolveExitCode
+          if ($classification -eq 'StaleBase') {
+            throw "Checked-out HEAD ($sha) does not match the freshly resolved origin/main ($freshMainSha). The checkout step did not land on current Addon main (e.g. a GitHub Actions Re-run resolving the historical event SHA). Aborting before adoption begins."
+          }
+
           Write-Host "Adoption base SHA: $sha"
           "sha=$sha" >> $env:GITHUB_OUTPUT
 
