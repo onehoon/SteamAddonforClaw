@@ -8,7 +8,6 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Diagnostics;
 using System.Diagnostics;
-using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -159,22 +158,20 @@ public partial class App : Application
             () => _effectiveSteamSessionSource?.State ?? SteamSessionState.FromRunningAppId(0),
             () => recoverySafetyState.Current == RecoverySafety.Safe,
             () => addonOwnedVirtualDeviceTracker.HasUncertainOwnership);
-        _msiClawNativeModeSession = nativeState is null ? null : new MsiClawNativeModeSessionCoordinator(
-            nativeState,
-            _recoveryManager!,
-            powerGate,
-            recoverySafetyState);
-        if (_msiClawNativeModeSession is not null)
+        if (nativeState is not null)
         {
-            var nativeModeStage = new MsiClawNativeModeStage(_msiClawNativeModeSession);
-            _physicalInputSource = new MsiClawInputSource(() => new VorticeDirectInputDeviceEnumerator(IntPtr.Zero));
-            var physicalInputStage = new MsiClawPhysicalInputStage(() => new VorticeDirectInputDeviceEnumerator(IntPtr.Zero), _physicalInputSource);
-            var physicalIsolationStage = new MsiClawPhysicalIsolationStage(
-                physicalInputStage,
-                _msiClawNativeModeSession,
+            var msiRoutingComposition = new MsiClawRoutingComposition(
+                nativeState,
                 _recoveryManager!,
-                new HidHideDriverClient(),
-                () => Environment.ProcessPath);
+                powerGate,
+                recoverySafetyState);
+
+            _msiClawNativeModeSession = msiRoutingComposition.NativeModeSession;
+            _physicalInputSource = msiRoutingComposition.PhysicalInputSource;
+            var nativeModeStage = msiRoutingComposition.NativeModeStage;
+            var physicalInputStage = msiRoutingComposition.PhysicalInputStage;
+            var physicalIsolationStage = msiRoutingComposition.PhysicalIsolationStage;
+
             var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
             SteamOutputComposition.LogTargetSelected();
             var deckStage = new CanonicalSteamDeckOutputStage(
