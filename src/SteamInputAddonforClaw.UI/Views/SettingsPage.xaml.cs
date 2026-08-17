@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Views;
 

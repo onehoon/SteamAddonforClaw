@@ -3,7 +3,6 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Windowing;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -45,17 +44,13 @@ public sealed partial class MainWindow : Window
         Title = FormatWindowTitle(GetDisplayVersion());
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         ApplyDefaultWindowSize();
-        Closed += OnWindowClosed;
         Activated += OnWindowActivated;
         SettingsContent.Initialize(_frontend, _bootstrap);
         ControllerContent.Initialize(_frontend, _bootstrap);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
-        DeveloperMenuContent.ClawSensorProbeRequested += (_, _) => OpenClawSensorProbe();
-        ClawSensorProbeContent.Initialize(() => _latestSystemStatus);
         _frontend.StateInvalidated += OnFrontendStateInvalidated;
-        ClawSensorProbeContent.ReturnToDeveloperMenuRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
         MainNavigationView.SelectedItem = StatusNavigationItem;
         _ = RefreshSystemStatusAsync();
@@ -143,17 +138,6 @@ public sealed partial class MainWindow : Window
         OpenDeveloperMenu();
     }
 
-    private async void OpenClawSensorProbe()
-    {
-        await ClawSensorProbeContent.PrepareForShowAsync();
-        ShowPage(_navigationState.OpenClawSensorProbe());
-    }
-
-    private async void OnWindowClosed(object sender, WindowEventArgs args)
-    {
-        await ClawSensorProbeContent.ShutdownAsync();
-    }
-
     private void MainNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         var selectedTag = (args.SelectedItem as NavigationViewItem)?.Tag as string;
@@ -167,7 +151,6 @@ public sealed partial class MainWindow : Window
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
-        ClawSensorProbeContent.Visibility = page == MainNavigationPage.ClawSensorProbe ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
     }
 
@@ -330,7 +313,7 @@ public sealed partial class MainWindow : Window
                 ReturnToSettings("MouseBackButton");
                 break;
             case MainNavigationPage.DeveloperMenu:
-                await ClawSensorProbeContent.ReturnToDeveloperMenuAsync();
+                ReturnToSettings("MouseBackButton");
                 break;
         }
     }

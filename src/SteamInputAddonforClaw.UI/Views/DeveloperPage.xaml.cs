@@ -1,8 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Contracts.Frontend;
-using SteamInputAddonforClaw.Settings;
 using System.Diagnostics;
 
 namespace SteamInputAddonforClaw.Views;
@@ -20,7 +18,6 @@ public sealed partial class DeveloperPage : UserControl
     private string _logDirectoryPath = string.Empty;
 
     public event EventHandler? BackRequested;
-    public event EventHandler? ClawSensorProbeRequested;
 
     public DeveloperPage()
     {
@@ -56,11 +53,6 @@ public sealed partial class DeveloperPage : UserControl
     private void BackButton_Click(object sender, RoutedEventArgs args)
     {
         BackRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void ClawSensorProbeButton_Click(object sender, RoutedEventArgs args)
-    {
-        ClawSensorProbeRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OpenLogFolderButton_Click(object sender, RoutedEventArgs args)

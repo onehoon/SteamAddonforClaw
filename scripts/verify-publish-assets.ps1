@@ -14,7 +14,6 @@ if (-not (Test-Path -LiteralPath $PublishDirectory -PathType Container)) {
 
 $requiredAssets = @(
     'App.xbf',
-    'MainWindow.xbf',
     'SteamInputAddonforClaw.pri',
     'Assets\AppIcon.ico',
     'Dependencies\HidHide\HidHide_1.5.230_x64.exe',

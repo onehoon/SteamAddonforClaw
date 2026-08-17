@@ -12,6 +12,7 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.FrontendTransport;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -35,6 +36,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _disposed;
     private int _startupStarted;
     private IAddonFrontendControl? _frontendControl;
+    private NamedPipeAddonFrontendServer? _frontendServer;
 
     internal AddonProcessHost(string[]? updateRestartArguments)
     {
@@ -77,7 +79,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private StartupResult? _startupResult;
 
-    internal void InitializeRuntime()
+    internal async Task InitializeRuntimeAsync()
     {
         if (_startupOutcome != AddonProcessStartupOutcome.RuntimeReady)
             throw new InvalidOperationException("Runtime initialization requires a successful startup.");
@@ -99,6 +101,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _runtimeHost = composition.RuntimeHost;
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage);
+        _frontendServer = new NamedPipeAddonFrontendServer(
+            FrontendPipeEndpoint.CreateForCurrentUserSession(),
+            _frontendControl);
+        await _frontendServer.StartAsync().ConfigureAwait(false);
         _startupComposition = null;
     }
 
@@ -123,7 +129,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _systemTrayIcon = null;
             _trayHostWindow?.Dispose();
             _trayHostWindow = null;
-            AppLog.Error("Tray", "Tray initialization failed; falling back to the main window.", exception);
+            AppLog.Error("Tray", "Tray initialization failed in headless Runtime mode.", exception);
             return false;
         }
     }
@@ -135,6 +141,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
         _startupCancellationTokenSource.Cancel();
+        if (_frontendServer is not null)
+        {
+            await _frontendServer.DisposeAsync().ConfigureAwait(false);
+            _frontendServer = null;
+        }
         _runtimeHost?.PrepareForShutdown();
         _systemTrayIcon?.Dispose();
         _systemTrayIcon = null;
