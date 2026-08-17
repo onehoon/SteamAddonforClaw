@@ -73,7 +73,10 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     break;
                 }
                 if (message.ProtocolVersion != FrontendTransportProtocol.CurrentVersion)
-                    throw new FrontendProtocolException("Protocol version mismatch.");
+                {
+                    await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.ProtocolError, Error: new(FrontendRemoteErrorCode.ProtocolMismatch, "Protocol version mismatch."))).ConfigureAwait(false);
+                    break;
+                }
                 if (message.Kind == FrontendWireMessageKind.CancelRequest && message.RequestId is > 0 and var cancelId)
                 {
                     if (requests.TryGetValue(cancelId, out var cancellation)) cancellation.Cancel();

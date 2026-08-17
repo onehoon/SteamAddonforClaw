@@ -80,8 +80,59 @@ public sealed class FrontendNamedPipeTransportTests
 
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion + 1, FrontendWireMessageKind.Request, 1, FrontendRpcMethod.GetBootstrap), writeGate, CancellationToken.None);
 
-        await Assert.ThrowsAnyAsync<Exception>(() => FrontendWireCodec.ReadAsync(pipe, CancellationToken.None));
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.ProtocolError, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.ProtocolMismatch, response.Error?.Code);
         Assert.Equal(0, fake.TotalCalls);
+    }
+
+    [Fact]
+    public async Task Malformed_response_payload_disconnects_client()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Test.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var serverTask = Task.Run(async () =>
+        {
+            await server.WaitForConnectionAsync();
+            using var writeGate = new SemaphoreSlim(1, 1);
+            _ = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
+            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.HandshakeAccepted), writeGate, CancellationToken.None);
+            var request = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
+            using var document = JsonDocument.Parse("{}");
+            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, request.RequestId, request.Method, Payload: document.RootElement.Clone()), writeGate, CancellationToken.None);
+        });
+
+        await using var client = new NamedPipeAddonFrontendClient(pipeName);
+        await client.ConnectAsync();
+        await Assert.ThrowsAsync<FrontendProtocolException>(() => client.GetBootstrapAsync());
+        await Assert.ThrowsAsync<FrontendTransportException>(() => client.GetBootstrapAsync());
+        await serverTask;
+    }
+
+    [Fact]
+    public async Task Dispose_during_connect_prevents_ownership_publish()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Test.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var handshakeRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHandshake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverTask = Task.Run(async () =>
+        {
+            await server.WaitForConnectionAsync();
+            using var writeGate = new SemaphoreSlim(1, 1);
+            _ = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
+            handshakeRead.TrySetResult();
+            await releaseHandshake.Task;
+            try { await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.HandshakeAccepted), writeGate, CancellationToken.None); } catch (IOException) { }
+        });
+
+        await using var client = new NamedPipeAddonFrontendClient(pipeName);
+        var connect = client.ConnectAsync();
+        await handshakeRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await client.DisposeAsync();
+        releaseHandshake.TrySetResult();
+        await Assert.ThrowsAnyAsync<Exception>(() => connect);
+        await serverTask;
     }
 
     [Fact]
