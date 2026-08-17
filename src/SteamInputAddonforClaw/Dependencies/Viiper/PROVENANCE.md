@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     efda3e80b00366d478ff93354f0af4c7cc4c95ee
+Commit:     6cecc1feb6a14f2e9b6d879abb58374a34a99271
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: 202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718
-DLL SHA-256:              9ef3923f59407af8d79bc5713ebcf632ae5dfe44a8432511af50690505422cd0
+DLL SHA-256:              5bcfdb8e2c93baf682e419ca74c7931be213dc56d046c671ca127f7732289dd3
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,45 +42,45 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-Reviewed VIIPER `ba63b9909f84bcabeddd4b1299beffe76ba04b4f` ->
-`efda3e80b00366d478ff93354f0af4c7cc4c95ee`. The target is two canonical
-main commits ahead and therefore supersedes the intermediate `af2615e` update:
+Reviewed VIIPER `efda3e80b00366d478ff93354f0af4c7cc4c95ee` ->
+`6cecc1feb6a14f2e9b6d879abb58374a34a99271`. The target is exactly one
+canonical main commit, `Harden typed lifecycle serialization and server
+isolation (#38)`.
 
-1. `af2615e80aec290ee61190c5da4813349b78ca56` — `Fix Windows version resources for untagged builds (#36)`.
-2. `efda3e80b00366d478ff93354f0af4c7cc4c95ee` — `Complete classified removal parity for typed devices (#37)`.
+The generated canonical `libVIIPER.h` is byte-identical to the previously
+reviewed header: its SHA-256 remains
+`202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718`.
+There are no new or removed exports, signature changes, enum changes, struct
+layout/packing changes, callback ABI changes, or Steam Deck state-layout
+changes. `SteamDeckDeviceState` therefore remains 76 bytes with the existing
+force fields at offsets 68/70/72/74. The current Addon managed P/Invoke
+surface, `RequiredExports`, callback rooting, and ABI tests require no
+adaptation.
 
-PR #36 is build/resource tooling only. It hardens Windows version-resource
-generation for semver, git-describe, four-component numeric versions, and raw
-Git SHA inputs. It does not modify libVIIPER runtime, USB/IP lifecycle, typed
-device behavior, or public ABI.
+PR #38 strengthens deterministic regression coverage for the existing
+server-scoped lifecycle contract used by the planned long-lived Steam Deck +
+Xbox360 composition. Production lifecycle semantics remain unchanged. The
+existing nil-by-default internal attach lock-attempt test seam is consolidated
+into `onLifecycleLockAttempt(operation)` and observed immediately before the
+owning server `lifecycleMu` is acquired for attach, detach, typed remove, and
+public close. In normal production the hook is nil, so the added calls are
+behavior-neutral and do not alter ownership or sequencing.
 
-PR #37 is an additive public-ABI extension for typed families that the current
-Addon does not bind: DualSense/DualSense Edge, DualShock 4, Nintendo Switch 2
-Pro, Keyboard, and Mouse. The generated header adds one four-value classified
-remove enum and one `Remove*DeviceEx` export for each family:
+The focused tests prove same-server serialization across attach/detach/remove/
+close, exact committed attachment-token consumption, sticky unsafe-unknown
+fail-closed behavior, public close serialization and retry semantics, caller-
+owned bus preservation, Deck + Xbox360 coexistence on one bus, server-wide
+`close-failed`, and isolation between separate `USBServerHandle` instances.
+The documentation also makes explicit that typed mutations on one server
+serialize at that server lifecycle boundary, while separate server handles
+have independent lifecycle state; same-process VirtualBus BusID allocation is
+process-global and therefore requires distinct BusIDs.
 
-- `DSDeviceRemoveResult` / `RemoveDualSenseDeviceEx`;
-- `DS4DeviceRemoveResult` / `RemoveDS4DeviceEx`;
-- `NS2ProDeviceRemoveResult` / `RemoveNS2ProDeviceEx`;
-- `KeyboardDeviceRemoveResult` / `RemoveKeyboardDeviceEx`;
-- `MouseDeviceRemoveResult` / `RemoveMouseDeviceEx`.
-
-Each enum preserves the established classified-removal values `SUCCESS = 0`,
-`RETRYABLE_FAILURE = 1`, `UNSAFE_OUTCOME_UNKNOWN = 2`, and `INVALID = 3`.
-The legacy bool `Remove*Device` exports remain available and are strict
-`SUCCESS -> true` compatibility projections. The shared typed removal
-lifecycle, caller-owned bus lifetime, callback teardown ordering, attachment
-ownership, and fail-closed unsafe-unknown semantics are unchanged.
-
-The current Addon `ICanonicalViiperNativeApi` and `RequiredExports` bind only
-the generic server/bus/attachment surface plus the Steam Deck typed family.
-They do not bind any of the five newly extended families. The Steam Deck ABI is
-unchanged: no Steam Deck export, callback typedef, state field, field order,
-packing, or enum change; `SteamDeckDeviceState` remains 76 bytes with
-`LPadForce`, `RPadForce`, `LStickForce`, and `RStickForce` at offsets
-68/70/72/74. Existing Addon Steam Deck P/Invoke definitions, callback rooting,
-mapper, publisher, session, routing, PnP, HidHide, recovery, and lifecycle
-policy therefore require no adaptation for this dependency update.
+No Addon Steam Deck mapper, publisher, native binding, callback, routing, PnP,
+HidHide, recovery, lifecycle-policy, or Xbox360 integration change is required
+for this dependency update. The Addon still uses the existing Steam Deck typed
+surface and bool attach/detach compatibility calls; adoption of the classified
+attachment/query APIs and typed Xbox360 route remains separate planned work.
 
 No hardware-validation claim is expanded. MSI Claw EX basic non-gyro Steam
 Deck input remains the established claim; SD3 lifecycle/recovery evidence,
