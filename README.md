@@ -94,6 +94,23 @@ Rumble and haptics are tracked separately from the basic controller-input
 validation. Do not treat one validated feature as validation of the remaining
 hardware or lifecycle surface.
 
+## Frontend transport foundation
+
+The repository contains a typed local named-pipe frontend transport foundation
+in `SteamInputAddonforClaw.FrontendTransport`. It is not enabled in production
+and does not yet split the UI into a separate process. The transport uses a
+user/session-scoped endpoint, CurrentUserOnly pipe access, versioned bounded
+JSON frames, typed RPC methods, cancellation, reconnect handling, and
+`StateInvalidated` notifications.
+
+Unknown string RPC method names are represented as `Unknown` and return
+`UnsupportedMethod`; missing, null, numeric, malformed, or structurally invalid
+requests return `InvalidMessage` without invoking frontend operations.
+
+The current transport test suite covers all frontend operations and these wire
+failure/reconnect/concurrency cases. Production activation and hardware
+validation remain outside this foundation work.
+
 ## Reference documents
 
 - [`docs/VIIPER_INTEGRATION.md`](docs/VIIPER_INTEGRATION.md)
