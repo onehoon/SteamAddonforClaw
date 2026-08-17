@@ -108,7 +108,8 @@ internal sealed class StartupVirtualOutputRecoveryInspector : IStartupVirtualOut
                 reason = "EvidenceInvalid";
                 return false;
             }
-            if (preExisting.Any(string.IsNullOrWhiteSpace) || resolved.Any(string.IsNullOrWhiteSpace) ||
+            if (preExisting.Any(id => string.IsNullOrWhiteSpace(id) || id != id.Trim()) ||
+                resolved.Any(id => string.IsNullOrWhiteSpace(id) || id != id.Trim()) ||
                 preExisting.GroupBy(id => id.Trim(), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1) ||
                 resolved.GroupBy(id => id.Trim(), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1) ||
                 preExisting.Any(id => resolved.Contains(id, StringComparer.OrdinalIgnoreCase)))

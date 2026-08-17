@@ -95,6 +95,24 @@ public sealed class StartupVirtualOutputRecoveryInspectorTests
     }
 
     [Fact]
+    public async Task UntrimmedPreExistingIdIsInvalidAndCannotBeUsedToExcuseCurrentCandidate()
+    {
+        var result = await Inspect(Entry([" external "], []), [Deck("external")]);
+
+        Assert.False(result.SafeToRetire);
+        Assert.Equal("EvidenceInvalid", result.Reason);
+    }
+
+    [Fact]
+    public async Task UntrimmedResolvedIdIsInvalidEvidence()
+    {
+        var result = await Inspect(Entry([], [" owned "]), []);
+
+        Assert.False(result.SafeToRetire);
+        Assert.Equal("EvidenceInvalid", result.Reason);
+    }
+
+    [Fact]
     public async Task CancellationDuringStabilizationPropagates()
     {
         using var cancellation = new CancellationTokenSource();
