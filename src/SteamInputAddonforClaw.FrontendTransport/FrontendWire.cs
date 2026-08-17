@@ -37,14 +37,20 @@ internal sealed record SetDeveloperTestModeRequest(bool Enabled);
 internal static class FrontendWireCodec
 {
     internal const int MaxFrameBytes = 1024 * 1024;
-    internal static readonly JsonSerializerOptions Json = new() { Converters = { new FrontendRpcMethodJsonConverter(), new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) } };
+    internal static readonly JsonSerializerOptions Json = new()
+    {
+        RespectRequiredConstructorParameters = true,
+        Converters = { new FrontendRpcMethodJsonConverter(), new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) }
+    };
     internal static async Task WriteAsync(Stream stream, FrontendWireEnvelope envelope, SemaphoreSlim gate, CancellationToken token)
+        => await WriteAsync(stream, envelope, gate, token, token).ConfigureAwait(false);
+    internal static async Task WriteAsync(Stream stream, FrontendWireEnvelope envelope, SemaphoreSlim gate, CancellationToken gateCancellationToken, CancellationToken writeCancellationToken)
     {
         var data = JsonSerializer.SerializeToUtf8Bytes(envelope, Json);
         if (data.Length is 0 or > MaxFrameBytes) throw new FrontendProtocolException("Invalid frame length.");
         var prefix = new byte[4]; BinaryPrimitives.WriteInt32LittleEndian(prefix, data.Length);
-        await gate.WaitAsync(token).ConfigureAwait(false);
-        try { await stream.WriteAsync(prefix, token).ConfigureAwait(false); await stream.WriteAsync(data, token).ConfigureAwait(false); await stream.FlushAsync(token).ConfigureAwait(false); }
+        await gate.WaitAsync(gateCancellationToken).ConfigureAwait(false);
+        try { await stream.WriteAsync(prefix, writeCancellationToken).ConfigureAwait(false); await stream.WriteAsync(data, writeCancellationToken).ConfigureAwait(false); await stream.FlushAsync(writeCancellationToken).ConfigureAwait(false); }
         finally { gate.Release(); }
     }
     internal static async Task<FrontendWireEnvelope> ReadAsync(Stream stream, CancellationToken token)
@@ -62,7 +68,14 @@ internal static class FrontendWireCodec
     internal static T Decode<T>(JsonElement? value)
     {
         var element = value ?? throw new FrontendProtocolException("Missing payload.");
-        return element.Deserialize<T>(Json) ?? throw new FrontendProtocolException("Invalid payload.");
+        try
+        {
+            return element.Deserialize<T>(Json) ?? throw new FrontendProtocolException("Invalid payload.");
+        }
+        catch (JsonException exception)
+        {
+            throw new FrontendProtocolException($"Invalid payload: {exception.Message}");
+        }
     }
 }
 
@@ -74,7 +87,11 @@ internal sealed class FrontendRpcMethodJsonConverter : JsonConverter<FrontendRpc
             throw new JsonException("RPC method must be a string.");
 
         var value = reader.GetString();
-        return value is not null && Enum.TryParse<FrontendRpcMethod>(value, ignoreCase: false, out var method) && method != FrontendRpcMethod.Unknown
+        return value is not null &&
+               Enum.TryParse<FrontendRpcMethod>(value, ignoreCase: false, out var method) &&
+               method != FrontendRpcMethod.Unknown &&
+               Enum.IsDefined(method) &&
+               string.Equals(value, method.ToString(), StringComparison.Ordinal)
             ? method
             : FrontendRpcMethod.Unknown;
     }

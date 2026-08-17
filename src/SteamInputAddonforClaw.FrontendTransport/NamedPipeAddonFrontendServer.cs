@@ -8,20 +8,27 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
 {
     private readonly string _pipeName; private readonly IAddonFrontendControl _inner; private readonly CancellationTokenSource _lifetime = new(); private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously); private NamedPipeServerStream? _activePipe; private Task? _acceptLoop; private int _started; private int _disposed;
     public NamedPipeAddonFrontendServer(string pipeName, IAddonFrontendControl inner) { _pipeName = pipeName; _inner = inner; }
-    public Task StartAsync() { if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("Server already started."); _acceptLoop = AcceptLoopAsync(); return _ready.Task; }
+    public Task StartAsync() { ObjectDisposedException.ThrowIf(_disposed != 0, this); if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("Server already started."); _acceptLoop = AcceptLoopAsync(); return _ready.Task; }
     private async Task AcceptLoopAsync()
     { while (!_lifetime.IsCancellationRequested) { try { await using var pipe = new NamedPipeServerStream(_pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly); Interlocked.Exchange(ref _activePipe, pipe); _ready.TrySetResult(); await pipe.WaitForConnectionAsync(_lifetime.Token).ConfigureAwait(false); await ServeAsync(pipe, _lifetime.Token).ConfigureAwait(false); } catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { _ready.TrySetCanceled(_lifetime.Token); } catch (Exception exception) { _ready.TrySetException(exception); } finally { Interlocked.Exchange(ref _activePipe, null)?.Dispose(); } } }
     private async Task ServeAsync(Stream pipe, CancellationToken token)
-    { using var connection = CancellationTokenSource.CreateLinkedTokenSource(token); using var gate = new SemaphoreSlim(1, 1); var requests = new ConcurrentDictionary<long, CancellationTokenSource>(); var activeRequests = new ConcurrentDictionary<long, Task>(); var operationGate = new SemaphoreSlim(1, 1); var notificationGate = new object(); Task? notificationTask = null; int invalidationPending = 0;
+    { using var connection = CancellationTokenSource.CreateLinkedTokenSource(token); using var gate = new SemaphoreSlim(1, 1); var requests = new ConcurrentDictionary<long, CancellationTokenSource>(); var activeRequests = new ConcurrentDictionary<long, Task>(); var operationGate = new SemaphoreSlim(1, 1); var notificationGate = new object(); Task? notificationTask = null; var notificationDirty = false; var notificationSending = false;
         async Task Send(FrontendWireEnvelope e) => await FrontendWireCodec.WriteAsync(pipe, e, gate, connection.Token).ConfigureAwait(false);
-        async Task Notify() { try { await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Notification, Notification: FrontendNotificationKind.StateInvalidated)); } catch { } finally { Volatile.Write(ref invalidationPending, 0); } }
-        void Invalidated(object? _, EventArgs __)
+        async Task Notify()
         {
-            if (Interlocked.Exchange(ref invalidationPending, 1) == 0)
+            while (true)
             {
                 lock (notificationGate)
-                    notificationTask = Notify();
+                {
+                    if (!notificationDirty) { notificationSending = false; notificationTask = null; return; }
+                    notificationDirty = false;
+                }
+                try { await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Notification, Notification: FrontendNotificationKind.StateInvalidated)); } catch { return; }
             }
+        }
+        void Invalidated(object? _, EventArgs __)
+        {
+            lock (notificationGate) { notificationDirty = true; if (!notificationSending) { notificationSending = true; notificationTask = Notify(); } }
         }
         async Task ExecuteRequestAsync(long id, FrontendWireEnvelope message, CancellationTokenSource requestCts, Task startSignal)
         {
@@ -78,17 +85,24 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                     throw new FrontendProtocolException("Invalid request.");
                 }
                 var id = message.RequestId.Value;
-                if (message.Method.Value == FrontendRpcMethod.Unknown || !Enum.IsDefined(message.Method.Value))
-                {
-                    await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.UnsupportedMethod, "Unsupported method."))).ConfigureAwait(false);
-                    continue;
-                }
                 var requestCts = CancellationTokenSource.CreateLinkedTokenSource(connection.Token);
                 if (!requests.TryAdd(id, requestCts))
                 {
                     requestCts.Dispose();
                     await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.ProtocolError, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Duplicate request id."))).ConfigureAwait(false);
                     throw new FrontendProtocolException("Duplicate request id.");
+                }
+                if (message.Method.Value == FrontendRpcMethod.Unknown || !Enum.IsDefined(message.Method.Value))
+                {
+                    await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.UnsupportedMethod, "Unsupported method."))).ConfigureAwait(false);
+                    requests.TryRemove(id, out var unsupportedCts); unsupportedCts?.Dispose();
+                    continue;
+                }
+                if (message.Payload is not null && message.Method.Value is FrontendRpcMethod.GetBootstrap or FrontendRpcMethod.CaptureStatus or FrontendRpcMethod.SuppressDeveloperMenuWarning or FrontendRpcMethod.RunPrerequisiteSetup or FrontendRpcMethod.GenerateEnvironmentReport)
+                {
+                    requests.TryRemove(id, out var invalidPayloadCts); invalidPayloadCts?.Dispose();
+                    await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.InvalidMessage, "Unexpected payload."))).ConfigureAwait(false);
+                    continue;
                 }
                 var startSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var requestTask = ExecuteRequestAsync(id, message, requestCts, startSignal.Task);

@@ -309,9 +309,31 @@ public sealed class FrontendNamedPipeTransportTests
         await pipe.WriteAsync(BitConverter.GetBytes(invalid.Length));
         await pipe.WriteAsync(invalid);
         await pipe.FlushAsync();
-        pipe.Dispose();
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
-        await server.DisposeAsync();
+        Assert.Equal(FrontendWireMessageKind.ProtocolError, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.TotalCalls);
+    }
+
+    [Fact]
+    public async Task Oversized_frame_over_pipe_returns_invalid_message_without_frontend_operation()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        await pipe.WriteAsync(BitConverter.GetBytes(FrontendWireCodec.MaxFrameBytes + 1));
+        await pipe.FlushAsync();
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendWireMessageKind.ProtocolError, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
         Assert.Equal(0, fake.TotalCalls);
     }
 
@@ -492,6 +514,30 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Theory]
+    [InlineData("1")]
+    [InlineData("01")]
+    [InlineData("999")]
+    [InlineData(" GetBootstrap ")]
+    public async Task Numeric_or_noncanonical_method_strings_return_unsupported_without_invoking_frontend(string method)
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\"}}");
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.UnsupportedMethod, response.Error?.Code);
+        Assert.Equal(0, fake.TotalCalls);
+    }
+
+    [Theory]
     [InlineData("{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1}")]
     [InlineData("{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
     [InlineData("{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
@@ -527,6 +573,57 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Null(envelope.Method);
     }
 
+    [Theory]
+    [InlineData("SetLaunchAtWindowsStartup", "{}")]
+    [InlineData("SetRouteInSteamBigPicture", "{}")]
+    [InlineData("SetDeveloperTestMode", "{}")]
+    [InlineData("SetLogLevel", "{}")]
+    [InlineData("SetLaunchAtWindowsStartup", "null")]
+    [InlineData("SetRouteInSteamBigPicture", "null")]
+    [InlineData("SetDeveloperTestMode", "null")]
+    [InlineData("SetLogLevel", "null")]
+    [InlineData("SetLaunchAtWindowsStartup", "{\"Enabled\":\"false\"}")]
+    [InlineData("SetRouteInSteamBigPicture", "{\"Enabled\":\"false\"}")]
+    [InlineData("SetDeveloperTestMode", "{\"Enabled\":\"false\"}")]
+    [InlineData("SetLogLevel", "{\"Level\":123}")]
+    public async Task Malformed_mutation_payload_is_rejected_without_invoking_frontend(string method, string payload)
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\",\"Payload\":{payload}}}");
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.TotalCalls);
+    }
+
+    [Fact]
+    public async Task No_argument_method_with_payload_is_rejected_without_invoking_frontend()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
+        Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
+
+        await WriteRawFrameAsync(pipe, "{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"GetBootstrap\",\"Payload\":{}}");
+        var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
+
+        Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
+        Assert.Equal(0, fake.TotalCalls);
+    }
+
     [Fact]
     public async Task Numeric_method_is_rejected_as_invalid_message()
     {
@@ -535,6 +632,35 @@ public sealed class FrontendNamedPipeTransportTests
         stream.Position = 0;
 
         await Assert.ThrowsAnyAsync<Exception>(() => FrontendWireCodec.ReadAsync(stream, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Server_start_after_dispose_is_rejected()
+    {
+        var server = new NamedPipeAddonFrontendServer($"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}", new RecordingFrontendControl());
+        await server.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await server.StartAsync());
+    }
+
+    [Fact]
+    public async Task Client_connect_after_dispose_is_rejected()
+    {
+        await using var client = new NamedPipeAddonFrontendClient($"SteamInputAddonForClaw.Tests.{Guid.NewGuid():N}");
+        await client.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => client.ConnectAsync());
+    }
+
+    [Fact]
+    public async Task Concurrent_client_connect_is_rejected_deterministically()
+    {
+        await using var client = new NamedPipeAddonFrontendClient($"SteamInputAddonForClaw.Tests.{Guid.NewGuid():N}");
+        using var cancellation = new CancellationTokenSource();
+        var first = client.ConnectAsync(cancellation.Token);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.ConnectAsync());
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
     }
 
     private static async Task WriteRawFrameAsync(Stream stream, string json)
