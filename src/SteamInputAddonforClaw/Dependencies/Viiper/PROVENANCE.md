@@ -42,12 +42,37 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-ABI compatibility is not inferred by the dependency automation. Review the
-generated `libVIIPER.h` diff and the managed interop
-(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
-Replace this paragraph with the reviewed ABI delta -- including any changed
-struct layout, offsets, or exports -- once confirmed.
+Reviewed VIIPER `ba63b9909f84bcabeddd4b1299beffe76ba04b4f` ->
+`af2615e80aec290ee61190c5da4813349b78ca56`. The target is exactly one
+upstream commit, `Fix Windows version resources for untagged builds (#36)`.
+Its source delta is limited to `.github/workflows/build_base.yml`,
+`scripts/inject-version.ps1`, and the new focused
+`scripts/tests/test-inject-version.ps1` regression suite.
+
+The canonical generated `libVIIPER.h` is byte-identical to the previously
+reviewed header: its SHA-256 remains
+`ff78cc701e4fb17a46aa74897210e23f80d73f6d3bbbb1e170bd278786f2a211`.
+There are no new or removed exports, signature changes, enum or struct-layout
+changes, callback ABI changes, or Steam Deck state-layout changes. The Addon
+managed P/Invoke surface, `RequiredExports`, callback rooting, and ABI tests
+therefore require no adaptation.
+
+The native library source and runtime lifecycle implementation are unchanged.
+PR #36 only hardens Windows version-resource generation for untagged builds:
+semver, git-describe, four-component versions, and Git SHA inputs are parsed
+explicitly; raw SHA builds use numeric `0.0.0.0` while preserving the SHA in
+the string ProductVersion; malformed or out-of-range values fail explicitly.
+The canonical artifact authority remains the exact full Git commit plus
+`viiper-artifact.json` and the DLL/header hashes. The DLL SHA-256 changes
+because the generated Windows version resource changes, not because of an ABI,
+typed-device, USB/IP, attachment, removal, callback, or routing change.
+
+No Steam Deck mapper, publisher, managed ABI, callback, routing, PnP, HidHide,
+recovery, lifecycle-policy, or Xbox360 integration change is required in the
+Addon for this dependency update. No hardware-validation claim is expanded;
+MSI Claw EX basic non-gyro Steam Deck input remains the established claim and
+SD3 lifecycle/recovery, rumble/haptics, gyro/IMU, and Game Bar/Xbox360 remain
+separate work.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
