@@ -49,6 +49,10 @@ validation remains next.
 
 Status: **NEXT**
 
+Addon-side stale startup virtual-output journal retirement now has a
+current-world PnP evidence gate in code. This is safety hardening only and
+does not advance SD3 hardware validation.
+
 Complete real MSI Claw EX validation for:
 
 - native-mode entry and restoration;
