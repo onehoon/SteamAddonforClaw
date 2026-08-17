@@ -31,4 +31,21 @@
   <ItemGroup>
     <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <!--
+    Unpackaged WinUI publish can omit generated XBF files and the application PRI
+    produced in the build output. The external UI project owns these XAML assets,
+    so preserve them in the UI publish payload.
+  -->
+  <Target Name="CopyMissingWinUIPublishAssets" AfterTargets="Publish">
+    <ItemGroup>
+      <_MissingXbf Include="$(OutDir)**\*.xbf" />
+      <_MissingApplicationPri Include="$(OutDir)$(AssemblyName).pri" Condition="Exists('$(OutDir)$(AssemblyName).pri')" />
+      <_MissingAssets Include="$(OutDir)Assets\**\*.*" />
+    </ItemGroup>
+    <Message Importance="High" Text="Preserving external UI WinUI publish assets: XBF=@(_MissingXbf); Application PRI=@(_MissingApplicationPri); Assets=@(_MissingAssets)" />
+    <Copy SourceFiles="@(_MissingXbf)" DestinationFolder="$(PublishDir)%(RecursiveDir)" SkipUnchangedFiles="true" Condition="'@(_MissingXbf)' != ''" />
+    <Copy SourceFiles="@(_MissingApplicationPri)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" Condition="'@(_MissingApplicationPri)' != ''" />
+    <Copy SourceFiles="@(_MissingAssets)" DestinationFolder="$(PublishDir)Assets\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="'@(_MissingAssets)' != ''" />
+  </Target>
 </Project>

@@ -3,7 +3,6 @@ using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.UI.Lifecycle;
 using SteamInputAddonforClaw.UI.Frontend;
-using SteamInputAddonforClaw.Views;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using Microsoft.UI.Xaml.Markup;
 
@@ -56,13 +55,6 @@ public partial class App : Application
             stage = "BootstrapAcquisition";
             var bootstrap = await _frontendClient.GetBootstrapAsync().ConfigureAwait(true);
             AppLog.Info("Frontend", "Bootstrap acquired.");
-            // Temporary external WinUI startup diagnostic. Remove after the failing
-            // XAML component/resource path is identified.
-            ProbeXamlComponent("StatusPage", static () => new StatusPage());
-            ProbeXamlComponent("HowToUsePage", static () => new HowToUsePage());
-            ProbeXamlComponent("ControllerPage", static () => new ControllerPage());
-            ProbeXamlComponent("SettingsPage", static () => new SettingsPage());
-            ProbeXamlComponent("DeveloperPage", static () => new DeveloperPage());
             stage = "MainWindowInitialization";
             _mainWindow = CreateMainWindowWithDiagnostics(_frontendClient, bootstrap);
             _mainWindow.Closed += OnMainWindowClosed;
@@ -99,20 +91,6 @@ public partial class App : Application
             if (current is XamlParseException) return true;
         }
         return false;
-    }
-
-    private static void ProbeXamlComponent(string component, Func<object> create)
-    {
-        AppLog.Info("XamlProbe", "Component probe started.", ("Component", component));
-        try
-        {
-            _ = create();
-            AppLog.Info("XamlProbe", "Component probe succeeded.", ("Component", component));
-        }
-        catch (Exception exception)
-        {
-            LogXamlFailure(component, exception);
-        }
     }
 
     private static void LogXamlFailure(string component, Exception exception, params (string Key, object? Value)[] fields)
@@ -156,12 +134,40 @@ public partial class App : Application
     {
         if (Interlocked.Exchange(ref _shuttingDown, 1) != 0) return;
         AppLog.Info("Frontend", "UI shutdown requested.", ("Reason", reason));
-        if (_frontendClient is not null)
+        try
         {
-            _frontendClient.Disconnected -= OnFrontendDisconnected;
-            await _frontendClient.DisposeAsync().ConfigureAwait(false);
-            _frontendClient = null;
+            if (_frontendClient is not null)
+            {
+                _frontendClient.Disconnected -= OnFrontendDisconnected;
+                AppLog.Info("Frontend", "Frontend client disposal started.");
+                await _frontendClient.DisposeAsync().ConfigureAwait(false);
+                _frontendClient = null;
+                AppLog.Info("Frontend", "Frontend client disposal completed.");
+            }
         }
+        catch (Exception exception)
+        {
+            AppLog.Error("Frontend", "Frontend client disposal failed; UI exit will continue.", exception);
+        }
+        finally
+        {
+            RequestExitOnUiThread();
+        }
+    }
+
+    private void RequestExitOnUiThread()
+    {
+        AppLog.Info("Frontend", "UI Application.Exit requested.");
+        if (_dispatcherQueue?.HasThreadAccess == true)
+        {
+            Exit();
+            return;
+        }
+
+        if (_dispatcherQueue?.TryEnqueue(Exit) == true) return;
+
+        // The dispatcher is already unavailable; preserve the fail-safe process-exit
+        // behavior rather than leaving a primary UI process alive indefinitely.
         Exit();
     }
 }
