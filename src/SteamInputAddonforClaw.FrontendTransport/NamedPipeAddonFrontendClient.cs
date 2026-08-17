@@ -117,6 +117,8 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     }
     private void MarkDisconnected(Exception exception)
     {
+        if (Volatile.Read(ref _disposed) != 0 || _lifetime.IsCancellationRequested)
+            return;
         _disconnectReason = exception;
         Interlocked.Exchange(ref _pipe, null)?.Dispose();
         FailPending(new FrontendTransportException("Pipe connection closed.", exception));

@@ -293,6 +293,25 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Local_dispose_wins_over_a_late_read_failure_without_disconnect_notification()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var count = 0;
+        client.Disconnected += (_, _) => Interlocked.Increment(ref count);
+
+        await client.DisposeAsync();
+        var markDisconnected = typeof(NamedPipeAddonFrontendClient).GetMethod(
+            "MarkDisconnected",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        markDisconnected.Invoke(client, [new IOException("late local read failure")]);
+
+        Assert.Equal(0, Volatile.Read(ref count));
+    }
+
+    [Fact]
     public async Task Cancellation_reaches_underlying_frontend_operation()
     {
         var fake = new RecordingFrontendControl { BlockPrerequisiteSetup = true };

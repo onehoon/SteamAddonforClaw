@@ -74,7 +74,16 @@ internal sealed class FrontendProcessLauncher
     {
         var startInfo = new ProcessStartInfo(_executablePath) { UseShellExecute = false };
         AppLog.Info("Frontend", "Frontend process launch attempted.", ("Reason", reason), ("Path", _executablePath));
-        try { _ = _startProcess(startInfo); AppLog.Info("Frontend", "Frontend process launch succeeded.", ("Reason", reason)); }
+        try
+        {
+            if (_startProcess(startInfo) is null)
+            {
+                AppLog.Warn("Frontend", "Frontend process launch returned no process; Runtime remains active.", null, ("Reason", reason), ("Path", _executablePath));
+                return;
+            }
+
+            AppLog.Info("Frontend", "Frontend process launch succeeded.", ("Reason", reason));
+        }
         catch (Exception exception) { AppLog.Warn("Frontend", "Frontend process launch failed; Runtime remains active.", exception, ("Reason", reason), ("Path", _executablePath)); }
     }
 }

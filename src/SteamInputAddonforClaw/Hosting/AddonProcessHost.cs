@@ -144,8 +144,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        _startupCancellationTokenSource.Cancel();
         _frontendLauncher.StopAcceptingRequests();
+        _startupCancellationTokenSource.Cancel();
         if (_frontendServer is not null)
         {
             await _frontendServer.DisposeAsync().ConfigureAwait(false);
