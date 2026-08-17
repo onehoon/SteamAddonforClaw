@@ -200,6 +200,22 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public async Task Notification_completion_failure_is_observed_and_fails_closed()
+    {
+        var gate = new PowerMutationGate(true);
+        var source = new FakeSource(true);
+        var coordinator = Coordinator(gate);
+        using var watcher = new PowerTransitionWatcher(source, gate, coordinator, () => { });
+        Assert.True(watcher.Start());
+        await coordinator.DisposeAsync();
+        gate.OpenAfterRecovery();
+
+        source.Raise(18);
+
+        Assert.True(SpinWait.SpinUntil(() => !gate.IsOpen, TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
     public void Suspend_callback_closes_gate_advances_epoch_and_cancels_without_waiting_for_quiesce()
     {
         var gate = new PowerMutationGate(true); var cancelled = 0; var source = new FakeSource(true);

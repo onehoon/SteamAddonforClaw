@@ -348,6 +348,23 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
+    [Fact]
+    public async Task LivePublisherFaultHandlerFailureIsObservedWithoutRetrying()
+    {
+        var session = new FakeCanonicalSession { InputAccepted = false };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var calls = 0;
+        stage.SetOutputFaultHandler(() => { Interlocked.Increment(ref calls); throw new InvalidOperationException("fail-close failed"); });
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref calls) == 1, TimeSpan.FromSeconds(5)));
+        await Task.Delay(100);
+        Assert.Equal(1, calls);
+        AppLog.DrainForTests();
+        Assert.Contains("Reason=OutputFaultHandlerFailed", LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath));
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
     // --- Composite-device (28DE:1205 is a COMPOSITE USB device: keyboard + mouse + controller
     // interfaces under one container) PnP identity resolution edge cases ------------------------
 

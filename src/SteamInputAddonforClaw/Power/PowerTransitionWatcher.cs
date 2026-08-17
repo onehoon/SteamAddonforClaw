@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.Power;
 
 internal interface IPowerSuspendResumeNotificationSource : IDisposable
@@ -23,7 +25,18 @@ internal sealed class PowerTransitionWatcher : IDisposable
         if (_source.TryRegister(out _)) return true;
         _source.Notification -= OnNotification; _gate.Close(); return false;
     }
-    private void OnNotification(uint rawCode) => _ = ObserveAsync(rawCode);
+    private void OnNotification(uint rawCode) => _ = ObserveNotificationSafelyAsync(rawCode);
+    private async Task ObserveNotificationSafelyAsync(uint rawCode)
+    {
+        try { await ObserveAsync(rawCode).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (Volatile.Read(ref _disposed) != 0) { }
+        catch (Exception exception)
+        {
+            _gate.Close();
+            AppLog.Error("Power.Notify", "Power notification processing failed.", exception,
+                ("RawCode", rawCode), ("Signal", Map(rawCode)), ("Action", "RemainFailClosed"));
+        }
+    }
     internal Task ObserveAsync(uint rawCode)
     {
         if (Volatile.Read(ref _disposed) != 0) return Task.CompletedTask;
