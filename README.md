@@ -108,8 +108,9 @@ Unknown string RPC method names are represented as `Unknown` and return
 requests return `InvalidMessage` without invoking frontend operations.
 
 The current transport test suite covers all frontend operations and these wire
-failure/reconnect/concurrency cases. External UI packaging and hardware/manual
-validation remain separate follow-up work.
+failure/reconnect/concurrency cases. Release packaging places the self-contained
+UI publish under `ui/` beside the headless Runtime; hardware/manual validation
+remains separate follow-up work.
 
 ## Reference documents
 

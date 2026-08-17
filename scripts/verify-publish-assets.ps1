@@ -19,7 +19,8 @@ $requiredAssets = @(
     'Dependencies\Viiper\libVIIPER.dll',
     'Dependencies\Viiper\PROVENANCE.md',
     'Dependencies\Viiper\libVIIPER.h',
-    'Dependencies\Viiper\LICENSE.txt'
+    'Dependencies\Viiper\LICENSE.txt',
+    'ui\SteamInputAddonforClaw.UI.exe'
 )
 
 $missingAssets = foreach ($asset in $requiredAssets) {
@@ -50,6 +51,19 @@ if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expec
 
 if ($missingAssets) {
     throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
+}
+
+$uiDirectory = Join-Path $PublishDirectory 'ui'
+$uiManagedPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.dll')
+$uiPriPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.pri')
+$uiWinmdPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.winmd')
+if ($uiManagedPayload.Count -eq 0 -or $uiPriPayload.Count -eq 0 -or $uiWinmdPayload.Count -eq 0) {
+    throw 'UI publish output is missing its self-contained managed or WinUI/Windows App SDK payload.'
+}
+
+$runtimeRootXaml = @(Get-ChildItem -LiteralPath $PublishDirectory -File | Where-Object { $_.Extension -in @('.xbf', '.pri') })
+if ($runtimeRootXaml.Count -gt 0) {
+    throw "Runtime publish root contains UI assets: $($runtimeRootXaml.Name -join ', ')"
 }
 
 Write-Host 'Published Runtime assets verified.'

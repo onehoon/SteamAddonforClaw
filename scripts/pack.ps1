@@ -15,7 +15,6 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$projectPath = Join-Path $repositoryRoot 'src\SteamInputAddonforClaw\SteamInputAddonforClaw.csproj'
 $iconPath = Join-Path $repositoryRoot 'src\SteamInputAddonforClaw\Assets\AppIcon.ico'
 $artifactsDirectory = Join-Path $repositoryRoot 'artifacts'
 $publishDirectory = Join-Path $artifactsDirectory 'publish'
@@ -37,16 +36,10 @@ if (-not (Test-Path -LiteralPath $iconPath)) {
     throw "Application icon was not found: $iconPath"
 }
 
-dotnet publish $projectPath `
-    --configuration $Configuration `
-    --runtime win-x64 `
-    --self-contained true `
-    /p:Version=$Version `
-    --output $publishDirectory
-
-if ($LASTEXITCODE -ne 0) {
-    throw "dotnet publish failed with exit code $LASTEXITCODE."
-}
+& (Join-Path $PSScriptRoot 'publish-layout.ps1') `
+    -Version $Version `
+    -Configuration $Configuration `
+    -PublishDirectory $publishDirectory
 
 & (Join-Path $PSScriptRoot 'verify-publish-assets.ps1') -PublishDirectory $publishDirectory
 
