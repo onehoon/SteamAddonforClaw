@@ -4,7 +4,8 @@ using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.UI.Lifecycle;
 using SteamInputAddonforClaw.UI.Frontend;
 using SteamInputAddonforClaw.Views;
-using System.Reflection;
+using SteamInputAddonforClaw.Contracts.Frontend;
+using Microsoft.UI.Xaml.Markup;
 
 namespace SteamInputAddonforClaw.UI;
 
@@ -63,7 +64,7 @@ public partial class App : Application
             ProbeXamlComponent("SettingsPage", static () => new SettingsPage());
             ProbeXamlComponent("DeveloperPage", static () => new DeveloperPage());
             stage = "MainWindowInitialization";
-            _mainWindow = new MainWindow(_frontendClient, bootstrap);
+            _mainWindow = CreateMainWindowWithDiagnostics(_frontendClient, bootstrap);
             _mainWindow.Closed += OnMainWindowClosed;
             AppLog.Info("Frontend", "MainWindow initialized.");
             if (_activationPending)
@@ -74,9 +75,30 @@ public partial class App : Application
         }
         catch (Exception exception)
         {
-            LogXamlFailure("MainWindow", exception, ("Stage", stage));
+            AppLog.Error("Startup", "UI startup failed.", exception, ("Stage", stage));
             await ShutdownAndExitAsync("StartupFailure").ConfigureAwait(true);
         }
+    }
+
+    private static MainWindow CreateMainWindowWithDiagnostics(
+        NamedPipeAddonFrontendClient frontendClient,
+        FrontendBootstrapSnapshot bootstrap)
+    {
+        try { return new MainWindow(frontendClient, bootstrap); }
+        catch (Exception exception) when (ContainsXamlParseException(exception))
+        {
+            LogXamlFailure("MainWindow", exception);
+            throw;
+        }
+    }
+
+    private static bool ContainsXamlParseException(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is XamlParseException) return true;
+        }
+        return false;
     }
 
     private static void ProbeXamlComponent(string component, Func<object> create)
