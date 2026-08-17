@@ -42,12 +42,41 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-ABI compatibility is not inferred by the dependency automation. Review the
-generated `libVIIPER.h` diff and the managed interop
-(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
-`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
-Replace this paragraph with the reviewed ABI delta -- including any changed
-struct layout, offsets, or exports -- once confirmed.
+Reviewed VIIPER `249c0cfa88154d77cd1683af03fb9d85ac6af426` ->
+`ba63b9909f84bcabeddd4b1299beffe76ba04b4f`. The target is exactly one
+upstream commit, `Harden canonical USB/IP attach invariants and diagnostics
+(#35)`.
+
+The canonical generated `libVIIPER.h` is byte-identical to the previously
+reviewed header: its SHA-256 remains
+`ff78cc701e4fb17a46aa74897210e23f80d73f6d3bbbb1e170bd278786f2a211`.
+There are no new or removed exports, signature changes, enum or struct-layout
+changes, callback ABI changes, or Steam Deck state-layout changes. The Addon
+managed P/Invoke surface and `RequiredExports` therefore remain aligned and
+require no adaptation.
+
+The native delta hardens regression coverage around the existing canonical
+attachment contract and enriches low-volume attach/detach timing diagnostics.
+Attachment diagnostics now snapshot logical/export identity, tracked token
+identity, and before/after attachment/server lifecycle state under the native
+lifecycle lock, then emit after releasing that lock. The upstream contract and
+PR explicitly classify this as behavior-neutral; the bool and classified
+attach/detach APIs retain their existing semantics, including idempotent
+attach/detach, sticky unsafe-unknown ownership, explicit reattach, and
+`autoAttachLocalhost=false` detached-ready behavior. Creation does not schedule
+background attachment.
+
+The Xbox360 wrapper change extracts a thin internal helper so the same public
+creation path can be exercised directly by focused tests; it does not alter
+the public ABI or require Addon Xbox360 adoption. The new regression suite also
+covers the Steam Deck detached-ready path using the existing public wrapper
+semantics. No Steam Deck mapper, publisher, P/Invoke, callback rooting,
+routing, PnP, HidHide, recovery, or lifecycle-policy code change is required
+in the Addon for this dependency update.
+
+No hardware-validation claim is expanded. MSI Claw EX basic non-gyro Steam
+Deck input remains the established claim; SD3 lifecycle/recovery evidence,
+rumble/haptics, gyro/IMU, and Game Bar/Xbox360 validation remain separate work.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
