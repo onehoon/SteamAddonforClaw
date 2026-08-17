@@ -605,6 +605,13 @@ typedef uintptr_t USBServerHandle;
 
 typedef uintptr_t Xbox360DeviceHandle;
 
+typedef enum {
+    VIIPER_XBOX360_REMOVE_SUCCESS = 0,
+    VIIPER_XBOX360_REMOVE_RETRYABLE_FAILURE = 1,
+    VIIPER_XBOX360_REMOVE_UNSAFE_OUTCOME_UNKNOWN = 2,
+    VIIPER_XBOX360_REMOVE_INVALID = 3
+} Xbox360DeviceRemoveResult;
+
 #define XBOX360_BUTTON_DPAD_UP     0x0001u
 #define XBOX360_BUTTON_DPAD_DOWN   0x0002u
 #define XBOX360_BUTTON_DPAD_LEFT   0x0004u
@@ -1026,6 +1033,12 @@ extern GoUint8 SetXbox360DeviceState(Xbox360DeviceHandle handle, Xbox360DeviceSt
  *
  */
 extern GoUint8 RemoveXbox360Device(Xbox360DeviceHandle handle);
+/*
+ * RemoveXbox360DeviceEx returns the classified Xbox360 logical-device removal result.
+ * The legacy RemoveXbox360Device bool export remains available for compatibility.
+ *
+ */
+extern Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(Xbox360DeviceHandle handle);
 /*
  * SetXbox360RumbleCallback sets a callback to be invoked when the host sends rumble/motor commands to the device.
  * @param handle Handle to the Xbox360 device.
