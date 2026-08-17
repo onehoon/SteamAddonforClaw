@@ -22,7 +22,8 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
     private const uint DeviceType = 32769;
     private const uint FileReadData = 0x0001;
     // HidHide exposes one exclusive control device. This must be shared by every
-    // client instance in this process, but does not coordinate other processes.
+    // client instance in this process; the driver exclusivity protects the full
+    // read-modify-write lifetime from other processes.
     private static readonly object ControlDeviceGate = new();
     private readonly IHidHideNativeApi _nativeApi = nativeApi ?? new HidHideNativeApi();
     private readonly IHidHidePathConverter _pathConverter = pathConverter ?? new HidHidePathConverter();
@@ -38,10 +39,11 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
             lock (ControlDeviceGate)
             {
                 using var device = _nativeApi.Open(GenericRead);
-                active = ReadBoolean(device, Ioctl(2052));
-                inverse = ReadBoolean(device, Ioctl(2054));
-                rawWhitelist = ReadMultiString(device, Ioctl(2048));
-                blacklist = ReadMultiString(device, Ioctl(2050));
+                var raw = ReadRawConfiguration(device);
+                active = raw.Active;
+                inverse = raw.Inverse;
+                rawWhitelist = raw.Whitelist;
+                blacklist = raw.Blacklist;
             }
             var normalizedWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var fullImageName in rawWhitelist)
@@ -96,24 +98,22 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
         if (string.IsNullOrWhiteSpace(deviceEntry)) return false;
         try
         {
-            var inspection = Inspect();
-            if (!inspection.IsConfigurationReadable) return false;
-            var entries = (inspection.HiddenDeviceEntries ?? []).ToList();
-            var index = entries.FindIndex(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase));
-            if (add ? index >= 0 : index < 0) return true;
-            if (add) entries.Add(deviceEntry);
-            else entries.RemoveAt(index);
-
             lock (ControlDeviceGate)
             {
                 using var device = _nativeApi.Open(GenericRead | GenericWrite);
+                var raw = ReadRawConfiguration(device);
+                var entries = raw.Blacklist.ToList();
+                var index = entries.FindIndex(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase));
+                if (add ? index >= 0 : index < 0) return true;
+                var expected = entries.ToList();
+                if (add) entries.Add(deviceEntry);
+                else entries.RemoveAt(index);
+                if (!add) expected.RemoveAt(index);
+                else expected.Add(deviceEntry);
                 WriteMultiString(device, Ioctl(2051), entries);
+                var verified = ReadMultiString(device, Ioctl(2050));
+                return verified.SequenceEqual(expected, StringComparer.Ordinal);
             }
-            var verification = Inspect();
-            if (!verification.IsConfigurationReadable) return false;
-            var present = (verification.HiddenDeviceEntries ?? [])
-                .Any(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase));
-            return add == present;
         }
         catch (Exception exception)
         {
@@ -122,6 +122,15 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
             return false;
         }
     }
+
+    private static RawHidHideConfiguration ReadRawConfiguration(IHidHideControlDevice device) =>
+        new(
+            ReadBoolean(device, Ioctl(2052)),
+            ReadBoolean(device, Ioctl(2054)),
+            ReadMultiString(device, Ioctl(2048)),
+            ReadMultiString(device, Ioctl(2050)));
+
+    private sealed record RawHidHideConfiguration(bool Active, bool Inverse, List<string> Whitelist, List<string> Blacklist);
 
     private bool UpdateWhitelist(string executablePath, bool add)
     {

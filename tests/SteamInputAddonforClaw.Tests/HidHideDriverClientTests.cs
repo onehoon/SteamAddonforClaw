@@ -196,7 +196,7 @@ public sealed class HidHideDriverClientTests
     }
 
     [Fact]
-    public void AddHiddenDevice_ClosesMutationHandleBeforeVerification()
+    public void AddHiddenDevice_UsesOneHandleThroughVerification()
     {
         var device = new FakeDevice([], ["Foreign"]) { Active = true };
         var native = new ExclusiveFakeNative(device);
@@ -204,13 +204,13 @@ public sealed class HidHideDriverClientTests
         Assert.True(new HidHideDriverClient(native, Converter()).AddHiddenDevice("Addon"));
 
         Assert.Equal(["Foreign", "Addon"], device.Blacklist);
-        Assert.Equal(3, native.OpenCount);
+        Assert.Equal(1, native.OpenCount);
         Assert.Equal(1, native.MaximumLiveHandleCount);
         Assert.Equal(0, native.LiveHandleCount);
     }
 
     [Fact]
-    public void RemoveHiddenDevice_ClosesMutationHandleBeforeVerification()
+    public void RemoveHiddenDevice_UsesOneHandleThroughVerification()
     {
         var device = new FakeDevice([], ["Foreign", "Addon"]) { Active = true };
         var native = new ExclusiveFakeNative(device);
@@ -218,7 +218,7 @@ public sealed class HidHideDriverClientTests
         Assert.True(new HidHideDriverClient(native, Converter()).RemoveHiddenDevice("Addon"));
 
         Assert.Equal(["Foreign"], device.Blacklist);
-        Assert.Equal(3, native.OpenCount);
+        Assert.Equal(1, native.OpenCount);
         Assert.Equal(1, native.MaximumLiveHandleCount);
         Assert.Equal(0, native.LiveHandleCount);
     }
@@ -235,6 +235,21 @@ public sealed class HidHideDriverClientTests
         Assert.Equal(2, native.OpenCount);
         Assert.Equal(1, native.MaximumLiveHandleCount);
         Assert.Equal(0, native.LiveHandleCount);
+    }
+
+    [Fact]
+    public void AddHiddenDevice_PreservesForeignEntryAddedAfterReadWriteVerification()
+    {
+        var device = new FakeDevice([], ["Foreign"]);
+        var native = new ExclusiveFakeNative(device)
+        {
+            OnFirstHandleDisposed = () => device.Blacklist.Add("ForeignLate")
+        };
+
+        Assert.True(new HidHideDriverClient(native, Converter()).AddHiddenDevice("Addon"));
+
+        Assert.Equal(["Foreign", "Addon", "ForeignLate"], device.Blacklist);
+        Assert.Equal(1, native.OpenCount);
     }
 
     [Fact]
@@ -362,6 +377,7 @@ public sealed class HidHideDriverClientTests
         public int OpenCount { get; private set; }
         public TaskCompletionSource FirstHandleOpened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource AllowFirstHandleDispose { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Action? OnFirstHandleDisposed { get; init; }
 
         public IHidHideControlDevice Open(uint desiredAccess)
         {
@@ -401,7 +417,11 @@ public sealed class HidHideDriverClientTests
 
             public void Dispose()
             {
-                if (Interlocked.Exchange(ref _disposed, 1) == 0) native.Release();
+                if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                {
+                    native.Release();
+                    if (native.OpenCount == 1) native.OnFirstHandleDisposed?.Invoke();
+                }
             }
         }
     }
