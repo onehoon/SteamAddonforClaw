@@ -9,11 +9,17 @@ internal sealed class NativeMessageLoop
     private const uint PM_NOREMOVE = 0x0000;
     private const uint WM_QUIT = 0x0012;
     private readonly uint _ownerThreadId;
+    private readonly Func<uint, bool> _postThreadMessage;
     private int _exitRequested;
 
-    internal NativeMessageLoop()
+    internal NativeMessageLoop() : this(PostThreadMessage)
     {
-        _ownerThreadId = GetCurrentThreadId();
+    }
+
+    internal NativeMessageLoop(Func<uint, bool> postThreadMessage, uint? ownerThreadId = null)
+    {
+        _postThreadMessage = postThreadMessage ?? throw new ArgumentNullException(nameof(postThreadMessage));
+        _ownerThreadId = ownerThreadId ?? GetCurrentThreadId();
         // PeekMessageW creates the queue even when it returns false because no message is pending.
         _ = PeekMessageW(out _, IntPtr.Zero, 0, 0, PM_NOREMOVE);
     }
@@ -45,8 +51,11 @@ internal sealed class NativeMessageLoop
             return;
         }
 
-        if (!PostThreadMessageW(_ownerThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero))
+        if (!_postThreadMessage(_ownerThreadId))
+        {
+            Volatile.Write(ref _exitRequested, 0);
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not post Runtime message-loop exit.");
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -84,4 +93,6 @@ internal sealed class NativeMessageLoop
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostThreadMessageW(uint threadId, uint message, IntPtr wParam, IntPtr lParam);
+
+    private static bool PostThreadMessage(uint threadId) => PostThreadMessageW(threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
 }

@@ -29,4 +29,15 @@ public sealed class NativeMessageLoopTests
         ownerLoop.RequestExit();
         await run.WaitAsync(TimeSpan.FromSeconds(5));
     }
+
+    [Fact]
+    public void Failed_cross_thread_exit_post_can_be_retried()
+    {
+        var attempts = 0;
+        var loop = new NativeMessageLoop(_ => ++attempts > 1, ownerThreadId: 1);
+
+        Assert.ThrowsAny<Exception>(() => loop.RequestExit());
+        loop.RequestExit();
+        Assert.Equal(2, attempts);
+    }
 }

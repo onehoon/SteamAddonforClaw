@@ -41,6 +41,10 @@ internal sealed class RuntimeProcessApplication
             _ = _processHost.ReconcileAsync();
             _messageLoop.Run();
         }
+        catch (Exception exception)
+        {
+            AppLog.Error("Startup", "Runtime startup or message-loop execution failed; exiting cleanly.", exception);
+        }
         finally
         {
             AppLog.Info("Runtime", "Runtime process cleanup started.");

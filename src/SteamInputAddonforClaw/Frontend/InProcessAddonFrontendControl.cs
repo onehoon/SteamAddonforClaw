@@ -8,6 +8,7 @@ using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.FrontendTransport;
 
 namespace SteamInputAddonforClaw.Frontend;
 
@@ -21,6 +22,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private string _registrationMessage;
     private readonly IFrontendPrerequisiteSetupExecutor _setupExecutor;
     private readonly Func<string?> _processPath;
+    private int _shutdownStarted;
 
     internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null)
     {
@@ -52,6 +54,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         var result = _settings.ChangeLaunchAtWindowsStartup(enabled);
         _registrationMessage = result.Message;
         StateInvalidated?.Invoke(this, EventArgs.Empty);
@@ -60,6 +63,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public Task<FrontendSettingsSnapshot> SetRouteInSteamBigPictureAsync(bool enabled, CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         _settings.ChangeRouteInSteamBigPicture(enabled);
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(MapSettings());
@@ -67,6 +71,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         _settings.ChangeLogLevel(level switch { FrontendLogLevel.Debug => AppLogPreference.Debug, FrontendLogLevel.Info => AppLogPreference.Info, _ => AppLogPreference.Off });
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(MapSettings());
@@ -74,6 +79,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         _settings.SuppressDeveloperMenuWarningPermanently();
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(MapSettings());
@@ -81,6 +87,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         _developer.SetEnabled(enabled);
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(new FrontendDeveloperSnapshot(_developer.IsEnabled));
@@ -88,6 +95,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         var current = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
         var setup = _setupExecutor.Evaluate(current);
         AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
@@ -102,6 +110,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var mapped = FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(current, _captureRoutingStatus()), setup);
         if (!PrerequisiteSetupPromptPolicy.IsInstallable(setup))
             return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
+        ThrowIfShuttingDown();
         var executable = _processPath() ?? throw new InvalidOperationException("The executable path is unavailable.");
         var result = await _setupExecutor.RunAsync(setup, executable, cancellationToken).ConfigureAwait(false);
         // RunIfInstallableAsync returns null only when its safety policy declines to launch.
@@ -131,6 +140,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         ElevatedPrerequisiteSetup.ResultKind.AlreadyInProgress => FrontendPrerequisiteSetupResultKind.AlreadyInProgress,
         _ => FrontendPrerequisiteSetupResultKind.Failed
     };
+
+    internal void BeginProcessShutdown() => Interlocked.Exchange(ref _shutdownStarted, 1);
+
+    private void ThrowIfShuttingDown()
+    {
+        if (Volatile.Read(ref _shutdownStarted) != 0)
+            throw new FrontendProtocolException("Runtime is shutting down.");
+    }
 
     public async Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default)
     {
