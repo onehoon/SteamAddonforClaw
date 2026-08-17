@@ -17,9 +17,13 @@ internal sealed class UiShutdownCoordinator
     internal async Task ShutdownAsync()
     {
         if (Interlocked.Exchange(ref _started, 1) != 0) return;
-        var cleanup = _disposeFrontend();
-        try { await cleanup.WaitAsync(_cleanupTimeout).ConfigureAwait(false); }
-        catch (TimeoutException) { ObserveLateFailure(cleanup); }
+        Task? cleanup = null;
+        try
+        {
+            cleanup = _disposeFrontend();
+            await cleanup.WaitAsync(_cleanupTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException) when (cleanup is not null) { ObserveLateFailure(cleanup); }
         catch (Exception) { }
         finally { _requestExit(); }
     }

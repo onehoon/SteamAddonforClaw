@@ -175,23 +175,19 @@ public partial class App : Application
     private void RequestExitOnUiThread()
     {
         AppLog.Info("Frontend", "UI exit dispatch requested.");
-        if (_dispatcherQueue?.HasThreadAccess == true)
-        {
-            AppLog.Info("Frontend", "UI Application.Exit executing.");
-            Exit();
-            return;
-        }
-
-        if (_dispatcherQueue?.TryEnqueue(() =>
-        {
-            AppLog.Info("Frontend", "UI Application.Exit executing.");
-            Exit();
-        }) == true) return;
-
-        // The dispatcher is already unavailable; preserve the fail-safe process-exit
-        // behavior rather than leaving a primary UI process alive indefinitely.
-        AppLog.Error("Frontend", "UI exit dispatch failed; terminating process without XAML API.",
-            new InvalidOperationException("UI dispatcher was unavailable."));
-        Environment.Exit(0);
+        new UiExitDispatcher(
+            () => _dispatcherQueue?.HasThreadAccess == true,
+            () => _dispatcherQueue?.TryEnqueue(() =>
+            {
+                AppLog.Info("Frontend", "UI Application.Exit executing.");
+                Exit();
+            }) == true,
+            () => { AppLog.Info("Frontend", "UI Application.Exit executing."); Exit(); },
+            () =>
+            {
+                AppLog.Error("Frontend", "UI exit dispatch failed; terminating process without XAML API.",
+                    new InvalidOperationException("UI dispatcher was unavailable."));
+                Environment.Exit(0);
+            }).RequestExit();
     }
 }
