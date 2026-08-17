@@ -20,7 +20,16 @@ $requiredAssets = @(
     'Dependencies\Viiper\PROVENANCE.md',
     'Dependencies\Viiper\libVIIPER.h',
     'Dependencies\Viiper\LICENSE.txt',
-    'ui\SteamInputAddonforClaw.UI.exe'
+    'ui\SteamInputAddonforClaw.UI.exe',
+    'ui\SteamInputAddonforClaw.UI.dll',
+    'ui\SteamInputAddonforClaw.UI.pri',
+    'ui\App.xbf',
+    'ui\MainWindow.xbf',
+    'ui\Views\StatusPage.xbf',
+    'ui\Views\HowToUsePage.xbf',
+    'ui\Views\ControllerPage.xbf',
+    'ui\Views\SettingsPage.xbf',
+    'ui\Views\DeveloperPage.xbf'
 )
 
 $missingAssets = foreach ($asset in $requiredAssets) {
@@ -59,6 +68,11 @@ $uiPriPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter
 $uiWinmdPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.winmd')
 if ($uiManagedPayload.Count -eq 0 -or $uiPriPayload.Count -eq 0 -or $uiWinmdPayload.Count -eq 0) {
     throw 'UI publish output is missing its self-contained managed or WinUI/Windows App SDK payload.'
+}
+
+$applicationPri = Join-Path $uiDirectory 'SteamInputAddonforClaw.UI.pri'
+if (-not (Test-Path -LiteralPath $applicationPri -PathType Leaf)) {
+    throw 'UI publish output is missing the external UI application PRI: SteamInputAddonforClaw.UI.pri'
 }
 
 $runtimeRootXaml = @(Get-ChildItem -LiteralPath $PublishDirectory -File | Where-Object { $_.Extension -in @('.xbf', '.pri') })
