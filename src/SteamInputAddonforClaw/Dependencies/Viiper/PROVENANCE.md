@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     b55b435a63c85430d2a00949014d5c0892c8af67
+Commit:     bce7b4e20da6c80a706be9952dfbfd5eb6515b57
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: 202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718
-DLL SHA-256:              db6fc51ddc17635e48b7192afc45040d6a3aa992a984111354566901b7a8e260
+DLL SHA-256:              bba7bd7466842642bcdbe408047ad7496cf8015d31651d44540b650966439a8d
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,60 +42,74 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-Reviewed VIIPER `74e8448023e6f48b6e3dc8dbffd5278b53390e64` ->
-`b55b435a63c85430d2a00949014d5c0892c8af67`. The target is exactly one
-canonical main commit, `Make rejected mutation logging lifecycle-lock safe
-(#40)`.
+Reviewed VIIPER `b55b435a63c85430d2a00949014d5c0892c8af67` ->
+`bce7b4e20da6c80a706be9952dfbfd5eb6515b57`. The target is exactly one
+canonical main commit, `Make attachment backend logging lifecycle-lock safe
+(#41)`.
 
 The generated canonical `libVIIPER.h` is byte-identical to the previously
 reviewed header. Its SHA-256 remains
 `202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718`,
-and the vendored header has the same Git blob identity as the prior Addon
-`main` header. There are no added or removed exports, signature changes, enum
-changes, struct layout/packing changes, callback ABI changes, or Steam Deck
-state-layout changes. `SteamDeckDeviceState` remains 76 bytes with
-`LPadForce`, `RPadForce`, `LStickForce`, and `RStickForce` at offsets
-68/70/72/74. The current Addon managed P/Invoke surface, `RequiredExports`,
-callback rooting, and ABI tests require no adaptation.
+and the dependency PR does not modify the vendored header. There are no added
+or removed exports, signature changes, enum changes, struct layout/packing
+changes, callback ABI changes, or Steam Deck state-layout changes.
+`SteamDeckDeviceState` remains 76 bytes with `LPadForce`, `RPadForce`,
+`LStickForce`, and `RStickForce` at offsets 68/70/72/74. The current Addon
+managed P/Invoke surface, 12-entry `RequiredExports`, callback rooting, and ABI
+tests require no adaptation.
 
-PR #40 changes diagnostic emission ordering rather than lifecycle results.
-Rejected server-mutation warnings now use a two-phase boundary: bounded
-operation+server-state de-duplication is decided while `lifecycleMu` is held,
-then the captured warning is emitted only after that lock is released. The
-successful typed state/callback mutation path still executes under
-`lifecycleMu`; rejected mutation results remain rejected with the same server
-state and ownership evidence.
+PR #41 extends the lock-safe diagnostic boundary introduced by the preceding
+lifecycle logging hardening to the canonical tracked attachment backend.
+Backend `slog` records produced while the native attach/detach operation is
+serialized under the owning server's `lifecycleMu` are captured into an
+internal deferred batch instead of invoking the real logger/callback while the
+lock is held. After the authoritative lifecycle mutation is committed and the
+lock is released, the captured records are synchronously replayed to the real
+logger before the public lifecycle API returns. The callback therefore remains
+synchronous from the caller's perspective while no embedding callback executes
+under `lifecycleMu`.
 
-Public typed create paths, including Steam Deck and Xbox360, now call the
-shared create helper while holding `lifecycleMu`, then unlock before emitting
-a captured rejection warning or rollback-failure diagnostic. Auto-attach,
-logical-handle creation/finalization, attachment ownership, and rollback
-results are unchanged. If rollback itself fails, the owning server still
-transitions to `close-failed` under the lifecycle lock; only the already
-captured error record is deferred until after unlock. `CreateUSBBus` follows
-the same post-unlock warning boundary. Redundant rejected Attach/Detach and
-`RemoveUSBBus` warning calls are removed where the existing canonical
-post-unlock attachment/teardown diagnostics already report the rejected
-result; this removes duplicate synchronous logging without changing the
-operation result.
+The deferred logger is internal implementation state only. The server-scoped
+capture logger is installed and consumed within the same serialized lifecycle
+boundary, cleared before unlock, and then replayed after unlock. Explicit
+Attach/Detach, typed Create with auto-attach, typed Remove, `RemoveUSBBus`, and
+`CloseUSBServer` all propagate the captured backend records through their
+existing canonical mutation/teardown paths. This does not create a second
+attach/detach path and does not weaken per-server lifecycle serialization.
 
-The focused regression suite checks rejected typed mutation and typed creation
-remain de-duplicated and emit lock-free, rollback failure logging occurs only
-after unlock while preserving `close-failed`, rejected `CreateUSBBus` logging
-is lock-safe, and rejected known-ownership Attach/Detach still return the same
-classified result while their canonical timing diagnostics remain lock-free.
-This aligns with the Addon rule that logging-only changes remain
-behavior-neutral and with the native contract that embedding callbacks must
-not execute while the lifecycle lock is held.
+Attachment ownership and result semantics remain unchanged. Successful attach
+still commits the verified backend and positive import port; detach still uses
+that exact stored token. Retryable failure preserves known ownership and an
+active server, while an unsafe unknown outcome remains sticky, transitions the
+owning server to `close-failed`, retains diagnostic evidence, and does not
+perform a destructive retry. Typed remove, bus remove, and close retain their
+existing caller-owned bus, partial-close, transport-drain, and fail-closed
+semantics.
+
+Diagnostic ordering is explicit: captured backend records replay after unlock
+and, where teardown requires it, after the existing transport drain, but before
+the canonical attachment-timing or teardown summary for that operation. The
+canonical operation `totalUs` value is snapshotted before synchronous replay so
+callback/log-handler latency is not reclassified as native lifecycle time.
+Focused regressions cover explicit attach/detach success and classified
+failure, exact-token retention, sticky unknown ownership, typed create/remove,
+multi-device bus removal ordering, server close, lock-free replay, structured
+record timestamps/levels/attributes/groups, destination `Enabled` filtering,
+and backend-record-before-summary ordering.
+
+This remains low-volume lifecycle diagnostic work only; no per-input/per-frame
+logging is introduced. The guarantee is deliberately scoped to the canonical
+`lib/viiper` tracked attachment path and does not make a new claim about the
+legacy `clib`/TCP/server logging stack.
 
 The Addon's registered VIIPER callback remains narrowly filtered to the
-existing `VIIPER.DPad` diagnostic prefix, so these generic rejection/rollback
-records are not forwarded into the Addon product log. No Addon Steam Deck
-mapper, publisher, native binding, callback lifetime, routing, PnP, HidHide,
-recovery, lifecycle policy, or planned Xbox360 route change is required for
-this dependency update. The Addon continues to use the existing bool
-attach/detach compatibility surface; classified attachment/query adoption
-remains SD3 lifecycle/recovery work.
+existing `VIIPER.DPad` diagnostic prefix, so generic backend attachment logs
+are not forwarded into the Addon product log. No Addon Steam Deck mapper,
+publisher, native binding, callback lifetime, routing, PnP, HidHide, recovery,
+lifecycle policy, or planned Xbox360 route change is required for this
+dependency update. The Addon continues to use the existing bool attach/detach
+compatibility surface; classified attachment/query adoption remains SD3
+lifecycle/recovery work.
 
 No hardware-validation claim is expanded. MSI Claw EX basic non-gyro Steam
 Deck input remains the established claim; SD3 lifecycle/recovery evidence,
