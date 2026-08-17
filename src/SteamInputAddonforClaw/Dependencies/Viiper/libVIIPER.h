@@ -66,6 +66,13 @@ typedef uintptr_t USBServerHandle;
 
 typedef uintptr_t DSDeviceHandle;
 
+typedef enum {
+    VIIPER_DS_REMOVE_SUCCESS = 0,
+    VIIPER_DS_REMOVE_RETRYABLE_FAILURE = 1,
+    VIIPER_DS_REMOVE_UNSAFE_OUTCOME_UNKNOWN = 2,
+    VIIPER_DS_REMOVE_INVALID = 3
+} DSDeviceRemoveResult;
+
 #define DS_BUTTON_SQUARE    0x00000010u
 #define DS_BUTTON_CROSS     0x00000020u
 #define DS_BUTTON_CIRCLE    0x00000040u
@@ -167,6 +174,13 @@ typedef uintptr_t USBServerHandle;
 
 typedef uintptr_t DS4DeviceHandle;
 
+typedef enum {
+    VIIPER_DS4_REMOVE_SUCCESS = 0,
+    VIIPER_DS4_REMOVE_RETRYABLE_FAILURE = 1,
+    VIIPER_DS4_REMOVE_UNSAFE_OUTCOME_UNKNOWN = 2,
+    VIIPER_DS4_REMOVE_INVALID = 3
+} DS4DeviceRemoveResult;
+
 #define DS4_BUTTON_SQUARE    0x0010u
 #define DS4_BUTTON_CROSS     0x0020u
 #define DS4_BUTTON_CIRCLE    0x0040u
@@ -240,6 +254,13 @@ static void viiper_call_ds4_output(DS4OutputCallback fn, DS4DeviceHandle handle,
 typedef uintptr_t USBServerHandle;
 
 typedef uintptr_t KeyboardDeviceHandle;
+
+typedef enum {
+    VIIPER_KEYBOARD_REMOVE_SUCCESS = 0,
+    VIIPER_KEYBOARD_REMOVE_RETRYABLE_FAILURE = 1,
+    VIIPER_KEYBOARD_REMOVE_UNSAFE_OUTCOME_UNKNOWN = 2,
+    VIIPER_KEYBOARD_REMOVE_INVALID = 3
+} KeyboardDeviceRemoveResult;
 
 #define KB_MOD_LEFT_CTRL   0x01u
 #define KB_MOD_LEFT_SHIFT  0x02u
@@ -378,6 +399,13 @@ typedef uintptr_t USBServerHandle;
 
 typedef uintptr_t MouseDeviceHandle;
 
+typedef enum {
+    VIIPER_MOUSE_REMOVE_SUCCESS = 0,
+    VIIPER_MOUSE_REMOVE_RETRYABLE_FAILURE = 1,
+    VIIPER_MOUSE_REMOVE_UNSAFE_OUTCOME_UNKNOWN = 2,
+    VIIPER_MOUSE_REMOVE_INVALID = 3
+} MouseDeviceRemoveResult;
+
 #define MOUSE_BTN_LEFT    0x01u
 #define MOUSE_BTN_RIGHT   0x02u
 #define MOUSE_BTN_MIDDLE  0x04u
@@ -403,6 +431,13 @@ typedef struct {
 typedef uintptr_t USBServerHandle;
 
 typedef uintptr_t NS2ProDeviceHandle;
+
+typedef enum {
+    VIIPER_NS2PRO_REMOVE_SUCCESS = 0,
+    VIIPER_NS2PRO_REMOVE_RETRYABLE_FAILURE = 1,
+    VIIPER_NS2PRO_REMOVE_UNSAFE_OUTCOME_UNKNOWN = 2,
+    VIIPER_NS2PRO_REMOVE_INVALID = 3
+} NS2ProDeviceRemoveResult;
 
 #define NS2PRO_BUTTON_B            0x00000001u
 #define NS2PRO_BUTTON_A            0x00000002u
@@ -816,6 +851,11 @@ extern GoUint8 SetDualSenseOutputCallback(DSDeviceHandle handle, DSOutputCallbac
  */
 extern GoUint8 RemoveDualSenseDevice(DSDeviceHandle handle);
 /*
+ * RemoveDualSenseDeviceEx returns the classified DualSense/DualSense Edge removal result.
+ *
+ */
+extern DSDeviceRemoveResult RemoveDualSenseDeviceEx(DSDeviceHandle handle);
+/*
  * CreateDS4Device creates a new DualShock 4 device on the bus with the given ID on the server associated with the given handle.
  * @param serverHandle Handle to the USB server.
  * @param outDeviceHandle Output parameter for the created device handle.
@@ -848,6 +888,11 @@ extern GoUint8 SetDS4OutputCallback(DS4DeviceHandle handle, DS4OutputCallback cb
  */
 extern GoUint8 RemoveDS4Device(DS4DeviceHandle handle);
 /*
+ * RemoveDS4DeviceEx returns the classified DualShock 4 removal result.
+ *
+ */
+extern DS4DeviceRemoveResult RemoveDS4DeviceEx(DS4DeviceHandle handle);
+/*
  * CreateKeyboardDevice creates a new HID keyboard device on the bus with the given ID on the server associated with the given handle.
  * @param serverHandle Handle to the USB server.
  * @param outDeviceHandle Output parameter for the created device handle.
@@ -879,6 +924,11 @@ extern GoUint8 SetKeyboardLEDCallback(KeyboardDeviceHandle handle, KeyboardLEDCa
  */
 extern GoUint8 RemoveKeyboardDevice(KeyboardDeviceHandle handle);
 /*
+ * RemoveKeyboardDeviceEx returns the classified keyboard removal result.
+ *
+ */
+extern KeyboardDeviceRemoveResult RemoveKeyboardDeviceEx(KeyboardDeviceHandle handle);
+/*
  * CreateMouseDevice creates a new HID mouse device on the bus with the given ID on the server associated with the given handle.
  * @param serverHandle Handle to the USB server.
  * @param outDeviceHandle Output parameter for the created device handle.
@@ -902,6 +952,11 @@ extern GoUint8 SetMouseDeviceState(MouseDeviceHandle handle, MouseDeviceState st
  *
  */
 extern GoUint8 RemoveMouseDevice(MouseDeviceHandle handle);
+/*
+ * RemoveMouseDeviceEx returns the classified mouse removal result.
+ *
+ */
+extern MouseDeviceRemoveResult RemoveMouseDeviceEx(MouseDeviceHandle handle);
 /*
  * CreateNS2ProDevice creates a new Nintendo Switch 2 Pro Controller device on the bus with the given ID on the server associated with the given handle.
  * @param serverHandle Handle to the USB server.
@@ -934,6 +989,11 @@ extern GoUint8 SetNS2ProOutputCallback(NS2ProDeviceHandle handle, NS2ProOutputCa
  *
  */
 extern GoUint8 RemoveNS2ProDevice(NS2ProDeviceHandle handle);
+/*
+ * RemoveNS2ProDeviceEx returns the classified Nintendo Switch 2 Pro removal result.
+ *
+ */
+extern NS2ProDeviceRemoveResult RemoveNS2ProDeviceEx(NS2ProDeviceHandle handle);
 /*
  * NewUSBServer creates a new USB server with the given configuration and returns a handle to it.
  * The server will run in the background and can be stopped by calling CloseUSBServer with the returned handle.
