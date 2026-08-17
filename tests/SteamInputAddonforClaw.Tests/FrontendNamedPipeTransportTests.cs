@@ -173,6 +173,28 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Invalidation_raised_while_notification_is_completing_is_not_lost()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var notifications = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var count = 0;
+        client.StateInvalidated += (_, _) =>
+        {
+            if (Interlocked.Increment(ref count) == 1)
+                fake.RaiseStateInvalidated();
+            if (Volatile.Read(ref count) == 2)
+                notifications.TrySetResult();
+        };
+
+        fake.RaiseStateInvalidated();
+        await notifications.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, count);
+    }
+
+    [Fact]
     public async Task Server_dispose_during_notification_delivery_completes_cleanly()
     {
         var fake = new RecordingFrontendControl();
@@ -663,6 +685,28 @@ public sealed class FrontendNamedPipeTransportTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
     }
 
+    [Fact]
+    public async Task Caller_cancellation_after_frame_start_does_not_cancel_payload_write()
+    {
+        await using var stream = new BlockingWriteStream();
+        using var gateCancellation = new CancellationTokenSource();
+        using var writeCancellation = new CancellationTokenSource();
+        using var gate = new SemaphoreSlim(1, 1);
+        var write = FrontendWireCodec.WriteAsync(
+            stream,
+            new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Request, 1, FrontendRpcMethod.GetBootstrap),
+            gate,
+            gateCancellation.Token,
+            writeCancellation.Token);
+
+        await stream.PrefixWritten.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        gateCancellation.Cancel();
+        Assert.False(write.IsCompleted);
+        stream.ReleasePayload();
+        await write;
+        Assert.Equal(2, stream.WriteCount);
+    }
+
     private static async Task WriteRawFrameAsync(Stream stream, string json)
     {
         var payload = System.Text.Encoding.UTF8.GetBytes(json);
@@ -718,5 +762,26 @@ public sealed class FrontendNamedPipeTransportTests
     {
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
             base.ReadAsync(buffer[..Math.Min(buffer.Length, 1)], cancellationToken);
+    }
+
+    private sealed class BlockingWriteStream : MemoryStream
+    {
+        private readonly TaskCompletionSource _releasePayload = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource PrefixWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int WriteCount { get; private set; }
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            WriteCount++;
+            if (WriteCount == 1)
+            {
+                await base.WriteAsync(buffer, cancellationToken);
+                PrefixWritten.TrySetResult();
+                return;
+            }
+
+            await _releasePayload.Task.WaitAsync(cancellationToken);
+            await base.WriteAsync(buffer, cancellationToken);
+        }
+        public void ReleasePayload() => _releasePayload.TrySetResult();
     }
 }
