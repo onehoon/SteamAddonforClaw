@@ -14,6 +14,7 @@ public partial class App : Application
     private NamedPipeAddonFrontendClient? _frontendClient;
     private MainWindow? _mainWindow;
     private DispatcherQueue? _dispatcherQueue;
+    private UiShutdownCoordinator? _shutdownCoordinator;
     private bool _activationPending;
     private int _shuttingDown;
 
@@ -34,6 +35,7 @@ public partial class App : Application
         }
 
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _shutdownCoordinator = new UiShutdownCoordinator(DisposeFrontendAsync, RequestExitOnUiThread, TimeSpan.FromSeconds(5));
         _singleInstanceGate.RegisterActivation(() =>
         {
             if (_dispatcherQueue?.TryEnqueue(ActivateOrDeferOnUiThread) != true)
@@ -142,6 +144,17 @@ public partial class App : Application
     {
         if (Interlocked.Exchange(ref _shuttingDown, 1) != 0) return;
         AppLog.Info("Frontend", "UI shutdown requested.", ("Reason", reason));
+        if (_shutdownCoordinator is not null)
+        {
+            await _shutdownCoordinator.ShutdownAsync().ConfigureAwait(true);
+            return;
+        }
+        await DisposeFrontendAsync().ConfigureAwait(true);
+        RequestExitOnUiThread();
+    }
+
+    private async Task DisposeFrontendAsync()
+    {
         try
         {
             if (_frontendClient is not null)
@@ -156,10 +169,6 @@ public partial class App : Application
         catch (Exception exception)
         {
             AppLog.Error("Frontend", "Frontend client disposal failed; UI exit will continue.", exception);
-        }
-        finally
-        {
-            RequestExitOnUiThread();
         }
     }
 
@@ -181,8 +190,8 @@ public partial class App : Application
 
         // The dispatcher is already unavailable; preserve the fail-safe process-exit
         // behavior rather than leaving a primary UI process alive indefinitely.
-        AppLog.Error("Frontend", "UI exit dispatch failed; executing fallback exit.",
+        AppLog.Error("Frontend", "UI exit dispatch failed; terminating process without XAML API.",
             new InvalidOperationException("UI dispatcher was unavailable."));
-        Exit();
+        Environment.Exit(0);
     }
 }
