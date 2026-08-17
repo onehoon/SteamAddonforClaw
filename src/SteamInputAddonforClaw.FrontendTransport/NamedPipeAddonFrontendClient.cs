@@ -35,9 +35,22 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     private async Task<T> SendAsync<T>(FrontendRpcMethod method, JsonElement? payload, CancellationToken token)
     {
         token.ThrowIfCancellationRequested(); var pipe = _pipe ?? throw new FrontendTransportException("Client is not connected.", _disconnectReason); var id = Interlocked.Increment(ref _nextRequestId); var tcs = new TaskCompletionSource<FrontendWireEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously); if (!_pending.TryAdd(id, tcs)) throw new FrontendTransportException("Duplicate request id.");
-        var requestWriteCommitted = 0;
-        using var registration = token.Register(() => { if (Volatile.Read(ref requestWriteCommitted) != 0) _cancelled.TryAdd(id, 0); _pending.TryRemove(id, out _); if (Volatile.Read(ref requestWriteCommitted) != 0) _ = SendCancelSafelyAsync(id); tcs.TrySetCanceled(token); });
-        try { await FrontendWireCodec.WriteAsync(pipe, new(_version, FrontendWireMessageKind.Request, id, method, Payload: payload), _writeGate, token, _lifetime.Token).ConfigureAwait(false); Volatile.Write(ref requestWriteCommitted, 1); var response = await tcs.Task.ConfigureAwait(false); if (response.Error is { } error) { if (error.Code == FrontendRemoteErrorCode.Cancelled) throw new OperationCanceledException(token); throw new FrontendRemoteException(error.Code, error.Message); } try { return FrontendWireCodec.Decode<T>(response.Payload); } catch (FrontendProtocolException exception) { MarkDisconnected(exception); throw; } }
+        var requestWriteState = 0;
+        using var registration = token.Register(() =>
+        {
+            if (Interlocked.CompareExchange(ref requestWriteState, 2, 0) == 0)
+            {
+                _pending.TryRemove(id, out _);
+            }
+            else
+            {
+                _cancelled.TryAdd(id, 0);
+                _pending.TryRemove(id, out _);
+                _ = SendCancelSafelyAsync(id);
+            }
+            tcs.TrySetCanceled(token);
+        });
+        try { await FrontendWireCodec.WriteAsync(pipe, new(_version, FrontendWireMessageKind.Request, id, method, Payload: payload), _writeGate, token, _lifetime.Token, () => { if (Interlocked.CompareExchange(ref requestWriteState, 1, 0) != 0) throw new OperationCanceledException(token); }).ConfigureAwait(false); var response = await tcs.Task.ConfigureAwait(false); if (response.Error is { } error) { if (error.Code == FrontendRemoteErrorCode.Cancelled) throw new OperationCanceledException(token); throw new FrontendRemoteException(error.Code, error.Message); } try { return FrontendWireCodec.Decode<T>(response.Payload); } catch (FrontendProtocolException exception) { MarkDisconnected(exception); throw; } }
         finally { _pending.TryRemove(id, out _); }
     }
     private async Task SendCancelSafelyAsync(long id) { try { if (_pipe is { } pipe) await FrontendWireCodec.WriteAsync(pipe, new(_version, FrontendWireMessageKind.CancelRequest, id), _writeGate, _lifetime.Token).ConfigureAwait(false); } catch { } }

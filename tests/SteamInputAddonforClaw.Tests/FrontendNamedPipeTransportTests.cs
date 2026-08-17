@@ -271,6 +271,84 @@ public sealed class FrontendNamedPipeTransportTests
         cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
         await fake.PrerequisiteSetupCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
+    }
+
+    [Fact]
+    public async Task Cancellation_before_request_write_sends_no_request_and_keeps_connection_usable()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var writeGate = (SemaphoreSlim)typeof(NamedPipeAddonFrontendClient).GetField("_writeGate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(client)!;
+        await writeGate.WaitAsync();
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            var request = client.GetBootstrapAsync(cts.Token);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+        }
+        finally { writeGate.Release(); }
+
+        Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
+        Assert.Equal(1, fake.TotalCalls);
+    }
+
+    [Fact]
+    public async Task Non_cancellation_operation_canceled_exception_maps_to_operation_failed()
+    {
+        var fake = new RecordingFrontendControl { ThrowOperationCanceledWithoutToken = true };
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var exception = await Assert.ThrowsAsync<FrontendRemoteException>(() => client.GetBootstrapAsync());
+        Assert.Equal(FrontendRemoteErrorCode.OperationFailed, exception.Code);
+    }
+
+    [Fact]
+    public async Task Named_pipe_client_cancellation_after_frame_start_sends_cancel_and_connection_survives()
+    {
+        var pipeName = $"SteamInputAddonforClaw.Test.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var prefixRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePayload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverTask = Task.Run(async () =>
+        {
+            await server.WaitForConnectionAsync();
+            using var writeGate = new SemaphoreSlim(1, 1);
+            _ = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
+            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.HandshakeAccepted), writeGate, CancellationToken.None);
+            var prefix = new byte[4];
+            await FrontendWireCodec.ReadExactlyAsync(server, prefix, CancellationToken.None);
+            var length = BitConverter.ToInt32(prefix);
+            prefixRead.TrySetResult();
+            await releasePayload.Task;
+            var data = new byte[length];
+            await FrontendWireCodec.ReadExactlyAsync(server, data, CancellationToken.None);
+            var request = JsonSerializer.Deserialize<FrontendWireEnvelope>(data, FrontendWireCodec.Json)!;
+            var cancel = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
+            Assert.Equal(FrontendWireMessageKind.CancelRequest, cancel.Kind);
+            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, request.RequestId, request.Method, Error: new(FrontendRemoteErrorCode.Cancelled, "Operation cancelled.")), writeGate, CancellationToken.None);
+            var next = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
+            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, next.RequestId, next.Method, Payload: FrontendWireCodec.Payload(new FrontendBootstrapSnapshot(new(true, FrontendLogLevel.Debug, true, false), "Registered", new(false), @"C:\Logs"))), writeGate, CancellationToken.None);
+        });
+
+        await using var client = new NamedPipeAddonFrontendClient(pipeName);
+        await client.ConnectAsync();
+        using var payloadDocument = JsonDocument.Parse("\"" + new string('x', 900_000) + "\"");
+        using var cancellation = new CancellationTokenSource();
+        var send = typeof(NamedPipeAddonFrontendClient).GetMethod("SendAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.MakeGenericMethod(typeof(FrontendBootstrapSnapshot));
+        var request = (Task<FrontendBootstrapSnapshot>)send.Invoke(client, new object?[] { FrontendRpcMethod.GetBootstrap, payloadDocument.RootElement.Clone(), cancellation.Token })!;
+        await prefixRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        releasePayload.TrySetResult();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+        Assert.Equal(Settings, (await client.GetBootstrapAsync()).Settings);
+        await serverTask;
     }
 
     [Fact]
@@ -795,10 +873,11 @@ public sealed class FrontendNamedPipeTransportTests
         public bool LastDeveloperTestModeEnabled { get; private set; }
         public int SuppressDeveloperWarningCount { get; private set; }
         public bool BlockPrerequisiteSetup { get; init; }
+        public bool ThrowOperationCanceledWithoutToken { get; init; }
         public TaskCompletionSource PrerequisiteSetupStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource PrerequisiteSetupCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void RaiseStateInvalidated() => StateInvalidated?.Invoke(this, EventArgs.Empty);
-        public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(Bootstrap); }
+        public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) { TotalCalls++; if (ThrowOperationCanceledWithoutToken) throw new OperationCanceledException(); return Task.FromResult(Bootstrap); }
         public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(Status); }
         public Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastLaunchAtStartupEnabled = enabled; return Task.FromResult(LaunchResult); }
         public Task<FrontendSettingsSnapshot> SetRouteInSteamBigPictureAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastRouteInBigPictureEnabled = enabled; return Task.FromResult(Settings); }

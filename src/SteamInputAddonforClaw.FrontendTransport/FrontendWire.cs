@@ -45,12 +45,14 @@ internal static class FrontendWireCodec
     internal static async Task WriteAsync(Stream stream, FrontendWireEnvelope envelope, SemaphoreSlim gate, CancellationToken token)
         => await WriteAsync(stream, envelope, gate, token, token).ConfigureAwait(false);
     internal static async Task WriteAsync(Stream stream, FrontendWireEnvelope envelope, SemaphoreSlim gate, CancellationToken gateCancellationToken, CancellationToken writeCancellationToken)
+        => await WriteAsync(stream, envelope, gate, gateCancellationToken, writeCancellationToken, null).ConfigureAwait(false);
+    internal static async Task WriteAsync(Stream stream, FrontendWireEnvelope envelope, SemaphoreSlim gate, CancellationToken gateCancellationToken, CancellationToken writeCancellationToken, Action? frameStarted)
     {
         var data = JsonSerializer.SerializeToUtf8Bytes(envelope, Json);
         if (data.Length is 0 or > MaxFrameBytes) throw new FrontendProtocolException("Invalid frame length.");
         var prefix = new byte[4]; BinaryPrimitives.WriteInt32LittleEndian(prefix, data.Length);
         await gate.WaitAsync(gateCancellationToken).ConfigureAwait(false);
-        try { await stream.WriteAsync(prefix, writeCancellationToken).ConfigureAwait(false); await stream.WriteAsync(data, writeCancellationToken).ConfigureAwait(false); await stream.FlushAsync(writeCancellationToken).ConfigureAwait(false); }
+        try { frameStarted?.Invoke(); await stream.WriteAsync(prefix, writeCancellationToken).ConfigureAwait(false); await stream.WriteAsync(data, writeCancellationToken).ConfigureAwait(false); await stream.FlushAsync(writeCancellationToken).ConfigureAwait(false); }
         finally { gate.Release(); }
     }
     internal static async Task<FrontendWireEnvelope> ReadAsync(Stream stream, CancellationToken token)

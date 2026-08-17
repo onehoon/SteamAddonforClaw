@@ -43,9 +43,13 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
                 }
                 finally { operationGate.Release(); }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (requestCts.IsCancellationRequested || connection.IsCancellationRequested)
             {
                 await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.Cancelled, "Operation cancelled."))).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException exception)
+            {
+                await Send(new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, id, Error: new(FrontendRemoteErrorCode.OperationFailed, exception.Message))).ConfigureAwait(false);
             }
             catch (FrontendProtocolException exception)
             {
