@@ -45,13 +45,10 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     private int _outputFaultReported;
     private ICanonicalSteamDeckSession? _canonicalSession;
     private bool _recoveryMutationCompleted;
-    private CreationTiming? _creationTiming;
-
     private sealed class CreationTiming
     {
         internal long Started { get; } = Stopwatch.GetTimestamp();
-        internal long RuntimeStartMs { get; set; }
-        internal long CreateDeviceMs { get; set; }
+        internal long CanonicalSessionStartMs { get; set; }
         internal long PnpResolveMs { get; set; }
         internal long RecoveryCheckpointMs { get; set; }
         internal long HidHideInspectionMs { get; set; }
@@ -113,7 +110,6 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     public async ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
     {
         var timing = new CreationTiming();
-        _creationTiming = timing;
         await _serial.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -135,11 +131,13 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             operationToken.ThrowIfCancellationRequested();
             _state = LifecycleState.Creating;
             var started = Stopwatch.GetTimestamp();
+            bool sessionStarted;
             try
             {
-                if (!_canonicalSession.Start()) return await FailAndRollbackCoreAsync("CanonicalSessionStartFailed").ConfigureAwait(false);
+                sessionStarted = _canonicalSession.Start();
             }
-            finally { timing.RuntimeStartMs = Elapsed(started); }
+            finally { timing.CanonicalSessionStartMs = Elapsed(started); }
+            if (!sessionStarted) return await FailAndRollbackCoreAsync("CanonicalSessionStartFailed", timing).ConfigureAwait(false);
             operationToken.ThrowIfCancellationRequested();
             _busId = _canonicalSession.BusId ?? 0;
             _deviceId = _canonicalSession.LogicalDeviceId ?? 0;
@@ -153,31 +151,31 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             {
                 SteamDeckVirtualDeviceIdentityDiagnostics.LogOnFailure(_before, identitySnapshot, resolved, _busId, _deviceId);
                 _potentialDeckInstanceIdsAtIdentityFailure = FindPotentialDeckInstanceIds(_before!, identitySnapshot);
-                return await FailAndRollbackCoreAsync(resolved.Reason).ConfigureAwait(false);
+                return await FailAndRollbackCoreAsync(resolved.Reason, timing).ConfigureAwait(false);
             }
             _owned = resolved.Devices;
             started = Stopwatch.GetTimestamp();
             RecoveryResult checkpoint;
             try { checkpoint = _recovery.ResolveAddonOwnedVirtualDeviceIdentity(session, _mutationId, _owned.Select(device => device.InstanceId)); }
             finally { timing.RecoveryCheckpointMs = Elapsed(started); }
-            if (!checkpoint.IsSafeToContinue) return await FailAndRollbackCoreAsync("VirtualDeviceRecoveryCheckpointFailed").ConfigureAwait(false);
+            if (!checkpoint.IsSafeToContinue) return await FailAndRollbackCoreAsync("VirtualDeviceRecoveryCheckpointFailed", timing).ConfigureAwait(false);
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             HidHideInspection hidHideInspection;
             try { hidHideInspection = _hidHide.Inspect(); }
             finally { timing.HidHideInspectionMs = Elapsed(started); }
-            if (!hidHideInspection.IsConfigurationReadable) return await FailAndRollbackCoreAsync("HidHideOutputInspectionUnavailable").ConfigureAwait(false);
+            if (!hidHideInspection.IsConfigurationReadable) return await FailAndRollbackCoreAsync("HidHideOutputInspectionUnavailable", timing).ConfigureAwait(false);
             var ownedEntries = _owned.SelectMany(device => device.AncestorInstanceIds.Append(device.InstanceId).Append(device.ParentInstanceId ?? string.Empty))
                 .Where(value => !string.IsNullOrWhiteSpace(value)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if ((hidHideInspection.HiddenDeviceEntries ?? []).Any(ownedEntries.Contains))
-                return await FailAndRollbackCoreAsync("HidHideOutputAlreadyBlocked").ConfigureAwait(false);
+                return await FailAndRollbackCoreAsync("HidHideOutputAlreadyBlocked", timing).ConfigureAwait(false);
             _tracker.ResolveOwnership(_owned);
             operationToken.ThrowIfCancellationRequested();
             started = Stopwatch.GetTimestamp();
             bool neutralAccepted;
             try { neutralAccepted = _canonicalSession.SetNeutral(); }
             finally { timing.NeutralReportMs = Elapsed(started); }
-            if (!neutralAccepted) return await FailAndRollbackCoreAsync("NeutralReportRejected").ConfigureAwait(false);
+            if (!neutralAccepted) return await FailAndRollbackCoreAsync("NeutralReportRejected", timing).ConfigureAwait(false);
             Interlocked.Exchange(ref _outputFaultReported, 0);
             _publisher = new CanonicalSteamDeckInputPublisher(_snapshot, _canonicalSession, _reportTicks,
                 fault: ReportOutputFault);
@@ -186,7 +184,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             finally { timing.PublisherStartMs = Elapsed(started); }
             _state = LifecycleState.Active;
             AppLog.Debug("SteamOutput", "SteamDeckOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{SteamDeckVirtualDeviceIdentityPolicy.VendorId:X4}"), ("PID", $"{SteamDeckVirtualDeviceIdentityPolicy.ProductId:X4}"), ("NeutralAccepted", true));
-            AppLog.Debug("RoutingTrace", "Steam Deck output creation completed.", ("Event", "SteamDeckOutputCreated"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(timing.Started)), ("RuntimeStartMs", timing.RuntimeStartMs), ("CreateDeviceMs", timing.CreateDeviceMs), ("PnPResolveMs", timing.PnpResolveMs), ("RecoveryCheckpointMs", timing.RecoveryCheckpointMs), ("HidHideInspectionMs", timing.HidHideInspectionMs), ("NeutralReportMs", timing.NeutralReportMs), ("PublisherStartMs", timing.PublisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
+            AppLog.Debug("RoutingTrace", "Steam Deck output creation completed.", ("Event", "SteamDeckOutputCreated"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(timing.Started)), ("CanonicalSessionStartMs", timing.CanonicalSessionStartMs), ("PnPResolveMs", timing.PnpResolveMs), ("RecoveryCheckpointMs", timing.RecoveryCheckpointMs), ("HidHideInspectionMs", timing.HidHideInspectionMs), ("NeutralReportMs", timing.NeutralReportMs), ("PublisherStartMs", timing.PublisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
             return RoutingStageOperationResult.Success("SteamDeckCreated");
         }
         catch (OperationCanceledException)
@@ -198,7 +196,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         }
         catch (Exception exception)
         {
-            return await FailAndRollbackCoreAsync(exception.GetType().Name).ConfigureAwait(false);
+            return await FailAndRollbackCoreAsync(exception.GetType().Name, timing).ConfigureAwait(false);
         }
         finally
         {
@@ -381,10 +379,9 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         }
     }
 
-    private async ValueTask<RoutingStageOperationResult> FailAndRollbackCoreAsync(string reason)
+    private async ValueTask<RoutingStageOperationResult> FailAndRollbackCoreAsync(string reason, CreationTiming timing)
     {
-        var timing = _creationTiming;
-        AppLog.Debug("RoutingTrace", "Steam Deck output creation failed.", ("Event", "SteamDeckOutputCreationFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("FailedOperation", FailureOperation(reason)), ("TotalMs", timing is null ? 0 : Elapsed(timing.Started)), ("RuntimeStartMs", timing?.RuntimeStartMs ?? 0), ("CreateDeviceMs", timing?.CreateDeviceMs ?? 0), ("PnPResolveMs", timing?.PnpResolveMs ?? 0), ("RecoveryCheckpointMs", timing?.RecoveryCheckpointMs ?? 0), ("HidHideInspectionMs", timing?.HidHideInspectionMs ?? 0), ("NeutralReportMs", timing?.NeutralReportMs ?? 0), ("PublisherStartMs", timing?.PublisherStartMs ?? 0), ("Reason", reason));
+        AppLog.Debug("RoutingTrace", "Steam Deck output creation failed.", ("Event", "SteamDeckOutputCreationFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("FailedOperation", FailureOperation(reason)), ("TotalMs", Elapsed(timing.Started)), ("CanonicalSessionStartMs", timing.CanonicalSessionStartMs), ("PnPResolveMs", timing.PnpResolveMs), ("RecoveryCheckpointMs", timing.RecoveryCheckpointMs), ("HidHideInspectionMs", timing.HidHideInspectionMs), ("NeutralReportMs", timing.NeutralReportMs), ("PublisherStartMs", timing.PublisherStartMs), ("Reason", reason));
         var rollback = await RollbackCoreAsync(CancellationToken.None).ConfigureAwait(false);
         return RoutingStageOperationResult.Failure($"{reason};Rollback={rollback.Reason}");
     }
@@ -393,6 +390,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     {
         "VirtualDeviceDidNotAppear" or "AmbiguousVirtualDeviceIdentity" or "VirtualDeviceIdentityDidNotStabilize" => "PnPResolve",
         "NeutralReportRejected" => "NeutralReport",
+        "CanonicalSessionStartFailed" => "CanonicalSessionStart",
         "VirtualDeviceRecoveryCheckpointFailed" => "RecoveryCheckpoint",
         "HidHideOutputInspectionUnavailable" or "HidHideOutputAlreadyBlocked" => "HidHideInspection",
         "VirtualDeviceRecoveryIntentFailed" => "RecoveryIntent",
