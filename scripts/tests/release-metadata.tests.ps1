@@ -32,6 +32,12 @@ Assert-Equal -Expected '0.1.10' -Actual $doubleDigitPatch.Version -Message 'Doub
 $largePatch = Get-NextReleaseMetadata -Tags @('v0.9.99')
 Assert-Equal -Expected '0.9.100' -Actual $largePatch.Version -Message 'Large patch increment'
 
+$fourDigitPatch = Get-NextReleaseMetadata -Tags @('v0.1.9999')
+Assert-Equal -Expected '0.1.10000' -Actual $fourDigitPatch.Version -Message 'Four-digit patch increment'
+
+$doubleDigitBoundary = Get-NextReleaseMetadata -Tags @('v0.1.99')
+Assert-Equal -Expected '0.1.100' -Actual $doubleDigitBoundary.Version -Message 'Double-digit patch boundary'
+
 $invalidTagsIgnored = Get-NextReleaseMetadata -Tags @('not-a-version', 'v0.1', 'release-4', 'v0.1.7')
 Assert-Equal -Expected '0.1.8' -Actual $invalidTagsIgnored.Version -Message 'Invalid tags ignored'
 Assert-Equal -Expected 'v0.1.7' -Actual $invalidTagsIgnored.PreviousTag -Message 'v prefix handling'
