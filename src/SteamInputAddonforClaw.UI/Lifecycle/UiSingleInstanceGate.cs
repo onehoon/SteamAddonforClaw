@@ -41,15 +41,25 @@ internal sealed class UiSingleInstanceGate : IDisposable
                 throw new InvalidOperationException("An activation handler is already registered.");
             _activationRegistration = ThreadPool.RegisterWaitForSingleObject(
                 _activationEvent,
-                (_, timedOut) =>
-                {
-                    if (!timedOut && !_disposed)
-                        activationHandler();
-                },
+                (_, timedOut) => OnActivationSignaled(activationHandler, timedOut),
                 null,
                 Timeout.Infinite,
                 executeOnlyOnce: false);
         }
+    }
+
+    private void OnActivationSignaled(Action activationHandler, bool timedOut)
+    {
+        if (timedOut)
+            return;
+
+        lock (_sync)
+        {
+            if (_disposed)
+                return;
+        }
+
+        activationHandler();
     }
 
     public void Dispose()

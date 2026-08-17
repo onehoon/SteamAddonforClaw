@@ -17,17 +17,23 @@ public sealed class UiSingleInstanceGateTests
     }
 
     [Fact]
-    public void Secondary_activation_signals_primary_once()
+    public void Secondary_activation_signals_primary()
     {
         var names = CreateNames();
         using var primary = new UiSingleInstanceGate(names.Mutex, names.Event);
         using var secondary = new UiSingleInstanceGate(names.Mutex, names.Event);
         using var activated = new ManualResetEventSlim();
+        var activationCount = 0;
 
-        primary.RegisterActivation(activated.Set);
+        primary.RegisterActivation(() =>
+        {
+            Interlocked.Increment(ref activationCount);
+            activated.Set();
+        });
         secondary.ActivatePrimaryInstance();
 
         Assert.True(activated.Wait(TimeSpan.FromSeconds(5)));
+        Assert.Equal(1, Volatile.Read(ref activationCount));
     }
 
     [Fact]
