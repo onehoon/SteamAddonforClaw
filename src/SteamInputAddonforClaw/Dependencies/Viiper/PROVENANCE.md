@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     e10b5f02945b1322f33c33468e583546600ba000
+Commit:     249c0cfa88154d77cd1683af03fb9d85ac6af426
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -33,8 +33,8 @@ Artifact hashes (recomputed independently from the fetched files, matching
 the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
-Generated header SHA-256: e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc
-DLL SHA-256:              e6d0a13f58bd204f9259634f208d362a4c7044c7697c3b3b0d5afde6fb66b275
+Generated header SHA-256: ff78cc701e4fb17a46aa74897210e23f80d73f6d3bbbb1e170bd278786f2a211
+DLL SHA-256:              4260c4b3690361658137c99c98500acadaafde4b9ea4fa7e350082cf184cecd6
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,33 +42,34 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-Reviewed VIIPER `d1510dd559b284d9bebb50007d38b12d3ab5f822` ->
-`e10b5f02945b1322f33c33468e583546600ba000`. The final target restores and
-retains the same canonical managed/native Steam Deck ABI already consumed by
-the Addon: the generated `libVIIPER.h` is byte-identical to the previously
-reviewed header and its SHA-256 remains
-`e6c1bddb3ef3bab27ec8744da44051ec9ea7e5a57f92dbc869a87f6d456aa9bc`.
-`SteamDeckDeviceState` therefore remains 76 bytes, ending with
+Reviewed VIIPER `e10b5f02945b1322f33c33468e583546600ba000` ->
+`249c0cfa88154d77cd1683af03fb9d85ac6af426`. The target is exactly one
+upstream commit, `Add classified Xbox360 removal parity (#34)`. Its canonical
+source delta is limited to the Xbox360 typed wrapper, focused Xbox360 removal
+tests, the generated-ABI/export CI checks, and the fork API documentation.
+
+The generated `libVIIPER.h` delta adds only the four-value
+`Xbox360DeviceRemoveResult` enum and the additive
+`RemoveXbox360DeviceEx(Xbox360DeviceHandle)` export. The existing
+`RemoveXbox360Device` compatibility bool export remains available and keeps
+its prior signature. No Steam Deck type, struct field, field order, offset,
+packing, callback typedef, or Steam Deck export changes. In particular,
+`SteamDeckDeviceState` remains the established 76-byte ABI ending with
 `LPadForce`/`RPadForce`/`LStickForce`/`RStickForce` at offsets 68/70/72/74.
-No exported function, callback typedef, enum, struct field order, field offset,
-packing, managed P/Invoke signature, or `RequiredExports` entry changes versus
-the currently embedded Addon contract. No managed ABI adaptation is required.
 
-The revision does contain a native Steam Deck input-report transport correction:
-VIIPER now always declares the full 64-byte input report length in report byte 3
-and preserves the established final four-byte stick-sensor tail at bytes 60:64.
-The intermediate 72-byte VIIPER revision in this commit range is not the adopted
-ABI contract; `e10b5f0` restores the 76-byte state before this artifact is built.
-The Addon already exposes the matching `LStickForce`/`RStickForce` managed
-fields and currently leaves them neutral, so this wire correction requires no
-mapper, publisher, P/Invoke, callback, routing, lifecycle, attachment, recovery,
-or HidHide code change.
+The current Addon managed native surface binds the generic server/bus/
+attachment functions and the Steam Deck typed family only; it does not yet
+bind or require Xbox360 exports. Xbox360 composition remains the planned SD7
+feature track. Therefore this additive, currently unused Xbox360 export does
+not require a managed P/Invoke, `RequiredExports`, struct/enum, callback,
+mapper, publisher, routing, attachment, recovery, or lifecycle code change in
+this dependency PR. When SD7 adopts the typed Xbox360 family, its managed
+surface should consume the classified removal API rather than inferring
+ownership from the legacy bool result.
 
-The exhaustive Steam Deck button/D-pad/Menu-View semantics remain unchanged,
-including `Start -> Menu` and `Back -> Options`. No hardware-validation claim
-is expanded: MSI Claw EX basic non-gyro input remains the established claim;
-lifecycle/recovery, rumble/haptics, gyro, and IMU validation remain separate
-work.
+No hardware-validation claim is expanded. MSI Claw EX basic non-gyro Steam
+Deck input remains the established claim; lifecycle/recovery, rumble/haptics,
+gyro/IMU, and Game Bar/Xbox360 validation remain separate work.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
