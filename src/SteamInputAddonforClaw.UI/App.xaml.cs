@@ -1,11 +1,15 @@
 using Microsoft.UI.Xaml;
+using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.UI.Lifecycle;
+using SteamInputAddonforClaw.UI.Frontend;
 
 namespace SteamInputAddonforClaw.UI;
 
 public partial class App : Application
 {
     private readonly UiSingleInstanceGate? _singleInstanceGate;
+    private NamedPipeAddonFrontendClient? _frontendClient;
+    private MainWindow? _mainWindow;
 
     public App() => InitializeComponent();
 
@@ -23,10 +27,41 @@ public partial class App : Application
             return;
         }
 
-        _singleInstanceGate.RegisterActivation(static () => { });
+        _singleInstanceGate.RegisterActivation(() => _mainWindow?.Activate());
+        _ = StartFrontendAsync();
+    }
 
-        // Foundation only. Production Runtime does not launch this executable yet.
-        // MainWindow ownership moves here in the frontend process cutover revision.
+    private async Task StartFrontendAsync()
+    {
+        try
+        {
+            _frontendClient = UiFrontendClientFactory.Create();
+            await _frontendClient.ConnectAsync().ConfigureAwait(true);
+            var bootstrap = await _frontendClient.GetBootstrapAsync().ConfigureAwait(true);
+            _mainWindow = new MainWindow(_frontendClient, bootstrap);
+            _mainWindow.Closed += OnMainWindowClosed;
+            _mainWindow.Activate();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Startup", "UI could not connect to the Runtime frontend.", exception);
+            await DisposeClientAsync().ConfigureAwait(true);
+            Exit();
+        }
+    }
+
+    private async void OnMainWindowClosed(object sender, WindowEventArgs args)
+    {
+        await DisposeClientAsync().ConfigureAwait(true);
         Exit();
+    }
+
+    private async Task DisposeClientAsync()
+    {
+        if (_frontendClient is not null)
+        {
+            await _frontendClient.DisposeAsync().ConfigureAwait(false);
+            _frontendClient = null;
+        }
     }
 }

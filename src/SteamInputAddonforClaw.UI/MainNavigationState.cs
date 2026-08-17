@@ -7,7 +7,7 @@ internal enum MainNavigationPage
     HowToUse,
     Settings,
     DeveloperMenu,
-    ClawSensorProbe
+    ClawSensorProbe,
 }
 
 internal sealed class MainNavigationState
@@ -40,8 +40,9 @@ internal sealed class MainNavigationState
         return CurrentPage;
     }
 
-    internal MainNavigationPage OpenClawSensorProbe() => CurrentPage = MainNavigationPage.ClawSensorProbe;
     internal MainNavigationPage ReturnToDeveloperMenu() => CurrentPage = MainNavigationPage.DeveloperMenu;
+
+    internal MainNavigationPage OpenClawSensorProbe() => CurrentPage = MainNavigationPage.ClawSensorProbe;
 
     internal MainNavigationPage? GetMouseBackDestination() => CurrentPage switch
     {

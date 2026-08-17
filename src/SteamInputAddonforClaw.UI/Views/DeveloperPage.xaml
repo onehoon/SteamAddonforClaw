@@ -55,15 +55,7 @@
                 </ComboBox>
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsCard
-                Click="ClawSensorProbeButton_Click"
-                Description="Read-only gyro and accelerometer diagnostics for MSI Claw hardware research."
-                Header="Claw Sensor Probe"
-                IsClickEnabled="True">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Directions" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-            </ctcontrols:SettingsCard>
+            <!-- TODO: Re-expose the developer sensor diagnostic through a Runtime-owned diagnostic frontend boundary. -->
         </StackPanel>
     </ScrollViewer>
 </UserControl>

@@ -19,6 +19,18 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("SteamInputAddonforClaw.csproj", transport);
     }
 
+    [Fact]
+    public void Frontend_sources_have_one_physical_owner()
+    {
+        var root = FindRepositoryRoot();
+        Assert.True(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml")));
+        Assert.True(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs")));
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw/MainWindow.xaml")));
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw/MainWindow.xaml.cs")));
+        Assert.True(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw/Views/ClawSensorProbePage.xaml")));
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ClawSensorProbePage.xaml")));
+    }
+
     private static IReadOnlyList<string> References(string relativeProjectPath)
     {
         var projectPath = Path.Combine(FindRepositoryRoot(), relativeProjectPath.Replace('/', Path.DirectorySeparatorChar));

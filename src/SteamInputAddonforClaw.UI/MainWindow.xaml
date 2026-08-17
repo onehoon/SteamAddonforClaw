@@ -45,7 +45,6 @@
             <views:SettingsPage x:Name="SettingsContent" Visibility="Collapsed" />
 
             <views:DeveloperPage x:Name="DeveloperMenuContent" Visibility="Collapsed" />
-            <views:ClawSensorProbePage x:Name="ClawSensorProbeContent" Visibility="Collapsed" />
         </Grid>
     </NavigationView>
         <Grid x:Name="PrerequisiteSetupBusyOverlay"
