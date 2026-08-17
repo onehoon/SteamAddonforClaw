@@ -14,6 +14,8 @@ public sealed class UiArchitectureTests
 
         Assert.Contains("SteamInputAddonforClaw.Contracts.csproj", ui);
         Assert.Contains("SteamInputAddonforClaw.FrontendTransport.csproj", ui);
+        Assert.Contains("SteamInputAddonforClaw.FrontendTransport.csproj", runtime);
+        Assert.Contains("SteamInputAddonforClaw.Contracts.csproj", transport);
         Assert.DoesNotContain("SteamInputAddonforClaw.csproj", ui);
         Assert.DoesNotContain("SteamInputAddonforClaw.UI.csproj", runtime);
         Assert.DoesNotContain("SteamInputAddonforClaw.csproj", transport);

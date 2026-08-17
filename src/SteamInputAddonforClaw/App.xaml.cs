@@ -56,8 +56,18 @@ public partial class App : Application
     private void HandleFatalStartupFailure(string message, Exception exception)
     {
         AppLog.Error("Startup", message, exception);
-        ShutdownApplicationOnce();
-        Exit();
+        try
+        {
+            ShutdownApplicationOnce();
+        }
+        catch (Exception cleanupException)
+        {
+            AppLog.Error("Startup", "Runtime cleanup after startup failure failed.", cleanupException);
+        }
+        finally
+        {
+            Exit();
+        }
     }
 
     private void ShutdownApplicationOnce()

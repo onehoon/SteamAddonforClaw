@@ -141,12 +141,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
         _startupCancellationTokenSource.Cancel();
-        _runtimeHost?.PrepareForShutdown();
         if (_frontendServer is not null)
         {
             await _frontendServer.DisposeAsync().ConfigureAwait(false);
             _frontendServer = null;
         }
+        _runtimeHost?.PrepareForShutdown();
         _systemTrayIcon?.Dispose();
         _systemTrayIcon = null;
         _trayHostWindow?.Dispose();

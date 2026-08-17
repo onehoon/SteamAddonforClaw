@@ -27,7 +27,8 @@ public partial class App : Application
             return;
         }
 
-        _singleInstanceGate.RegisterActivation(() => _mainWindow?.Activate());
+        _singleInstanceGate.RegisterActivation(static () =>
+            AppLog.Info("Activation received; external UI focus is deferred to #207B."));
         _ = StartFrontendAsync();
     }
 
