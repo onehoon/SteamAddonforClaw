@@ -19,6 +19,28 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_WhenSettingsDoNotExist_EnablesBigPictureRoutingByDefault()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+
+        var settings = store.Load();
+
+        Assert.True(settings.RouteInSteamBigPicture);
+    }
+
+    [Fact]
+    public void Load_LegacySettingsWithoutBigPictureProperty_EnablesBigPictureRouting()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false}");
+
+        var settings = new SettingsStore(path).Load();
+
+        Assert.True(settings.RouteInSteamBigPicture);
+    }
+
+    [Fact]
     public void SaveAndLoad_PreservesStartupSetting()
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -182,7 +204,7 @@ public sealed class SettingsStoreTests : IDisposable
     public void ChangeBigPictureSetting_SaveFailureKeepsMemoryAndEmitsNoChange()
     {
         Directory.CreateDirectory(_testDirectory);
-        var coordinator = new StartupSettingsCoordinator(new AppSettings(), new SettingsStore(_testDirectory), new FakeStartupManager());
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(RouteInSteamBigPicture: false), new SettingsStore(_testDirectory), new FakeStartupManager());
         var changes = 0;
         coordinator.RouteInSteamBigPictureChanged += (_, _) => changes++;
 
