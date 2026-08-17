@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     249c0cfa88154d77cd1683af03fb9d85ac6af426
+Commit:     ba63b9909f84bcabeddd4b1299beffe76ba04b4f
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: ff78cc701e4fb17a46aa74897210e23f80d73f6d3bbbb1e170bd278786f2a211
-DLL SHA-256:              4260c4b3690361658137c99c98500acadaafde4b9ea4fa7e350082cf184cecd6
+DLL SHA-256:              10a4a5e6df632dac0a3f53e34f6ec96b0a19bb67514aa6ef05e8f35c06eefba5
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,34 +42,41 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-Reviewed VIIPER `e10b5f02945b1322f33c33468e583546600ba000` ->
-`249c0cfa88154d77cd1683af03fb9d85ac6af426`. The target is exactly one
-upstream commit, `Add classified Xbox360 removal parity (#34)`. Its canonical
-source delta is limited to the Xbox360 typed wrapper, focused Xbox360 removal
-tests, the generated-ABI/export CI checks, and the fork API documentation.
+Reviewed VIIPER `249c0cfa88154d77cd1683af03fb9d85ac6af426` ->
+`ba63b9909f84bcabeddd4b1299beffe76ba04b4f`. The target is exactly one
+upstream commit, `Harden canonical USB/IP attach invariants and diagnostics
+(#35)`.
 
-The generated `libVIIPER.h` delta adds only the four-value
-`Xbox360DeviceRemoveResult` enum and the additive
-`RemoveXbox360DeviceEx(Xbox360DeviceHandle)` export. The existing
-`RemoveXbox360Device` compatibility bool export remains available and keeps
-its prior signature. No Steam Deck type, struct field, field order, offset,
-packing, callback typedef, or Steam Deck export changes. In particular,
-`SteamDeckDeviceState` remains the established 76-byte ABI ending with
-`LPadForce`/`RPadForce`/`LStickForce`/`RStickForce` at offsets 68/70/72/74.
+The canonical generated `libVIIPER.h` is byte-identical to the previously
+reviewed header: its SHA-256 remains
+`ff78cc701e4fb17a46aa74897210e23f80d73f6d3bbbb1e170bd278786f2a211`.
+There are no new or removed exports, signature changes, enum or struct-layout
+changes, callback ABI changes, or Steam Deck state-layout changes. The Addon
+managed P/Invoke surface and `RequiredExports` therefore remain aligned and
+require no adaptation.
 
-The current Addon managed native surface binds the generic server/bus/
-attachment functions and the Steam Deck typed family only; it does not yet
-bind or require Xbox360 exports. Xbox360 composition remains the planned SD7
-feature track. Therefore this additive, currently unused Xbox360 export does
-not require a managed P/Invoke, `RequiredExports`, struct/enum, callback,
-mapper, publisher, routing, attachment, recovery, or lifecycle code change in
-this dependency PR. When SD7 adopts the typed Xbox360 family, its managed
-surface should consume the classified removal API rather than inferring
-ownership from the legacy bool result.
+The native delta hardens regression coverage around the existing canonical
+attachment contract and enriches low-volume attach/detach timing diagnostics.
+Attachment diagnostics now snapshot logical/export identity, tracked token
+identity, and before/after attachment/server lifecycle state under the native
+lifecycle lock, then emit after releasing that lock. The upstream contract and
+PR explicitly classify this as behavior-neutral; the bool and classified
+attach/detach APIs retain their existing semantics, including idempotent
+attach/detach, sticky unsafe-unknown ownership, explicit reattach, and
+`autoAttachLocalhost=false` detached-ready behavior. Creation does not schedule
+background attachment.
+
+The Xbox360 wrapper change extracts a thin internal helper so the same public
+creation path can be exercised directly by focused tests; it does not alter
+the public ABI or require Addon Xbox360 adoption. The new regression suite also
+covers the Steam Deck detached-ready path using the existing public wrapper
+semantics. No Steam Deck mapper, publisher, P/Invoke, callback rooting,
+routing, PnP, HidHide, recovery, or lifecycle-policy code change is required
+in the Addon for this dependency update.
 
 No hardware-validation claim is expanded. MSI Claw EX basic non-gyro Steam
-Deck input remains the established claim; lifecycle/recovery, rumble/haptics,
-gyro/IMU, and Game Bar/Xbox360 validation remain separate work.
+Deck input remains the established claim; SD3 lifecycle/recovery evidence,
+rumble/haptics, gyro/IMU, and Game Bar/Xbox360 validation remain separate work.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
