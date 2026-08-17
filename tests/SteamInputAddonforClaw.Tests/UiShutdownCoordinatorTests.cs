@@ -28,6 +28,23 @@ public sealed class UiShutdownCoordinatorTests
     }
 
     [Fact]
+    public void Successful_enqueue_does_not_exit_or_fallback_on_current_thread()
+    {
+        var enqueued = 0;
+        var xamlExit = 0;
+        var fallback = 0;
+        new UiExitDispatcher(
+            () => false,
+            () => { Interlocked.Increment(ref enqueued); return true; },
+            () => Interlocked.Increment(ref xamlExit),
+            () => Interlocked.Increment(ref fallback)).RequestExit();
+
+        Assert.Equal(1, enqueued);
+        Assert.Equal(0, xamlExit);
+        Assert.Equal(0, fallback);
+    }
+
+    [Fact]
     public async Task Cleanup_exception_still_requests_exit()
     {
         var exits = 0;
