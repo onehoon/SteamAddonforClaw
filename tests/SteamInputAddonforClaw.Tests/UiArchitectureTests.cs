@@ -1,0 +1,40 @@
+using System.Xml.Linq;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+public sealed class UiArchitectureTests
+{
+    [Fact]
+    public void Project_references_preserve_the_headless_dependency_direction()
+    {
+        var ui = References("src/SteamInputAddonforClaw.UI/SteamInputAddonforClaw.UI.csproj");
+        var runtime = References("src/SteamInputAddonforClaw/SteamInputAddonforClaw.csproj");
+        var transport = References("src/SteamInputAddonforClaw.FrontendTransport/SteamInputAddonforClaw.FrontendTransport.csproj");
+
+        Assert.Contains("SteamInputAddonforClaw.Contracts.csproj", ui);
+        Assert.Contains("SteamInputAddonforClaw.FrontendTransport.csproj", ui);
+        Assert.DoesNotContain("SteamInputAddonforClaw.csproj", ui);
+        Assert.DoesNotContain("SteamInputAddonforClaw.UI.csproj", runtime);
+        Assert.DoesNotContain("SteamInputAddonforClaw.csproj", transport);
+    }
+
+    private static IReadOnlyList<string> References(string relativeProjectPath)
+    {
+        var projectPath = Path.Combine(FindRepositoryRoot(), relativeProjectPath.Replace('/', Path.DirectorySeparatorChar));
+        return XDocument.Load(projectPath)
+            .Descendants("ProjectReference")
+            .Select(element => Path.GetFileName((string?)element.Attribute("Include") ?? string.Empty))
+            .ToArray();
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "SteamInputAddonforClaw.slnx")))
+                return directory.FullName;
+        }
+        throw new DirectoryNotFoundException("Repository root was not found.");
+    }
+}
