@@ -184,7 +184,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         lock (_cancellationSync)
         {
             _transitionCancellation.Cancel();
-            _transitionCancellation = new CancellationTokenSource();
+            if (!IsShutdownRequested)
+                _transitionCancellation = new CancellationTokenSource();
         }
     }
 

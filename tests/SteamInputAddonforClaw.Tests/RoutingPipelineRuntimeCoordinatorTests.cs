@@ -611,14 +611,20 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     [Fact]
     public async Task RepeatedShutdownIsIdempotent()
     {
-        var bridge = Create(new FakeStatusProvider(Snapshot(Eligible(), Software())), new FakeExecutor());
+        var executor = new FakeExecutor();
+        var bridge = Create(new FakeStatusProvider(Snapshot(Eligible(), Software())), executor);
 
         var first = bridge.Bridge.ShutdownAsync().AsTask();
         var second = bridge.Bridge.ShutdownAsync().AsTask();
 
         var results = await Task.WhenAll(first, second);
+        bridge.Bridge.CancelInFlightTransition();
+        var afterShutdown = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
 
         Assert.All(results, result => Assert.True(result.Succeeded));
+        Assert.True(afterShutdown.Succeeded);
+        Assert.Equal("RuntimeShuttingDown", afterShutdown.Reason);
+        Assert.Empty(executor.ExecutedPlans);
         Assert.Null(bridge.Session.ActiveSession);
         Assert.Null(bridge.Session.PendingCleanup);
     }
