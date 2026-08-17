@@ -112,7 +112,9 @@ internal sealed class HidHideDriverClient(IHidHideNativeApi? nativeApi = null, I
                 else expected.Add(deviceEntry);
                 WriteMultiString(device, Ioctl(2051), entries);
                 var verified = ReadMultiString(device, Ioctl(2050));
-                return verified.SequenceEqual(expected, StringComparer.Ordinal);
+                var targetPresent = verified.Any(entry => string.Equals(entry, deviceEntry, StringComparison.OrdinalIgnoreCase));
+                return verified.SequenceEqual(expected, StringComparer.Ordinal)
+                    && (add ? targetPresent : !targetPresent);
             }
         }
         catch (Exception exception)

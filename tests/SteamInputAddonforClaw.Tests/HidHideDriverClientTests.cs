@@ -176,6 +176,16 @@ public sealed class HidHideDriverClientTests
     }
 
     [Fact]
+    public void RemoveHiddenDevice_ReturnsFalseWhenDuplicateTargetRemains()
+    {
+        var device = new FakeDevice([], ["Addon", "ADDON", "Foreign"]) { Active = true };
+        var client = new HidHideDriverClient(new FakeNative(device), Converter());
+
+        Assert.False(client.RemoveHiddenDevice("addon"));
+        Assert.Equal(["ADDON", "Foreign"], device.Blacklist);
+    }
+
+    [Fact]
     public void RemoveHiddenDevice_AlreadyAbsentDoesNotWrite()
     {
         var device = new FakeDevice([], ["ABC"]) { Active = true };
