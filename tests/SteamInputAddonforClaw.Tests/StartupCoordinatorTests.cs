@@ -197,6 +197,31 @@ public sealed class StartupCoordinatorTests
     }
 
     [Fact]
+    public async Task VirtualOutputIsRecheckedAfterHidHideCleanupBeforeJournalRetirement()
+    {
+        var events = new List<string>();
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(HidHideDeviceAdditions: ["HID\\Claw"], AddonOwnedVirtualDeviceEntries:
+                [new(Guid.NewGuid(), "steamdeck", 0x28DE, 0x1205, [], [])]));
+        var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner();
+        var inspector = new SequencedVirtualOutputInspector(
+            new(true, "StableSafeAbsence"),
+            new(false, "ResidualOrAmbiguousVirtualDevicePresent"));
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner,
+            virtualOutputRecoveryInspector: inspector);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(1, cleaner.CallCount);
+        Assert.Equal(2, inspector.CallCount);
+        Assert.Equal(0, store.DeleteCallCount);
+    }
+
+    [Fact]
     public async Task ConflictingManagerDetected_DoesNotInvokeHidHideCleaner()
     {
         var events = new List<string>();
@@ -819,6 +844,16 @@ public sealed class StartupCoordinatorTests
     {
         public Task<StartupVirtualOutputRecoveryAssessment> AssessAsync(IReadOnlyList<Recovery.AddonOwnedVirtualDeviceRecoveryEntry> _, CancellationToken __) =>
             Task.FromResult(new StartupVirtualOutputRecoveryAssessment(false, "ResidualOrAmbiguousVirtualDevicePresent"));
+    }
+    private sealed class SequencedVirtualOutputInspector(params StartupVirtualOutputRecoveryAssessment[] assessments) : IStartupVirtualOutputRecoveryInspector
+    {
+        private int _index;
+        public int CallCount { get; private set; }
+        public Task<StartupVirtualOutputRecoveryAssessment> AssessAsync(IReadOnlyList<Recovery.AddonOwnedVirtualDeviceRecoveryEntry> _, CancellationToken __)
+        {
+            CallCount++;
+            return Task.FromResult(assessments[Math.Min(_index++, assessments.Length - 1)]);
+        }
     }
 
     private static ControllerEnvironmentAssessmentSnapshot Assessment(ControllerEnvironmentMode mode)

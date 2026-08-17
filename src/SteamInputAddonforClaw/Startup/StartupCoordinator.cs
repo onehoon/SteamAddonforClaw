@@ -168,6 +168,16 @@ internal sealed class StartupCoordinator
         if (!virtualOutputSafe)
             return false;
 
+        if (virtualEntries.Count > 0)
+        {
+            var finalAssessment = await _virtualOutputRecoveryInspector!.AssessAsync(virtualEntries, cancellationToken).ConfigureAwait(false);
+            AppLog.Info("Recovery.VirtualOutput", "Final stale virtual-output retirement gate assessed.",
+                ("SessionId", journal.RecoverySessionId), ("Assessment", finalAssessment.SafeToRetire ? "SafeToRetire" : "Unsafe"),
+                ("Reason", finalAssessment.Reason), ("EntryCount", virtualEntries.Count));
+            if (!finalAssessment.SafeToRetire)
+                return false;
+        }
+
         if (!TryRetireStaleStartupJournal(out var reason))
         {
             AppLog.Warn("Startup", "Stale startup journal could not be discarded after the live XInput baseline; routing remains passive.", null,
