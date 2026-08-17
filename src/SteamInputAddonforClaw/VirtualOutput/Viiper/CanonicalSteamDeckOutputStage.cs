@@ -79,7 +79,17 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         if (Interlocked.Exchange(ref _outputFaultReported, 1) != 0) return;
         AppLog.Error("SteamOutput", "Live Steam Deck publishing failed.", exception);
         if (_outputFaultHandler is { } handler)
-            _ = Task.Run(async () => await handler().ConfigureAwait(false));
+            _ = Task.Run(() => RunOutputFaultHandlerAsync(handler));
+    }
+
+    private static async Task RunOutputFaultHandlerAsync(Func<ValueTask> handler)
+    {
+        try { await handler().ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            AppLog.Error("SteamOutput", "Steam Deck output fail-close reconciliation failed.", exception,
+                ("Component", "SteamOutput"), ("Action", "RemainFailClosed"), ("Reason", "OutputFaultHandlerFailed"));
+        }
     }
 
     public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)

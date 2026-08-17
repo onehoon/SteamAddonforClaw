@@ -42,21 +42,30 @@ public partial class App : Application
 
     private async Task StartFrontendAsync()
     {
+        var stage = "FrontendClientCreation";
         try
         {
             _frontendClient = UiFrontendClientFactory.Create();
             _frontendClient.Disconnected += OnFrontendDisconnected;
+            stage = "RuntimeConnection";
             await _frontendClient.ConnectAsync().ConfigureAwait(true);
+            AppLog.Info("Frontend", "Frontend connected.");
+            stage = "BootstrapAcquisition";
             var bootstrap = await _frontendClient.GetBootstrapAsync().ConfigureAwait(true);
+            AppLog.Info("Frontend", "Bootstrap acquired.");
+            stage = "MainWindowInitialization";
             _mainWindow = new MainWindow(_frontendClient, bootstrap);
             _mainWindow.Closed += OnMainWindowClosed;
+            AppLog.Info("Frontend", "MainWindow initialized.");
             if (_activationPending)
                 AppLog.Info("Frontend", "Pending UI activation fulfilled.");
+            stage = "Activation";
             ActivateOrDeferOnUiThread();
+            AppLog.Info("Frontend", "Frontend activated.");
         }
         catch (Exception exception)
         {
-            AppLog.Error("Startup", "UI could not connect to the Runtime frontend.", exception);
+            AppLog.Error("Startup", "UI startup failed.", exception, ("Stage", stage));
             await ShutdownAndExitAsync("StartupFailure").ConfigureAwait(true);
         }
     }

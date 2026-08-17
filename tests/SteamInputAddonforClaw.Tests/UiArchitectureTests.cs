@@ -61,6 +61,16 @@ public sealed class UiArchitectureTests
         Assert.DoesNotContain("Application.Start", sourceText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void External_ui_app_registers_required_winui_control_resources()
+    {
+        var root = FindRepositoryRoot();
+        var appXaml = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/App.xaml"));
+
+        Assert.Contains("<Application.Resources>", appXaml, StringComparison.Ordinal);
+        Assert.Contains("XamlControlsResources", appXaml, StringComparison.Ordinal);
+    }
+
     private static IReadOnlyList<string> References(string relativeProjectPath)
     {
         var projectPath = Path.Combine(FindRepositoryRoot(), relativeProjectPath.Replace('/', Path.DirectorySeparatorChar));

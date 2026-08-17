@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("AppLog")]
 public sealed class PowerTransitionTests
 {
     [Fact]
@@ -197,6 +198,22 @@ public sealed class PowerTransitionTests
         var gate = new PowerMutationGate(true); var source = new FakeSource(false);
         var watcher = new PowerTransitionWatcher(source, gate, Coordinator(gate), () => { });
         Assert.False(watcher.Start()); Assert.False(gate.IsOpen); watcher.Dispose();
+    }
+
+    [Fact]
+    public async Task Notification_completion_failure_is_observed_and_fails_closed()
+    {
+        var gate = new PowerMutationGate(true);
+        var source = new FakeSource(true);
+        var coordinator = Coordinator(gate);
+        using var watcher = new PowerTransitionWatcher(source, gate, coordinator, () => { });
+        Assert.True(watcher.Start());
+        await coordinator.DisposeAsync();
+        gate.OpenAfterRecovery();
+
+        source.Raise(999);
+
+        Assert.True(SpinWait.SpinUntil(() => !gate.IsOpen, TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
