@@ -48,6 +48,19 @@ public sealed class CanonicalSteamDeckSessionTests
     }
 
     [Fact]
+    public void Output_callback_registration_and_clear_use_the_authoritative_device_handle()
+    {
+        var native = new FakeNative();
+        using var session = new CanonicalSteamDeckSession(native);
+        Assert.True(session.Start());
+        SteamDeckOutputCallback callback = (_, _, _) => { };
+
+        Assert.True(session.SetOutputCallback(callback));
+        Assert.True(session.ClearOutputCallback());
+        Assert.Equal([((nuint)20, true), ((nuint)20, false)], native.Callbacks);
+    }
+
+    [Fact]
     public void Known_remove_failure_retains_device_and_allows_only_explicit_retry()
     {
         var native = new FakeNative
@@ -273,6 +286,7 @@ public sealed class CanonicalSteamDeckSessionTests
         internal bool IdentityResult { get; init; } = true;
         internal uint IdentityBusId { get; init; } = 42;
         internal bool AttachResult { get; init; } = true;
+        internal List<(nuint Handle, bool Registered)> Callbacks { get; } = [];
         internal string? Address { get; private set; }
         internal bool AutoAttach { get; private set; }
         internal ushort Vendor { get; private set; }
@@ -296,7 +310,7 @@ public sealed class CanonicalSteamDeckSessionTests
         public bool CreateSteamDeckDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct)
         { Calls.Add("CreateSteamDeckDevice"); deviceHandle = 20; AutoAttach = autoAttachLocalhost; Vendor = idVendor; Product = idProduct; return CreateDeviceResult; }
         public bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); States.Add(state); return true; }
-        public bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback) { Calls.Add("SetSteamDeckOutputCallback"); return true; }
+        public bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback) { Calls.Add("SetSteamDeckOutputCallback"); Callbacks.Add((deviceHandle, callback is not null)); return true; }
         public bool RemoveSteamDeckDevice(nuint deviceHandle) { Calls.Add("RemoveSteamDeckDevice"); return true; }
         public SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle)
         { Calls.Add("RemoveSteamDeckDeviceEx"); return RemoveDeviceResults.Count == 0 ? SteamDeckDeviceRemoveResult.Success : RemoveDeviceResults.Dequeue(); }

@@ -713,6 +713,9 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
             return NeutralAccepted;
         }
 
+        public bool SetOutputCallback(SteamDeckOutputCallback callback) => State == CanonicalSteamDeckSessionState.Active;
+        public bool ClearOutputCallback() => State == CanonicalSteamDeckSessionState.Active;
+
         public bool RemoveDevice()
         {
             Trace.Add("Remove");
