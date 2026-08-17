@@ -85,14 +85,14 @@ jobs:
       - name: Test release metadata
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/release-metadata.tests.ps1
 
-      - name: Publish smoke test
+      - name: Publish Runtime and external UI layout
         run: >-
-          dotnet publish src/SteamInputAddonforClaw/SteamInputAddonforClaw.csproj
-          -c Release
-          -r win-x64
-          --self-contained true
-          --no-restore
-          -o artifacts/publish
+          powershell.exe -NoProfile -ExecutionPolicy Bypass
+          -File scripts/publish-layout.ps1
+          -Version 0.1.0
+          -Configuration Release
+          -PublishDirectory artifacts/publish
+          -NoRestore
 
       - name: Verify published Runtime assets
         run: >-
