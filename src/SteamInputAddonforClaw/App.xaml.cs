@@ -11,10 +11,17 @@ public partial class App : Application
     private readonly SingleInstanceGate _singleInstanceGate;
     private AddonProcessHost? _processHost;
     private int _shutdownStarted;
+    private bool _shouldLaunchFrontend;
 
     public App() : this(Program.CurrentSingleInstanceGate ?? throw new InvalidOperationException("The single-instance gate was not initialized.")) { }
 
-    internal App(string[]? arguments, SingleInstanceGate singleInstanceGate) : this(singleInstanceGate) { }
+    internal App(string[]? arguments, SingleInstanceGate singleInstanceGate)
+    {
+        _singleInstanceGate = singleInstanceGate;
+        _shouldLaunchFrontend = ApplicationLifecyclePolicy.ShouldLaunchFrontend(arguments ?? []);
+        AppLog.Info("Runtime launch mode: " + (_shouldLaunchFrontend ? "manual" : "background"));
+        InitializeComponent();
+    }
 
     internal App(SingleInstanceGate singleInstanceGate)
     {
@@ -25,8 +32,10 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        _singleInstanceGate.RegisterActivation(static () => AppLog.Info("Runtime activation received; external UI activation is deferred to #207B."));
-        _processHost = new AddonProcessHost(["--background"]);
+        _processHost = new AddonProcessHost(_shouldLaunchFrontend ? null : ["--background"]);
+        _singleInstanceGate.RegisterActivation(() => _processHost?.RequestFrontendOpen(FrontendOpenReason.RuntimeActivation));
+        if (_shouldLaunchFrontend)
+            _processHost.RequestFrontendOpen(FrontendOpenReason.InitialManualLaunch);
         _ = StartApplicationAsync();
     }
 
@@ -46,10 +55,7 @@ public partial class App : Application
         var processHost = _processHost!;
         await processHost.InitializeRuntimeAsync().ConfigureAwait(true);
         processHost.StartPowerObservation();
-        processHost.TryInitializeTray(
-            static () => AppLog.Info("Runtime tray Open is deferred to #207B."),
-            RestartApplication,
-            ExitApplication);
+        processHost.TryInitializeTray(RestartApplication, ExitApplication);
         _ = processHost.ReconcileAsync();
     }
 

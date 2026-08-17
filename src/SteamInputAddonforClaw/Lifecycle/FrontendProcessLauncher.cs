@@ -1,0 +1,80 @@
+using System.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics;
+
+namespace SteamInputAddonforClaw.Lifecycle;
+
+internal enum FrontendOpenReason { InitialManualLaunch, RuntimeActivation, Tray }
+
+internal sealed class FrontendProcessLauncher
+{
+    private readonly object _sync = new();
+    private readonly string _executablePath;
+    private readonly Func<ProcessStartInfo, Process?> _startProcess;
+    private bool _runtimeReady;
+    private bool _pendingOpen;
+    private FrontendOpenReason? _pendingReason;
+    private bool _stopping;
+
+    internal FrontendProcessLauncher(string runtimeBaseDirectory, Func<ProcessStartInfo, Process?>? startProcess = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(runtimeBaseDirectory);
+        _executablePath = Path.Combine(runtimeBaseDirectory, "ui", "SteamInputAddonforClaw.UI.exe");
+        _startProcess = startProcess ?? Process.Start;
+    }
+
+    internal string ExecutablePath => _executablePath;
+
+    internal void RequestOpen(FrontendOpenReason reason)
+    {
+        lock (_sync)
+        {
+            if (_stopping) return;
+            AppLog.Info("Frontend", "Frontend open requested.", ("Reason", reason));
+            if (!_runtimeReady)
+            {
+                _pendingOpen = true;
+                _pendingReason = reason;
+                AppLog.Info("Frontend", "Frontend open queued until Runtime readiness.");
+                return;
+            }
+            LaunchLocked(reason);
+        }
+    }
+
+    internal void MarkRuntimeReady()
+    {
+        lock (_sync)
+        {
+            if (_stopping || _runtimeReady) return;
+            _runtimeReady = true;
+            if (_pendingOpen)
+            {
+                _pendingOpen = false;
+                var reason = _pendingReason ?? FrontendOpenReason.InitialManualLaunch;
+                _pendingReason = null;
+                AppLog.Info("Frontend", "Queued frontend open released.");
+                LaunchLocked(reason);
+            }
+        }
+    }
+
+    internal void StopAcceptingRequests()
+    {
+        lock (_sync)
+        {
+            if (_stopping) return;
+            _stopping = true;
+            _pendingOpen = false;
+            _pendingReason = null;
+            AppLog.Info("Frontend", "Frontend launcher stopping.");
+        }
+    }
+
+    private void LaunchLocked(FrontendOpenReason reason)
+    {
+        var startInfo = new ProcessStartInfo(_executablePath) { UseShellExecute = false };
+        AppLog.Info("Frontend", "Frontend process launch attempted.", ("Reason", reason), ("Path", _executablePath));
+        try { _ = _startProcess(startInfo); AppLog.Info("Frontend", "Frontend process launch succeeded.", ("Reason", reason)); }
+        catch (Exception exception) { AppLog.Warn("Frontend", "Frontend process launch failed; Runtime remains active.", exception, ("Reason", reason), ("Path", _executablePath)); }
+    }
+}

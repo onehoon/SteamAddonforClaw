@@ -5,16 +5,12 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class ApplicationLifecyclePolicyTests
 {
-    [Fact]
-    public void ShouldShowMainWindow_WhenBackgroundLaunch_ReturnsFalse() => Assert.False(ApplicationLifecyclePolicy.ShouldShowMainWindow(["--background"]));
-
-    [Fact]
-    public void ShouldShowMainWindow_WhenManualLaunch_ReturnsTrue() => Assert.True(ApplicationLifecyclePolicy.ShouldShowMainWindow([]));
-
-    [Fact]
-    public void OnWindowClose_WhenNotExplicit_ReturnsHideWindow() => Assert.Equal(ApplicationCloseAction.HideWindow, ApplicationLifecyclePolicy.OnWindowClose(false));
-
     [Theory]
-    [InlineData(true)]
-    public void OnWindowClose_WhenExplicitExit_ReturnsExitApplication(bool explicitExit) => Assert.Equal(ApplicationCloseAction.ExitApplication, ApplicationLifecyclePolicy.OnWindowClose(explicitExit));
+    [InlineData(true, "")]
+    [InlineData(true, "--restart")]
+    [InlineData(false, "--background")]
+    [InlineData(false, "--background --restart")]
+    [InlineData(false, "--BaCkGrOuNd")]
+    public void ShouldLaunchFrontend_FollowsRuntimeLaunchIntent(bool expected, string argumentText) =>
+        Assert.Equal(expected, ApplicationLifecyclePolicy.ShouldLaunchFrontend(argumentText.Length == 0 ? [] : argumentText.Split(' ')));
 }
