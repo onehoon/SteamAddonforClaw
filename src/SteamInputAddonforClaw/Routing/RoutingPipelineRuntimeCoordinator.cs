@@ -147,13 +147,13 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ShutdownAsync()
     {
         Interlocked.Exchange(ref _shutdownRequested, 1);
+        CancelInFlightTransition();
         Interlocked.Increment(ref _transitionOperationCount);
         var acquired = false;
         try
         {
             await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             acquired = true;
-            CancelInFlightTransition();
             return await _sessionCoordinator.ReconcileAsync(
                 new RoutingDecision(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive),
                 IndeterminateClassification,
