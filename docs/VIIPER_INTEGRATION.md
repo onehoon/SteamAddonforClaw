@@ -8,7 +8,7 @@ VIIPER API. The active Steam virtual-output target is Steam Deck `28DE:1205`.
 | Item | Current contract |
 | --- | --- |
 | Canonical embedded API | `lib/viiper` typed ABI |
-| Embedded VIIPER revision | `bce7b4e20da6c80a706be9952dfbfd5eb6515b57` |
+| Embedded VIIPER revision | `a6bb749199aa797da690c611d2f18edc5e770c1e` |
 | Active Steam output | Steam Deck `28DE:1205` only |
 | Addon integration | Session, mapper, publisher, identity resolver, safety stage implemented |
 | Hardware status | EX basic non-gyro input validated; lifecycle evidence remains pending |
