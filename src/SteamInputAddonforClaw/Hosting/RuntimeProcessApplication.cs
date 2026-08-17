@@ -99,7 +99,14 @@ internal sealed class RuntimeProcessApplication
     {
         if (Interlocked.Exchange(ref _shutdownRequested, 1) != 0) return;
         _processHost?.BeginProcessShutdown();
-        try { _messageLoop?.RequestExit(); }
-        catch (Exception exception) { AppLog.Error("Runtime", "Native message loop exit could not be requested.", exception); }
+        try
+        {
+            _messageLoop?.RequestExit();
+        }
+        catch (Exception exception)
+        {
+            Volatile.Write(ref _shutdownRequested, 0);
+            AppLog.Error("Runtime", "Native message loop exit could not be requested; a later exit request may retry.", exception);
+        }
     }
 }
