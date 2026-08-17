@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
+using SteamInputAddonforClaw.FrontendTransport;
 
 namespace SteamInputAddonforClaw.Diagnostics;
 
@@ -10,7 +11,7 @@ internal enum AppLogLevel { Debug, Info, Warn, Error, Fatal, Off }
 
 internal static class AppLog
 {
-    internal const int RetentionDays = 7;
+    internal const int RetentionDays = AddonLogRetention.RetentionDays;
     internal const long MaximumLogDirectoryBytes = 100L * 1024 * 1024;
 
     // Bounded so a logging burst cannot grow memory without limit. Sized generously relative to the

@@ -172,19 +172,19 @@ public sealed class AppLogTests : IDisposable
     }
 
     [Fact]
-    public void Retention_KeepsSixDayOldFileAndDeletesSevenDayOldFile()
+    public void Retention_KeepsYesterdayFileAndDeletesTwoDayOldFile()
     {
         Directory.CreateDirectory(_directory);
         AppLog.DirectoryOverride = _directory;
         var today = DateTime.Today;
-        File.WriteAllText(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-6):yyyy-MM-dd}.log"), "keep");
-        File.WriteAllText(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-7):yyyy-MM-dd}.log"), "delete");
+        File.WriteAllText(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-1):yyyy-MM-dd}.log"), "keep");
+        File.WriteAllText(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-2):yyyy-MM-dd}.log"), "delete");
 
         AppLog.Info("retention");
         AppLog.DrainForTests();
 
-        Assert.True(File.Exists(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-6):yyyy-MM-dd}.log")));
-        Assert.False(File.Exists(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-7):yyyy-MM-dd}.log")));
+        Assert.True(File.Exists(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-1):yyyy-MM-dd}.log")));
+        Assert.False(File.Exists(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-2):yyyy-MM-dd}.log")));
     }
 
     [Fact]
@@ -229,11 +229,11 @@ public sealed class AppLogTests : IDisposable
         var today = DateTime.Today;
         Directory.CreateDirectory(_directory);
         var recentNew = AppLogFileName.Create(new DateTimeOffset(today.AddDays(-1)), 111, "recent");
-        var oldNew = AppLogFileName.Create(new DateTimeOffset(today.AddDays(-7)), 222, "old");
+        var oldNew = AppLogFileName.Create(new DateTimeOffset(today.AddDays(-2)), 222, "old");
         File.WriteAllText(Path.Combine(_directory, recentNew), "recent");
         File.WriteAllText(Path.Combine(_directory, oldNew), "old");
         File.WriteAllText(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-1):yyyy-MM-dd}.log"), "legacy recent");
-        File.WriteAllText(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-7):yyyy-MM-dd}.log"), "legacy old");
+        File.WriteAllText(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-2):yyyy-MM-dd}.log"), "legacy old");
         File.WriteAllText(Path.Combine(_directory, "notes.txt"), "keep");
         File.WriteAllText(Path.Combine(_directory, "SteamInputAddonforClaw-not-a-valid-log-name.tmp"), "keep");
         AppLog.DirectoryOverride = _directory; AppLog.Info("retention");
@@ -241,7 +241,7 @@ public sealed class AppLogTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_directory, recentNew)));
         Assert.False(File.Exists(Path.Combine(_directory, oldNew)));
         Assert.True(File.Exists(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-1):yyyy-MM-dd}.log")));
-        Assert.False(File.Exists(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-7):yyyy-MM-dd}.log")));
+        Assert.False(File.Exists(Path.Combine(_directory, $"SteamInputAddonforClaw-{today.AddDays(-2):yyyy-MM-dd}.log")));
         Assert.True(File.Exists(Path.Combine(_directory, "notes.txt")));
         Assert.True(File.Exists(Path.Combine(_directory, "SteamInputAddonforClaw-not-a-valid-log-name.tmp")));
     }

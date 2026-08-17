@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.UI.Lifecycle;
 using WinRT;
 
@@ -11,6 +12,7 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        AddonLogRetention.PruneDefaultDirectory();
         using var gate = UiSingleInstanceGate.CreateForCurrentUser();
         if (!gate.IsPrimaryInstance)
         {

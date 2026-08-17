@@ -1,5 +1,6 @@
 using Velopack;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Hosting;
 using SteamInputAddonforClaw.Lifecycle;
 using System.Runtime.InteropServices;
@@ -17,6 +18,7 @@ public static class Program
         // Program is the sole owner of final log shutdown on every exit path.
         try
         {
+            AddonLogRetention.PruneDefaultDirectory();
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
             VelopackApp.Build().Run();
             var persistedLogLevel = LogLevelBootstrap.Read(VelopackAppPaths.SettingsPath);
