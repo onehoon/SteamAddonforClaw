@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("AppLog")]
 public sealed class PowerTransitionTests
 {
     [Fact]
@@ -210,7 +211,7 @@ public sealed class PowerTransitionTests
         await coordinator.DisposeAsync();
         gate.OpenAfterRecovery();
 
-        source.Raise(18);
+        source.Raise(999);
 
         Assert.True(SpinWait.SpinUntil(() => !gate.IsOpen, TimeSpan.FromSeconds(5)));
     }
