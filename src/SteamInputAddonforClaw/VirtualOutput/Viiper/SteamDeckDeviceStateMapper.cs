@@ -4,8 +4,7 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
 /// Maps the Addon's physical <see cref="ControllerState"/> into the canonical VIIPER
-/// <see cref="SteamDeckDeviceState"/> (VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778, PR
-/// #16).
+/// <see cref="SteamDeckDeviceState"/> from the canonical typed VIIPER ABI.
 /// </summary>
 /// <remarks>
 /// Steam Deck has native right-stick and R3 fields, so this mapper writes them directly (RightStick

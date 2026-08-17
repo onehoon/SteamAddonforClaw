@@ -14,11 +14,11 @@ internal enum CanonicalSteamDeckSessionState
 
 /// <summary>
 /// The canonical typed Steam Deck session: a long-lived USB server, a caller-owned bus, and a typed
-/// Steam Deck device with explicit attachment ownership, driving VIIPER's typed Steam Deck ABI
-/// (VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778, PR #16). Logical-device removal is
-/// classified into retryable cleanup phases so a partial failure can be resumed rather than left
-/// unsafe, and <see cref="Dispose"/> is non-destructive -- it never attempts native teardown itself,
-/// it only reports if native ownership is still outstanding when the session is discarded.
+/// Steam Deck device with explicit attachment ownership, driving the canonical typed VIIPER ABI.
+/// Logical-device removal is classified into retryable cleanup phases so a partial failure can be
+/// resumed rather than left unsafe, and <see cref="Dispose"/> is non-destructive -- it never
+/// attempts native teardown itself, it only reports if native ownership is still outstanding when
+/// the session is discarded.
 /// </summary>
 internal sealed class CanonicalSteamDeckSession : ICanonicalSteamDeckSession
 {

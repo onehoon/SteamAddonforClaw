@@ -20,9 +20,10 @@ Phase 2B1 tooling status: `scripts/update-viiper.ps1` can fetch and
 independently verify the canonical Windows libVIIPER artifact for an exact,
 already-built `onehoon/VIIPER` commit into a disposable staging directory.
 
-Phase 2B2 adopted the canonical artifact above (from
-`ec64282c69e5587466b950332d7983fd53a7d778`) and aligned the managed Steam
-Deck callback ABI: the native revision adds exactly one export,
+Phase 2B2 performed the first canonical dependency adoption from
+`ec64282c69e5587466b950332d7983fd53a7d778` to
+`0b3627317d2008065d8ec231f94bf31af7527bbd` and aligned the managed Steam
+Deck callback ABI. That adopted revision added exactly one export,
 `SetSteamDeckOutputCallback`, and the managed `ICanonicalViiperNativeApi`
 surface, `RequiredExports`, and callback-lifetime rooting were updated in the
 same change. This is dependency/ABI adoption only -- it does not implement

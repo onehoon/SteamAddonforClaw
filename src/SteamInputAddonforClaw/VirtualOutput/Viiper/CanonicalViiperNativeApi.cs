@@ -22,7 +22,7 @@ internal interface ICanonicalViiperNativeApi
     bool AttachUSBDevice(nuint deviceHandle);
     bool DetachUSBDevice(nuint deviceHandle);
 
-    // Steam Deck typed surface (VIIPER main@0b3627317d2008065d8ec231f94bf31af7527bbd).
+    // Canonical typed Steam Deck surface consumed by the Addon.
     bool CreateSteamDeckDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct);
     bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state);
     bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback);

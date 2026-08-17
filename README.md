@@ -11,7 +11,7 @@ Steam Deck `VID=0x28DE`, `PID=0x1205`.
 | Physical MSI Claw PID_1902 acquisition | Implemented |
 | Native mode / HidHide / recovery safety shell | Implemented |
 | Active Steam virtual output | Steam Deck `28DE:1205` |
-| VIIPER Steam Deck typed wrapper | Validated and embedded at `ec64282c69e5587466b950332d7983fd53a7d778` |
+| VIIPER Steam Deck typed wrapper | Validated and embedded at the pinned VIIPER revision |
 | Addon Steam Deck session / mapper / publisher | Implemented |
 | EX hardware basic non-gyro controller input | Validated |
 | Lifecycle and recovery hardware validation | Remaining validation track |
