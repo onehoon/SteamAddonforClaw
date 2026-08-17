@@ -37,6 +37,44 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task SuccessfulCreationLogsCanonicalSessionTimingWithoutObsoleteFields()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+
+        Assert.Contains("Event=SteamDeckOutputCreated", log);
+        Assert.Contains("CanonicalSessionStartMs=", log);
+        Assert.DoesNotContain("RuntimeStartMs=", log);
+        Assert.DoesNotContain("CreateDeviceMs=", log);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task SessionStartFailureLogsTimingBeforeFailureTraceWithNormalizedOperation()
+    {
+        var session = new FakeCanonicalSession { StartResult = false };
+        var stage = Create(session, new FakeEnumerator([[]]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        Assert.False(result.Succeeded);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+
+        Assert.Contains("Event=SteamDeckOutputCreationFailed", log);
+        Assert.Contains("FailedOperation=CanonicalSessionStart", log);
+        Assert.Contains("Reason=CanonicalSessionStartFailed", log);
+        Assert.Contains("CanonicalSessionStartMs=", log);
+        Assert.DoesNotContain("RuntimeStartMs=", log);
+        Assert.DoesNotContain("CreateDeviceMs=", log);
+    }
+
+    [Fact]
     public async Task BusRemovalRetryDoesNotReplayDeviceRemoval()
     {
         var session = new FakeCanonicalSession { CleanupFailure = CanonicalPendingCleanupPhase.BusRemoval };
@@ -312,6 +350,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Equal(1, log.Split("Event=SteamDeckOutputCreationFailed", StringSplitOptions.None).Length - 1);
         Assert.Contains("FailedOperation=NeutralReport", log);
+        Assert.Contains("CanonicalSessionStartMs=", log);
         Assert.Contains("NeutralReportMs=", log);
         Assert.Equal(1, session.RemoveCalls);
     }
@@ -636,6 +675,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public bool NeutralAccepted { get; init; } = true;
         public bool InputAccepted { get; init; } = true;
         public bool RemoveResult { get; init; } = true;
+        public bool StartResult { get; init; } = true;
         public bool BlockInput { get; init; }
         public Action? OnRemoveDeviceCalled;
         public int RemoveCalls { get; private set; }
@@ -647,7 +687,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public uint? BusId => State == CanonicalSteamDeckSessionState.Clean ? null : 1u;
         public uint? LogicalDeviceId => State == CanonicalSteamDeckSessionState.Clean ? null : 7u;
 
-        public bool Start() { Trace.Add("Start"); State = CanonicalSteamDeckSessionState.Active; return true; }
+        public bool Start() { Trace.Add("Start"); if (!StartResult) return false; State = CanonicalSteamDeckSessionState.Active; return true; }
 
         // The stage calls SetNeutral() directly for its one-time neutral report before starting the
         // publisher; the publisher (constructed with this session as its sink) calls SetState()
