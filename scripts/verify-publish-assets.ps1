@@ -13,9 +13,7 @@ if (-not (Test-Path -LiteralPath $PublishDirectory -PathType Container)) {
 }
 
 $requiredAssets = @(
-    'App.xbf',
-    'SteamInputAddonforClaw.pri',
-    'Assets\AppIcon.ico',
+    'SteamInputAddonforClaw.exe',
     'Dependencies\HidHide\HidHide_1.5.230_x64.exe',
     'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe',
     'Dependencies\Viiper\libVIIPER.dll',
@@ -51,7 +49,7 @@ if ((Get-FileHash -LiteralPath $viiperPayload -Algorithm SHA256).Hash -ne $expec
 }
 
 if ($missingAssets) {
-    throw "Publish output is missing required WinUI assets: $($missingAssets -join ', ')"
+    throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
 }
 
-Write-Host 'Published WinUI assets verified.'
+Write-Host 'Published Runtime assets verified.'

@@ -14,7 +14,7 @@ namespace SteamInputAddonforClaw.Runtime;
 /// composition is available), normal/resume reconcile orchestration
 /// (<see cref="ResumeFreshReconcileSuppression"/>), suspend/resume power orchestration
 /// (<c>PowerTransitionCoordinator</c>/<c>PowerTransitionWatcher</c>), and user-termination safety
-/// (<c>UserTerminationGuard</c>). No dependency on WinUI, the main window, the system tray, or any
+/// (<c>UserTerminationGuard</c>). No dependency on the presentation shell, the main window, the system tray, or any
 /// device-specific (MSI/CenterM) type -- UI communication happens only through the generic
 /// <see cref="SteamSessionStateChanged"/>/<see cref="StatusRefreshRequested"/> events, and the
 /// device-specific stock-mode baseline capability arrives only as a generic
@@ -22,7 +22,7 @@ namespace SteamInputAddonforClaw.Runtime;
 /// </summary>
 /// <remarks>
 /// This is C5c: the last major Runtime Core ownership step. The application shell retains only
-/// startup/bootstrap, WinUI/MainWindow, and the system tray.
+/// startup/bootstrap, the presentation window, and the system tray.
 ///
 /// <para>
 /// Lifecycle: construct, subscribe to the two events, call <see cref="StartPowerObservation"/>

@@ -94,7 +94,7 @@ jobs:
           --no-restore
           -o artifacts/publish
 
-      - name: Verify published WinUI assets
+      - name: Verify published Runtime assets
         run: >-
           powershell.exe -NoProfile -ExecutionPolicy Bypass
           -File scripts/verify-publish-assets.ps1
@@ -108,7 +108,7 @@ jobs:
             throw "Published executable was not found: $executable"
           }
 
-          $process = Start-Process -FilePath $executable -PassThru
+          $process = Start-Process -FilePath $executable -ArgumentList '--background' -PassThru
           try {
             Start-Sleep -Seconds 5
             $process.Refresh()

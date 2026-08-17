@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Routing;
@@ -76,6 +77,17 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
         Assert.Equal(expected, result.Result);
         Assert.Null(result.Status);
         Assert.Equal(1, executor.RunCallCount);
+    }
+
+    [Fact]
+    public async Task Process_shutdown_barrier_rejects_new_frontend_mutations()
+    {
+        var control = CreateControl([Snapshot("initial")], new FakeExecutor(new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.SteamActive, false)));
+
+        control.BeginProcessShutdown();
+
+        var exception = await Assert.ThrowsAsync<FrontendProtocolException>(() => control.SetRouteInSteamBigPictureAsync(true));
+        Assert.Contains("shutting down", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static InProcessAddonFrontendControl CreateControl(IReadOnlyList<SystemStatusSnapshot> snapshots, FakeExecutor executor)

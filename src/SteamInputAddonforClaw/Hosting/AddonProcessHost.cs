@@ -38,6 +38,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private IAddonFrontendControl? _frontendControl;
     private NamedPipeAddonFrontendServer? _frontendServer;
     private readonly FrontendProcessLauncher _frontendLauncher = new(AppContext.BaseDirectory);
+    private int _processShutdownStarted;
+    private int _runtimeShutdownPrepared;
 
     internal AddonProcessHost(string[]? updateRestartArguments)
     {
@@ -138,20 +140,25 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
     }
 
-    internal void CancelStartup() => _startupCancellationTokenSource.Cancel();
+    internal void BeginProcessShutdown()
+    {
+        if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
+        _frontendLauncher.StopAcceptingRequests();
+        _startupCancellationTokenSource.Cancel();
+        PrepareRuntimeForShutdown();
+    }
 
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        _frontendLauncher.StopAcceptingRequests();
-        _startupCancellationTokenSource.Cancel();
+        BeginProcessShutdown();
         if (_frontendServer is not null)
         {
             await _frontendServer.DisposeAsync().ConfigureAwait(false);
             _frontendServer = null;
         }
-        _runtimeHost?.PrepareForShutdown();
+        PrepareRuntimeForShutdown();
         _systemTrayIcon?.Dispose();
         _systemTrayIcon = null;
         _trayHostWindow?.Dispose();
@@ -165,4 +172,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     }
 
     private AddonRuntimeHost GetRuntimeHost() => _runtimeHost ?? throw new InvalidOperationException("Runtime has not been initialized.");
+
+    private void PrepareRuntimeForShutdown()
+    {
+        if (Interlocked.Exchange(ref _runtimeShutdownPrepared, 1) != 0) return;
+        if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
+            control.BeginProcessShutdown();
+        _runtimeHost?.PrepareForShutdown();
+    }
 }
