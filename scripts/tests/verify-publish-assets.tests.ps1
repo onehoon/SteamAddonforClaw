@@ -2,75 +2,100 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $scriptPath = Join-Path $repoRoot 'scripts\verify-publish-assets.ps1'
-$realPublish = Join-Path $repoRoot 'artifacts\publish-assets-shutdown'
+$dependencyRoot = Join-Path $repoRoot 'src\SteamInputAddonforClaw\Dependencies'
+
+function New-Fixture {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("publish-assets-verify-test-" + [System.Guid]::NewGuid())
+    $directories = @(
+        $root,
+        (Join-Path $root 'Dependencies\HidHide'),
+        (Join-Path $root 'Dependencies\UsbIpWin2'),
+        (Join-Path $root 'Dependencies\Viiper'),
+        (Join-Path $root 'ui\Views')
+    )
+    New-Item -ItemType Directory -Force -Path $directories | Out-Null
+
+    $files = @{
+        'SteamInputAddonforClaw.exe' = 'runtime'
+        'Dependencies\HidHide\HidHide_1.5.230_x64.exe' = (Join-Path $dependencyRoot 'HidHide\HidHide_1.5.230_x64.exe')
+        'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe' = (Join-Path $dependencyRoot 'UsbIpWin2\USBip-0.9.7.7-x64.exe')
+        'Dependencies\Viiper\libVIIPER.dll' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.dll')
+        'Dependencies\Viiper\PROVENANCE.md' = (Join-Path $dependencyRoot 'Viiper\PROVENANCE.md')
+        'Dependencies\Viiper\libVIIPER.h' = (Join-Path $dependencyRoot 'Viiper\libVIIPER.h')
+        'Dependencies\Viiper\LICENSE.txt' = (Join-Path $dependencyRoot 'Viiper\LICENSE.txt')
+        'ui\SteamInputAddonforClaw.UI.exe' = 'ui executable'
+        'ui\SteamInputAddonforClaw.UI.dll' = 'managed payload'
+        'ui\SteamInputAddonforClaw.UI.pri' = 'application pri'
+        'ui\App.xbf' = 'app xbf'
+        'ui\MainWindow.xbf' = 'main window xbf'
+        'ui\Views\StatusPage.xbf' = 'status xbf'
+        'ui\Views\HowToUsePage.xbf' = 'how-to-use xbf'
+        'ui\Views\ControllerPage.xbf' = 'controller xbf'
+        'ui\Views\SettingsPage.xbf' = 'settings xbf'
+        'ui\Views\DeveloperPage.xbf' = 'developer xbf'
+        'ui\Microsoft.WindowsAppRuntime.1.8.pri' = 'dependency pri'
+        'ui\Microsoft.UI.Xaml.winmd' = 'winmd payload'
+    }
+
+    foreach ($entry in $files.GetEnumerator()) {
+        $destination = Join-Path $root $entry.Key
+        if ($entry.Value -is [string] -and (Test-Path -LiteralPath $entry.Value -PathType Leaf)) {
+            Copy-Item -LiteralPath $entry.Value -Destination $destination
+        }
+        else {
+            Set-Content -LiteralPath $destination -Value $entry.Value
+        }
+    }
+
+    return $root
+}
 
 function Invoke-Verify {
     param([Parameter(Mandatory)] [string] $PublishDirectory)
-
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
         $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath -PublishDirectory $PublishDirectory 2>&1
         $exitCode = $LASTEXITCODE
     }
-    finally {
-        $ErrorActionPreference = $previousPreference
-    }
-
-    [pscustomobject]@{
-        ExitCode = $exitCode
-        Output   = ($output | Out-String)
-    }
+    finally { $ErrorActionPreference = $previousPreference }
+    [pscustomobject]@{ ExitCode = $exitCode; Output = ($output | Out-String) }
 }
 
 function Assert-Success {
     param([Parameter(Mandatory)] $Result, [Parameter(Mandatory)] [string] $Case)
-    if ($Result.ExitCode -ne 0) {
-        throw "Expected '$Case' to succeed, but it failed with output:`n$($Result.Output)"
-    }
+    if ($Result.ExitCode -ne 0) { throw "Expected '$Case' to succeed, but it failed with output:`n$($Result.Output)" }
 }
 
-function Assert-Failure {
-    param([Parameter(Mandatory)] $Result, [Parameter(Mandatory)] [string] $Case)
-    if ($Result.ExitCode -eq 0) {
-        throw "Expected '$Case' to fail, but it succeeded with output:`n$($Result.Output)"
-    }
-}
-
-if (-not (Test-Path -LiteralPath $realPublish -PathType Container)) {
-    throw "The checked-in publish fixture is missing: $realPublish"
+function Assert-MissingAssetFailure {
+    param([Parameter(Mandatory)] $Result, [Parameter(Mandatory)] [string] $Case, [Parameter(Mandatory)] [string] $Asset)
+    if ($Result.ExitCode -eq 0) { throw "Expected '$Case' to fail, but it succeeded." }
+    if ($Result.Output -notmatch [regex]::Escape($Asset)) { throw "Expected '$Case' to report missing '$Asset', but got:`n$($Result.Output)" }
 }
 
 $fixturesToClean = @()
 try {
-    $validRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("publish-assets-verify-test-" + [System.Guid]::NewGuid())
-    Copy-Item -LiteralPath $realPublish -Destination $validRoot -Recurse
+    $validRoot = New-Fixture
     $fixturesToClean += $validRoot
     Assert-Success -Result (Invoke-Verify -PublishDirectory $validRoot) -Case 'complete application asset set'
 
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("publish-assets-verify-test-" + [System.Guid]::NewGuid())
-    Copy-Item -LiteralPath $realPublish -Destination $root -Recurse
+    $root = New-Fixture
     $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'ui\SteamInputAddonforClaw.UI.pri')
-    Set-Content -LiteralPath (Join-Path $root 'ui\dependency.pri') -Value 'dependency'
-    Assert-Failure -Result (Invoke-Verify -PublishDirectory $root) -Case 'dependency PRI without application PRI'
+    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'dependency PRI without application PRI' -Asset 'ui\SteamInputAddonforClaw.UI.pri'
 
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("publish-assets-verify-test-" + [System.Guid]::NewGuid())
-    Copy-Item -LiteralPath $realPublish -Destination $root -Recurse
+    $root = New-Fixture
     $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'ui\MainWindow.xbf')
-    Assert-Failure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing MainWindow.xbf'
+    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing MainWindow.xbf' -Asset 'ui\MainWindow.xbf'
 
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("publish-assets-verify-test-" + [System.Guid]::NewGuid())
-    Copy-Item -LiteralPath $realPublish -Destination $root -Recurse
+    $root = New-Fixture
     $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'ui\Views\HowToUsePage.xbf')
-    Assert-Failure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing child-view XBF'
+    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing child-view XBF' -Asset 'ui\Views\HowToUsePage.xbf'
 
     Write-Host 'Publish asset verification tests passed.'
 }
 finally {
-    foreach ($fixture in $fixturesToClean) {
-        Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    foreach ($fixture in $fixturesToClean) { Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue }
 }
