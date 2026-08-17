@@ -7,7 +7,8 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 
 public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsyncDisposable
 {
-    private readonly string _pipeName; private readonly int _version; private readonly ConcurrentDictionary<long, TaskCompletionSource<FrontendWireEnvelope>> _pending = new(); private readonly ConcurrentDictionary<long, byte> _cancelled = new();
+    private sealed class RequestState { public int Value; }
+    private readonly string _pipeName; private readonly int _version; private readonly ConcurrentDictionary<long, TaskCompletionSource<FrontendWireEnvelope>> _pending = new(); private readonly ConcurrentDictionary<long, RequestState> _requestStates = new(); private readonly ConcurrentDictionary<long, byte> _cancelled = new();
     private readonly CancellationTokenSource _lifetime = new(); private readonly SemaphoreSlim _writeGate = new(1, 1); private readonly object _connectionGate = new(); private NamedPipeClientStream? _pipe; private Exception? _disconnectReason; private Task? _readLoop; private long _nextRequestId; private int _disposed; private int _connecting;
     public event EventHandler? StateInvalidated;
     public NamedPipeAddonFrontendClient(string pipeName) : this(pipeName, FrontendTransportProtocol.CurrentVersion) { }
@@ -35,27 +36,67 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     private async Task<T> SendAsync<T>(FrontendRpcMethod method, JsonElement? payload, CancellationToken token)
     {
         token.ThrowIfCancellationRequested(); var pipe = _pipe ?? throw new FrontendTransportException("Client is not connected.", _disconnectReason); var id = Interlocked.Increment(ref _nextRequestId); var tcs = new TaskCompletionSource<FrontendWireEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously); if (!_pending.TryAdd(id, tcs)) throw new FrontendTransportException("Duplicate request id.");
-        var requestWriteState = 0;
+        var requestState = new RequestState();
+        _requestStates.TryAdd(id, requestState);
         using var registration = token.Register(() =>
         {
-            if (Interlocked.CompareExchange(ref requestWriteState, 2, 0) == 0)
+            if (Interlocked.CompareExchange(ref requestState.Value, 2, 0) == 0)
             {
                 _pending.TryRemove(id, out _);
             }
-            else
+            else if (Interlocked.CompareExchange(ref requestState.Value, 4, 1) == 1)
             {
                 _cancelled.TryAdd(id, 0);
                 _pending.TryRemove(id, out _);
                 _ = SendCancelSafelyAsync(id);
             }
-            tcs.TrySetCanceled(token);
+            if (Volatile.Read(ref requestState.Value) is 2 or 4) tcs.TrySetCanceled(token);
         });
-        try { await FrontendWireCodec.WriteAsync(pipe, new(_version, FrontendWireMessageKind.Request, id, method, Payload: payload), _writeGate, token, _lifetime.Token, () => { if (Interlocked.CompareExchange(ref requestWriteState, 1, 0) != 0) throw new OperationCanceledException(token); }).ConfigureAwait(false); var response = await tcs.Task.ConfigureAwait(false); if (response.Error is { } error) { if (error.Code == FrontendRemoteErrorCode.Cancelled) throw new OperationCanceledException(token); throw new FrontendRemoteException(error.Code, error.Message); } try { return FrontendWireCodec.Decode<T>(response.Payload); } catch (FrontendProtocolException exception) { MarkDisconnected(exception); throw; } }
-        finally { _pending.TryRemove(id, out _); }
+        try
+        {
+            try { await FrontendWireCodec.WriteAsync(pipe, new(_version, FrontendWireMessageKind.Request, id, method, Payload: payload), _writeGate, token, _lifetime.Token, () => { if (Interlocked.CompareExchange(ref requestState.Value, 1, 0) != 0) throw new OperationCanceledException(token); }).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+            catch (Exception exception) when (_disposed != 0 || _lifetime.IsCancellationRequested || exception is IOException || exception is ObjectDisposedException)
+            { throw new FrontendTransportException(_disposed != 0 ? "Client disposed." : "Pipe connection closed.", exception); }
+            var response = await tcs.Task.ConfigureAwait(false); if (response.Error is { } error) { if (error.Code == FrontendRemoteErrorCode.Cancelled) throw new OperationCanceledException(token); throw new FrontendRemoteException(error.Code, error.Message); } try { return FrontendWireCodec.Decode<T>(response.Payload); } catch (FrontendProtocolException exception) { MarkDisconnected(exception); throw; }
+        }
+        finally { _pending.TryRemove(id, out _); _requestStates.TryRemove(id, out _); }
     }
     private async Task SendCancelSafelyAsync(long id) { try { if (_pipe is { } pipe) await FrontendWireCodec.WriteAsync(pipe, new(_version, FrontendWireMessageKind.CancelRequest, id), _writeGate, _lifetime.Token).ConfigureAwait(false); } catch { } }
     private async Task ReadLoopAsync()
-    { try { while (!_lifetime.IsCancellationRequested && _pipe is { } pipe) { var message = await FrontendWireCodec.ReadAsync(pipe, _lifetime.Token).ConfigureAwait(false); if (message.ProtocolVersion != FrontendTransportProtocol.CurrentVersion) throw new FrontendProtocolException("Protocol version mismatch."); if (message.Kind == FrontendWireMessageKind.Notification && message.Notification == FrontendNotificationKind.StateInvalidated) StateInvalidated?.Invoke(this, EventArgs.Empty); else if (message.Kind == FrontendWireMessageKind.Response && message.RequestId is > 0 and var id) { if (_pending.TryGetValue(id, out var tcs)) tcs.TrySetResult(message); else if (!_cancelled.TryRemove(id, out _)) throw new FrontendProtocolException("Unexpected response correlation id."); } else throw new FrontendProtocolException("Unexpected wire message."); } } catch (Exception e) when (e is not OperationCanceledException) { MarkDisconnected(e); } }
+    {
+        try
+        {
+            while (!_lifetime.IsCancellationRequested && _pipe is { } pipe)
+            {
+                var message = await FrontendWireCodec.ReadAsync(pipe, _lifetime.Token).ConfigureAwait(false);
+                if (message.ProtocolVersion != FrontendTransportProtocol.CurrentVersion)
+                    throw new FrontendProtocolException("Protocol version mismatch.");
+                if (message.Kind == FrontendWireMessageKind.Notification && message.Notification == FrontendNotificationKind.StateInvalidated)
+                {
+                    StateInvalidated?.Invoke(this, EventArgs.Empty);
+                    continue;
+                }
+                if (message.Kind != FrontendWireMessageKind.Response || message.RequestId is not > 0)
+                    throw new FrontendProtocolException("Unexpected wire message.");
+                var id = message.RequestId.Value;
+                if (_pending.TryGetValue(id, out var tcs))
+                {
+                    if (_requestStates.TryGetValue(id, out var state))
+                    {
+                        Interlocked.CompareExchange(ref state.Value, 3, 1);
+                        Interlocked.CompareExchange(ref state.Value, 3, 4);
+                    }
+                    tcs.TrySetResult(message);
+                }
+                else if (!_cancelled.TryRemove(id, out _))
+                {
+                    throw new FrontendProtocolException("Unexpected response correlation id.");
+                }
+            }
+        }
+        catch (Exception e) when (e is not OperationCanceledException) { MarkDisconnected(e); }
+    }
     private void MarkDisconnected(Exception exception)
     {
         _disconnectReason = exception;
