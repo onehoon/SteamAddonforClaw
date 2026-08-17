@@ -258,6 +258,60 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Unexpected_server_disconnect_is_reported_once_after_connection_establishment()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var client = await ConnectAsync(pipeName);
+        var disconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var count = 0;
+        client.Disconnected += (_, _) =>
+        {
+            if (Interlocked.Increment(ref count) == 1)
+                disconnected.TrySetResult();
+        };
+
+        await server.DisposeAsync();
+        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, Volatile.Read(ref count));
+    }
+
+    [Fact]
+    public async Task Intentional_client_dispose_does_not_report_disconnect()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var count = 0;
+        client.Disconnected += (_, _) => Interlocked.Increment(ref count);
+
+        await client.DisposeAsync();
+
+        Assert.Equal(0, Volatile.Read(ref count));
+    }
+
+    [Fact]
+    public async Task Local_dispose_wins_over_a_late_read_failure_without_disconnect_notification()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var count = 0;
+        client.Disconnected += (_, _) => Interlocked.Increment(ref count);
+
+        await client.DisposeAsync();
+        var markDisconnected = typeof(NamedPipeAddonFrontendClient).GetMethod(
+            "MarkDisconnected",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        markDisconnected.Invoke(client, [new IOException("late local read failure")]);
+
+        Assert.Equal(0, Volatile.Read(ref count));
+    }
+
+    [Fact]
     public async Task Cancellation_reaches_underlying_frontend_operation()
     {
         var fake = new RecordingFrontendControl { BlockPrerequisiteSetup = true };

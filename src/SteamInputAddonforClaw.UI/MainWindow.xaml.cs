@@ -45,6 +45,7 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         ApplyDefaultWindowSize();
         Activated += OnWindowActivated;
+        Closed += OnWindowClosed;
         SettingsContent.Initialize(_frontend, _bootstrap);
         ControllerContent.Initialize(_frontend, _bootstrap);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
@@ -57,6 +58,8 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnFrontendStateInvalidated(object? sender, EventArgs args) => RequestStatusRefresh();
+
+    private void OnWindowClosed(object sender, WindowEventArgs args) => _frontend.StateInvalidated -= OnFrontendStateInvalidated;
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {

@@ -17,8 +17,9 @@ internal sealed class FrontendRequestTerminalState
 public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsyncDisposable
 {
     private readonly string _pipeName; private readonly int _version; private readonly ConcurrentDictionary<long, TaskCompletionSource<FrontendWireEnvelope>> _pending = new(); private readonly ConcurrentDictionary<long, FrontendRequestTerminalState> _requestStates = new(); private readonly ConcurrentDictionary<long, byte> _cancelled = new();
-    private readonly CancellationTokenSource _lifetime = new(); private readonly SemaphoreSlim _writeGate = new(1, 1); private readonly object _connectionGate = new(); private NamedPipeClientStream? _pipe; private Exception? _disconnectReason; private Task? _readLoop; private long _nextRequestId; private int _disposed; private int _connecting;
+    private readonly CancellationTokenSource _lifetime = new(); private readonly SemaphoreSlim _writeGate = new(1, 1); private readonly object _connectionGate = new(); private NamedPipeClientStream? _pipe; private Exception? _disconnectReason; private Task? _readLoop; private long _nextRequestId; private int _disposed; private int _connecting; private int _disconnectedRaised;
     public event EventHandler? StateInvalidated;
+    public event EventHandler? Disconnected;
     public NamedPipeAddonFrontendClient(string pipeName) : this(pipeName, FrontendTransportProtocol.CurrentVersion) { }
     internal NamedPipeAddonFrontendClient(string pipeName, int version) { _pipeName = pipeName; _version = version; }
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
@@ -116,9 +117,13 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     }
     private void MarkDisconnected(Exception exception)
     {
+        if (Volatile.Read(ref _disposed) != 0 || _lifetime.IsCancellationRequested)
+            return;
         _disconnectReason = exception;
         Interlocked.Exchange(ref _pipe, null)?.Dispose();
         FailPending(new FrontendTransportException("Pipe connection closed.", exception));
+        if (Interlocked.Exchange(ref _disconnectedRaised, 1) == 0)
+            Disconnected?.Invoke(this, EventArgs.Empty);
     }
     private void FailPending(Exception e) { foreach (var item in _pending) item.Value.TrySetException(e); _pending.Clear(); _cancelled.Clear(); }
     public async ValueTask DisposeAsync() { if (Interlocked.Exchange(ref _disposed, 1) != 0) return; _lifetime.Cancel(); NamedPipeClientStream? pipe; lock (_connectionGate) pipe = Interlocked.Exchange(ref _pipe, null); pipe?.Dispose(); if (_readLoop is not null) try { await _readLoop.ConfigureAwait(false); } catch { } FailPending(new FrontendTransportException("Client disposed.")); _writeGate.Dispose(); _lifetime.Dispose(); }

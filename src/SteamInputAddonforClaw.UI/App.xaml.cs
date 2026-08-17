@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.UI.Lifecycle;
 using SteamInputAddonforClaw.UI.Frontend;
@@ -10,6 +11,9 @@ public partial class App : Application
     private readonly UiSingleInstanceGate? _singleInstanceGate;
     private NamedPipeAddonFrontendClient? _frontendClient;
     private MainWindow? _mainWindow;
+    private DispatcherQueue? _dispatcherQueue;
+    private bool _activationPending;
+    private int _shuttingDown;
 
     public App() => InitializeComponent();
 
@@ -27,8 +31,12 @@ public partial class App : Application
             return;
         }
 
-        _singleInstanceGate.RegisterActivation(static () =>
-            AppLog.Info("Activation received; external UI focus is deferred to #207B."));
+        _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _singleInstanceGate.RegisterActivation(() =>
+        {
+            if (_dispatcherQueue?.TryEnqueue(ActivateOrDeferOnUiThread) != true)
+                AppLog.Info("Frontend activation ignored because the UI dispatcher is unavailable.");
+        });
         _ = StartFrontendAsync();
     }
 
@@ -37,32 +45,52 @@ public partial class App : Application
         try
         {
             _frontendClient = UiFrontendClientFactory.Create();
+            _frontendClient.Disconnected += OnFrontendDisconnected;
             await _frontendClient.ConnectAsync().ConfigureAwait(true);
             var bootstrap = await _frontendClient.GetBootstrapAsync().ConfigureAwait(true);
             _mainWindow = new MainWindow(_frontendClient, bootstrap);
             _mainWindow.Closed += OnMainWindowClosed;
-            _mainWindow.Activate();
+            if (_activationPending)
+                AppLog.Info("Frontend", "Pending UI activation fulfilled.");
+            ActivateOrDeferOnUiThread();
         }
         catch (Exception exception)
         {
             AppLog.Error("Startup", "UI could not connect to the Runtime frontend.", exception);
-            await DisposeClientAsync().ConfigureAwait(true);
-            Exit();
+            await ShutdownAndExitAsync("StartupFailure").ConfigureAwait(true);
         }
+    }
+
+    private void OnFrontendDisconnected(object? sender, EventArgs args)
+    {
+        if (_dispatcherQueue?.TryEnqueue(() => _ = ShutdownAndExitAsync("RuntimeDisconnected")) != true)
+            AppLog.Info("Frontend disconnect observed during UI shutdown.");
+    }
+
+    private void ActivateOrDeferOnUiThread()
+    {
+        if (Volatile.Read(ref _shuttingDown) != 0) return;
+        if (_mainWindow is null) { _activationPending = true; return; }
+        _activationPending = false;
+        _mainWindow.AppWindow.Show();
+        _mainWindow.Activate();
     }
 
     private async void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
-        await DisposeClientAsync().ConfigureAwait(true);
-        Exit();
+        await ShutdownAndExitAsync("WindowClosed").ConfigureAwait(true);
     }
 
-    private async Task DisposeClientAsync()
+    private async Task ShutdownAndExitAsync(string reason)
     {
+        if (Interlocked.Exchange(ref _shuttingDown, 1) != 0) return;
+        AppLog.Info("Frontend", "UI shutdown requested.", ("Reason", reason));
         if (_frontendClient is not null)
         {
+            _frontendClient.Disconnected -= OnFrontendDisconnected;
             await _frontendClient.DisposeAsync().ConfigureAwait(false);
             _frontendClient = null;
         }
+        Exit();
     }
 }

@@ -37,6 +37,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _startupStarted;
     private IAddonFrontendControl? _frontendControl;
     private NamedPipeAddonFrontendServer? _frontendServer;
+    private readonly FrontendProcessLauncher _frontendLauncher = new(AppContext.BaseDirectory);
 
     internal AddonProcessHost(string[]? updateRestartArguments)
     {
@@ -105,8 +106,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             FrontendPipeEndpoint.CreateForCurrentUserSession(),
             _frontendControl);
         await _frontendServer.StartAsync().ConfigureAwait(false);
+        _frontendLauncher.MarkRuntimeReady();
         _startupComposition = null;
     }
+
+    internal void RequestFrontendOpen(FrontendOpenReason reason) => _frontendLauncher.RequestOpen(reason);
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
 
@@ -115,12 +119,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal UserTerminationDecision EvaluateUserTermination() =>
         _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);
 
-    internal bool TryInitializeTray(Action open, Action restart, Action exit)
+    internal bool TryInitializeTray(Action restart, Action exit)
     {
         try
         {
             _trayHostWindow = new NativeTrayHostWindow();
-            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, open, restart, exit, EvaluateUserTermination);
+            _systemTrayIcon = new SystemTrayIcon(_trayHostWindow.Handle, () => RequestFrontendOpen(FrontendOpenReason.Tray), restart, exit, EvaluateUserTermination);
             return true;
         }
         catch (Exception exception)
@@ -140,6 +144,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
+        _frontendLauncher.StopAcceptingRequests();
         _startupCancellationTokenSource.Cancel();
         if (_frontendServer is not null)
         {
