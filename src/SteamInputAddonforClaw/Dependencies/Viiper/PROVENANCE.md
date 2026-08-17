@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     6cecc1feb6a14f2e9b6d879abb58374a34a99271
+Commit:     74e8448023e6f48b6e3dc8dbffd5278b53390e64
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: 202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718
-DLL SHA-256:              5bcfdb8e2c93baf682e419ca74c7931be213dc56d046c671ca127f7732289dd3
+DLL SHA-256:              137fb9190d0d1e1f12f3dcf3fe3637e9d2ae0987a82d915cd107a09292073c8f
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,49 +42,12 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-Reviewed VIIPER `efda3e80b00366d478ff93354f0af4c7cc4c95ee` ->
-`6cecc1feb6a14f2e9b6d879abb58374a34a99271`. The target is exactly one
-canonical main commit, `Harden typed lifecycle serialization and server
-isolation (#38)`.
-
-The generated canonical `libVIIPER.h` is byte-identical to the previously
-reviewed header: its SHA-256 remains
-`202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718`.
-There are no new or removed exports, signature changes, enum changes, struct
-layout/packing changes, callback ABI changes, or Steam Deck state-layout
-changes. `SteamDeckDeviceState` therefore remains 76 bytes with the existing
-force fields at offsets 68/70/72/74. The current Addon managed P/Invoke
-surface, `RequiredExports`, callback rooting, and ABI tests require no
-adaptation.
-
-PR #38 strengthens deterministic regression coverage for the existing
-server-scoped lifecycle contract used by the planned long-lived Steam Deck +
-Xbox360 composition. Production lifecycle semantics remain unchanged. The
-existing nil-by-default internal attach lock-attempt test seam is consolidated
-into `onLifecycleLockAttempt(operation)` and observed immediately before the
-owning server `lifecycleMu` is acquired for attach, detach, typed remove, and
-public close. In normal production the hook is nil, so the added calls are
-behavior-neutral and do not alter ownership or sequencing.
-
-The focused tests prove same-server serialization across attach/detach/remove/
-close, exact committed attachment-token consumption, sticky unsafe-unknown
-fail-closed behavior, public close serialization and retry semantics, caller-
-owned bus preservation, Deck + Xbox360 coexistence on one bus, server-wide
-`close-failed`, and isolation between separate `USBServerHandle` instances.
-The documentation also makes explicit that typed mutations on one server
-serialize at that server lifecycle boundary, while separate server handles
-have independent lifecycle state; same-process VirtualBus BusID allocation is
-process-global and therefore requires distinct BusIDs.
-
-No Addon Steam Deck mapper, publisher, native binding, callback, routing, PnP,
-HidHide, recovery, lifecycle-policy, or Xbox360 integration change is required
-for this dependency update. The Addon still uses the existing Steam Deck typed
-surface and bool attach/detach compatibility calls; adoption of the classified
-attachment/query APIs and typed Xbox360 route remains separate planned work.
-
-No hardware-validation claim is expanded. MSI Claw EX basic non-gyro Steam
-Deck input remains the established claim; SD3 lifecycle/recovery evidence,
-rumble/haptics, gyro/IMU, and Game Bar/Xbox360 validation remain separate work.
+ABI compatibility is not inferred by the dependency automation. Review the
+generated `libVIIPER.h` diff and the managed interop
+(`CanonicalViiperNativeApi.cs`, `CanonicalViiperNativeTypes.cs`,
+`CanonicalViiperNativeAbiTests.cs`) before merging this dependency update.
+Replace this paragraph with the reviewed ABI delta -- including any changed
+struct layout, offsets, or exports -- once confirmed.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
