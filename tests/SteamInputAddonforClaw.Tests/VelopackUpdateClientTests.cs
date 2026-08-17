@@ -21,6 +21,28 @@ public sealed class VelopackUpdateClientTests
     }
 
     [Fact]
+    public async Task Silent_update_download_cancellation_does_not_schedule_apply()
+    {
+        var operations = new FakeOperations
+        {
+            CheckResult = UninitializedUpdateInfo(),
+            DownloadCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        var client = new VelopackUpdateClient(operations);
+        using var cancellation = new CancellationTokenSource();
+        var update = new SilentUpdateService(client).CheckDownloadAndScheduleAsync(cancellation.Token);
+        await operations.DownloadStarted.Task;
+
+        cancellation.Cancel();
+        operations.DownloadCompletion!.SetCanceled();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => update);
+        Assert.Equal(1, operations.DownloadCount);
+        Assert.Equal(0, operations.ApplyCount);
+        Assert.Equal(cancellation.Token, operations.DownloadToken);
+    }
+
+    [Fact]
     public async Task Non_cancellable_check_stops_waiting_when_the_caller_cancels()
     {
         var completion = new TaskCompletionSource<UpdateInfo?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -34,6 +56,7 @@ public sealed class VelopackUpdateClientTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => check);
         Assert.False(check.IsCompletedSuccessfully);
         completion.SetResult(UninitializedUpdateInfo());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.DownloadUpdatesAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -49,7 +72,6 @@ public sealed class VelopackUpdateClientTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => check);
         completion.SetException(new InvalidOperationException("late check failure"));
 
-        await Task.Delay(50);
         await Assert.ThrowsAsync<InvalidOperationException>(() => client.DownloadUpdatesAsync(CancellationToken.None));
     }
 
@@ -61,8 +83,18 @@ public sealed class VelopackUpdateClientTests
         public Task<UpdateInfo?>? CheckTask { private get; init; }
         public UpdateInfo? CheckResult { private get; init; }
         public CancellationToken DownloadToken { get; private set; }
+        public TaskCompletionSource? DownloadCompletion { get; init; }
+        public TaskCompletionSource DownloadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int DownloadCount { get; private set; }
+        public int ApplyCount { get; private set; }
         public Task<UpdateInfo?> CheckForUpdatesAsync() => CheckTask ?? Task.FromResult(CheckResult);
-        public Task DownloadUpdatesAsync(UpdateInfo update, CancellationToken cancellationToken) { DownloadToken = cancellationToken; return Task.CompletedTask; }
-        public void WaitExitThenApplyUpdates(UpdateInfo update, string[]? restartArguments) { }
+        public Task DownloadUpdatesAsync(UpdateInfo update, CancellationToken cancellationToken)
+        {
+            DownloadCount++;
+            DownloadToken = cancellationToken;
+            DownloadStarted.TrySetResult();
+            return DownloadCompletion?.Task ?? Task.CompletedTask;
+        }
+        public void WaitExitThenApplyUpdates(UpdateInfo update, string[]? restartArguments) => ApplyCount++;
     }
 }
