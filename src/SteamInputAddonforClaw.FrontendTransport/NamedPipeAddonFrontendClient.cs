@@ -5,10 +5,18 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
 
+internal sealed class FrontendRequestTerminalState
+{
+    internal int Value;
+    internal bool TryStart() => Interlocked.CompareExchange(ref Value, 1, 0) == 0;
+    internal bool TryCancelBeforeStart() => Interlocked.CompareExchange(ref Value, 2, 0) == 0;
+    internal bool TryCancelStarted() => Interlocked.CompareExchange(ref Value, 4, 1) == 1;
+    internal bool TryCompleteResponse() => Interlocked.CompareExchange(ref Value, 3, 1) == 1;
+}
+
 public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsyncDisposable
 {
-    private sealed class RequestState { public int Value; }
-    private readonly string _pipeName; private readonly int _version; private readonly ConcurrentDictionary<long, TaskCompletionSource<FrontendWireEnvelope>> _pending = new(); private readonly ConcurrentDictionary<long, RequestState> _requestStates = new(); private readonly ConcurrentDictionary<long, byte> _cancelled = new();
+    private readonly string _pipeName; private readonly int _version; private readonly ConcurrentDictionary<long, TaskCompletionSource<FrontendWireEnvelope>> _pending = new(); private readonly ConcurrentDictionary<long, FrontendRequestTerminalState> _requestStates = new(); private readonly ConcurrentDictionary<long, byte> _cancelled = new();
     private readonly CancellationTokenSource _lifetime = new(); private readonly SemaphoreSlim _writeGate = new(1, 1); private readonly object _connectionGate = new(); private NamedPipeClientStream? _pipe; private Exception? _disconnectReason; private Task? _readLoop; private long _nextRequestId; private int _disposed; private int _connecting;
     public event EventHandler? StateInvalidated;
     public NamedPipeAddonFrontendClient(string pipeName) : this(pipeName, FrontendTransportProtocol.CurrentVersion) { }
@@ -36,25 +44,32 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
     private async Task<T> SendAsync<T>(FrontendRpcMethod method, JsonElement? payload, CancellationToken token)
     {
         token.ThrowIfCancellationRequested(); var pipe = _pipe ?? throw new FrontendTransportException("Client is not connected.", _disconnectReason); var id = Interlocked.Increment(ref _nextRequestId); var tcs = new TaskCompletionSource<FrontendWireEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously); if (!_pending.TryAdd(id, tcs)) throw new FrontendTransportException("Duplicate request id.");
-        var requestState = new RequestState();
+        var requestState = new FrontendRequestTerminalState();
         _requestStates.TryAdd(id, requestState);
         using var registration = token.Register(() =>
         {
-            if (Interlocked.CompareExchange(ref requestState.Value, 2, 0) == 0)
+            if (requestState.TryCancelBeforeStart())
             {
                 _pending.TryRemove(id, out _);
             }
-            else if (Interlocked.CompareExchange(ref requestState.Value, 4, 1) == 1)
+            else if (Volatile.Read(ref requestState.Value) == 1)
             {
                 _cancelled.TryAdd(id, 0);
-                _pending.TryRemove(id, out _);
-                _ = SendCancelSafelyAsync(id);
+                if (requestState.TryCancelStarted())
+                {
+                    _pending.TryRemove(id, out _);
+                    _ = SendCancelSafelyAsync(id);
+                }
+                else
+                {
+                    _cancelled.TryRemove(id, out _);
+                }
             }
             if (Volatile.Read(ref requestState.Value) is 2 or 4) tcs.TrySetCanceled(token);
         });
         try
         {
-            try { await FrontendWireCodec.WriteAsync(pipe, new(_version, FrontendWireMessageKind.Request, id, method, Payload: payload), _writeGate, token, _lifetime.Token, () => { if (Interlocked.CompareExchange(ref requestState.Value, 1, 0) != 0) throw new OperationCanceledException(token); }).ConfigureAwait(false); }
+            try { await FrontendWireCodec.WriteAsync(pipe, new(_version, FrontendWireMessageKind.Request, id, method, Payload: payload), _writeGate, token, _lifetime.Token, () => { if (!requestState.TryStart()) throw new OperationCanceledException(token); }).ConfigureAwait(false); }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
             catch (Exception exception) when (_disposed != 0 || _lifetime.IsCancellationRequested || exception is IOException || exception is ObjectDisposedException)
             { throw new FrontendTransportException(_disposed != 0 ? "Client disposed." : "Pipe connection closed.", exception); }
@@ -82,12 +97,14 @@ public sealed class NamedPipeAddonFrontendClient : IAddonFrontendControl, IAsync
                 var id = message.RequestId.Value;
                 if (_pending.TryGetValue(id, out var tcs))
                 {
+                    var responseWon = true;
                     if (_requestStates.TryGetValue(id, out var state))
                     {
-                        Interlocked.CompareExchange(ref state.Value, 3, 1);
-                        Interlocked.CompareExchange(ref state.Value, 3, 4);
+                        responseWon = state.TryCompleteResponse();
+                        if (!responseWon && Volatile.Read(ref state.Value) == 4)
+                            _cancelled.TryRemove(id, out _);
                     }
-                    tcs.TrySetResult(message);
+                    if (responseWon) { _cancelled.TryRemove(id, out _); tcs.TrySetResult(message); }
                 }
                 else if (!_cancelled.TryRemove(id, out _))
                 {

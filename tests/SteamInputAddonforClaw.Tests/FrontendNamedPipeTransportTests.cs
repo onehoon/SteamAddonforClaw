@@ -352,6 +352,26 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public void Response_and_cancellation_have_one_atomic_terminal_state_winner()
+    {
+        var responseFirst = new FrontendRequestTerminalState();
+        Assert.True(responseFirst.TryStart());
+        var marker = true;
+        Assert.True(responseFirst.TryCompleteResponse());
+        Assert.False(responseFirst.TryCancelStarted());
+        marker = false;
+        Assert.False(marker);
+
+        var cancellationFirst = new FrontendRequestTerminalState();
+        Assert.True(cancellationFirst.TryStart());
+        marker = true;
+        Assert.True(cancellationFirst.TryCancelStarted());
+        Assert.False(cancellationFirst.TryCompleteResponse());
+        marker = false;
+        Assert.False(marker);
+    }
+
+    [Fact]
     public async Task New_client_reconnects_after_previous_client_disconnects()
     {
         var fake = new RecordingFrontendControl();
