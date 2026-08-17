@@ -79,8 +79,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
-          $publishedTags = @($releases | Where-Object { -not $_.draft -and -not $_.prerelease } | ForEach-Object tag_name)
+          $releaseJson = gh release list --repo $env:GITHUB_REPOSITORY --limit 100 --json tagName,isDraft,isPrerelease
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to enumerate GitHub releases."
+          }
+
+          $releases = @($releaseJson | ConvertFrom-Json)
+          $publishedTags = @(
+            $releases |
+              Where-Object { -not $_.isDraft -and -not $_.isPrerelease } |
+              ForEach-Object tagName
+          )
           & ./scripts/release-metadata.ps1 -PublishedReleaseTags $publishedTags -OutputFile $env:GITHUB_OUTPUT
 
       - name: Verify release does not already exist
