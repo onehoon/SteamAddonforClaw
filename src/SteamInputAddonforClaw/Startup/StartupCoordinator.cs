@@ -17,6 +17,7 @@ internal sealed class StartupCoordinator
     private readonly IStockCenterMStartupBaseline? _stockCenterMBaseline;
     private readonly IWindowsDeviceProbeContextFactory _probeContextFactory;
     private readonly IHardwareCompatibilityEvaluator _hardwareCompatibilityEvaluator;
+    private readonly IStartupVirtualOutputRecoveryInspector? _virtualOutputRecoveryInspector;
     private readonly TimeSpan _hardwareProbePollInterval;
     private readonly TimeSpan _hardwareProbeTimeout;
     private readonly Func<TimeSpan, CancellationToken, Task> _hardwareProbeDelay;
@@ -30,6 +31,7 @@ internal sealed class StartupCoordinator
         IRecoveryJournalStore recoveryJournalStore,
         IStockCenterMStartupBaseline? stockCenterMBaseline = null,
         IStartupHidHideRecoveryCleaner? hidHideRecoveryCleaner = null,
+        IStartupVirtualOutputRecoveryInspector? virtualOutputRecoveryInspector = null,
         TimeSpan? hardwareProbePollInterval = null,
         TimeSpan? hardwareProbeTimeout = null,
         Func<TimeSpan, CancellationToken, Task>? hardwareProbeDelay = null)
@@ -43,6 +45,7 @@ internal sealed class StartupCoordinator
         _stockCenterMBaseline = stockCenterMBaseline;
         _probeContextFactory = probeContextFactory ?? throw new ArgumentNullException(nameof(probeContextFactory));
         _hardwareCompatibilityEvaluator = hardwareCompatibilityEvaluator ?? throw new ArgumentNullException(nameof(hardwareCompatibilityEvaluator));
+        _virtualOutputRecoveryInspector = virtualOutputRecoveryInspector;
         _hardwareProbePollInterval = hardwareProbePollInterval ?? TimeSpan.FromMilliseconds(500);
         _hardwareProbeTimeout = hardwareProbeTimeout ?? TimeSpan.FromSeconds(5);
         _hardwareProbeDelay = hardwareProbeDelay ?? Task.Delay;
@@ -107,7 +110,7 @@ internal sealed class StartupCoordinator
         if (!baseline.Succeeded)
             return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
 
-        var recoverySafe = ResolveStaleRecovery();
+        var recoverySafe = await ResolveStaleRecoveryAsync(cancellationToken).ConfigureAwait(false);
         return new StartupResult(true, environment.Mode, readiness, RecoverySafe: recoverySafe);
     }
 
@@ -117,7 +120,7 @@ internal sealed class StartupCoordinator
     /// state is never replayed. The journal is discarded only after any required HidHide cleanup
     /// has been independently verified to succeed.
     /// </summary>
-    private bool ResolveStaleRecovery()
+    private async Task<bool> ResolveStaleRecoveryAsync(CancellationToken cancellationToken)
     {
         var loaded = _recoveryManager.LoadJournal();
         switch (loaded.Status)
@@ -131,6 +134,23 @@ internal sealed class StartupCoordinator
         }
 
         var journal = loaded.Journal!;
+        var virtualEntries = journal.Mutations.AddonOwnedVirtualDeviceEntries ?? [];
+        var virtualOutputSafe = true;
+        if (virtualEntries.Count > 0)
+        {
+            if (_virtualOutputRecoveryInspector is null)
+            {
+                AppLog.Warn("Recovery.VirtualOutput", "Stale virtual-output evidence cannot be inspected; routing remains passive.", null, ("Assessment", "InspectorUnavailable"));
+                return false;
+            }
+            var assessment = await _virtualOutputRecoveryInspector.AssessAsync(virtualEntries, cancellationToken).ConfigureAwait(false);
+            virtualOutputSafe = assessment.SafeToRetire;
+            AppLog.Info("Recovery.VirtualOutput", "Stale virtual-output retirement assessed.",
+                ("SessionId", journal.RecoverySessionId), ("Assessment", assessment.SafeToRetire ? "SafeToRetire" : "Unsafe"), ("Reason", assessment.Reason),
+                ("EntryCount", virtualEntries.Count));
+            if (!assessment.SafeToRetire && assessment.Reason == "EvidenceInvalid")
+                return false;
+        }
         if (StartupHidHideRecoveryCleaner.RequiresCleanup(journal))
         {
             if (_hidHideRecoveryCleaner is null)
@@ -143,6 +163,19 @@ internal sealed class StartupCoordinator
                 AppLog.Warn("Recovery", "Stale startup HidHide cleanup failed; routing remains passive.", null, ("Action", "Passive"), ("Reason", cleanupReason));
                 return false;
             }
+        }
+
+        if (!virtualOutputSafe)
+            return false;
+
+        if (virtualEntries.Count > 0)
+        {
+            var finalAssessment = await _virtualOutputRecoveryInspector!.AssessAsync(virtualEntries, cancellationToken).ConfigureAwait(false);
+            AppLog.Info("Recovery.VirtualOutput", "Final stale virtual-output retirement gate assessed.",
+                ("SessionId", journal.RecoverySessionId), ("Assessment", finalAssessment.SafeToRetire ? "SafeToRetire" : "Unsafe"),
+                ("Reason", finalAssessment.Reason), ("EntryCount", virtualEntries.Count));
+            if (!finalAssessment.SafeToRetire)
+                return false;
         }
 
         if (!TryRetireStaleStartupJournal(out var reason))

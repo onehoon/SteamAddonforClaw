@@ -183,16 +183,42 @@ public sealed class StartupCoordinatorTests
         var cleaner = new FakeStartupHidHideRecoveryCleaner();
         var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
             new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
-            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner);
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner,
+            virtualOutputRecoveryInspector: new UnsafeInspector());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.True(result.RecoverySafe);
+        Assert.False(result.RecoverySafe);
         Assert.Equal(1, cleaner.CallCount);
-        Assert.Equal(1, store.DeleteCallCount);
+        Assert.Equal(0, store.DeleteCallCount);
         // The cleaner only ever receives the journal + IHidHideClient (see
         // StartupHidHideRecoveryCleaner), so it structurally cannot replay native or VIIPER
         // state -- there is no such dependency for it to call.
+    }
+
+    [Fact]
+    public async Task VirtualOutputIsRecheckedAfterHidHideCleanupBeforeJournalRetirement()
+    {
+        var events = new List<string>();
+        var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, Guid.NewGuid(), DateTimeOffset.UtcNow, null,
+            new(HidHideDeviceAdditions: ["HID\\Claw"], AddonOwnedVirtualDeviceEntries:
+                [new(Guid.NewGuid(), "steamdeck", 0x28DE, 0x1205, [], [])]));
+        var store = new FakeRecoveryJournalStore(events, exists: true, journal: journal);
+        var cleaner = new FakeStartupHidHideRecoveryCleaner();
+        var inspector = new SequencedVirtualOutputInspector(
+            new(true, "StableSafeAbsence"),
+            new(false, "ResidualOrAmbiguousVirtualDevicePresent"));
+        var coordinator = new StartupCoordinator(new FakeUpdateGate(events, UpdateGateResult.Continue),
+            new FakeEnvironmentDetector(events), new FakeEnvironmentWaiter(events), new FakeProbeFactory(), new FakeHardwareEvaluator(),
+            recoveryJournalStore: store, stockCenterMBaseline: new FakeBaseline(events), hidHideRecoveryCleaner: cleaner,
+            virtualOutputRecoveryInspector: inspector);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+
+        Assert.False(result.RecoverySafe);
+        Assert.Equal(1, cleaner.CallCount);
+        Assert.Equal(2, inspector.CallCount);
+        Assert.Equal(0, store.DeleteCallCount);
     }
 
     [Fact]
@@ -814,6 +840,21 @@ public sealed class StartupCoordinatorTests
     private sealed class ThrowingEnvironmentWaiter : IControllerEnvironmentWaiter { public Task<ControllerEnvironmentReadiness> WaitUntilStableAsync(ControllerEnvironmentMode _, CancellationToken __) => throw new Xunit.Sdk.XunitException("Environment wait must not run after recovery failure."); }
     private sealed class ThrowingProbeFactory : IWindowsDeviceProbeContextFactory { public DeviceProbeContextCapture Capture() => throw new Xunit.Sdk.XunitException("Hardware probe must not run after recovery failure."); }
     private sealed class ThrowingHardwareEvaluator : IHardwareCompatibilityEvaluator { public HardwareCompatibilityAssessment Evaluate(DeviceProbeContextCapture _) => throw new Xunit.Sdk.XunitException("Hardware evaluator must not run after recovery failure."); }
+    private sealed class UnsafeInspector : IStartupVirtualOutputRecoveryInspector
+    {
+        public Task<StartupVirtualOutputRecoveryAssessment> AssessAsync(IReadOnlyList<Recovery.AddonOwnedVirtualDeviceRecoveryEntry> _, CancellationToken __) =>
+            Task.FromResult(new StartupVirtualOutputRecoveryAssessment(false, "ResidualOrAmbiguousVirtualDevicePresent"));
+    }
+    private sealed class SequencedVirtualOutputInspector(params StartupVirtualOutputRecoveryAssessment[] assessments) : IStartupVirtualOutputRecoveryInspector
+    {
+        private int _index;
+        public int CallCount { get; private set; }
+        public Task<StartupVirtualOutputRecoveryAssessment> AssessAsync(IReadOnlyList<Recovery.AddonOwnedVirtualDeviceRecoveryEntry> _, CancellationToken __)
+        {
+            CallCount++;
+            return Task.FromResult(assessments[Math.Min(_index++, assessments.Length - 1)]);
+        }
+    }
 
     private static ControllerEnvironmentAssessmentSnapshot Assessment(ControllerEnvironmentMode mode)
     {

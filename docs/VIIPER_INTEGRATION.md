@@ -194,6 +194,15 @@ The active routing pipeline preserves these boundaries:
 - publisher faults request runtime fail-closed reconciliation;
 - teardown is retry-safe and never silently selects another output.
 
+Stale previous-process Steam Deck virtual-output journal evidence is retired
+only after bounded, cancellation-aware current-world PnP inspection proves
+stable absence of every recorded owned identity and every new exact
+`28DE:1205` identity that was not present before the mutation. Unresolved
+identity evidence is not treated as proof that no virtual device was created.
+Startup never replays previous-process VIIPER handles or creates a replacement
+session to detach stale devices; ambiguous or unavailable PnP evidence
+preserves the journal and keeps recovery unsafe.
+
 ## 8. Steam session authority
 
 The effective Steam session source combines the direct Steam watcher, Big

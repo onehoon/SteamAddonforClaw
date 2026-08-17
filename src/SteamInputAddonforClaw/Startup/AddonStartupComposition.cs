@@ -47,6 +47,7 @@ internal static class AddonStartupCompositionFactory
             recoveryJournalStore: recoveryJournalStore,
             stockCenterMBaseline: stockCenterMBaseline,
             hidHideRecoveryCleaner: new StartupHidHideRecoveryCleaner(new HidHideDriverClient()),
+            virtualOutputRecoveryInspector: new StartupVirtualOutputRecoveryInspector(deviceEnumerator),
             probeContextFactory: new WindowsDeviceProbeContextFactory(new WindowsDeviceIdentitySource(), deviceEnumerator),
             hardwareCompatibilityEvaluator: new HardwareCompatibilityEvaluator(deviceRegistry));
 
