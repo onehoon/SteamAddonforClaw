@@ -1,8 +1,6 @@
-using Microsoft.UI.Dispatching;
-using Microsoft.UI.Xaml;
 using Velopack;
-using WinRT;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Hosting;
 using SteamInputAddonforClaw.Lifecycle;
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Prerequisites;
@@ -13,17 +11,10 @@ namespace SteamInputAddonforClaw;
 
 public static class Program
 {
-    internal static SingleInstanceGate? CurrentSingleInstanceGate { get; private set; }
-
     [STAThread]
     public static void Main(string[] args)
     {
-        // Sole owner of AppLog.Shutdown(): guarantees it runs exactly once, on every exit path out of
-        // Main -- the several early `return`s below (elevated prerequisite setup, secondary-instance
-        // activation, restart timeout) that never reach a MainWindow at all, the fatal-startup-exception
-        // path, and the normal path (Application.Start blocks until the WinUI app has fully exited).
-        // App owns runtime shutdown independently of MainWindow existence; Program still owns only
-        // the final AppLog shutdown.
+        // Program is the sole owner of final log shutdown on every exit path.
         try
         {
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
@@ -75,30 +66,9 @@ public static class Program
 
             using (singleInstanceGate)
             {
-                CurrentSingleInstanceGate = singleInstanceGate;
                 var launchMode = args.Contains("--background", StringComparer.OrdinalIgnoreCase) ? "Background" : "Manual";
                 AppLog.Info("App", "Application launch header.", ("Version", typeof(Program).Assembly.GetName().Version), ("LaunchMode", launchMode), ("PID", Environment.ProcessId), ("ProcessArchitecture", RuntimeInformation.ProcessArchitecture), ("OSArchitecture", RuntimeInformation.OSArchitecture), ("OS", Environment.OSVersion), ("Runtime", Environment.Version), ("ProcessPath", Environment.ProcessPath), ("BaseDirectory", AppContext.BaseDirectory));
-                AppLog.Debug("COM wrapper initialization starting.");
-                ComWrappersSupport.InitializeComWrappers();
-                AppLog.Debug("COM wrapper initialization completed.");
-                var winUiAssets = WinUiRuntimeAssetProbe.Inspect(AppContext.BaseDirectory);
-                AppLog.Debug("Startup", "WinUI runtime assets.",
-                    ("BaseDirectory", AppContext.BaseDirectory),
-                    ("AppXbf", winUiAssets[0].Exists), ("AppXbfBytes", winUiAssets[0].SizeBytes),
-                    ("MainWindowXbf", winUiAssets[1].Exists), ("MainWindowXbfBytes", winUiAssets[1].SizeBytes),
-                    ("Pri", winUiAssets[2].Exists), ("PriBytes", winUiAssets[2].SizeBytes),
-                    ("AppIcon", winUiAssets[3].Exists), ("AppIconBytes", winUiAssets[3].SizeBytes));
-                AppLog.Debug("XAML Application.Start entering.");
-                Application.Start(_ =>
-                {
-                    AppLog.Debug("XAML startup callback entered.");
-                    var synchronizationContext = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
-                    SynchronizationContext.SetSynchronizationContext(synchronizationContext);
-                    AppLog.Debug("Creating App instance.");
-                    var app = new App(args, singleInstanceGate);
-                    app.UnhandledException += (_, eventArgs) => AppLog.Error("Unhandled XAML exception.", eventArgs.Exception);
-                    AppLog.Debug("App instance created.");
-                });
+                new RuntimeProcessApplication(args, singleInstanceGate).Run();
             }
         }
         catch (Exception exception)

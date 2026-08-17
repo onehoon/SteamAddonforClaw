@@ -4,11 +4,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
-    <WindowsPackageType>None</WindowsPackageType>
-    <UseWinUI>true</UseWinUI>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64</Platforms>
     <AssemblyName>SteamInputAddonforClaw</AssemblyName>
@@ -17,7 +14,6 @@
     <Version>0.1.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,8 +22,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.250402" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
     <PackageReference Include="System.Management" Version="10.0.0" />
     <PackageReference Include="Velopack" Version="1.2.0" />
     <PackageReference Include="Vortice.DirectInput" Version="3.8.3" />
@@ -61,21 +55,4 @@
     </Content>
   </ItemGroup>
 
-  <!--
-    dotnet publish for an unpackaged WinUI 3 app omits the XAML binary files
-    and the app PRI that dotnet build produces in $(OutDir). Application.Start
-    then fails while loading App.xaml/MainWindow.xaml. Preserve those generated
-    runtime assets in the Velopack publish payload.
-  -->
-  <Target Name="CopyMissingWinUIPublishAssets" AfterTargets="Publish">
-    <ItemGroup>
-      <_MissingXbf Include="$(OutDir)**\*.xbf" />
-      <_MissingPri Include="$(OutDir)*.pri" />
-      <_MissingAssets Include="$(OutDir)Assets\**\*.*" />
-    </ItemGroup>
-    <Message Importance="High" Text="Preserving WinUI publish assets: XBF=@(_MissingXbf); PRI=@(_MissingPri); Assets=@(_MissingAssets)" />
-    <Copy SourceFiles="@(_MissingXbf)" DestinationFolder="$(PublishDir)%(RecursiveDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_MissingPri)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_MissingAssets)" DestinationFolder="$(PublishDir)Assets\%(RecursiveDir)" SkipUnchangedFiles="true" />
-  </Target>
 </Project>

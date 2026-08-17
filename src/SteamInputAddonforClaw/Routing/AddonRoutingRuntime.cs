@@ -14,7 +14,7 @@ namespace SteamInputAddonforClaw.Routing;
 /// Owns the routing/virtual-output object graph -- the handheld routing composition, its
 /// borrowed safety session, the canonical Steam Deck output stage, and the routing pipeline
 /// executor/session coordinator/runtime coordinator -- that was previously assembled and held
-/// directly by <c>App.xaml.cs</c>. UI-independent: this type has no dependency on WinUI, the main
+/// directly by the process shell. UI-independent: this type has no dependency on the presentation shell, the main
 /// window, or the system tray. The application shell still owns startup/bootstrap, Steam/BPM
 /// watcher lifecycle, power/suspend/resume orchestration, and top-level application shutdown
 /// ordering -- this runtime is only the routing slice of that graph.
