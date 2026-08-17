@@ -7,7 +7,7 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 /// </summary>
 public static class AddonLogRetention
 {
-    internal const int RetentionDays = 2;
+    public const int RetentionDays = 2;
 
     private static readonly string DefaultDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
