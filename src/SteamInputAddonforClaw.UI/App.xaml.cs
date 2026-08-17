@@ -3,6 +3,8 @@ using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.UI.Lifecycle;
 using SteamInputAddonforClaw.UI.Frontend;
+using SteamInputAddonforClaw.Views;
+using System.Reflection;
 
 namespace SteamInputAddonforClaw.UI;
 
@@ -53,6 +55,13 @@ public partial class App : Application
             stage = "BootstrapAcquisition";
             var bootstrap = await _frontendClient.GetBootstrapAsync().ConfigureAwait(true);
             AppLog.Info("Frontend", "Bootstrap acquired.");
+            // Temporary external WinUI startup diagnostic. Remove after the failing
+            // XAML component/resource path is identified.
+            ProbeXamlComponent("StatusPage", static () => new StatusPage());
+            ProbeXamlComponent("HowToUsePage", static () => new HowToUsePage());
+            ProbeXamlComponent("ControllerPage", static () => new ControllerPage());
+            ProbeXamlComponent("SettingsPage", static () => new SettingsPage());
+            ProbeXamlComponent("DeveloperPage", static () => new DeveloperPage());
             stage = "MainWindowInitialization";
             _mainWindow = new MainWindow(_frontendClient, bootstrap);
             _mainWindow.Closed += OnMainWindowClosed;
@@ -65,9 +74,40 @@ public partial class App : Application
         }
         catch (Exception exception)
         {
-            AppLog.Error("Startup", "UI startup failed.", exception, ("Stage", stage));
+            LogXamlFailure("MainWindow", exception, ("Stage", stage));
             await ShutdownAndExitAsync("StartupFailure").ConfigureAwait(true);
         }
+    }
+
+    private static void ProbeXamlComponent(string component, Func<object> create)
+    {
+        AppLog.Info("XamlProbe", "Component probe started.", ("Component", component));
+        try
+        {
+            _ = create();
+            AppLog.Info("XamlProbe", "Component probe succeeded.", ("Component", component));
+        }
+        catch (Exception exception)
+        {
+            LogXamlFailure(component, exception);
+        }
+    }
+
+    private static void LogXamlFailure(string component, Exception exception, params (string Key, object? Value)[] fields)
+    {
+        var assembly = typeof(App).Assembly;
+        var context = new (string Key, object? Value)[]
+        {
+            ("Component", component),
+            ("ExceptionType", exception.GetType().FullName ?? exception.GetType().Name),
+            ("HResult", $"0x{exception.HResult:X8}"),
+            ("BaseDirectory", AppContext.BaseDirectory),
+            ("AssemblyLocation", assembly.Location),
+            ("AssemblyName", assembly.GetName().Name ?? string.Empty),
+            ("AssemblyVersion", assembly.GetName().Version?.ToString() ?? string.Empty)
+        };
+        AppLog.Error("XamlProbe", component == "MainWindow" ? "MainWindow XAML initialization failed." : "Component probe failed.", exception,
+            [.. context, .. fields]);
     }
 
     private void OnFrontendDisconnected(object? sender, EventArgs args)
