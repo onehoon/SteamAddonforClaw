@@ -112,8 +112,16 @@ public partial class App : Application
 
     private void OnFrontendDisconnected(object? sender, EventArgs args)
     {
+        AppLog.Info("Frontend", "Runtime disconnect observed.",
+            ("ShuttingDown", Volatile.Read(ref _shuttingDown)),
+            ("HasDispatcher", _dispatcherQueue is not null),
+            ("HasFrontendClient", _frontendClient is not null));
         if (_dispatcherQueue?.TryEnqueue(() => _ = ShutdownAndExitAsync("RuntimeDisconnected")) != true)
-            AppLog.Info("Frontend disconnect observed during UI shutdown.");
+        {
+            AppLog.Error("Frontend", "Runtime disconnect shutdown dispatch failed; UI exit will continue.",
+                new InvalidOperationException("UI dispatcher was unavailable."));
+            RequestExitOnUiThread();
+        }
     }
 
     private void ActivateOrDeferOnUiThread()
@@ -157,17 +165,24 @@ public partial class App : Application
 
     private void RequestExitOnUiThread()
     {
-        AppLog.Info("Frontend", "UI Application.Exit requested.");
+        AppLog.Info("Frontend", "UI exit dispatch requested.");
         if (_dispatcherQueue?.HasThreadAccess == true)
         {
+            AppLog.Info("Frontend", "UI Application.Exit executing.");
             Exit();
             return;
         }
 
-        if (_dispatcherQueue?.TryEnqueue(Exit) == true) return;
+        if (_dispatcherQueue?.TryEnqueue(() =>
+        {
+            AppLog.Info("Frontend", "UI Application.Exit executing.");
+            Exit();
+        }) == true) return;
 
         // The dispatcher is already unavailable; preserve the fail-safe process-exit
         // behavior rather than leaving a primary UI process alive indefinitely.
+        AppLog.Error("Frontend", "UI exit dispatch failed; executing fallback exit.",
+            new InvalidOperationException("UI dispatcher was unavailable."));
         Exit();
     }
 }
