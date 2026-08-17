@@ -29,7 +29,7 @@ public sealed class SettingsStore
             var startup = root.TryGetProperty("LaunchAtWindowsStartup", out var startupProperty) && startupProperty.ValueKind is JsonValueKind.False or JsonValueKind.True
                 ? startupProperty.GetBoolean() : true;
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
-            var routeInSteamBigPicture = root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty) && routeProperty.ValueKind == JsonValueKind.True && routeProperty.GetBoolean();
+            var routeInSteamBigPicture = !root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty) || routeProperty.ValueKind == JsonValueKind.True;
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
             var settings = new AppSettings(startup, logLevel, routeInSteamBigPicture, suppressDeveloperMenuWarning);
             AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
@@ -62,7 +62,7 @@ public sealed class SettingsStore
                 : null);
             var route = root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty)
                 ? routeProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? routeProperty.GetBoolean() : throw new JsonException("RouteInSteamBigPicture must be boolean.")
-                : false;
+                : true;
             // Developer-menu warning suppression is UI preference data, not a safety-gate input.
             // Keep malformed values from affecting the prerequisite mutation decision.
             return new(new AppSettings(startup, logLevel, route), true, "Loaded");
