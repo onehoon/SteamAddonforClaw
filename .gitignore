@@ -43,6 +43,10 @@ secrets.json
 *.etl
 *.dmp
 
+# Local investigation artifacts
+scripts/.tmp-*
+steam-window-monitor-*.jsonl
+
 # OS files
 Thumbs.db
 Desktop.ini
