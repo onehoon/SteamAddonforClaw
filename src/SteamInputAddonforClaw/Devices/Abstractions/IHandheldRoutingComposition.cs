@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Feedback;
 
 namespace SteamInputAddonforClaw.Devices.Abstractions;
 
@@ -36,4 +37,7 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
     IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> SessionBoundaryParticipants { get; }
 
     IRoutingSafetySession? SafetySession { get; }
+
+    /// <summary>Optional borrowed physical-feedback capability; null is valid for a backend without rumble.</summary>
+    IPhysicalRumbleSink? PhysicalRumbleSink { get; }
 }

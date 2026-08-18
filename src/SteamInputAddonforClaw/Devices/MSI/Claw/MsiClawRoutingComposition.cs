@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Feedback;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -35,6 +36,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     internal MsiClawInputSource PhysicalInputSource { get; }
     internal MsiClawPhysicalInputStage PhysicalInputStage { get; }
     internal MsiClawPhysicalIsolationStage PhysicalIsolationStage { get; }
+    internal MsiClawRumbleSink PhysicalRumbleSink { get; }
 
     private readonly IReadOnlyList<IRoutingPipelineStage> _stages;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
@@ -66,6 +68,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             new HidHideDriverClient(),
             () => Environment.ProcessPath);
 
+        PhysicalRumbleSink = new MsiClawRumbleSink(PhysicalInputStage, new WindowsMsiClawRumbleTransport());
+
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage];
         _sessionBoundaryParticipants = [NativeModeSession];
     }
@@ -77,9 +81,11 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> IHandheldRoutingComposition.SessionBoundaryParticipants => _sessionBoundaryParticipants;
 
     IRoutingSafetySession? IHandheldRoutingComposition.SafetySession => NativeModeSession;
+    IPhysicalRumbleSink? IHandheldRoutingComposition.PhysicalRumbleSink => PhysicalRumbleSink;
 
     public async ValueTask DisposeAsync()
     {
+        PhysicalRumbleSink.Dispose();
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
     }
