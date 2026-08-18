@@ -2573,6 +2573,63 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
     }
 
+    [Fact]
+    public async Task TimedOutSuspendAfterArmedCommitEpochBump_NeverPublishesStaleArmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        var suspendCts = new CancellationTokenSource();
+        Task? suspendTask = null;
+
+        coordinator.TestOnly_BeforeArmedCommitLinearization = async () =>
+        {
+            suspendTask = coordinator.QuiesceForSuspendAsync(
+                DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, suspendCts.Token);
+            suspendCts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => suspendTask!);
+        };
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        // The suspend request bumped the lifecycle epoch, then timed out while waiting for the
+        // coordinator gate. Its pending marker is now zero, so the final decision must rely on the
+        // epoch as well as the marker and reject the stale Armed publication.
+        Assert.NotNull(suspendTask);
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.False(h.HelperOwnership.IsOwned);
+    }
+
+    [Fact]
+    public async Task TimedOutSuspendAfterDebounceEpochCheck_NeverTerminatesTrackedMainUi()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        var suspendCts = new CancellationTokenSource();
+        Task? suspendTask = null;
+        coordinator.TestOnly_BeforeTerminationLinearization = async () =>
+        {
+            suspendTask = coordinator.QuiesceForSuspendAsync(
+                DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, suspendCts.Token);
+            suspendCts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => suspendTask!);
+        };
+
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+
+        // The debounce passed its early epoch check before the timed-out suspend request. The
+        // final combined decision must still reject termination after that request clears pending.
+        Assert.NotNull(suspendTask);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        Assert.NotNull(coordinator.GetSnapshot().RealMainUiProcessId);
+    }
+
     // ============================================================
     // Review 4957507443, finding #3 (MAJOR): DisposeAsync must drain the fire-and-forget debounce
     // continuation before disposing the gate.
