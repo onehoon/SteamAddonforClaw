@@ -11,10 +11,12 @@ internal readonly record struct Oem1GesturePolicyRequest(Oem1Gesture Gesture);
 internal sealed class Oem1EventGestureBridge : IDisposable
 {
     private readonly object _gate = new();
+    private readonly object _recognizerOperationGate = new();
     private readonly IMsiEventSource _eventSource;
     private readonly Oem1GestureRecognizer _recognizer;
     private bool _customAuthority;
     private bool _disposed;
+    private long _authorityEpoch;
 
     internal Oem1EventGestureBridge(IMsiEventSource eventSource, Oem1GestureRecognizer recognizer)
     {
@@ -28,13 +30,20 @@ internal sealed class Oem1EventGestureBridge : IDisposable
 
     internal void SetCustomAuthority(bool active)
     {
+        var resetRecognizer = false;
         lock (_gate)
         {
             if (_disposed || _customAuthority == active)
                 return;
 
             _customAuthority = active;
-            if (!active)
+            _authorityEpoch++;
+            resetRecognizer = !active;
+        }
+
+        if (resetRecognizer)
+        {
+            lock (_recognizerOperationGate)
                 _recognizer.Reset();
         }
     }
@@ -48,10 +57,13 @@ internal sealed class Oem1EventGestureBridge : IDisposable
 
             _disposed = true;
             _customAuthority = false;
-            _recognizer.Reset();
+            _authorityEpoch++;
             _eventSource.EventReceived -= OnMsiEvent;
             _recognizer.GestureRecognized -= OnGestureRecognized;
         }
+
+        lock (_recognizerOperationGate)
+            _recognizer.Reset();
     }
 
     private void OnMsiEvent(MsiOemEvent msiEvent)
@@ -59,11 +71,25 @@ internal sealed class Oem1EventGestureBridge : IDisposable
         if (msiEvent.Code != CenterMOemCode.Oem1)
             return;
 
+        long authorityEpoch;
         lock (_gate)
         {
             if (_disposed || !_customAuthority)
                 return;
 
+            authorityEpoch = _authorityEpoch;
+        }
+
+        lock (_recognizerOperationGate)
+        {
+            lock (_gate)
+            {
+                if (_disposed || !_customAuthority || authorityEpoch != _authorityEpoch)
+                    return;
+            }
+
+            // Do not hold the bridge gate while entering the recognizer. The recognizer
+            // may synchronously deliver a gesture back to this bridge.
             _recognizer.OnPress();
         }
     }

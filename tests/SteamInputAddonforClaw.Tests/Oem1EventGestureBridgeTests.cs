@@ -293,6 +293,20 @@ public sealed class Oem1EventGestureBridgeTests
     }
 
     [Fact]
+    public async Task Concurrent_timeout_event_and_authority_revocation_complete_without_deadlock()
+    {
+        using var fixture = Create(doubleEnabled: true);
+        fixture.Bridge.SetCustomAuthority(true);
+        fixture.Source.Emit(Oem1());
+
+        var timeout = fixture.Delay.CompleteLastAsync();
+        var revocation = Task.Run(() => fixture.Bridge.SetCustomAuthority(false));
+        await Task.WhenAll(timeout, revocation);
+
+        Assert.InRange(fixture.Results.Count, 0, 1);
+    }
+
+    [Fact]
     public void Bridge_does_not_query_or_depend_on_lifecycle_coordinator()
     {
         using var fixture = Create();

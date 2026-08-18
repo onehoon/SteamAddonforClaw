@@ -60,6 +60,7 @@ internal sealed class Oem1TaskDelay : IOem1GestureDelay
 internal sealed class Oem1GestureRecognizer : IDisposable
 {
     private readonly object _gate = new();
+    private readonly object _deliveryGate = new();
     private readonly bool _doubleClickEnabled;
     private readonly TimeSpan _doubleClickWindow;
     private readonly IOem1GestureDelay _delay;
@@ -67,6 +68,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private readonly IOem1GestureCancellationSourceFactory _cancellationSourceFactory;
     private IOem1GestureCancellationSource? _pendingCancellation;
     private long _generation;
+    private long _deliveryEpoch;
     private bool _firstPressPending;
     private long _firstPressTimestamp;
     private bool _disposed;
@@ -93,6 +95,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     internal void OnPress()
     {
         Oem1Gesture? immediate = null;
+        long immediateDeliveryEpoch = 0;
         long generation = 0;
         CancellationToken token = default;
         var startTimeout = false;
@@ -106,6 +109,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                 if (!_doubleClickEnabled)
                 {
                     immediate = Oem1Gesture.Single;
+                    immediateDeliveryEpoch = _deliveryEpoch;
                 }
                 else if (_firstPressPending)
                 {
@@ -115,6 +119,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                         _generation++;
                         CancelPendingCore();
                         immediate = Oem1Gesture.Double;
+                        immediateDeliveryEpoch = _deliveryEpoch;
                     }
                     else
                     {
@@ -122,6 +127,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                         _generation++;
                         CancelPendingCore();
                         immediate = Oem1Gesture.Single;
+                        immediateDeliveryEpoch = _deliveryEpoch;
                         BeginPendingPressCore(now, out generation, out token);
                         startTimeout = true;
                     }
@@ -132,9 +138,10 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                     startTimeout = true;
                 }
 
-                if (immediate.HasValue)
-                    GestureRecognized?.Invoke(immediate.Value);
             }
+
+            if (immediate.HasValue)
+                DeliverGesture(immediate.Value, immediateDeliveryEpoch);
         }
         finally
         {
@@ -151,8 +158,15 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                 return;
 
             _generation++;
+            _deliveryEpoch++;
             _firstPressPending = false;
             CancelPendingCore();
+        }
+
+        lock (_deliveryGate)
+        {
+            // Establish a synchronous boundary with any delivery that already passed
+            // its generation check.
         }
     }
 
@@ -165,13 +179,21 @@ internal sealed class Oem1GestureRecognizer : IDisposable
 
             _disposed = true;
             _generation++;
+            _deliveryEpoch++;
             _firstPressPending = false;
             CancelPendingCore();
+        }
+
+        lock (_deliveryGate)
+        {
+            // Establish a synchronous boundary with any delivery that already passed
+            // its generation check.
         }
     }
 
     private async Task CompleteSingleAfterTimeoutAsync(long generation, CancellationToken cancellationToken)
     {
+        long deliveryEpoch;
         try
         {
             await _delay.DelayAsync(_doubleClickWindow, cancellationToken).ConfigureAwait(false);
@@ -190,7 +212,23 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             var completedCancellation = _pendingCancellation;
             _pendingCancellation = null;
             completedCancellation?.Dispose();
-            GestureRecognized?.Invoke(Oem1Gesture.Single);
+            deliveryEpoch = _deliveryEpoch;
+        }
+
+        DeliverGesture(Oem1Gesture.Single, deliveryEpoch);
+    }
+
+    private void DeliverGesture(Oem1Gesture gesture, long deliveryEpoch)
+    {
+        lock (_deliveryGate)
+        {
+            lock (_gate)
+            {
+                if (_disposed || deliveryEpoch != _deliveryEpoch)
+                    return;
+            }
+
+            GestureRecognized?.Invoke(gesture);
         }
     }
 
