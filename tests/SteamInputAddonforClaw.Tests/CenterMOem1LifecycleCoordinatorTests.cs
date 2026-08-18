@@ -2887,4 +2887,84 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.Equal(1, h.TerminateInvoker.TerminateCallCount);
         Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
     }
+
+    // ============================================================
+    // Review 4958174221 (BLOCKER): RefreshSuppressionPrerequisites() itself performs
+    // externally-observed work (environment eligibility, AutoRun, Launcher/Server capture) and can
+    // legitimately take real time. A disable/suspend/shutdown request can become request-time-
+    // authoritative WHILE that refresh is still in flight and only then start waiting for _gate --
+    // invisible both to the pre-refresh IsHighPriorityRequestPending check (which already ran) and to
+    // the refresh's own return value (which reflects only OEM1 environment validity, never lifecycle
+    // authority). The final destructive linearization point must re-check the request-time barrier
+    // AGAIN, immediately before CompleteDebounceCore/SafeMainUiTerminator is ever entered.
+    // ============================================================
+
+    [Fact]
+    public async Task DebounceExpiry_HighPriorityRequestBecomesAuthoritativeDuringPrerequisiteRefresh_RefusesTerminationAndLetsHighPriorityRequestProceed()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        // Block the FIRST prerequisite source RefreshSuppressionPrerequisites() consults (environment
+        // eligibility) so the final-checkpoint refresh at debounce expiry is deterministically caught
+        // mid-flight. This runs on the debounce continuation's own background thread (never the test
+        // thread), so blocking synchronously here cannot deadlock the test.
+        var enteredRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.EnvironmentEligible = () =>
+        {
+            enteredRefresh.TrySetResult();
+            releaseRefresh.Task.GetAwaiter().GetResult();
+            return true;
+        };
+
+        var debounceFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnFinished() => debounceFinished.TrySetResult();
+        coordinator.TestOnly_DebounceContinuationFinished += OnFinished;
+        try
+        {
+            h.Delay.Release();
+            await enteredRefresh.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Start a REAL QuiesceForSuspendAsync call while the prerequisite refresh above is
+            // blocked mid-flight. QuiesceForSuspendAsync marks the request-time barrier pending and
+            // bumps the lifecycle epoch SYNCHRONOUSLY, before it ever awaits _gate (which the
+            // debounce continuation currently holds) -- so by the time control returns here, the
+            // request is already authoritative even though it is still waiting for the gate.
+            var suspendTask = coordinator.QuiesceForSuspendAsync(
+                DateTimeOffset.UtcNow.AddSeconds(5), cycle: 1, epoch: 1, CancellationToken.None);
+
+            // Now let the blocked prerequisite refresh return -- it reports the OEM1 environment as
+            // still otherwise valid, exactly as the finding describes.
+            releaseRefresh.SetResult();
+
+            await debounceFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // The debounce must never have entered CompleteDebounceCore/SafeMainUiTerminator despite
+            // the prerequisite refresh reporting valid.
+            Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+            var snap = coordinator.GetSnapshot();
+            Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, snap.State);
+            Assert.NotNull(snap.RealMainUiProcessId);
+            // Note: snap.LastReason is not asserted here -- once the gate is released, the pending
+            // QuiesceForSuspendAsync call can race ahead and overwrite _lastReason with
+            // "SuspendQuiesced" before this snapshot is taken; TerminateCallCount and the tracked
+            // MainUI identity above are the deterministic, race-free evidence that termination never
+            // ran.
+
+            // The pending high-priority request must then acquire the gate and complete normally.
+            var suspended = await suspendTask.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(suspended);
+        }
+        finally
+        {
+            coordinator.TestOnly_DebounceContinuationFinished -= OnFinished;
+        }
+    }
 }

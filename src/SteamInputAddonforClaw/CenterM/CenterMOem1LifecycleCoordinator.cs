@@ -1369,6 +1369,26 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     return;
                 }
 
+                // Review 4958174221 (BLOCKER): RefreshSuppressionPrerequisites() itself performs
+                // several externally-observed operations (environment eligibility, AutoRun, Launcher/
+                // Server capture) and can legitimately take real time. A disable/suspend/shutdown
+                // request can become request-time-authoritative (BeginHighPriorityRequest + epoch
+                // bump) WHILE that refresh is in flight and then sit waiting for _gate -- invisible to
+                // the IsHighPriorityRequestPending check earlier in this method (which ran strictly
+                // before the refresh started) and invisible to the refresh's own return value (which
+                // only reflects OEM1 environment validity, not lifecycle authority). Re-check the
+                // request-time barrier AGAIN here, immediately before ever entering
+                // CompleteDebounceCore/SafeMainUiTerminator -- this is the final destructive
+                // linearization point for this debounce. This is additive to, never a replacement for,
+                // SafeMainUiTerminator's own fresh retained-handle/window/topology checks.
+                if (IsHighPriorityRequestPending)
+                {
+                    _lastReason = "HighPriorityRequestPendingAfterPrerequisiteRefresh";
+                    AppLog.Warn("CenterM.Oem1", "A disable/suspend/shutdown request became pending during the prerequisite refresh; termination refused, tracked real MainUI left intact.", null, ("ProcessId", tracked.ProcessId));
+                    SetState(CenterMOem1LifecycleState.NativeMainUiActive);
+                    return;
+                }
+
                 await CompleteDebounceCore(tracked).ConfigureAwait(false);
             }
             finally
