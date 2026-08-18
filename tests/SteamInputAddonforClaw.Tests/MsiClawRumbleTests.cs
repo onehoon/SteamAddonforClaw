@@ -7,6 +7,12 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class MsiClawRumbleTests
 {
+    [Fact]
+    public void Endpoint_diagnostics_compare_physical_roots_case_insensitively()
+    {
+        Assert.True(WindowsMsiClawRumbleEndpointCatalog.MatchesPhysicalRoot("USB\\VID_0DB0&PID_1902\\A", "usb\\vid_0db0&pid_1902\\a"));
+        Assert.False(WindowsMsiClawRumbleEndpointCatalog.MatchesPhysicalRoot("USB\\VID_0DB0&PID_1902\\A", "USB\\VID_0DB0&PID_1902\\B"));
+    }
     [Theory]
     [InlineData(0, 0)]
     [InlineData(255, 0)]
@@ -203,6 +209,28 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Sink_does_not_cache_failed_endpoint_resolution()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var resolver = new SequenceResolver(new(null, "NoVerifiedEndpoint"), new("path-a", "VerifiedTestEndpoint"));
+        var transport = new FakeTransport();
+        using var sink = new MsiClawRumbleSink(identity, transport, resolver);
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Equal(2, resolver.Calls);
+    }
+
+    [Fact]
+    public void Sink_contains_endpoint_resolver_exceptions()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT"));
+        using var sink = new MsiClawRumbleSink(identity, new FakeTransport(), new ThrowingResolver());
+        var result = sink.SetRumble(TwoMotorRumble.Stopped);
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, result.Status);
+        Assert.Equal("EndpointResolutionException", result.Reason);
+    }
+
+    [Fact]
     public async Task Sink_retirement_barrier_waits_for_admitted_write_and_closes_admission()
     {
         var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
@@ -250,6 +278,22 @@ public sealed class MsiClawRumbleTests
             Calls++;
             return new(identity.DevicePath, "VerifiedTestEndpoint");
         }
+    }
+
+    private sealed class SequenceResolver(params MsiClawRumbleEndpointResolution[] results) : IMsiClawRumbleEndpointResolver
+    {
+        private int _index;
+        public int Calls { get; private set; }
+        public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity)
+        {
+            Calls++;
+            return results[Math.Min(_index++, results.Length - 1)];
+        }
+    }
+
+    private sealed class ThrowingResolver : IMsiClawRumbleEndpointResolver
+    {
+        public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity) => throw new InvalidOperationException("resolver");
     }
 
     private sealed class FakeTransport : IMsiClawRumbleTransport
