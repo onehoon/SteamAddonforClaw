@@ -389,6 +389,30 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task TeardownClearsPendingQuickAccessPulse()
+    {
+        var session = new FakeCanonicalSession();
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        stage.RequestQuickAccessPulse();
+        ticks.Tick();
+        await session.WaitForSetStateCountAsync(1);
+        Assert.Equal((byte)1, session.QuickAccessValues[0]);
+
+        // Stop/teardown must clear the pending pulse via the overlay's Clear() -- not just stop
+        // publishing. Reach into the stage's owned overlay (private field, same-assembly test access
+        // via reflection) to prove Clear() actually ran, independent of whether the stage is ever
+        // reactivated.
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        var overlayField = typeof(CanonicalSteamDeckOutputStage).GetField("_systemButtonOverlay", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var overlay = (SteamDeckSystemButtonOverlay)overlayField.GetValue(stage)!;
+        Assert.Equal((byte)0, overlay.Apply(default).QuickAccess);
+    }
+
+    [Fact]
     public async Task FailedRumblePreflightLeavesRoutingActiveWithoutCallbackOrFinalStop()
     {
         var session = new FakeCanonicalSession();
@@ -868,13 +892,26 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         // Neutral/Remove is instead observed via InputObservedAfterTraceCount below, using tests that
         // drive ticks manually (ManualTicks) for determinism.
         public int InputObservedAfterTraceCount { get; private set; } = -1;
+        public List<byte> QuickAccessValues { get; } = [];
         public bool SetState(SteamDeckDeviceState state)
         {
             if (InputObservedAfterTraceCount < 0) InputObservedAfterTraceCount = Trace.Count;
+            lock (QuickAccessValues) QuickAccessValues.Add(state.QuickAccess);
             ExternalTrace?.Add("PublisherLive");
             InputEntered.TrySetResult();
             if (BlockInput) ReleaseInput.Task.GetAwaiter().GetResult();
             return InputAccepted;
+        }
+
+        public async Task WaitForSetStateCountAsync(int count, TimeSpan? timeout = null)
+        {
+            var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                lock (QuickAccessValues) { if (QuickAccessValues.Count >= count) return; }
+                if (DateTime.UtcNow >= deadline) throw new TimeoutException($"SetState was not called {count} times within the timeout.");
+                await Task.Delay(5);
+            }
         }
 
         public bool SetNeutral()
