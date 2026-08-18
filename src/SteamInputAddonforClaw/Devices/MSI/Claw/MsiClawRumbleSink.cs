@@ -11,6 +11,8 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
     private readonly Lock _sync = new();
     private int _disposed;
     private bool _admissionOpen = true;
+    private long? _endpointGeneration;
+    private MsiClawRumbleEndpointResolution _cachedEndpoint;
 
     internal MsiClawRumbleSink(IMsiClawPhysicalInputIdentityProvider identityProvider, IMsiClawRumbleTransport transport, IMsiClawRumbleEndpointResolver? endpointResolver = null)
     {
@@ -29,7 +31,15 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
             var identity = _identityProvider.CurrentIdentity;
             if (identity is null || string.IsNullOrWhiteSpace(identity.PhysicalIdentity))
                 return new(PhysicalRumbleWriteStatus.Unavailable, "PhysicalIdentityUnavailable");
-            var endpoint = _endpointResolver.Resolve(identity);
+            var generationEndpoint = _identityProvider.CurrentSessionGeneration;
+            var endpoint = _endpointGeneration == generationEndpoint
+                ? _cachedEndpoint
+                : _endpointResolver.Resolve(identity);
+            if (_endpointGeneration != generationEndpoint)
+            {
+                _cachedEndpoint = endpoint;
+                _endpointGeneration = generationEndpoint;
+            }
             if (!endpoint.IsAvailable) return new(PhysicalRumbleWriteStatus.Unavailable, endpoint.Reason);
             var current = _identityProvider.CurrentIdentity;
             if (_identityProvider.CurrentSessionGeneration != generation || !SameIdentity(identity, current))
@@ -70,12 +80,22 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
 
     internal void BeginPhysicalSessionRetirement()
     {
-        lock (_sync) _admissionOpen = false;
+        lock (_sync)
+        {
+            _admissionOpen = false;
+            _endpointGeneration = null;
+            _cachedEndpoint = default;
+        }
     }
 
     internal void BeginPhysicalSession()
     {
-        lock (_sync) _admissionOpen = true;
+        lock (_sync)
+        {
+            _admissionOpen = true;
+            _endpointGeneration = null;
+            _cachedEndpoint = default;
+        }
     }
 
     public void Dispose()

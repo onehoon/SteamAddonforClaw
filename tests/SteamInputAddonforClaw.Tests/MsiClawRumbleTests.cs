@@ -186,6 +186,22 @@ public sealed class MsiClawRumbleTests
         Assert.Empty(transport.Packets);
     }
 
+    [Fact]
+    public void Sink_resolves_endpoint_once_per_session_generation()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var resolver = new CountingResolver();
+        using var sink = new MsiClawRumbleSink(identity, new FakeTransport(), resolver);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Equal(1, resolver.Calls);
+        sink.BeginPhysicalSessionRetirement();
+        identity.Generation = 2;
+        sink.BeginPhysicalSession();
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Equal(2, resolver.Calls);
+    }
+
     private sealed class FakeIdentity(MsiClawPhysicalInputIdentity? identity) : IMsiClawPhysicalInputIdentityProvider
     {
         public MsiClawPhysicalInputIdentity? Current { get; set; } = identity;
@@ -207,6 +223,16 @@ public sealed class MsiClawRumbleTests
             identity.Current = null;
             identity.Generation++;
             return new(value.DevicePath, "VerifiedTestEndpoint");
+        }
+    }
+
+    private sealed class CountingResolver : IMsiClawRumbleEndpointResolver
+    {
+        public int Calls { get; private set; }
+        public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity)
+        {
+            Calls++;
+            return new(identity.DevicePath, "VerifiedTestEndpoint");
         }
     }
 
