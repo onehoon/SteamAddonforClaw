@@ -51,6 +51,10 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     private readonly CenterMMainUiMutexOwnership _mutexOwnership;
     private readonly Func<string, string?> _stager;
     private readonly TimeSpan _helperStopTimeout;
+    /// <summary>Phase 2: retires an already-running real MainUI (tray-resident or visible) before
+    /// the helper/mutex arm sequence below. Null is a valid, fully-Phase-1-compatible configuration
+    /// -- an existing real MainUI then still simply refuses to arm, exactly as before.</summary>
+    private readonly CenterMMainUiRoutingRetirement? _retirement;
     // Guards the ENTIRE Arm/Disarm transaction (not just the _armed flag) -- Arm does multiple
     // sequential native operations (stage, start helper, acquire mutex, re-verify), and a second
     // concurrent Arm/Disarm observing a stale _armed value mid-sequence could stop a helper the
@@ -65,7 +69,8 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         CenterMHelperOwnership? helperOwnership = null,
         CenterMMainUiMutexOwnership? mutexOwnership = null,
         Func<string, string?>? stager = null,
-        TimeSpan? helperStopTimeout = null)
+        TimeSpan? helperStopTimeout = null,
+        CenterMMainUiRoutingRetirement? retirement = null)
     {
         _publishRootProvider = publishRootProvider ?? (() => AppContext.BaseDirectory);
         _processSnapshotSource = processSnapshotSource ?? new Win32ProcessSnapshotSource();
@@ -73,6 +78,7 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         _mutexOwnership = mutexOwnership ?? new CenterMMainUiMutexOwnership();
         _stager = stager ?? CenterMHelperStaging.StageFromPublishRoot;
         _helperStopTimeout = helperStopTimeout ?? TimeSpan.FromSeconds(5);
+        _retirement = retirement;
     }
 
     internal bool IsArmed => _armed;
@@ -104,10 +110,29 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
 
         if (beforeSnapshot.Count > 0)
         {
-            AppLog.Info("CenterM.RoutingGuard", "Real MainUI present; routing guard will not arm.", ("Reason", "RealMainUiPresent"), ("MainUiProcessId", beforeSnapshot[0].ProcessId));
-            return CenterMMainUiRoutingGuardResult.RealMainUiPresent;
+            if (_retirement is null)
+            {
+                // Phase 1 behavior, preserved exactly when no retirement service is configured.
+                AppLog.Info("CenterM.RoutingGuard", "Real MainUI present; routing guard will not arm.", ("Reason", "RealMainUiPresent"), ("MainUiProcessId", beforeSnapshot[0].ProcessId));
+                return CenterMMainUiRoutingGuardResult.RealMainUiPresent;
+            }
+
+            var retirementResult = await _retirement.PrepareExistingMainUiForRoutingAsync(cancellationToken).ConfigureAwait(false);
+            if (retirementResult is not (CenterMMainUiRoutingRetirementResult.NoMainUiPresent or CenterMMainUiRoutingRetirementResult.Retired))
+            {
+                return retirementResult switch
+                {
+                    CenterMMainUiRoutingRetirementResult.IdentityUncertain
+                        or CenterMMainUiRoutingRetirementResult.WindowStateUncertain
+                        or CenterMMainUiRoutingRetirementResult.AbsenceCheckFailed => CenterMMainUiRoutingGuardResult.Uncertain,
+                    _ => CenterMMainUiRoutingGuardResult.RealMainUiPresent
+                };
+            }
         }
 
+        // Do not trust beforeSnapshot for the arm-continuation decision below: retirement (if it
+        // ran) already performed its own fresh absence verification, and if no real MainUI was ever
+        // present this snapshot was already empty.
         var publishRoot = _publishRootProvider();
         var stagedPath = _stager(publishRoot);
         if (stagedPath is null)

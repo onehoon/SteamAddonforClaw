@@ -82,7 +82,11 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         PhysicalInputStage.PhysicalSessionRetired += PhysicalRumbleSink.InvalidatePhysicalSession;
         PhysicalInputSource.TestCompleted += OnPhysicalInputCompleted;
 
-        CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard();
+        // Phase 2: the same already-owned nativeState instance is reused (never a second
+        // MsiClawNativeStateManager) as the guard's read-only native-mode probe, so retirement's
+        // XInput verification observes the exact same authority the real NativeMode stage uses.
+        CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard(
+            retirement: new CenterMMainUiRoutingRetirement(new MsiClawCenterMNativeModeProbe(nativeState)));
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage, CenterMGuardStage];

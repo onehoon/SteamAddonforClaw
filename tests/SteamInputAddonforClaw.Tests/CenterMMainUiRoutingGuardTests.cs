@@ -321,14 +321,140 @@ public sealed class CenterMMainUiRoutingGuardTests
         Assert.Contains("Terminate", helperApi.Calls);
     }
 
+    [Fact]
+    public async Task Existing_tray_resident_mainui_is_retired_before_helper_and_mutex_still_arm()
+    {
+        const int existingMainUiPid = 999;
+        const string expectedPath = @"C:\Program Files\WindowsApps\9426MICRO-STARINTERNATION.64797CC12EF8E_3.0.60630.0_x64__kzh8wxbdkxb8p\MSI Center M\MSI Center M.exe";
+
+        // Shared by the guard's own beforeSnapshot/afterSnapshot checks AND retirement's internal
+        // discovery/recheck/absence calls -- exactly like production, where they are the same
+        // IProcessSnapshotSource instance.
+        var snapshots = new FakeSnapshotSource(
+        [
+            [new ProcessSnapshotEntry(existingMainUiPid, "MSI Center M", expectedPath)], // guard beforeSnapshot
+            [new ProcessSnapshotEntry(existingMainUiPid, "MSI Center M", expectedPath)], // retirement discovery
+            [new ProcessSnapshotEntry(existingMainUiPid, "MSI Center M", expectedPath)], // terminator fresh recheck
+            [], // fresh absence after termination
+            [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)] // guard afterSnapshot (owned helper)
+        ]);
+        var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+        var helperApi = new RecordingHelperApi();
+        var mutexFactory = new FakeMutexFactory();
+
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, existingMainUiPid, "MSI Center M", expectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 0)]);
+        var terminateInvoker = new RecordingTerminateInvoker();
+        var terminator = new CenterMMainUiRoutingTerminator(terminateInvoker, identity, window, snapshots);
+        var retirement = new CenterMMainUiRoutingRetirement(
+            new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput),
+            processSnapshotSource: snapshots,
+            handleOpener: new RealSelfProcessHandleOpener(),
+            identityInspector: identity,
+            windowSnapshotProvider: window,
+            terminator: terminator,
+            minimizeWaitTimeout: TimeSpan.FromMilliseconds(200),
+            xInputWaitTimeout: TimeSpan.FromMilliseconds(200),
+            terminateWaitTimeout: TimeSpan.FromMilliseconds(50));
+
+        var guard = Create(snapshots, stager, helperApi, mutexFactory, retirement);
+
+        var result = await guard.ArmAsync();
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, result);
+        Assert.Equal(1, terminateInvoker.TerminateCallCount);
+        Assert.Equal(1, mutexFactory.CreateCallCount);
+    }
+
+    [Fact]
+    public async Task Retirement_failure_prevents_arm_and_never_starts_the_helper()
+    {
+        const int existingMainUiPid = 999;
+        var snapshots = new FakeSnapshotSource(
+        [
+            [new ProcessSnapshotEntry(existingMainUiPid, "MSI Center M", null)], // guard beforeSnapshot
+            [new ProcessSnapshotEntry(existingMainUiPid, "MSI Center M", null)] // retirement discovery
+        ]);
+        var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+        var helperApi = new RecordingHelperApi();
+        var mutexFactory = new FakeMutexFactory();
+
+        // Package path is unrecognized -> identity mismatch -> retirement refuses to touch it.
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, existingMainUiPid, "MSI Center M", @"C:\evil\MSI Center M.exe")]);
+        var retirement = new CenterMMainUiRoutingRetirement(
+            new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput),
+            processSnapshotSource: snapshots,
+            handleOpener: new RealSelfProcessHandleOpener(),
+            identityInspector: identity);
+
+        var guard = Create(snapshots, stager, helperApi, mutexFactory, retirement);
+
+        var result = await guard.ArmAsync();
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.RealMainUiPresent, result);
+        Assert.False(guard.IsArmed);
+        Assert.False(stager.Called);
+        Assert.Empty(helperApi.Calls);
+    }
+
     private static CenterMMainUiRoutingGuard Create(
-        FakeSnapshotSource snapshots, FakeStager stager, RecordingHelperApi helperApi, FakeMutexFactory mutexFactory) =>
+        FakeSnapshotSource snapshots, FakeStager stager, RecordingHelperApi helperApi, FakeMutexFactory mutexFactory,
+        CenterMMainUiRoutingRetirement? retirement = null) =>
         new(
             publishRootProvider: () => "C:\\fake\\publish",
             processSnapshotSource: snapshots,
             helperOwnership: new CenterMHelperOwnership(helperApi),
             mutexOwnership: new CenterMMainUiMutexOwnership(mutexFactory),
-            stager: stager.Stage);
+            stager: stager.Stage,
+            retirement: retirement);
+
+    private sealed class QueueIdentityInspector(IEnumerable<LiveProcessIdentity> responses) : IProcessIdentityInspector
+    {
+        private readonly Queue<LiveProcessIdentity> _queue = new(responses);
+        private LiveProcessIdentity _last;
+
+        public LiveProcessIdentity Inspect(SafeProcessHandle handle)
+        {
+            if (_queue.Count > 0) _last = _queue.Dequeue();
+            return _last;
+        }
+    }
+
+    private sealed class QueueWindowSnapshotProvider(IEnumerable<MainUiWindowSnapshot?> responses) : IMainUiWindowSnapshotProvider
+    {
+        private readonly Queue<MainUiWindowSnapshot?> _queue = new(responses);
+        private MainUiWindowSnapshot? _last;
+
+        public MainUiWindowSnapshot? Capture(int processId)
+        {
+            if (_queue.Count > 0) _last = _queue.Dequeue();
+            return _last;
+        }
+    }
+
+    private sealed class FixedNativeModeProbe(CenterMNativeModeProbeResult result) : ICenterMNativeModeProbe
+    {
+        public Task<CenterMNativeModeProbeResult> CaptureAsync(CancellationToken cancellationToken) => Task.FromResult(result);
+    }
+
+    private sealed class RecordingTerminateInvoker : ITerminateProcessInvoker
+    {
+        internal int TerminateCallCount { get; private set; }
+        public bool TryTerminate(SafeProcessHandle handle, out int win32Error) { TerminateCallCount++; win32Error = 0; return true; }
+        public bool WaitForExit(SafeProcessHandle handle, TimeSpan timeout) => true;
+    }
+
+    /// <summary>Opens a REAL (non-pseudo) handle to this test process itself -- the
+    /// <c>GetCurrentProcess()</c> pseudo-handle (-1) trips <see cref="SafeProcessHandle"/>'s own
+    /// IsInvalid check when routed through the production <see cref="TrackedCenterMMainUi.Create"/>
+    /// path.</summary>
+    private sealed class RealSelfProcessHandleOpener : IProcessHandleOpener
+    {
+        public SafeProcessHandle Open(int processId, uint desiredAccess) => OpenProcess(desiredAccess, false, Environment.ProcessId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern SafeProcessHandle OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, int processId);
+    }
 
     private sealed class FakeSnapshotSource : IProcessSnapshotSource
     {

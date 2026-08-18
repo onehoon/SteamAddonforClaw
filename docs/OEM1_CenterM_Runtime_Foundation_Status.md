@@ -138,14 +138,10 @@ scheduled first in `RoutingPipelineStageOrder.Forward` (before native-mode/
 PID1902 mutation) and last in `RoutingPipelineStageOrder.Rollback` (after
 native/physical restoration) -- routing cannot begin mutating the physical
 controller until the guard reports `Armed`, and the guard is only released
-after routing has already torn down. If a real MainUI is already present when
-routing tries to enter, arm fails (`RealMainUiPresent`) and routing does not
-start; this PR does **not** terminate an already-running real MainUI
-(`SafeMainUiTerminator` is not invoked here) -- that is an explicit Phase 2
-decision. Every partial arm failure (helper failed to start, mutex
-unavailable, invariant check failed, a foreign same-name process appeared
-mid-arm) unwinds only what that attempt itself acquired and never commits
-Armed.
+after routing has already torn down. Every partial arm failure (helper failed
+to start, mutex unavailable, invariant check failed, a foreign same-name
+process appeared mid-arm) unwinds only what that attempt itself acquired and
+never commits Armed.
 
 This is a separate, narrower composition than `CenterMOem1LifecycleCoordinator`
 (still fully dormant in production, unrelated to this PR) -- no OEM1
@@ -153,9 +149,51 @@ gesture/action/UI behavior is touched. The routing guard owns its own
 dedicated `CenterMHelperOwnership` instance; a future production OEM1
 composition must not create a second same-name helper alongside it.
 
+## Routing-time MainUI existing-instance retirement, Phase 2 (this PR)
+
+Phase 1 unconditionally refused to arm (`RealMainUiPresent`) whenever a real
+MainUI process already existed -- hardware testing confirmed this also blocked
+Test Mode (same canonical pipeline, `EnterOverride`) for the common case of a
+tray-resident real Center M. Phase 2 replaces that unconditional refusal with
+an explicit retirement step, `CenterMMainUiRoutingRetirement`, run inside the
+same serialized `CenterMMainUiRoutingGuard.ArmAsync` transaction, before the
+Phase-1 helper/mutex arm sequence:
+
+- **tray-resident (hidden) MainUI**: verify the physical controller is
+  already stable `XInput` (`ICenterMNativeModeProbe`, wrapping the SAME
+  `MsiClawNativeStateManager` instance the real NativeMode stage uses --
+  never a second one), then terminate the exact process.
+- **visible MainUI**: request a normal `WM_SYSCOMMAND`/`SC_MINIMIZE` (never
+  `ShowWindow(SW_HIDE)`, so Center M runs its own real minimize lifecycle --
+  `GamePadListener` stop -> `GoToXInputMode` -> `ExitProfileConfig` -- research:
+  `MSI_Center_M_MainUI_ControlMode_RE_Report.md`), wait (bounded) for the
+  window to actually hide, then the same XInput verification and termination
+  as the tray path.
+
+Termination itself goes through a new `CenterMMainUiRoutingTerminator` --
+deliberately a SEPARATE type from `SafeMainUiTerminator`, whose existing OEM1
+`SeenVisible` contract is untouched. `CenterMMainUiRoutingTerminator` reuses
+the same identity/evidence shape and `SafeMainUiTerminator.PathMatchesExpectedPackage`,
+but its authority comes from routing being about to take exclusive controller
+ownership plus freshly re-verified identity/window/native-state evidence, not
+from the OEM1 hidden-after-visible lifecycle -- a tray-only MainUI that was
+never observed visible by this process (`StartingOrHiddenNeverVisible` in
+`MainUiLifecycleObserver` terms) is a valid routing-retirement candidate even
+though it still correctly refuses `SafeMainUiTerminator`'s own OEM1 API.
+Only the exact retained `MSI Center M.exe` process handle is ever terminated;
+`MSI_Center_M_Server.exe`, `MSI_Center_M_Launcher.exe`, and
+`MSI_Center_M_Server_ControlMode.exe` are never touched.
+
+Every uncertain/ambiguous outcome (enumeration uncertain, multiple same-name
+candidates, identity/package-path mismatch, minimize command failure/timeout,
+native mode never confirmed XInput, termination failure/timeout, another real
+MainUI present after retirement) fails routing entry before any native-mode/
+PID1902 mutation and before any helper/mutex commitment -- retirement never
+guesses, and Test Mode and normal Steam routing share this exact behavior
+(same canonical `CenterMGuard` stage, same `StockCenterM` plan).
+
 **Hardware validation is required and has not been performed.** See
-`docs/VIIPER_MIGRATION_TODO.md` SD3 for the required first hardware test
-checklist.
+`docs/VIIPER_MIGRATION_TODO.md` SD3 for the required hardware test checklist.
 
 ## PR3+ (not started) — settings / UI / production composition
 
