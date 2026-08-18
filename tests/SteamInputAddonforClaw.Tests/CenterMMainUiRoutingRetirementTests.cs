@@ -306,6 +306,30 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Late_hidden_observation_past_the_deadline_is_still_classified_as_timeout()
+    {
+        // The configured timeout is shorter than the poll interval, and the provider only reports
+        // Hidden on the sample that arrives after the budget has already elapsed (e.g. Capture()
+        // itself took longer than the remaining budget). A poll loop that only checked the deadline
+        // BEFORE capturing would wake up, see it hadn't timed out yet when it started waiting, then
+        // accept this late Hidden as an in-budget success -- that must never happen.
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new SlowThenHiddenWindowSnapshotProvider(
+            initialSnapshot: new MainUiWindowSnapshot(true, 1, 1),
+            delayedHiddenSnapshot: new MainUiWindowSnapshot(true, 1, 0),
+            captureDelay: TimeSpan.FromMilliseconds(80));
+        var (retirement, invoker, windowController) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            minimizeWaitTimeout: TimeSpan.FromMilliseconds(30), minimizeWaitPollInterval: TimeSpan.FromMilliseconds(200));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.MinimizeTimedOut, result);
+        Assert.Equal(1, windowController.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
     public async Task Window_snapshot_uncertain_during_minimize_wait_is_classified_as_uncertain_not_timeout()
     {
         var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
@@ -497,7 +521,7 @@ public sealed class CenterMMainUiRoutingRetirementTests
     private static (CenterMMainUiRoutingRetirement Retirement, RecordingInvoker Invoker, FixedWindowController WindowController) Create(
         QueueProcessSnapshotSource snapshotSource,
         QueueIdentityInspector? identityInspector = null,
-        QueueWindowSnapshotProvider? windowSnapshotProvider = null,
+        IMainUiWindowSnapshotProvider? windowSnapshotProvider = null,
         ICenterMNativeModeProbe? nativeModeProbe = null,
         CenterMMainUiMinimizeResult minimizeResult = CenterMMainUiMinimizeResult.Requested,
         IProcessHandleOpener? handleOpener = null,
@@ -565,6 +589,29 @@ public sealed class CenterMMainUiRoutingRetirementTests
         {
             if (_queue.Count > 0) _last = _queue.Dequeue();
             return _last;
+        }
+    }
+
+    /// <summary>Returns <paramref name="initialSnapshot"/> on the first call (the upfront
+    /// visibility check), then sleeps <paramref name="captureDelay"/> before returning
+    /// <paramref name="delayedHiddenSnapshot"/> on every call after that -- simulates a Capture()
+    /// that is itself slow enough to cross the wait deadline while it runs, so the caller must
+    /// re-check the deadline after the call returns rather than trusting a pre-call check.</summary>
+    private sealed class SlowThenHiddenWindowSnapshotProvider(
+        MainUiWindowSnapshot initialSnapshot, MainUiWindowSnapshot delayedHiddenSnapshot, TimeSpan captureDelay) : IMainUiWindowSnapshotProvider
+    {
+        private bool _first = true;
+
+        public MainUiWindowSnapshot? Capture(int processId)
+        {
+            if (_first)
+            {
+                _first = false;
+                return initialSnapshot;
+            }
+
+            Thread.Sleep(captureDelay);
+            return delayedHiddenSnapshot;
         }
     }
 

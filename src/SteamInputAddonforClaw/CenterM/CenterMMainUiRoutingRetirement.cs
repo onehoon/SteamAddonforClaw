@@ -306,19 +306,38 @@ internal sealed class CenterMMainUiRoutingRetirement
     /// silently extend this safety wait well past its nominal timeout. A <see langword="null"/>
     /// snapshot (enumeration failure) is reported as <see cref="MainUiHideWaitStatus.Uncertain"/>,
     /// distinct from and never conflated with <see cref="MainUiHideWaitStatus.TimedOut"/> (the
-    /// window was observed, just never became hidden in time).</summary>
+    /// window was observed, just never became hidden in time). <see cref="_minimizeWaitTimeout"/>
+    /// is a true deadline: the elapsed budget is re-checked immediately before AND after each
+    /// capture, so a Hidden observation obtained after the deadline already elapsed (e.g. because
+    /// the poll interval is longer than the remaining budget) is never accepted as an in-budget
+    /// transition -- it is reported as TimedOut instead.</summary>
     private async Task<MainUiHideWaitResult> WaitUntilHiddenOrExitedAsync(int processId, CancellationToken cancellationToken)
     {
         var started = Stopwatch.GetTimestamp();
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            // Check the deadline BEFORE capturing: a capture obtained after the configured budget
+            // already elapsed must not be accepted as an in-budget Hidden transition merely because
+            // the poll loop happened to wake up late (e.g. timeout shorter than the poll interval).
+            if (Stopwatch.GetElapsedTime(started) >= _minimizeWaitTimeout)
+                return new(MainUiHideWaitStatus.TimedOut, null);
+
             var snapshot = _windowSnapshotProvider.Capture(processId);
             if (snapshot is null) return new(MainUiHideWaitStatus.Uncertain, null);
+
+            // Capture is synchronous but not instantaneous -- re-check the deadline before trusting
+            // this snapshot as a fresh, in-budget observation.
+            if (Stopwatch.GetElapsedTime(started) >= _minimizeWaitTimeout)
+                return new(MainUiHideWaitStatus.TimedOut, snapshot);
+
             if (!snapshot.Value.ProcessAlive) return new(MainUiHideWaitStatus.Exited, snapshot);
             if (snapshot.Value.VisibleMainWindowCount == 0) return new(MainUiHideWaitStatus.Hidden, snapshot);
-            if (Stopwatch.GetElapsedTime(started) >= _minimizeWaitTimeout) return new(MainUiHideWaitStatus.TimedOut, snapshot);
-            await Task.Delay(_minimizeWaitPollInterval, cancellationToken).ConfigureAwait(false);
+
+            var remaining = _minimizeWaitTimeout - Stopwatch.GetElapsedTime(started);
+            var delay = remaining < _minimizeWaitPollInterval ? remaining : _minimizeWaitPollInterval;
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         }
     }
 
