@@ -26,6 +26,14 @@ internal enum HelperStartResult
 internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null) : IDisposable
 {
     private readonly IHelperProcessNativeApi _api = api ?? new Win32HelperProcessNativeApi();
+    // Serializes Start/Stop/Dispose so the "exactly one owned helper" invariant holds regardless
+    // of caller scheduling, not merely against a strictly sequential caller: without this, two
+    // concurrent Start() calls could both observe IsOwned == false, both create/assign/resume a
+    // suspended helper, and only afterward race to overwrite the owned handles/ProcessId --
+    // recreating the same-name invariant violation and lost-ownership bug this class exists to
+    // prevent. The lock is held across each method's entire native-call sequence (not just the
+    // IsOwned check), so only one such sequence can ever be in flight at a time.
+    private readonly Lock _sync = new();
     private SafeProcessHandle? _processHandle;
     private SafeHandle? _jobHandle;
 
@@ -38,8 +46,14 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     /// silently lose ownership of the first, which would both violate the Armed same-name
     /// invariant and leave the first Job/process handles to nondeterministic finalization instead
     /// of explicit lifecycle ownership. Callers that intend to replace an owned helper must call
-    /// <see cref="Stop"/> first.</summary>
+    /// <see cref="Stop"/> first. Internally serialized: this remains true even under concurrent
+    /// callers.</summary>
     internal HelperStartResult Start(string imagePath)
+    {
+        lock (_sync) return StartCore(imagePath);
+    }
+
+    private HelperStartResult StartCore(string imagePath)
     {
         if (IsOwned) return HelperStartResult.AlreadyOwned;
 
@@ -101,15 +115,18 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     }
 
     /// <summary>Stops the owned helper via its retained handle (never by re-querying PID) and
-    /// releases ownership. Idempotent.</summary>
+    /// releases ownership. Idempotent. Internally serialized against Start/Dispose.</summary>
     internal bool Stop(TimeSpan waitTimeout)
     {
-        if (_processHandle is null) return true;
+        lock (_sync)
+        {
+            if (_processHandle is null) return true;
 
-        var terminated = _api.TryTerminate(_processHandle, out _) && _api.WaitForExit(_processHandle, waitTimeout);
-        AppLog.Info("CenterM.Helper", "Helper stopped.", ("Terminated", terminated), ("ProcessId", ProcessId));
-        Dispose();
-        return terminated;
+            var terminated = _api.TryTerminate(_processHandle, out _) && _api.WaitForExit(_processHandle, waitTimeout);
+            AppLog.Info("CenterM.Helper", "Helper stopped.", ("Terminated", terminated), ("ProcessId", ProcessId));
+            DisposeCore();
+            return terminated;
+        }
     }
 
     private void TerminateSuspended(SafeProcessHandle processHandle)
@@ -120,6 +137,11 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     }
 
     public void Dispose()
+    {
+        lock (_sync) DisposeCore();
+    }
+
+    private void DisposeCore()
     {
         _processHandle?.Dispose();
         _jobHandle?.Dispose();

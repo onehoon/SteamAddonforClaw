@@ -23,8 +23,13 @@ namespace SteamInputAddonforClaw.Tests;
 /// against the exact same staged artifact) to a VSTest-host-specific process-tree interaction, not
 /// a defect in CenterMHelperOwnership/CenterMHelperStaging: the identical sequence against the
 /// identical file is reliable from a standalone process and unreliable only as a `dotnet test`
-/// descendant. Skipped under the normal test run for that reason; run manually (remove the Skip)
-/// to verify end-to-end after any change to helper packaging/creation.
+/// descendant. Skipped under the normal test run for that reason.
+///
+/// The actual non-skipped CI regression coverage for this scenario is
+/// scripts/verify-centerm-helper-smoke.ps1, which builds and runs
+/// SteamInputAddonforClaw.CenterMHelperSmoke -- a plain console executable (not a VSTest
+/// descendant) that exercises this exact scenario against a real publish output. This test remains
+/// here, with Skip removable, for interactive debugging in an IDE test runner.
 /// </summary>
 public sealed class CenterMHelperIntegrationTests
 {
@@ -36,7 +41,7 @@ public sealed class CenterMHelperIntegrationTests
         Assert.True(File.Exists(sourceBinary),
             $"Expected the CenterMHelper publish output at '{sourceBinary}'. Build the solution (which publishes the helper as part of SteamInputAddonforClaw's build) before running this test.");
 
-        var stagedPath = CenterMHelperStaging.Stage(sourceDirectory);
+        var stagedPath = CenterMHelperStaging.StageFromPublishRoot(sourceDirectory);
         Assert.NotNull(stagedPath);
         Assert.Equal("MSI Center M.exe", Path.GetFileName(stagedPath));
 

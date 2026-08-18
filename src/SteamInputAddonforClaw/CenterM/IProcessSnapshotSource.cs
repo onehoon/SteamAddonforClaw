@@ -10,15 +10,25 @@ internal readonly record struct ProcessSnapshotEntry(int ProcessId, string Proce
 /// all of that logic can be unit tested without touching real OS process state.</summary>
 internal interface IProcessSnapshotSource
 {
-    IReadOnlyList<ProcessSnapshotEntry> GetProcessesByName(string processName);
+    /// <summary>Returns null when enumeration itself failed (uncertain), which callers must treat
+    /// as a distinct safety fact from "enumerated successfully and found zero matches" -- an empty
+    /// list is a confident negative; null is not.</summary>
+    IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName);
 }
 
 internal sealed class Win32ProcessSnapshotSource : IProcessSnapshotSource
 {
-    public IReadOnlyList<ProcessSnapshotEntry> GetProcessesByName(string processName)
+    public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName)
     {
+        System.Diagnostics.Process[] processes;
+        try { processes = System.Diagnostics.Process.GetProcessesByName(processName); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+
         var results = new List<ProcessSnapshotEntry>();
-        foreach (var process in System.Diagnostics.Process.GetProcessesByName(processName))
+        foreach (var process in processes)
         {
             using (process)
             {

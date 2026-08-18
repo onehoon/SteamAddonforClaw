@@ -103,6 +103,13 @@ jobs:
           -File scripts/verify-publish-assets.ps1
           -PublishDirectory artifacts/publish
 
+      - name: CenterM helper staged-artifact smoke test
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass
+          -File scripts/verify-centerm-helper-smoke.ps1
+          -PublishDirectory artifacts/publish
+          -Configuration Release
+
       - name: Startup process smoke test
         shell: pwsh
         run: |

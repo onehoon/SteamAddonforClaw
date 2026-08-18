@@ -67,8 +67,16 @@ internal sealed class ManagementEventWatcherAdapter : IManagementEventWatcherAda
 internal sealed class WmiMsiEventSource : IMsiEventSource
 {
     private readonly IManagementEventWatcherAdapter _adapter;
-    private int _disposed;
-    private int _started;
+    // Serializes Start/Dispose against each other: without this, Start() could observe
+    // "not disposed" and then, mid-way through subscribing/calling into the adapter, lose a race
+    // with a concurrent Dispose() that already unsubscribed/disposed the adapter -- reaching
+    // TryStart() on an already-disposed native watcher. Holding this lock across each method's
+    // entire adapter interaction guarantees subscribe/start and stop/unsubscribe/dispose can never
+    // interleave across the disposal boundary, at the cost of Dispose() blocking until any
+    // in-flight Start() finishes -- an acceptable, bounded wait for a one-shot lifecycle gate.
+    private readonly Lock _sync = new();
+    private bool _disposed;
+    private bool _started;
 
     internal WmiMsiEventSource(IManagementEventWatcherAdapter? adapter = null) =>
         _adapter = adapter ?? new ManagementEventWatcherAdapter();
@@ -80,23 +88,28 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
     /// risking a duplicated subscription or touching an already-disposed native watcher.</summary>
     public bool Start()
     {
-        if (Volatile.Read(ref _disposed) != 0) return false;
-        if (Interlocked.CompareExchange(ref _started, 1, 0) != 0) return false;
+        lock (_sync)
+        {
+            if (_disposed || _started) return false;
+            _started = true;
 
-        _adapter.MsiEventArrived += OnMsiEventArrived;
-        if (_adapter.TryStart(out var error)) return true;
+            _adapter.MsiEventArrived += OnMsiEventArrived;
+            if (_adapter.TryStart(out var error)) return true;
 
-        _adapter.MsiEventArrived -= OnMsiEventArrived;
-        _started = 0;
-        AppLog.Warn("CenterM.MsiEvent", "MSI_Event WMI watcher failed to start.", error);
-        return false;
+            _adapter.MsiEventArrived -= OnMsiEventArrived;
+            _started = false;
+            AppLog.Warn("CenterM.MsiEvent", "MSI_Event WMI watcher failed to start.", error);
+            return false;
+        }
     }
 
     private void OnMsiEventArrived(object? propertyValue)
     {
         // Dispose-race guard: a callback already in flight when Dispose() runs must not raise
-        // EventReceived to subscribers that may have already torn down.
-        if (Volatile.Read(ref _disposed) != 0) return;
+        // EventReceived to subscribers that may have already torn down. A quick lock-protected
+        // read keeps this check consistent with the same _disposed flag Start/Dispose transition
+        // under, without holding the lock for the parse/forward work itself.
+        lock (_sync) { if (_disposed) return; }
         if (!TryParseRawCode(propertyValue, out var rawCode)) return;
         EventReceived?.Invoke(new MsiOemEvent(rawCode, CenterMOemEventMapper.Classify(rawCode)));
     }
@@ -124,8 +137,12 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        _adapter.MsiEventArrived -= OnMsiEventArrived;
+        lock (_sync)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _adapter.MsiEventArrived -= OnMsiEventArrived;
+        }
         _adapter.Dispose();
     }
 }

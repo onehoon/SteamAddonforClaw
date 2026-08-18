@@ -9,20 +9,27 @@ namespace SteamInputAddonforClaw.CenterM;
 /// in-place update in progress.</summary>
 internal static class CenterMHelperStaging
 {
-    private const string SourceBinaryName = "CenterMHelper.exe";
+    /// <summary>The exact subdirectory + filename CopyCenterMHelperOutput (in
+    /// SteamInputAddonforClaw.csproj) publishes the helper to, alongside this app's own output/
+    /// publish directory. This is the one place that layout contract is spelled out -- callers
+    /// pass the publish/output root, never this subpath, so production and any test/smoke tooling
+    /// can never drift out of sync with each other.</summary>
+    private static readonly string SourceRelativePath = Path.Combine("CenterMHelperSource", "CenterMHelper.exe");
     private const string StagedBinaryName = "MSI Center M.exe";
 
     internal static string RuntimeDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonForClaw", "Runtime", "CenterM");
 
-    /// <summary>Copies the helper next to <paramref name="sourceDirectory"/>'s built binary into
-    /// the runtime directory. Returns null (staging failed) rather than throwing -- callers must
-    /// treat that as "helper start not permitted", not attempt to run it anyway.</summary>
-    internal static string? Stage(string sourceDirectory)
+    /// <summary>Copies the helper from <paramref name="publishRoot"/> (this app's own output or
+    /// publish directory -- the same root CopyCenterMHelperOutput writes
+    /// CenterMHelperSource\CenterMHelper.exe into) into the runtime directory. Returns null
+    /// (staging failed) rather than throwing -- callers must treat that as "helper start not
+    /// permitted", not attempt to run it anyway.</summary>
+    internal static string? StageFromPublishRoot(string publishRoot)
     {
         try
         {
-            var sourcePath = Path.Combine(sourceDirectory, SourceBinaryName);
+            var sourcePath = Path.Combine(publishRoot, SourceRelativePath);
             if (!File.Exists(sourcePath))
             {
                 AppLog.Warn("CenterM.Helper", "Helper source binary not found.", null, ("SourcePath", sourcePath));

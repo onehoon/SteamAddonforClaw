@@ -14,9 +14,13 @@ internal sealed class CenterMBackendProbe(IProcessSnapshotSource? processes = nu
 
     internal CenterMBackendSnapshot Capture()
     {
-        var launcher = _processes.GetProcessesByName(CenterMProcessNames.Launcher);
-        var server = _processes.GetProcessesByName(CenterMProcessNames.Server);
-        var controlMode = _processes.GetProcessesByName(CenterMProcessNames.ServerControlMode);
+        // Enumeration uncertainty (null) is treated as "not confidently present" here -- the same
+        // fail-closed direction as an empty result, since this snapshot only has a presence/PID
+        // shape to report through, and a prerequisite that cannot be confirmed present must not be
+        // treated as ready.
+        var launcher = _processes.GetProcessesByName(CenterMProcessNames.Launcher) ?? [];
+        var server = _processes.GetProcessesByName(CenterMProcessNames.Server) ?? [];
+        var controlMode = _processes.GetProcessesByName(CenterMProcessNames.ServerControlMode) ?? [];
 
         return new CenterMBackendSnapshot(
             launcher.Count > 0, launcher.Count > 0 ? launcher[0].ProcessId : null,

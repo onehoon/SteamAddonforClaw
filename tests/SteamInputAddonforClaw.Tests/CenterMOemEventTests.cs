@@ -98,6 +98,37 @@ public sealed class CenterMOemEventTests
         Assert.Equal(CenterMOemCode.Oem1, received.Value.Code);
     }
 
+    [Fact]
+    public async Task Start_racing_Dispose_never_throws_never_starts_after_disposal_never_delivers_after_disposal()
+    {
+        var adapter = new BlockingManagementEventWatcherAdapter();
+        var source = new WmiMsiEventSource(adapter);
+
+        var startTask = Task.Run(() => source.Start());
+        // Wait until Start() is genuinely inside TryStart (holding the lock), not just scheduled.
+        Assert.True(adapter.TryStartEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        // Dispose() must now block on the same lock until Start() finishes -- give it a moment to
+        // actually attempt that (a Task that "hasn't run yet" would make this test meaningless).
+        var disposeTask = Task.Run(source.Dispose);
+        await Task.Delay(50);
+
+        adapter.ReleaseTryStart();
+
+        var started = await startTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Started successfully (TryStart returned true) before Dispose could ever run -- exactly
+        // one TryStart call, never a second one triggered by any interleaving.
+        Assert.True(started);
+        Assert.Equal(1, adapter.TryStartCallCount);
+
+        var receivedCount = 0;
+        source.EventReceived += _ => receivedCount++;
+        adapter.Raise(0x220029);
+        Assert.Equal(0, receivedCount);
+    }
+
     private sealed class FakeManagementEventWatcherAdapter(bool startSucceeds) : IManagementEventWatcherAdapter
     {
         internal int TryStartCallCount { get; private set; }
@@ -111,6 +142,32 @@ public sealed class CenterMOemEventTests
             return startSucceeds;
         }
 
+        internal void Raise(object? rawPropertyValue) => MsiEventArrived?.Invoke(rawPropertyValue);
+
+        public void Dispose() { }
+    }
+
+    /// <summary>Blocks inside TryStart until explicitly released, so a test can deterministically
+    /// prove a concurrent Dispose() cannot interleave with an in-flight Start() -- it must wait for
+    /// the lock instead.</summary>
+    private sealed class BlockingManagementEventWatcherAdapter : IManagementEventWatcherAdapter
+    {
+        private readonly ManualResetEventSlim _release = new(false);
+        internal readonly ManualResetEventSlim TryStartEntered = new(false);
+        internal int TryStartCallCount { get; private set; }
+
+        public event Action<object?>? MsiEventArrived;
+
+        public bool TryStart(out Exception? error)
+        {
+            TryStartCallCount++;
+            TryStartEntered.Set();
+            _release.Wait(TimeSpan.FromSeconds(10));
+            error = null;
+            return true;
+        }
+
+        internal void ReleaseTryStart() => _release.Set();
         internal void Raise(object? rawPropertyValue) => MsiEventArrived?.Invoke(rawPropertyValue);
 
         public void Dispose() { }

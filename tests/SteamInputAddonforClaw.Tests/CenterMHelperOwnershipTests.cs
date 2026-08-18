@@ -111,6 +111,34 @@ public sealed class CenterMHelperOwnershipTests
     }
 
     [Fact]
+    public async Task ConcurrentStart_OnlyOneCreateSuspendedSequenceRuns_LoserGetsAlreadyOwned()
+    {
+        var blocker = new ManualResetEventSlim(false);
+        var api = new RecordingApi { CreateSuspendedBlocker = blocker };
+        var ownership = new CenterMHelperOwnership(api);
+
+        var firstTask = Task.Run(() => ownership.Start(@"C:\fake\MSI Center M.exe"));
+        // Wait until the first Start() is genuinely inside TryCreateSuspended (holding the lock),
+        // not just scheduled.
+        Assert.True(api.CreateSuspendedEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        // The second Start() must now block on the same lock -- give it a moment to actually
+        // attempt that (a Task that "hasn't run yet" would make this test meaningless).
+        var secondTask = Task.Run(() => ownership.Start(@"C:\fake\MSI Center M.exe"));
+        await Task.Delay(50);
+
+        blocker.Set();
+
+        var firstResult = await firstTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var secondResult = await secondTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(HelperStartResult.Started, firstResult);
+        Assert.Equal(HelperStartResult.AlreadyOwned, secondResult);
+        Assert.Equal(1, api.CreateSuspendedCallCount);
+        Assert.True(ownership.IsOwned);
+    }
+
+    [Fact]
     public void Stop_TerminatesViaRetainedHandle_Idempotent()
     {
         var api = new RecordingApi();
@@ -137,9 +165,19 @@ public sealed class CenterMHelperOwnershipTests
         internal bool AssignSucceeds { get; init; } = true;
         internal bool ResumeSucceeds { get; init; } = true;
 
+        /// <summary>When set, TryCreateSuspended signals <see cref="CreateSuspendedEntered"/> and
+        /// blocks until this is released -- lets a test prove a concurrent Start() call is
+        /// genuinely serialized behind the lock, not merely observed to "happen to" run second.</summary>
+        internal ManualResetEventSlim? CreateSuspendedBlocker { get; init; }
+        internal ManualResetEventSlim CreateSuspendedEntered { get; } = new(false);
+        internal int CreateSuspendedCallCount { get; private set; }
+
         public bool TryCreateSuspended(string imagePath, out int processId, out SafeProcessHandle? processHandle, out SafeHandle? threadHandle, out int win32Error)
         {
             Calls.Add("CreateSuspended");
+            CreateSuspendedCallCount++;
+            CreateSuspendedEntered.Set();
+            CreateSuspendedBlocker?.Wait(TimeSpan.FromSeconds(10));
             win32Error = 0;
             if (!CreateSucceeds)
             {

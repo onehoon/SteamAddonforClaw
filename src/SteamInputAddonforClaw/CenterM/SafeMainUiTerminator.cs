@@ -31,7 +31,8 @@ internal readonly record struct SafeMainUiTerminationEvidence(
     string? CurrentExecutablePath,
     bool SeenVisible,
     MainUiWindowSnapshot? FreshWindowSnapshot,
-    bool AdditionalForeignMainUiExists);
+    bool AdditionalForeignMainUiExists,
+    bool SameNameEnumerationUncertain = false);
 
 /// <summary>Native TerminateProcess/WaitForSingleObject seam, isolated so termination decision
 /// logic can be unit tested without ever calling into a real process.</summary>
@@ -96,8 +97,21 @@ internal sealed class SafeMainUiTerminator(
     /// </summary>
     internal SafeMainUiTerminationResult TryTerminate(TrackedCenterMMainUi tracked, bool seenVisible, TimeSpan waitTimeout)
     {
-        var evidence = CaptureFreshEvidence(tracked, seenVisible);
-        var result = Evaluate(tracked, evidence);
+        SafeMainUiTerminationResult result;
+        try
+        {
+            var evidence = CaptureFreshEvidence(tracked, seenVisible);
+            result = Evaluate(tracked, evidence);
+        }
+        catch (Exception ex)
+        {
+            // Fail-open contract: a capture seam throwing unexpectedly must never escape this
+            // method or be mistaken for a green light to terminate -- it is exactly as uncertain
+            // as a seam that returned an explicit "could not determine" result.
+            AppLog.Warn("CenterM.MainUi", "Fresh termination evidence capture failed.", ex, ("ProcessId", tracked.ProcessId));
+            return SafeMainUiTerminationResult.IdentityUncertain;
+        }
+
         AppLog.Info("CenterM.MainUi", "Safe MainUI termination evaluated.", ("Result", result), ("ProcessId", tracked.ProcessId));
 
         if (result != SafeMainUiTerminationResult.Terminated) return result;
@@ -125,7 +139,6 @@ internal sealed class SafeMainUiTerminator(
 
         var windowSnapshot = _windowProvider.Capture(tracked.ProcessId);
         var sameNameProcesses = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
-        var foreignExists = sameNameProcesses.Any(p => p.ProcessId != tracked.ProcessId);
 
         return new SafeMainUiTerminationEvidence(
             HandleStillValid: true,
@@ -135,7 +148,8 @@ internal sealed class SafeMainUiTerminator(
             CurrentExecutablePath: identity.ExecutablePath,
             SeenVisible: seenVisible,
             FreshWindowSnapshot: windowSnapshot,
-            AdditionalForeignMainUiExists: foreignExists);
+            AdditionalForeignMainUiExists: sameNameProcesses?.Any(p => p.ProcessId != tracked.ProcessId) ?? false,
+            SameNameEnumerationUncertain: sameNameProcesses is null);
     }
 
     /// <summary>Pure precondition evaluation, independently unit-testable. Returns
@@ -163,6 +177,9 @@ internal sealed class SafeMainUiTerminator(
 
         if (evidence.FreshWindowSnapshot.Value.VisibleMainWindowCount > 0)
             return SafeMainUiTerminationResult.VisibleAgain;
+
+        if (evidence.SameNameEnumerationUncertain)
+            return SafeMainUiTerminationResult.IdentityUncertain;
 
         if (evidence.AdditionalForeignMainUiExists)
             return SafeMainUiTerminationResult.AdditionalMainUiDetected;

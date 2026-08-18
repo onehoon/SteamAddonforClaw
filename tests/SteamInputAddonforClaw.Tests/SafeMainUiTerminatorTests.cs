@@ -201,6 +201,63 @@ public sealed class SafeMainUiTerminatorTests
         Assert.Equal(SafeMainUiTerminationResult.WaitTimedOut, result);
     }
 
+    [Fact]
+    public void TryTerminate_SameNameEnumerationUncertain_ReturnsIdentityUncertain_DoesNotTerminate()
+    {
+        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
+        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
+        var terminator = new SafeMainUiTerminator(
+            invoker,
+            new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource(null)); // enumeration could not be confirmed
+
+        var result = terminator.TryTerminate(tracked, seenVisible: true, TimeSpan.FromSeconds(1));
+
+        Assert.Equal(SafeMainUiTerminationResult.IdentityUncertain, result);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Theory]
+    [InlineData("identity")]
+    [InlineData("window")]
+    [InlineData("processSnapshot")]
+    public void TryTerminate_CaptureSeamThrows_FailsOpenToIdentityUncertain_DoesNotTerminate(string throwingSeam)
+    {
+        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
+        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
+        IProcessIdentityInspector identityInspector = throwingSeam == "identity"
+            ? new ThrowingIdentityInspector()
+            : new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath);
+        IMainUiWindowSnapshotProvider windowProvider = throwingSeam == "window"
+            ? new ThrowingWindowProvider()
+            : new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0));
+        IProcessSnapshotSource processSnapshotSource = throwingSeam == "processSnapshot"
+            ? new ThrowingProcessSnapshotSource()
+            : new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]);
+        var terminator = new SafeMainUiTerminator(invoker, identityInspector, windowProvider, processSnapshotSource);
+
+        var result = terminator.TryTerminate(tracked, seenVisible: true, TimeSpan.FromSeconds(1));
+
+        Assert.Equal(SafeMainUiTerminationResult.IdentityUncertain, result);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    private sealed class ThrowingIdentityInspector : IProcessIdentityInspector
+    {
+        public LiveProcessIdentity Inspect(SafeProcessHandle handle) => throw new InvalidOperationException("boom");
+    }
+
+    private sealed class ThrowingWindowProvider : IMainUiWindowSnapshotProvider
+    {
+        public MainUiWindowSnapshot? Capture(int processId) => throw new InvalidOperationException("boom");
+    }
+
+    private sealed class ThrowingProcessSnapshotSource : IProcessSnapshotSource
+    {
+        public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName) => throw new InvalidOperationException("boom");
+    }
+
     private sealed class RecordingInvoker(bool terminateSucceeds, bool waitSucceeds) : ITerminateProcessInvoker
     {
         internal int TerminateCallCount { get; private set; }
@@ -225,8 +282,8 @@ public sealed class SafeMainUiTerminatorTests
         public MainUiWindowSnapshot? Capture(int processId) => snapshot;
     }
 
-    private sealed class FakeProcessSnapshotSource(IReadOnlyList<ProcessSnapshotEntry> entries) : IProcessSnapshotSource
+    private sealed class FakeProcessSnapshotSource(IReadOnlyList<ProcessSnapshotEntry>? entries) : IProcessSnapshotSource
     {
-        public IReadOnlyList<ProcessSnapshotEntry> GetProcessesByName(string processName) => entries;
+        public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName) => entries;
     }
 }

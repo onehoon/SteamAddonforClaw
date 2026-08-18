@@ -33,12 +33,24 @@ public sealed class CenterMBackendProbeTests
         Assert.False(snapshot.ControlModePresent);
     }
 
-    private sealed class FakeProcessSnapshotSource : IProcessSnapshotSource
+    [Fact]
+    public void Capture_treats_enumeration_uncertainty_as_absent_not_present()
+    {
+        var processes = new FakeProcessSnapshotSource(enumerationUncertain: true);
+
+        var snapshot = new CenterMBackendProbe(processes).Capture();
+
+        Assert.False(snapshot.LauncherPresent);
+        Assert.False(snapshot.ServerPresent);
+        Assert.False(snapshot.ControlModePresent);
+    }
+
+    private sealed class FakeProcessSnapshotSource(bool enumerationUncertain = false) : IProcessSnapshotSource
     {
         private readonly Dictionary<string, ProcessSnapshotEntry> _entries = [];
         internal void Set(string name, ProcessSnapshotEntry entry) => _entries[name] = entry;
 
-        public IReadOnlyList<ProcessSnapshotEntry> GetProcessesByName(string processName) =>
-            _entries.TryGetValue(processName, out var entry) ? [entry] : [];
+        public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName) =>
+            enumerationUncertain ? null : _entries.TryGetValue(processName, out var entry) ? [entry] : [];
     }
 }
