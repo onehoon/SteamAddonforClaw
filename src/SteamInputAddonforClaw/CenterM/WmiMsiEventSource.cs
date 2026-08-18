@@ -75,6 +75,11 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
     // interleave across the disposal boundary, at the cost of Dispose() blocking until any
     // in-flight Start() finishes -- an acceptable, bounded wait for a one-shot lifecycle gate.
     private readonly Lock _sync = new();
+    // Signaled whenever no callback is currently admitted (in flight). Dispose() waits on this
+    // after closing admission, so it can never return while a callback that was already admitted
+    // is still executing/about to invoke EventReceived.
+    private readonly ManualResetEventSlim _drained = new(true);
+    private int _activeCallbacks;
     private bool _disposed;
     private bool _started;
 
@@ -105,13 +110,30 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
 
     private void OnMsiEventArrived(object? propertyValue)
     {
-        // Dispose-race guard: a callback already in flight when Dispose() runs must not raise
-        // EventReceived to subscribers that may have already torn down. A quick lock-protected
-        // read keeps this check consistent with the same _disposed flag Start/Dispose transition
-        // under, without holding the lock for the parse/forward work itself.
-        lock (_sync) { if (_disposed) return; }
-        if (!TryParseRawCode(propertyValue, out var rawCode)) return;
-        EventReceived?.Invoke(new MsiOemEvent(rawCode, CenterMOemEventMapper.Classify(rawCode)));
+        // Admission: a callback is only let through if not yet disposed, and once admitted it is
+        // counted so Dispose() can wait for it to actually finish -- not merely check a flag that
+        // could still be true when this method later invokes EventReceived after Dispose() has
+        // already returned.
+        lock (_sync)
+        {
+            if (_disposed) return;
+            if (_activeCallbacks == 0) _drained.Reset();
+            _activeCallbacks++;
+        }
+
+        try
+        {
+            if (!TryParseRawCode(propertyValue, out var rawCode)) return;
+            EventReceived?.Invoke(new MsiOemEvent(rawCode, CenterMOemEventMapper.Classify(rawCode)));
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                _activeCallbacks--;
+                if (_activeCallbacks == 0) _drained.Set();
+            }
+        }
     }
 
     /// <summary>
@@ -135,6 +157,12 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
         }
     }
 
+    /// <summary>
+    /// Closes admission (no callback entering after this point can proceed past its admission
+    /// check), then waits for any callback that was already admitted to finish before disposing
+    /// the native watcher -- once this returns, no subscriber callback that entered earlier can
+    /// still be beginning or completing.
+    /// </summary>
     public void Dispose()
     {
         lock (_sync)
@@ -143,6 +171,10 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
             _disposed = true;
             _adapter.MsiEventArrived -= OnMsiEventArrived;
         }
+
+        // Waited outside the lock: an admitted callback needs to acquire _sync itself (on exit) to
+        // decrement/signal, so holding it here would deadlock against that.
+        _drained.Wait(TimeSpan.FromSeconds(5));
         _adapter.Dispose();
     }
 }

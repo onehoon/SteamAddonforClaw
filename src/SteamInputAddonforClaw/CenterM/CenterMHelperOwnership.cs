@@ -12,7 +12,15 @@ internal enum HelperStartResult
     JobObjectFailed,
     JobLimitFailed,
     AssignFailed,
-    ResumeFailed
+    ResumeFailed,
+    /// <summary>Construction failed (Job/limit/assign/resume) and the follow-up cleanup attempt
+    /// (TerminateProcess and/or the bounded exit wait) could not confirm the helper actually
+    /// exited. The only authoritative process handle is retained (<see cref="CenterMHelperOwnership.IsOwned"/>
+    /// is true) rather than discarded, so a later <see cref="CenterMHelperOwnership.Stop"/> can
+    /// still resolve it through the same retained handle -- never by process-name or PID
+    /// rediscovery. Callers must not treat this as equivalent to a clean native fallback: a
+    /// same-name process may still be alive and suppressing native Center M launch until resolved.</summary>
+    PartialCleanupUnconfirmed
 }
 
 /// <summary>
@@ -69,17 +77,15 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
         if (!_api.TryCreateJobObject(out var jobHandle, out var jobError))
         {
             AppLog.Warn("CenterM.Helper", "CreateJobObject failed; terminating suspended helper.", null, ("Win32Error", jobError));
-            TerminateSuspended(ownedProcessHandle);
-            return HelperStartResult.JobObjectFailed;
+            return CleanupAfterConstructionFailure(processId, ownedProcessHandle, HelperStartResult.JobObjectFailed);
         }
         var ownedJobHandle = jobHandle!;
 
         if (!_api.TrySetKillOnJobClose(ownedJobHandle, out var limitError))
         {
             AppLog.Warn("CenterM.Helper", "SetInformationJobObject(KILL_ON_JOB_CLOSE) failed; terminating suspended helper.", null, ("Win32Error", limitError));
-            ownedJobHandle.Dispose();
-            TerminateSuspended(ownedProcessHandle);
-            return HelperStartResult.JobLimitFailed;
+            ownedJobHandle.Dispose(); // never assigned to the process -- safe to discard unconditionally
+            return CleanupAfterConstructionFailure(processId, ownedProcessHandle, HelperStartResult.JobLimitFailed);
         }
 
         if (!_api.TryAssignProcessToJob(ownedJobHandle, ownedProcessHandle, out var assignError))
@@ -87,9 +93,8 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
             // The helper must never run unassigned even momentarily -- terminate rather than let
             // it continue outside crash-cleanup protection.
             AppLog.Warn("CenterM.Helper", "AssignProcessToJobObject failed; terminating suspended helper.", null, ("Win32Error", assignError));
-            ownedJobHandle.Dispose();
-            TerminateSuspended(ownedProcessHandle);
-            return HelperStartResult.AssignFailed;
+            ownedJobHandle.Dispose(); // never assigned to the process -- safe to discard unconditionally
+            return CleanupAfterConstructionFailure(processId, ownedProcessHandle, HelperStartResult.AssignFailed);
         }
 
         if (!_api.TryResumeThread(ownedThreadHandle, out var resumeError))
@@ -97,14 +102,20 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
             // Already assigned to the Job: closing the Job (KILL_ON_JOB_CLOSE) requests the kill
             // of the still-suspended helper. The process handle is retained until a bounded wait
             // confirms the kill actually completed -- deterministic evidence the helper is gone,
-            // not just a request that it should be.
+            // not just a request that it should be. The Job itself is already closed/invalid at
+            // this point, so only the process handle is a candidate for retained ownership below.
             AppLog.Warn("CenterM.Helper", "ResumeThread failed; closing Job to kill suspended helper.", null, ("Win32Error", resumeError));
             ownedJobHandle.Dispose();
-            var exited = _api.WaitForExit(ownedProcessHandle, TimeSpan.FromSeconds(5));
-            if (!exited)
-                AppLog.Warn("CenterM.Helper", "Helper did not confirm exit after Job close following ResumeThread failure.", null, ("ProcessId", processId));
-            ownedProcessHandle.Dispose();
-            return HelperStartResult.ResumeFailed;
+            if (_api.WaitForExit(ownedProcessHandle, TimeSpan.FromSeconds(5)))
+            {
+                ownedProcessHandle.Dispose();
+                return HelperStartResult.ResumeFailed;
+            }
+
+            AppLog.Warn("CenterM.Helper", "Helper did not confirm exit after Job close following ResumeThread failure; retaining ownership.", null, ("ProcessId", processId));
+            ProcessId = processId;
+            _processHandle = ownedProcessHandle;
+            return HelperStartResult.PartialCleanupUnconfirmed;
         }
 
         ProcessId = processId;
@@ -129,11 +140,27 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
         }
     }
 
-    private void TerminateSuspended(SafeProcessHandle processHandle)
+    /// <summary>Attempts to terminate a still-suspended helper left over from a construction
+    /// failure. If cleanup is confirmed, the handle is discarded and <paramref name="failureResult"/>
+    /// is returned as-is. If it cannot be confirmed (TerminateProcess failed, or the bounded wait
+    /// timed out), the handle is retained instead of discarded -- <see cref="IsOwned"/> becomes
+    /// true -- so a later <see cref="Stop"/> can still resolve it, and
+    /// <see cref="HelperStartResult.PartialCleanupUnconfirmed"/> is returned instead so callers
+    /// cannot mistake this for a clean native fallback.</summary>
+    private HelperStartResult CleanupAfterConstructionFailure(int processId, SafeProcessHandle processHandle, HelperStartResult failureResult)
     {
-        _api.TryTerminate(processHandle, out _);
-        _api.WaitForExit(processHandle, TimeSpan.FromSeconds(2));
-        processHandle.Dispose();
+        // Both must succeed to count as confirmed: a failed TerminateProcess call followed by a
+        // wait that happens to return true is not evidence the helper actually exited.
+        if (_api.TryTerminate(processHandle, out _) && _api.WaitForExit(processHandle, TimeSpan.FromSeconds(2)))
+        {
+            processHandle.Dispose();
+            return failureResult;
+        }
+
+        AppLog.Warn("CenterM.Helper", "Suspended-helper cleanup after construction failure could not be confirmed; retaining ownership.", null, ("ProcessId", processId), ("FailureReason", failureResult));
+        ProcessId = processId;
+        _processHandle = processHandle;
+        return HelperStartResult.PartialCleanupUnconfirmed;
     }
 
     public void Dispose()

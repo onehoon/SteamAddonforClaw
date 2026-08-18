@@ -92,6 +92,88 @@ public sealed class CenterMHelperOwnershipTests
         Assert.False(ownership.IsOwned);
     }
 
+    [Theory]
+    [InlineData(false, true)] // TerminateProcess itself fails
+    [InlineData(true, false)] // Terminate succeeds, exit wait times out
+    public void JobObjectFailure_CleanupUnconfirmed_RetainsOwnership_NoNameOrPidRediscoveryNeeded(bool terminateSucceeds, bool waitForExitSucceeds)
+    {
+        var api = new RecordingApi { CreateJobSucceeds = false, TerminateSucceeds = terminateSucceeds, WaitForExitSucceeds = waitForExitSucceeds };
+        var ownership = new CenterMHelperOwnership(api);
+
+        var result = ownership.Start(@"C:\fake\MSI Center M.exe");
+
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, result);
+        Assert.True(ownership.IsOwned);
+        Assert.Equal(api.LastProcessId, ownership.ProcessId);
+
+        // The retained handle from construction can still resolve this later, through the exact
+        // same Stop() path as a normal owned helper -- never process-name or PID rediscovery.
+        api.TerminateSucceeds = true;
+        api.WaitForExitSucceeds = true;
+        var stopped = ownership.Stop(TimeSpan.FromSeconds(1));
+        Assert.True(stopped);
+        Assert.False(ownership.IsOwned);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void JobLimitFailure_CleanupUnconfirmed_RetainsOwnership(bool terminateSucceeds, bool waitForExitSucceeds)
+    {
+        var api = new RecordingApi { SetLimitSucceeds = false, TerminateSucceeds = terminateSucceeds, WaitForExitSucceeds = waitForExitSucceeds };
+        var ownership = new CenterMHelperOwnership(api);
+
+        var result = ownership.Start(@"C:\fake\MSI Center M.exe");
+
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, result);
+        Assert.True(ownership.IsOwned);
+        api.TerminateSucceeds = true;
+        api.WaitForExitSucceeds = true;
+        Assert.True(ownership.Stop(TimeSpan.FromSeconds(1)));
+        Assert.False(ownership.IsOwned);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void AssignFailure_CleanupUnconfirmed_RetainsOwnership(bool terminateSucceeds, bool waitForExitSucceeds)
+    {
+        var api = new RecordingApi { AssignSucceeds = false, TerminateSucceeds = terminateSucceeds, WaitForExitSucceeds = waitForExitSucceeds };
+        var ownership = new CenterMHelperOwnership(api);
+
+        var result = ownership.Start(@"C:\fake\MSI Center M.exe");
+
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, result);
+        Assert.True(ownership.IsOwned);
+        api.TerminateSucceeds = true;
+        api.WaitForExitSucceeds = true;
+        Assert.True(ownership.Stop(TimeSpan.FromSeconds(1)));
+        Assert.False(ownership.IsOwned);
+    }
+
+    [Fact]
+    public void ResumeFailure_ExitWaitTimesOut_RetainsOwnership_NotReportedAsCleanNativeFallback()
+    {
+        var api = new RecordingApi { ResumeSucceeds = false, WaitForExitSucceeds = false };
+        var ownership = new CenterMHelperOwnership(api);
+
+        var result = ownership.Start(@"C:\fake\MSI Center M.exe");
+
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, result);
+        Assert.NotEqual(HelperStartResult.ResumeFailed, result); // must not imply clean resolution
+        Assert.True(ownership.IsOwned);
+        Assert.Equal(api.LastProcessId, ownership.ProcessId);
+
+        // Repeated Stop()/Dispose() after the partial-cleanup failure must still resolve ownership
+        // through the retained handle.
+        api.WaitForExitSucceeds = true;
+        var stopped = ownership.Stop(TimeSpan.FromSeconds(1));
+        var stoppedAgain = ownership.Stop(TimeSpan.FromSeconds(1));
+        Assert.True(stopped);
+        Assert.True(stoppedAgain);
+        Assert.False(ownership.IsOwned);
+    }
+
     [Fact]
     public void SecondStart_WhileAlreadyOwned_IsRefused_NoNativeCallsAndFirstOwnershipRetained()
     {
@@ -164,6 +246,8 @@ public sealed class CenterMHelperOwnershipTests
         internal bool SetLimitSucceeds { get; init; } = true;
         internal bool AssignSucceeds { get; init; } = true;
         internal bool ResumeSucceeds { get; init; } = true;
+        internal bool TerminateSucceeds { get; set; } = true;
+        internal bool WaitForExitSucceeds { get; set; } = true;
 
         /// <summary>When set, TryCreateSuspended signals <see cref="CreateSuspendedEntered"/> and
         /// blocks until this is released -- lets a test prove a concurrent Start() call is
@@ -225,14 +309,14 @@ public sealed class CenterMHelperOwnershipTests
         public bool TryTerminate(SafeProcessHandle processHandle, out int win32Error)
         {
             Calls.Add("Terminate");
-            win32Error = 0;
-            return true;
+            win32Error = TerminateSucceeds ? 0 : 5;
+            return TerminateSucceeds;
         }
 
         public bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout)
         {
             Calls.Add("WaitForExit");
-            return true;
+            return WaitForExitSucceeds;
         }
 
         private static IntPtr GetCurrentProcessHandle() => System.Diagnostics.Process.GetCurrentProcess().Handle;

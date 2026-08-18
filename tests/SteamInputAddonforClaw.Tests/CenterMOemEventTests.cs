@@ -129,6 +129,44 @@ public sealed class CenterMOemEventTests
         Assert.Equal(0, receivedCount);
     }
 
+    [Fact]
+    public async Task Dispose_waits_for_an_already_admitted_inflight_callback_to_drain_before_returning()
+    {
+        var adapter = new FakeManagementEventWatcherAdapter(startSucceeds: true);
+        var source = new WmiMsiEventSource(adapter);
+        Assert.True(source.Start());
+
+        var callbackEntered = new ManualResetEventSlim(false);
+        var releaseCallback = new ManualResetEventSlim(false);
+        var deliveredCount = 0;
+        source.EventReceived += _ =>
+        {
+            deliveredCount++;
+            callbackEntered.Set();
+            releaseCallback.Wait(TimeSpan.FromSeconds(10));
+        };
+
+        var raiseTask = Task.Run(() => adapter.Raise(0x220029));
+        // Wait until the callback has genuinely been admitted and is inside subscriber invocation,
+        // not just scheduled.
+        Assert.True(callbackEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        var disposeTask = Task.Run(source.Dispose);
+        await Task.Delay(50);
+        Assert.False(disposeTask.IsCompleted, "Dispose() must still be draining the in-flight callback.");
+
+        releaseCallback.Set();
+
+        await raiseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, deliveredCount);
+
+        // No delivery for a notification arriving after Dispose() has fully returned.
+        adapter.Raise(0x220058);
+        Assert.Equal(1, deliveredCount);
+    }
+
     private sealed class FakeManagementEventWatcherAdapter(bool startSucceeds) : IManagementEventWatcherAdapter
     {
         internal int TryStartCallCount { get; private set; }
