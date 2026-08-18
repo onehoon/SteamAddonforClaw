@@ -90,11 +90,19 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private bool _serverReady;
     private TrackedCenterMMainUi? _trackedMainUi;
     private PendingDebounce? _pendingDebounce;
-    /// <summary>Finding #3 (review 4957507443): tracks the most recently started fire-and-forget
-    /// <see cref="RunDebounceAsync"/> task purely so <see cref="DisposeAsync"/> can drain it before
-    /// disposing <see cref="_gate"/> -- never awaited/consulted by any safety-relevant logic, which
-    /// must continue to rely only on <see cref="_pendingDebounce"/>/epoch/generation.</summary>
-    private Task? _debounceTask;
+    /// <summary>Review 4957630432 finding #4: tracks EVERY still-active fire-and-forget
+    /// <see cref="RunDebounceAsync"/> task -- not only the most recently started one -- purely so
+    /// <see cref="DisposeAsync"/> can drain all of them before disposing <see cref="_gate"/>. An
+    /// older continuation whose delay already completed can still be alive (parked immediately
+    /// before re-acquiring <see cref="_gate"/>) even after <see cref="CancelPendingDebounceCore"/>
+    /// has cleared <see cref="_pendingDebounce"/> and a newer replacement debounce has started, so a
+    /// single "latest task" field is not enough to guarantee every continuation is drained. Guarded
+    /// by <see cref="_debounceTasksLock"/> (not <see cref="_gate"/>) because entries are added under
+    /// the gate but removed from a continuation callback that must never itself try to reacquire the
+    /// gate. Never awaited/consulted by any safety-relevant logic, which must continue to rely only
+    /// on <see cref="_pendingDebounce"/>/epoch/generation.</summary>
+    private readonly List<Task> _debounceTasks = [];
+    private readonly object _debounceTasksLock = new();
     private long _generation;
     private long _lifecycleEpoch;
     private string? _lastReason;
@@ -126,6 +134,14 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// production code.</summary>
     internal void TestOnly_BumpLifecycleEpoch() => BumpLifecycleEpoch();
 
+    /// <summary>Test-only accessor (review 4957630432 finding #3): exposes the coordinator's own
+    /// <see cref="CenterMHelperOwnership"/> instance -- whether caller-injected or constructed
+    /// internally by the default constructor path -- so a test can prove the terminal ownership
+    /// policy in <see cref="DisposeAsync"/> applies to the true default/internal construction path,
+    /// not only a test-harness-injected reference held independently of the coordinator. Never
+    /// touched by production code.</summary>
+    internal CenterMHelperOwnership TestOnly_HelperOwnership => _helperOwnership;
+
     internal CenterMOem1LifecycleCoordinator(
         Func<string> publishRootProvider,
         CenterMBackendProbe? backendProbe = null,
@@ -141,14 +157,20 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         Func<bool>? environmentEligibility = null,
         TimeSpan? hiddenDebounce = null,
         TimeSpan? helperStopTimeout = null,
-        TimeSpan? mainUiTerminateTimeout = null)
+        TimeSpan? mainUiTerminateTimeout = null,
+        IHelperProcessNativeApi? testOnlyDefaultHelperNativeApi = null)
     {
         _publishRootProvider = publishRootProvider;
         var snapshotSource = processSnapshotSource ?? new Win32ProcessSnapshotSource();
         _backendProbe = backendProbe ?? new CenterMBackendProbe(snapshotSource);
         _autoRunReader = autoRunReader ?? CenterMAutoRunReader.Read;
         _processSnapshotSource = snapshotSource;
-        _helperOwnership = helperOwnership ?? new CenterMHelperOwnership();
+        // testOnlyDefaultHelperNativeApi (review 4957630432 finding #3) only ever substitutes the
+        // native API used by the coordinator's OWN internally-constructed CenterMHelperOwnership --
+        // never touched by production code (always null there) -- so a test can deterministically
+        // exercise the true default/internal ownership construction path (as opposed to the
+        // caller-injected `helperOwnership` parameter) without making any real Win32 calls.
+        _helperOwnership = helperOwnership ?? new CenterMHelperOwnership(testOnlyDefaultHelperNativeApi);
         _mainUiObserver = mainUiObserver ?? new MainUiLifecycleObserver();
         _terminator = terminator ?? new SafeMainUiTerminator();
         _handleOpener = handleOpener;
@@ -281,8 +303,14 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                         // Suspended barrier (finding #1): retiring the now-stale ownership record is
                         // safe bookkeeping, but a fresh reconcile that could stage/start a new helper
                         // must never run until ReconcileAfterResumeAsync explicitly clears the
-                        // barrier.
+                        // barrier. Review 4957630432 finding #1 (state-consistency gap): the exact
+                        // owned helper is now confirmed gone, so Armed is no longer semantically true
+                        // even though re-arm is deferred until resume -- invalidate it here so the
+                        // snapshot can never report SuppressionReady == true with
+                        // HelperProcessId == null in the meantime.
                         _lastReason = "HelperExitedWhileSuspended";
+                        if (_state == CenterMOem1LifecycleState.Armed)
+                            SetState(CenterMOem1LifecycleState.NeedsSetup);
                         AppLog.Warn("CenterM.Oem1", "Helper exited while suspended; deferring reconciliation until resume.", null);
                         return;
                     }
@@ -290,10 +318,18 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     await ReconcileCore("HelperUnexpectedExit", cancellationToken).ConfigureAwait(false);
                     return;
                 case HelperLivenessState.Uncertain:
-                    // Do not blindly respawn, do not discard the retained handle.
-                    _lastReason = "HelperLivenessUncertain";
-                    SetState(CenterMOem1LifecycleState.FaultedNative);
-                    AppLog.Warn("CenterM.Oem1", "Helper liveness poll returned Uncertain (WAIT_FAILED); entering faulted reconciliation without discarding the retained handle.", null, ("ProcessId", _helperOwnership.ProcessId));
+                    // Review 4957630432 finding #1 (BLOCKER): WAIT_FAILED means suppression
+                    // certainty is lost -- the helper filename/process IS the suppression mechanism,
+                    // so this must use the same shared fail-open disarm contract as the topology/
+                    // invariant paths (DisarmOwnedHelperForFailOpen) instead of merely relabeling
+                    // _state while the exact owned helper may still be running. Never falls back to
+                    // process-name/PID rediscovery; never respawns from this same tick.
+                    {
+                        var disarmed = DisarmOwnedHelperForFailOpen();
+                        _lastReason = disarmed ? "HelperLivenessUncertain:Disarmed" : "HelperLivenessUncertain:DisarmCleanupUnconfirmed";
+                        SetState(CenterMOem1LifecycleState.FaultedNative);
+                        AppLog.Warn("CenterM.Oem1", "Helper liveness poll returned Uncertain (WAIT_FAILED); exact-handle disarm attempted, never blindly respawning.", null, ("ProcessId", _helperOwnership.ProcessId), ("Disarmed", disarmed));
+                    }
                     return;
             }
         }
@@ -375,8 +411,14 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 }
                 else if (liveness == HelperLivenessState.Uncertain)
                 {
-                    _lastReason = "ResumeHelperLivenessUncertain";
+                    // Review 4957630432 finding #1: same shared fail-open disarm contract as the
+                    // normal poll path -- an uncertain retained helper must not survive
+                    // ReconcileAfterResumeAsync merely because this method returns before
+                    // ReconcileCore's own invalid-helper cleanup would otherwise apply.
+                    var disarmed = DisarmOwnedHelperForFailOpen();
+                    _lastReason = disarmed ? "ResumeHelperLivenessUncertain:Disarmed" : "ResumeHelperLivenessUncertain:DisarmCleanupUnconfirmed";
                     SetState(CenterMOem1LifecycleState.FaultedNative);
+                    AppLog.Warn("CenterM.Oem1", "Resume helper liveness poll returned Uncertain; exact-handle disarm attempted.", null, ("Disarmed", disarmed));
                     return;
                 }
             }
@@ -440,27 +482,47 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
         if (_helperOwnership.IsOwned)
         {
-            // Not discarded: the CenterMHelperOwnership instance (and its retained SafeProcessHandle/
-            // job handle) is left exactly as-is -- still the sole authority over the exact process --
-            // for whatever caller-held reference can still resolve it later. The coordinator's own
-            // gate is still disposed below because DisposeAsync must complete in bounded time; it is
-            // the coordinator's serialization ability that ends here, not the retained handle itself.
-            AppLog.Warn("CenterM.Oem1", "Dispose completing with the exact retained helper handle still unresolved after bounded final cleanup attempts; ownership remains retained on the CenterMHelperOwnership instance, not discarded.", null, ("ProcessId", _helperOwnership.ProcessId));
+            // Review 4957630432 finding #3 (MAJOR): a private field with no caller-visible or
+            // process-level owner does not actually satisfy the PR1 retention contract once
+            // DisposeAsync has made the coordinator itself unusable -- registering the SAME instance
+            // (never discarded, never a copy) with the process-wide CenterMOrphanedHelperRegistry
+            // gives it a real, testable owner that a future process-shutdown/recovery seam can still
+            // resolve later, regardless of whether this CenterMHelperOwnership was caller-injected or
+            // constructed internally by the coordinator's default constructor path. The coordinator's
+            // own gate is still disposed below because DisposeAsync must complete in bounded time; it
+            // is the coordinator's serialization ability that ends here, not the retained handle
+            // itself.
+            CenterMOrphanedHelperRegistry.Register(_helperOwnership);
+            AppLog.Warn("CenterM.Oem1", "Dispose completing with the exact retained helper handle still unresolved after bounded final cleanup attempts; ownership registered with the process-level orphan retry owner, not discarded.", null, ("ProcessId", _helperOwnership.ProcessId));
         }
 
-        // Finding #3 (review 4957507443): RunDebounceAsync is deliberately fire-and-forget, but a
-        // continuation whose delay already completed and is merely waiting to (re-)acquire _gate
-        // must be drained to completion BEFORE _gate is disposed -- otherwise it can resume after
-        // disposal and fault on the now-disposed semaphore. Awaited here, outside the gate (already
-        // released by ShutdownAsync), so this can never deadlock against the continuation's own
-        // _gate.WaitAsync.
-        var pendingDebounceTask = _debounceTask;
-        if (pendingDebounceTask is not null)
+        // Review 4957630432 finding #4 (MAJOR): RunDebounceAsync is deliberately fire-and-forget,
+        // and CancelPendingDebounceCore clears _pendingDebounce immediately while an older
+        // continuation whose delay already completed may still be alive, parked immediately before
+        // (re-)acquiring _gate. A later hidden cycle can legitimately start a REPLACEMENT debounce
+        // once _pendingDebounce is null, so tracking only the single most-recently-started
+        // continuation is not enough -- every still-active continuation must be drained before
+        // _gate is disposed, or an older stale one can resume after disposal and fault on the
+        // now-disposed semaphore. Drained in a loop (rather than a single snapshot) so a
+        // continuation that is itself in the process of being added/removed can never be missed.
+        // Awaited here, outside the gate (already released by ShutdownAsync), so this can never
+        // deadlock against any continuation's own _gate.WaitAsync -- and once _shutdown is true, no
+        // further debounce can ever be newly started (every gate-guarded entry point checks
+        // _shutdown before it could reach StartHiddenDebounce), so this loop is guaranteed to
+        // terminate.
+        while (true)
         {
-            try { await pendingDebounceTask.ConfigureAwait(false); }
-            catch (Exception ex)
+            Task[] snapshot;
+            lock (_debounceTasksLock) snapshot = _debounceTasks.Count == 0 ? [] : [.. _debounceTasks];
+            if (snapshot.Length == 0) break;
+
+            foreach (var pendingDebounceTask in snapshot)
             {
-                AppLog.Warn("CenterM.Oem1", "Debounce continuation drain during dispose observed an exception.", null, ("Exception", ex.Message));
+                try { await pendingDebounceTask.ConfigureAwait(false); }
+                catch (Exception ex)
+                {
+                    AppLog.Warn("CenterM.Oem1", "Debounce continuation drain during dispose observed an exception.", null, ("Exception", ex.Message));
+                }
             }
         }
 
@@ -709,6 +771,19 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         {
             _lastReason = "StagingFailed";
             SetState(CenterMOem1LifecycleState.FaultedNative);
+            return;
+        }
+
+        // Review 4957630432 finding #2 (BLOCKER): re-check the captured epoch immediately before
+        // ever calling Start -- the prior fix only checked AFTER Start succeeded, leaving a window
+        // where a suspend/disable/shutdown request became authoritative during staging (before
+        // Start was even entered) and a helper could still be newly created. If it already changed,
+        // nothing has been created yet, so there is nothing to clean up.
+        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart)
+        {
+            _lastReason = "SuspendRequestedDuringArmBeforeStart";
+            SetState(CenterMOem1LifecycleState.NeedsSetup);
+            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed (suspend/disable/shutdown requested) before helper Start was ever entered; no helper created, Armed never committed.", null);
             return;
         }
 
@@ -1030,10 +1105,23 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
         // Fire-and-forget by design: the debounce is a background timer whose only effect is to
         // eventually re-enter the single serialized gate and re-validate everything fresh. It must
-        // never run its safety-relevant logic outside that gate. The Task is retained in
-        // _debounceTask solely so DisposeAsync can drain it before disposing _gate (finding #3) --
-        // it is never awaited or consulted by any safety-relevant logic.
-        _debounceTask = RunDebounceAsync(pending, cts.Token);
+        // never run its safety-relevant logic outside that gate. The Task is tracked in
+        // _debounceTasks solely so DisposeAsync can drain EVERY still-active continuation before
+        // disposing _gate (review 4957630432 finding #4) -- it is never awaited or consulted by any
+        // safety-relevant logic. Removed from the tracking list via a continuation (not from inside
+        // RunDebounceAsync itself) so the removal never depends on the gate being held.
+        var task = RunDebounceAsync(pending, cts.Token);
+        lock (_debounceTasksLock) _debounceTasks.Add(task);
+        task.ContinueWith(
+            static (_, state) =>
+            {
+                var (coordinator, completed) = ((CenterMOem1LifecycleCoordinator, Task))state!;
+                lock (coordinator._debounceTasksLock) coordinator._debounceTasks.Remove(completed);
+            },
+            (this, task),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private async Task RunDebounceAsync(PendingDebounce mine, CancellationToken token)

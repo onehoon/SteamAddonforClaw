@@ -25,6 +25,11 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         internal string? StagedPath = @"C:\fake\Runtime\MSI Center M.exe";
         internal Func<bool> EnvironmentEligible = () => true;
         internal readonly CenterMHelperOwnership HelperOwnership;
+        /// <summary>Review 4957630432 finding #2: fires whenever the stager is invoked, letting a
+        /// test simulate a suspend/disable/shutdown request's lifecycle-epoch bump becoming
+        /// authoritative between staging and the subsequent Start call, deterministically and
+        /// without any real timing race.</summary>
+        internal Action? OnStagerCalled { get; set; }
 
         internal Harness()
         {
@@ -55,7 +60,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
                 terminator: terminator,
                 handleOpener: HandleOpener,
                 identityInspector: IdentityInspector,
-                stager: _ => StagedPath,
+                stager: _ => { OnStagerCalled?.Invoke(); return StagedPath; },
                 delay: Delay.DelayAsync,
                 environmentEligibility: () => EnvironmentEligible(),
                 hiddenDebounce: debounce ?? TimeSpan.FromMilliseconds(1));
@@ -465,7 +470,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
-    public async Task Liveness_Uncertain_NoBlindRespawn_RetainsHandle()
+    public async Task Liveness_Uncertain_NoBlindRespawn_ExactHandleStopAttempted()
     {
         var h = NewHarness();
         var coordinator = h.Build();
@@ -476,8 +481,110 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
         var snap = coordinator.GetSnapshot();
         Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
-        Assert.False(snap.NativeBehaviorGuaranteed); // handle retained, not discarded
         Assert.Equal(1, h.HelperApi.StartCallCount); // no respawn attempted
+        Assert.Equal(1, h.HelperApi.TerminateCallCount); // review 4957630432 #1: exact-handle stop attempted, never blind respawn
+    }
+
+    // ============================================================
+    // Review 4957630432, finding #1 (BLOCKER): exact-handle liveness Uncertain must actually disarm
+    // the suppression helper (shared DisarmOwnedHelperForFailOpen contract), not merely relabel
+    // _state while the helper may still be running.
+    // ============================================================
+
+    [Fact]
+    public async Task Liveness_Uncertain_CleanupConfirmed_OwnershipClearedNativeBehaviorGuaranteed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(h.HelperOwnership.IsOwned);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Uncertain;
+        // Default fake confirms Stop()/WaitForExit -- cleanup should be actually confirmed.
+        await coordinator.PollHelperLivenessAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.False(h.HelperOwnership.IsOwned);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+        Assert.Null(snap.HelperProcessId);
+    }
+
+    [Fact]
+    public async Task Liveness_Uncertain_CleanupUnconfirmed_OwnershipRetained_NoSecondStart()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(h.HelperOwnership.IsOwned);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Uncertain;
+        h.HelperApi.TerminateSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false;
+        await coordinator.PollHelperLivenessAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.True(h.HelperOwnership.IsOwned); // never discarded, unresolved cleanup stays retained
+        Assert.False(snap.NativeBehaviorGuaranteed);
+        Assert.Equal(1, h.HelperApi.StartCallCount); // no second helper ever created
+    }
+
+    [Fact]
+    public async Task Resume_UncertainLiveness_SameDisarmSemantics_NeverLeavesSuppressionHelperActive()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(h.HelperOwnership.IsOwned);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Uncertain;
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.False(h.HelperOwnership.IsOwned); // confirmed cleanup -> never left running
+        Assert.True(snap.NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task Resume_UncertainLiveness_CleanupUnconfirmed_OwnershipRetained()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(h.HelperOwnership.IsOwned);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Uncertain;
+        h.HelperApi.TerminateSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false;
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.True(h.HelperOwnership.IsOwned);
+        Assert.False(snap.NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task SuspendedExit_PriorStateArmed_InvalidatesArmed_SnapshotNeverReportsSuppressionReadyWithNoHelper()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+        await coordinator.PollHelperLivenessAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        // The direct assertion the review asked for: never SuppressionReady == true with
+        // HelperProcessId == null.
+        Assert.False(snap.SuppressionReady && snap.HelperProcessId is null);
+        Assert.Null(snap.HelperProcessId);
     }
 
     [Fact]
@@ -1985,6 +2092,30 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     // ============================================================
+    // Review 4957630432, finding #2 (BLOCKER): the request-time lifecycle epoch must also be
+    // re-checked immediately before Start itself -- not only after Start succeeds -- so a request
+    // that became authoritative during staging can never still result in a newly created helper.
+    // ============================================================
+
+    [Fact]
+    public async Task AttemptArm_EpochBumpedDuringStaging_BeforeStart_NeverCallsStart()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        // Simulates QuiesceForSuspendAsync's epoch bump becoming authoritative between staging and
+        // the subsequent Start call -- strictly BEFORE Start is ever entered.
+        h.OnStagerCalled = () => coordinator.TestOnly_BumpLifecycleEpoch();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.Equal(0, h.HelperApi.StartCallCount); // Start must never even be called
+        Assert.False(h.HelperOwnership.IsOwned);
+    }
+
+    // ============================================================
     // Review 4957507443, finding #3 (MAJOR): DisposeAsync must drain the fire-and-forget debounce
     // continuation before disposing the gate.
     // ============================================================
@@ -2076,5 +2207,155 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.False(h.HelperOwnership.IsOwned);
+    }
+
+    // ============================================================
+    // Review 4957630432, finding #3 (MAJOR): DisposeAsync must define a real, testable terminal
+    // ownership policy -- not just log a warning -- when unresolved exact ownership remains,
+    // including for the coordinator's own DEFAULT/INTERNAL CenterMHelperOwnership construction path
+    // (a private field with no caller-visible owner), not only a test-harness-injected reference.
+    // ============================================================
+
+    [Fact]
+    public async Task DisposeAsync_HelperCleanupUnconfirmed_RegistersOwnershipWithProcessLevelOrphanRegistry()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(h.HelperOwnership.IsOwned);
+
+        h.HelperApi.WaitForExitSucceeds = false;
+        h.HelperApi.TerminateSucceeds = false;
+
+        CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        try
+        {
+            await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.True(h.HelperOwnership.IsOwned);
+            Assert.True(CenterMOrphanedHelperRegistry.Contains(h.HelperOwnership));
+        }
+        finally
+        {
+            CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        }
+    }
+
+    [Fact]
+    public async Task DisposeAsync_DefaultConstructedOwnership_UnresolvedExactOwnership_HasSupportedOwnerAfterTerminalDisposal()
+    {
+        // Constructs the coordinator via its NORMAL constructor path, letting it create its own
+        // CenterMHelperOwnership internally (never passed via the `helperOwnership:` parameter) --
+        // only the native API is substituted (test-only) so no real Win32 calls are made. This is
+        // the coordinator's actual production default-construction path: a private field with no
+        // caller-visible reference once DisposeAsync completes, so the terminal ownership policy
+        // must still give it a supported owner.
+        var h = NewHarness();
+        h.HelperApi.WaitForExitSucceeds = false;
+        h.HelperApi.TerminateSucceeds = false;
+
+        var coordinator = new CenterMOem1LifecycleCoordinator(
+            publishRootProvider: () => "fake-publish-root",
+            backendProbe: new CenterMBackendProbe(h.Snapshots),
+            autoRunReader: () => h.AutoRun,
+            processSnapshotSource: h.Snapshots,
+            helperOwnership: null, // default/internal construction path under test
+            mainUiObserver: new MainUiLifecycleObserver(h.WindowProvider),
+            terminator: new SafeMainUiTerminator(h.TerminateInvoker, h.IdentityInspector, h.WindowProvider, h.Snapshots),
+            handleOpener: h.HandleOpener,
+            identityInspector: h.IdentityInspector,
+            stager: _ => h.StagedPath,
+            delay: h.Delay.DelayAsync,
+            environmentEligibility: () => h.EnvironmentEligible(),
+            hiddenDebounce: TimeSpan.FromMilliseconds(1),
+            testOnlyDefaultHelperNativeApi: h.HelperApi);
+
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(coordinator.TestOnly_HelperOwnership.IsOwned);
+
+        CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        try
+        {
+            await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.True(coordinator.TestOnly_HelperOwnership.IsOwned); // still unresolved
+            Assert.True(CenterMOrphanedHelperRegistry.Contains(coordinator.TestOnly_HelperOwnership));
+        }
+        finally
+        {
+            CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        }
+    }
+
+    // ============================================================
+    // Review 4957630432, finding #4 (MAJOR): DisposeAsync must drain EVERY overlapping active
+    // debounce continuation -- not only the most recently started one -- before disposing the gate.
+    // ============================================================
+
+    [Fact]
+    public async Task DisposeAsync_DrainsAllOverlappingDebounceContinuations_NotOnlyTheNewest()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+
+        var hookEntries = new List<TaskCompletionSource>();
+        var hookReleases = new List<TaskCompletionSource>();
+        var hookLock = new object();
+        coordinator.TestOnly_BeforeDebounceGateAcquire = () =>
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (hookLock)
+            {
+                hookEntries.Add(entered);
+                hookReleases.Add(release);
+            }
+            entered.TrySetResult();
+            return release.Task;
+        };
+
+        // A: HiddenAfterVisible -> starts debounce A. The delay is not held, so it resolves
+        // immediately and the continuation parks deterministically right before it tries to
+        // (re-)acquire the gate -- exactly the race window finding #4 describes.
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+        await hookEntries[0].Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Cancel A (VisibleAgain) -- A is already past its delay and parked at the hook, so
+        // cancellation cannot stop it there; it becomes a stale continuation that only resumes once
+        // explicitly released below -- then start B (HiddenAfterVisible again), the newer/current
+        // debounce.
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+        await hookEntries[1].Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var disposeTask = coordinator.DisposeAsync().AsTask();
+
+        // Let B (the newer/current debounce) finish first.
+        hookReleases[1].SetResult();
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
+
+        // Disposal must NOT have completed yet -- the older stale continuation A is still parked and
+        // undrained. This is the regression: previously only the newest task (_debounceTask) was
+        // awaited, so disposal could complete and dispose _gate while A was still alive.
+        Assert.False(disposeTask.IsCompleted);
+
+        // Now release A too.
+        hookReleases[0].SetResult();
+
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Both continuations returned early once _shutdown was observed -- zero post-shutdown
+        // termination, and disposeTask completing without throwing proves no background
+        // ObjectDisposedException against the now-disposed gate.
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
     }
 }
