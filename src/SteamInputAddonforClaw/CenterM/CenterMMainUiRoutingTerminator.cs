@@ -126,6 +126,13 @@ internal sealed class CenterMMainUiRoutingTerminator(
         if (evidence.FreshWindowSnapshot is null)
             return CenterMRoutingTerminationResult.IdentityUncertain;
 
+        // The process can exit in the window between the identity inspection above and this fresh
+        // window capture -- Win32MainUiWindowSnapshotProvider reports that as ProcessAlive: false,
+        // distinct from (and checked before) visibility, so a benign natural-exit race is classified
+        // as AlreadyExited rather than attempted as a termination against an already-exited handle.
+        if (!evidence.FreshWindowSnapshot.Value.ProcessAlive)
+            return CenterMRoutingTerminationResult.AlreadyExited;
+
         if (evidence.FreshWindowSnapshot.Value.VisibleMainWindowCount > 0)
             return CenterMRoutingTerminationResult.VisibleAgain;
 

@@ -243,6 +243,37 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Visible_mainui_xinput_wait_enforces_a_true_end_to_end_budget()
+    {
+        // The production probe (MsiClawCenterMNativeModeProbe) is not instantaneous -- a single
+        // call can internally settle for the native-state manager's own multi-second timeout. The
+        // outer xInputWaitTimeout must be a real end-to-end budget covering the probe calls
+        // themselves, not just the polling loop around them: a probe that never returns must still
+        // cause the wait to give up once the configured budget elapses, via the per-call budget
+        // token this fake observes.
+        var snapshots = new QueueProcessSnapshotSource(
+        [
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)],
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]
+        ]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider(
+        [
+            new MainUiWindowSnapshot(true, 1, 1), // upfront: visible
+            new MainUiWindowSnapshot(true, 1, 0) // minimize-wait loop observes hidden
+        ]);
+        var probe = new BlocksUntilBudgetCancelledProbe();
+        var (retirement, invoker, _) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            nativeModeProbe: probe, xInputWaitTimeout: TimeSpan.FromMilliseconds(100), xInputWaitPollInterval: TimeSpan.FromMilliseconds(10));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.XInputNotConfirmed, result);
+        Assert.True(probe.SawCancellableToken);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
     public async Task Visible_mainui_minimize_command_failure_does_not_terminate()
     {
         var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
@@ -518,6 +549,22 @@ public sealed class CenterMMainUiRoutingRetirementTests
             _entered.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
             return CenterMNativeModeProbeResult.XInput;
+        }
+    }
+
+    /// <summary>Never returns on its own -- proves <see cref="CenterMMainUiRoutingRetirement"/>
+    /// passes each probe call a genuinely cancellable, time-boxed token (the per-call budget) rather
+    /// than relying solely on an outer poll-loop deadline that would never fire while a single call
+    /// is still in flight.</summary>
+    private sealed class BlocksUntilBudgetCancelledProbe : ICenterMNativeModeProbe
+    {
+        internal bool SawCancellableToken { get; private set; }
+
+        public async Task<CenterMNativeModeProbeResult> CaptureAsync(CancellationToken cancellationToken)
+        {
+            SawCancellableToken |= cancellationToken.CanBeCanceled;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+            return CenterMNativeModeProbeResult.Uncertain;
         }
     }
 

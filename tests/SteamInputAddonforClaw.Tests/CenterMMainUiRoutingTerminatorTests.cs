@@ -53,6 +53,16 @@ public sealed class CenterMMainUiRoutingTerminatorTests
             CenterMMainUiRoutingTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { AdditionalForeignMainUiExists = true }));
 
     [Fact]
+    public void Evaluate_ProcessExitsBetweenIdentityInspectionAndWindowCapture_IsAlreadyExited() =>
+        // Win32MainUiWindowSnapshotProvider reports ProcessAlive: false when the process exits in
+        // the window between the identity handle inspection and this fresh window capture -- that
+        // must be classified as a benign natural exit, checked before visibility, never attempted
+        // as a termination against an already-exited process.
+        Assert.Equal(CenterMRoutingTerminationResult.AlreadyExited,
+            CenterMMainUiRoutingTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true),
+                ValidEvidence() with { ProcessAlive = true, FreshWindowSnapshot = new MainUiWindowSnapshot(false, 0, 0) }));
+
+    [Fact]
     public void Evaluate_WindowEnumerationUncertain() =>
         Assert.Equal(CenterMRoutingTerminationResult.IdentityUncertain,
             CenterMMainUiRoutingTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { FreshWindowSnapshot = null }));

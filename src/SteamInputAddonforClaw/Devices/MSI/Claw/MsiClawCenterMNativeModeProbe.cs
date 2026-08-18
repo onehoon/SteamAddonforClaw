@@ -23,6 +23,14 @@ internal sealed class MsiClawCenterMNativeModeProbe(MsiClawNativeStateManager na
         catch (JsonException) { return CenterMNativeModeProbeResult.Uncertain; }
         if (payload is null) return CenterMNativeModeProbeResult.Uncertain;
 
+        // A successful capture alone is not enough authority to call XInput confirmed -- it says
+        // nothing about physical identity strength. The real NativeMode stage
+        // (MsiClawNativeModeSessionCoordinator.InspectCoreLocked) explicitly refuses to mutate
+        // unless IdentityConfidence.Strong; this probe must refuse to call the state authoritative
+        // under the same weaker evidence, or retirement could terminate the real MainUI for a route
+        // the canonical native preflight was always going to reject anyway.
+        if (payload.IdentityConfidence != MsiClawIdentityConfidence.Strong) return CenterMNativeModeProbeResult.Uncertain;
+
         return payload.Mode == MsiClawNativeMode.XInput ? CenterMNativeModeProbeResult.XInput : CenterMNativeModeProbeResult.NotXInput;
     }
 }

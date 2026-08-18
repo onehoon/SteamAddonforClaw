@@ -313,17 +313,47 @@ internal sealed class CenterMMainUiRoutingRetirement
     }
 
     /// <summary>Monotonic bounded wait -- see <see cref="WaitUntilHiddenOrExitedAsync"/>'s remarks
-    /// on why <see cref="DateTime.UtcNow"/> is never used for this kind of safety-lifecycle timing.</summary>
+    /// on why <see cref="DateTime.UtcNow"/> is never used for this kind of safety-lifecycle timing.
+    /// <see cref="_xInputWaitTimeout"/> is enforced as a true end-to-end budget covering the probe
+    /// calls themselves, not just the outer poll loop: the underlying native-state manager's own
+    /// stable-capture can internally settle for its own multi-second timeout, so without an inner
+    /// per-call budget a single slow probe call could make this wait run for roughly double its
+    /// configured timeout before the outer deadline is ever checked again. Each probe call is given
+    /// only the REMAINING budget via a linked, time-boxed token -- a timeout expiring that inner
+    /// token (and not the caller's own token) is treated as "not confirmed in time", never as caller
+    /// cancellation.</summary>
     private async Task<bool> WaitForXInputAsync(CancellationToken cancellationToken)
     {
         var started = Stopwatch.GetTimestamp();
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var result = await _nativeModeProbe.CaptureAsync(cancellationToken).ConfigureAwait(false);
+
+            var remaining = _xInputWaitTimeout - Stopwatch.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero) return false;
+
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(remaining);
+
+            CenterMNativeModeProbeResult result;
+            try
+            {
+                result = await _nativeModeProbe.CaptureAsync(budget.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && budget.IsCancellationRequested)
+            {
+                // The retirement stabilization budget expired inside the probe call itself, not the
+                // caller's own token -- report as not-confirmed-in-time, not as cancellation.
+                return false;
+            }
+
             if (result == CenterMNativeModeProbeResult.XInput) return true;
-            if (Stopwatch.GetElapsedTime(started) >= _xInputWaitTimeout) return false;
-            await Task.Delay(_xInputWaitPollInterval, cancellationToken).ConfigureAwait(false);
+
+            remaining = _xInputWaitTimeout - Stopwatch.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero) return false;
+
+            var delay = remaining < _xInputWaitPollInterval ? remaining : _xInputWaitPollInterval;
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         }
     }
 
