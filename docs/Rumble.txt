@@ -15,8 +15,13 @@ SmallMotor. Source decoding and physical sinks remain separate, with one
 feedback authority controlling accepted generations. PR2 represents the MSI
 command as an 11-byte semantic packet, then zero-pads it to a serialized
 64-byte HID write behind the optional physical sink capability. Production
-Deck-to-MSI production wiring is implemented; hardware validation remains
-pending and no specific model success is claimed.
+Deck-to-MSI production wiring is implemented. Before callback registration,
+the physical sink performs an explicit STOP preflight through endpoint
+resolution, retained-handle open, and the physical 64-byte write path. If that
+optional preflight is unavailable, Steam Deck input routing continues without
+feedback; only an actually armed feedback session requires final STOP and
+callback-clear teardown. Hardware validation remains pending and no specific
+model success is claimed.
 
 Steam Haptic 0xEA, Haptic Pulse 0x8F, audio/jingle commands, and unknown output
 commands remain unsupported in Rumble v1. Gyro/IMU remain separate. The

@@ -52,13 +52,15 @@ revision adds exactly one native export, `SetSteamDeckOutputCallback`
 and `SteamDeckDeviceRemoveResult` are unchanged. The managed
 `ICanonicalViiperNativeApi` surface, `RequiredExports`, and callback-lifetime
 rooting were updated in the same change to keep the native and managed ABI
-aligned. Production registers the Steam Deck output callback only when the
-generic handheld composition supplies a physical rumble capability. The Addon
-copies the synchronous normalized payload, decodes ordinary 0xEB rumble, and
-gates physical writes through the shared feedback authority. Teardown revokes
-and drains feedback, sends an explicit physical STOP, clears the callback, and
-only then performs typed Steam Deck removal. Haptic/audio commands remain
-unsupported.
+aligned. Production registers the Steam Deck output callback only after the
+optional physical rumble capability succeeds at an explicit STOP preflight
+through the real endpoint/handle/write path. If preflight is unavailable,
+Steam Deck input routing continues without feedback and no callback is
+registered. An armed session copies the synchronous normalized payload,
+decodes ordinary 0xEB rumble, and gates physical writes through the shared
+feedback authority. Teardown of an armed session revokes and drains feedback,
+sends an explicit physical STOP, clears the callback, and only then performs
+typed Steam Deck removal. Haptic/audio commands remain unsupported.
 
 ### Automated dependency update PRs
 

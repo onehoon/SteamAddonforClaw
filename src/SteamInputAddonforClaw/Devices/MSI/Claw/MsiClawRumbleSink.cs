@@ -24,6 +24,17 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
 
     public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
     {
+        try { return SetRumbleCore(rumble); }
+        catch (Exception exception)
+        {
+            try { AppLog.Debug("Rumble", "MSI rumble sink failure was contained.", ("Reason", exception.GetType().Name)); }
+            catch { }
+            return new(PhysicalRumbleWriteStatus.Failed, "SinkException");
+        }
+    }
+
+    private PhysicalRumbleWriteResult SetRumbleCore(TwoMotorRumble rumble)
+    {
         if (Volatile.Read(ref _disposed) != 0) return new(PhysicalRumbleWriteStatus.Disposed, "Disposed");
         lock (_sync)
         {
@@ -33,15 +44,28 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
             if (identity is null || string.IsNullOrWhiteSpace(identity.PhysicalIdentity))
                 return new(PhysicalRumbleWriteStatus.Unavailable, "PhysicalIdentityUnavailable");
             var generationEndpoint = _identityProvider.CurrentSessionGeneration;
-            var endpoint = _endpointGeneration == generationEndpoint
-                ? _cachedEndpoint
-                : _endpointResolver.Resolve(identity);
-            if (_endpointGeneration != generationEndpoint)
+            MsiClawRumbleEndpointResolution endpoint;
+            try
+            {
+                endpoint = _endpointGeneration == generationEndpoint && _cachedEndpoint.IsAvailable
+                    ? _cachedEndpoint
+                    : _endpointResolver.Resolve(identity);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Debug("Rumble", "MSI rumble endpoint resolution failed.", ("PID", 1902), ("PhysicalGeneration", generationEndpoint), ("Reason", "EndpointResolutionException"), ("Exception", exception.GetType().Name));
+                return new(PhysicalRumbleWriteStatus.Failed, "EndpointResolutionException");
+            }
+            if (endpoint.IsAvailable)
             {
                 _cachedEndpoint = endpoint;
                 _endpointGeneration = generationEndpoint;
             }
-            if (!endpoint.IsAvailable) return new(PhysicalRumbleWriteStatus.Unavailable, endpoint.Reason);
+            if (!endpoint.IsAvailable)
+            {
+                AppLog.Debug("Rumble", "MSI rumble endpoint unavailable.", ("PID", 1902), ("PhysicalGeneration", generationEndpoint), ("Reason", endpoint.Reason));
+                return new(PhysicalRumbleWriteStatus.Unavailable, endpoint.Reason);
+            }
             var current = _identityProvider.CurrentIdentity;
             if (_identityProvider.CurrentSessionGeneration != generation || !SameIdentity(identity, current))
                 return new(PhysicalRumbleWriteStatus.Unavailable, "StalePhysicalSession");
