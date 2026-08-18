@@ -47,6 +47,7 @@ internal sealed record MsiClawPhysicalInputIdentity(Guid InstanceGuid, string De
 internal interface IMsiClawPhysicalInputIdentityProvider
 {
     MsiClawPhysicalInputIdentity? CurrentIdentity { get; }
+    long CurrentSessionGeneration => 0;
 }
 
 internal interface IMsiClawInputDiagnostic : IMsiClawPreparedInputSource

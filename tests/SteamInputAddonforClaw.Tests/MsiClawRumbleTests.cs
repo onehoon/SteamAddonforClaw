@@ -33,7 +33,7 @@ public sealed class MsiClawRumbleTests
     {
         var identity = new FakeIdentity(null);
         var transport = new FakeTransport();
-        using var sink = new MsiClawRumbleSink(identity, transport);
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
         Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, sink.SetRumble(new(1, 2)).Status);
         identity.Current = new(Guid.NewGuid(), "path-a", "PNP", "USB\\VID_0DB0&PID_1902");
         Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
@@ -91,7 +91,7 @@ public sealed class MsiClawRumbleTests
     public void Sink_returns_disposed_without_transport_io()
     {
         var transport = new FakeTransport();
-        using var sink = new MsiClawRumbleSink(new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "USB\\VID_0DB0&PID_1902")), transport);
+        using var sink = new MsiClawRumbleSink(new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "USB\\VID_0DB0&PID_1902")), transport, new VerifiedEndpointResolver());
         sink.Dispose();
         Assert.Equal(PhysicalRumbleWriteStatus.Disposed, sink.SetRumble(TwoMotorRumble.Stopped).Status);
         Assert.Empty(transport.Packets);
@@ -114,7 +114,29 @@ public sealed class MsiClawRumbleTests
         native.ReleaseFirstWrite.Set();
         Assert.True((await first).Succeeded);
         Assert.True((await second).Succeeded);
-        Assert.Equal([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], native.Writes);
+        Assert.Equal(2, native.Writes.Count);
+        Assert.Equal(1, native.Writes[0][0]);
+        Assert.Equal(2, native.Writes[1][0]);
+        Assert.All(native.Writes, write => { Assert.Equal(64, write.Length); Assert.All(write[11..], value => Assert.Equal(0, value)); });
+    }
+
+    [Fact]
+    public async Task Invalidation_waits_for_in_progress_write_and_forces_fresh_open()
+    {
+        var native = new FakeNativeHid { BlockFirstWrite = true };
+        using var transport = new WindowsMsiClawRumbleTransport(native);
+        var first = Task.Run(() => transport.Write("path-a", new byte[11]));
+        await native.FirstWriteEntered.Task;
+        var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        transport.InvalidationRequested = () => requested.TrySetResult();
+        var invalidation = Task.Run(transport.InvalidatePhysicalSession);
+        await requested.Task;
+        Assert.False(invalidation.IsCompleted);
+        native.ReleaseFirstWrite.Set();
+        Assert.True((await first).Succeeded);
+        await invalidation;
+        Assert.True(transport.Write("path-a", new byte[11]).Succeeded);
+        Assert.Equal(2, native.OpenCount);
     }
 
     [Fact]
@@ -122,7 +144,7 @@ public sealed class MsiClawRumbleTests
     {
         var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "USB\\VID_0DB0&PID_1902"));
         var transport = new FakeTransport { Result = new(false, "OpenFailed", 5) };
-        using var sink = new MsiClawRumbleSink(identity, transport);
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
         Assert.Equal(PhysicalRumbleWriteStatus.Failed, sink.SetRumble(TwoMotorRumble.Stopped).Status);
         transport.Result = new(false, "PartialWrite");
         Assert.Equal(PhysicalRumbleWriteStatus.Failed, sink.SetRumble(TwoMotorRumble.Stopped).Status);
@@ -134,7 +156,32 @@ public sealed class MsiClawRumbleTests
     public void Sink_rejects_empty_identity_path_without_transport_call()
     {
         var transport = new FakeTransport();
-        using var sink = new MsiClawRumbleSink(new FakeIdentity(new(Guid.NewGuid(), "", "PNP", "USB\\VID_0DB0&PID_1902")), transport);
+        using var sink = new MsiClawRumbleSink(new FakeIdentity(new(Guid.NewGuid(), "", "PNP", "USB\\VID_0DB0&PID_1902")), transport, new VerifiedEndpointResolver());
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Empty(transport.Packets);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_requires_one_exact_writable_64_byte_pid1902_candidate()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        MsiClawRumbleEndpointCandidate Candidate(string path, ushort pid = 0x1902, int length = 64, bool writable = true, string pnp = "PNP-A", string physical = "ROOT-A") =>
+            new(path, pnp, physical, 0x0DB0, pid, length, writable);
+
+        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => []).Resolve(identity).Reason);
+        Assert.Equal("AmbiguousEndpoints", new MsiClawRumbleEndpointResolver(_ => [Candidate("a"), Candidate("b")]).Resolve(identity).Reason);
+        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", pid: 0x1901)]).Resolve(identity).Reason);
+        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", length: 11)]).Resolve(identity).Reason);
+        Assert.Equal("a", new MsiClawRumbleEndpointResolver(_ => [Candidate("a")]).Resolve(identity).DevicePath);
+    }
+
+    [Fact]
+    public void Sink_rejects_identity_that_becomes_stale_before_write_admission()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var transport = new FakeTransport();
+        var resolver = new MutatingResolver(identity);
+        using var sink = new MsiClawRumbleSink(identity, transport, resolver);
         Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, sink.SetRumble(TwoMotorRumble.Stopped).Status);
         Assert.Empty(transport.Packets);
     }
@@ -143,6 +190,24 @@ public sealed class MsiClawRumbleTests
     {
         public MsiClawPhysicalInputIdentity? Current { get; set; } = identity;
         public MsiClawPhysicalInputIdentity? CurrentIdentity => Current;
+        public long Generation { get; set; }
+        public long CurrentSessionGeneration => Generation;
+    }
+
+    private sealed class VerifiedEndpointResolver : IMsiClawRumbleEndpointResolver
+    {
+        public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity) =>
+            string.IsNullOrWhiteSpace(identity.DevicePath) ? new(null, "NoVerifiedEndpoint") : new(identity.DevicePath, "VerifiedTestEndpoint");
+    }
+
+    private sealed class MutatingResolver(FakeIdentity identity) : IMsiClawRumbleEndpointResolver
+    {
+        public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity value)
+        {
+            identity.Current = null;
+            identity.Generation++;
+            return new(value.DevicePath, "VerifiedTestEndpoint");
+        }
     }
 
     private sealed class FakeTransport : IMsiClawRumbleTransport

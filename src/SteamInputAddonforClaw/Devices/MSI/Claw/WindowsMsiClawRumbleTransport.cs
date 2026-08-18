@@ -8,7 +8,7 @@ internal readonly record struct MsiClawRumbleTransportResult(bool Succeeded, str
 
 internal interface IMsiClawRumbleTransport : IDisposable
 {
-    MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> packet);
+    MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket);
     void InvalidatePhysicalSession();
 }
 
@@ -21,17 +21,18 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
     private bool _disposed;
 
     internal Action? WriteRequested { get; set; }
+    internal Action? InvalidationRequested { get; set; }
 
     internal WindowsMsiClawRumbleTransport(IMsiClawNativeHidApi? api = null) => _api = api ?? new WindowsMsiClawNativeHidApi();
 
-    public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> packet)
+    public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket)
     {
         WriteRequested?.Invoke();
         lock (_sync)
         {
             if (_disposed) return new(false, "Disposed");
             if (string.IsNullOrWhiteSpace(devicePath)) return new(false, "EmptyDevicePath");
-            if (packet.Length != 11) return new(false, "InvalidLength");
+            if (semanticPacket.Length != 11) return new(false, "InvalidSemanticLength");
 
             if (!string.Equals(_devicePath, devicePath, StringComparison.OrdinalIgnoreCase))
                 CloseHandleLocked();
@@ -49,7 +50,8 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
                 _devicePath = devicePath;
             }
 
-            var bytes = packet.ToArray();
+            var bytes = new byte[64];
+            semanticPacket.CopyTo(bytes);
             var writeStarted = Stopwatch.GetTimestamp();
             if (!_api.Write(_handle, bytes, out var written))
             {
@@ -69,6 +71,7 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
 
     public void InvalidatePhysicalSession()
     {
+        InvalidationRequested?.Invoke();
         lock (_sync)
             CloseHandleLocked();
     }

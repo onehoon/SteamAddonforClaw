@@ -13,6 +13,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
     private DirectInputDeviceDescriptor? _preparedDescriptor;
     private bool _ownsInputSession;
     private MsiClawPhysicalInputIdentity? _currentIdentity;
+    private long _sessionGeneration;
 
     internal MsiClawPhysicalInputStage(Func<IDirectInputDeviceEnumerator> enumeratorFactory, IMsiClawPreparedInputSource inputSource)
     {
@@ -22,6 +23,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
 
     public RoutingStageKind Kind => RoutingStageKind.PhysicalInput;
     public MsiClawPhysicalInputIdentity? CurrentIdentity { get { lock (_sync) return _currentIdentity; } }
+    public long CurrentSessionGeneration { get { lock (_sync) return _sessionGeneration; } }
 
     public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)
     {
@@ -109,6 +111,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
         lock (_sync)
         {
             _ownsInputSession = true;
+            _sessionGeneration++;
             _currentIdentity = new(descriptor.InstanceGuid, descriptor.DevicePath!, descriptor.PnpInstanceId!, descriptor.PhysicalIdentity!);
         }
         AppLog.Debug("PhysicalInput", "PhysicalInput selected", ("InstanceGuid", descriptor.InstanceGuid), ("DevicePath", descriptor.DevicePath), ("PnpInstanceId", descriptor.PnpInstanceId), ("PhysicalIdentity", descriptor.PhysicalIdentity));
@@ -138,6 +141,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
             _preparedDescriptor = null;
             _ownsInputSession = false;
             _currentIdentity = null;
+            _sessionGeneration++;
         }
         PhysicalSessionRetired?.Invoke();
         return RoutingStageOperationResult.Success("Stopped");
