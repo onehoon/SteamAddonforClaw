@@ -23,6 +23,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
         internal CenterMAutoRunState AutoRun = CenterMAutoRunState.Disabled;
         internal string? StagedPath = @"C:\fake\Runtime\MSI Center M.exe";
+        internal Func<bool> EnvironmentEligible = () => true;
         internal readonly CenterMHelperOwnership HelperOwnership;
 
         internal Harness()
@@ -53,8 +54,10 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
                 mainUiObserver: mainUiObserver,
                 terminator: terminator,
                 handleOpener: HandleOpener,
+                identityInspector: IdentityInspector,
                 stager: _ => StagedPath,
                 delay: Delay.DelayAsync,
+                environmentEligibility: () => EnvironmentEligible(),
                 hiddenDebounce: debounce ?? TimeSpan.FromMilliseconds(1));
         }
     }
@@ -221,6 +224,29 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     private const string ExpectedPath = @"C:\Program Files\WindowsApps\Fake\MSI Center M\MSI Center M.exe";
+
+    /// <summary>Deterministic replacement for wall-clock <c>Task.Delay</c> polling (finding #7):
+    /// subscribes to the coordinator's debounce-finished test seam BEFORE invoking
+    /// <paramref name="trigger"/>, so a fire-and-forget debounce continuation that completes very
+    /// quickly (or even synchronously) can never race past the subscription and be missed.</summary>
+    private static async Task AwaitDebounceCompletionAsync(CenterMOem1LifecycleCoordinator coordinator, Func<Task> trigger)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnFinished() => tcs.TrySetResult();
+        coordinator.TestOnly_DebounceContinuationFinished += OnFinished;
+        try
+        {
+            await trigger().ConfigureAwait(false);
+            await tcs.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        }
+        finally
+        {
+            coordinator.TestOnly_DebounceContinuationFinished -= OnFinished;
+        }
+    }
+
+    private static Task AwaitDebounceCompletionAsync(CenterMOem1LifecycleCoordinator coordinator, Action trigger) =>
+        AwaitDebounceCompletionAsync(coordinator, () => { trigger(); return Task.CompletedTask; });
 
     // ============================================================
     // Eligibility / arming
@@ -657,15 +683,21 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         await coordinator.PollTickAsync();
         Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
 
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
+        // Cancellation happens synchronously as part of this poll (the debounce continuation is
+        // parked on the delay awaiting the cancellation token, so canceling it can finish the
+        // continuation before this call even returns) -- subscribe to the completion seam BEFORE
+        // triggering it so the signal can never be missed.
+        await AwaitDebounceCompletionAsync(coordinator, async () =>
+        {
+            h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+            await coordinator.PollTickAsync();
+        });
 
         Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
 
-        // Releasing the stale delay must not cause a termination -- the pending debounce token was
-        // already canceled, so its continuation must observe cancellation and do nothing.
+        // Releasing the (already-canceled, already-finished) delay must not cause a second
+        // continuation run or a termination.
         h.Delay.Release();
-        await Task.Delay(50);
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
     }
 
@@ -700,9 +732,10 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         await coordinator.PollTickAsync();
         Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
 
-        await coordinator.SetDesiredEnabledAsync(false);
+        // Disable cancels the pending debounce synchronously as part of its own gate turn, so the
+        // continuation may already finish before this call returns -- subscribe first.
+        await AwaitDebounceCompletionAsync(coordinator, () => coordinator.SetDesiredEnabledAsync(false));
         h.Delay.Release();
-        await Task.Delay(50);
 
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
         Assert.Equal(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
@@ -719,9 +752,11 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
         await coordinator.PollTickAsync();
 
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+        // Suspend cancels the pending debounce synchronously as part of its own gate turn, so the
+        // continuation may already finish before this call returns -- subscribe first.
+        await AwaitDebounceCompletionAsync(coordinator,
+            () => coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None));
         h.Delay.Release();
-        await Task.Delay(50);
 
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
     }
@@ -738,10 +773,10 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         await coordinator.PollTickAsync();
         h.Delay.Held = false; // let the debounce resolve immediately once started
         h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-        await coordinator.PollTickAsync();
-        // Give the fire-and-forget debounce continuation a chance to run and re-enter the gate.
-        for (var i = 0; i < 50 && coordinator.GetSnapshot().State == CenterMOem1LifecycleState.HiddenDebounce; i++)
-            await Task.Delay(10);
+        // Subscribe BEFORE triggering the poll that starts the debounce: with Held == false the
+        // fire-and-forget continuation may finish essentially immediately, so subscribing after
+        // would risk a missed signal.
+        await AwaitDebounceCompletionAsync(coordinator, () => coordinator.PollTickAsync());
         return (coordinator, h);
     }
 
@@ -777,9 +812,11 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         h.IdentityInspector.Status = LiveProcessProbeStatus.Exited; // fresh evidence: already exited
         h.Snapshots.Foreign = []; // an already-exited process no longer appears in enumeration either
         h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        // The retained-handle check at the top of ObserveTrackedMainUiCore now catches this
+        // "Exited" evidence immediately -- it routes straight to the natural-exit reconciliation
+        // path and never even reaches HiddenDebounce, so no debounce continuation is ever started
+        // and no completion wait is needed here.
         await coordinator.PollTickAsync();
-        for (var i = 0; i < 50 && coordinator.GetSnapshot().State == CenterMOem1LifecycleState.HiddenDebounce; i++)
-            await Task.Delay(10);
 
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // AlreadyExited never reaches a real TerminateProcess call
         Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
@@ -792,15 +829,18 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         var coordinator = await ArmAndAdoptStartingHidden(h);
         h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
         await coordinator.PollTickAsync();
-        h.Delay.Held = false;
-        // Debounce evaluates SafeMainUiTerminator.TryTerminate which itself captures a *fresh*
-        // window snapshot -- if that fresh capture shows visible again, the result is VisibleAgain.
+        // Hold the delay open so the exact moment the debounce's fresh capture runs is
+        // deterministic: only after we explicitly change the window snapshot and release it.
+        h.Delay.Held = true;
         h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-        var originalCapture = h.WindowProvider.NextSnapshot;
         await coordinator.PollTickAsync();
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1); // becomes visible again before the debounce's own fresh capture runs
-        for (var i = 0; i < 50 && coordinator.GetSnapshot().State == CenterMOem1LifecycleState.HiddenDebounce; i++)
-            await Task.Delay(10);
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        // Debounce evaluates SafeMainUiTerminator.TryTerminate which itself captures a *fresh*
+        // window snapshot immediately before deciding -- becomes visible again before that fresh
+        // capture runs.
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
 
         Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
     }
@@ -812,7 +852,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         var coordinator = await ArmAndAdoptStartingHidden(h);
         h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
         await coordinator.PollTickAsync();
-        h.Delay.Held = false;
         h.HandleOpener.FullRightsSucceed = false; // no terminate rights -> AccessDenied path (observation-only handle)
         h.HandleOpener.ObservationSucceeds = true;
         // Re-adopt is not re-run mid-test; instead directly force AccessDenied via handle rights on
@@ -820,9 +859,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         // WaitTimedOut/Failed style fail-open via a terminate failure instead.
         h.TerminateInvoker.TerminateSucceeds = false;
         h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-        await coordinator.PollTickAsync();
-        for (var i = 0; i < 50 && coordinator.GetSnapshot().State == CenterMOem1LifecycleState.HiddenDebounce; i++)
-            await Task.Delay(10);
+        await AwaitDebounceCompletionAsync(coordinator, () => coordinator.PollTickAsync());
 
         var snap = coordinator.GetSnapshot();
         Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
@@ -877,9 +914,10 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         await coordinator.PollTickAsync();
         Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
 
-        await coordinator.ShutdownAsync();
+        // Shutdown cancels the pending debounce synchronously as part of its own gate turn, so the
+        // continuation may already finish before this call returns -- subscribe first.
+        await AwaitDebounceCompletionAsync(coordinator, () => coordinator.ShutdownAsync());
         h.Delay.Release();
-        await Task.Delay(50);
 
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
     }
@@ -1059,10 +1097,20 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
         await coordinator.PollTickAsync();
 
-        var shutdownTask = coordinator.ShutdownAsync();
-        h.Delay.Release();
-        await shutdownTask;
-        await Task.Delay(50);
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnFinished() => tcs.TrySetResult();
+        coordinator.TestOnly_DebounceContinuationFinished += OnFinished;
+        try
+        {
+            var shutdownTask = coordinator.ShutdownAsync();
+            h.Delay.Release();
+            await shutdownTask;
+            await tcs.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            coordinator.TestOnly_DebounceContinuationFinished -= OnFinished;
+        }
 
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
     }
@@ -1096,5 +1144,345 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         await Task.WhenAll(t1, t2);
 
         Assert.Equal(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
+    }
+
+    // ============================================================
+    // Review round 2 (PR #239, review 4957250006): regression coverage for the 8 findings.
+    // ============================================================
+
+    // ---- Finding #1: suspended mutation barrier ----
+
+    [Fact]
+    public async Task Suspend_HelperExitsAfterQuiesce_LivenessPoll_NoReArmBeforeResume()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+        await coordinator.PollHelperLivenessAsync();
+
+        // The exited handle is retired (bookkeeping only), but no fresh reconcile -- and therefore
+        // no new helper -- may run while the suspended barrier is active.
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+        Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.Equal(2, h.HelperApi.StartCallCount); // resume is the explicit boundary that re-arms
+    }
+
+    [Fact]
+    public async Task Suspend_TrackedMainUiHiddenAfterQuiesce_PollStartsNoDebounceOrTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        Assert.True(coordinator.GetSnapshot().SeenVisible);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0); // hidden
+        await coordinator.PollTickAsync();
+
+        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.Delay.CallCount); // no debounce ever started while suspended
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task SuspendedBarrier_BlocksGenericReconcile_UntilResumeClearsIt()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        await coordinator.ReconcileAsync("attempted-reconcile-while-suspended");
+        Assert.Equal(1, h.HelperApi.StartCallCount); // barrier refused to mutate anything
+
+        await coordinator.ReconcileAfterResumeAsync(); // explicit boundary: clears barrier, reconciles fresh
+
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.Equal(1, h.HelperApi.StartCallCount); // world was clean -- resume simply reconfirms Armed
+    }
+
+    // ---- Finding #2: retained-handle-anchored adoption and observation ----
+
+    [Fact]
+    public async Task AdoptionCandidate_RetainedHandleReportsDifferentIdentity_NoAdoption()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
+        // The enumeration candidate is 5555, but the freshly retained handle proves a DIFFERENT
+        // process (PID mismatch) -- the candidate exited/changed between enumeration and handle
+        // acquisition.
+        h.IdentityInspector.ProcessId = 9999;
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.Null(snap.RealMainUiProcessId);
+    }
+
+    [Fact]
+    public async Task RetainedHandleExited_ReusedPidReportsAliveAndVisible_NeverTransfersSeenVisible()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        Assert.True(coordinator.GetSnapshot().SeenVisible);
+
+        // The retained handle now proves the original identity is gone, even though the PID/window
+        // provider currently reports something alive and visible for the same numeric PID (a reused
+        // PID from an unrelated process).
+        h.IdentityInspector.Status = LiveProcessProbeStatus.Exited;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+
+        await coordinator.PollTickAsync();
+
+        Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
+        Assert.False(coordinator.GetSnapshot().SeenVisible); // never transferred to the reused PID
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task RetainedHandleUncertainWhileHidden_FailsOpen_NoTerminationNoReArm()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        Assert.True(coordinator.GetSnapshot().SeenVisible);
+        var startCallCountBeforeUncertain = h.HelperApi.StartCallCount;
+
+        h.IdentityInspector.Status = LiveProcessProbeStatus.Uncertain;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0); // would otherwise look hidden
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.Equal(0, h.Delay.CallCount); // no debounce ever started from stale PID/window evidence
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        Assert.Equal(startCallCountBeforeUncertain, h.HelperApi.StartCallCount); // no re-arm either
+    }
+
+    // ---- Finding #3: authoritative same-name invariant for an already-owned helper ----
+
+    [Fact]
+    public async Task AliveRetainedHelper_EmptySameNameEnumeration_NeverCommitsArmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        var startCallCountAfterArm = h.HelperApi.StartCallCount;
+
+        // A confidently empty enumeration despite an alive, owned, retained helper handle is exactly
+        // the inconsistent-world case the stronger invariant must catch -- HelperMissing, not Valid.
+        h.Snapshots.MainUiSequence = new Queue<IReadOnlyList<ProcessSnapshotEntry>?>([[]]);
+
+        await coordinator.ReconcileAsync("empty-enumeration-despite-owned-helper");
+
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.Equal(startCallCountAfterArm, h.HelperApi.StartCallCount); // no re-arm attempted either
+    }
+
+    // ---- Finding #4: edge-triggered, identity-bound hidden debounce ----
+
+    [Fact]
+    public async Task RepeatedHiddenPolls_DoNotRestartDebounce_TerminatorFiresExactlyOnce()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+        Assert.Equal(1, h.Delay.CallCount);
+
+        // Additional hidden polls before expiry (simulating a poll cadence faster than the
+        // debounce) must never start (or cancel/restart) a second delay for the same identity.
+        await coordinator.PollTickAsync();
+        await coordinator.PollTickAsync();
+        await coordinator.PollTickAsync();
+        Assert.Equal(1, h.Delay.CallCount);
+
+        // Releasing the ORIGINAL delay runs the terminator exactly once.
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+        Assert.Equal(1, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    // ---- Finding #5: confirmed-clean helper removal before ever reporting a clean state ----
+
+    [Fact]
+    public async Task AutoRunDrift_StopFailure_StaysFaultedNative_NeverNeedsSetup()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        h.AutoRun = CenterMAutoRunState.Enabled; // drift
+        h.HelperApi.TerminateSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false;
+
+        await coordinator.ReconcileAsync("autorun-drift");
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.False(snap.NativeBehaviorGuaranteed); // still owned -- cleanup unconfirmed
+    }
+
+    [Fact]
+    public async Task PrerequisiteDrift_StopFailure_StaysFaultedNative_NeverNeedsSetup()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        h.Snapshots.Launcher = []; // drift
+        h.HelperApi.TerminateSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false;
+
+        await coordinator.ReconcileAsync("prerequisite-drift");
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.False(snap.NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task FailedDisable_FollowedByGenericReconcile_NeverFalselyReportsDisabled()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.HelperApi.TerminateSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false;
+        await coordinator.SetDesiredEnabledAsync(false);
+        Assert.NotEqual(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
+
+        // A later generic reconcile (e.g. a subsequent timer tick) with desiredEnabled == false must
+        // preserve the same "never falsely report clean" semantics as the direct disable path --
+        // it must retry cleanup, not blindly commit Disabled.
+        await coordinator.ReconcileAsync("post-disable-generic-reconcile");
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Disabled, snap.State);
+        Assert.False(snap.NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task Shutdown_UnconfirmedCleanup_NeverReportsCleanDisabled()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.HelperApi.TerminateSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false;
+
+        await coordinator.ShutdownAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Disabled, snap.State);
+        Assert.False(snap.NativeBehaviorGuaranteed); // exact helper still unresolved
+    }
+
+    // ---- Finding #6: request-time epoch invalidation ahead of the debounce's mutation gate ----
+
+    [Fact]
+    public async Task DisableEpochBump_CompletesBeforeDebounceEntersGate_PreventsStaleTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        var enteredHook = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHook = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator.TestOnly_BeforeDebounceGateAcquire = async () =>
+        {
+            enteredHook.TrySetResult();
+            await releaseHook.Task;
+        };
+
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnFinished() => finished.TrySetResult();
+        coordinator.TestOnly_DebounceContinuationFinished += OnFinished;
+
+        h.Delay.Release();
+        // The debounce continuation's delay has completed and it is now parked immediately before
+        // it would compete for the gate.
+        await enteredHook.Task;
+
+        // The disable request now runs to FULL completion -- including its epoch bump, which
+        // happens before it ever tries to acquire the gate -- entirely before the debounce
+        // continuation is permitted to enter the gate. This is exactly the ordering finding #6
+        // describes as unsafe without the epoch check: even though the debounce "arrived" first, a
+        // higher-priority request became authoritative before the debounce ever entered the gate.
+        await coordinator.SetDesiredEnabledAsync(false);
+
+        releaseHook.TrySetResult(); // let the now-stale debounce continuation proceed into the gate
+        await finished.Task;
+        coordinator.TestOnly_DebounceContinuationFinished -= OnFinished;
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        Assert.Equal(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
+    }
+
+    // ---- Finding #8: supported-environment eligibility gate ----
+
+    [Fact]
+    public async Task UnsupportedEnvironment_NeedsSetup_HelperNeverCreated()
+    {
+        var h = NewHarness();
+        h.EnvironmentEligible = () => false;
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task UnsupportedEnvironment_ExistingOwnedHelper_StoppedBeforeNeedsSetup()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        h.EnvironmentEligible = () => false;
+        await coordinator.ReconcileAsync("environment-became-unsupported");
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+        Assert.Null(snap.HelperProcessId);
     }
 }
