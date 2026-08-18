@@ -48,6 +48,37 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task Pulse_is_merged_between_mapper_and_sink_then_expires()
+    {
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time);
+        var source = new Snapshot(new ControllerState(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false), default, default, default, new([false, false])));
+        var sink = new FakeSink(); var ticks = new ManualTicks();
+        var publisher = new CanonicalSteamDeckInputPublisher(source, sink, ticks, systemButtonOverlay: overlay);
+        publisher.Start();
+
+        // Before any pulse is requested: normal mapped state, QuickAccess neutral.
+        await ticks.TickAsync(); await sink.WaitForCountAsync(1);
+        Assert.Equal((byte)1, sink.States[0].A);
+        Assert.Equal((byte)0, sink.States[0].QuickAccess);
+
+        // Overlay requests a pulse out-of-band (as a future caller would); the next publish tick
+        // (mapper -> overlay -> sink) must carry it while leaving the mapped fields untouched.
+        overlay.RequestQuickAccessPulse();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        Assert.Equal((byte)1, sink.States[1].A);
+        Assert.Equal((byte)1, sink.States[1].QuickAccess);
+
+        // After the pulse duration elapses, normal publication continues with QuickAccess neutral.
+        time.Advance(TimeSpan.FromMilliseconds(51));
+        await ticks.TickAsync(); await sink.WaitForCountAsync(3);
+        Assert.Equal((byte)1, sink.States[2].A);
+        Assert.Equal((byte)0, sink.States[2].QuickAccess);
+
+        await publisher.StopAsync();
+    }
+
+    [Fact]
     public async Task Unchanged_state_is_published_every_tick()
     {
         var state = new ControllerState(new GamepadButtons(true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false), default, default, default, new([false, false]));
@@ -757,6 +788,15 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
             }
             return true;
         }
+    }
+
+    /// <summary>Minimal deterministic <see cref="TimeProvider"/> stub shared with
+    /// SteamDeckSystemButtonOverlayTests' scope -- kept local here to avoid a cross-file test dependency.</summary>
+    private sealed class FakeTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now = DateTimeOffset.UnixEpoch;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan by) => _now += by;
     }
 
     private sealed class Snapshot(ControllerState value) : IControllerStateSnapshotSource

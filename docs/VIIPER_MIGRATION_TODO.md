@@ -87,7 +87,12 @@ Required properties:
 Status: **PLANNED**
 
 Map the validated OEM1 control to the Steam Deck Quick Access field after the
-basic lifecycle gate is complete.
+basic lifecycle gate is complete. A managed, output-only Quick Access
+synthetic-button primitive (`SteamDeckSystemButtonOverlay`, merged into the
+existing Steam Deck publish path in `CanonicalSteamDeckInputPublisher`) now
+exists, with a narrow `CanonicalSteamDeckOutputStage.RequestQuickAccessPulse()`
+forwarding seam for a future PR. It remains unwired to OEM1, gesture policy,
+UI, IPC, or settings, and this does not advance SD5 completion.
 
 ### SD6 — gyro and accelerometer
 

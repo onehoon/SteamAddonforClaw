@@ -54,6 +54,7 @@ internal sealed class CanonicalSteamDeckInputPublisher
     private readonly IInputReportTickSource? _ticks;
     private readonly Action<Exception>? _fault;
     private readonly Func<long> _timestampProvider;
+    private readonly SteamDeckSystemButtonOverlay _systemButtonOverlay;
     private CancellationTokenSource? _stop;
     private Task? _task;
     private int _publishedStateCount;
@@ -99,13 +100,15 @@ internal sealed class CanonicalSteamDeckInputPublisher
         ICanonicalSteamDeckStateSink sink,
         IInputReportTickSource? ticks = null,
         Action<Exception>? fault = null,
-        Func<long>? timestampProvider = null)
+        Func<long>? timestampProvider = null,
+        SteamDeckSystemButtonOverlay? systemButtonOverlay = null)
     {
         _snapshot = snapshot;
         _sink = sink;
         _ticks = ticks;
         _fault = fault;
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
+        _systemButtonOverlay = systemButtonOverlay ?? new SteamDeckSystemButtonOverlay();
     }
 
     internal bool IsRunning => _task is { IsCompleted: false } || _workerThread is { IsAlive: true };
@@ -382,7 +385,8 @@ internal sealed class CanonicalSteamDeckInputPublisher
     /// </summary>
     private bool PublishCurrentStateOnce()
     {
-        var state = SteamDeckDeviceStateMapper.Map(_snapshot.LatestState);
+        var mapped = SteamDeckDeviceStateMapper.Map(_snapshot.LatestState);
+        var state = _systemButtonOverlay.Apply(mapped);
 
         var diagnosticsEnabled = AppLog.IsEnabled(AppLogLevel.Info);
         var callStart = diagnosticsEnabled ? _timestampProvider() : 0;
