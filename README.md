@@ -15,7 +15,8 @@ Steam Deck `VID=0x28DE`, `PID=0x1205`.
 | Addon Steam Deck session / mapper / publisher | Implemented |
 | EX hardware basic non-gyro controller input | Validated |
 | Lifecycle and recovery hardware validation | Remaining validation track |
-| Rumble / haptics | Separate feature track |
+| Rumble | Production wiring implemented; hardware validation pending |
+| Haptics | Separate feature track |
 | Gyro / accelerometer | Separate feature track |
 | Quick Access / OEM1 | Planned |
 | Game Bar / typed Xbox360 route | Planned |

@@ -106,7 +106,8 @@ the active Deck lifecycle or recovery invariants.
 
 ## Separate feature tracks
 
-Rumble, haptics, gyro, and accelerometer behavior are not implied by the basic
+Rumble v1 production wiring is implemented, but hardware validation remains
+pending. Haptics, gyro, and accelerometer behavior are not implied by the basic
 non-gyro input validation. Each requires its own protocol, mapping, lifecycle,
 and hardware evidence.
 

@@ -1,10 +1,103 @@
 using SteamInputAddonforClaw.Feedback;
+using System.Runtime.InteropServices;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class RumbleV1Tests
 {
+    [Fact]
+    public void SteamDeckFeedbackBridge_captures_immutable_token_and_rejects_late_callback()
+    {
+        var authority = new FeedbackAuthority();
+        var first = authority.Acquire("SteamDeck");
+        var sink = new RecordingSink();
+        var oldBridge = new SteamDeckRumbleFeedbackBridge(authority, first, sink);
+        authority.RevokeAndDrain();
+        var second = authority.Acquire("SteamDeck");
+        var newBridge = new SteamDeckRumbleFeedbackBridge(authority, second, sink);
+        Invoke(oldBridge.Callback, Packet(0x1234, 0x5678));
+        Invoke(newBridge.Callback, Packet(0x1234, 0x5678));
+        Assert.Single(sink.Values);
+        Assert.Equal(new TwoMotorRumble(0x1234, 0x5678), sink.Values[0]);
+    }
+
+    [Fact]
+    public void SteamDeckFeedbackBridge_contains_invalid_native_callback_inputs_and_sink_exceptions()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        var sink = new RecordingSink { ThrowOnWrite = true };
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
+        bridge.Callback(0, 0, 4);
+        var oversized = Marshal.AllocHGlobal(65);
+        try { bridge.Callback(0, oversized, 65); }
+        finally { Marshal.FreeHGlobal(oversized); }
+        Invoke(bridge.Callback, Packet(1, 2));
+        Assert.Empty(sink.Values);
+    }
+
+    [Fact]
+    public async Task SteamDeckFeedbackBridge_paused_before_lease_is_rejected_after_revoke()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        var sink = new RecordingSink();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
+        var beforeLease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new ManualResetEventSlim(false);
+        bridge.BeforeLease = () => { beforeLease.TrySetResult(); release.Wait(); };
+        var callback = Task.Run(() => Invoke(bridge.Callback, Packet(1, 2)));
+        await beforeLease.Task;
+        authority.RevokeAndDrain();
+        release.Set();
+        await callback;
+        Assert.Empty(sink.Values);
+    }
+
+    [Fact]
+    public async Task SteamDeckFeedbackBridge_admitted_write_drains_before_revoke_returns()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        var sink = new BlockingRecordingSink();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
+        var callback = Task.Run(() => Invoke(bridge.Callback, Packet(1, 2)));
+        await sink.Entered.Task;
+        var revoke = Task.Run(authority.RevokeAndDrain);
+        Assert.False(revoke.IsCompleted);
+        sink.Release.Set();
+        await callback;
+        await revoke;
+        Assert.Equal([new TwoMotorRumble(1, 2)], sink.Values);
+    }
+
+    private static void Invoke(SteamInputAddonforClaw.VirtualOutput.Viiper.SteamDeckOutputCallback callback, byte[] report)
+    {
+        var pointer = Marshal.AllocHGlobal(report.Length);
+        try { Marshal.Copy(report, 0, pointer, report.Length); callback(0, pointer, (uint)report.Length); }
+        finally { Marshal.FreeHGlobal(pointer); }
+    }
+
+    private static byte[] Packet(ushort left, ushort right) =>
+        [0xEB, 9, 0, 0, 0, (byte)left, (byte)(left >> 8), (byte)right, (byte)(right >> 8), 2, 0];
+
+    private sealed class RecordingSink : IPhysicalRumbleSink
+    {
+        public List<TwoMotorRumble> Values { get; } = [];
+        public bool ThrowOnWrite { get; set; }
+        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
+        { if (ThrowOnWrite) throw new InvalidOperationException(); Values.Add(rumble); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+    }
+
+    private sealed class BlockingRecordingSink : IPhysicalRumbleSink
+    {
+        public List<TwoMotorRumble> Values { get; } = [];
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim Release { get; } = new(false);
+        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
+        { Entered.TrySetResult(); Release.Wait(); Values.Add(rumble); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+    }
     [Fact]
     public void TwoMotorRumble_PreservesIndependentFullPrecisionChannels()
     {

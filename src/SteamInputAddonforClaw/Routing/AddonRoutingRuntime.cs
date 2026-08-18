@@ -7,6 +7,7 @@ using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Feedback;
 
 namespace SteamInputAddonforClaw.Routing;
 
@@ -61,6 +62,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         if (handheldRoutingComposition is null) return null;
 
         var safetySession = handheldRoutingComposition.SafetySession;
+        var feedbackAuthority = new FeedbackAuthority();
 
         var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
         SteamOutputComposition.LogTargetSelected();
@@ -71,7 +73,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             addonOwnedVirtualDeviceTracker,
             recovery,
             () => safetySession?.CurrentRecoverySessionId,
-            new HidHideDriverClient(), handheldRoutingComposition.ControllerStateSource);
+            new HidHideDriverClient(), handheldRoutingComposition.ControllerStateSource,
+            feedbackAuthority: feedbackAuthority, physicalRumbleSink: handheldRoutingComposition.PhysicalRumbleSink);
         IRoutingPipelineStage steamOutputStage = deckStage;
         var pipelineExecutor = new RoutingPipelineExecutor([.. handheldRoutingComposition.Stages, steamOutputStage]);
         var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(pipelineExecutor);

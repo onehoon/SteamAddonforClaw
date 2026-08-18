@@ -11,6 +11,7 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
     private readonly Lock _sync = new();
     private int _disposed;
     private bool _admissionOpen = true;
+    private bool _failureWarningEmitted;
     private long? _endpointGeneration;
     private MsiClawRumbleEndpointResolution _cachedEndpoint;
 
@@ -56,12 +57,12 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
                 return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
             }
 
-                AppLog.Warn("Rumble", "MSI rumble write failed", null, ("PID", 1902), ("Large8", large8), ("Small8", small8), ("Operation", result.Reason.StartsWith("Open", StringComparison.Ordinal) ? "Open" : "Write"), ("Reason", result.Reason), ("Win32Error", result.Win32Error));
+                LogFailureOnce(result.Reason, large8, small8, result.Win32Error);
                 return new(PhysicalRumbleWriteStatus.Failed, result.Reason);
             }
             catch (Exception exception)
             {
-                AppLog.Warn("Rumble", "MSI rumble write failed", exception, ("PID", 1902), ("Large8", large8), ("Small8", small8), ("Reason", "TransportException"));
+                LogFailureOnce("TransportException", large8, small8, 0, exception);
                 return new(PhysicalRumbleWriteStatus.Failed, "TransportException");
             }
         }
@@ -83,6 +84,7 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
         lock (_sync)
         {
             _admissionOpen = false;
+            _failureWarningEmitted = false;
             _endpointGeneration = null;
             _cachedEndpoint = default;
             _transport.InvalidatePhysicalSession();
@@ -94,9 +96,17 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
         lock (_sync)
         {
             _admissionOpen = true;
+            _failureWarningEmitted = false;
             _endpointGeneration = null;
             _cachedEndpoint = default;
         }
+    }
+
+    private void LogFailureOnce(string reason, byte large8, byte small8, int win32Error, Exception? exception = null)
+    {
+        if (_failureWarningEmitted) return;
+        _failureWarningEmitted = true;
+        AppLog.Warn("Rumble", "MSI rumble write failed", exception, ("PID", 1902), ("Large8", large8), ("Small8", small8), ("Operation", reason.StartsWith("Open", StringComparison.Ordinal) ? "Open" : "Write"), ("Reason", reason), ("Win32Error", win32Error));
     }
 
     public void Dispose()
