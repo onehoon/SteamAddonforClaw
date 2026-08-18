@@ -69,12 +69,20 @@ integration, and no settings/UI. No new hardware validation is claimed by
 this PR; all coverage is deterministic automated tests with fake
 dependencies.
 
-## PR2-B (not started) — Gesture / policy
+## PR2-B1 — Gesture core (this PR)
 
-Single/double-click OEM1 gesture recognition, configurable timing,
-`Oem1Action` selection/dispatch. Steam Deck Quick Access mapping (VIIPER
-`VIIPER_MIGRATION_TODO.md` item "SD5") remains PLANNED and is not touched or
-validated by PR2-A.
+Adds an isolated OEM1 semantic gesture recognizer for Single/Double results,
+configurable double-click timing, deterministic delay testing, reset/cancellation,
+and stale-timeout protection. It receives already-classified semantic presses
+only; it is not wired into production runtime, Event41, lifecycle ownership, or
+any action policy. Production OEM1 behavior therefore remains unchanged.
+
+## PR2-B2 (not started) — Event / gesture policy bridge
+
+Will later forward validated OEM1 Event41 presses to the gesture core, ignore
+OEM2/Event88, gate processing on valid OEM1 custom authority, and convert
+gesture results into semantic policy requests. Quick Access remains deferred to
+PR3+; no `Oem1Action` or action dispatch is implemented here.
 
 ## PR3+ (not started) — Steam Quick Access / settings / UI
 
