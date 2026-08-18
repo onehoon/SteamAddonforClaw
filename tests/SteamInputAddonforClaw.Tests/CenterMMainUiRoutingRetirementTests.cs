@@ -235,6 +235,88 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Window_snapshot_uncertain_during_minimize_wait_is_classified_as_uncertain_not_timeout()
+    {
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider(
+        [
+            new MainUiWindowSnapshot(true, 1, 1), // upfront: visible
+            null // minimize-wait loop: enumeration failure, distinct from "stayed visible"
+        ]);
+        var (retirement, invoker, windowController) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            minimizeWaitTimeout: TimeSpan.FromMilliseconds(200), minimizeWaitPollInterval: TimeSpan.FromMilliseconds(10));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.WindowStateUncertain, result);
+        Assert.Equal(1, windowController.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Visible_mainui_without_terminate_rights_is_not_minimized()
+    {
+        // Fails BEFORE ever mutating the user's Center M window/controller lifecycle, since we
+        // already know this attempt can never complete termination.
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 1)]);
+        var (retirement, invoker, windowController) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            handleOpener: new FakeHandleOpener(grantTerminateRights: false));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.AccessDenied, result);
+        Assert.Equal(0, windowController.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Cancellation_racing_in_right_after_minimize_still_completes_stabilization_and_never_terminates()
+    {
+        // SC_MINIMIZE is an external side effect posted to a foreign process that the pipeline
+        // cannot roll back. Cancellation arriving right after that must not abandon Center M
+        // mid-transition -- hidden/XInput stabilization must still run to completion, and only once
+        // that resolves to a known-safe state does cancellation get honored again (without ever
+        // terminating the MainUI for a route that no longer exists).
+        using var cts = new CancellationTokenSource();
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider(
+        [
+            new MainUiWindowSnapshot(true, 1, 1), // upfront: visible
+            new MainUiWindowSnapshot(true, 1, 0) // minimize-wait loop observes hidden
+        ]);
+        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
+        var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshots);
+        // Cancels the token as a side effect of the minimize request itself succeeding -- simulates
+        // cancellation racing in immediately after the external side effect is posted.
+        var windowController = new CancelingWindowController(cts, CenterMMainUiMinimizeResult.Requested);
+        var retirement = new CenterMMainUiRoutingRetirement(
+            new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput),
+            processSnapshotSource: snapshots,
+            handleOpener: new FakeHandleOpener(),
+            identityInspector: identity,
+            windowSnapshotProvider: window,
+            windowController: windowController,
+            terminator: terminator,
+            minimizeWaitTimeout: TimeSpan.FromMilliseconds(200),
+            minimizeWaitPollInterval: TimeSpan.FromMilliseconds(10),
+            xInputWaitTimeout: TimeSpan.FromMilliseconds(200),
+            xInputWaitPollInterval: TimeSpan.FromMilliseconds(10),
+            terminateWaitTimeout: TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => retirement.PrepareExistingMainUiForRoutingAsync(cts.Token));
+
+        // Stabilization ran to completion despite the cancellation (both queued window snapshots
+        // were consumed -- if it had abandoned immediately, the second would never be read).
+        Assert.Equal(0, window.RemainingCount);
+        Assert.Equal(1, windowController.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
     public async Task Window_visible_again_immediately_before_termination_blocks_the_kill()
     {
         var snapshots = new QueueProcessSnapshotSource(
@@ -358,6 +440,8 @@ public sealed class CenterMMainUiRoutingRetirementTests
         private readonly Queue<MainUiWindowSnapshot?> _queue = new(responses);
         private MainUiWindowSnapshot? _last;
 
+        internal int RemainingCount => _queue.Count;
+
         public MainUiWindowSnapshot? Capture(int processId)
         {
             if (_queue.Count > 0) _last = _queue.Dequeue();
@@ -368,6 +452,21 @@ public sealed class CenterMMainUiRoutingRetirementTests
     private sealed class FixedNativeModeProbe(CenterMNativeModeProbeResult result) : ICenterMNativeModeProbe
     {
         public Task<CenterMNativeModeProbeResult> CaptureAsync(CancellationToken cancellationToken) => Task.FromResult(result);
+    }
+
+    /// <summary>Cancels the supplied token as a side effect of a successful minimize request --
+    /// simulates cancellation racing in immediately after the external SC_MINIMIZE side effect is
+    /// posted, without needing real timing gates.</summary>
+    private sealed class CancelingWindowController(CancellationTokenSource cancelOnMinimize, CenterMMainUiMinimizeResult result) : ICenterMMainUiWindowController
+    {
+        internal int CallCount { get; private set; }
+
+        public CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId)
+        {
+            CallCount++;
+            if (result == CenterMMainUiMinimizeResult.Requested) cancelOnMinimize.Cancel();
+            return result;
+        }
     }
 
     private sealed class FixedWindowController(CenterMMainUiMinimizeResult result) : ICenterMMainUiWindowController

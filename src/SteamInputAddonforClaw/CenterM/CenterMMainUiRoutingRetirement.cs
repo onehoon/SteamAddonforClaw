@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.CenterM;
@@ -21,6 +22,10 @@ internal enum CenterMMainUiRoutingRetirementResult
     TerminationTimedOut,
     AbsenceCheckFailed
 }
+
+internal enum MainUiHideWaitStatus { Hidden, Exited, TimedOut, Uncertain }
+
+internal readonly record struct MainUiHideWaitResult(MainUiHideWaitStatus Status, MainUiWindowSnapshot? Snapshot);
 
 /// <summary>
 /// Retires an already-running real MSI Center M MainUI before the Phase-1
@@ -81,6 +86,16 @@ internal sealed class CenterMMainUiRoutingRetirement
         _terminateWaitTimeout = terminateWaitTimeout ?? TimeSpan.FromSeconds(5);
     }
 
+    /// <summary>
+    /// Cancellation is only honored freely up to (and including) the point where a minimize request
+    /// has just been posted to a foreign MSI process -- that <c>SC_MINIMIZE</c> is an external side
+    /// effect the pipeline cannot roll back. Once posted, the resulting hidden/XInput transition is
+    /// always finished stabilizing/classifying with <see cref="CancellationToken.None"/> before
+    /// cancellation is ever observed again, so a cancelled routing request never abandons Center M
+    /// mid-transition -- it is either fully resolved (hidden + XInput confirmed, then retirement is
+    /// abandoned via <see cref="OperationCanceledException"/> WITHOUT terminating it) or the
+    /// resolution itself is reported as a definite failure (never guessed).
+    /// </summary>
     internal async Task<CenterMMainUiRoutingRetirementResult> PrepareExistingMainUiForRoutingAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -125,6 +140,15 @@ internal sealed class CenterMMainUiRoutingRetirement
             return CenterMMainUiRoutingRetirementResult.IdentityMismatch;
         }
 
+        // Fail before ever mutating the user's Center M window/controller lifecycle if we already
+        // know this attempt can never complete termination -- there is no benefit to minimizing (or
+        // observing tray XInput) first, just to fail with AccessDenied afterward.
+        if (!tracked.HasTerminateRights)
+        {
+            LogFailed(tracked.ProcessId, "AccessDenied");
+            return CenterMMainUiRoutingRetirementResult.AccessDenied;
+        }
+
         var windowSnapshot = _windowSnapshotProvider.Capture(tracked.ProcessId);
         if (windowSnapshot is null)
         {
@@ -139,6 +163,9 @@ internal sealed class CenterMMainUiRoutingRetirement
 
         if (windowSnapshot.Value.VisibleMainWindowCount > 0)
         {
+            // Safe cancellation point: nothing external has happened yet.
+            cancellationToken.ThrowIfCancellationRequested();
+
             AppLog.Info("CenterM.RoutingGuard", "MainUI minimize requested.", ("ProcessId", tracked.ProcessId));
             var minimizeResult = _windowController.TryMinimizeRecognizedMainUi(tracked.ProcessId);
             if (minimizeResult != CenterMMainUiMinimizeResult.Requested)
@@ -147,14 +174,22 @@ internal sealed class CenterMMainUiRoutingRetirement
                 return CenterMMainUiRoutingRetirementResult.MinimizeFailed;
             }
 
-            var afterMinimize = await WaitUntilHiddenOrExitedAsync(tracked.ProcessId, cancellationToken).ConfigureAwait(false);
-            if (afterMinimize is null)
+            // SC_MINIMIZE was just posted to a foreign process -- an external side effect the
+            // pipeline cannot undo. From here on, finish stabilizing/classifying the resulting
+            // transition with CancellationToken.None; a cancelled caller is only honored again once
+            // that classification is complete (see the method doc comment).
+            var afterMinimize = await WaitUntilHiddenOrExitedAsync(tracked.ProcessId, CancellationToken.None).ConfigureAwait(false);
+            switch (afterMinimize.Status)
             {
-                LogFailed(tracked.ProcessId, "MinimizeTimedOut");
-                return CenterMMainUiRoutingRetirementResult.MinimizeTimedOut;
+                case MainUiHideWaitStatus.Uncertain:
+                    LogFailed(tracked.ProcessId, "WindowStateUncertain");
+                    return CenterMMainUiRoutingRetirementResult.WindowStateUncertain;
+                case MainUiHideWaitStatus.TimedOut:
+                    LogFailed(tracked.ProcessId, "MinimizeTimedOut");
+                    return CenterMMainUiRoutingRetirementResult.MinimizeTimedOut;
+                case MainUiHideWaitStatus.Exited:
+                    return await VerifyFreshAbsenceAsync().ConfigureAwait(false);
             }
-            if (!afterMinimize.Value.ProcessAlive)
-                return await VerifyFreshAbsenceAsync().ConfigureAwait(false);
 
             AppLog.Info("CenterM.RoutingGuard", "MainUI hidden confirmed.", ("ProcessId", tracked.ProcessId));
         }
@@ -164,7 +199,12 @@ internal sealed class CenterMMainUiRoutingRetirement
         }
 
         AppLog.Info("CenterM.RoutingGuard", "Waiting for native XInput before retirement.", ("ProcessId", tracked.ProcessId));
-        var xInputConfirmed = await WaitForXInputAsync(cancellationToken).ConfigureAwait(false);
+        // Still CancellationToken.None: once a visible MainUI has been minimized, this wait is part
+        // of finishing that same external transition's classification. For the tray path nothing
+        // external has happened yet, but using the same non-cancelable wait here keeps a single,
+        // simple invariant (Hidden+XInput is always either fully confirmed or fails as a definite,
+        // logged reason) rather than two different cancellation behaviors for the two paths.
+        var xInputConfirmed = await WaitForXInputAsync(CancellationToken.None).ConfigureAwait(false);
         if (!xInputConfirmed)
         {
             LogFailed(tracked.ProcessId, "XInputNotConfirmed");
@@ -172,6 +212,9 @@ internal sealed class CenterMMainUiRoutingRetirement
         }
         AppLog.Info("CenterM.RoutingGuard", "Native XInput confirmed before MainUI retirement.", ("ProcessId", tracked.ProcessId));
 
+        // The externally-mutated MSI state is now fully known and safe (hidden + physical XInput).
+        // Only now is cancellation honored again -- a cancelled routing request stops here WITHOUT
+        // terminating the MainUI, rather than killing it for a route that no longer exists.
         cancellationToken.ThrowIfCancellationRequested();
 
         var terminationResult = _terminator.TryTerminate(tracked, _terminateWaitTimeout);
@@ -231,29 +274,38 @@ internal sealed class CenterMMainUiRoutingRetirement
         return CenterMMainUiRoutingRetirementResult.Retired;
     }
 
-    private async Task<MainUiWindowSnapshot?> WaitUntilHiddenOrExitedAsync(int processId, CancellationToken cancellationToken)
+    /// <summary>Monotonic (<see cref="Stopwatch"/>-based) bounded wait -- never wall-clock
+    /// (<see cref="DateTime.UtcNow"/>), which a system clock correction could move backwards and
+    /// silently extend this safety wait well past its nominal timeout. A <see langword="null"/>
+    /// snapshot (enumeration failure) is reported as <see cref="MainUiHideWaitStatus.Uncertain"/>,
+    /// distinct from and never conflated with <see cref="MainUiHideWaitStatus.TimedOut"/> (the
+    /// window was observed, just never became hidden in time).</summary>
+    private async Task<MainUiHideWaitResult> WaitUntilHiddenOrExitedAsync(int processId, CancellationToken cancellationToken)
     {
-        var deadline = DateTime.UtcNow + _minimizeWaitTimeout;
+        var started = Stopwatch.GetTimestamp();
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var snapshot = _windowSnapshotProvider.Capture(processId);
-            if (snapshot is null) return null;
-            if (!snapshot.Value.ProcessAlive || snapshot.Value.VisibleMainWindowCount == 0) return snapshot;
-            if (DateTime.UtcNow >= deadline) return null;
+            if (snapshot is null) return new(MainUiHideWaitStatus.Uncertain, null);
+            if (!snapshot.Value.ProcessAlive) return new(MainUiHideWaitStatus.Exited, snapshot);
+            if (snapshot.Value.VisibleMainWindowCount == 0) return new(MainUiHideWaitStatus.Hidden, snapshot);
+            if (Stopwatch.GetElapsedTime(started) >= _minimizeWaitTimeout) return new(MainUiHideWaitStatus.TimedOut, snapshot);
             await Task.Delay(_minimizeWaitPollInterval, cancellationToken).ConfigureAwait(false);
         }
     }
 
+    /// <summary>Monotonic bounded wait -- see <see cref="WaitUntilHiddenOrExitedAsync"/>'s remarks
+    /// on why <see cref="DateTime.UtcNow"/> is never used for this kind of safety-lifecycle timing.</summary>
     private async Task<bool> WaitForXInputAsync(CancellationToken cancellationToken)
     {
-        var deadline = DateTime.UtcNow + _xInputWaitTimeout;
+        var started = Stopwatch.GetTimestamp();
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var result = await _nativeModeProbe.CaptureAsync(cancellationToken).ConfigureAwait(false);
             if (result == CenterMNativeModeProbeResult.XInput) return true;
-            if (DateTime.UtcNow >= deadline) return false;
+            if (Stopwatch.GetElapsedTime(started) >= _xInputWaitTimeout) return false;
             await Task.Delay(_xInputWaitPollInterval, cancellationToken).ConfigureAwait(false);
         }
     }
