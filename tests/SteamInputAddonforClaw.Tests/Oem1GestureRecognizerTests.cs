@@ -231,6 +231,41 @@ public sealed class Oem1GestureRecognizerTests
     }
 
     [Fact]
+    public async Task Press_after_window_expiry_emits_single_and_starts_a_new_sequence()
+    {
+        var delay = new ControlledDelay();
+        var clock = new ControlledClock();
+        using var recognizer = Create(true, delay, clock: clock);
+        var results = Collect(recognizer);
+
+        recognizer.OnPress();
+        clock.Advance(TimeSpan.FromMilliseconds(251));
+        recognizer.OnPress();
+        await delay.CompleteNextAsync();
+
+        Assert.Equal([Oem1Gesture.Single, Oem1Gesture.Single], results);
+    }
+
+    [Fact]
+    public async Task Reset_reentrant_from_delivery_is_a_synchronous_boundary()
+    {
+        var delay = new ControlledDelay();
+        using var recognizer = Create(true, delay);
+        var results = new List<Oem1Gesture>();
+        recognizer.GestureRecognized += gesture =>
+        {
+            results.Add(gesture);
+            recognizer.Reset();
+        };
+
+        recognizer.OnPress();
+        await delay.CompleteNextAsync();
+        recognizer.OnPress();
+
+        Assert.Equal([Oem1Gesture.Single], results);
+    }
+
+    [Fact]
     public void Invalid_enabled_window_is_rejected()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => Create(true, new ControlledDelay(), TimeSpan.Zero));
@@ -251,8 +286,12 @@ public sealed class Oem1GestureRecognizerTests
         Assert.Throws<ObjectDisposedException>(recognizer.OnPress);
     }
 
-    private static Oem1GestureRecognizer Create(bool enabled, IOem1GestureDelay? delay = null, TimeSpan? window = null) =>
-        new(enabled, window ?? TimeSpan.FromMilliseconds(250), delay);
+    private static Oem1GestureRecognizer Create(
+        bool enabled,
+        IOem1GestureDelay? delay = null,
+        TimeSpan? window = null,
+        IOem1GestureClock? clock = null) =>
+        new(enabled, window ?? TimeSpan.FromMilliseconds(250), delay, clock);
 
     private static List<Oem1Gesture> Collect(Oem1GestureRecognizer recognizer)
     {
@@ -275,6 +314,18 @@ public sealed class Oem1GestureRecognizerTests
         }
 
         internal async Task CompleteNextAsync() => await Pending.Last().CompleteAsync();
+    }
+
+    private sealed class ControlledClock : IOem1GestureClock
+    {
+        private long _timestamp;
+
+        public long GetTimestamp() => _timestamp;
+
+        public TimeSpan GetElapsedTime(long startTimestamp, long endTimestamp) =>
+            TimeSpan.FromTicks(endTimestamp - startTimestamp);
+
+        internal void Advance(TimeSpan elapsed) => _timestamp += elapsed.Ticks;
     }
 
     private sealed class PendingDelay

@@ -11,6 +11,20 @@ internal interface IOem1GestureDelay
     Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken);
 }
 
+internal interface IOem1GestureClock
+{
+    long GetTimestamp();
+    TimeSpan GetElapsedTime(long startTimestamp, long endTimestamp);
+}
+
+internal sealed class Oem1StopwatchClock : IOem1GestureClock
+{
+    public long GetTimestamp() => System.Diagnostics.Stopwatch.GetTimestamp();
+
+    public TimeSpan GetElapsedTime(long startTimestamp, long endTimestamp) =>
+        System.Diagnostics.Stopwatch.GetElapsedTime(startTimestamp, endTimestamp);
+}
+
 internal sealed class Oem1TaskDelay : IOem1GestureDelay
 {
     public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
@@ -24,15 +38,18 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private readonly bool _doubleClickEnabled;
     private readonly TimeSpan _doubleClickWindow;
     private readonly IOem1GestureDelay _delay;
+    private readonly IOem1GestureClock _clock;
     private CancellationTokenSource? _pendingCancellation;
     private long _generation;
     private bool _firstPressPending;
+    private long _firstPressTimestamp;
     private bool _disposed;
 
     internal Oem1GestureRecognizer(
         bool doubleClickEnabled,
         TimeSpan doubleClickWindow,
-        IOem1GestureDelay? delay = null)
+        IOem1GestureDelay? delay = null,
+        IOem1GestureClock? clock = null)
     {
         if (doubleClickEnabled && doubleClickWindow <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(doubleClickWindow), "The double-click window must be positive.");
@@ -40,6 +57,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         _doubleClickEnabled = doubleClickEnabled;
         _doubleClickWindow = doubleClickWindow;
         _delay = delay ?? new Oem1TaskDelay();
+        _clock = clock ?? new Oem1StopwatchClock();
     }
 
     internal event Action<Oem1Gesture>? GestureRecognized;
@@ -49,6 +67,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         Oem1Gesture? immediate = null;
         long generation = 0;
         CancellationToken token = default;
+        var now = _clock.GetTimestamp();
 
         lock (_gate)
         {
@@ -59,28 +78,33 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             }
             else if (_firstPressPending)
             {
-                _firstPressPending = false;
-                _generation++;
-                CancelPendingCore();
-                immediate = Oem1Gesture.Double;
+                if (_clock.GetElapsedTime(_firstPressTimestamp, now) < _doubleClickWindow)
+                {
+                    _firstPressPending = false;
+                    _generation++;
+                    CancelPendingCore();
+                    immediate = Oem1Gesture.Double;
+                }
+                else
+                {
+                    _firstPressPending = false;
+                    _generation++;
+                    CancelPendingCore();
+                    immediate = Oem1Gesture.Single;
+                    BeginPendingPressCore(now, out generation, out token);
+                }
             }
             else
             {
-                _firstPressPending = true;
-                generation = ++_generation;
-                _pendingCancellation = new CancellationTokenSource();
-                token = _pendingCancellation.Token;
+                BeginPendingPressCore(now, out generation, out token);
             }
+
+            if (immediate.HasValue)
+                GestureRecognized?.Invoke(immediate.Value);
         }
 
-        if (immediate.HasValue)
-        {
-            GestureRecognized?.Invoke(immediate.Value);
-        }
-        else
-        {
+        if (token != default)
             _ = CompleteSingleAfterTimeoutAsync(generation, token);
-        }
     }
 
     internal void Reset()
@@ -128,9 +152,17 @@ internal sealed class Oem1GestureRecognizer : IDisposable
 
             _firstPressPending = false;
             _pendingCancellation = null;
+            GestureRecognized?.Invoke(Oem1Gesture.Single);
         }
+    }
 
-        GestureRecognized?.Invoke(Oem1Gesture.Single);
+    private void BeginPendingPressCore(long timestamp, out long generation, out CancellationToken token)
+    {
+        _firstPressPending = true;
+        _firstPressTimestamp = timestamp;
+        generation = ++_generation;
+        _pendingCancellation = new CancellationTokenSource();
+        token = _pendingCancellation.Token;
     }
 
     private void CancelPendingCore()
