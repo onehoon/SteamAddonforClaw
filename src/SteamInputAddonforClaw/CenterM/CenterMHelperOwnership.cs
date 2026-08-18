@@ -28,6 +28,10 @@ internal enum HelperStartResult
     PartialCleanupUnconfirmed
 }
 
+/// <summary>Zero-time exact-handle liveness classification for an owned helper. Never derived from
+/// process-name/PID rediscovery.</summary>
+internal enum HelperLivenessState { NotOwned, Alive, Exited, Uncertain }
+
 /// <summary>
 /// Owns exactly one helper process via CREATE_SUSPENDED + a private Job Object with
 /// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, in the mandatory order required for crash-safe fail-open:
@@ -52,6 +56,36 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
 
     internal int? ProcessId { get; private set; }
     internal bool IsOwned => _processHandle is not null;
+
+    /// <summary>Zero-time liveness classification of the exact retained helper handle -- never
+    /// process-name or PID rediscovery. <see cref="HelperLivenessState.Uncertain"/> (native
+    /// WAIT_FAILED) must never be treated as either Alive or Exited by callers.</summary>
+    internal HelperLivenessState PollLiveness()
+    {
+        lock (_sync)
+        {
+            if (_processHandle is null) return HelperLivenessState.NotOwned;
+            return _api.PollLiveness(_processHandle) switch
+            {
+                LiveProcessProbeStatus.Alive => HelperLivenessState.Alive,
+                LiveProcessProbeStatus.Exited => HelperLivenessState.Exited,
+                _ => HelperLivenessState.Uncertain
+            };
+        }
+    }
+
+    /// <summary>Releases the retained handles for a helper already confirmed exited via
+    /// <see cref="PollLiveness"/> (WAIT_OBJECT_0) -- no TerminateProcess/WaitForExit call is made,
+    /// since the process is already known gone; this only retires the now-stale ownership record.
+    /// A no-op when nothing is owned.</summary>
+    internal void RetireConfirmedExited()
+    {
+        lock (_sync)
+        {
+            if (_processHandle is null) return;
+            DisposeCore();
+        }
+    }
 
     /// <summary>Starts and takes ownership of exactly one helper. Refuses (returns
     /// <see cref="HelperStartResult.AlreadyOwned"/>, no native calls made) while a helper is

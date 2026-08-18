@@ -403,6 +403,58 @@ public sealed class CenterMHelperOwnershipTests
         Assert.Equal(1, api.Calls.Count(c => c == "Terminate"));
     }
 
+    [Fact]
+    public void PollLiveness_NotOwned_ReturnsNotOwned_NoNativeCall()
+    {
+        var api = new RecordingApi();
+        var ownership = new CenterMHelperOwnership(api);
+
+        Assert.Equal(HelperLivenessState.NotOwned, ownership.PollLiveness());
+        Assert.DoesNotContain("PollLiveness", api.Calls);
+    }
+
+    [Theory]
+    [InlineData(0, 1)] // Alive -> Alive
+    [InlineData(1, 2)] // Exited -> Exited
+    [InlineData(2, 3)] // Uncertain -> Uncertain
+    public void PollLiveness_Owned_MapsNativeResultExactly_NeverConflatesUncertainWithEitherExtreme(int nativeRaw, int expectedRaw)
+    {
+        var native = (LiveProcessProbeStatus)nativeRaw;
+        var expected = (HelperLivenessState)expectedRaw;
+        var api = new RecordingApi { PollLivenessResult = native };
+        var ownership = new CenterMHelperOwnership(api);
+        Assert.Equal(HelperStartResult.Started, ownership.Start(@"C:\fake\MSI Center M.exe"));
+
+        Assert.Equal(expected, ownership.PollLiveness());
+    }
+
+    [Fact]
+    public void RetireConfirmedExited_ClearsOwnership_WithoutCallingTerminateOrWaitForExit()
+    {
+        var api = new RecordingApi();
+        var ownership = new CenterMHelperOwnership(api);
+        Assert.Equal(HelperStartResult.Started, ownership.Start(@"C:\fake\MSI Center M.exe"));
+        var callsBefore = api.Calls.Count;
+
+        ownership.RetireConfirmedExited();
+
+        Assert.False(ownership.IsOwned);
+        Assert.Null(ownership.ProcessId);
+        Assert.Equal(callsBefore, api.Calls.Count); // no Terminate/WaitForExit issued for an already-confirmed-dead handle
+    }
+
+    [Fact]
+    public void RetireConfirmedExited_NotOwned_IsNoOp()
+    {
+        var api = new RecordingApi();
+        var ownership = new CenterMHelperOwnership(api);
+
+        ownership.RetireConfirmedExited();
+
+        Assert.False(ownership.IsOwned);
+        Assert.Empty(api.Calls);
+    }
+
     private sealed class RecordingApi : IHelperProcessNativeApi
     {
         internal List<string> Calls { get; } = [];
@@ -490,6 +542,15 @@ public sealed class CenterMHelperOwnershipTests
         {
             Calls.Add("WaitForExit");
             return WaitForExitResults is { Count: > 0 } queue ? queue.Dequeue() : WaitForExitSucceeds;
+        }
+
+        internal Queue<LiveProcessProbeStatus>? PollLivenessResults { get; init; }
+        internal LiveProcessProbeStatus PollLivenessResult { get; set; } = LiveProcessProbeStatus.Alive;
+
+        public LiveProcessProbeStatus PollLiveness(SafeProcessHandle processHandle)
+        {
+            Calls.Add("PollLiveness");
+            return PollLivenessResults is { Count: > 0 } queue ? queue.Dequeue() : PollLivenessResult;
         }
 
         private static IntPtr GetCurrentProcessHandle() => System.Diagnostics.Process.GetCurrentProcess().Handle;

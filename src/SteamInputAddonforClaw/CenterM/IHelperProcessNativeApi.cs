@@ -16,4 +16,10 @@ internal interface IHelperProcessNativeApi
     bool TryResumeThread(SafeHandle threadHandle, out int win32Error);
     bool TryTerminate(SafeProcessHandle processHandle, out int win32Error);
     bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout);
+
+    /// <summary>Zero-timeout, exact-handle liveness classification (no process-name/PID
+    /// rediscovery): distinguishes WAIT_OBJECT_0 (Exited) from WAIT_TIMEOUT (Alive) from
+    /// WAIT_FAILED (Uncertain) -- the two failure/negative outcomes must never be conflated, since
+    /// only WAIT_OBJECT_0 is authoritative proof of exit.</summary>
+    LiveProcessProbeStatus PollLiveness(SafeProcessHandle processHandle);
 }

@@ -1,0 +1,1100 @@
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+using SteamInputAddonforClaw.CenterM;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+public sealed class CenterMOem1LifecycleCoordinatorTests
+{
+    // ---- Shared harness ----
+
+    private static Harness NewHarness() => new();
+
+    private sealed class Harness
+    {
+        internal readonly FakeSnapshotSource Snapshots = new();
+        internal readonly FakeHelperApi HelperApi = new();
+        internal readonly FakeHandleOpener HandleOpener = new();
+        internal readonly FakeTerminateInvoker TerminateInvoker = new();
+        internal readonly FakeIdentityInspector IdentityInspector = new();
+        internal readonly FakeWindowProvider WindowProvider = new();
+        internal readonly ManualDelayGate Delay = new();
+
+        internal CenterMAutoRunState AutoRun = CenterMAutoRunState.Disabled;
+        internal string? StagedPath = @"C:\fake\Runtime\MSI Center M.exe";
+        internal readonly CenterMHelperOwnership HelperOwnership;
+
+        internal Harness()
+        {
+            HelperOwnership = new CenterMHelperOwnership(HelperApi);
+            // A real owned helper process (even suspended) shows up in a same-name enumeration --
+            // the fake mirrors that by always reflecting live ownership state instead of requiring
+            // every test to manually add/remove the helper's own PID from its foreign-process list.
+            Snapshots.HelperProcessIdProvider = () => HelperOwnership.IsOwned ? HelperOwnership.ProcessId : null;
+            // Once a real MainUI process's exit is actually confirmed, it stops appearing in a
+            // fresh enumeration -- mirrors real Windows behavior so post-termination reconciliation
+            // in tests observes a consistent world instead of re-discovering an already-dead PID.
+            TerminateInvoker.OnExitConfirmed = () => Snapshots.Foreign = [];
+        }
+
+        internal CenterMOem1LifecycleCoordinator Build(TimeSpan? debounce = null)
+        {
+            var backendProbe = new CenterMBackendProbe(Snapshots);
+            var mainUiObserver = new MainUiLifecycleObserver(WindowProvider);
+            var terminator = new SafeMainUiTerminator(TerminateInvoker, IdentityInspector, WindowProvider, Snapshots);
+
+            return new CenterMOem1LifecycleCoordinator(
+                publishRootProvider: () => "fake-publish-root",
+                backendProbe: backendProbe,
+                autoRunReader: () => AutoRun,
+                processSnapshotSource: Snapshots,
+                helperOwnership: HelperOwnership,
+                mainUiObserver: mainUiObserver,
+                terminator: terminator,
+                handleOpener: HandleOpener,
+                stager: _ => StagedPath,
+                delay: Delay.DelayAsync,
+                hiddenDebounce: debounce ?? TimeSpan.FromMilliseconds(1));
+        }
+    }
+
+    private sealed class FakeSnapshotSource : IProcessSnapshotSource
+    {
+        internal IReadOnlyList<ProcessSnapshotEntry>? Launcher { get; set; } = [new(1, CenterMProcessNames.Launcher, null)];
+        internal IReadOnlyList<ProcessSnapshotEntry>? Server { get; set; } = [new(2, CenterMProcessNames.Server, null)];
+        /// <summary>Foreign (non-helper-owned) "MSI Center M" processes only -- the live owned
+        /// helper PID (if any) is contributed automatically via <see cref="HelperProcessIdProvider"/>,
+        /// matching real Windows behavior where even a CREATE_SUSPENDED process is enumerable.</summary>
+        internal List<ProcessSnapshotEntry> Foreign { get; set; } = [];
+        internal bool MainUiEnumerationUncertain { get; set; }
+        internal Func<int?>? HelperProcessIdProvider { get; set; }
+        /// <summary>Highest-priority override: when non-empty, each call dequeues one exact result,
+        /// bypassing <see cref="Foreign"/>/<see cref="HelperProcessIdProvider"/> entirely -- for
+        /// tests that need to assert on a specific raw sequence.</summary>
+        internal Queue<IReadOnlyList<ProcessSnapshotEntry>?>? MainUiSequence { get; set; }
+        internal int MainUiCallCount { get; private set; }
+
+        public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName)
+        {
+            if (processName == CenterMProcessNames.MainUi)
+            {
+                MainUiCallCount++;
+                if (MainUiSequence is { Count: > 0 } q) return q.Dequeue();
+                if (MainUiEnumerationUncertain) return null;
+
+                var result = new List<ProcessSnapshotEntry>(Foreign);
+                if (HelperProcessIdProvider?.Invoke() is int helperPid)
+                    result.Add(new ProcessSnapshotEntry(helperPid, CenterMProcessNames.MainUi, null));
+                return result;
+            }
+            if (processName == CenterMProcessNames.Launcher) return Launcher;
+            if (processName == CenterMProcessNames.Server) return Server;
+            return [];
+        }
+    }
+
+    private sealed class FakeHelperApi : IHelperProcessNativeApi
+    {
+        internal bool CreateSucceeds { get; set; } = true;
+        internal bool JobSucceeds { get; set; } = true;
+        internal bool LimitSucceeds { get; set; } = true;
+        internal bool AssignSucceeds { get; set; } = true;
+        internal bool ResumeSucceeds { get; set; } = true;
+        internal bool TerminateSucceeds { get; set; } = true;
+        internal bool WaitForExitSucceeds { get; set; } = true;
+        internal LiveProcessProbeStatus LivenessResult { get; set; } = LiveProcessProbeStatus.Alive;
+        internal int NextProcessId { get; set; } = 9000;
+        internal int StartCallCount { get; private set; }
+        internal int PollLivenessCallCount { get; private set; }
+
+        public bool TryCreateSuspended(string imagePath, out int processId, out SafeProcessHandle? processHandle, out SafeHandle? threadHandle, out int win32Error)
+        {
+            StartCallCount++;
+            win32Error = 0;
+            if (!CreateSucceeds) { processId = 0; processHandle = null; threadHandle = null; return false; }
+            processId = NextProcessId++;
+            processHandle = new SafeProcessHandle(CurrentProcessHandle(), false);
+            threadHandle = new SafeGenericHandle(CurrentProcessHandle());
+            return true;
+        }
+
+        public bool TryCreateJobObject(out SafeHandle? jobHandle, out int win32Error)
+        {
+            win32Error = 0;
+            if (!JobSucceeds) { jobHandle = null; return false; }
+            jobHandle = new SafeGenericHandle(CurrentProcessHandle());
+            return true;
+        }
+
+        public bool TrySetKillOnJobClose(SafeHandle jobHandle, out int win32Error) { win32Error = 0; return LimitSucceeds; }
+        public bool TryAssignProcessToJob(SafeHandle jobHandle, SafeProcessHandle processHandle, out int win32Error) { win32Error = 0; return AssignSucceeds; }
+        public bool TryResumeThread(SafeHandle threadHandle, out int win32Error) { win32Error = 0; return ResumeSucceeds; }
+        public bool TryTerminate(SafeProcessHandle processHandle, out int win32Error) { win32Error = TerminateSucceeds ? 0 : 5; return TerminateSucceeds; }
+        public bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout) => WaitForExitSucceeds;
+
+        public LiveProcessProbeStatus PollLiveness(SafeProcessHandle processHandle)
+        {
+            PollLivenessCallCount++;
+            return LivenessResult;
+        }
+
+        private static IntPtr CurrentProcessHandle() => System.Diagnostics.Process.GetCurrentProcess().Handle;
+    }
+
+    private sealed class FakeHandleOpener : IProcessHandleOpener
+    {
+        private const uint PROCESS_TERMINATE = 0x0001;
+        internal bool FullRightsSucceed { get; set; } = true;
+        internal bool ObservationSucceeds { get; set; } = true;
+
+        public SafeProcessHandle Open(int processId, uint desiredAccess)
+        {
+            var isFullRights = (desiredAccess & PROCESS_TERMINATE) != 0;
+            var succeeds = isFullRights ? FullRightsSucceed : ObservationSucceeds;
+            return succeeds ? new SafeProcessHandle(System.Diagnostics.Process.GetCurrentProcess().Handle, false) : new SafeProcessHandle(IntPtr.Zero, false);
+        }
+    }
+
+    private sealed class FakeTerminateInvoker : ITerminateProcessInvoker
+    {
+        internal bool TerminateSucceeds { get; set; } = true;
+        internal bool WaitConfirmsExit { get; set; } = true;
+        internal int TerminateCallCount { get; private set; }
+
+        public bool TryTerminate(SafeProcessHandle handle, out int win32Error)
+        {
+            TerminateCallCount++;
+            win32Error = TerminateSucceeds ? 0 : 5;
+            return TerminateSucceeds;
+        }
+
+        /// <summary>Fires once exit is confirmed -- lets the harness mirror a real Windows fact:
+        /// once a process has genuinely exited, it no longer appears in a subsequent same-name
+        /// enumeration.</summary>
+        internal Action? OnExitConfirmed { get; set; }
+
+        public bool WaitForExit(SafeProcessHandle handle, TimeSpan timeout)
+        {
+            if (WaitConfirmsExit) OnExitConfirmed?.Invoke();
+            return WaitConfirmsExit;
+        }
+    }
+
+    private sealed class FakeIdentityInspector : IProcessIdentityInspector
+    {
+        internal LiveProcessProbeStatus Status { get; set; } = LiveProcessProbeStatus.Alive;
+        internal int? ProcessId { get; set; }
+        internal string? ProcessName { get; set; } = CenterMProcessNames.MainUi;
+        internal string? ExecutablePath { get; set; } = @"C:\Program Files\WindowsApps\Fake\MSI Center M\MSI Center M.exe";
+
+        public LiveProcessIdentity Inspect(SafeProcessHandle handle) =>
+            new(Status, Status == LiveProcessProbeStatus.Alive ? ProcessId : null,
+                Status == LiveProcessProbeStatus.Alive ? ProcessName : null,
+                Status == LiveProcessProbeStatus.Alive ? ExecutablePath : null);
+    }
+
+    private sealed class FakeWindowProvider : IMainUiWindowSnapshotProvider
+    {
+        internal MainUiWindowSnapshot? NextSnapshot { get; set; } = new MainUiWindowSnapshot(true, 0, 0);
+
+        public MainUiWindowSnapshot? Capture(int processId) => NextSnapshot;
+    }
+
+    /// <summary>Injectable delay boundary: tests either let it resolve immediately (default) or hold
+    /// it open with a gate until the test explicitly releases it, so debounce timing is never
+    /// asserted via real wall-clock sleeps.</summary>
+    private sealed class ManualDelayGate
+    {
+        private readonly SemaphoreSlim _release = new(0);
+        internal bool Held { get; set; }
+        internal int CallCount { get; private set; }
+
+        internal async Task DelayAsync(TimeSpan delay, CancellationToken ct)
+        {
+            CallCount++;
+            if (!Held) return;
+            await _release.WaitAsync(ct).ConfigureAwait(false);
+        }
+
+        internal void Release() => _release.Release();
+    }
+
+    private const string ExpectedPath = @"C:\Program Files\WindowsApps\Fake\MSI Center M\MSI Center M.exe";
+
+    // ============================================================
+    // Eligibility / arming
+    // ============================================================
+
+    [Fact]
+    public async Task Disabled_NoArm_NativeBehaviorGuaranteed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        await coordinator.ReconcileAsync("test");
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.Disabled, snap.State);
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task AutoRunEnabled_NeedsSetup_NoHelperCreated()
+    {
+        var h = NewHarness();
+        h.AutoRun = CenterMAutoRunState.Enabled;
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task AutoRunUnknown_NeedsSetup_NoHelperCreated()
+    {
+        var h = NewHarness();
+        h.AutoRun = CenterMAutoRunState.Unknown;
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task LauncherUnavailable_NoArm_RemainsNative()
+    {
+        var h = NewHarness();
+        h.Snapshots.Launcher = [];
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task ServerUnavailable_NoArm_RemainsNative()
+    {
+        var h = NewHarness();
+        h.Snapshots.Server = [];
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task CleanArm_AllPrerequisitesSatisfied_CommitsArmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.True(snap.SuppressionReady);
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task StagingFailure_FaultedNative_NoHelperCreated()
+    {
+        var h = NewHarness();
+        h.StagedPath = null;
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task StartFailure_CreateProcessFailed_FaultedNative_NoOwnership()
+    {
+        var h = NewHarness();
+        h.HelperApi.CreateSucceeds = false;
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task PartialCleanupUnconfirmed_RetainsOwnership_NoSecondStartAttempted()
+    {
+        var h = NewHarness();
+        h.HelperApi.JobSucceeds = false; // construction failure path
+        h.HelperApi.WaitForExitSucceeds = false; // cleanup cannot confirm -> PartialCleanupUnconfirmed
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.False(coordinator.GetSnapshot().NativeBehaviorGuaranteed); // ownership retained
+
+        // A further reconcile attempt while ownership is retained must never create a second helper.
+        await coordinator.ReconcileAsync("retry");
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task PostStartInvariantFailure_ForeignProcessDetected_StopsHelper_NeverCommitsArmed()
+    {
+        var h = NewHarness();
+        // After Start(), the fresh re-enumeration finds two same-name processes (helper + foreign).
+        h.Snapshots.MainUiSequence = new Queue<IReadOnlyList<ProcessSnapshotEntry>?>(
+        [
+            [], // pre-arm check inside ReconcileCore
+            [new ProcessSnapshotEntry(9000, CenterMProcessNames.MainUi, null), new ProcessSnapshotEntry(4242, CenterMProcessNames.MainUi, ExpectedPath)]
+        ]);
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed); // helper stop succeeded
+    }
+
+    [Fact]
+    public async Task ProcessEnumerationUncertain_NeverArms()
+    {
+        var h = NewHarness();
+        h.Snapshots.MainUiEnumerationUncertain = true;
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+    }
+
+    // ============================================================
+    // Helper liveness
+    // ============================================================
+
+    [Fact]
+    public async Task Liveness_Alive_StaysArmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Alive;
+        await coordinator.PollHelperLivenessAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+    }
+
+    [Fact]
+    public async Task Liveness_Exited_RetiresAndReconciles_ReArmsCleanly()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+        await coordinator.PollHelperLivenessAsync();
+
+        // Retired ownership triggers a fresh reconcile which re-arms since the world is clean.
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.Equal(2, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task Liveness_Uncertain_NoBlindRespawn_RetainsHandle()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Uncertain;
+        await coordinator.PollHelperLivenessAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.False(snap.NativeBehaviorGuaranteed); // handle retained, not discarded
+        Assert.Equal(1, h.HelperApi.StartCallCount); // no respawn attempted
+    }
+
+    [Fact]
+    public async Task Liveness_WaitFailedIsNotConflatedWithAliveOrExited()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Uncertain;
+        await coordinator.PollHelperLivenessAsync();
+
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.NotEqual(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
+    }
+
+    [Fact]
+    public async Task UnexpectedHelperDeath_NeverIssuesRestoreOperation_OnlyReconciles()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+        await coordinator.PollHelperLivenessAsync();
+
+        // Only Start() (a fresh, fully governed arm) was ever called again -- no other native
+        // mutation path exists in this fake, so a count of exactly 2 Start calls (initial + re-arm)
+        // proves no separate "restore" mechanism was invoked.
+        Assert.Equal(2, h.HelperApi.StartCallCount);
+    }
+
+    // ============================================================
+    // Real MainUI appearance while Armed
+    // ============================================================
+
+    [Fact]
+    public async Task ForeignSameNameProcess_InvalidatesArmedImmediately_StopsHelperFirst()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.IdentityInspector.ProcessId = 5555;
+
+        await coordinator.PollTickAsync();
+
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task UnconfirmedHelperStop_BlocksAdoptionAndReArm()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.HelperApi.TerminateSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false;
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.False(snap.NativeBehaviorGuaranteed);
+        Assert.Null(snap.RealMainUiProcessId); // no adoption happened
+    }
+
+    [Fact]
+    public async Task TrustedWindowsAppsCandidate_IsTrackedAndAdopted()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.IdentityInspector.ProcessId = 5555;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 0, 0); // starting, never visible yet
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(5555, snap.RealMainUiProcessId);
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, snap.State);
+        Assert.Null(snap.HelperProcessId);
+    }
+
+    [Fact]
+    public async Task UnknownPath_NoKillNoAdoption()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, null)];
+
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
+    }
+
+    [Fact]
+    public async Task WrongPath_NoKillNoAdoption()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, @"C:\NotWindowsApps\MSI Center M.exe")];
+
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
+    }
+
+    [Fact]
+    public async Task MultipleForeignCandidates_NoKill_FaultedNative()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign =
+        [
+            new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath),
+            new ProcessSnapshotEntry(6666, CenterMProcessNames.MainUi, ExpectedPath)
+        ];
+
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task IdentityMismatchAfterEnumeration_HandleUnavailable_NoAdoption()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.HandleOpener.FullRightsSucceed = false;
+        h.HandleOpener.ObservationSucceeds = false; // handle acquisition itself fails entirely
+
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
+    }
+
+    // ============================================================
+    // Visibility lifecycle
+    // ============================================================
+
+    private async Task<CenterMOem1LifecycleCoordinator> ArmAndAdoptStartingHidden(Harness h)
+    {
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.IdentityInspector.ProcessId = 5555;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 0, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+        Assert.False(coordinator.GetSnapshot().SeenVisible);
+        return coordinator;
+    }
+
+    [Fact]
+    public async Task HiddenBeforeFirstVisible_NoDebounceNoTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+
+        // Still zero visible windows (never seen visible) -- must remain StartingOrHiddenNeverVisible,
+        // never a kill candidate.
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Visible_SetsSeenVisible()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+
+        Assert.True(coordinator.GetSnapshot().SeenVisible);
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+    }
+
+    [Fact]
+    public async Task VisibleThenHidden_StartsDebounce()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // not terminated yet -- still debouncing
+    }
+
+    [Fact]
+    public async Task VisibleAgainDuringDebounce_CancelsIt()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+
+        // Releasing the stale delay must not cause a termination -- the pending debounce token was
+        // already canceled, so its continuation must observe cancellation and do nothing.
+        h.Delay.Release();
+        await Task.Delay(50);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task NaturalExitDuringDebounce_NoTerminationCall()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(false, 0, 0); // process exited
+        h.Snapshots.Foreign = []; // exited process no longer appears in a fresh enumeration either
+        await coordinator.PollTickAsync();
+
+        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task DisableDuringDebounce_CantKillStale()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        await coordinator.SetDesiredEnabledAsync(false);
+        h.Delay.Release();
+        await Task.Delay(50);
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        Assert.Equal(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
+    }
+
+    [Fact]
+    public async Task SuspendDuringDebounce_CantKillStale()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+        h.Delay.Release();
+        await Task.Delay(50);
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    // ============================================================
+    // Safe termination result handling
+    // ============================================================
+
+    private async Task<(CenterMOem1LifecycleCoordinator Coordinator, Harness H)> ArmAdoptAndReachDebounce()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = false; // let the debounce resolve immediately once started
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        // Give the fire-and-forget debounce continuation a chance to run and re-enter the gate.
+        for (var i = 0; i < 50 && coordinator.GetSnapshot().State == CenterMOem1LifecycleState.HiddenDebounce; i++)
+            await Task.Delay(10);
+        return (coordinator, h);
+    }
+
+    [Fact]
+    public async Task DebounceCompletes_TerminatorInvokedExactlyOnce()
+    {
+        var (coordinator, h) = await ArmAdoptAndReachDebounce();
+        h.TerminateInvoker.WaitConfirmsExit = true;
+
+        Assert.Equal(1, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Terminated_RetiresIdentityAndReconciles()
+    {
+        var (coordinator, h) = await ArmAdoptAndReachDebounce();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Null(snap.RealMainUiProcessId);
+        // Reconciliation after termination attempts to re-arm since the world is clean and no
+        // same-name process remains.
+        Assert.Equal(CenterMOem1LifecycleState.Armed, snap.State);
+    }
+
+    [Fact]
+    public async Task AlreadyExited_NoSecondAttempt_Reconciles()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = false;
+        h.IdentityInspector.Status = LiveProcessProbeStatus.Exited; // fresh evidence: already exited
+        h.Snapshots.Foreign = []; // an already-exited process no longer appears in enumeration either
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        for (var i = 0; i < 50 && coordinator.GetSnapshot().State == CenterMOem1LifecycleState.HiddenDebounce; i++)
+            await Task.Delay(10);
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // AlreadyExited never reaches a real TerminateProcess call
+        Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
+    }
+
+    [Fact]
+    public async Task VisibleAgainResultFromTerminator_ReturnsToNative()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = false;
+        // Debounce evaluates SafeMainUiTerminator.TryTerminate which itself captures a *fresh*
+        // window snapshot -- if that fresh capture shows visible again, the result is VisibleAgain.
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        var originalCapture = h.WindowProvider.NextSnapshot;
+        await coordinator.PollTickAsync();
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1); // becomes visible again before the debounce's own fresh capture runs
+        for (var i = 0; i < 50 && coordinator.GetSnapshot().State == CenterMOem1LifecycleState.HiddenDebounce; i++)
+            await Task.Delay(10);
+
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+    }
+
+    [Fact]
+    public async Task FailOpenResults_NeverReArmFromStaleState()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = false;
+        h.HandleOpener.FullRightsSucceed = false; // no terminate rights -> AccessDenied path (observation-only handle)
+        h.HandleOpener.ObservationSucceeds = true;
+        // Re-adopt is not re-run mid-test; instead directly force AccessDenied via handle rights on
+        // the already-tracked identity is not possible post-adoption, so this test exercises the
+        // WaitTimedOut/Failed style fail-open via a terminate failure instead.
+        h.TerminateInvoker.TerminateSucceeds = false;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        for (var i = 0; i < 50 && coordinator.GetSnapshot().State == CenterMOem1LifecycleState.HiddenDebounce; i++)
+            await Task.Delay(10);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.Equal(1, h.HelperApi.StartCallCount); // still just the original arm -- no re-arm from a stale/failed termination
+    }
+
+    // ============================================================
+    // Disable / shutdown
+    // ============================================================
+
+    [Fact]
+    public async Task DisableWhileArmed_StopsExactHelper()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        await coordinator.SetDesiredEnabledAsync(false);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.Disabled, snap.State);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+        Assert.Null(snap.HelperProcessId);
+    }
+
+    [Fact]
+    public async Task DisableWithUnconfirmedStop_DoesNotFalselyReportClean()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.HelperApi.TerminateSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false;
+        await coordinator.SetDesiredEnabledAsync(false);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Disabled, snap.State);
+        Assert.False(snap.NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task Shutdown_CancelsDebounce_NeverTerminatesRealMainUi()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        await coordinator.ShutdownAsync();
+        h.Delay.Release();
+        await Task.Delay(50);
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Shutdown_CleansOnlyAddonOwnedHelper_NeverTouchesRealMainUi()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        await coordinator.ShutdownAsync();
+
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // no real MainUI ever tracked/terminated
+        Assert.Equal(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
+    }
+
+    // ============================================================
+    // Suspend / resume
+    // ============================================================
+
+    [Fact]
+    public async Task Suspend_DoesNotKillAValidHelper()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+        Assert.False(coordinator.GetSnapshot().NativeBehaviorGuaranteed); // still owned
+    }
+
+    [Fact]
+    public async Task Resume_SameValidHelper_StaysArmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.Equal(1, h.HelperApi.StartCallCount); // no duplicate helper created
+    }
+
+    [Fact]
+    public async Task Resume_HelperExitedDuringSleep_FreshReconcile_ReArms()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+        await coordinator.ReconcileAfterResumeAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.Equal(2, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task Resume_RealMainUiAppearedDuringSleep_YieldsNative()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.IdentityInspector.ProcessId = 5555;
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(5555, snap.RealMainUiProcessId);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task Resume_AutoRunChangedDuringSleep_NoReArm()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.AutoRun = CenterMAutoRunState.Enabled;
+        await coordinator.ReconcileAfterResumeAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, coordinator.GetSnapshot().State);
+        Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task Resume_LauncherDisappearedDuringSleep_NoReArm()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.Launcher = [];
+        await coordinator.ReconcileAfterResumeAsync();
+
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task Resume_UncertainEnumeration_NoReArm()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.Snapshots.MainUiEnumerationUncertain = true;
+        await coordinator.ReconcileAfterResumeAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+    }
+
+    [Fact]
+    public async Task ResumeReconcile_HasNoDependencyOnRoutingOrViiper()
+    {
+        // The coordinator's public surface takes no VIIPER/routing dependency at all -- this is
+        // a structural assertion that resume succeeds purely from CenterM-local facts.
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+    }
+
+    // ============================================================
+    // Concurrency races
+    // ============================================================
+
+    [Fact]
+    public async Task EnableRacingDisable_SerializedNoDoubleHelperCreation()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        var t1 = coordinator.SetDesiredEnabledAsync(true);
+        var t2 = coordinator.SetDesiredEnabledAsync(false);
+        await Task.WhenAll(t1, t2);
+
+        // Whatever the final state, at most one helper was ever created concurrently (the gate
+        // guarantees full serialization of the two calls).
+        Assert.True(h.HelperApi.StartCallCount <= 1);
+    }
+
+    [Fact]
+    public async Task ReconcileRacingDisable_NoDoubleHelperCreation()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var t1 = coordinator.ReconcileAsync("race1");
+        var t2 = coordinator.SetDesiredEnabledAsync(false);
+        await Task.WhenAll(t1, t2);
+
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task HiddenDebounceCompletionRacingShutdown_NoStaleTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+
+        var shutdownTask = coordinator.ShutdownAsync();
+        h.Delay.Release();
+        await shutdownTask;
+        await Task.Delay(50);
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task HelperDeathObservationRacingDisable_NoRetainedOwnershipOverwrite()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+        var t1 = coordinator.PollHelperLivenessAsync();
+        var t2 = coordinator.SetDesiredEnabledAsync(false);
+        await Task.WhenAll(t1, t2);
+
+        // No exception, and the coordinator settles into a single consistent terminal state.
+        var snap = coordinator.GetSnapshot();
+        Assert.True(snap.State is CenterMOem1LifecycleState.Disabled or CenterMOem1LifecycleState.Armed or CenterMOem1LifecycleState.FaultedNative);
+    }
+
+    [Fact]
+    public async Task ResumeReconciliationRacingShutdown_NoDoubleCleanup()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var t1 = coordinator.ReconcileAfterResumeAsync();
+        var t2 = coordinator.ShutdownAsync();
+        await Task.WhenAll(t1, t2);
+
+        Assert.Equal(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
+    }
+}
