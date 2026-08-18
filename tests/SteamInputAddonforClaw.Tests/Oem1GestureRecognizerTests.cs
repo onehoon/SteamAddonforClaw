@@ -266,6 +266,20 @@ public sealed class Oem1GestureRecognizerTests
     }
 
     [Fact]
+    public async Task Successful_timeout_disposes_its_cancellation_source_once()
+    {
+        var delay = new ControlledDelay();
+        var cancellation = new TrackingCancellationSourceFactory();
+        using var recognizer = Create(true, delay, cancellationSourceFactory: cancellation);
+
+        recognizer.OnPress();
+        await delay.CompleteNextAsync();
+
+        var source = Assert.Single(cancellation.Created);
+        Assert.Equal(1, source.DisposeCount);
+    }
+
+    [Fact]
     public void Invalid_enabled_window_is_rejected()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => Create(true, new ControlledDelay(), TimeSpan.Zero));
@@ -290,8 +304,9 @@ public sealed class Oem1GestureRecognizerTests
         bool enabled,
         IOem1GestureDelay? delay = null,
         TimeSpan? window = null,
-        IOem1GestureClock? clock = null) =>
-        new(enabled, window ?? TimeSpan.FromMilliseconds(250), delay, clock);
+        IOem1GestureClock? clock = null,
+        IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null) =>
+        new(enabled, window ?? TimeSpan.FromMilliseconds(250), delay, clock, cancellationSourceFactory);
 
     private static List<Oem1Gesture> Collect(Oem1GestureRecognizer recognizer)
     {
@@ -326,6 +341,33 @@ public sealed class Oem1GestureRecognizerTests
             TimeSpan.FromTicks(endTimestamp - startTimestamp);
 
         internal void Advance(TimeSpan elapsed) => _timestamp += elapsed.Ticks;
+    }
+
+    private sealed class TrackingCancellationSourceFactory : IOem1GestureCancellationSourceFactory
+    {
+        internal List<TrackingCancellationSource> Created { get; } = [];
+
+        public IOem1GestureCancellationSource Create()
+        {
+            var source = new TrackingCancellationSource();
+            Created.Add(source);
+            return source;
+        }
+    }
+
+    private sealed class TrackingCancellationSource : IOem1GestureCancellationSource
+    {
+        private readonly CancellationTokenSource _source = new();
+
+        internal int DisposeCount { get; private set; }
+        public CancellationToken Token => _source.Token;
+        public void Cancel() => _source.Cancel();
+
+        public void Dispose()
+        {
+            DisposeCount++;
+            _source.Dispose();
+        }
     }
 
     private sealed class PendingDelay

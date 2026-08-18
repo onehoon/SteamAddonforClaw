@@ -17,6 +17,31 @@ internal interface IOem1GestureClock
     TimeSpan GetElapsedTime(long startTimestamp, long endTimestamp);
 }
 
+internal interface IOem1GestureCancellationSource : IDisposable
+{
+    CancellationToken Token { get; }
+    void Cancel();
+}
+
+internal interface IOem1GestureCancellationSourceFactory
+{
+    IOem1GestureCancellationSource Create();
+}
+
+internal sealed class Oem1GestureCancellationSource : IOem1GestureCancellationSource
+{
+    private readonly CancellationTokenSource _source = new();
+
+    public CancellationToken Token => _source.Token;
+    public void Cancel() => _source.Cancel();
+    public void Dispose() => _source.Dispose();
+}
+
+internal sealed class Oem1GestureCancellationSourceFactory : IOem1GestureCancellationSourceFactory
+{
+    public IOem1GestureCancellationSource Create() => new Oem1GestureCancellationSource();
+}
+
 internal sealed class Oem1StopwatchClock : IOem1GestureClock
 {
     public long GetTimestamp() => System.Diagnostics.Stopwatch.GetTimestamp();
@@ -39,7 +64,8 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private readonly TimeSpan _doubleClickWindow;
     private readonly IOem1GestureDelay _delay;
     private readonly IOem1GestureClock _clock;
-    private CancellationTokenSource? _pendingCancellation;
+    private readonly IOem1GestureCancellationSourceFactory _cancellationSourceFactory;
+    private IOem1GestureCancellationSource? _pendingCancellation;
     private long _generation;
     private bool _firstPressPending;
     private long _firstPressTimestamp;
@@ -49,7 +75,8 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         bool doubleClickEnabled,
         TimeSpan doubleClickWindow,
         IOem1GestureDelay? delay = null,
-        IOem1GestureClock? clock = null)
+        IOem1GestureClock? clock = null,
+        IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null)
     {
         if (doubleClickEnabled && doubleClickWindow <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(doubleClickWindow), "The double-click window must be positive.");
@@ -58,6 +85,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         _doubleClickWindow = doubleClickWindow;
         _delay = delay ?? new Oem1TaskDelay();
         _clock = clock ?? new Oem1StopwatchClock();
+        _cancellationSourceFactory = cancellationSourceFactory ?? new Oem1GestureCancellationSourceFactory();
     }
 
     internal event Action<Oem1Gesture>? GestureRecognized;
@@ -151,7 +179,9 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                 return;
 
             _firstPressPending = false;
+            var completedCancellation = _pendingCancellation;
             _pendingCancellation = null;
+            completedCancellation?.Dispose();
             GestureRecognized?.Invoke(Oem1Gesture.Single);
         }
     }
@@ -161,7 +191,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         _firstPressPending = true;
         _firstPressTimestamp = timestamp;
         generation = ++_generation;
-        _pendingCancellation = new CancellationTokenSource();
+        _pendingCancellation = _cancellationSourceFactory.Create();
         token = _pendingCancellation.Token;
     }
 
