@@ -2693,6 +2693,34 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
     }
 
+    [Fact]
+    public async Task TimedOutSuspend_LatchesPassiveBarrier_UntilExplicitResume()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        using var suspendCts = new CancellationTokenSource();
+
+        coordinator.TestOnly_BeforeHelperStartLinearization = async () =>
+        {
+            var suspendTask = coordinator.QuiesceForSuspendAsync(
+                DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, suspendCts.Token);
+            suspendCts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => suspendTask);
+        };
+
+        await coordinator.SetDesiredEnabledAsync(true);
+        coordinator.TestOnly_BeforeHelperStartLinearization = null;
+
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+        await coordinator.ReconcileAsync("after timed-out suspend");
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        await coordinator.ReconcileAfterResumeAsync();
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+    }
+
     // ============================================================
     // Review 4957507443, finding #3 (MAJOR): DisposeAsync must drain the fire-and-forget debounce
     // continuation before disposing the gate.

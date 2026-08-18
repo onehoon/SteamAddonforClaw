@@ -150,6 +150,10 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// reconciliation.</summary>
     private bool _suspended;
 
+    // Request-time suspend intent survives a participant timeout. Unlike _suspended, this is set
+    // before waiting for _gate and is cleared only by the explicit resume boundary.
+    private bool _suspendBarrierRequested;
+
     /// <summary>Test-only synchronization seam: awaited (if set) by a debounce continuation
     /// immediately before it acquires <see cref="_gate"/>, letting tests deterministically force a
     /// competing high-priority request (disable/suspend/shutdown) to run to completion first. Never
@@ -381,7 +385,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     AppLog.Warn("CenterM.Oem1", "Owned helper exited unexpectedly; retiring.", null, ("ProcessId", _helperOwnership.ProcessId));
                     _helperOwnership.RetireConfirmedExited();
                     BumpGeneration();
-                    if (_suspended)
+                    if (IsSuspendBarrierActive)
                     {
                         // Suspended barrier (finding #1): retiring the now-stale ownership record is
                         // safe bookkeeping, but a fresh reconcile that could stage/start a new helper
@@ -429,7 +433,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         try
         {
             if (_shutdown) return;
-            if (_suspended)
+            if (IsSuspendBarrierActive)
             {
                 // Suspended barrier (finding #1): no new debounce may be started and no termination
                 // may be attempted from stale PID/window evidence while suspended.
@@ -466,8 +470,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         // Bumped BEFORE acquiring the gate (finding #6), same reasoning as SetDesiredEnabledAsync.
         // Review 4957791980 finding #1: also marks the request pending via the request-time barrier
         // for the same reason -- see SetDesiredEnabledAsync.
-        BeginHighPriorityRequest();
-        BumpLifecycleEpoch();
+        BeginSuspendBarrier();
 
         try
         {
@@ -497,6 +500,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         {
             if (_shutdown) return;
 
+            lock (_requestBoundarySync) _suspendBarrierRequested = false;
             _suspended = false;
 
             if (_helperOwnership.IsOwned)
@@ -672,7 +676,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     {
         _lastReason = reason;
 
-        if (_suspended)
+        if (IsSuspendBarrierActive)
         {
             // Suspended barrier (finding #1): every mutating reconciliation path funnels through
             // here, so guarding at entry blocks re-arm, drift cleanup, and disable-retry alike until
@@ -961,7 +965,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         if (TestOnly_BeforeHelperStartLinearization is { } beforeStartHook)
             await beforeStartHook().ConfigureAwait(false);
 
-        if (!TryLinearizeOrdinaryMutationStart(expectedEpoch))
+                if (!TryLinearizeOrdinaryMutationStart(expectedEpoch))
         {
             _lastReason = "SuspendRequestedDuringArmBeforeStart";
             SetState(CenterMOem1LifecycleState.NeedsSetup);
@@ -1567,6 +1571,25 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         get { lock (_requestBoundarySync) { return _pendingHighPriorityRequests != 0; } }
     }
 
+    private bool IsSuspendBarrierActive
+    {
+        get
+        {
+            lock (_requestBoundarySync)
+                return _suspendBarrierRequested || _suspended;
+        }
+    }
+
+    private void BeginSuspendBarrier()
+    {
+        lock (_requestBoundarySync)
+        {
+            _suspendBarrierRequested = true;
+            _pendingHighPriorityRequests++;
+            _lifecycleEpoch++;
+        }
+    }
+
     /// <summary>Review 4958332345 (BLOCKER): the shared linearization point for an ordinary/
     /// destructive mutation's "operation start" -- helper Start (site 1) and real-MainUI termination
     /// (site 3). Returns <see langword="true"/> only if no high-priority request currently holds
@@ -1581,7 +1604,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     {
         lock (_requestBoundarySync)
         {
-            return _pendingHighPriorityRequests == 0
+            return !_suspendBarrierRequested
+                && _pendingHighPriorityRequests == 0
                 && Interlocked.Read(ref _lifecycleEpoch) == expectedEpoch;
         }
     }
@@ -1599,7 +1623,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     {
         lock (_requestBoundarySync)
         {
-            if (_pendingHighPriorityRequests != 0
+            if (_suspendBarrierRequested
+                || _pendingHighPriorityRequests != 0
                 || Interlocked.Read(ref _lifecycleEpoch) != expectedEpoch)
                 return false;
             _lastReason = "Armed";
