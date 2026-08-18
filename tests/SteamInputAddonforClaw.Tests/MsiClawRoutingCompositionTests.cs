@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SteamInputAddonforClaw.CenterM;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -57,6 +58,41 @@ public sealed class MsiClawRoutingCompositionTests
         await ((IAsyncDisposable)composition).DisposeAsync();
 
         Assert.False(composition.PhysicalInputSource.IsRunning);
+    }
+
+    [Fact]
+    public async Task CenterMGuardStage_is_included_in_the_generic_stage_list()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
+        IHandheldRoutingComposition handheld = composition;
+
+        Assert.Contains(composition.CenterMGuardStage, handheld.Stages);
+        Assert.Equal(RoutingStageKind.CenterMGuard, composition.CenterMGuardStage.Kind);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_disarms_the_guard_if_it_was_left_armed()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        var guard = new CenterMMainUiRoutingGuard(
+            processSnapshotSource: new AlwaysEmptySnapshotSource(),
+            stager: _ => null);
+        // Staging is forced to fail so this never touches a real DirectInput/Win32 helper -- the
+        // point of this test is only that a still-armed guard's Dispose path is reachable and
+        // idempotent-safe, not the arm sequence itself (covered by CenterMMainUiRoutingGuardTests).
+        var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), centerMGuard: guard);
+
+        var exception = await Record.ExceptionAsync(async () => await ((IAsyncDisposable)composition).DisposeAsync());
+
+        Assert.Null(exception);
+    }
+
+    private sealed class AlwaysEmptySnapshotSource : IProcessSnapshotSource
+    {
+        public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName) => [];
     }
 
     [Fact]

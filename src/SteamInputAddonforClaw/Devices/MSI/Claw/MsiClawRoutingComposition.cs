@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.CenterM;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
@@ -38,6 +39,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     internal MsiClawPhysicalInputStage PhysicalInputStage { get; }
     internal MsiClawPhysicalIsolationStage PhysicalIsolationStage { get; }
     internal MsiClawRumbleSink PhysicalRumbleSink { get; }
+    internal CenterMMainUiRoutingGuard CenterMGuard { get; }
+    internal CenterMMainUiRoutingGuardStage CenterMGuardStage { get; }
 
     private readonly IReadOnlyList<IRoutingPipelineStage> _stages;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
@@ -48,7 +51,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         RecoveryManager recovery,
         PowerMutationGate powerGate,
         RecoverySafetyState recoverySafety,
-        Func<IMsiClawRumbleEndpointResolver>? rumbleEndpointResolverFactory = null)
+        Func<IMsiClawRumbleEndpointResolver>? rumbleEndpointResolverFactory = null,
+        CenterMMainUiRoutingGuard? centerMGuard = null)
     {
         NativeModeSession = new MsiClawNativeModeSessionCoordinator(
             nativeState,
@@ -78,7 +82,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         PhysicalInputStage.PhysicalSessionRetired += PhysicalRumbleSink.InvalidatePhysicalSession;
         PhysicalInputSource.TestCompleted += OnPhysicalInputCompleted;
 
-        _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage];
+        CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard();
+        CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
+
+        _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage, CenterMGuardStage];
         _sessionBoundaryParticipants = [NativeModeSession];
     }
 
@@ -149,6 +156,12 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         PhysicalInputStage.PhysicalSessionRetiring -= PhysicalRumbleSink.BeginPhysicalSessionRetirement;
         PhysicalInputStage.PhysicalSessionStarted -= PhysicalRumbleSink.BeginPhysicalSession;
         PhysicalRumbleSink.Dispose();
+        // Defensive only: normal routing rollback already disarms the guard (last in
+        // RoutingPipelineStageOrder.Rollback, after native/physical restoration) before disposal is
+        // ever reached. A crash bypasses this entirely and relies on the OS closing the owned
+        // handles instead (fail-open) -- see CenterMMainUiRoutingGuard's remarks.
+        if (CenterMGuard.IsArmed)
+            await CenterMGuard.DisarmAsync().ConfigureAwait(false);
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
     }

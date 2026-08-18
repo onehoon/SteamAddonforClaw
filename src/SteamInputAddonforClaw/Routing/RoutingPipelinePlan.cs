@@ -16,7 +16,11 @@ internal enum RoutingStageKind
     ThirdPartyIsolation,
     SteamOutput,
     XboxOutput,
-    GameBarRouting
+    GameBarRouting,
+    /// <summary>Transient prevention of a new real MSI Center M MainUI becoming operational while
+    /// routing is active. See <see cref="RoutingPipelineStageOrder"/> for why it runs first on entry
+    /// and last on rollback.</summary>
+    CenterMGuard
 }
 
 internal sealed record RoutingPipelinePlan(
@@ -26,7 +30,8 @@ internal sealed record RoutingPipelinePlan(
     RoutingStageMode ThirdPartyIsolation,
     RoutingStageMode SteamOutput,
     RoutingStageMode XboxOutput,
-    RoutingStageMode GameBarRouting)
+    RoutingStageMode GameBarRouting,
+    RoutingStageMode CenterMGuard = RoutingStageMode.Disabled)
 {
     internal static RoutingPipelinePlan StockCenterM { get; } = new(
         RoutingStageMode.Enabled,
@@ -35,9 +40,11 @@ internal sealed record RoutingPipelinePlan(
         RoutingStageMode.Disabled,
         RoutingStageMode.Enabled,
         RoutingStageMode.Disabled,
-        RoutingStageMode.Disabled);
+        RoutingStageMode.Disabled,
+        RoutingStageMode.Enabled);
 
     internal static RoutingPipelinePlan AllDisabled { get; } = new(
+        RoutingStageMode.Disabled,
         RoutingStageMode.Disabled,
         RoutingStageMode.Disabled,
         RoutingStageMode.Disabled,
@@ -55,6 +62,7 @@ internal sealed record RoutingPipelinePlan(
         RoutingStageKind.SteamOutput => SteamOutput,
         RoutingStageKind.XboxOutput => XboxOutput,
         RoutingStageKind.GameBarRouting => GameBarRouting,
+        RoutingStageKind.CenterMGuard => CenterMGuard,
         _ => RoutingStageMode.Disabled
     };
 }

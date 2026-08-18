@@ -119,6 +119,44 @@ The dispatcher is not composed into production startup. `Oem1EventGestureBridge`
 there is still no settings, persistence, IPC, or UI to change the bindings.
 No hardware validation is claimed by this PR.
 
+## Routing-time MainUI launch guard, Phase 1 (this PR)
+
+Adds `CenterMMainUiRoutingGuard`, a narrow routing-only primitive that prevents
+a NEW real MSI Center M MainUI from becoming operational while Steam routing
+is active, so the owned PID1902/DirectInput physical session stays
+authoritative. RE (`MSI_COMPLETE_RESEARCH_RESULT.md`) confirmed the real
+`MSI Center M.exe`'s own duplicate-instance guard is the mutex
+`Local\MSI Center M.exe` (`MSI_Center_M.App.IsAlreadyRunning`), checked before
+`MainWindow`/controller-mode initialization -- this PR has the Addon
+transiently own that exact same resource for the routing lifetime
+(`CenterMMainUiMutexOwnership`), alongside the existing same-name staged
+helper (`CenterMHelperOwnership`/`CenterMHelperStaging`, reused as-is, not
+duplicated).
+
+Composed as a new `CenterMMainUiRoutingGuardStage` in `MsiClawRoutingComposition`,
+scheduled first in `RoutingPipelineStageOrder.Forward` (before native-mode/
+PID1902 mutation) and last in `RoutingPipelineStageOrder.Rollback` (after
+native/physical restoration) -- routing cannot begin mutating the physical
+controller until the guard reports `Armed`, and the guard is only released
+after routing has already torn down. If a real MainUI is already present when
+routing tries to enter, arm fails (`RealMainUiPresent`) and routing does not
+start; this PR does **not** terminate an already-running real MainUI
+(`SafeMainUiTerminator` is not invoked here) -- that is an explicit Phase 2
+decision. Every partial arm failure (helper failed to start, mutex
+unavailable, invariant check failed, a foreign same-name process appeared
+mid-arm) unwinds only what that attempt itself acquired and never commits
+Armed.
+
+This is a separate, narrower composition than `CenterMOem1LifecycleCoordinator`
+(still fully dormant in production, unrelated to this PR) -- no OEM1
+gesture/action/UI behavior is touched. The routing guard owns its own
+dedicated `CenterMHelperOwnership` instance; a future production OEM1
+composition must not create a second same-name helper alongside it.
+
+**Hardware validation is required and has not been performed.** See
+`docs/VIIPER_MIGRATION_TODO.md` SD3 for the required first hardware test
+checklist.
+
 ## PR3+ (not started) — settings / UI / production composition
 
 Controller settings "Center M Button" action selector, status presentation,
