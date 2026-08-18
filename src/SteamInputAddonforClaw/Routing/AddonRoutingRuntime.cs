@@ -148,11 +148,10 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         }, requestStatusRefresh);
 
     /// <summary>
-    /// Stops routing via the existing coordinator shutdown, falling back to the safety session's
-    /// fail-close on either an unsuccessful shutdown result or a thrown exception -- exactly the
-    /// behavior <c>App.xaml.cs</c> previously performed inline. The caller must still dispose this
-    /// runtime (and stop any other orchestration referencing it) afterward; this method does not
-    /// release backend resources.
+    /// Stops routing through the canonical coordinator. An unsuccessful result or exception is
+    /// returned as <c>false</c> without invoking the safety-session fail-close, preserving any
+    /// residual SteamOutput rollback barrier for retry. The caller must not dispose this runtime's
+    /// backend resources until this method succeeds.
     /// </summary>
     internal async Task<bool> ShutdownAsync()
     {
