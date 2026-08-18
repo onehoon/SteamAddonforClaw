@@ -17,6 +17,24 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class AddonRuntimeHostTests
 {
+    [Theory]
+    [InlineData("FinalStop", false)]
+    [InlineData("CallbackClear", false)]
+    [InlineData("Success", true)]
+    public async Task Host_shutdown_disposes_routing_backend_only_after_canonical_success(string failureClass, bool shutdownSucceeded)
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var disposed = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
+            new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), true,
+            () => false, _ => Task.FromResult(false), routingShutdownOverride: () => Task.FromResult(shutdownSucceeded),
+            routingDisposeOverride: () => { Assert.True(failureClass is "FinalStop" or "CallbackClear" or "Success"); disposed++; return ValueTask.CompletedTask; });
+
+        await host.DisposeAsync();
+
+        Assert.Equal(shutdownSucceeded ? 1 : 0, disposed);
+    }
+
     [Fact]
     public async Task Host_with_unavailable_routing_remains_valid_and_passive()
     {

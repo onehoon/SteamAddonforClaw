@@ -28,14 +28,14 @@ namespace SteamInputAddonforClaw.Runtime;
 /// Lifecycle: construct, subscribe to the two events, call <see cref="StartPowerObservation"/>
 /// once dependents (e.g. <c>MainWindow</c>) are ready to receive the events it may synchronously
 /// raise, then eventually call <see cref="PrepareForShutdown"/> (stops Steam observation; safe to
-/// call multiple times) followed by <see cref="DisposeAsync"/> (idempotent full runtime shutdown:
-/// stops power observation, shuts down routing, disposes the power coordinator, then disposes the
-/// routing backend -- in that order). The caller does not need to separately shut down routing or
-/// dispose power objects; <see cref="DisposeAsync"/> owns the complete remaining sequence.
+/// call multiple times) followed by <see cref="DisposeAsync"/> (idempotent runtime shutdown:
+/// stops power observation, attempts canonical routing shutdown, and disposes the routing backend
+/// only when that shutdown succeeds). Failed canonical rollback preserves residual ownership.
 /// </para>
 /// </remarks>
 internal sealed class AddonRuntimeHost : IAsyncDisposable
 {
+    internal static bool ShouldDisposeRoutingBackend(bool canonicalShutdownSucceeded) => canonicalShutdownSucceeded;
     private readonly SteamSessionRuntime _steamRuntime;
     private readonly AddonRoutingRuntime? _routingRuntime;
     private readonly ResumeFreshReconcileSuppression _resumeFreshReconcileSuppression = new();
@@ -44,6 +44,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private readonly PowerTransitionCoordinator _powerCoordinator;
     private readonly PowerTransitionWatcher _powerWatcher;
     private readonly UserTerminationGuard _userTerminationGuard;
+    private readonly Func<Task<bool>>? _routingShutdownOverride;
+    private readonly Func<ValueTask>? _routingDisposeOverride;
 
     // Guards against a resume notification that was already queued in PowerTransitionCoordinator
     // before shutdown began running ReconcileFreshAfterResumeAsync's Steam refresh concurrently
@@ -65,13 +67,17 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         bool recoverySafe,
         Func<bool> hasIncompleteRecovery,
         Func<CancellationToken, Task<bool>> establishBaseline,
-        IPowerSuspendResumeNotificationSource? notificationSource = null)
+        IPowerSuspendResumeNotificationSource? notificationSource = null,
+        Func<Task<bool>>? routingShutdownOverride = null,
+        Func<ValueTask>? routingDisposeOverride = null)
     {
         _steamRuntime = steamRuntime;
         _routingRuntime = routingRuntime;
         _powerGate = powerGate;
         _recoverySafetyState = recoverySafetyState;
         _steamRuntime.StateChanged += OnSteamSessionStateChanged;
+        _routingShutdownOverride = routingShutdownOverride;
+        _routingDisposeOverride = routingDisposeOverride;
 
         var powerParticipants = new List<IPowerSuspendParticipant>();
         if (_routingRuntime is not null) powerParticipants.Add(_routingRuntime);
@@ -185,9 +191,15 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         PrepareForShutdown();
         _powerWatcher.Dispose();
-        if (_routingRuntime is not null) await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
+        var routingShutdownSucceeded = _routingShutdownOverride is not null
+            ? await _routingShutdownOverride().ConfigureAwait(false)
+            : _routingRuntime is null || await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
         await _powerCoordinator.DisposeAsync().ConfigureAwait(false);
-        if (_routingRuntime is not null) await _routingRuntime.DisposeAsync().ConfigureAwait(false);
+        if (ShouldDisposeRoutingBackend(routingShutdownSucceeded))
+        {
+            if (_routingDisposeOverride is not null) await _routingDisposeOverride().ConfigureAwait(false);
+            else if (_routingRuntime is not null) await _routingRuntime.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }
 

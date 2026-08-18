@@ -10,8 +10,10 @@ internal sealed class FeedbackAuthority
     private int _activeLeases;
     private bool _revocationInProgress;
     private readonly TaskCompletionSource _acquireBlocked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _revocationStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     internal Task AcquireBlocked => _acquireBlocked.Task;
+    internal Task RevocationStarted => _revocationStarted.Task;
 
     internal bool IsRevocationInProgress
     {
@@ -81,6 +83,7 @@ internal sealed class FeedbackAuthority
     {
         if (_revocationInProgress) return;
         _revocationInProgress = true;
+        _revocationStarted.TrySetResult();
         _generation++;
         _source = null;
     }

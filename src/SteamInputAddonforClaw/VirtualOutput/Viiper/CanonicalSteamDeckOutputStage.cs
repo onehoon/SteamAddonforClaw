@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Feedback;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
@@ -45,6 +46,12 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     private int _outputFaultReported;
     private ICanonicalSteamDeckSession? _canonicalSession;
     private bool _recoveryMutationCompleted;
+    private readonly FeedbackAuthority? _feedbackAuthority;
+    private readonly IPhysicalRumbleSink? _physicalRumbleSink;
+    private SteamDeckRumbleFeedbackBridge? _feedbackBridge;
+    private FeedbackAuthorityToken? _feedbackToken;
+    private bool _feedbackCallbackRegistered;
+    private bool _feedbackRevoked;
     private sealed class CreationTiming
     {
         internal long Started { get; } = Stopwatch.GetTimestamp();
@@ -59,17 +66,25 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     internal CanonicalSteamDeckOutputStage(Func<ICanonicalSteamDeckSession> sessionFactory, IControllerDeviceEnumerator enumerator,
         SteamDeckVirtualDeviceIdentityResolver resolver, AddonOwnedVirtualDeviceTracker tracker, RecoveryManager recovery,
         Func<Guid?> sessionId, IHidHideClient hidHide, IControllerStateSnapshotSource snapshot,
-        TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null, IInputReportTickSource? reportTicks = null)
+        TimeSpan? pnPTimeout = null, TimeSpan? pollInterval = null, IInputReportTickSource? reportTicks = null,
+        FeedbackAuthority? feedbackAuthority = null, IPhysicalRumbleSink? physicalRumbleSink = null)
     {
         _sessionFactory = sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory)); _enumerator = enumerator; _resolver = resolver; _tracker = tracker; _recovery = recovery; _sessionId = sessionId; _hidHide = hidHide;
         _pnPTimeout = pnPTimeout ?? TimeSpan.FromSeconds(5); _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(50);
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot)); _reportTicks = reportTicks;
+        if (physicalRumbleSink is not null && feedbackAuthority is null)
+            throw new ArgumentException("A physical rumble sink requires a feedback authority.", nameof(feedbackAuthority));
+        _feedbackAuthority = feedbackAuthority; _physicalRumbleSink = physicalRumbleSink;
     }
 
     public RoutingStageKind Kind => RoutingStageKind.SteamOutput;
     public string Name => "SteamDeckOutput";
 
     internal void SetOutputFaultHandler(Func<ValueTask> handler) => _outputFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+    internal Action? FeedbackBeforeLease
+    {
+        set { if (_feedbackBridge is not null) _feedbackBridge.BeforeLease = value; }
+    }
 
     private void ReportOutputFault(Exception exception)
     {
@@ -176,6 +191,23 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             try { neutralAccepted = _canonicalSession.SetNeutral(); }
             finally { timing.NeutralReportMs = Elapsed(started); }
             if (!neutralAccepted) return await FailAndRollbackCoreAsync("NeutralReportRejected", timing).ConfigureAwait(false);
+            if (_physicalRumbleSink is not null)
+            {
+                var token = _feedbackAuthority!.Acquire("SteamDeck");
+                _feedbackToken = token;
+                _feedbackBridge = new SteamDeckRumbleFeedbackBridge(_feedbackAuthority, token, _physicalRumbleSink);
+                if (!_canonicalSession.SetOutputCallback(_feedbackBridge.Callback))
+                {
+                    _feedbackAuthority.RevokeAndDrain();
+                    _feedbackRevoked = true;
+                    _feedbackBridge = null;
+                    _feedbackToken = null;
+                    return await FailAndRollbackCoreAsync("SteamDeckFeedbackCallbackRegistrationFailed", timing).ConfigureAwait(false);
+                }
+                _feedbackCallbackRegistered = true;
+                AppLog.Debug("Rumble", "Steam Deck feedback callback registered.", ("Source", "SteamDeck"));
+                _feedbackRevoked = false;
+            }
             Interlocked.Exchange(ref _outputFaultReported, 0);
             _publisher = new CanonicalSteamDeckInputPublisher(_snapshot, _canonicalSession, _reportTicks,
                 fault: ReportOutputFault);
@@ -237,6 +269,32 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             await _publisher.StopAsync().ConfigureAwait(false);
             _publisher = null;
         }
+        if (_feedbackAuthority is not null && _feedbackToken is not null && !_feedbackRevoked)
+        {
+            _feedbackAuthority.RevokeAndDrain();
+            _feedbackRevoked = true;
+            AppLog.Debug("Rumble", "Steam Deck feedback authority revoked/drained.", ("Source", "SteamDeck"));
+        }
+        if (_physicalRumbleSink is not null && _feedbackToken is not null)
+        {
+            var stop = _physicalRumbleSink.SetRumble(TwoMotorRumble.Stopped);
+            if (stop.Status != PhysicalRumbleWriteStatus.Succeeded)
+            {
+                AppLog.Warn("Rumble", "Steam Deck final physical STOP failed.", null, ("Status", stop.Status), ("Reason", stop.Reason));
+                return RollbackFailure("PhysicalRumbleFinalStopFailed");
+            }
+            AppLog.Debug("Rumble", "Steam Deck final physical STOP accepted.", ("Source", "SteamDeck"));
+        }
+        if (_feedbackCallbackRegistered)
+        {
+            if (!_canonicalSession?.ClearOutputCallback() ?? false)
+            {
+                AppLog.Warn("Rumble", "Steam Deck feedback callback clear failed.", null, ("Operation", "ClearOutputCallback"));
+                return RollbackFailure("SteamDeckFeedbackCallbackClearFailed");
+            }
+            _feedbackCallbackRegistered = false;
+            AppLog.Debug("Rumble", "Steam Deck feedback callback cleared.", ("Source", "SteamDeck"));
+        }
         if (_sessionId() is not { } session) return RollbackFailure("RecoverySessionUnavailable");
         var hadResolvedIdentity = _owned is { Count: > 0 };
         if (_canonicalSession is null) return RollbackFailure("CanonicalSessionUnavailable");
@@ -290,6 +348,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         _canonicalSession = null;
         _deviceId = 0; _busId = 0; _owned = null; _before = null; _potentialDeckInstanceIdsAtIdentityFailure = [];
         _recoveryMutationCompleted = false;
+        _feedbackBridge = null; _feedbackToken = null; _feedbackRevoked = false;
         _state = LifecycleState.Inactive;
         return RoutingStageOperationResult.Success("SteamDeckRemoved");
     }

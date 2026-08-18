@@ -411,6 +411,27 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.Equal(1, provider.CaptureCount);
     }
 
+    [Theory]
+    [InlineData("PhysicalRumbleFinalStopFailed")]
+    [InlineData("SteamDeckFeedbackCallbackClearFailed")]
+    public async Task ShutdownPreservesPendingCanonicalCleanupForFeedbackBarrier(string reason)
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        executor.RollbackResults.Enqueue(new(false, RoutingStageKind.SteamOutput, reason));
+
+        var result = await bridge.Bridge.ShutdownAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(reason, result.Reason);
+        Assert.NotNull(bridge.Session.PendingCleanup);
+        Assert.Equal(RoutingStageMode.Enabled, bridge.Session.PendingCleanup!.Session.Plan.SteamOutput);
+        Assert.Equal(RoutingActionKind.ExitOverride, bridge.Session.PendingCleanup.OriginAction);
+        Assert.NotNull(bridge.Session.PendingCleanup.Session);
+    }
+
     [Fact]
     public async Task SteamSessionBoundaryRunsAfterSuccessfulCleanup()
     {

@@ -12,7 +12,8 @@ VIIPER API. The active Steam virtual-output target is Steam Deck `28DE:1205`.
 | Active Steam output | Steam Deck `28DE:1205` only |
 | Addon integration | Session, mapper, publisher, identity resolver, safety stage implemented |
 | Hardware status | EX basic non-gyro input validated; lifecycle evidence remains pending |
-| Rumble / haptics | Separate feature track |
+| Rumble | Production callback/authority/STOP wiring implemented; hardware validation pending |
+| Haptics | Separate feature track |
 | Gyro / IMU | Separate feature track |
 
 The DLL, generated header, managed P/Invoke definitions, ABI tests, hashes,
@@ -51,8 +52,13 @@ revision adds exactly one native export, `SetSteamDeckOutputCallback`
 and `SteamDeckDeviceRemoveResult` are unchanged. The managed
 `ICanonicalViiperNativeApi` surface, `RequiredExports`, and callback-lifetime
 rooting were updated in the same change to keep the native and managed ABI
-aligned. No production caller registers the Steam Deck output callback yet;
-Addon rumble/haptics handling remains a separate feature track.
+aligned. Production registers the Steam Deck output callback only when the
+generic handheld composition supplies a physical rumble capability. The Addon
+copies the synchronous normalized payload, decodes ordinary 0xEB rumble, and
+gates physical writes through the shared feedback authority. Teardown revokes
+and drains feedback, sends an explicit physical STOP, clears the callback, and
+only then performs typed Steam Deck removal. Haptic/audio commands remain
+unsupported.
 
 ### Automated dependency update PRs
 
