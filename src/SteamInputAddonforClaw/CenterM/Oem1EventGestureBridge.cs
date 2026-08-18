@@ -11,7 +11,7 @@ internal readonly record struct Oem1GesturePolicyRequest(Oem1Gesture Gesture);
 internal sealed class Oem1EventGestureBridge : IDisposable
 {
     [ThreadStatic]
-    private static int _policyDeliveryDepth;
+    private static HashSet<long>? _currentPolicyDeliveries;
 
     private readonly object _gate = new();
     private readonly object _recognizerOperationGate = new();
@@ -24,7 +24,8 @@ internal sealed class Oem1EventGestureBridge : IDisposable
     private bool _disposed;
     private long _authorityEpoch;
     private long _activeRecognizerDeliveryEpoch;
-    private int _activePolicyDeliveries;
+    private long _nextPolicyDeliveryId;
+    private readonly HashSet<long> _activePolicyDeliveries = [];
 
     internal Oem1EventGestureBridge(
         IMsiEventSource eventSource,
@@ -135,10 +136,10 @@ internal sealed class Oem1EventGestureBridge : IDisposable
                 if (_disposed || !_customAuthority || deliveryEpoch != _activeRecognizerDeliveryEpoch)
                     return;
 
-                _activePolicyDeliveries++;
+                _activePolicyDeliveries.Add(++_nextPolicyDeliveryId);
+                (_currentPolicyDeliveries ??= []).Add(_nextPolicyDeliveryId);
             }
 
-            _policyDeliveryDepth++;
         }
 
         try
@@ -151,10 +152,14 @@ internal sealed class Oem1EventGestureBridge : IDisposable
         }
         finally
         {
-            _policyDeliveryDepth--;
             lock (_policyDeliveryGate)
             {
-                _activePolicyDeliveries--;
+                var current = _currentPolicyDeliveries!;
+                var deliveryId = current.Last();
+                current.Remove(deliveryId);
+                _activePolicyDeliveries.Remove(deliveryId);
+                if (current.Count == 0)
+                    _currentPolicyDeliveries = null;
                 Monitor.PulseAll(_policyDeliveryGate);
             }
         }
@@ -162,12 +167,9 @@ internal sealed class Oem1EventGestureBridge : IDisposable
 
     private void WaitForPolicyDeliveriesToDrain()
     {
-        if (_policyDeliveryDepth != 0)
-            return;
-
         lock (_policyDeliveryGate)
         {
-            while (_activePolicyDeliveries != 0)
+            while (_activePolicyDeliveries.Any(id => _currentPolicyDeliveries is null || !_currentPolicyDeliveries.Contains(id)))
                 Monitor.Wait(_policyDeliveryGate);
         }
     }

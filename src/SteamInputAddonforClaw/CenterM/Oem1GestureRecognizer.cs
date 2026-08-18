@@ -60,7 +60,7 @@ internal sealed class Oem1TaskDelay : IOem1GestureDelay
 internal sealed class Oem1GestureRecognizer : IDisposable
 {
     [ThreadStatic]
-    private static int _deliveryDepth;
+    private static HashSet<long>? _currentDeliveries;
 
     private readonly object _gate = new();
     private readonly object _deliveryGate = new();
@@ -73,7 +73,8 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private IOem1GestureCancellationSource? _pendingCancellation;
     private long _generation;
     private long _deliveryEpoch;
-    private int _activeDeliveries;
+    private long _nextDeliveryId;
+    private readonly HashSet<long> _activeDeliveries = [];
     private bool _firstPressPending;
     private long _firstPressTimestamp;
     private bool _disposed;
@@ -233,6 +234,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
 
     private void DeliverGesture(Oem1Gesture gesture, long deliveryEpoch)
     {
+        long deliveryId;
         lock (_deliveryGate)
         {
             lock (_gate)
@@ -240,11 +242,12 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                 if (_disposed || deliveryEpoch != _deliveryEpoch)
                     return;
 
-                _activeDeliveries++;
+                deliveryId = ++_nextDeliveryId;
+                _activeDeliveries.Add(deliveryId);
             }
         }
 
-        _deliveryDepth++;
+        (_currentDeliveries ??= []).Add(deliveryId);
         try
         {
             _deliveryBeforeNotification?.Invoke(deliveryEpoch);
@@ -253,10 +256,14 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         }
         finally
         {
-            _deliveryDepth--;
             lock (_deliveryGate)
             {
-                _activeDeliveries--;
+                var current = _currentDeliveries!;
+                var completedDeliveryId = current.Last();
+                current.Remove(completedDeliveryId);
+                _activeDeliveries.Remove(completedDeliveryId);
+                if (current.Count == 0)
+                    _currentDeliveries = null;
                 Monitor.PulseAll(_deliveryGate);
             }
         }
@@ -264,12 +271,9 @@ internal sealed class Oem1GestureRecognizer : IDisposable
 
     private void WaitForDeliveriesToDrain()
     {
-        if (_deliveryDepth != 0)
-            return;
-
         lock (_deliveryGate)
         {
-            while (_activeDeliveries != 0)
+            while (_activeDeliveries.Any(id => _currentDeliveries is null || !_currentDeliveries.Contains(id)))
                 Monitor.Wait(_deliveryGate);
         }
     }
