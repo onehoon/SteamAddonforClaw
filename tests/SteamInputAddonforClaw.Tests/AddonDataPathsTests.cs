@@ -22,11 +22,13 @@ public sealed class AddonDataPathsTests
     [Fact]
     public void Paths_AreInsideDataRootAndOutsideInstallRoot()
     {
-        var dataRoot = AddonDataPaths.ResolveDataRoot(InstallRoot);
+        var settingsPath = AddonDataPaths.ResolveSettingsPath(InstallRoot);
+        var recoveryPath = AddonDataPaths.ResolveRecoveryJournalPath(InstallRoot);
 
-        Assert.Equal(Path.Combine(dataRoot, "settings.json"), Path.Combine(dataRoot, "settings.json"));
-        Assert.Equal(Path.Combine(dataRoot, "recovery.json"), Path.Combine(dataRoot, "recovery.json"));
-        Assert.False(Path.GetFullPath(dataRoot).StartsWith(Path.GetFullPath(InstallRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(@"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\settings.json", settingsPath);
+        Assert.Equal(@"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\recovery.json", recoveryPath);
+        Assert.False(settingsPath.StartsWith(Path.GetFullPath(InstallRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        Assert.False(recoveryPath.StartsWith(Path.GetFullPath(InstallRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
