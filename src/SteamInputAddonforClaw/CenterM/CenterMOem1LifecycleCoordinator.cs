@@ -90,6 +90,11 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private bool _serverReady;
     private TrackedCenterMMainUi? _trackedMainUi;
     private PendingDebounce? _pendingDebounce;
+    /// <summary>Finding #3 (review 4957507443): tracks the most recently started fire-and-forget
+    /// <see cref="RunDebounceAsync"/> task purely so <see cref="DisposeAsync"/> can drain it before
+    /// disposing <see cref="_gate"/> -- never awaited/consulted by any safety-relevant logic, which
+    /// must continue to rely only on <see cref="_pendingDebounce"/>/epoch/generation.</summary>
+    private Task? _debounceTask;
     private long _generation;
     private long _lifecycleEpoch;
     private string? _lastReason;
@@ -112,6 +117,14 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// stale, or ran <see cref="CompleteDebounceCore"/>. Lets tests replace wall-clock
     /// <c>Task.Delay</c> polling with deterministic awaits. Never touched by production code.</summary>
     internal event Action? TestOnly_DebounceContinuationFinished;
+
+    /// <summary>Test-only synchronization seam (finding #2, review 4957507443): deterministically
+    /// simulates a suspend/disable/shutdown request's lifecycle-epoch bump becoming authoritative
+    /// while some other operation is already in flight, without any real timing race. Mirrors
+    /// exactly what <see cref="QuiesceForSuspendAsync"/>/<see cref="SetDesiredEnabledAsync"/>/
+    /// <see cref="ShutdownAsync"/> do before ever waiting on <see cref="_gate"/>. Never touched by
+    /// production code.</summary>
+    internal void TestOnly_BumpLifecycleEpoch() => BumpLifecycleEpoch();
 
     internal CenterMOem1LifecycleCoordinator(
         Func<string> publishRootProvider,
@@ -412,8 +425,53 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     public async ValueTask DisposeAsync()
     {
         await ShutdownAsync().ConfigureAwait(false);
+
+        // Finding #4 (review 4957507443): ShutdownAsync's own Stop attempt may not have confirmed
+        // exit for the exact retained helper handle -- disposal is the last point at which this
+        // coordinator can still drive that resolution before its serialization primitive goes away.
+        // Give it a final bounded number of extra attempts against the SAME exact retained handle
+        // (never name/PID rediscovery) rather than silently discarding the retry boundary the moment
+        // ShutdownAsync's single attempt didn't resolve it.
+        for (var attempt = 1; attempt <= DisposeFinalCleanupAttempts && _helperOwnership.IsOwned; attempt++)
+        {
+            if (_helperOwnership.Stop(_helperStopTimeout)) break;
+            AppLog.Warn("CenterM.Oem1", "Dispose final cleanup attempt could not confirm helper termination.", null, ("Attempt", attempt), ("ProcessId", _helperOwnership.ProcessId));
+        }
+
+        if (_helperOwnership.IsOwned)
+        {
+            // Not discarded: the CenterMHelperOwnership instance (and its retained SafeProcessHandle/
+            // job handle) is left exactly as-is -- still the sole authority over the exact process --
+            // for whatever caller-held reference can still resolve it later. The coordinator's own
+            // gate is still disposed below because DisposeAsync must complete in bounded time; it is
+            // the coordinator's serialization ability that ends here, not the retained handle itself.
+            AppLog.Warn("CenterM.Oem1", "Dispose completing with the exact retained helper handle still unresolved after bounded final cleanup attempts; ownership remains retained on the CenterMHelperOwnership instance, not discarded.", null, ("ProcessId", _helperOwnership.ProcessId));
+        }
+
+        // Finding #3 (review 4957507443): RunDebounceAsync is deliberately fire-and-forget, but a
+        // continuation whose delay already completed and is merely waiting to (re-)acquire _gate
+        // must be drained to completion BEFORE _gate is disposed -- otherwise it can resume after
+        // disposal and fault on the now-disposed semaphore. Awaited here, outside the gate (already
+        // released by ShutdownAsync), so this can never deadlock against the continuation's own
+        // _gate.WaitAsync.
+        var pendingDebounceTask = _debounceTask;
+        if (pendingDebounceTask is not null)
+        {
+            try { await pendingDebounceTask.ConfigureAwait(false); }
+            catch (Exception ex)
+            {
+                AppLog.Warn("CenterM.Oem1", "Debounce continuation drain during dispose observed an exception.", null, ("Exception", ex.Message));
+            }
+        }
+
         _gate.Dispose();
     }
+
+    /// <summary>Bounded number of additional exact-handle Stop attempts <see cref="DisposeAsync"/>
+    /// makes if <see cref="ShutdownAsync"/>'s own attempt did not confirm termination -- finite so
+    /// disposal still completes in bounded time, but strictly more than the zero extra attempts
+    /// disposal previously made.</summary>
+    private const int DisposeFinalCleanupAttempts = 3;
 
     // ---- Core (gate already held) ----
 
@@ -538,7 +596,12 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         var sameName = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
         if (sameName is null)
         {
-            _lastReason = "ProcessEnumerationUncertain";
+            // Finding #1 (review 4957507443): the same certainty-lost class as the existing-helper
+            // validity branch below -- an uncertain enumeration reached from a fresh reconcile must
+            // also actually disarm any owned helper, not merely report FaultedNative while it stays
+            // running.
+            var disarmed = DisarmOwnedHelperForFailOpen();
+            _lastReason = disarmed ? "ProcessEnumerationUncertain:Disarmed" : "ProcessEnumerationUncertain:DisarmCleanupUnconfirmed";
             SetState(CenterMOem1LifecycleState.FaultedNative);
             return;
         }
@@ -568,10 +631,14 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             // Finding #1/#3: owned does not mean operationally armed -- a job-less
             // PartialCleanupUnconfirmed residue, a liveness that is not confirmed Alive, or a fresh
             // same-name enumeration that no longer confirms the authoritative invariant must all
-            // fail open into FaultedNative rather than ever being (re-)committed to Armed.
-            _lastReason = $"ExistingHelperInvalid:{validity}";
+            // fail open into FaultedNative rather than ever being (re-)committed to Armed. Finding #1
+            // (review 4957507443): failing open must actually disarm the exact owned helper too --
+            // the helper filename IS the suppression mechanism, so leaving it running while merely
+            // reporting a non-Armed state does not restore native OEM1 behavior.
+            var disarmed = DisarmOwnedHelperForFailOpen();
+            _lastReason = disarmed ? $"ExistingHelperInvalid:{validity}:Disarmed" : $"ExistingHelperInvalid:{validity}:DisarmCleanupUnconfirmed";
             SetState(CenterMOem1LifecycleState.FaultedNative);
-            AppLog.Warn("CenterM.Oem1", "Existing-helper reconcile failed the authoritative armed-helper validity check; never committing Armed.", null, ("Validity", validity));
+            AppLog.Warn("CenterM.Oem1", "Existing-helper reconcile failed the authoritative armed-helper validity check; disarm attempted, never committing Armed.", null, ("Validity", validity), ("Disarmed", disarmed));
             return;
         }
 
@@ -596,6 +663,22 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             : ArmedHelperValidity.InvariantInvalid;
     }
 
+    /// <summary>Finding #1 (review 4957507443): single shared path for "suppression certainty was
+    /// lost, fail open" so every caller (fresh reconciliation, the steady-state Armed poll, an
+    /// uncertain same-name enumeration, ...) actually disarms the exact owned helper instead of only
+    /// changing <see cref="_state"/> -- the helper filename itself is the suppression mechanism, so
+    /// <c>SuppressionReady == false</c> while it remains alive does not restore native OEM1
+    /// behavior. A no-op (returns true) when nothing is owned. Never touches a foreign process, and
+    /// never falls back to name/PID rediscovery -- only the exact retained handle via
+    /// <see cref="CenterMHelperOwnership.Stop"/>.</summary>
+    private bool DisarmOwnedHelperForFailOpen()
+    {
+        if (!_helperOwnership.IsOwned) return true;
+        var stopped = _helperOwnership.Stop(_helperStopTimeout);
+        if (stopped) BumpGeneration();
+        return stopped;
+    }
+
     /// <summary>Attempts to stop any owned helper and reports whether cleanup was actually
     /// confirmed. Finding #5: callers must never commit a "clean" state (NeedsSetup/Disabled) on the
     /// strength of this alone -- they must check the returned value and stay in an explicit
@@ -612,6 +695,14 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     private async Task AttemptArm(CancellationToken cancellationToken)
     {
+        // Finding #2 (review 4957507443): the request-time suspend boundary (QuiesceForSuspendAsync
+        // bumps _lifecycleEpoch BEFORE it ever waits for _gate) must invalidate an arm already in
+        // flight, even though _suspended itself is only set once QuiesceForSuspendAsync finally
+        // acquires _gate -- i.e. strictly AFTER this method (which holds the gate throughout) has
+        // already returned. Capture the epoch now so it can be re-checked immediately before ever
+        // committing Armed below.
+        var epochAtStart = Interlocked.Read(ref _lifecycleEpoch);
+
         var publishRoot = _publishRootProvider();
         var stagedPath = _stager(publishRoot);
         if (stagedPath is null)
@@ -637,6 +728,20 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 _lastReason = $"HelperStartFailed:{startResult}";
                 SetState(CenterMOem1LifecycleState.FaultedNative);
                 return;
+        }
+
+        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart)
+        {
+            // Finding #2: a suspend (or disable/shutdown) request became authoritative while this
+            // arm was already in flight, strictly after the helper was created. The newly-created
+            // exact owned helper must be cleaned immediately and Armed must never be committed from
+            // this now-stale operation -- QuiesceForSuspendAsync is still blocked waiting for this
+            // method to release the gate and will establish _suspended right after.
+            var cleaned = _helperOwnership.Stop(_helperStopTimeout);
+            _lastReason = cleaned ? "SuspendRequestedDuringArm" : "SuspendRequestedDuringArmCleanupUnconfirmed";
+            SetState(cleaned ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
+            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed (suspend/disable/shutdown requested) while an arm was in flight; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleaned));
+            return;
         }
 
         // Never publish Armed before this post-start invariant check.
@@ -851,8 +956,15 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         var sameName = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
         if (sameName is null)
         {
-            _lastReason = "ProcessEnumerationUncertain";
+            // Finding #1 (review 4957507443): an uncertain enumeration while Armed must actually
+            // disarm the exact owned helper, not just flip the reported state -- the helper filename
+            // is the suppression mechanism, and it must never be left running indefinitely just
+            // because a later poll tick that could have re-checked it never runs while State !=
+            // Armed.
+            var disarmed = DisarmOwnedHelperForFailOpen();
+            _lastReason = disarmed ? "ProcessEnumerationUncertain:Disarmed" : "ProcessEnumerationUncertain:DisarmCleanupUnconfirmed";
             SetState(CenterMOem1LifecycleState.FaultedNative);
+            AppLog.Warn("CenterM.Oem1", "Same-name enumeration uncertain during poll; disarm attempted.", null, ("Disarmed", disarmed));
             return;
         }
 
@@ -874,9 +986,12 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             var validity = EvaluateArmedHelperValidity(sameName, ownedPid);
             if (validity != ArmedHelperValidity.Valid)
             {
-                _lastReason = $"ArmedInvariantFailedDuringPoll:{validity}";
+                // Finding #1: same as the uncertain-enumeration branch above -- invalidating Armed
+                // must actually disarm the exact owned helper, not merely relabel the state.
+                var disarmed = DisarmOwnedHelperForFailOpen();
+                _lastReason = disarmed ? $"ArmedInvariantFailedDuringPoll:{validity}:Disarmed" : $"ArmedInvariantFailedDuringPoll:{validity}:DisarmCleanupUnconfirmed";
                 SetState(CenterMOem1LifecycleState.FaultedNative);
-                AppLog.Warn("CenterM.Oem1", "Steady-state Armed poll failed the authoritative helper validity check; invalidating Armed.", null, ("Validity", validity));
+                AppLog.Warn("CenterM.Oem1", "Steady-state Armed poll failed the authoritative helper validity check; disarm attempted, invalidating Armed.", null, ("Validity", validity), ("Disarmed", disarmed));
             }
         }
     }
@@ -915,8 +1030,10 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
         // Fire-and-forget by design: the debounce is a background timer whose only effect is to
         // eventually re-enter the single serialized gate and re-validate everything fresh. It must
-        // never run its safety-relevant logic outside that gate.
-        _ = RunDebounceAsync(pending, cts.Token);
+        // never run its safety-relevant logic outside that gate. The Task is retained in
+        // _debounceTask solely so DisposeAsync can drain it before disposing _gate (finding #3) --
+        // it is never awaited or consulted by any safety-relevant logic.
+        _debounceTask = RunDebounceAsync(pending, cts.Token);
     }
 
     private async Task RunDebounceAsync(PendingDebounce mine, CancellationToken token)

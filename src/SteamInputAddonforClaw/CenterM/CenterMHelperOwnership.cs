@@ -50,7 +50,18 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     // recreating the same-name invariant violation and lost-ownership bug this class exists to
     // prevent. The lock is held across each method's entire native-call sequence (not just the
     // IsOwned check), so only one such sequence can ever be in flight at a time.
-    private readonly Lock _sync = new();
+    //
+    // CI regression fix: this was previously `private readonly Lock _sync = new();` using the C#
+    // 13 System.Threading.Lock type. Under real concurrent contention (see
+    // ConcurrentStart_OnlyOneCreateSuspendedSequenceRuns_LoserGetsAlreadyOwned, which blocks a
+    // second thread on this exact lock while the first is still inside native-call territory) this
+    // intermittently threw System.IO.IOException ("The handle is invalid.") from deep inside
+    // System.Threading.Lock.Exit -> SignalWaiterIfNecessary -> EventWaitHandle.Set() on CI runners
+    // -- entirely inside the new Lock type's own contention-event bookkeeping, not in any code this
+    // class owns. Reverting to a plain object monitored via the classic `lock` statement (Monitor,
+    // same reentrant-per-thread semantics as `Lock`) avoids that internal code path entirely and is
+    // the well-established, battle-tested primitive for this exact use.
+    private readonly object _sync = new();
     private SafeProcessHandle? _processHandle;
     private SafeHandle? _jobHandle;
 

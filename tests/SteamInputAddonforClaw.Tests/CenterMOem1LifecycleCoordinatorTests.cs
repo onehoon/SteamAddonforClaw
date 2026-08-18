@@ -114,12 +114,18 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         /// is invoked during a helper stop, letting a test mutate world state (AutoRun, foreign
         /// process presence, ...) to simulate drift occurring during the bounded cleanup wait.</summary>
         internal Action? OnWaitForExitCalled { get; set; }
+        /// <summary>Test-only hook (round-4 finding #2): fires right after a helper has been
+        /// successfully created (before Job/Assign/Resume), letting a test simulate a suspend
+        /// request becoming authoritative while an arm is already in flight, deterministically and
+        /// without any real timing race.</summary>
+        internal Action? OnCreateSuspendedCalled { get; set; }
 
         public bool TryCreateSuspended(string imagePath, out int processId, out SafeProcessHandle? processHandle, out SafeHandle? threadHandle, out int win32Error)
         {
             StartCallCount++;
             win32Error = 0;
             if (!CreateSucceeds) { processId = 0; processHandle = null; threadHandle = null; return false; }
+            OnCreateSuspendedCalled?.Invoke();
             processId = NextProcessId++;
             processHandle = new SafeProcessHandle(CurrentProcessHandle(), false);
             threadHandle = new SafeGenericHandle(CurrentProcessHandle());
@@ -137,7 +143,9 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         public bool TrySetKillOnJobClose(SafeHandle jobHandle, out int win32Error) { win32Error = 0; return LimitSucceeds; }
         public bool TryAssignProcessToJob(SafeHandle jobHandle, SafeProcessHandle processHandle, out int win32Error) { win32Error = 0; return AssignSucceeds; }
         public bool TryResumeThread(SafeHandle threadHandle, out int win32Error) { win32Error = 0; return ResumeSucceeds; }
-        public bool TryTerminate(SafeProcessHandle processHandle, out int win32Error) { win32Error = TerminateSucceeds ? 0 : 5; return TerminateSucceeds; }
+        internal int TerminateCallCount { get; private set; }
+
+        public bool TryTerminate(SafeProcessHandle processHandle, out int win32Error) { TerminateCallCount++; win32Error = TerminateSucceeds ? 0 : 5; return TerminateSucceeds; }
         public bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout)
         {
             OnWaitForExitCalled?.Invoke();
@@ -1856,5 +1864,217 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         var snap = coordinator.GetSnapshot();
         Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
         Assert.Equal(startCallCountAfterArm, h.HelperApi.StartCallCount);
+    }
+
+    // ============================================================
+    // Review 4957507443, finding #1 (BLOCKER): losing the Armed invariant must actually disarm
+    // the exact owned helper, not merely relabel the state.
+    // ============================================================
+
+    [Fact]
+    public async Task Reconcile_ExistingArmedHelperInvalid_HelperActuallyDisarmed_NotOnlyStateChanged()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.True(h.HelperOwnership.IsOwned);
+
+        // The retained handle no longer confirms Alive -- EvaluateArmedHelperValidity classifies
+        // this as invalid. The regression: only State moved to FaultedNative while the operational
+        // helper (the actual suppression mechanism) stayed alive/owned.
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+
+        await coordinator.ReconcileAsync("test");
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.False(h.HelperOwnership.IsOwned);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task PollTick_SameNameEnumerationUncertainWhileArmed_HelperActuallyDisarmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.True(h.HelperOwnership.IsOwned);
+
+        // An uncertain enumeration is exactly the "certainty lost" case -- the regression left this
+        // as a diagnostic-only transition to FaultedNative with the operational helper still alive.
+        h.Snapshots.MainUiEnumerationUncertain = true;
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.False(h.HelperOwnership.IsOwned);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+    }
+
+    [Fact]
+    public async Task PollTick_SameNameEnumerationUncertainWhileArmed_CleanupUnconfirmed_OwnershipRetainedForRetry()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        h.HelperApi.WaitForExitSucceeds = false;
+        h.HelperApi.TerminateSucceeds = false; // Stop() cannot confirm termination
+        h.Snapshots.MainUiEnumerationUncertain = true;
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        // Not discarded, not name/PID rediscovery -- the exact handle stays retained for a later
+        // retry, matching PR1's retention contract.
+        Assert.True(h.HelperOwnership.IsOwned);
+        Assert.False(snap.NativeBehaviorGuaranteed);
+
+        // A later retry whose exact-handle wait finally succeeds resolves it via the normal
+        // reconcile-time disarm path -- proving this is not a dead end.
+        h.HelperApi.WaitForExitSucceeds = true;
+        h.HelperApi.TerminateSucceeds = true;
+        await coordinator.ReconcileAsync("retry");
+        Assert.False(h.HelperOwnership.IsOwned);
+    }
+
+    // ============================================================
+    // Review 4957507443, finding #2 (BLOCKER): the request-time suspend boundary must invalidate
+    // an arm already in flight, before Armed is ever committed.
+    // ============================================================
+
+    [Fact]
+    public async Task AttemptArm_SuspendRequestedWhileArmInFlight_HelperCleanedUp_ArmedNeverCommitted()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        // Simulates QuiesceForSuspendAsync bumping the lifecycle epoch (which it always does BEFORE
+        // ever waiting on the gate) at the exact moment the helper process has just been created,
+        // strictly after AttemptArm (which already holds the gate) started its work.
+        h.HelperApi.OnCreateSuspendedCalled = () => coordinator.TestOnly_BumpLifecycleEpoch();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.False(h.HelperOwnership.IsOwned); // newly-created helper was cleaned up, not left running
+        Assert.Equal(1, h.HelperApi.StartCallCount); // no second helper created from the stale operation
+    }
+
+    [Fact]
+    public async Task AttemptArm_SuspendRequestedWhileArmInFlight_CleanupUnconfirmed_OwnershipRetainedFaultedNative()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        h.HelperApi.OnCreateSuspendedCalled = () => coordinator.TestOnly_BumpLifecycleEpoch();
+        h.HelperApi.WaitForExitSucceeds = false;
+        h.HelperApi.TerminateSucceeds = false;
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.True(h.HelperOwnership.IsOwned); // retained -- unresolved cleanup is never discarded
+    }
+
+    // ============================================================
+    // Review 4957507443, finding #3 (MAJOR): DisposeAsync must drain the fire-and-forget debounce
+    // continuation before disposing the gate.
+    // ============================================================
+
+    [Fact]
+    public async Task DisposeAsync_DrainsPendingDebounceContinuation_CompletesCleanlyAfterRelease()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync(); // Visible
+
+        var hookEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator.TestOnly_BeforeDebounceGateAcquire = () =>
+        {
+            hookEntered.TrySetResult();
+            return release.Task;
+        };
+
+        // Delay is not held, so the debounce's own delay resolves immediately and the fire-and-
+        // forget continuation parks deterministically right before it tries to (re-)acquire the
+        // gate -- exactly the race window finding #3 describes.
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        await hookEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // DisposeAsync (via ShutdownAsync) can still acquire the gate here -- the continuation is
+        // parked in the hook, not holding it. The regression: _gate got disposed immediately after
+        // ShutdownAsync returned, before this parked continuation ever got its turn.
+        var disposeTask = coordinator.DisposeAsync().AsTask();
+
+        // Give DisposeAsync's own ShutdownAsync a chance to actually finish before releasing the
+        // parked continuation, so the continuation resumes strictly after shutdown completed.
+        await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromMilliseconds(200)));
+        release.SetResult();
+
+        // Must complete cleanly -- no unobserved ObjectDisposedException from the drained
+        // continuation touching a disposed semaphore.
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    // ============================================================
+    // Review 4957507443, finding #4 (MAJOR): DisposeAsync must not simply discard the exact
+    // retained helper handle when cleanup remains unresolved.
+    // ============================================================
+
+    [Fact]
+    public async Task DisposeAsync_HelperCleanupUnconfirmed_RetriesBoundedThenFinalizes_OwnershipRemainsRetained()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(h.HelperOwnership.IsOwned);
+
+        h.HelperApi.WaitForExitSucceeds = false;
+        h.HelperApi.TerminateSucceeds = false; // Stop() can never confirm termination
+
+        await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Never simply discarded: the exact retained handle is still the sole authority over the
+        // process, available to whatever caller-held reference can attempt resolution later.
+        Assert.True(h.HelperOwnership.IsOwned);
+        // ShutdownAsync's own attempt (1) plus DisposeAsync's bounded extra attempts were all made,
+        // not zero extra attempts as before this fix.
+        Assert.True(h.HelperApi.TerminateCallCount > 1);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_HelperCleanupConfirmedOnRetry_OwnershipCleared()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(h.HelperOwnership.IsOwned);
+
+        // ShutdownAsync's own Stop() attempt can invoke WaitForExit up to twice (graceful wait, then
+        // a Job-close fallback wait) and still fail both times here; a later bounded retry inside
+        // DisposeAsync succeeds.
+        var attemptsBeforeSuccess = 3;
+        h.HelperApi.WaitForExitSucceeds = false;
+        h.HelperApi.OnWaitForExitCalled = () =>
+        {
+            if (--attemptsBeforeSuccess <= 0) h.HelperApi.WaitForExitSucceeds = true;
+        };
+
+        await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(h.HelperOwnership.IsOwned);
     }
 }
