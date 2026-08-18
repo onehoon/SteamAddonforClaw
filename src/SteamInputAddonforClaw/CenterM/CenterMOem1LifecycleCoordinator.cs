@@ -702,6 +702,11 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             return;
         }
 
+        // Capture the reconciliation epoch once. A suspend participant may time out while this
+        // gate-held reconciliation is in flight; its pending marker can then be cleared, but this
+        // epoch must still prevent stale Armed publication.
+        var reconciliationEpoch = Interlocked.Read(ref _lifecycleEpoch);
+
         if (_trackedMainUi is not null)
         {
             // Finding #4 (review 4957507443): an existing tracked real MainUI identity is
@@ -806,7 +811,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 // fresh-arm commit in AttemptArm -- a disable/suspend/shutdown request that wins
                 // _requestBoundarySync first must never be papered over by simply re-confirming the
                 // old Armed state.
-                if (!TryCommitArmedState())
+                if (!TryCommitArmedState(reconciliationEpoch))
                 {
                     var disarmedPending = DisarmOwnedHelperForFailOpen();
                     _lastReason = disarmedPending ? "HighPriorityRequestPendingDuringArmedConfirm:Disarmed" : "HighPriorityRequestPendingDuringArmedConfirm:DisarmCleanupUnconfirmed";
@@ -951,7 +956,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         if (TestOnly_BeforeHelperStartLinearization is { } beforeStartHook)
             await beforeStartHook().ConfigureAwait(false);
 
-        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart || !TryLinearizeOrdinaryMutationStart())
+        if (!TryLinearizeOrdinaryMutationStart(epochAtStart))
         {
             _lastReason = "SuspendRequestedDuringArmBeforeStart";
             SetState(CenterMOem1LifecycleState.NeedsSetup);
@@ -998,20 +1003,20 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         var invariant = CenterMHelperInvariant.Evaluate(fresh, _helperOwnership.ProcessId!.Value);
         if (invariant == CenterMHelperInvariantState.Valid)
         {
-            // Review 4958332345 (BLOCKER): the final linearization point, replacing the prior
-            // epoch-delta + IsHighPriorityRequestPending check-then-act read. TryCommitArmedState()
+            // Review 4958332345/4958548607 (BLOCKER): the final linearization point, replacing the prior
+            // epoch-delta + IsHighPriorityRequestPending check-then-act read. TryCommitArmedState(epoch)
             // performs the "no high-priority request holds the boundary" check and the Armed
             // publication itself under the SAME _requestBoundarySync lock, so a disable/suspend/
             // shutdown request can never win the boundary in the gap between the check and
             // SetState(Armed) -- there is no such gap anymore. State publication is cheap (no I/O,
             // no native calls), so doing it inside the lock is safe; only the (possibly slow) cleanup
-            // below runs outside it. As with the pre-Start check, the epoch check is intentionally
-            // dropped: AttemptArm holds _gate throughout, so any request that bumped the epoch must
-            // still be waiting on _gate (and therefore still counted by _requestBoundarySync) here.
+            // below runs outside it. The epoch is checked inside the same lock because a timed-out
+            // suspend participant may already have cleared its pending marker while its epoch bump
+            // must still invalidate this in-flight arm.
             if (TestOnly_BeforeArmedCommitLinearization is { } beforeCommitHook)
                 await beforeCommitHook().ConfigureAwait(false);
 
-            if (!TryCommitArmedState())
+            if (!TryCommitArmedState(epochAtStart))
             {
                 var cleanedAtCommit = _helperOwnership.Stop(_helperStopTimeout);
                 _lastReason = cleanedAtCommit ? "SuspendRequestedDuringArmCommit" : "SuspendRequestedDuringArmCommitCleanupUnconfirmed";
@@ -1444,7 +1449,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 if (TestOnly_BeforeTerminationLinearization is { } beforeTerminationHook)
                     await beforeTerminationHook().ConfigureAwait(false);
 
-                if (!TryLinearizeOrdinaryMutationStart())
+                if (!TryLinearizeOrdinaryMutationStart(mine.Epoch))
                 {
                     _lastReason = "HighPriorityRequestWonTerminationBoundary";
                     AppLog.Warn("CenterM.Oem1", "A high-priority request won the request boundary immediately before destructive MainUI termination; termination refused, tracked real MainUI left intact.", null, ("ProcessId", tracked.ProcessId));
@@ -1567,9 +1572,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// already returned <see langword="true"/> is ordered strictly after an already-started
     /// operation. Only ever held for this single comparison -- never across an await or a native
     /// call.</summary>
-    private bool TryLinearizeOrdinaryMutationStart()
+    private bool TryLinearizeOrdinaryMutationStart(long expectedEpoch)
     {
-        lock (_requestBoundarySync) { return _pendingHighPriorityRequests == 0; }
+        lock (_requestBoundarySync)
+        {
+            return _pendingHighPriorityRequests == 0
+                && Interlocked.Read(ref _lifecycleEpoch) == expectedEpoch;
+        }
     }
 
     /// <summary>Review 4958332345 (BLOCKER): the shared linearization point for the final Armed
@@ -1581,11 +1590,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// Returns <see langword="false"/> without publishing Armed when a high-priority request already
     /// holds the boundary; the caller is then responsible for the (possibly slow) helper cleanup,
     /// which must run outside this lock.</summary>
-    private bool TryCommitArmedState()
+    private bool TryCommitArmedState(long expectedEpoch)
     {
         lock (_requestBoundarySync)
         {
-            if (_pendingHighPriorityRequests != 0) return false;
+            if (_pendingHighPriorityRequests != 0
+                || Interlocked.Read(ref _lifecycleEpoch) != expectedEpoch)
+                return false;
             _lastReason = "Armed";
             SetState(CenterMOem1LifecycleState.Armed);
             return true;
