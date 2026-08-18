@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Dormant helper for OEM1 native-launch suppression (see docs handoff). Never enabled by
+         default production startup in this PR: staged and started only by a future coordinator PR
+         once armed. No window, no tray icon, no pipe, no MSI/WMI/registry/network calls, no child
+         processes; it simply stays alive until externally terminated (owned Job Object or process
+         handle), matching the research PoC's dummy process design exactly. -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <AssemblyName>CenterMHelper</AssemblyName>
+    <RootNamespace>SteamInputAddonforClaw.CenterMHelper</RootNamespace>
+    <Version>0.1.0</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseWindowsForms>false</UseWindowsForms>
+    <!-- The staged/renamed artifact ("MSI Center M.exe") must be a genuinely standalone,
+         self-contained executable with no dependency on a managed payload/runtimeconfig sitting
+         next to it: PublishSingleFile bundles the runtime and app into the one produced EXE, so
+         copying just that EXE to the runtime staging directory is actually sufficient. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+</Project>
