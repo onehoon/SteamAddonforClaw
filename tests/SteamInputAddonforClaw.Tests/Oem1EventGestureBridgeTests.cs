@@ -307,6 +307,46 @@ public sealed class Oem1EventGestureBridgeTests
     }
 
     [Fact]
+    public async Task Contested_timeout_and_event_ordering_completes_without_lock_inversion()
+    {
+        var eventOperationEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseEventOperation = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var armEventBarrier = false;
+        using var fixture = Create(
+            doubleEnabled: true,
+            recognizerOperationEntered: () =>
+            {
+                if (armEventBarrier)
+                {
+                    eventOperationEntered.TrySetResult(null);
+                    releaseEventOperation.Task.GetAwaiter().GetResult();
+                }
+            });
+        fixture.Bridge.SetCustomAuthority(true);
+        fixture.Source.Emit(Oem1());
+        fixture.Clock.Advance(TimeSpan.FromMilliseconds(251));
+        armEventBarrier = true;
+
+        var policyEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Bridge.PolicyRequested += _ =>
+        {
+            policyEntered.TrySetResult(null);
+            fixture.Bridge.SetCustomAuthority(false);
+        };
+
+        var eventTask = Task.Run(() => fixture.Source.Emit(Oem1()));
+        await eventOperationEntered.Task;
+        var timeout = fixture.Delay.CompleteLastAsync();
+        await policyEntered.Task;
+        releaseEventOperation.TrySetResult(null);
+        await Task.WhenAll(timeout, eventTask);
+
+        var resultCount = fixture.Results.Count;
+        fixture.Source.Emit(Oem1());
+        Assert.Equal(resultCount, fixture.Results.Count);
+    }
+
+    [Fact]
     public void Bridge_does_not_query_or_depend_on_lifecycle_coordinator()
     {
         using var fixture = Create();
@@ -319,20 +359,22 @@ public sealed class Oem1EventGestureBridgeTests
     private static MsiOemEvent Oem2() => new(88, CenterMOemCode.Oem2);
     private static MsiOemEvent Other() => new(99, CenterMOemCode.Other);
 
-    private static Fixture Create(bool doubleEnabled = false)
+    private static Fixture Create(bool doubleEnabled = false, Action? recognizerOperationEntered = null)
     {
         var source = new FakeMsiEventSource();
         var delay = new ControlledDelay();
-        var recognizer = new Oem1GestureRecognizer(doubleEnabled, TimeSpan.FromMilliseconds(250), delay);
-        var bridge = new Oem1EventGestureBridge(source, recognizer);
+        var clock = new ControlledClock();
+        var recognizer = new Oem1GestureRecognizer(doubleEnabled, TimeSpan.FromMilliseconds(250), delay, clock);
+        var bridge = new Oem1EventGestureBridge(source, recognizer, recognizerOperationEntered);
         var results = new List<Oem1GesturePolicyRequest>();
         bridge.PolicyRequested += results.Add;
-        return new Fixture(source, delay, bridge, results);
+        return new Fixture(source, delay, clock, bridge, results);
     }
 
     private sealed record Fixture(
         FakeMsiEventSource Source,
         ControlledDelay Delay,
+        ControlledClock Clock,
         Oem1EventGestureBridge Bridge,
         List<Oem1GesturePolicyRequest> Results) : IDisposable
     {
@@ -340,6 +382,7 @@ public sealed class Oem1EventGestureBridgeTests
         {
             Bridge.Dispose();
         }
+
     }
 
     private sealed class FakeMsiEventSource : IMsiEventSource
@@ -369,6 +412,16 @@ public sealed class Oem1EventGestureBridgeTests
         }
 
         internal Task CompleteLastAsync() => Pending.Last().CompleteAsync();
+    }
+
+    private sealed class ControlledClock : IOem1GestureClock
+    {
+        private long _timestamp;
+
+        public long GetTimestamp() => _timestamp;
+        public TimeSpan GetElapsedTime(long startTimestamp, long endTimestamp) =>
+            TimeSpan.FromTicks(endTimestamp - startTimestamp);
+        internal void Advance(TimeSpan elapsed) => _timestamp += elapsed.Ticks;
     }
 
     private sealed class PendingDelay(CancellationToken cancellationToken)

@@ -59,6 +59,9 @@ internal sealed class Oem1TaskDelay : IOem1GestureDelay
 /// <summary>Recognizes semantic OEM1 presses without owning event acquisition or actions.</summary>
 internal sealed class Oem1GestureRecognizer : IDisposable
 {
+    [ThreadStatic]
+    private static int _deliveryDepth;
+
     private readonly object _gate = new();
     private readonly object _deliveryGate = new();
     private readonly bool _doubleClickEnabled;
@@ -69,6 +72,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private IOem1GestureCancellationSource? _pendingCancellation;
     private long _generation;
     private long _deliveryEpoch;
+    private int _activeDeliveries;
     private bool _firstPressPending;
     private long _firstPressTimestamp;
     private bool _disposed;
@@ -163,11 +167,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             CancelPendingCore();
         }
 
-        lock (_deliveryGate)
-        {
-            // Establish a synchronous boundary with any delivery that already passed
-            // its generation check.
-        }
+        WaitForDeliveriesToDrain();
     }
 
     public void Dispose()
@@ -184,11 +184,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             CancelPendingCore();
         }
 
-        lock (_deliveryGate)
-        {
-            // Establish a synchronous boundary with any delivery that already passed
-            // its generation check.
-        }
+        WaitForDeliveriesToDrain();
     }
 
     private async Task CompleteSingleAfterTimeoutAsync(long generation, CancellationToken cancellationToken)
@@ -226,9 +222,36 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             {
                 if (_disposed || deliveryEpoch != _deliveryEpoch)
                     return;
-            }
 
+                _activeDeliveries++;
+            }
+        }
+
+        _deliveryDepth++;
+        try
+        {
             GestureRecognized?.Invoke(gesture);
+        }
+        finally
+        {
+            _deliveryDepth--;
+            lock (_deliveryGate)
+            {
+                _activeDeliveries--;
+                Monitor.PulseAll(_deliveryGate);
+            }
+        }
+    }
+
+    private void WaitForDeliveriesToDrain()
+    {
+        if (_deliveryDepth != 0)
+            return;
+
+        lock (_deliveryGate)
+        {
+            while (_activeDeliveries != 0)
+                Monitor.Wait(_deliveryGate);
         }
     }
 

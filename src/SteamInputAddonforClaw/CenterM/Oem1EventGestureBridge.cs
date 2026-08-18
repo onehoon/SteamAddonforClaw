@@ -10,18 +10,28 @@ internal readonly record struct Oem1GesturePolicyRequest(Oem1Gesture Gesture);
 /// </summary>
 internal sealed class Oem1EventGestureBridge : IDisposable
 {
+    [ThreadStatic]
+    private static int _policyDeliveryDepth;
+
     private readonly object _gate = new();
     private readonly object _recognizerOperationGate = new();
+    private readonly object _policyDeliveryGate = new();
     private readonly IMsiEventSource _eventSource;
     private readonly Oem1GestureRecognizer _recognizer;
+    private readonly Action? _recognizerOperationEntered;
     private bool _customAuthority;
     private bool _disposed;
     private long _authorityEpoch;
+    private int _activePolicyDeliveries;
 
-    internal Oem1EventGestureBridge(IMsiEventSource eventSource, Oem1GestureRecognizer recognizer)
+    internal Oem1EventGestureBridge(
+        IMsiEventSource eventSource,
+        Oem1GestureRecognizer recognizer,
+        Action? recognizerOperationEntered = null)
     {
         _eventSource = eventSource ?? throw new ArgumentNullException(nameof(eventSource));
         _recognizer = recognizer ?? throw new ArgumentNullException(nameof(recognizer));
+        _recognizerOperationEntered = recognizerOperationEntered;
         _eventSource.EventReceived += OnMsiEvent;
         _recognizer.GestureRecognized += OnGestureRecognized;
     }
@@ -30,40 +40,45 @@ internal sealed class Oem1EventGestureBridge : IDisposable
 
     internal void SetCustomAuthority(bool active)
     {
-        var resetRecognizer = false;
-        lock (_gate)
+        lock (_recognizerOperationGate)
         {
-            if (_disposed || _customAuthority == active)
-                return;
+            var resetRecognizer = false;
+            lock (_gate)
+            {
+                if (_disposed || _customAuthority == active)
+                    return;
 
-            _customAuthority = active;
-            _authorityEpoch++;
-            resetRecognizer = !active;
-        }
+                _customAuthority = active;
+                _authorityEpoch++;
+                resetRecognizer = !active;
+            }
 
-        if (resetRecognizer)
-        {
-            lock (_recognizerOperationGate)
+            if (resetRecognizer)
                 _recognizer.Reset();
+
+            WaitForPolicyDeliveryToDrain();
         }
     }
 
     public void Dispose()
     {
-        lock (_gate)
-        {
-            if (_disposed)
-                return;
-
-            _disposed = true;
-            _customAuthority = false;
-            _authorityEpoch++;
-            _eventSource.EventReceived -= OnMsiEvent;
-            _recognizer.GestureRecognized -= OnGestureRecognized;
-        }
-
         lock (_recognizerOperationGate)
+        {
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+
+                _disposed = true;
+                _customAuthority = false;
+                _authorityEpoch++;
+                _eventSource.EventReceived -= OnMsiEvent;
+                _recognizer.GestureRecognized -= OnGestureRecognized;
+            }
+
             _recognizer.Reset();
+            WaitForPolicyDeliveryToDrain();
+        }
     }
 
     private void OnMsiEvent(MsiOemEvent msiEvent)
@@ -82,6 +97,7 @@ internal sealed class Oem1EventGestureBridge : IDisposable
 
         lock (_recognizerOperationGate)
         {
+            _recognizerOperationEntered?.Invoke();
             lock (_gate)
             {
                 if (_disposed || !_customAuthority || authorityEpoch != _authorityEpoch)
@@ -96,19 +112,47 @@ internal sealed class Oem1EventGestureBridge : IDisposable
 
     private void OnGestureRecognized(Oem1Gesture gesture)
     {
-        lock (_gate)
+        lock (_policyDeliveryGate)
         {
-            if (_disposed || !_customAuthority)
-                return;
+            lock (_gate)
+            {
+                if (_disposed || !_customAuthority)
+                    return;
 
-            try
-            {
-                PolicyRequested?.Invoke(new Oem1GesturePolicyRequest(gesture));
+                _activePolicyDeliveries++;
             }
-            catch (Exception exception)
+
+            _policyDeliveryDepth++;
+        }
+
+        try
+        {
+            PolicyRequested?.Invoke(new Oem1GesturePolicyRequest(gesture));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("CenterM.Oem1", "OEM1 gesture policy subscriber failed; observation continues.", exception);
+        }
+        finally
+        {
+            _policyDeliveryDepth--;
+            lock (_policyDeliveryGate)
             {
-                AppLog.Warn("CenterM.Oem1", "OEM1 gesture policy subscriber failed; observation continues.", exception);
+                _activePolicyDeliveries--;
+                Monitor.PulseAll(_policyDeliveryGate);
             }
+        }
+    }
+
+    private void WaitForPolicyDeliveryToDrain()
+    {
+        if (_policyDeliveryDepth != 0)
+            return;
+
+        lock (_policyDeliveryGate)
+        {
+            while (_activePolicyDeliveries != 0)
+                Monitor.Wait(_policyDeliveryGate);
         }
     }
 }
