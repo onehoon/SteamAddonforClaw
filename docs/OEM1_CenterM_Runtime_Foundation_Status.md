@@ -91,7 +91,36 @@ No actual action is executed, Quick Access remains deferred to PR3+, and no
 hardware validation is claimed. Production OEM1/OEM2 behavior remains
 unchanged.
 
-## PR3+ (not started) — Steam Quick Access / settings / UI
+## PR3-A — Steam Deck Quick Access output overlay (this PR)
+
+Adds a managed, output-only Quick Access synthetic-button primitive
+(`SteamDeckSystemButtonOverlay`), merged into the existing Steam Deck publish
+path, with a `CanonicalSteamDeckOutputStage.RequestQuickAccessPulse()`
+forwarding seam for a future PR. It remains unwired to OEM1, gesture policy,
+UI, IPC, or settings.
+
+## PR3-B — Selectable OEM1 Quick Access action policy (this PR)
+
+Adds a minimal semantic action-policy seam connecting the PR2-B2 gesture
+bridge output to the PR3-A Quick Access primitive: `Oem1Action` (`None`,
+`SteamQuickAccess`), `Oem1ActionBindings` (Single/Double gesture-to-action
+selection, default Single -> `SteamQuickAccess`, Double -> `None`), and
+`Oem1ActionDispatcher`, which resolves the bound action for a gesture and,
+for `SteamQuickAccess`, calls `RequestQuickAccessPulse()` only when
+`RoutingRuntimeStatusSnapshot.SteamOutputActive` is true at dispatch time. If
+the bound action is `SteamQuickAccess` but Steam output is not active, this is
+a clean no-op — no fallback launches Center M, starts Steam, or activates
+routing. Routing state alone never redefines OEM1's action; the binding is
+always consulted first, so a different binding (e.g. Double ->
+`SteamQuickAccess`) works without changing the dispatcher.
+
+The dispatcher is not composed into production startup. `Oem1EventGestureBridge`,
+`CenterMOem1LifecycleCoordinator`, and `WmiMsiEventSource` remain dormant, and
+there is still no settings, persistence, IPC, or UI to change the bindings.
+No hardware validation is claimed by this PR.
+
+## PR3+ (not started) — settings / UI / production composition
 
 Controller settings "Center M Button" action selector, status presentation,
-named-pipe settings transport/persistence, localization.
+named-pipe settings transport/persistence, localization, production
+composition wiring OEM1 suppression on real user machines.

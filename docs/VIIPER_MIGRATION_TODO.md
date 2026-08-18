@@ -89,10 +89,18 @@ Status: **PLANNED**
 Map the validated OEM1 control to the Steam Deck Quick Access field after the
 basic lifecycle gate is complete. A managed, output-only Quick Access
 synthetic-button primitive (`SteamDeckSystemButtonOverlay`, merged into the
-existing Steam Deck publish path in `CanonicalSteamDeckInputPublisher`) now
-exists, with a narrow `CanonicalSteamDeckOutputStage.RequestQuickAccessPulse()`
-forwarding seam for a future PR. It remains unwired to OEM1, gesture policy,
-UI, IPC, or settings, and this does not advance SD5 completion.
+existing Steam Deck publish path in `CanonicalSteamDeckInputPublisher`) exists,
+with `CanonicalSteamDeckOutputStage.RequestQuickAccessPulse()` as its forwarding
+seam. A selectable OEM1 action-policy layer (`Oem1Action`, `Oem1ActionBindings`,
+`Oem1ActionDispatcher`) now resolves an OEM1 gesture to an action and, for
+`SteamQuickAccess`, calls that seam only when
+`RoutingRuntimeStatusSnapshot.SteamOutputActive` is true — routing state alone
+does not redefine OEM1 as Quick Access. Default bindings are Single ->
+`SteamQuickAccess`, Double -> `None`. This dispatcher is not yet composed into
+production startup: `Oem1EventGestureBridge`, `CenterMOem1LifecycleCoordinator`,
+and `WmiMsiEventSource` remain dormant, and there is still no settings,
+persistence, or UI to change the bindings. This does not advance SD5
+completion, and no hardware validation is claimed.
 
 ### SD6 — gyro and accelerometer
 
