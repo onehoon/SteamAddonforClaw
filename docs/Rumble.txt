@@ -5,13 +5,17 @@ superseded by the current three-PR plan wherever they differ.
 
 PR1 establishes the manufacturer-independent TwoMotorRumble contract, the
 feedback authority, the Steam Deck 0xEB source decoder, and explicit callback
-registration/clear capability. It does not register the callback in the live
-production route and does not write physical HID output.
+registration/clear capability. PR2 adds the MSI physical backend and retained
+PID1902 rumble transport. Neither PR1 nor PR2 registers the callback in the
+live production route.
 
 Generic rumble remains two independent 16-bit channels: LargeMotor and
 SmallMotor. Source decoding and physical sinks remain separate, with one
-feedback authority controlling accepted generations. Physical MSI rumble is a
-later PR2/PR3 concern; no hardware validation is claimed here.
+feedback authority controlling accepted generations. PR2 represents the MSI
+command as an 11-byte semantic packet, then zero-pads it to a serialized
+64-byte HID write behind the optional physical sink capability. Production
+Deck-to-MSI wiring remains a PR3 concern. No hardware validation is claimed
+unless separately recorded for a specific model.
 
 Steam Haptic 0xEA, Haptic Pulse 0x8F, audio/jingle commands, and unknown output
 commands remain unsupported in Rumble v1. Gyro/IMU remain separate. The

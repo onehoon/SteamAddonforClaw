@@ -22,6 +22,7 @@ public sealed class MsiClawRoutingCompositionTests
         Assert.Same(composition.NativeModeSession, handheld.SafetySession);
         Assert.Same(composition.PhysicalInputSource, handheld.ControllerStateSource);
         Assert.Same(composition.NativeModeSession, Assert.Single(handheld.SessionBoundaryParticipants));
+        Assert.Same(composition.PhysicalRumbleSink, handheld.PhysicalRumbleSink);
     }
 
     [Fact]
