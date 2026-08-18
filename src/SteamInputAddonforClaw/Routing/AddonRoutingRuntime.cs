@@ -154,22 +154,18 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     /// runtime (and stop any other orchestration referencing it) afterward; this method does not
     /// release backend resources.
     /// </summary>
-    internal async Task ShutdownAsync()
+    internal async Task<bool> ShutdownAsync()
     {
         try
         {
             var shutdown = await _coordinator.ShutdownAsync().ConfigureAwait(false);
-            if (!shutdown.Succeeded && _safetySession is not null)
-                await _safetySession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).ConfigureAwait(false);
+            if (!shutdown.Succeeded) return false;
+            return true;
         }
         catch (Exception exception)
         {
-            AppLog.Error("Routing.Runtime", "Routing pipeline shutdown failed; attempting NativeMode fail-close.", exception);
-            if (_safetySession is not null)
-            {
-                try { await _safetySession.FailClosedAsync("ApplicationShutdownRoutingRollbackFailed", CancellationToken.None).ConfigureAwait(false); }
-                catch (Exception failClosedException) { AppLog.Error("NativeMode", "NativeMode shutdown fail-close failed.", failClosedException); }
-            }
+            AppLog.Error("Routing.Runtime", "Routing pipeline shutdown failed; preserving the canonical rollback barrier.", exception);
+            return false;
         }
     }
 

@@ -72,6 +72,8 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         _sessionFactory = sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory)); _enumerator = enumerator; _resolver = resolver; _tracker = tracker; _recovery = recovery; _sessionId = sessionId; _hidHide = hidHide;
         _pnPTimeout = pnPTimeout ?? TimeSpan.FromSeconds(5); _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(50);
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot)); _reportTicks = reportTicks;
+        if (physicalRumbleSink is not null && feedbackAuthority is null)
+            throw new ArgumentException("A physical rumble sink requires a feedback authority.", nameof(feedbackAuthority));
         _feedbackAuthority = feedbackAuthority; _physicalRumbleSink = physicalRumbleSink;
     }
 
@@ -79,6 +81,10 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     public string Name => "SteamDeckOutput";
 
     internal void SetOutputFaultHandler(Func<ValueTask> handler) => _outputFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+    internal Action? FeedbackBeforeLease
+    {
+        set { if (_feedbackBridge is not null) _feedbackBridge.BeforeLease = value; }
+    }
 
     private void ReportOutputFault(Exception exception)
     {
@@ -199,6 +205,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                     return await FailAndRollbackCoreAsync("SteamDeckFeedbackCallbackRegistrationFailed", timing).ConfigureAwait(false);
                 }
                 _feedbackCallbackRegistered = true;
+                AppLog.Debug("Rumble", "Steam Deck feedback callback registered.", ("Source", "SteamDeck"));
                 _feedbackRevoked = false;
             }
             Interlocked.Exchange(ref _outputFaultReported, 0);

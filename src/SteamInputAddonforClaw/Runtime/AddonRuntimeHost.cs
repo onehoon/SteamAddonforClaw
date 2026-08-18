@@ -185,9 +185,10 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         PrepareForShutdown();
         _powerWatcher.Dispose();
-        if (_routingRuntime is not null) await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
+        var routingShutdownSucceeded = _routingRuntime is null || await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
         await _powerCoordinator.DisposeAsync().ConfigureAwait(false);
-        if (_routingRuntime is not null) await _routingRuntime.DisposeAsync().ConfigureAwait(false);
+        if (routingShutdownSucceeded && _routingRuntime is not null)
+            await _routingRuntime.DisposeAsync().ConfigureAwait(false);
     }
 }
 

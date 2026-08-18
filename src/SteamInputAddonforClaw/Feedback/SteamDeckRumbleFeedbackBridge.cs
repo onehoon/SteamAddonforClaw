@@ -40,7 +40,8 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
         catch (Exception exception)
         {
-            AppLog.Debug("Rumble", "Steam Deck feedback callback was contained.", ("Reason", exception.GetType().Name));
+            try { AppLog.Debug("Rumble", "Steam Deck feedback callback was contained.", ("Reason", exception.GetType().Name)); }
+            catch { /* Never allow diagnostics to cross the unmanaged callback boundary. */ }
         }
     }
 }
