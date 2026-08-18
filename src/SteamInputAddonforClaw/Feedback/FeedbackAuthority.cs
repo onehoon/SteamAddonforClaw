@@ -8,12 +8,20 @@ internal sealed class FeedbackAuthority
     private long _generation;
     private string? _source;
     private int _activeLeases;
+    private bool _revocationInProgress;
+
+    internal bool IsRevocationInProgress
+    {
+        get { lock (_gate) return _revocationInProgress; }
+    }
 
     internal FeedbackAuthorityToken Acquire(string source)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
         lock (_gate)
         {
+            while (_revocationInProgress)
+                Monitor.Wait(_gate);
             _generation++;
             _source = source;
             return new FeedbackAuthorityToken(_generation, source);
@@ -44,18 +52,28 @@ internal sealed class FeedbackAuthority
 
     internal void Revoke()
     {
-        RevokeAndDrain();
+        lock (_gate)
+            BeginRevocationLocked();
     }
 
     internal void RevokeAndDrain()
     {
         lock (_gate)
         {
-            _generation++;
-            _source = null;
+            BeginRevocationLocked();
             while (_activeLeases != 0)
                 Monitor.Wait(_gate);
+            _revocationInProgress = false;
+            Monitor.PulseAll(_gate);
         }
+    }
+
+    private void BeginRevocationLocked()
+    {
+        if (_revocationInProgress) return;
+        _revocationInProgress = true;
+        _generation++;
+        _source = null;
     }
 
     private void ReleaseLease()

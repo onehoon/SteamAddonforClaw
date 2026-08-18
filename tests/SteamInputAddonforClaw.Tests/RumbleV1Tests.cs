@@ -58,7 +58,7 @@ public sealed class RumbleV1Tests
         var first = authority.Acquire("SteamDeck");
         Assert.True(authority.IsCurrent(first));
         Assert.False(authority.IsCurrent(new FeedbackAuthorityToken(first.Generation, "Xbox360")));
-        authority.Revoke();
+        authority.RevokeAndDrain();
         Assert.False(authority.IsCurrent(first));
         var second = authority.Acquire("SteamDeck");
         Assert.True(second.Generation > first.Generation);
@@ -73,7 +73,7 @@ public sealed class RumbleV1Tests
         var token = authority.Acquire("SteamDeck");
         var tasks = Enumerable.Range(0, 16).Select(_ => Task.Run(() =>
         {
-            authority.Revoke();
+            authority.RevokeAndDrain();
             authority.Acquire("SteamDeck");
             return authority.IsCurrent(token);
         }));
@@ -94,5 +94,27 @@ public sealed class RumbleV1Tests
         admitted.Dispose();
         await revoked;
         Assert.False(authority.TryAcquireLease(token, out _));
+    }
+
+    [Fact]
+    public async Task Authority_DoesNotAllowAcquireToRepopulateAnActiveRevokeBoundary()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        Assert.True(authority.TryAcquireLease(token, out var lease));
+        using var admitted = lease!;
+
+        var revoke = Task.Run(() => authority.RevokeAndDrain());
+        while (!authority.IsRevocationInProgress) await Task.Yield();
+
+        var reacquire = Task.Run(() => authority.Acquire("SteamDeck"));
+        await Task.Delay(20);
+        Assert.False(reacquire.IsCompleted);
+        admitted.Dispose();
+        await revoke;
+        var newToken = await reacquire;
+        Assert.True(newToken.Generation > token.Generation);
+        Assert.True(authority.TryAcquireLease(newToken, out var newLease));
+        newLease!.Dispose();
     }
 }
