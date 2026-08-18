@@ -113,7 +113,12 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         ReportRuntimeFault(MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason);
     }
 
-    private void ReportRuntimeFault(string reason)
+    /// <summary>
+    /// Internal (rather than private) so the dispatch/exception-containment behavior can be
+    /// exercised directly in tests without needing committed physical-input ownership, which
+    /// requires real DirectInput hardware.
+    /// </summary>
+    internal void ReportRuntimeFault(string reason)
     {
         if (_runtimeFaultHandler is not { } handler)
             return;

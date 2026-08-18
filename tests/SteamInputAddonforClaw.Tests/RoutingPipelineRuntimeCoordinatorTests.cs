@@ -227,6 +227,32 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task FailClosedCancelsAnInFlightEnterBeforeForwardCompletion()
+    {
+        // FailClosedAsync() must preempt an in-flight routing Enter rather than sitting behind
+        // _transitionGate while that Enter is still free to keep mutating forward -- otherwise a
+        // caller reporting a fault that already invalidates the active session (e.g. the owned
+        // MSI physical-input session dying mid-Enter) could still race a later stage (e.g. Steam
+        // output attach) into completing before rollback ever starts.
+        var executor = new FakeExecutor { BlockNextExecute = true };
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        var entering = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var failClosing = bridge.Bridge.FailClosedAsync().AsTask();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => entering);
+        await executor.ExecuteCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var result = await failClosing;
+        Assert.True(result.Succeeded);
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Equal(RoutingOperationalState.Passive, bridge.Bridge.CurrentOperationalState);
+    }
+
+    [Fact]
     public async Task PublisherFaultInvokesTheActualRuntimeFailClosedPath()
     {
         var executor = new FakeExecutor();

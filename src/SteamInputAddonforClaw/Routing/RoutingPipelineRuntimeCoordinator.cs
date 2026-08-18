@@ -123,6 +123,13 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedAsync()
     {
+        // Fail-close must stop any in-flight forward transition before waiting for the gate --
+        // otherwise a caller reporting a fault that already invalidates the active session (e.g.
+        // an owned physical-input session that just died) would sit behind a routing Enter that is
+        // still free to keep mutating forward (attaching Steam output, etc.) after that authority
+        // was already lost. Cancelling here routes that in-flight Enter through its own normal
+        // executor-cancellation + rollback path instead. Mirrors ShutdownAsync's existing preempt.
+        CancelInFlightTransition();
         Interlocked.Increment(ref _transitionOperationCount);
         var acquired = false;
         try
