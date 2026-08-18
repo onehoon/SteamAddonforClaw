@@ -10,28 +10,26 @@ internal readonly record struct Oem1GesturePolicyRequest(Oem1Gesture Gesture);
 /// </summary>
 internal sealed class Oem1EventGestureBridge : IDisposable
 {
-    [ThreadStatic]
-    private static int _policyDeliveryDepth;
-
     private readonly object _gate = new();
     private readonly object _recognizerOperationGate = new();
-    private readonly object _policyDeliveryGate = new();
     private readonly IMsiEventSource _eventSource;
     private readonly Oem1GestureRecognizer _recognizer;
     private readonly Action? _recognizerOperationEntered;
+    private readonly Action? _authorityInvalidationEntered;
     private bool _customAuthority;
     private bool _disposed;
     private long _authorityEpoch;
-    private int _activePolicyDeliveries;
 
     internal Oem1EventGestureBridge(
         IMsiEventSource eventSource,
         Oem1GestureRecognizer recognizer,
-        Action? recognizerOperationEntered = null)
+        Action? recognizerOperationEntered = null,
+        Action? authorityInvalidationEntered = null)
     {
         _eventSource = eventSource ?? throw new ArgumentNullException(nameof(eventSource));
         _recognizer = recognizer ?? throw new ArgumentNullException(nameof(recognizer));
         _recognizerOperationEntered = recognizerOperationEntered;
+        _authorityInvalidationEntered = authorityInvalidationEntered;
         _eventSource.EventReceived += OnMsiEvent;
         _recognizer.GestureRecognized += OnGestureRecognized;
     }
@@ -54,9 +52,10 @@ internal sealed class Oem1EventGestureBridge : IDisposable
             }
 
             if (resetRecognizer)
-                _recognizer.Reset();
-
-            WaitForPolicyDeliveryToDrain();
+            {
+                _authorityInvalidationEntered?.Invoke();
+                _recognizer.InvalidatePending();
+            }
         }
     }
 
@@ -76,8 +75,7 @@ internal sealed class Oem1EventGestureBridge : IDisposable
                 _recognizer.GestureRecognized -= OnGestureRecognized;
             }
 
-            _recognizer.Reset();
-            WaitForPolicyDeliveryToDrain();
+            _recognizer.InvalidatePending();
         }
     }
 
@@ -112,17 +110,10 @@ internal sealed class Oem1EventGestureBridge : IDisposable
 
     private void OnGestureRecognized(Oem1Gesture gesture)
     {
-        lock (_policyDeliveryGate)
+        lock (_gate)
         {
-            lock (_gate)
-            {
-                if (_disposed || !_customAuthority)
-                    return;
-
-                _activePolicyDeliveries++;
-            }
-
-            _policyDeliveryDepth++;
+            if (_disposed || !_customAuthority)
+                return;
         }
 
         try
@@ -132,27 +123,6 @@ internal sealed class Oem1EventGestureBridge : IDisposable
         catch (Exception exception)
         {
             AppLog.Warn("CenterM.Oem1", "OEM1 gesture policy subscriber failed; observation continues.", exception);
-        }
-        finally
-        {
-            _policyDeliveryDepth--;
-            lock (_policyDeliveryGate)
-            {
-                _activePolicyDeliveries--;
-                Monitor.PulseAll(_policyDeliveryGate);
-            }
-        }
-    }
-
-    private void WaitForPolicyDeliveryToDrain()
-    {
-        if (_policyDeliveryDepth != 0)
-            return;
-
-        lock (_policyDeliveryGate)
-        {
-            while (_activePolicyDeliveries != 0)
-                Monitor.Wait(_policyDeliveryGate);
         }
     }
 }

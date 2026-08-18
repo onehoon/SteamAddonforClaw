@@ -156,6 +156,12 @@ internal sealed class Oem1GestureRecognizer : IDisposable
 
     internal void Reset()
     {
+        InvalidatePending();
+        WaitForDeliveriesToDrain();
+    }
+
+    internal void InvalidatePending()
+    {
         lock (_gate)
         {
             if (_disposed)
@@ -166,8 +172,6 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             _firstPressPending = false;
             CancelPendingCore();
         }
-
-        WaitForDeliveriesToDrain();
     }
 
     public void Dispose()

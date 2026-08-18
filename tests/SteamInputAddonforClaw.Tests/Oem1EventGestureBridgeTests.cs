@@ -347,6 +347,36 @@ public sealed class Oem1EventGestureBridgeTests
     }
 
     [Fact]
+    public async Task Revocation_invalidation_does_not_wait_for_reentrant_policy_delivery()
+    {
+        var policyEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var invalidationEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowPolicyReentry = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var fixture = Create(
+            doubleEnabled: true,
+            authorityInvalidationEntered: () => invalidationEntered.TrySetResult(null));
+
+        fixture.Bridge.PolicyRequested += _ =>
+        {
+            policyEntered.TrySetResult(null);
+            allowPolicyReentry.Task.GetAwaiter().GetResult();
+            fixture.Bridge.SetCustomAuthority(false);
+        };
+        fixture.Bridge.SetCustomAuthority(true);
+        fixture.Source.Emit(Oem1());
+
+        var timeoutTask = fixture.Delay.CompleteLastAsync();
+        await policyEntered.Task;
+
+        var revokeTask = Task.Run(() => fixture.Bridge.SetCustomAuthority(false));
+        await invalidationEntered.Task;
+        allowPolicyReentry.TrySetResult(null);
+
+        await Task.WhenAll(timeoutTask, revokeTask);
+        Assert.Empty(fixture.Results.Skip(1));
+    }
+
+    [Fact]
     public void Bridge_does_not_query_or_depend_on_lifecycle_coordinator()
     {
         using var fixture = Create();
@@ -359,13 +389,20 @@ public sealed class Oem1EventGestureBridgeTests
     private static MsiOemEvent Oem2() => new(88, CenterMOemCode.Oem2);
     private static MsiOemEvent Other() => new(99, CenterMOemCode.Other);
 
-    private static Fixture Create(bool doubleEnabled = false, Action? recognizerOperationEntered = null)
+    private static Fixture Create(
+        bool doubleEnabled = false,
+        Action? recognizerOperationEntered = null,
+        Action? authorityInvalidationEntered = null)
     {
         var source = new FakeMsiEventSource();
         var delay = new ControlledDelay();
         var clock = new ControlledClock();
         var recognizer = new Oem1GestureRecognizer(doubleEnabled, TimeSpan.FromMilliseconds(250), delay, clock);
-        var bridge = new Oem1EventGestureBridge(source, recognizer, recognizerOperationEntered);
+        var bridge = new Oem1EventGestureBridge(
+            source,
+            recognizer,
+            recognizerOperationEntered,
+            authorityInvalidationEntered);
         var results = new List<Oem1GesturePolicyRequest>();
         bridge.PolicyRequested += results.Add;
         return new Fixture(source, delay, clock, bridge, results);
