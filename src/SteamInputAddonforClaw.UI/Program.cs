@@ -12,7 +12,8 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        AddonLogRetention.PruneDefaultDirectory();
+        UiLog.ConfigureDirectory(args);
+        AddonLogRetention.PruneDirectory(UiLog.DirectoryPath);
         using var gate = UiSingleInstanceGate.CreateForCurrentUser();
         if (!gate.IsPrimaryInstance)
         {

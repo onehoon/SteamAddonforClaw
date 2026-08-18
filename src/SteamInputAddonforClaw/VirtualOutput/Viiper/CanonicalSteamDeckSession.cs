@@ -49,6 +49,8 @@ internal sealed class CanonicalSteamDeckSession : ICanonicalSteamDeckSession
     uint? ICanonicalSteamDeckSession.LogicalDeviceId => LogicalDeviceId;
     bool ICanonicalSteamDeckSession.Start() => Start();
     bool ICanonicalSteamDeckSession.SetNeutral() => SetNeutral();
+    bool ICanonicalSteamDeckSession.SetOutputCallback(SteamDeckOutputCallback callback) => SetOutputCallback(callback);
+    bool ICanonicalSteamDeckSession.ClearOutputCallback() => ClearOutputCallback();
     bool ICanonicalSteamDeckSession.RemoveDevice() => RemoveDevice();
     bool ICanonicalSteamDeckSession.RetryPendingCleanup() => RetryPendingCleanup();
     bool ICanonicalSteamDeckSession.CompleteRuntimeCleanup() => CompleteRuntimeCleanup();
@@ -123,6 +125,20 @@ internal sealed class CanonicalSteamDeckSession : ICanonicalSteamDeckSession
     }
 
     internal bool SetNeutral() => SetState(default);
+
+    internal bool SetOutputCallback(SteamDeckOutputCallback callback)
+    {
+        EnsureNotDisposed();
+        return State == CanonicalSteamDeckSessionState.Active && _deviceHandle != 0 && _logicalDeviceId is not null &&
+            _native.SetSteamDeckOutputCallback(_deviceHandle, callback);
+    }
+
+    internal bool ClearOutputCallback()
+    {
+        EnsureNotDisposed();
+        return State == CanonicalSteamDeckSessionState.Active && _deviceHandle != 0 && _logicalDeviceId is not null &&
+            _native.SetSteamDeckOutputCallback(_deviceHandle, null);
+    }
 
     internal bool RemoveDevice()
     {
@@ -301,6 +317,8 @@ internal interface ICanonicalSteamDeckSession : ICanonicalSteamDeckStateSink, ID
     uint? LogicalDeviceId { get; }
     bool Start();
     bool SetNeutral();
+    bool SetOutputCallback(SteamDeckOutputCallback callback);
+    bool ClearOutputCallback();
     bool RemoveDevice();
     bool RetryPendingCleanup();
     bool CompleteRuntimeCleanup();

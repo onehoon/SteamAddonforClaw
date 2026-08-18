@@ -1,0 +1,18 @@
+Rumble v1 planning status
+
+The former four-PR rumble sequence is historical planning context and is
+superseded by the current three-PR plan wherever they differ.
+
+PR1 establishes the manufacturer-independent TwoMotorRumble contract, the
+feedback authority, the Steam Deck 0xEB source decoder, and explicit callback
+registration/clear capability. It does not register the callback in the live
+production route and does not write physical HID output.
+
+Generic rumble remains two independent 16-bit channels: LargeMotor and
+SmallMotor. Source decoding and physical sinks remain separate, with one
+feedback authority controlling accepted generations. Physical MSI rumble is a
+later PR2/PR3 concern; no hardware validation is claimed here.
+
+Steam Haptic 0xEA, Haptic Pulse 0x8F, audio/jingle commands, and unknown output
+commands remain unsupported in Rumble v1. Gyro/IMU remain separate. The
+VIIPER native ABI, generated header, DLL, and pinned dependency are unchanged.

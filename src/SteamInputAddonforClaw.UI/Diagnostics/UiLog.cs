@@ -1,15 +1,22 @@
+using SteamInputAddonforClaw.FrontendTransport;
+
 namespace SteamInputAddonforClaw.UI.Diagnostics;
 
 internal static class UiLog
 {
     private static readonly object Sync = new();
-    private static readonly string Directory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SteamInputAddonforClaw",
-        "logs");
-    private static readonly string FilePath = Path.Combine(Directory, $"ui-{Environment.ProcessId}.log");
+    private static string _directory = FrontendLaunchArguments.ResolveLogDirectory([]);
 
-    internal static string DirectoryPath => Directory;
+    internal static string DirectoryPath => _directory;
+
+    internal static void ConfigureDirectory(string[] args) => ConfigureDirectory(FrontendLaunchArguments.ResolveLogDirectory(args));
+
+    private static void ConfigureDirectory(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Path.IsPathFullyQualified(directory))
+            throw new ArgumentException("The UI log directory must be an absolute path.", nameof(directory));
+        _directory = directory;
+    }
 
     internal static void Info(string message) => Write("INFO", "App", message, null, []);
 
@@ -30,8 +37,8 @@ internal static class UiLog
             var line = $"{DateTimeOffset.Now:O} [{level}] [{category}] {message}{(suffix.Length == 0 ? string.Empty : " " + suffix)}{(exception is null ? string.Empty : Environment.NewLine + exception)}{Environment.NewLine}";
             lock (Sync)
             {
-                System.IO.Directory.CreateDirectory(Directory);
-                File.AppendAllText(FilePath, line);
+                System.IO.Directory.CreateDirectory(DirectoryPath);
+                File.AppendAllText(Path.Combine(DirectoryPath, $"ui-{Environment.ProcessId}.log"), line);
             }
         }
         catch

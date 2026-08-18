@@ -37,13 +37,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _startupStarted;
     private IAddonFrontendControl? _frontendControl;
     private NamedPipeAddonFrontendServer? _frontendServer;
-    private readonly FrontendProcessLauncher _frontendLauncher = new(AppContext.BaseDirectory);
+    private readonly FrontendProcessLauncher _frontendLauncher;
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
 
     internal AddonProcessHost(string[]? updateRestartArguments)
     {
         _updateRestartArguments = updateRestartArguments;
+        _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
     }
 
     internal bool IsTrayAvailable => _systemTrayIcon?.IsAvailable == true;
