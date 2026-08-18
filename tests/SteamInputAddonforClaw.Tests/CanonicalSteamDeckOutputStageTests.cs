@@ -409,13 +409,14 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     {
         var session = new FakeCanonicalSession();
         var sink = new BlockingRumbleSink();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
+        var authority = new FeedbackAuthority();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink, authority: authority);
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         var callbackTask = Task.Run(() => Invoke(session.Callback!, RumbleReport(0x1234, 0x5678)));
         await sink.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var rollbackTask = stage.RollbackMutationAsync(CancellationToken.None).AsTask();
-        await Task.Yield();
+        await authority.RevocationStarted.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(0, session.ClearOutputCallbackCalls);
         Assert.Equal(0, session.RemoveCalls);
         sink.Release.TrySetResult();
@@ -721,14 +722,14 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
-    private CanonicalSteamDeckOutputStage Create(FakeCanonicalSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null, IPhysicalRumbleSink? sink = null)
+    private CanonicalSteamDeckOutputStage Create(FakeCanonicalSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null, IPhysicalRumbleSink? sink = null, FeedbackAuthority? authority = null)
     {
         Directory.CreateDirectory(_directory);
         var store = new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"));
         var recovery = new RecoveryManager(storeWriteFailsAfterSeed ? new FailingReplaceStore(store) : store);
         var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, _session, DateTimeOffset.UtcNow, null, new());
         File.WriteAllText(Path.Combine(_directory, "recovery.json"), System.Text.Json.JsonSerializer.Serialize(journal));
-        return new(() => session, enumerator, new(new SteamDeckVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks, new FeedbackAuthority(), sink);
+        return new(() => session, enumerator, new(new SteamDeckVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks, authority ?? new FeedbackAuthority(), sink);
     }
 
     private CanonicalSteamDeckOutputStage CreateFactoryFailure(IControllerDeviceEnumerator enumerator, FakeHidHide hid)

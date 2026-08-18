@@ -29,12 +29,12 @@ namespace SteamInputAddonforClaw.Routing;
 /// <see cref="IRoutingSafetySession"/> view is never disposed independently.
 ///
 /// <para>
-/// <see cref="ShutdownAsync"/> stops routing (with the existing fail-close fallback on failure)
+/// <see cref="ShutdownAsync"/> stops routing while preserving failed canonical rollback barriers;
+/// it does not bypass residual SteamOutput cleanup with a device-specific fail-close.
 /// and must be called, together with any other external orchestration referencing this runtime
 /// (e.g. the power coordinator), before <see cref="DisposeAsync"/>. <see cref="DisposeAsync"/>
-/// only releases the owned <see cref="IHandheldRoutingComposition"/>'s backend resources -- it
-/// does not perform routing shutdown itself and must not be treated as a full-shutdown
-/// orchestrator.
+/// only releases the owned <see cref="IHandheldRoutingComposition"/>'s backend resources. It must
+/// be called only after successful routing shutdown; failed canonical cleanup retains ownership.
 /// </para>
 /// </remarks>
 internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParticipant

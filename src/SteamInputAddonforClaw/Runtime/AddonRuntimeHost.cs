@@ -28,14 +28,14 @@ namespace SteamInputAddonforClaw.Runtime;
 /// Lifecycle: construct, subscribe to the two events, call <see cref="StartPowerObservation"/>
 /// once dependents (e.g. <c>MainWindow</c>) are ready to receive the events it may synchronously
 /// raise, then eventually call <see cref="PrepareForShutdown"/> (stops Steam observation; safe to
-/// call multiple times) followed by <see cref="DisposeAsync"/> (idempotent full runtime shutdown:
-/// stops power observation, shuts down routing, disposes the power coordinator, then disposes the
-/// routing backend -- in that order). The caller does not need to separately shut down routing or
-/// dispose power objects; <see cref="DisposeAsync"/> owns the complete remaining sequence.
+/// call multiple times) followed by <see cref="DisposeAsync"/> (idempotent runtime shutdown:
+/// stops power observation, attempts canonical routing shutdown, and disposes the routing backend
+/// only when that shutdown succeeds). Failed canonical rollback preserves residual ownership.
 /// </para>
 /// </remarks>
 internal sealed class AddonRuntimeHost : IAsyncDisposable
 {
+    internal static bool ShouldDisposeRoutingBackend(bool canonicalShutdownSucceeded) => canonicalShutdownSucceeded;
     private readonly SteamSessionRuntime _steamRuntime;
     private readonly AddonRoutingRuntime? _routingRuntime;
     private readonly ResumeFreshReconcileSuppression _resumeFreshReconcileSuppression = new();
@@ -187,7 +187,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         _powerWatcher.Dispose();
         var routingShutdownSucceeded = _routingRuntime is null || await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
         await _powerCoordinator.DisposeAsync().ConfigureAwait(false);
-        if (routingShutdownSucceeded && _routingRuntime is not null)
+        if (ShouldDisposeRoutingBackend(routingShutdownSucceeded) && _routingRuntime is not null)
             await _routingRuntime.DisposeAsync().ConfigureAwait(false);
     }
 }

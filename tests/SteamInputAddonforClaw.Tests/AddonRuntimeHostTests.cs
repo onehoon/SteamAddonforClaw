@@ -17,6 +17,14 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class AddonRuntimeHostTests
 {
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void Routing_backend_disposal_requires_successful_canonical_shutdown(bool shutdownSucceeded, bool expected)
+    {
+        Assert.Equal(expected, AddonRuntimeHost.ShouldDisposeRoutingBackend(shutdownSucceeded));
+    }
+
     [Fact]
     public async Task Host_with_unavailable_routing_remains_valid_and_passive()
     {
