@@ -16,10 +16,15 @@ internal enum HelperStartResult
     /// <summary>Construction failed (Job/limit/assign/resume) and the follow-up cleanup attempt
     /// (TerminateProcess and/or the bounded exit wait) could not confirm the helper actually
     /// exited. The only authoritative process handle is retained (<see cref="CenterMHelperOwnership.IsOwned"/>
-    /// is true) rather than discarded, so a later <see cref="CenterMHelperOwnership.Stop"/> can
-    /// still resolve it through the same retained handle -- never by process-name or PID
-    /// rediscovery. Callers must not treat this as equivalent to a clean native fallback: a
-    /// same-name process may still be alive and suppressing native Center M launch until resolved.</summary>
+    /// is true) rather than discarded, so a later <see cref="CenterMHelperOwnership.Stop"/> or
+    /// <see cref="CenterMHelperOwnership.Dispose"/> attempts real termination through that same
+    /// retained handle -- never by process-name or PID rediscovery. Neither call is guaranteed to
+    /// succeed on any given attempt: if termination still cannot be confirmed and no Job
+    /// (KILL_ON_JOB_CLOSE) fail-safe exists for this identity, ownership is deliberately left
+    /// retained rather than silently discarded, so a further retry remains possible. Callers must
+    /// not treat this result as equivalent to a clean native fallback: a same-name process may
+    /// still be alive and suppressing native Center M launch until resolution is actually
+    /// confirmed.</summary>
     PartialCleanupUnconfirmed
 }
 
@@ -126,18 +131,38 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     }
 
     /// <summary>Stops the owned helper via its retained handle (never by re-querying PID) and
-    /// releases ownership. Idempotent. Internally serialized against Start/Dispose.</summary>
+    /// releases ownership -- but only once termination is actually confirmed, or a Job
+    /// (KILL_ON_JOB_CLOSE) is present as a crash-safety net that itself guarantees the kill when
+    /// closed. If neither holds (a job-less retained handle -- e.g. a
+    /// <see cref="HelperStartResult.PartialCleanupUnconfirmed"/> identity from before Job
+    /// assignment -- whose termination attempt fails again), ownership is deliberately NOT
+    /// released: the handle is the only authority left, and discarding it would abandon a possibly
+    /// still-alive same-name process with no way to resolve it later except process-name/PID
+    /// rediscovery, which this class never does. Idempotent when it does resolve. Internally
+    /// serialized against Start/Dispose.</summary>
     internal bool Stop(TimeSpan waitTimeout)
     {
-        lock (_sync)
-        {
-            if (_processHandle is null) return true;
+        lock (_sync) return StopCore(waitTimeout);
+    }
 
-            var terminated = _api.TryTerminate(_processHandle, out _) && _api.WaitForExit(_processHandle, waitTimeout);
-            AppLog.Info("CenterM.Helper", "Helper stopped.", ("Terminated", terminated), ("ProcessId", ProcessId));
+    private bool StopCore(TimeSpan waitTimeout)
+    {
+        if (_processHandle is null) return true;
+
+        var terminated = _api.TryTerminate(_processHandle, out _) && _api.WaitForExit(_processHandle, waitTimeout);
+        AppLog.Info("CenterM.Helper", "Helper stop attempted.", ("Terminated", terminated), ("ProcessId", ProcessId), ("JobBacked", _jobHandle is not null));
+
+        if (terminated || _jobHandle is not null)
+        {
+            // Either confirmed exit directly, or a Job with KILL_ON_JOB_CLOSE is present -- closing
+            // it here is itself a guaranteed, effective kill even when the graceful
+            // TerminateProcess/wait above did not confirm exit in time.
             DisposeCore();
             return terminated;
         }
+
+        AppLog.Warn("CenterM.Helper", "Stop could not confirm helper termination and no Job fail-safe exists; ownership retained for retry.", null, ("ProcessId", ProcessId));
+        return false;
     }
 
     /// <summary>Attempts to terminate a still-suspended helper left over from a construction
@@ -163,9 +188,24 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
         return HelperStartResult.PartialCleanupUnconfirmed;
     }
 
+    /// <summary>
+    /// Releases owned resources. For a Job-backed helper (the normal successfully-armed case),
+    /// this alone is a safe, guaranteed kill: closing the Job triggers KILL_ON_JOB_CLOSE. For a
+    /// job-less retained handle (a <see cref="HelperStartResult.PartialCleanupUnconfirmed"/>
+    /// identity from before Job assignment), simply closing the process handle would NOT terminate
+    /// the process -- so this attempts a real termination through the retained handle first
+    /// (exact-handle, never process-name/PID rediscovery). If that attempt also cannot confirm
+    /// exit, ownership is intentionally left retained (<see cref="IsOwned"/> stays true) rather
+    /// than silently discarding the only authority over a process that may still be alive.
+    /// </summary>
     public void Dispose()
     {
-        lock (_sync) DisposeCore();
+        lock (_sync)
+        {
+            if (_processHandle is null) { DisposeCore(); return; }
+            if (!StopCore(TimeSpan.FromSeconds(5)))
+                AppLog.Warn("CenterM.Helper", "Dispose could not confirm termination for a job-less retained handle; ownership intentionally left retained rather than silently discarded.", null, ("ProcessId", ProcessId));
+        }
     }
 
     private void DisposeCore()

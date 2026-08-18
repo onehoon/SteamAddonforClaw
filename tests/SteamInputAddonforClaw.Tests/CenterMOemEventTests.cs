@@ -152,8 +152,12 @@ public sealed class CenterMOemEventTests
         Assert.True(callbackEntered.Wait(TimeSpan.FromSeconds(5)));
 
         var disposeTask = Task.Run(source.Dispose);
-        await Task.Delay(50);
-        Assert.False(disposeTask.IsCompleted, "Dispose() must still be draining the in-flight callback.");
+        // Dispose() has no timeout escape (regression: it previously gave up after 5 seconds and
+        // returned anyway, letting the admitted callback complete after Dispose() had already
+        // returned). Hold the callback blocked past that old boundary and prove Dispose() is
+        // genuinely still draining, not merely "hasn't gotten around to returning yet".
+        await Task.Delay(TimeSpan.FromSeconds(6));
+        Assert.False(disposeTask.IsCompleted, "Dispose() must have no timeout escape -- it must still be draining the in-flight callback.");
 
         releaseCallback.Set();
 

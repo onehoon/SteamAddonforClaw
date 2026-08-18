@@ -115,6 +115,114 @@ public sealed class CenterMHelperOwnershipTests
         Assert.False(ownership.IsOwned);
     }
 
+    [Fact]
+    public void JobObjectFailure_SecondStopAttemptTerminateAlsoFails_ReturnsFalse_OwnershipRemainsRetained()
+    {
+        var api = new RecordingApi { CreateJobSucceeds = false, TerminateSucceeds = false };
+        var ownership = new CenterMHelperOwnership(api);
+        var initial = ownership.Start(@"C:\fake\MSI Center M.exe");
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, initial);
+        Assert.True(ownership.IsOwned);
+        var processId = ownership.ProcessId;
+
+        // Second attempt: TerminateProcess fails again. With no Job fail-safe for this job-less
+        // identity, Stop() must not discard the only retained handle.
+        var stopped = ownership.Stop(TimeSpan.FromSeconds(1));
+
+        Assert.False(stopped);
+        Assert.True(ownership.IsOwned);
+        Assert.Equal(processId, ownership.ProcessId);
+
+        // A later attempt, once termination can actually be confirmed, still resolves it through
+        // the same retained handle.
+        api.TerminateSucceeds = true;
+        Assert.True(ownership.Stop(TimeSpan.FromSeconds(1)));
+        Assert.False(ownership.IsOwned);
+    }
+
+    [Fact]
+    public void JobObjectFailure_SecondStopAttemptWaitTimesOutAgain_ReturnsFalse_OwnershipRemainsRetained()
+    {
+        var api = new RecordingApi { CreateJobSucceeds = false, WaitForExitSucceeds = false };
+        var ownership = new CenterMHelperOwnership(api);
+        var initial = ownership.Start(@"C:\fake\MSI Center M.exe");
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, initial);
+        Assert.True(ownership.IsOwned);
+
+        var stopped = ownership.Stop(TimeSpan.FromSeconds(1));
+
+        Assert.False(stopped);
+        Assert.True(ownership.IsOwned);
+
+        api.WaitForExitSucceeds = true;
+        Assert.True(ownership.Stop(TimeSpan.FromSeconds(1)));
+        Assert.False(ownership.IsOwned);
+    }
+
+    [Fact]
+    public void JobObjectFailure_DisposeAfterPartialCleanup_AttemptsRealTermination_NotJustHandleDrop()
+    {
+        // Regression: Dispose() must not simply close a job-less retained process handle (which
+        // would NOT terminate the process) -- it must attempt a real TerminateProcess through that
+        // handle first, exactly like Stop() does.
+        var api = new RecordingApi { CreateJobSucceeds = false, TerminateSucceeds = false };
+        var ownership = new CenterMHelperOwnership(api);
+        var initial = ownership.Start(@"C:\fake\MSI Center M.exe");
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, initial);
+        var callsBeforeDispose = api.Calls.Count;
+
+        api.TerminateSucceeds = true;
+        api.WaitForExitSucceeds = true;
+        ownership.Dispose();
+
+        Assert.False(ownership.IsOwned);
+        Assert.Contains("Terminate", api.Calls.Skip(callsBeforeDispose));
+        Assert.Contains("WaitForExit", api.Calls.Skip(callsBeforeDispose));
+    }
+
+    [Fact]
+    public void JobObjectFailure_DisposeCannotConfirmTermination_OwnershipIntentionallyRetained()
+    {
+        // Regression: if Dispose()'s own termination attempt also cannot confirm exit for a
+        // job-less retained handle, it must NOT silently report ownership as resolved -- IsOwned
+        // must remain true so the identity is not lost/abandoned.
+        var api = new RecordingApi { CreateJobSucceeds = false, TerminateSucceeds = false };
+        var ownership = new CenterMHelperOwnership(api);
+        var initial = ownership.Start(@"C:\fake\MSI Center M.exe");
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, initial);
+
+        ownership.Dispose();
+
+        Assert.True(ownership.IsOwned, "Dispose() must not discard a job-less retained handle whose termination could not be confirmed.");
+
+        // The identity is still resolvable afterward -- Dispose() is not a dead end.
+        api.TerminateSucceeds = true;
+        Assert.True(ownership.Stop(TimeSpan.FromSeconds(1)));
+        Assert.False(ownership.IsOwned);
+    }
+
+    [Fact]
+    public void ResumeFailure_SecondStopAttemptAlsoUnconfirmed_OwnershipRemainsRetained_NoJobFailSafeLeft()
+    {
+        // Post-Assign/Resume-failure case: the Job was already closed as part of the ResumeThread
+        // failure path, so a subsequent Stop()/Dispose() has no Job fail-safe either -- the exact
+        // same "retain until confirmed" contract must apply here too.
+        var api = new RecordingApi { ResumeSucceeds = false, WaitForExitSucceeds = false };
+        var ownership = new CenterMHelperOwnership(api);
+        var initial = ownership.Start(@"C:\fake\MSI Center M.exe");
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, initial);
+        Assert.True(ownership.IsOwned);
+
+        var stopped = ownership.Stop(TimeSpan.FromSeconds(1));
+
+        Assert.False(stopped);
+        Assert.True(ownership.IsOwned);
+
+        api.WaitForExitSucceeds = true;
+        Assert.True(ownership.Stop(TimeSpan.FromSeconds(1)));
+        Assert.False(ownership.IsOwned);
+    }
+
     [Theory]
     [InlineData(false, true)]
     [InlineData(true, false)]
@@ -218,6 +326,23 @@ public sealed class CenterMHelperOwnershipTests
         Assert.Equal(HelperStartResult.AlreadyOwned, secondResult);
         Assert.Equal(1, api.CreateSuspendedCallCount);
         Assert.True(ownership.IsOwned);
+    }
+
+    [Fact]
+    public void Stop_JobBackedHelper_GracefulTerminateUnconfirmed_StillResolvesViaJobCloseFailSafe()
+    {
+        // For a fully-armed (Job-backed) helper, TerminateProcess/wait not confirming exit is not
+        // the end of the story: closing the Job (KILL_ON_JOB_CLOSE, already set during Start()) is
+        // itself a guaranteed kill, so Stop() may still safely release ownership even though the
+        // reported result reflects that graceful termination specifically was not confirmed.
+        var api = new RecordingApi { TerminateSucceeds = false };
+        var ownership = new CenterMHelperOwnership(api);
+        Assert.Equal(HelperStartResult.Started, ownership.Start(@"C:\fake\MSI Center M.exe"));
+
+        var stopped = ownership.Stop(TimeSpan.FromSeconds(1));
+
+        Assert.False(stopped); // graceful termination itself was not confirmed
+        Assert.False(ownership.IsOwned); // but the Job fail-safe still resolves ownership
     }
 
     [Fact]

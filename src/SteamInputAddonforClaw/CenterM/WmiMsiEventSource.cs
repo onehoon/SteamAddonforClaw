@@ -173,8 +173,13 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
         }
 
         // Waited outside the lock: an admitted callback needs to acquire _sync itself (on exit) to
-        // decrement/signal, so holding it here would deadlock against that.
-        _drained.Wait(TimeSpan.FromSeconds(5));
+        // decrement/signal, so holding it here would deadlock against that. No timeout: a bounded
+        // wait that then proceeds anyway would let an already-admitted callback invoke
+        // EventReceived after Dispose() has returned -- exactly the state this barrier exists to
+        // rule out. Subscriber invocation is expected to be fast (parse + forward); a subscriber
+        // that stalls indefinitely is a bug in that subscriber, not something this source should
+        // paper over by breaking its own drain guarantee.
+        _drained.Wait();
         _adapter.Dispose();
     }
 }
