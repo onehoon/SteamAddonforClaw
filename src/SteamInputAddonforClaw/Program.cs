@@ -18,9 +18,9 @@ public static class Program
         // Program is the sole owner of final log shutdown on every exit path.
         try
         {
-            AddonLogRetention.PruneDefaultDirectory();
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
             VelopackApp.Build().Run();
+            AddonLogRetention.PruneDirectory(AppLog.DirectoryPath);
             var persistedLogLevel = LogLevelBootstrap.Read(AddonDataPaths.SettingsPath);
             AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(persistedLogLevel);
             AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));

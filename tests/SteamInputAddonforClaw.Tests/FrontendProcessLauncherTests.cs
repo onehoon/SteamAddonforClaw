@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Lifecycle;
 using Xunit;
 
@@ -10,7 +11,7 @@ public sealed class FrontendProcessLauncherTests
     public void Requests_before_ready_coalesce_and_release_once()
     {
         var starts = new List<ProcessStartInfo>();
-        var launcher = new FrontendProcessLauncher("C:\\runtime", info => { starts.Add(info); return null; });
+        var launcher = new FrontendProcessLauncher("C:\\runtime", "C:\\logs", info => { starts.Add(info); return null; });
         launcher.RequestOpen(FrontendOpenReason.InitialManualLaunch);
         launcher.RequestOpen(FrontendOpenReason.Tray);
         Assert.Empty(starts);
@@ -22,7 +23,7 @@ public sealed class FrontendProcessLauncherTests
     public void Request_after_ready_starts_immediately()
     {
         var starts = new List<ProcessStartInfo>();
-        var launcher = new FrontendProcessLauncher("C:\\runtime", info => { starts.Add(info); return null; });
+        var launcher = new FrontendProcessLauncher("C:\\runtime", "C:\\logs", info => { starts.Add(info); return null; });
         launcher.MarkRuntimeReady();
         launcher.RequestOpen(FrontendOpenReason.Tray);
         Assert.Single(starts);
@@ -32,7 +33,7 @@ public sealed class FrontendProcessLauncherTests
     public void Stop_before_ready_drops_pending_and_future_requests()
     {
         var starts = new List<ProcessStartInfo>();
-        var launcher = new FrontendProcessLauncher("C:\\runtime", info => { starts.Add(info); return null; });
+        var launcher = new FrontendProcessLauncher("C:\\runtime", "C:\\logs", info => { starts.Add(info); return null; });
         launcher.RequestOpen(FrontendOpenReason.Tray);
         launcher.StopAcceptingRequests();
         launcher.MarkRuntimeReady();
@@ -44,7 +45,7 @@ public sealed class FrontendProcessLauncherTests
     public void Failed_start_is_non_fatal_and_later_request_retries()
     {
         var attempts = 0;
-        var launcher = new FrontendProcessLauncher("C:\\runtime", _ =>
+        var launcher = new FrontendProcessLauncher("C:\\runtime", "C:\\logs", _ =>
         {
             attempts++;
             if (attempts == 1) throw new InvalidOperationException("test");
@@ -59,7 +60,20 @@ public sealed class FrontendProcessLauncherTests
     [Fact]
     public void Uses_final_ui_relative_path()
     {
-        var launcher = new FrontendProcessLauncher("C:\\runtime");
+        var launcher = new FrontendProcessLauncher("C:\\runtime", "C:\\logs");
         Assert.Equal("C:\\runtime\\ui\\SteamInputAddonforClaw.UI.exe", launcher.ExecutablePath);
+    }
+
+    [Fact]
+    public void Passes_canonical_log_directory_as_one_argument()
+    {
+        var starts = new List<ProcessStartInfo>();
+        var logDirectory = @"C:\Users\Test User\Addon Data\logs";
+        var launcher = new FrontendProcessLauncher("C:\\runtime", logDirectory, info => { starts.Add(info); return null; });
+        launcher.MarkRuntimeReady();
+        launcher.RequestOpen(FrontendOpenReason.InitialManualLaunch);
+
+        Assert.Single(starts);
+        Assert.Equal([FrontendLaunchArguments.LogDirectoryOption, logDirectory], starts[0].ArgumentList);
     }
 }

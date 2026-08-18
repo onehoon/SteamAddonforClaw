@@ -9,15 +9,7 @@ public static class AddonLogRetention
 {
     public const int RetentionDays = 2;
 
-    private static readonly string DefaultDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SteamInputAddonforClaw",
-        "logs");
-
-    public static void PruneDefaultDirectory()
-    {
-        PruneDirectory(DefaultDirectory, DateTime.Now.Date);
-    }
+    public static void PruneDirectory(string directory) => PruneDirectory(directory, DateTime.Now.Date);
 
     internal static void PruneDirectory(string directory, DateTime today)
     {

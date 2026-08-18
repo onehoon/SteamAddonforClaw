@@ -20,6 +20,14 @@ public sealed class AddonDataPathsTests
     }
 
     [Fact]
+    public void ResolveLogDirectory_UsesCanonicalDataRoot()
+    {
+        Assert.Equal(
+            @"C:\Users\Test\AppData\Local\SteamInputAddonforClaw-Data\logs",
+            AddonDataPaths.ResolveLogDirectory(InstallRoot));
+    }
+
+    [Fact]
     public void Paths_AreInsideDataRootAndOutsideInstallRoot()
     {
         var settingsPath = AddonDataPaths.ResolveSettingsPath(InstallRoot);
