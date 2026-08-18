@@ -58,12 +58,29 @@ public sealed class RumbleV1Tests
         var first = authority.Acquire("SteamDeck");
         Assert.True(authority.IsCurrent(first));
         Assert.False(authority.IsCurrent(new FeedbackAuthorityToken(first.Generation, "Xbox360")));
-        authority.RevokeAndDrain();
+        authority.Revoke();
         Assert.False(authority.IsCurrent(first));
         var second = authority.Acquire("SteamDeck");
         Assert.True(second.Generation > first.Generation);
         Assert.False(authority.IsCurrent(first));
         Assert.True(authority.IsCurrent(second));
+    }
+
+    [Fact]
+    public void Authority_RevokeIsImmediateAndNonDraining()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        Assert.True(authority.TryAcquireLease(token, out var lease));
+        using (lease!)
+        {
+            authority.Revoke();
+            Assert.False(authority.IsCurrent(token));
+            Assert.False(authority.TryAcquireLease(token, out _));
+            var reacquired = authority.Acquire("SteamDeck");
+            Assert.True(reacquired.Generation > token.Generation);
+            Assert.False(authority.IsCurrent(token));
+        }
     }
 
     [Fact]
@@ -89,7 +106,6 @@ public sealed class RumbleV1Tests
         using var admitted = lease!;
         var revoked = Task.Run(() => authority.RevokeAndDrain());
 
-        await Task.Delay(20);
         Assert.False(revoked.IsCompleted);
         admitted.Dispose();
         await revoked;
@@ -108,7 +124,7 @@ public sealed class RumbleV1Tests
         while (!authority.IsRevocationInProgress) await Task.Yield();
 
         var reacquire = Task.Run(() => authority.Acquire("SteamDeck"));
-        await Task.Delay(20);
+        await authority.AcquireBlocked;
         Assert.False(reacquire.IsCompleted);
         admitted.Dispose();
         await revoke;

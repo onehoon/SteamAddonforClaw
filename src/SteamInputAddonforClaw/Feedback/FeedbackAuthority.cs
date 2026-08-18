@@ -9,6 +9,9 @@ internal sealed class FeedbackAuthority
     private string? _source;
     private int _activeLeases;
     private bool _revocationInProgress;
+    private readonly TaskCompletionSource _acquireBlocked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    internal Task AcquireBlocked => _acquireBlocked.Task;
 
     internal bool IsRevocationInProgress
     {
@@ -21,7 +24,10 @@ internal sealed class FeedbackAuthority
         lock (_gate)
         {
             while (_revocationInProgress)
+            {
+                _acquireBlocked.TrySetResult();
                 Monitor.Wait(_gate);
+            }
             _generation++;
             _source = source;
             return new FeedbackAuthorityToken(_generation, source);
@@ -53,7 +59,10 @@ internal sealed class FeedbackAuthority
     internal void Revoke()
     {
         lock (_gate)
-            BeginRevocationLocked();
+        {
+            _generation++;
+            _source = null;
+        }
     }
 
     internal void RevokeAndDrain()
