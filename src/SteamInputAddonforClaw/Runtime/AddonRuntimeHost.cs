@@ -44,6 +44,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private readonly PowerTransitionCoordinator _powerCoordinator;
     private readonly PowerTransitionWatcher _powerWatcher;
     private readonly UserTerminationGuard _userTerminationGuard;
+    private readonly Func<Task<bool>>? _routingShutdownOverride;
+    private readonly Func<ValueTask>? _routingDisposeOverride;
 
     // Guards against a resume notification that was already queued in PowerTransitionCoordinator
     // before shutdown began running ReconcileFreshAfterResumeAsync's Steam refresh concurrently
@@ -65,13 +67,17 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         bool recoverySafe,
         Func<bool> hasIncompleteRecovery,
         Func<CancellationToken, Task<bool>> establishBaseline,
-        IPowerSuspendResumeNotificationSource? notificationSource = null)
+        IPowerSuspendResumeNotificationSource? notificationSource = null,
+        Func<Task<bool>>? routingShutdownOverride = null,
+        Func<ValueTask>? routingDisposeOverride = null)
     {
         _steamRuntime = steamRuntime;
         _routingRuntime = routingRuntime;
         _powerGate = powerGate;
         _recoverySafetyState = recoverySafetyState;
         _steamRuntime.StateChanged += OnSteamSessionStateChanged;
+        _routingShutdownOverride = routingShutdownOverride;
+        _routingDisposeOverride = routingDisposeOverride;
 
         var powerParticipants = new List<IPowerSuspendParticipant>();
         if (_routingRuntime is not null) powerParticipants.Add(_routingRuntime);
@@ -185,10 +191,15 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         PrepareForShutdown();
         _powerWatcher.Dispose();
-        var routingShutdownSucceeded = _routingRuntime is null || await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
+        var routingShutdownSucceeded = _routingShutdownOverride is not null
+            ? await _routingShutdownOverride().ConfigureAwait(false)
+            : _routingRuntime is null || await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
         await _powerCoordinator.DisposeAsync().ConfigureAwait(false);
-        if (ShouldDisposeRoutingBackend(routingShutdownSucceeded) && _routingRuntime is not null)
-            await _routingRuntime.DisposeAsync().ConfigureAwait(false);
+        if (ShouldDisposeRoutingBackend(routingShutdownSucceeded))
+        {
+            if (_routingDisposeOverride is not null) await _routingDisposeOverride().ConfigureAwait(false);
+            else if (_routingRuntime is not null) await _routingRuntime.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }
 

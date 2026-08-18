@@ -408,7 +408,9 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task AdmittedCallbackDrainsBeforeStageStopClearAndRemove()
     {
         var session = new FakeCanonicalSession();
-        var sink = new BlockingRumbleSink();
+        var order = new List<string>();
+        session.ExternalTrace = order;
+        var sink = new BlockingRumbleSink(order);
         var authority = new FeedbackAuthority();
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink, authority: authority);
         await stage.PrepareMutationAsync(CancellationToken.None);
@@ -425,6 +427,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.Equal([new TwoMotorRumble(0x1234, 0x5678), TwoMotorRumble.Stopped], sink.Values);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
         Assert.Equal(1, session.RemoveCalls);
+        Assert.Equal(["Nonzero", "Stop", "ClearOutputCallback", "RemoveDevice"], order);
     }
 
     [Fact]
@@ -793,6 +796,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public Action? OnRemoveDeviceCalled;
         public int RemoveCalls { get; private set; }
         public int ClearOutputCallbackCalls { get; private set; }
+        public List<string>? ExternalTrace { get; set; }
         public SteamDeckOutputCallback? Callback { get; private set; }
         public TaskCompletionSource InputEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseInput { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -829,11 +833,12 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         }
 
         public bool SetOutputCallback(SteamDeckOutputCallback callback) { Trace.Add("SetOutputCallback"); Callback = callback; return State == CanonicalSteamDeckSessionState.Active && SetOutputCallbackResult; }
-        public bool ClearOutputCallback() { Trace.Add("ClearOutputCallback"); ClearOutputCallbackCalls++; return State == CanonicalSteamDeckSessionState.Active && ClearOutputCallbackResult; }
+        public bool ClearOutputCallback() { Trace.Add("ClearOutputCallback"); ExternalTrace?.Add("ClearOutputCallback"); ClearOutputCallbackCalls++; return State == CanonicalSteamDeckSessionState.Active && ClearOutputCallbackResult; }
 
         public bool RemoveDevice()
         {
             Trace.Add("Remove");
+            ExternalTrace?.Add("RemoveDevice");
             RemoveCalls++;
             OnRemoveDeviceCalled?.Invoke();
             // A known/classified remove failure (RemoveResult=false) leaves State unchanged (still
@@ -881,13 +886,16 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
     private sealed class BlockingRumbleSink : IPhysicalRumbleSink
     {
+        private readonly List<string> _order;
+        public BlockingRumbleSink(List<string> order) => _order = order;
         public List<TwoMotorRumble> Values { get; } = [];
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
         {
             Values.Add(rumble);
-            if (rumble != TwoMotorRumble.Stopped) { Entered.TrySetResult(); Release.Task.GetAwaiter().GetResult(); }
+            if (rumble != TwoMotorRumble.Stopped) { _order.Add("Nonzero"); Entered.TrySetResult(); Release.Task.GetAwaiter().GetResult(); }
+            else _order.Add("Stop");
             return new(PhysicalRumbleWriteStatus.Succeeded, "");
         }
     }

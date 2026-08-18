@@ -18,11 +18,21 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class AddonRuntimeHostTests
 {
     [Theory]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public void Routing_backend_disposal_requires_successful_canonical_shutdown(bool shutdownSucceeded, bool expected)
+    [InlineData("FinalStop", false)]
+    [InlineData("CallbackClear", false)]
+    [InlineData("Success", true)]
+    public async Task Host_shutdown_disposes_routing_backend_only_after_canonical_success(string failureClass, bool shutdownSucceeded)
     {
-        Assert.Equal(expected, AddonRuntimeHost.ShouldDisposeRoutingBackend(shutdownSucceeded));
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var disposed = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
+            new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), true,
+            () => false, _ => Task.FromResult(false), routingShutdownOverride: () => Task.FromResult(shutdownSucceeded),
+            routingDisposeOverride: () => { Assert.True(failureClass is "FinalStop" or "CallbackClear" or "Success"); disposed++; return ValueTask.CompletedTask; });
+
+        await host.DisposeAsync();
+
+        Assert.Equal(shutdownSucceeded ? 1 : 0, disposed);
     }
 
     [Fact]
