@@ -366,7 +366,7 @@ internal static class ElevatedPrerequisiteSetup
             var recoverySafety = new MachineRecoverySafetyInspector().Inspect();
             if (!AllowsRecoverySafeProvisioning(recoverySafety)) return (false, recoverySafety.Reason);
             using var runningAppId = new SteamRunningAppIdRegistrySource();
-            var settings = new SettingsStore(VelopackAppPaths.SettingsPath);
+            var settings = new SettingsStore(AddonDataPaths.SettingsPath);
             var probe = new SteamBigPictureWindowProbe();
             return ElevatedSteamSafetyGate.Evaluate(runningAppId.GetRunningAppId, settings.LoadForSafetyGate, probe.Capture);
         }

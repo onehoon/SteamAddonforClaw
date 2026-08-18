@@ -36,7 +36,7 @@ internal static class AddonStartupCompositionFactory
             new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
         };
         var controllerEnvironmentAssessmentProvider = new ControllerEnvironmentAssessmentProvider(controllerSoftwareProviders);
-        var recoveryJournalStore = new RecoveryJournalStore(VelopackAppPaths.RecoveryJournalPath);
+        var recoveryJournalStore = new RecoveryJournalStore(AddonDataPaths.RecoveryJournalPath);
         var runtimeRecoveryManager = new RecoveryManager(recoveryJournalStore);
         var nativeState = msiClawAdapter.NativeState as MsiClawNativeStateManager;
         var stockCenterMBaseline = nativeState is null ? null : new StockCenterMStartupBaseline(nativeState);

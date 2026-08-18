@@ -33,7 +33,7 @@ internal static class AddonRuntimeCompositionFactory
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe)
     {
-        var settingsStore = new SettingsStore(VelopackAppPaths.SettingsPath);
+        var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
         var startupRegistration = new WindowsTaskSchedulerStartupManager();

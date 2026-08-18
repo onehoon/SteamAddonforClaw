@@ -4,9 +4,6 @@ namespace SteamInputAddonforClaw.Install;
 
 internal static class VelopackAppPaths
 {
-    internal static string RecoveryJournalPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SteamInputAddonforClaw", "recovery.json");
     internal static string ProvisioningStateDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "SteamInputAddonforClaw", "provisioning");
@@ -20,8 +17,6 @@ internal static class VelopackAppPaths
     public static string RootAppDirectory => string.IsNullOrWhiteSpace(VelopackLocator.Current.RootAppDir)
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw")
         : VelopackLocator.Current.RootAppDir;
-
-    public static string SettingsPath => Path.Combine(RootAppDirectory, "settings.json");
 
     public static string StableExecutablePath => string.IsNullOrWhiteSpace(VelopackLocator.Current.RootAppDir)
         ? string.Empty
