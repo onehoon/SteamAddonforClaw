@@ -383,9 +383,17 @@ internal sealed class CenterMMainUiRoutingRetirement
                 return false;
             }
 
+            // The probe call itself is part of the safety budget -- a cancellation timer is not a
+            // hard observation deadline (its callback can run late under scheduler pressure, and a
+            // probe may contain a non-cancellable section), so a single elapsed sample taken right
+            // after the probe returns must gate acceptance of even a successful XInput result, not
+            // only the non-XInput/poll-again path.
+            var elapsedAfterProbe = Stopwatch.GetElapsedTime(started);
+            if (elapsedAfterProbe >= _xInputWaitTimeout) return false;
+
             if (result == CenterMNativeModeProbeResult.XInput) return true;
 
-            remaining = _xInputWaitTimeout - Stopwatch.GetElapsedTime(started);
+            remaining = _xInputWaitTimeout - elapsedAfterProbe;
             if (remaining <= TimeSpan.Zero) return false;
 
             var delay = remaining < _xInputWaitPollInterval ? remaining : _xInputWaitPollInterval;

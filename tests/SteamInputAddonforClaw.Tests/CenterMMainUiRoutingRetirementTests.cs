@@ -274,6 +274,30 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Late_xinput_observation_past_deadline_is_rejected()
+    {
+        // Models a probe whose call does not observe the supplied cancellation token until after its
+        // own work completes -- a cancellation timer is not itself a hard observation deadline (its
+        // callback can run late under scheduler pressure), so even a successful XInput result must be
+        // rejected if the probe call itself completed after the configured stabilization budget.
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider(
+        [
+            new MainUiWindowSnapshot(true, 1, 1), // upfront: visible
+            new MainUiWindowSnapshot(true, 1, 0) // minimize-wait loop observes hidden
+        ]);
+        var probe = new SlowSuccessfulNativeModeProbe(TimeSpan.FromMilliseconds(80));
+        var (retirement, invoker, _) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            nativeModeProbe: probe, xInputWaitTimeout: TimeSpan.FromMilliseconds(30), xInputWaitPollInterval: TimeSpan.FromMilliseconds(10));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.XInputNotConfirmed, result);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
     public async Task Visible_mainui_minimize_command_failure_does_not_terminate()
     {
         var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
@@ -637,6 +661,19 @@ public sealed class CenterMMainUiRoutingRetirementTests
 
             Thread.Sleep(captureDelay);
             return delayedHiddenSnapshot;
+        }
+    }
+
+    /// <summary>Deliberately does not observe the supplied cancellation token until after its own
+    /// delay completes -- models a probe section that isn't cooperatively cancellable, proving the
+    /// caller must still reject a late-completing success rather than relying on the token to cut
+    /// the call short.</summary>
+    private sealed class SlowSuccessfulNativeModeProbe(TimeSpan delay) : ICenterMNativeModeProbe
+    {
+        public async Task<CenterMNativeModeProbeResult> CaptureAsync(CancellationToken cancellationToken)
+        {
+            await Task.Delay(delay, CancellationToken.None).ConfigureAwait(false);
+            return CenterMNativeModeProbeResult.XInput;
         }
     }
 
