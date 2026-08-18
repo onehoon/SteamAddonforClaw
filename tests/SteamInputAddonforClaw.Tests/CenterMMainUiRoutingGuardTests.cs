@@ -200,6 +200,68 @@ public sealed class CenterMMainUiRoutingGuardTests
     }
 
     [Fact]
+    public async Task DisposeAsync_hands_unresolved_exact_helper_ownership_to_orphan_registry()
+    {
+        CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        try
+        {
+            var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
+            var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+            // Every WaitForExit remains unconfirmed, so Stop() can never resolve -- the exact
+            // handle must stay retained (never discarded) and end up in the registry.
+            var helperApi = new RecordingHelperApi { WaitForExitSucceeds = false };
+            var helperOwnership = new CenterMHelperOwnership(helperApi);
+            var guard = new CenterMMainUiRoutingGuard(
+                publishRootProvider: () => "C:\\fake\\publish",
+                processSnapshotSource: snapshots,
+                helperOwnership: helperOwnership,
+                mutexOwnership: new CenterMMainUiMutexOwnership(new FakeMutexFactory()),
+                stager: stager.Stage,
+                helperStopTimeout: TimeSpan.Zero);
+            Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ArmAsync());
+
+            await guard.DisposeAsync();
+
+            Assert.True(helperOwnership.IsOwned);
+            Assert.True(CenterMOrphanedHelperRegistry.Contains(helperOwnership));
+        }
+        finally
+        {
+            CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        }
+    }
+
+    [Fact]
+    public async Task DisposeAsync_does_not_register_a_helper_whose_termination_is_confirmed()
+    {
+        CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        try
+        {
+            var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
+            var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+            var helperApi = new RecordingHelperApi();
+            var helperOwnership = new CenterMHelperOwnership(helperApi);
+            var guard = new CenterMMainUiRoutingGuard(
+                publishRootProvider: () => "C:\\fake\\publish",
+                processSnapshotSource: snapshots,
+                helperOwnership: helperOwnership,
+                mutexOwnership: new CenterMMainUiMutexOwnership(new FakeMutexFactory()),
+                stager: stager.Stage);
+            Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ArmAsync());
+
+            await guard.DisposeAsync();
+
+            Assert.False(helperOwnership.IsOwned);
+            Assert.False(CenterMOrphanedHelperRegistry.Contains(helperOwnership));
+            Assert.Equal(0, CenterMOrphanedHelperRegistry.RegisteredCount);
+        }
+        finally
+        {
+            CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        }
+    }
+
+    [Fact]
     public async Task Concurrent_arm_calls_serialize_and_produce_exactly_one_helper_and_mutex()
     {
         var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
@@ -321,6 +383,7 @@ public sealed class CenterMMainUiRoutingGuardTests
         internal const int FixedProcessId = 4242;
         internal List<string> Calls { get; } = [];
         internal bool CreateSucceeds { get; init; } = true;
+        internal bool WaitForExitSucceeds { get; init; } = true;
 
         /// <summary>When set, the first <see cref="TryCreateSuspended"/> call signals
         /// <see cref="CreateSuspendedEntered"/> and then blocks until this is released -- lets a
@@ -381,7 +444,7 @@ public sealed class CenterMMainUiRoutingGuardTests
         public bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout)
         {
             Calls.Add("WaitForExit");
-            return true;
+            return WaitForExitSucceeds;
         }
 
         public LiveProcessProbeStatus PollLiveness(SafeProcessHandle processHandle)

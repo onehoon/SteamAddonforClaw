@@ -166,10 +166,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
 
-        // Unconditional, not gated on IsArmed: a failed arm attempt can leave the guard's helper
-        // ownership retained (CenterMHelperOwnership deliberately keeps an exact handle when
-        // cleanup could not be confirmed) even though _armed never became true. DisarmAsync is
-        // idempotent/a safe no-op when there is genuinely nothing owned.
-        await CenterMGuard.DisarmAsync().ConfigureAwait(false);
+        // Terminal cleanup, not the normal Disarm path: bounded final Stop retries, and -- if the
+        // exact helper handle is still unresolved after those -- hands it to the process-level
+        // CenterMOrphanedHelperRegistry rather than letting this composition (and the guard's own
+        // ability to retry) become unreachable with the only exact ownership still outstanding.
+        await CenterMGuard.DisposeAsync().ConfigureAwait(false);
     }
 }

@@ -37,8 +37,14 @@ internal enum CenterMMainUiRoutingGuardResult
 ///    <see cref="CenterMHelperInvariant"/> -- the only same-name process must be the owned helper.
 /// Any failure at any step unwinds only what this attempt itself acquired and never commits Armed.
 /// </summary>
-internal sealed class CenterMMainUiRoutingGuard
+internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
 {
+    /// <summary>Bounded number of additional exact-handle Stop attempts terminal disposal makes
+    /// before handing unresolved ownership to <see cref="CenterMOrphanedHelperRegistry"/>, mirroring
+    /// <see cref="CenterMOem1LifecycleCoordinator"/>'s own terminal cleanup policy for the same
+    /// <see cref="CenterMHelperOwnership"/> primitive.</summary>
+    private const int DisposeFinalCleanupAttempts = 3;
+
     private readonly Func<string> _publishRootProvider;
     private readonly IProcessSnapshotSource _processSnapshotSource;
     private readonly CenterMHelperOwnership _helperOwnership;
@@ -213,5 +219,36 @@ internal sealed class CenterMMainUiRoutingGuard
         _mutexOwnership.Release();
         AppLog.Info("CenterM.RoutingGuard", "MainUI mutex released.");
         return Task.FromResult(helperStopped);
+    }
+
+    /// <summary>
+    /// Terminal cleanup: a bounded number of additional exact-handle Stop attempts beyond whatever
+    /// the normal Disarm path already tried, and -- if the exact helper handle is still unresolved
+    /// after those -- hands the SAME <see cref="CenterMHelperOwnership"/> instance (never a copy,
+    /// never discarded) to the process-level <see cref="CenterMOrphanedHelperRegistry"/>, mirroring
+    /// <see cref="CenterMOem1LifecycleCoordinator.DisposeAsync"/>'s terminal policy for the same
+    /// primitive. Never falls back to process-name/PID rediscovery. Idempotent.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            _armed = false;
+            _mutexOwnership.Release();
+
+            for (var attempt = 1; attempt <= DisposeFinalCleanupAttempts && _helperOwnership.IsOwned; attempt++)
+            {
+                if (_helperOwnership.Stop(_helperStopTimeout)) break;
+                AppLog.Warn("CenterM.RoutingGuard", "Dispose final cleanup attempt could not confirm helper termination.", null, ("Attempt", attempt), ("ProcessId", _helperOwnership.ProcessId));
+            }
+
+            if (_helperOwnership.IsOwned)
+            {
+                CenterMOrphanedHelperRegistry.Register(_helperOwnership);
+                AppLog.Warn("CenterM.RoutingGuard", "Terminal disposal completed with unresolved exact helper ownership; registered with the process-level orphan retry owner, not discarded.", null, ("ProcessId", _helperOwnership.ProcessId));
+            }
+        }
+        finally { _gate.Release(); }
     }
 }
