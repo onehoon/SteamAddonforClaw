@@ -149,7 +149,13 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     {
         if (_processHandle is null) return true;
 
-        var terminated = _api.TryTerminate(_processHandle, out _) && _api.WaitForExit(_processHandle, waitTimeout);
+        // TerminateProcess is a best-effort request, not the confirmation itself: Windows
+        // documents that it fails with ERROR_ACCESS_DENIED once the target has already exited, so
+        // its own return value must never gate whether the authoritative exit check even runs.
+        // WaitForExit on the exact retained handle is what actually confirms exit -- signaled
+        // means gone, regardless of why (this call, an external actor, a prior Job kill, ...).
+        _api.TryTerminate(_processHandle, out _);
+        var terminated = _api.WaitForExit(_processHandle, waitTimeout);
         AppLog.Info("CenterM.Helper", "Helper stop attempted.", ("Terminated", terminated), ("ProcessId", ProcessId), ("JobBacked", _jobHandle is not null));
 
         if (terminated || _jobHandle is not null)
@@ -174,9 +180,11 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     /// cannot mistake this for a clean native fallback.</summary>
     private HelperStartResult CleanupAfterConstructionFailure(int processId, SafeProcessHandle processHandle, HelperStartResult failureResult)
     {
-        // Both must succeed to count as confirmed: a failed TerminateProcess call followed by a
-        // wait that happens to return true is not evidence the helper actually exited.
-        if (_api.TryTerminate(processHandle, out _) && _api.WaitForExit(processHandle, TimeSpan.FromSeconds(2)))
+        // TerminateProcess is a best-effort request; a signaled retained handle afterward is
+        // authoritative exit evidence regardless of whether this particular call succeeded (it
+        // legitimately fails with ERROR_ACCESS_DENIED against an already-exited process).
+        _api.TryTerminate(processHandle, out _);
+        if (_api.WaitForExit(processHandle, TimeSpan.FromSeconds(2)))
         {
             processHandle.Dispose();
             return failureResult;

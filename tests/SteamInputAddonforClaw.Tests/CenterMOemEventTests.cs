@@ -171,6 +171,32 @@ public sealed class CenterMOemEventTests
         Assert.Equal(1, deliveredCount);
     }
 
+    [Fact]
+    public async Task Dispose_called_reentrantly_from_within_EventReceived_does_not_deadlock()
+    {
+        var adapter = new FakeManagementEventWatcherAdapter(startSucceeds: true);
+        var source = new WmiMsiEventSource(adapter);
+        Assert.True(source.Start());
+
+        var deliveredCount = 0;
+        source.EventReceived += _ =>
+        {
+            deliveredCount++;
+            // A subscriber that synchronously triggers its own teardown -- this must not deadlock
+            // against the drain barrier that guards the ordinary (non-reentrant) Dispose() path.
+            source.Dispose();
+        };
+
+        var raiseTask = Task.Run(() => adapter.Raise(0x220029));
+        await raiseTask.WaitAsync(TimeSpan.FromSeconds(5)); // times out (test fails) if it deadlocks
+
+        Assert.Equal(1, deliveredCount);
+
+        // No delivery for a notification arriving after the reentrant Dispose() completed.
+        adapter.Raise(0x220058);
+        Assert.Equal(1, deliveredCount);
+    }
+
     private sealed class FakeManagementEventWatcherAdapter(bool startSucceeds) : IManagementEventWatcherAdapter
     {
         internal int TryStartCallCount { get; private set; }

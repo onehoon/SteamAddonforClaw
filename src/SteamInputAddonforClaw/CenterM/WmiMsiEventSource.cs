@@ -82,6 +82,12 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
     private int _activeCallbacks;
     private bool _disposed;
     private bool _started;
+    // Set/cleared only on the thread currently running an admitted callback, around the
+    // subscriber invocation. Lets Dispose() detect it is being called reentrantly from within its
+    // own EventReceived subscriber (a subscriber that synchronously triggers teardown) and avoid
+    // deadlocking on _drained -- that admitted callback cannot reach its own finally block (which
+    // is what would signal _drained) until Dispose() itself returns.
+    [ThreadStatic] private static bool _isInsideAdmittedCallback;
 
     internal WmiMsiEventSource(IManagementEventWatcherAdapter? adapter = null) =>
         _adapter = adapter ?? new ManagementEventWatcherAdapter();
@@ -121,6 +127,7 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
             _activeCallbacks++;
         }
 
+        _isInsideAdmittedCallback = true;
         try
         {
             if (!TryParseRawCode(propertyValue, out var rawCode)) return;
@@ -128,6 +135,7 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
         }
         finally
         {
+            _isInsideAdmittedCallback = false;
             lock (_sync)
             {
                 _activeCallbacks--;
@@ -161,7 +169,9 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
     /// Closes admission (no callback entering after this point can proceed past its admission
     /// check), then waits for any callback that was already admitted to finish before disposing
     /// the native watcher -- once this returns, no subscriber callback that entered earlier can
-    /// still be beginning or completing.
+    /// still be beginning or completing. Exception: if called reentrantly from within this
+    /// source's own admitted callback (e.g. a subscriber that synchronously triggers teardown),
+    /// waiting would deadlock against that same callback -- see the reentrant branch below.
     /// </summary>
     public void Dispose()
     {
@@ -170,6 +180,18 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
             if (_disposed) return;
             _disposed = true;
             _adapter.MsiEventArrived -= OnMsiEventArrived;
+        }
+
+        if (_isInsideAdmittedCallback)
+        {
+            // Reentrant: this call is running on the same thread as the one and only admitted
+            // callback currently in flight (WMI delivers to this source serially). Admission is
+            // already closed above, so no further callback can ever be admitted -- it is safe to
+            // dispose the native watcher immediately rather than wait for a drain condition that
+            // can only become true after this very call returns and the callback unwinds through
+            // its own finally block.
+            _adapter.Dispose();
+            return;
         }
 
         // Waited outside the lock: an admitted callback needs to acquire _sync itself (on exit) to
