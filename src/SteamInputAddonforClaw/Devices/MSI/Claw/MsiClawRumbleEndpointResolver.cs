@@ -6,6 +6,7 @@ internal sealed record MsiClawRumbleEndpointCandidate(
     string PhysicalIdentity,
     ushort VendorId,
     ushort ProductId,
+    int InputReportLength,
     int OutputReportLength,
     bool Writable);
 
@@ -25,14 +26,14 @@ internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointReso
     private readonly Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>> _catalog;
 
     internal MsiClawRumbleEndpointResolver(Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>>? catalog = null)
-        => _catalog = catalog ?? (_ => []);
+        => _catalog = catalog ?? (identity => new WindowsMsiClawRumbleEndpointCatalog().Find(identity));
 
     public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity)
     {
         var candidates = _catalog(identity).Where(candidate =>
             candidate.VendorId == MsiClawHardware.VendorId &&
             candidate.ProductId == MsiClawHardware.DirectInputProductId &&
-            candidate.OutputReportLength == 64 && candidate.Writable &&
+            candidate.InputReportLength == 64 && candidate.OutputReportLength >= 64 && candidate.Writable &&
             string.Equals(candidate.PnpInstanceId, identity.PnpInstanceId, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(candidate.PhysicalIdentity, identity.PhysicalIdentity, StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(candidate.DevicePath)).ToArray();

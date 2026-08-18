@@ -45,7 +45,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         MsiClawNativeStateManager nativeState,
         RecoveryManager recovery,
         PowerMutationGate powerGate,
-        RecoverySafetyState recoverySafety)
+        RecoverySafetyState recoverySafety,
+        Func<IMsiClawRumbleEndpointResolver>? rumbleEndpointResolverFactory = null)
     {
         NativeModeSession = new MsiClawNativeModeSessionCoordinator(
             nativeState,
@@ -68,7 +69,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             new HidHideDriverClient(),
             () => Environment.ProcessPath);
 
-        PhysicalRumbleSink = new MsiClawRumbleSink(PhysicalInputStage, new WindowsMsiClawRumbleTransport());
+        PhysicalRumbleSink = new MsiClawRumbleSink(PhysicalInputStage, new WindowsMsiClawRumbleTransport(),
+            rumbleEndpointResolverFactory?.Invoke() ?? new MsiClawRumbleEndpointResolver());
+        PhysicalInputStage.PhysicalSessionRetiring += PhysicalRumbleSink.BeginPhysicalSessionRetirement;
+        PhysicalInputStage.PhysicalSessionStarted += PhysicalRumbleSink.BeginPhysicalSession;
         PhysicalInputStage.PhysicalSessionRetired += PhysicalRumbleSink.InvalidatePhysicalSession;
 
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage];
@@ -87,6 +91,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     public async ValueTask DisposeAsync()
     {
         PhysicalInputStage.PhysicalSessionRetired -= PhysicalRumbleSink.InvalidatePhysicalSession;
+        PhysicalInputStage.PhysicalSessionRetiring -= PhysicalRumbleSink.BeginPhysicalSessionRetirement;
+        PhysicalInputStage.PhysicalSessionStarted -= PhysicalRumbleSink.BeginPhysicalSession;
         PhysicalRumbleSink.Dispose();
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);

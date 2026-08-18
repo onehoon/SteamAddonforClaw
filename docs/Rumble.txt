@@ -11,8 +11,9 @@ live production route.
 
 Generic rumble remains two independent 16-bit channels: LargeMotor and
 SmallMotor. Source decoding and physical sinks remain separate, with one
-feedback authority controlling accepted generations. Physical MSI rumble is a
-implemented in PR2 behind the optional physical sink capability, but production
+feedback authority controlling accepted generations. PR2 represents the MSI
+command as an 11-byte semantic packet, then zero-pads it to a serialized
+64-byte HID write behind the optional physical sink capability. Production
 Deck-to-MSI wiring remains a PR3 concern. No hardware validation is claimed
 unless separately recorded for a specific model.
 

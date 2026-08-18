@@ -10,6 +10,7 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
     private readonly IMsiClawRumbleTransport _transport;
     private readonly Lock _sync = new();
     private int _disposed;
+    private bool _admissionOpen = true;
 
     internal MsiClawRumbleSink(IMsiClawPhysicalInputIdentityProvider identityProvider, IMsiClawRumbleTransport transport, IMsiClawRumbleEndpointResolver? endpointResolver = null)
     {
@@ -23,6 +24,7 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
         if (Volatile.Read(ref _disposed) != 0) return new(PhysicalRumbleWriteStatus.Disposed, "Disposed");
         lock (_sync)
         {
+            if (!_admissionOpen) return new(PhysicalRumbleWriteStatus.Unavailable, "PhysicalSessionRetiring");
             var generation = _identityProvider.CurrentSessionGeneration;
             var identity = _identityProvider.CurrentIdentity;
             if (identity is null || string.IsNullOrWhiteSpace(identity.PhysicalIdentity))
@@ -64,6 +66,16 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
     internal void InvalidatePhysicalSession()
     {
         lock (_sync) _transport.InvalidatePhysicalSession();
+    }
+
+    internal void BeginPhysicalSessionRetirement()
+    {
+        lock (_sync) _admissionOpen = false;
+    }
+
+    internal void BeginPhysicalSession()
+    {
+        lock (_sync) _admissionOpen = true;
     }
 
     public void Dispose()
