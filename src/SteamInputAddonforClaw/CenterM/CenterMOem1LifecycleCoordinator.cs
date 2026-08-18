@@ -121,10 +121,28 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// <see cref="IsHighPriorityRequestPending"/> -- not just the epoch delta -- immediately before
     /// every destructive/arming commit point, so a later mutation can never adopt an
     /// already-bumped epoch as a "clean" baseline while a disable/suspend/shutdown request is still
-    /// pending. Interlocked-based rather than a new lock: the existing concurrency history on this
-    /// branch (CI flakiness from a contended `Lock`) argues strongly for a simple atomic counter over
-    /// another synchronization primitive layered around <see cref="_gate"/>.</summary>
+    /// pending. Review 4958332345: mutated and read exclusively under <see cref="_requestBoundarySync"/>
+    /// now (a plain <c>object</c>+<c>lock</c>, deliberately not the C# 13 <c>Lock</c> type -- the
+    /// existing concurrency history on this branch, CI flakiness from a contended <c>Lock</c>, argues
+    /// for the simplest primitive here too) rather than bare <c>Interlocked</c> operations, so the
+    /// increment/decrement/check and the "operation start" linearization decision at the three
+    /// remaining commit points can never interleave.</summary>
     private int _pendingHighPriorityRequests;
+
+    /// <summary>Review 4958332345 (BLOCKER): a genuine linearization primitive shared by
+    /// <see cref="BeginHighPriorityRequest"/>/<see cref="EndHighPriorityRequest"/> and the three
+    /// remaining "operation start" points (helper Start, final Armed publication, real-MainUI
+    /// termination). The prior round's fix added <see cref="IsHighPriorityRequestPending"/> as an
+    /// extra check-then-act read at each site -- still a TOCTOU race, because the read was never
+    /// synchronized with the atomic increment in <see cref="BeginHighPriorityRequest"/> via any
+    /// shared ordering primitive, so the scheduler could preempt between the check and the mutation
+    /// it was meant to gate. A plain <c>object</c>+<c>lock</c> (never the C# 13 <c>Lock</c> type --
+    /// this branch already hit CI flakiness from a contended <c>Lock</c>) makes "is a high-priority
+    /// request pending" and "the ordinary/destructive operation is now beginning" a single atomic
+    /// decision: whichever side wins the lock first is unambiguously ordered before the other. Only
+    /// ever held briefly around that decision -- never across an <c>await</c>, native Start call, or
+    /// the terminator/WaitForExit sequence.</summary>
+    private readonly object _requestBoundarySync = new();
 
     /// <summary>Suspended mutation barrier (finding #1). While true, no arm/reconcile/destructive
     /// polling path may mutate helper ownership or MainUI tracking -- only
@@ -164,6 +182,28 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// <summary>Test-only synchronization seam (review 4957791980, finding #1): retires a marker set
     /// by <see cref="TestOnly_BeginHighPriorityRequest"/>. Never touched by production code.</summary>
     internal void TestOnly_EndHighPriorityRequest() => EndHighPriorityRequest();
+
+    /// <summary>Test-only synchronization seam (review 4958332345, site 1): invoked immediately
+    /// before <see cref="AttemptArm"/> calls <see cref="TryLinearizeOrdinaryMutationStart"/> for
+    /// helper Start, letting a test deterministically start a REAL competing high-priority request
+    /// (e.g. <see cref="QuiesceForSuspendAsync"/>) and let its synchronous
+    /// <see cref="BeginHighPriorityRequest"/> prefix run to completion before the linearization
+    /// decision is made -- without any real timing race, since the calling method still holds
+    /// <see cref="_gate"/> throughout. Never touched by production code.</summary>
+    internal Func<Task>? TestOnly_BeforeHelperStartLinearization;
+
+    /// <summary>Test-only synchronization seam (review 4958332345, site 2): invoked immediately
+    /// before <see cref="AttemptArm"/> calls <see cref="TryCommitArmedState"/> for the final Armed
+    /// publication. Same purpose and guarantees as <see cref="TestOnly_BeforeHelperStartLinearization"/>.
+    /// Never touched by production code.</summary>
+    internal Func<Task>? TestOnly_BeforeArmedCommitLinearization;
+
+    /// <summary>Test-only synchronization seam (review 4958332345, site 3): invoked immediately
+    /// before <see cref="RunDebounceAsync"/> calls <see cref="TryLinearizeOrdinaryMutationStart"/>
+    /// for real-MainUI termination, after <see cref="RefreshSuppressionPrerequisites"/> has already
+    /// succeeded. Same purpose and guarantees as <see cref="TestOnly_BeforeHelperStartLinearization"/>.
+    /// Never touched by production code.</summary>
+    internal Func<Task>? TestOnly_BeforeTerminationLinearization;
 
     /// <summary>Test-only accessor (review 4957630432 finding #3): exposes the coordinator's own
     /// <see cref="CenterMHelperOwnership"/> instance -- whether caller-injected or constructed
@@ -761,19 +801,19 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             var validity = EvaluateArmedHelperValidity(sameName, ownedPid);
             if (validity == ArmedHelperValidity.Valid)
             {
-                // Review 4957791980 finding #1: re-confirming Armed for an already-owned, already-
-                // valid helper is still a commit point -- a disable/suspend/shutdown request that
-                // became pending after this reconcile started (and is still waiting for the gate)
-                // must never be papered over by simply re-confirming the old Armed state.
-                if (IsHighPriorityRequestPending)
+                // Review 4958332345: re-confirming Armed for an already-owned, already-valid helper
+                // is still a commit point, sharing the SAME atomic linearization primitive as the
+                // fresh-arm commit in AttemptArm -- a disable/suspend/shutdown request that wins
+                // _requestBoundarySync first must never be papered over by simply re-confirming the
+                // old Armed state.
+                if (!TryCommitArmedState())
                 {
                     var disarmedPending = DisarmOwnedHelperForFailOpen();
                     _lastReason = disarmedPending ? "HighPriorityRequestPendingDuringArmedConfirm:Disarmed" : "HighPriorityRequestPendingDuringArmedConfirm:DisarmCleanupUnconfirmed";
                     SetState(CenterMOem1LifecycleState.FaultedNative);
-                    AppLog.Warn("CenterM.Oem1", "A disable/suspend/shutdown request became pending while re-confirming an already-valid Armed helper; disarm attempted, Armed never re-committed.", null, ("Disarmed", disarmedPending));
+                    AppLog.Warn("CenterM.Oem1", "A high-priority request won the request boundary while re-confirming an already-valid Armed helper; disarm attempted, Armed never re-committed.", null, ("Disarmed", disarmedPending));
                     return;
                 }
-                SetState(CenterMOem1LifecycleState.Armed);
                 return;
             }
 
@@ -898,16 +938,24 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         // Start was even entered) and a helper could still be newly created. If it already changed,
         // nothing has been created yet, so there is nothing to clean up.
         //
-        // Review 4957791980 finding #1 (BLOCKER): the epoch-delta check alone is not enough -- a
-        // request that bumped the epoch and is still waiting for the gate is invisible to a delta
-        // check taken entirely after that bump (epochAtStart already reflects it as the "clean"
-        // baseline). IsHighPriorityRequestPending is checked independently of the epoch delta for
-        // exactly this reason.
-        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart || IsHighPriorityRequestPending)
+        // Review 4958332345 (BLOCKER): replaces the prior bare IsHighPriorityRequestPending
+        // check-then-act read with a genuine linearization decision under _requestBoundarySync.
+        // TryLinearizeOrdinaryMutationStart() makes "no high-priority request currently holds the
+        // boundary" and "helper Start is now beginning" a single atomic step, closing the window
+        // where BeginHighPriorityRequest() could win the race immediately after a separate check
+        // passed but strictly before Start was ever called. The epoch-delta check stays alongside it
+        // (never replaced by it) -- it still catches a distinct case the boundary lock alone cannot:
+        // an epoch bump with no lingering pending marker, e.g. a caller-driven epoch bump (test-only
+        // seam) or, in principle, a request whose entire begin/end lifecycle happened not to overlap
+        // this exact instant.
+        if (TestOnly_BeforeHelperStartLinearization is { } beforeStartHook)
+            await beforeStartHook().ConfigureAwait(false);
+
+        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart || !TryLinearizeOrdinaryMutationStart())
         {
             _lastReason = "SuspendRequestedDuringArmBeforeStart";
             SetState(CenterMOem1LifecycleState.NeedsSetup);
-            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request is pending (suspend/disable/shutdown) before helper Start was ever entered; no helper created, Armed never committed.", null);
+            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request (suspend/disable/shutdown) won the request boundary before helper Start was ever entered; no helper created, Armed never committed.", null);
             return;
         }
 
@@ -950,21 +998,28 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         var invariant = CenterMHelperInvariant.Evaluate(fresh, _helperOwnership.ProcessId!.Value);
         if (invariant == CenterMHelperInvariantState.Valid)
         {
-            // Review 4957791980 finding #1 (second bullet): the final linearization point. A
-            // suspend/disable/shutdown request that became pending during the fresh post-start
-            // invariant capture above must still be caught here, immediately before ever committing
-            // Armed -- this is the last checkpoint before publication.
-            if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart || IsHighPriorityRequestPending)
+            // Review 4958332345 (BLOCKER): the final linearization point, replacing the prior
+            // epoch-delta + IsHighPriorityRequestPending check-then-act read. TryCommitArmedState()
+            // performs the "no high-priority request holds the boundary" check and the Armed
+            // publication itself under the SAME _requestBoundarySync lock, so a disable/suspend/
+            // shutdown request can never win the boundary in the gap between the check and
+            // SetState(Armed) -- there is no such gap anymore. State publication is cheap (no I/O,
+            // no native calls), so doing it inside the lock is safe; only the (possibly slow) cleanup
+            // below runs outside it. As with the pre-Start check, the epoch check is intentionally
+            // dropped: AttemptArm holds _gate throughout, so any request that bumped the epoch must
+            // still be waiting on _gate (and therefore still counted by _requestBoundarySync) here.
+            if (TestOnly_BeforeArmedCommitLinearization is { } beforeCommitHook)
+                await beforeCommitHook().ConfigureAwait(false);
+
+            if (!TryCommitArmedState())
             {
                 var cleanedAtCommit = _helperOwnership.Stop(_helperStopTimeout);
                 _lastReason = cleanedAtCommit ? "SuspendRequestedDuringArmCommit" : "SuspendRequestedDuringArmCommitCleanupUnconfirmed";
                 SetState(cleanedAtCommit ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
-                AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request became pending during the post-start invariant capture; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleanedAtCommit));
+                AppLog.Warn("CenterM.Oem1", "A high-priority request won the request boundary at the final Armed commit point; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleanedAtCommit));
                 return;
             }
 
-            _lastReason = "Armed";
-            SetState(CenterMOem1LifecycleState.Armed);
             return;
         }
 
@@ -1369,22 +1424,30 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     return;
                 }
 
-                // Review 4958174221 (BLOCKER): RefreshSuppressionPrerequisites() itself performs
+                // Review 4958332345 (BLOCKER): RefreshSuppressionPrerequisites() itself performs
                 // several externally-observed operations (environment eligibility, AutoRun, Launcher/
                 // Server capture) and can legitimately take real time. A disable/suspend/shutdown
-                // request can become request-time-authoritative (BeginHighPriorityRequest + epoch
-                // bump) WHILE that refresh is in flight and then sit waiting for _gate -- invisible to
-                // the IsHighPriorityRequestPending check earlier in this method (which ran strictly
-                // before the refresh started) and invisible to the refresh's own return value (which
-                // only reflects OEM1 environment validity, not lifecycle authority). Re-check the
-                // request-time barrier AGAIN here, immediately before ever entering
-                // CompleteDebounceCore/SafeMainUiTerminator -- this is the final destructive
-                // linearization point for this debounce. This is additive to, never a replacement for,
-                // SafeMainUiTerminator's own fresh retained-handle/window/topology checks.
-                if (IsHighPriorityRequestPending)
+                // request can become request-time-authoritative (BeginHighPriorityRequest) WHILE that
+                // refresh is in flight and then sit waiting for _gate -- invisible to the earlier
+                // check in this method (which ran strictly before the refresh started) and invisible
+                // to the refresh's own return value (which only reflects OEM1 environment validity,
+                // not lifecycle authority). This is the final destructive linearization point for this
+                // debounce: TryLinearizeOrdinaryMutationStart() makes the "no high-priority request
+                // holds the boundary" decision and "destructive termination is now beginning" decision
+                // atomic under the same _requestBoundarySync lock used by the helper-arm sites, so a
+                // request can never win the boundary in the gap between a separate check and entering
+                // CompleteDebounceCore. The lock itself is held only for the brief decision -- never
+                // across CompleteDebounceCore/SafeMainUiTerminator.TryTerminate/TerminateProcess/
+                // WaitForExit, which can legitimately take real time. This check is additive to, never
+                // a replacement for, SafeMainUiTerminator's own fresh retained-handle/window/topology
+                // checks.
+                if (TestOnly_BeforeTerminationLinearization is { } beforeTerminationHook)
+                    await beforeTerminationHook().ConfigureAwait(false);
+
+                if (!TryLinearizeOrdinaryMutationStart())
                 {
-                    _lastReason = "HighPriorityRequestPendingAfterPrerequisiteRefresh";
-                    AppLog.Warn("CenterM.Oem1", "A disable/suspend/shutdown request became pending during the prerequisite refresh; termination refused, tracked real MainUI left intact.", null, ("ProcessId", tracked.ProcessId));
+                    _lastReason = "HighPriorityRequestWonTerminationBoundary";
+                    AppLog.Warn("CenterM.Oem1", "A high-priority request won the request boundary immediately before destructive MainUI termination; termination refused, tracked real MainUI left intact.", null, ("ProcessId", tracked.ProcessId));
                     SetState(CenterMOem1LifecycleState.NativeMainUiActive);
                     return;
                 }
@@ -1457,24 +1520,77 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     private void BumpLifecycleEpoch() => Interlocked.Increment(ref _lifecycleEpoch);
 
-    /// <summary>Review 4957791980 finding #1: marks a disable/suspend/shutdown request as pending,
-    /// BEFORE that request ever waits on <see cref="_gate"/>. Must be paired with exactly one
-    /// <see cref="EndHighPriorityRequest"/> regardless of outcome (success, early return, or an
-    /// exception/cancellation while waiting for the gate).</summary>
-    private void BeginHighPriorityRequest() => Interlocked.Increment(ref _pendingHighPriorityRequests);
+    /// <summary>Review 4957791980 finding #1 (extended by review 4958332345): marks a disable/
+    /// suspend/shutdown request as pending, BEFORE that request ever waits on <see cref="_gate"/>.
+    /// Must be paired with exactly one <see cref="EndHighPriorityRequest"/> regardless of outcome
+    /// (success, early return, or an exception/cancellation while waiting for the gate). Now
+    /// synchronized via <see cref="_requestBoundarySync"/> (not a bare Interlocked increment) so it
+    /// participates in the same atomic ordering as <see cref="TryLinearizeOrdinaryMutationStart"/>
+    /// and <see cref="TryCommitArmedState"/> -- the increment and a concurrent linearization decision
+    /// can never interleave.</summary>
+    private void BeginHighPriorityRequest()
+    {
+        lock (_requestBoundarySync) { _pendingHighPriorityRequests++; }
+    }
 
     /// <summary>Review 4957791980 finding #1: retires a request marked pending by
     /// <see cref="BeginHighPriorityRequest"/>. Deliberately not tied to the exact moment the
     /// authoritative flag (<c>_desiredEnabled</c>/<c>_suspended</c>/<c>_shutdown</c>) is committed --
     /// holding the marker slightly longer (through the rest of that call's own gate-held work) is
-    /// always safe, only ever making a concurrent arm-committing path more conservative, never less.</summary>
-    private void EndHighPriorityRequest() => Interlocked.Decrement(ref _pendingHighPriorityRequests);
+    /// always safe, only ever making a concurrent arm-committing path more conservative, never less.
+    /// Held only briefly under <see cref="_requestBoundarySync"/>, never across an await.</summary>
+    private void EndHighPriorityRequest()
+    {
+        lock (_requestBoundarySync) { _pendingHighPriorityRequests--; }
+    }
 
     /// <summary>Review 4957791980 finding #1: true while at least one disable/suspend/shutdown
     /// request has bumped its request-time marker but has not yet finished running under
-    /// <see cref="_gate"/>. Checked by every arm-committing path in addition to (never instead of)
-    /// the existing epoch-delta check.</summary>
-    private bool IsHighPriorityRequestPending => Interlocked.CompareExchange(ref _pendingHighPriorityRequests, 0, 0) != 0;
+    /// <see cref="_gate"/>. Retained as a plain observational read for the sites that were not
+    /// converted to a linearization call in review 4958332345 (the post-Start / post-invariant-
+    /// capture checks inside <see cref="AttemptArm"/>, and the debounce/observation checks that run
+    /// well before the final destructive decision) -- those sites still have a genuine follow-up
+    /// checkpoint later in the same method that performs the actual linearized decision, so an
+    /// ordinary synchronized read here is sufficient and keeps those call sites unchanged.</summary>
+    private bool IsHighPriorityRequestPending
+    {
+        get { lock (_requestBoundarySync) { return _pendingHighPriorityRequests != 0; } }
+    }
+
+    /// <summary>Review 4958332345 (BLOCKER): the shared linearization point for an ordinary/
+    /// destructive mutation's "operation start" -- helper Start (site 1) and real-MainUI termination
+    /// (site 3). Returns <see langword="true"/> only if no high-priority request currently holds
+    /// <see cref="_requestBoundarySync"/> with a pending count, and this successful return IS the
+    /// documented linearization point at which the caller's operation has begun: a high-priority
+    /// request that wins the lock first (via <see cref="BeginHighPriorityRequest"/>) makes this
+    /// return <see langword="false"/>; a request that only acquires the lock after this method
+    /// already returned <see langword="true"/> is ordered strictly after an already-started
+    /// operation. Only ever held for this single comparison -- never across an await or a native
+    /// call.</summary>
+    private bool TryLinearizeOrdinaryMutationStart()
+    {
+        lock (_requestBoundarySync) { return _pendingHighPriorityRequests == 0; }
+    }
+
+    /// <summary>Review 4958332345 (BLOCKER): the shared linearization point for the final Armed
+    /// state publication (site 2), used by both a fresh arm (<see cref="AttemptArm"/>) and the
+    /// steady-state "re-confirm an already-valid Armed helper" branch in <see cref="ReconcileCore"/>.
+    /// State publication itself is cheap (no I/O, no native calls), so the check and the
+    /// <see cref="SetState"/> call happen atomically under the SAME lock instead of as two separate
+    /// steps -- there is no gap in which a high-priority request could win the boundary between them.
+    /// Returns <see langword="false"/> without publishing Armed when a high-priority request already
+    /// holds the boundary; the caller is then responsible for the (possibly slow) helper cleanup,
+    /// which must run outside this lock.</summary>
+    private bool TryCommitArmedState()
+    {
+        lock (_requestBoundarySync)
+        {
+            if (_pendingHighPriorityRequests != 0) return false;
+            _lastReason = "Armed";
+            SetState(CenterMOem1LifecycleState.Armed);
+            return true;
+        }
+    }
 
     private void SetState(CenterMOem1LifecycleState next)
     {

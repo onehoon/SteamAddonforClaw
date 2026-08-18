@@ -2471,6 +2471,109 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     // ============================================================
+    // Review 4958332345 (BLOCKER): IsHighPriorityRequestPending checks at the three remaining
+    // commit points were still check-then-act (TOCTOU) races, because the read was never
+    // synchronized with BeginHighPriorityRequest's atomic increment via any shared ordering
+    // primitive. Each test below parks execution deterministically (via a test-only hook) right
+    // before the shared linearization call at one of the three sites, starts a REAL competing
+    // QuiesceForSuspendAsync from inside that hook, and proves it wins the request boundary --
+    // relying only on the fact that QuiesceForSuspendAsync's synchronous BeginHighPriorityRequest
+    // prefix always runs to completion before its first await (_gate.WaitAsync, which cannot
+    // complete synchronously here because the coordinator method under test still holds _gate
+    // throughout). No real timing race in any of these tests.
+    // ============================================================
+
+    [Fact]
+    public async Task AttemptArm_HighPriorityRequestWinsBoundaryImmediatelyBeforeHelperStart_StartNeverCalled()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        Task? suspendTask = null;
+        coordinator.TestOnly_BeforeHelperStartLinearization = () =>
+        {
+            suspendTask = coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+            return Task.CompletedTask;
+        };
+
+        await coordinator.SetDesiredEnabledAsync(true);
+        // Clear the hook immediately -- it must fire exactly once for this test's single race. Left
+        // set, it would fire again during the resume reconcile below and spawn a second, unwanted
+        // suspend request that would never let the world re-arm.
+        coordinator.TestOnly_BeforeHelperStartLinearization = null;
+        Assert.NotNull(suspendTask);
+        await suspendTask!.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.Equal(0, h.HelperApi.StartCallCount); // Start must never even be called
+        Assert.False(h.HelperOwnership.IsOwned);
+
+        // Suspend did win the boundary and commit _suspended -- proven by the barrier blocking a
+        // further reconcile until resume, matching the equivalent epoch-based race test above.
+        await coordinator.ReconcileAsync("post-race-reconcile-while-suspended");
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+        await coordinator.ReconcileAfterResumeAsync();
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+    }
+
+    [Fact]
+    public async Task AttemptArm_HighPriorityRequestWinsBoundaryImmediatelyBeforeArmedCommit_ArmedNeverPublished_HelperCleanedUp()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        Task? suspendTask = null;
+        coordinator.TestOnly_BeforeArmedCommitLinearization = () =>
+        {
+            suspendTask = coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+            return Task.CompletedTask;
+        };
+
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.NotNull(suspendTask);
+        await suspendTask!.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var snap = coordinator.GetSnapshot();
+        // Armed must never have been published -- the helper was created (Start succeeded, the
+        // post-start checks passed) but the request won the boundary at the final commit point, so
+        // exact-helper cleanup must have run and the state must reflect that cleanup's outcome.
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.True(snap.State is CenterMOem1LifecycleState.NeedsSetup or CenterMOem1LifecycleState.FaultedNative);
+        Assert.Equal(1, h.HelperApi.StartCallCount); // the helper WAS created before the request won
+        Assert.False(h.HelperOwnership.IsOwned); // ...but cleaned up, never left running
+    }
+
+    [Fact]
+    public async Task DebounceContinuation_HighPriorityRequestWinsBoundaryImmediatelyBeforeTermination_RefusesTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        Task? suspendTask = null;
+        coordinator.TestOnly_BeforeTerminationLinearization = () =>
+        {
+            suspendTask = coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+            return Task.CompletedTask;
+        };
+
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+        Assert.NotNull(suspendTask);
+        await suspendTask!.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Termination was refused -- the real MainUI was never terminated, and it remains tracked/
+        // passive rather than the debounce having actually invoked the terminator.
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+    }
+
+    // ============================================================
     // Review 4957507443, finding #3 (MAJOR): DisposeAsync must drain the fire-and-forget debounce
     // continuation before disposing the gate.
     // ============================================================
