@@ -328,14 +328,21 @@ internal sealed class CenterMMainUiRoutingRetirement
             if (snapshot is null) return new(MainUiHideWaitStatus.Uncertain, null);
 
             // Capture is synchronous but not instantaneous -- re-check the deadline before trusting
-            // this snapshot as a fresh, in-budget observation.
-            if (Stopwatch.GetElapsedTime(started) >= _minimizeWaitTimeout)
+            // this snapshot as a fresh, in-budget observation. Take ONE sample here and reuse it for
+            // both this check and the remaining-budget delay calculation below: sampling Stopwatch
+            // separately for each would leave a TOCTOU gap where a proven-in-budget capture could
+            // still end up with a negative "remaining" by the time the delay is computed, which
+            // would throw out of Task.Delay instead of deterministically timing out.
+            var elapsedAfterCapture = Stopwatch.GetElapsedTime(started);
+            if (elapsedAfterCapture >= _minimizeWaitTimeout)
                 return new(MainUiHideWaitStatus.TimedOut, snapshot);
 
             if (!snapshot.Value.ProcessAlive) return new(MainUiHideWaitStatus.Exited, snapshot);
             if (snapshot.Value.VisibleMainWindowCount == 0) return new(MainUiHideWaitStatus.Hidden, snapshot);
 
-            var remaining = _minimizeWaitTimeout - Stopwatch.GetElapsedTime(started);
+            var remaining = _minimizeWaitTimeout - elapsedAfterCapture;
+            if (remaining <= TimeSpan.Zero) return new(MainUiHideWaitStatus.TimedOut, snapshot);
+
             var delay = remaining < _minimizeWaitPollInterval ? remaining : _minimizeWaitPollInterval;
             await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         }
