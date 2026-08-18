@@ -131,6 +131,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         /// request becoming authoritative while an arm is already in flight, deterministically and
         /// without any real timing race.</summary>
         internal Action? OnCreateSuspendedCalled { get; set; }
+        internal Action? OnPollLivenessCalled { get; set; }
 
         public bool TryCreateSuspended(string imagePath, out int processId, out SafeProcessHandle? processHandle, out SafeHandle? threadHandle, out int win32Error)
         {
@@ -167,6 +168,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         public LiveProcessProbeStatus PollLiveness(SafeProcessHandle processHandle)
         {
             PollLivenessCallCount++;
+            OnPollLivenessCalled?.Invoke();
             return LivenessResult;
         }
 
@@ -474,6 +476,41 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         // Retired ownership triggers a fresh reconcile which re-arms since the world is clean.
         Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
         Assert.Equal(2, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task TimedOutSuspendDuringHelperLivenessExit_RetiresOwnershipAndDefersRearmUntilResume()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        using var suspendCts = new CancellationTokenSource();
+        Task? suspendTask = null;
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+        h.HelperApi.OnPollLivenessCalled = () =>
+        {
+            suspendTask = coordinator.QuiesceForSuspendAsync(
+                DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, suspendCts.Token);
+            suspendCts.Cancel();
+            Assert.ThrowsAny<OperationCanceledException>(() => suspendTask!.GetAwaiter().GetResult());
+        };
+
+        await coordinator.PollHelperLivenessAsync();
+
+        Assert.NotNull(suspendTask);
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+        Assert.False(h.HelperOwnership.IsOwned);
+
+        h.HelperApi.OnPollLivenessCalled = null;
+        await coordinator.ReconcileAsync("after timed-out helper liveness");
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        await coordinator.ReconcileAfterResumeAsync();
+        Assert.Equal(2, h.HelperApi.StartCallCount);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
     }
 
     [Fact]
