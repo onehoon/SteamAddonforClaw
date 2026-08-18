@@ -43,6 +43,8 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
         }
     }
 
+    internal void InvalidatePhysicalSession() => _transport.InvalidatePhysicalSession();
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0) _transport.Dispose();

@@ -21,8 +21,9 @@ namespace SteamInputAddonforClaw.Devices.Abstractions;
 ///
 /// <para>
 /// The composition owns the backend resources represented by these views. <see cref="Stages"/>,
-/// <see cref="ControllerStateSource"/>, <see cref="SessionBoundaryParticipants"/>, and
-/// <see cref="SafetySession"/> are borrowed references into resources the composition created and
+/// <see cref="ControllerStateSource"/>, <see cref="SessionBoundaryParticipants"/>,
+/// <see cref="SafetySession"/>, and <see cref="PhysicalRumbleSink"/> are borrowed references into
+/// resources the composition created and
 /// must not be disposed independently by consumers. <see cref="IAsyncDisposable.DisposeAsync"/>
 /// releases those backend-owned resources; callers must dispose the composition only after
 /// routing and power orchestration built on top of it have already been stopped.

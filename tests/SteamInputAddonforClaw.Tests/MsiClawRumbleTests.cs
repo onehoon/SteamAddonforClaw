@@ -61,6 +61,18 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Transport_reopens_same_path_after_physical_session_retirement()
+    {
+        var native = new FakeNativeHid();
+        using var transport = new WindowsMsiClawRumbleTransport(native);
+        var packet = new byte[11];
+        Assert.True(transport.Write("path-a", packet).Succeeded);
+        transport.InvalidatePhysicalSession();
+        Assert.True(transport.Write("path-a", packet).Succeeded);
+        Assert.Equal(2, native.OpenCount);
+    }
+
+    [Fact]
     public void Transport_rejects_non_11_byte_packets_before_native_io_and_reopens_after_partial_write()
     {
         var native = new FakeNativeHid();
@@ -92,12 +104,39 @@ public sealed class MsiClawRumbleTests
         using var transport = new WindowsMsiClawRumbleTransport(native);
         var first = Task.Run(() => transport.Write("path-a", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
         await native.FirstWriteEntered.Task;
+        var secondRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        transport.WriteRequested = () => secondRequested.TrySetResult();
+        // The request signal is installed before a second request so the test positively observes
+        // that B reached the transport boundary while A is still inside native Write.
         var second = Task.Run(() => transport.Write("path-a", [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        await secondRequested.Task;
         Assert.Equal(1, native.WriteCalls);
         native.ReleaseFirstWrite.Set();
         Assert.True((await first).Succeeded);
         Assert.True((await second).Succeeded);
         Assert.Equal([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], native.Writes);
+    }
+
+    [Fact]
+    public void Sink_maps_transport_failures_and_exceptions_to_generic_failed_result()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "USB\\VID_0DB0&PID_1902"));
+        var transport = new FakeTransport { Result = new(false, "OpenFailed", 5) };
+        using var sink = new MsiClawRumbleSink(identity, transport);
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        transport.Result = new(false, "PartialWrite");
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        transport.Exception = new IOException("test");
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+    }
+
+    [Fact]
+    public void Sink_rejects_empty_identity_path_without_transport_call()
+    {
+        var transport = new FakeTransport();
+        using var sink = new MsiClawRumbleSink(new FakeIdentity(new(Guid.NewGuid(), "", "PNP", "USB\\VID_0DB0&PID_1902")), transport);
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Empty(transport.Packets);
     }
 
     private sealed class FakeIdentity(MsiClawPhysicalInputIdentity? identity) : IMsiClawPhysicalInputIdentityProvider
@@ -109,8 +148,11 @@ public sealed class MsiClawRumbleTests
     private sealed class FakeTransport : IMsiClawRumbleTransport
     {
         public List<byte[]> Packets { get; } = [];
-        public MsiClawRumbleTransportResult Write(string _, ReadOnlySpan<byte> packet) { Packets.Add(packet.ToArray()); return new(true, "OK"); }
+        public MsiClawRumbleTransportResult Result { get; set; } = new(true, "OK");
+        public Exception? Exception { get; set; }
+        public MsiClawRumbleTransportResult Write(string _, ReadOnlySpan<byte> packet) { if (Exception is not null) throw Exception; Packets.Add(packet.ToArray()); return Result; }
         public void Dispose() { }
+        public void InvalidatePhysicalSession() { }
     }
 
     private sealed class FakeNativeHid : IMsiClawNativeHidApi

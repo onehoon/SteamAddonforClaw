@@ -6,6 +6,7 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiClawPhysicalInputIdentityProvider
 {
+    internal event Action? PhysicalSessionRetired;
     private readonly Func<IDirectInputDeviceEnumerator> _enumeratorFactory;
     private readonly IMsiClawPreparedInputSource _inputSource;
     private readonly Lock _sync = new();
@@ -138,6 +139,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
             _ownsInputSession = false;
             _currentIdentity = null;
         }
+        PhysicalSessionRetired?.Invoke();
         return RoutingStageOperationResult.Success("Stopped");
     }
 }

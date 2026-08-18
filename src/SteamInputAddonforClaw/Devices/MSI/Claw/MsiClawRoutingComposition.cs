@@ -69,6 +69,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             () => Environment.ProcessPath);
 
         PhysicalRumbleSink = new MsiClawRumbleSink(PhysicalInputStage, new WindowsMsiClawRumbleTransport());
+        PhysicalInputStage.PhysicalSessionRetired += PhysicalRumbleSink.InvalidatePhysicalSession;
 
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage];
         _sessionBoundaryParticipants = [NativeModeSession];
@@ -85,6 +86,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     public async ValueTask DisposeAsync()
     {
+        PhysicalInputStage.PhysicalSessionRetired -= PhysicalRumbleSink.InvalidatePhysicalSession;
         PhysicalRumbleSink.Dispose();
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);

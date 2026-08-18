@@ -9,6 +9,7 @@ internal readonly record struct MsiClawRumbleTransportResult(bool Succeeded, str
 internal interface IMsiClawRumbleTransport : IDisposable
 {
     MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> packet);
+    void InvalidatePhysicalSession();
 }
 
 internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
@@ -19,10 +20,13 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
     private string? _devicePath;
     private bool _disposed;
 
+    internal Action? WriteRequested { get; set; }
+
     internal WindowsMsiClawRumbleTransport(IMsiClawNativeHidApi? api = null) => _api = api ?? new WindowsMsiClawNativeHidApi();
 
     public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> packet)
     {
+        WriteRequested?.Invoke();
         lock (_sync)
         {
             if (_disposed) return new(false, "Disposed");
@@ -61,6 +65,12 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
 
             return new(true, "OK", 0, Stopwatch.GetElapsedTime(writeStarted).TotalMilliseconds);
         }
+    }
+
+    public void InvalidatePhysicalSession()
+    {
+        lock (_sync)
+            CloseHandleLocked();
     }
 
     public void Dispose()
