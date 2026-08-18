@@ -200,6 +200,8 @@ The active routing pipeline preserves these boundaries:
 - routing epochs gate final state commits;
 - startup and resume use live current-world state;
 - publisher faults request runtime fail-closed reconciliation;
+- unexpected loss of the owned physical-input session while routing is
+  active -> stop routing / fail closed;
 - teardown is retry-safe and never silently selects another output.
 
 Stale previous-process Steam Deck virtual-output journal evidence is retired
