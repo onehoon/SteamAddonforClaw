@@ -36,6 +36,22 @@ public sealed class RumbleV1Tests
     }
 
     [Fact]
+    public void Decoder_CoversNormalizedMinimumAndIndependentMotorBoundaries()
+    {
+        static byte[] Packet(ushort left, ushort right, byte size = 9)
+            => [0xEB, size, 0, 0, 0, (byte)left, (byte)(left >> 8), (byte)right, (byte)(right >> 8), 2, 0];
+
+        Assert.Equal(TwoMotorRumble.Stopped, SteamDeckRumbleDecoder.Decode(Packet(0, 0)).Rumble);
+        Assert.Equal(new TwoMotorRumble(ushort.MaxValue, ushort.MaxValue), SteamDeckRumbleDecoder.Decode(Packet(ushort.MaxValue, ushort.MaxValue)).Rumble);
+        Assert.Equal(new TwoMotorRumble(0x1234, 0), SteamDeckRumbleDecoder.Decode(Packet(0x1234, 0)).Rumble);
+        Assert.Equal(new TwoMotorRumble(0, 0x5678), SteamDeckRumbleDecoder.Decode(Packet(0, 0x5678)).Rumble);
+        Assert.Equal(SteamDeckFeedbackCommand.Rumble, SteamDeckRumbleDecoder.Decode(Packet(1, 2)).Command);
+        Assert.Equal(SteamDeckFeedbackCommand.Malformed, SteamDeckRumbleDecoder.Decode(Packet(1, 2)[..10]).Command);
+        Assert.Equal(SteamDeckFeedbackCommand.Malformed, SteamDeckRumbleDecoder.Decode(Packet(1, 2, 8)).Command);
+        Assert.Equal(SteamDeckFeedbackCommand.Malformed, SteamDeckRumbleDecoder.Decode([]).Command);
+    }
+
+    [Fact]
     public void Authority_RejectsStaleAndWrongSourceTokensAcrossRevokeAndReacquire()
     {
         var authority = new FeedbackAuthority();
@@ -62,5 +78,21 @@ public sealed class RumbleV1Tests
             return authority.IsCurrent(token);
         }));
         Assert.DoesNotContain(true, await Task.WhenAll(tasks));
+    }
+
+    [Fact]
+    public async Task Authority_RevokeAndDrainWaitsForAdmittedLeaseBeforeReturning()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        Assert.True(authority.TryAcquireLease(token, out var lease));
+        using var admitted = lease!;
+        var revoked = Task.Run(() => authority.RevokeAndDrain());
+
+        await Task.Delay(20);
+        Assert.False(revoked.IsCompleted);
+        admitted.Dispose();
+        await revoked;
+        Assert.False(authority.TryAcquireLease(token, out _));
     }
 }
