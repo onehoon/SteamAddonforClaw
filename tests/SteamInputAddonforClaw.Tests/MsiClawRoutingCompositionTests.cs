@@ -1,4 +1,7 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Threading;
+using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.CenterM;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.Abstractions;
@@ -73,7 +76,7 @@ public sealed class MsiClawRoutingCompositionTests
     }
 
     [Fact]
-    public async Task DisposeAsync_disarms_the_guard_if_it_was_left_armed()
+    public async Task DisposeAsync_disarms_the_guard_even_when_arm_never_ran()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
         var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
@@ -81,8 +84,8 @@ public sealed class MsiClawRoutingCompositionTests
             processSnapshotSource: new AlwaysEmptySnapshotSource(),
             stager: _ => null);
         // Staging is forced to fail so this never touches a real DirectInput/Win32 helper -- the
-        // point of this test is only that a still-armed guard's Dispose path is reachable and
-        // idempotent-safe, not the arm sequence itself (covered by CenterMMainUiRoutingGuardTests).
+        // point of this test is only that the unarmed/never-attempted Dispose path is reachable
+        // and idempotent-safe, not the arm sequence itself (covered by CenterMMainUiRoutingGuardTests).
         var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), centerMGuard: guard);
 
         var exception = await Record.ExceptionAsync(async () => await ((IAsyncDisposable)composition).DisposeAsync());
@@ -90,9 +93,96 @@ public sealed class MsiClawRoutingCompositionTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public async Task DisposeAsync_disposes_native_mode_before_disarming_the_guard()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        var terminateBlocker = new ManualResetEventSlim(false);
+        var helperApi = new BlockingTerminateHelperApi(terminateBlocker);
+        var guard = new CenterMMainUiRoutingGuard(
+            // First call (before helper start) sees no same-name process; the second (post-mutex
+            // invariant re-check) sees exactly the owned helper's fixed PID.
+            processSnapshotSource: new SequencedSnapshotSource([[], [new ProcessSnapshotEntry(7777, "MSI Center M", null)]]),
+            helperOwnership: new CenterMHelperOwnership(helperApi),
+            mutexOwnership: new CenterMMainUiMutexOwnership(new NoOpMutexFactory()),
+            stager: _ => @"C:\fake\MSI Center M.exe");
+        var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), centerMGuard: guard);
+
+        Assert.True(await composition.NativeModeSession.ObserveRoutingDecisionAsync(new RoutingDecision(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible), 1));
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ArmAsync());
+
+        var disposing = ((IAsyncDisposable)composition).DisposeAsync().AsTask();
+
+        Assert.True(helperApi.TerminateEntered.Wait(TimeSpan.FromSeconds(5)));
+        // The guard's helper-stop (inside DisarmAsync) is still in flight here -- if DisposeAsync's
+        // ordering is correct, NativeModeSession.DisposeAsync must have already run to completion
+        // before DisarmAsync was ever reached.
+        Assert.False(composition.NativeModeSession.IsActive);
+
+        terminateBlocker.Set();
+        await disposing;
+    }
+
+    /// <summary>Always succeeds except <see cref="TryTerminate"/>, which blocks on the supplied
+    /// signal so a test can observe composition-disposal state while the guard's helper-stop is
+    /// still in flight.</summary>
+    private sealed class BlockingTerminateHelperApi(ManualResetEventSlim terminateBlocker) : IHelperProcessNativeApi
+    {
+        internal ManualResetEventSlim TerminateEntered { get; } = new(false);
+
+        public bool TryCreateSuspended(string imagePath, out int processId, out SafeProcessHandle? processHandle, out SafeHandle? threadHandle, out int win32Error)
+        {
+            win32Error = 0;
+            processId = 7777;
+            processHandle = new SafeProcessHandle(GetCurrentProcessHandle(), false);
+            threadHandle = new SafeFileHandle(GetCurrentProcessHandle(), false);
+            return true;
+        }
+
+        public bool TryCreateJobObject(out SafeHandle? jobHandle, out int win32Error)
+        {
+            win32Error = 0;
+            jobHandle = new SafeFileHandle(GetCurrentProcessHandle(), false);
+            return true;
+        }
+
+        public bool TrySetKillOnJobClose(SafeHandle jobHandle, out int win32Error) { win32Error = 0; return true; }
+        public bool TryAssignProcessToJob(SafeHandle jobHandle, SafeProcessHandle processHandle, out int win32Error) { win32Error = 0; return true; }
+        public bool TryResumeThread(SafeHandle threadHandle, out int win32Error) { win32Error = 0; return true; }
+
+        public bool TryTerminate(SafeProcessHandle processHandle, out int win32Error)
+        {
+            TerminateEntered.Set();
+            terminateBlocker.Wait(TimeSpan.FromSeconds(10));
+            win32Error = 0;
+            return true;
+        }
+
+        public bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout) => true;
+        public LiveProcessProbeStatus PollLiveness(SafeProcessHandle processHandle) => LiveProcessProbeStatus.Alive;
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+        private static IntPtr GetCurrentProcessHandle() => GetCurrentProcess();
+    }
+
+    private sealed class NoOpMutexFactory : ICenterMMainUiMutexFactory
+    {
+        public (ICenterMMainUiMutexHandle Handle, bool CreatedNew) Create(string name) => (new Handle(), true);
+        private sealed class Handle : ICenterMMainUiMutexHandle { public void Dispose() { } }
+    }
+
     private sealed class AlwaysEmptySnapshotSource : IProcessSnapshotSource
     {
         public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName) => [];
+    }
+
+    private sealed class SequencedSnapshotSource(IEnumerable<IReadOnlyList<ProcessSnapshotEntry>> snapshots) : IProcessSnapshotSource
+    {
+        private readonly Queue<IReadOnlyList<ProcessSnapshotEntry>> _snapshots = new(snapshots);
+        public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName) =>
+            _snapshots.Count > 0 ? _snapshots.Dequeue() : [];
     }
 
     [Fact]

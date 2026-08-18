@@ -9,14 +9,15 @@ internal enum CenterMMainUiMutexAcquireResult
     Unavailable
 }
 
-/// <summary>Owned handle to a named OS mutex. Isolated behind this interface (rather than exposing
-/// <see cref="Mutex"/> directly) so tests can exercise <see cref="CenterMMainUiMutexOwnership"/>
+/// <summary>Owned handle to a named OS mutex object. Isolated behind this interface (rather than
+/// exposing <see cref="Mutex"/> directly) so tests can exercise <see cref="CenterMMainUiMutexOwnership"/>
 /// without creating a real, globally named OS mutex that could collide across parallel CI runs or
-/// with a real MSI Center M MainUI on the test machine.</summary>
-internal interface ICenterMMainUiMutexHandle : IDisposable
-{
-    void ReleaseMutex();
-}
+/// with a real MSI Center M MainUI on the test machine. Deliberately has no
+/// <c>ReleaseMutex()</c>/synchronization-ownership members: the guard exploits only the real
+/// MainUI's duplicate-instance *creation* check (<c>createdNew == false</c>), never actual mutex
+/// wait/signal semantics, so the routing lifetime is represented purely by keeping this handle
+/// (and the kernel object it references) alive -- see <see cref="Win32CenterMMainUiMutexFactory"/>.</summary>
+internal interface ICenterMMainUiMutexHandle : IDisposable;
 
 /// <summary>Creates (never opens/steals) a named mutex, reporting whether this call was the one
 /// that actually created the underlying kernel object.</summary>
@@ -29,23 +30,18 @@ internal sealed class Win32CenterMMainUiMutexFactory : ICenterMMainUiMutexFactor
 {
     public (ICenterMMainUiMutexHandle Handle, bool CreatedNew) Create(string name)
     {
-        var mutex = new Mutex(initiallyOwned: true, name, out var createdNew);
+        // initiallyOwned: false deliberately. System.Threading.Mutex's initial-ownership grant (and
+        // ReleaseMutex) is thread-affine, but Arm/Disarm are not guaranteed to run on the same
+        // thread (async continuations, routing rollback, composition disposal). We only need the
+        // named kernel object to EXIST for the real MainUI's own duplicate-instance check
+        // (new Mutex(true, name, out createdNew)) to observe createdNew == false -- we never take
+        // or release synchronization ownership of it ourselves.
+        var mutex = new Mutex(initiallyOwned: false, name, out var createdNew);
         return (new RealHandle(mutex), createdNew);
     }
 
     private sealed class RealHandle(Mutex mutex) : ICenterMMainUiMutexHandle
     {
-        public void ReleaseMutex()
-        {
-            try { mutex.ReleaseMutex(); }
-            catch (ApplicationException)
-            {
-                // Not held by this thread (e.g. a prior release already ran) -- nothing further to
-                // release. Never treated as a failure: the goal (this thread no longer holds it) is
-                // already satisfied.
-            }
-        }
-
         public void Dispose() => mutex.Dispose();
     }
 }
@@ -106,13 +102,14 @@ internal sealed class CenterMMainUiMutexOwnership(ICenterMMainUiMutexFactory? fa
         }
     }
 
-    /// <summary>Idempotent: a no-op returning true when nothing is owned.</summary>
+    /// <summary>Idempotent: a no-op returning true when nothing is owned. Disposing the handle
+    /// (rather than any release/signal call) is the entire release operation -- see
+    /// <see cref="ICenterMMainUiMutexHandle"/>'s remarks.</summary>
     internal bool Release()
     {
         lock (_sync)
         {
             if (_handle is null) return true;
-            _handle.ReleaseMutex();
             _handle.Dispose();
             _handle = null;
             return true;

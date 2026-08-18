@@ -199,6 +199,66 @@ public sealed class CenterMMainUiRoutingGuardTests
         Assert.False(guard.IsArmed);
     }
 
+    [Fact]
+    public async Task Concurrent_arm_calls_serialize_and_produce_exactly_one_helper_and_mutex()
+    {
+        var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
+        var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+        var blocker = new ManualResetEventSlim(false);
+        var helperApi = new RecordingHelperApi { CreateSuspendedBlocker = blocker };
+        var mutexFactory = new FakeMutexFactory();
+        var guard = Create(snapshots, stager, helperApi, mutexFactory);
+
+        var armA = Task.Run(() => guard.ArmAsync());
+        Assert.True(helperApi.CreateSuspendedEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        var armB = Task.Run(() => guard.ArmAsync());
+        // B must be genuinely blocked behind A's still-in-flight transaction, not merely
+        // happening to run after it.
+        await Task.Delay(50);
+        Assert.False(armB.IsCompleted);
+
+        blocker.Set();
+        var resultA = await armA;
+        var resultB = await armB;
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, resultA);
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, resultB);
+        Assert.True(guard.IsArmed);
+        Assert.Equal(1, helperApi.Calls.Count(call => call == "CreateSuspended"));
+        Assert.Equal(1, mutexFactory.CreateCallCount);
+    }
+
+    [Fact]
+    public async Task Overlapping_disarm_never_races_an_in_flight_arm()
+    {
+        var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
+        var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+        var blocker = new ManualResetEventSlim(false);
+        var helperApi = new RecordingHelperApi { CreateSuspendedBlocker = blocker };
+        var mutexFactory = new FakeMutexFactory();
+        var guard = Create(snapshots, stager, helperApi, mutexFactory);
+
+        var arming = Task.Run(() => guard.ArmAsync());
+        Assert.True(helperApi.CreateSuspendedEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        var disarming = Task.Run(() => guard.DisarmAsync());
+        await Task.Delay(50);
+        Assert.False(disarming.IsCompleted);
+
+        blocker.Set();
+        var armResult = await arming;
+        var disarmResult = await disarming;
+
+        // Disarm was queued behind the already-in-flight Arm transaction, so it can only ever run
+        // to completion after Arm has already published (and then immediately retracted) Armed --
+        // never interleaved with it.
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, armResult);
+        Assert.True(disarmResult);
+        Assert.False(guard.IsArmed);
+        Assert.Contains("Terminate", helperApi.Calls);
+    }
+
     private static CenterMMainUiRoutingGuard Create(
         FakeSnapshotSource snapshots, FakeStager stager, RecordingHelperApi helperApi, FakeMutexFactory mutexFactory) =>
         new(
@@ -262,9 +322,18 @@ public sealed class CenterMMainUiRoutingGuardTests
         internal List<string> Calls { get; } = [];
         internal bool CreateSucceeds { get; init; } = true;
 
+        /// <summary>When set, the first <see cref="TryCreateSuspended"/> call signals
+        /// <see cref="CreateSuspendedEntered"/> and then blocks until this is released -- lets a
+        /// test deterministically prove a competing Arm/Disarm call is genuinely serialized behind
+        /// the guard's gate, not merely observed to "happen to" run second.</summary>
+        internal ManualResetEventSlim? CreateSuspendedBlocker { get; init; }
+        internal ManualResetEventSlim CreateSuspendedEntered { get; } = new(false);
+
         public bool TryCreateSuspended(string imagePath, out int processId, out SafeProcessHandle? processHandle, out SafeHandle? threadHandle, out int win32Error)
         {
             Calls.Add("CreateSuspended");
+            CreateSuspendedEntered.Set();
+            CreateSuspendedBlocker?.Wait(TimeSpan.FromSeconds(10));
             win32Error = 0;
             if (!CreateSucceeds) { processId = 0; processHandle = null; threadHandle = null; return false; }
             processId = FixedProcessId;

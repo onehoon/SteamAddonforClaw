@@ -1,3 +1,4 @@
+using System.Linq;
 using SteamInputAddonforClaw.CenterM;
 using Xunit;
 
@@ -103,11 +104,35 @@ public sealed class CenterMMainUiMutexOwnershipTests
         Assert.Equal(@"Local\MSI Center M.exe", CenterMMainUiMutexOwnership.MutexName);
     }
 
+    [Fact]
+    public void Production_factory_requests_the_named_mutex_without_thread_affine_initial_ownership()
+    {
+        // Regression guard for the thread-affinity hazard: System.Threading.Mutex's initial
+        // ownership grant (and ReleaseMutex) is thread-affine, but Arm/Disarm are not guaranteed to
+        // run on the same thread. The guard must only rely on the named object's *existence*
+        // (createdNew), never on holding/releasing synchronization ownership of it.
+        var factory = new Win32CenterMMainUiMutexFactory();
+        var name = "SteamInputAddonforClaw.Tests." + Guid.NewGuid().ToString("N");
+
+        var (handle, createdNew) = factory.Create(name);
+        try
+        {
+            Assert.True(createdNew);
+            // If production had requested initiallyOwned: true, this thread would hold the mutex;
+            // releasing from an unrelated thread would then throw ApplicationException. Since the
+            // handle type exposes no release/signal member at all, there is nothing here for this
+            // thread (or any other) to mis-release -- the type system itself rules the hazard out.
+            Assert.DoesNotContain(typeof(ICenterMMainUiMutexHandle).GetMethods(), method => method.Name.Contains("Release", StringComparison.Ordinal));
+        }
+        finally
+        {
+            handle.Dispose();
+        }
+    }
+
     private sealed class FakeHandle : ICenterMMainUiMutexHandle
     {
-        internal bool Released { get; private set; }
         internal bool Disposed { get; private set; }
-        public void ReleaseMutex() => Released = true;
         public void Dispose() => Disposed = true;
     }
 

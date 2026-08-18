@@ -156,13 +156,20 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         PhysicalInputStage.PhysicalSessionRetiring -= PhysicalRumbleSink.BeginPhysicalSessionRetirement;
         PhysicalInputStage.PhysicalSessionStarted -= PhysicalRumbleSink.BeginPhysicalSession;
         PhysicalRumbleSink.Dispose();
-        // Defensive only: normal routing rollback already disarms the guard (last in
-        // RoutingPipelineStageOrder.Rollback, after native/physical restoration) before disposal is
-        // ever reached. A crash bypasses this entirely and relies on the OS closing the owned
-        // handles instead (fail-open) -- see CenterMMainUiRoutingGuard's remarks.
-        if (CenterMGuard.IsArmed)
-            await CenterMGuard.DisarmAsync().ConfigureAwait(false);
+
+        // Normal routing rollback already disarms the guard (last in
+        // RoutingPipelineStageOrder.Rollback, after native/physical restoration) long before
+        // disposal is ever reached -- this composition is only disposed after routing has already
+        // been shut down. This is a last-resort fallback for whatever normal rollback did NOT
+        // resolve, so it preserves the same ordering invariant: never release Center M launch
+        // protection before native-mode/physical restoration has at least been attempted.
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
+
+        // Unconditional, not gated on IsArmed: a failed arm attempt can leave the guard's helper
+        // ownership retained (CenterMHelperOwnership deliberately keeps an exact handle when
+        // cleanup could not be confirmed) even though _armed never became true. DisarmAsync is
+        // idempotent/a safe no-op when there is genuinely nothing owned.
+        await CenterMGuard.DisarmAsync().ConfigureAwait(false);
     }
 }

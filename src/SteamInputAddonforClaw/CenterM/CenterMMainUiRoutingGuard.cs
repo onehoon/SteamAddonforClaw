@@ -45,8 +45,13 @@ internal sealed class CenterMMainUiRoutingGuard
     private readonly CenterMMainUiMutexOwnership _mutexOwnership;
     private readonly Func<string, string?> _stager;
     private readonly TimeSpan _helperStopTimeout;
-    private readonly object _sync = new();
-    private bool _armed;
+    // Guards the ENTIRE Arm/Disarm transaction (not just the _armed flag) -- Arm does multiple
+    // sequential native operations (stage, start helper, acquire mutex, re-verify), and a second
+    // concurrent Arm/Disarm observing a stale _armed value mid-sequence could stop a helper the
+    // first call just started, or publish Armed after a Disarm already became authoritative. A
+    // SemaphoreSlim (not a plain lock) is used because the transaction awaits.
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private volatile bool _armed;
 
     internal CenterMMainUiRoutingGuard(
         Func<string>? publishRootProvider = null,
@@ -64,18 +69,20 @@ internal sealed class CenterMMainUiRoutingGuard
         _helperStopTimeout = helperStopTimeout ?? TimeSpan.FromSeconds(5);
     }
 
-    internal bool IsArmed { get { lock (_sync) return _armed; } }
+    internal bool IsArmed => _armed;
 
-    internal Task<CenterMMainUiRoutingGuardResult> ArmAsync(CancellationToken cancellationToken = default)
+    internal async Task<CenterMMainUiRoutingGuardResult> ArmAsync(CancellationToken cancellationToken = default)
     {
-        lock (_sync)
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             // Idempotent: a duplicate arm request while already armed is a confirmation, not a
             // fresh attempt -- it must never stage a second helper or re-acquire the mutex.
-            if (_armed) return Task.FromResult(CenterMMainUiRoutingGuardResult.Armed);
-        }
+            if (_armed) return CenterMMainUiRoutingGuardResult.Armed;
 
-        return ArmCoreAsync(cancellationToken);
+            return await ArmCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
     }
 
     private async Task<CenterMMainUiRoutingGuardResult> ArmCoreAsync(CancellationToken cancellationToken)
@@ -101,6 +108,15 @@ internal sealed class CenterMMainUiRoutingGuard
         {
             AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: helper staging failed.", null);
             return CenterMMainUiRoutingGuardResult.HelperFailure;
+        }
+
+        // Safe pre-mutation cancellation point: nothing has been created yet, so there is nothing
+        // to unwind -- a cancelled Enter should not still create a helper/mutex only to immediately
+        // tear them down via the pipeline's subsequent rollback.
+        if (cancellationToken.IsCancellationRequested)
+        {
+            AppLog.Info("CenterM.RoutingGuard", "Routing guard arm cancelled before any resource was created.", ("Action", "NoOp"));
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         var startResult = _helperOwnership.Start(stagedPath);
@@ -148,7 +164,17 @@ internal sealed class CenterMMainUiRoutingGuard
             };
         }
 
-        lock (_sync) _armed = true;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            // Every check has passed, but the caller no longer wants this Enter -- unwind what was
+            // just acquired rather than publishing Armed for a transition about to be rolled back
+            // anyway.
+            AppLog.Info("CenterM.RoutingGuard", "Routing guard arm cancelled just before Armed publication; unwinding.");
+            await UnwindAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        _armed = true;
         AppLog.Info("CenterM.RoutingGuard", "Routing guard armed.", ("HelperProcessId", _helperOwnership.ProcessId));
         return CenterMMainUiRoutingGuardResult.Armed;
     }
@@ -156,14 +182,23 @@ internal sealed class CenterMMainUiRoutingGuard
     /// <summary>Idempotent and safe to call even when never armed (a failed/never-attempted arm
     /// leaves nothing to release). Returns false only when the owned helper's cleanup could not be
     /// confirmed -- callers must not treat that as a clean disarm (fail-closed, matching
-    /// <see cref="CenterMHelperOwnership.Stop"/>'s own contract).</summary>
+    /// <see cref="CenterMHelperOwnership.Stop"/>'s own contract). Serialized against
+    /// <see cref="ArmAsync"/> through the same gate -- an overlapping Disarm can never race a
+    /// concurrent Arm's helper/mutex acquisition, and a Disarm always wins any race for the gate
+    /// over a not-yet-started Arm (whichever acquires the gate first runs to completion before the
+    /// other is admitted).</summary>
     internal async Task<bool> DisarmAsync(CancellationToken cancellationToken = default)
     {
-        AppLog.Debug("CenterM.RoutingGuard", "Routing guard disarm started.");
-        lock (_sync) _armed = false;
-        var confirmed = await UnwindAsync().ConfigureAwait(false);
-        AppLog.Info("CenterM.RoutingGuard", "Routing guard disarmed.", ("Confirmed", confirmed));
-        return confirmed;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            AppLog.Debug("CenterM.RoutingGuard", "Routing guard disarm started.");
+            _armed = false;
+            var confirmed = await UnwindAsync().ConfigureAwait(false);
+            AppLog.Info("CenterM.RoutingGuard", "Routing guard disarmed.", ("Confirmed", confirmed));
+            return confirmed;
+        }
+        finally { _gate.Release(); }
     }
 
     private Task<bool> UnwindAsync()
