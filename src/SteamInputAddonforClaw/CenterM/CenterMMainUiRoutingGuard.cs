@@ -20,20 +20,29 @@ internal enum CenterMMainUiRoutingGuardResult
 /// <summary>
 /// Arms/disarms transient, routing-time prevention of a NEW real MSI Center M MainUI becoming
 /// operational, so PID1902/DirectInput routing can remain authoritative while Steam routing is
-/// active. This is Phase 1 only: it never terminates an already-running real MainUI (arm simply
-/// refuses when one is present) and it has no knowledge of OEM1 gestures, Quick Access, Game Bar,
-/// VIIPER, or native controller-mode mutation -- routing calls <see cref="ArmAsync"/> before any of
-/// that, and <see cref="DisarmAsync"/> only after native/output mutation has already been rolled
-/// back or classified.
+/// active. Has no knowledge of OEM1 gestures, Quick Access, Game Bar, VIIPER, or native
+/// controller-mode mutation of its own -- routing calls <see cref="ArmAsync"/> before any of that,
+/// and <see cref="DisarmAsync"/> only after native/output mutation has already been rolled back or
+/// classified.
+///
+/// When a <see cref="CenterMMainUiRoutingRetirement"/> service is configured (the production MSI
+/// Claw composition), an existing exact real MainUI (tray-resident or visible) is first retired
+/// under the Phase-2 tray/visible policy -- see that type's own remarks -- before the Phase-1
+/// helper/mutex sequence below ever runs. When no retirement service is configured, Phase-1
+/// behavior is preserved exactly: any existing same-name real MainUI causes arm to fail
+/// (<see cref="CenterMMainUiRoutingGuardResult.RealMainUiPresent"/>) before helper/mutex/native-mode
+/// mutation.
 ///
 /// Arm sequence (safety-critical ordering, research: MSI_COMPLETE_RESEARCH_RESULT.md section 4 --
 /// the real MainUI's own duplicate-instance check, keyed on the same
 /// <see cref="CenterMMainUiMutexOwnership.MutexName"/> this class owns, runs before
 /// <c>MainWindow</c>/controller-mode initialization):
 /// 1. fresh same-name process snapshot -- any match means a real MainUI may already be present;
-/// 2. stage + start the dedicated helper (process-name half of the guard);
-/// 3. acquire the MainUI mutex (mutex half of the guard);
-/// 4. fresh same-name snapshot again, verified via the existing
+/// 2. if present and retirement is configured, retire it (tray XInput-verify-then-kill, or
+///    visible minimize-then-hidden-then-XInput-verify-then-kill); otherwise fail immediately;
+/// 3. stage + start the dedicated helper (process-name half of the guard);
+/// 4. acquire the MainUI mutex (mutex half of the guard);
+/// 5. fresh same-name snapshot again, verified via the existing
 ///    <see cref="CenterMHelperInvariant"/> -- the only same-name process must be the owned helper.
 /// Any failure at any step unwinds only what this attempt itself acquired and never commits Armed.
 /// </summary>
@@ -133,6 +142,15 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         // Do not trust beforeSnapshot for the arm-continuation decision below: retirement (if it
         // ran) already performed its own fresh absence verification, and if no real MainUI was ever
         // present this snapshot was already empty.
+        //
+        // Cancellation checkpoint BEFORE staging: retirement/current-world classification has fully
+        // completed by this point (it only ever returns while cancellation is still authoritative
+        // via its own OperationCanceledException, never as a plain Retired result), so no
+        // Addon-owned resource has been created yet -- but staging itself is not a pure read
+        // (CenterMHelperStaging.StageFromPublishRoot creates a directory and copies/reads a file),
+        // so a cancelled Enter must not still perform that filesystem mutation.
+        cancellationToken.ThrowIfCancellationRequested();
+
         var publishRoot = _publishRootProvider();
         var stagedPath = _stager(publishRoot);
         if (stagedPath is null)

@@ -60,6 +60,29 @@ public sealed class CenterMMainUiRoutingGuardTests
     }
 
     [Fact]
+    public async Task Cancellation_before_staging_skips_the_filesystem_mutation()
+    {
+        // No real MainUI present (retirement is never even invoked), but the caller already
+        // cancelled before ArmAsync was called -- staging (a filesystem mutation: directory
+        // create + file copy/read, not a pure read) must never run for an Enter that is already
+        // known-cancelled.
+        var snapshots = new FakeSnapshotSource([[]]);
+        var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+        var helperApi = new RecordingHelperApi();
+        var mutexFactory = new FakeMutexFactory();
+        var guard = Create(snapshots, stager, helperApi, mutexFactory);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => guard.ArmAsync(cts.Token));
+
+        Assert.False(guard.IsArmed);
+        Assert.False(stager.Called);
+        Assert.Empty(helperApi.Calls);
+        Assert.Equal(0, mutexFactory.CreateCallCount);
+    }
+
+    [Fact]
     public async Task Helper_staging_failure_prevents_mutex_acquisition()
     {
         var snapshots = new FakeSnapshotSource([[]]);

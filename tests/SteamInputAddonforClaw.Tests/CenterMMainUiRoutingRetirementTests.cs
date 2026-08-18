@@ -388,6 +388,52 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Cancellation_during_termination_still_completes_absence_check_then_propagates()
+    {
+        // Once TerminateProcess/WaitForExit has actually started, that operation cannot be undone --
+        // it must run to a classified result. VerifyFreshAbsence must then still run to completion
+        // (never abandoned), and only once it comes back clean is the caller's cancellation finally
+        // honored -- so a cancelled route never reaches Phase-1 helper staging on the strength of a
+        // Retired result it never actually wanted.
+        using var cts = new CancellationTokenSource();
+        var snapshots = new QueueProcessSnapshotSource(
+        [
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)], // discovery
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)], // terminator's same-name recheck
+            [] // fresh absence after termination
+        ]);
+        var identity = new QueueIdentityInspector(
+        [
+            new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath),
+            new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)
+        ]);
+        var window = new QueueWindowSnapshotProvider(
+        [
+            new MainUiWindowSnapshot(true, 1, 0), // upfront: tray/hidden
+            new MainUiWindowSnapshot(true, 1, 0) // terminator's fresh recheck
+        ]);
+        // Cancels the token as a side effect of WaitForExit confirming the exit -- simulates
+        // cancellation racing in exactly while termination is in flight.
+        var invoker = new CancelingInvoker(cts);
+        var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshots);
+        var retirement = new CenterMMainUiRoutingRetirement(
+            new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput),
+            processSnapshotSource: snapshots,
+            handleOpener: new FakeHandleOpener(),
+            identityInspector: identity,
+            windowSnapshotProvider: window,
+            terminator: terminator,
+            terminateWaitTimeout: TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => retirement.PrepareExistingMainUiForRoutingAsync(cts.Token));
+
+        // The exact exit was still classified, and fresh absence was still consumed (the third
+        // queued snapshot response was reached) despite the cancellation.
+        Assert.Equal(1, invoker.TerminateCallCount);
+        Assert.Equal(0, snapshots.RemainingCount);
+    }
+
+    [Fact]
     public async Task Window_visible_again_immediately_before_termination_blocks_the_kill()
     {
         var snapshots = new QueueProcessSnapshotSource(
@@ -486,6 +532,8 @@ public sealed class CenterMMainUiRoutingRetirementTests
     {
         private readonly Queue<IReadOnlyList<ProcessSnapshotEntry>?> _queue = new(responses);
         private IReadOnlyList<ProcessSnapshotEntry>? _last = [];
+
+        internal int RemainingCount => _queue.Count;
 
         public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName)
         {
@@ -605,6 +653,27 @@ public sealed class CenterMMainUiRoutingRetirementTests
         }
 
         public bool WaitForExit(SafeProcessHandle handle, TimeSpan timeout) => waitSucceeds;
+    }
+
+    /// <summary>Cancels the supplied token as a side effect of confirming a successful exit --
+    /// simulates cancellation racing in exactly while TerminateProcess/WaitForExit is in flight,
+    /// without needing real timing gates.</summary>
+    private sealed class CancelingInvoker(CancellationTokenSource cancelOnExitConfirmed) : ITerminateProcessInvoker
+    {
+        internal int TerminateCallCount { get; private set; }
+
+        public bool TryTerminate(SafeProcessHandle handle, out int win32Error)
+        {
+            TerminateCallCount++;
+            win32Error = 0;
+            return true;
+        }
+
+        public bool WaitForExit(SafeProcessHandle handle, TimeSpan timeout)
+        {
+            cancelOnExitConfirmed.Cancel();
+            return true;
+        }
     }
 
     /// <summary>Opens a REAL (non-pseudo) handle to this test process itself, via

@@ -126,7 +126,7 @@ internal sealed class CenterMMainUiRoutingRetirement
         // that may not even be the real MainUI.
         var identity = _identityInspector.Inspect(tracked.Handle);
         if (identity.Status == LiveProcessProbeStatus.Exited)
-            return await VerifyFreshAbsenceAsync().ConfigureAwait(false);
+            return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
         if (identity.Status == LiveProcessProbeStatus.Uncertain)
         {
             LogFailed(tracked.ProcessId, "IdentityUncertain");
@@ -156,7 +156,7 @@ internal sealed class CenterMMainUiRoutingRetirement
             return CenterMMainUiRoutingRetirementResult.WindowStateUncertain;
         }
         if (!windowSnapshot.Value.ProcessAlive)
-            return await VerifyFreshAbsenceAsync().ConfigureAwait(false);
+            return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
 
         AppLog.Info("CenterM.RoutingGuard", "Existing real MainUI detected for routing retirement.",
             ("ProcessId", tracked.ProcessId), ("WindowState", windowSnapshot.Value.VisibleMainWindowCount > 0 ? "Visible" : "Hidden"));
@@ -188,12 +188,7 @@ internal sealed class CenterMMainUiRoutingRetirement
                     LogFailed(tracked.ProcessId, "MinimizeTimedOut");
                     return CenterMMainUiRoutingRetirementResult.MinimizeTimedOut;
                 case MainUiHideWaitStatus.Exited:
-                {
-                    var absence = await VerifyFreshAbsenceAsync().ConfigureAwait(false);
-                    if (absence == CenterMMainUiRoutingRetirementResult.Retired)
-                        cancellationToken.ThrowIfCancellationRequested();
-                    return absence;
-                }
+                    return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
             }
 
             AppLog.Info("CenterM.RoutingGuard", "MainUI hidden confirmed.", ("ProcessId", tracked.ProcessId));
@@ -239,7 +234,7 @@ internal sealed class CenterMMainUiRoutingRetirement
         {
             case CenterMRoutingTerminationResult.Terminated:
             case CenterMRoutingTerminationResult.AlreadyExited:
-                return await VerifyFreshAbsenceAsync().ConfigureAwait(false);
+                return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
 
             case CenterMRoutingTerminationResult.WaitTimedOut:
                 LogFailed(tracked.ProcessId, "TerminationTimedOut");
@@ -266,6 +261,21 @@ internal sealed class CenterMMainUiRoutingRetirement
                 LogFailed(tracked.ProcessId, "TerminationFailed");
                 return CenterMMainUiRoutingRetirementResult.TerminationFailed;
         }
+    }
+
+    /// <summary>Common tail for every path that just observed the real MainUI as gone (terminated,
+    /// or exited naturally on its own): always finishes the fresh same-name absence classification
+    /// first -- that evidence step is never abandoned merely because the caller cancelled. Only
+    /// once a CLEAN <see cref="CenterMMainUiRoutingRetirementResult.Retired"/> comes back is caller
+    /// cancellation honored, immediately before returning to <see cref="CenterMMainUiRoutingGuard"/>
+    /// -- so a cancelled routing request never proceeds into Phase-1 helper staging (a filesystem
+    /// mutation, not a pure read) on the strength of a retirement result it never actually wanted.</summary>
+    private async Task<CenterMMainUiRoutingRetirementResult> FinishExitedMainUiAsync(CancellationToken cancellationToken)
+    {
+        var absence = await VerifyFreshAbsenceAsync().ConfigureAwait(false);
+        if (absence == CenterMMainUiRoutingRetirementResult.Retired)
+            cancellationToken.ThrowIfCancellationRequested();
+        return absence;
     }
 
     private async Task<CenterMMainUiRoutingRetirementResult> VerifyFreshAbsenceAsync()
