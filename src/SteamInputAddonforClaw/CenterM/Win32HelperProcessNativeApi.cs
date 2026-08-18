@@ -125,6 +125,18 @@ internal sealed class Win32HelperProcessNativeApi : IHelperProcessNativeApi
     public bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout) =>
         WaitForSingleObject(processHandle, (uint)timeout.TotalMilliseconds) == WAIT_OBJECT_0;
 
+    private const uint WAIT_TIMEOUT = 0x102;
+
+    public LiveProcessProbeStatus PollLiveness(SafeProcessHandle processHandle)
+    {
+        var result = WaitForSingleObject(processHandle, 0);
+        if (result == WAIT_OBJECT_0) return LiveProcessProbeStatus.Exited;
+        if (result == WAIT_TIMEOUT) return LiveProcessProbeStatus.Alive;
+        // WAIT_FAILED (or any other unexpected return) -- deliberately never conflated with either
+        // Alive or Exited; the caller must fail open.
+        return LiveProcessProbeStatus.Uncertain;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct STARTUPINFO
     {

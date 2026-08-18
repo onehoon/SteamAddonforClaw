@@ -28,6 +28,10 @@ internal enum HelperStartResult
     PartialCleanupUnconfirmed
 }
 
+/// <summary>Zero-time exact-handle liveness classification for an owned helper. Never derived from
+/// process-name/PID rediscovery.</summary>
+internal enum HelperLivenessState { NotOwned, Alive, Exited, Uncertain }
+
 /// <summary>
 /// Owns exactly one helper process via CREATE_SUSPENDED + a private Job Object with
 /// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, in the mandatory order required for crash-safe fail-open:
@@ -46,12 +50,66 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     // recreating the same-name invariant violation and lost-ownership bug this class exists to
     // prevent. The lock is held across each method's entire native-call sequence (not just the
     // IsOwned check), so only one such sequence can ever be in flight at a time.
-    private readonly Lock _sync = new();
+    //
+    // CI regression fix: this was previously `private readonly Lock _sync = new();` using the C#
+    // 13 System.Threading.Lock type. Under real concurrent contention (see
+    // ConcurrentStart_OnlyOneCreateSuspendedSequenceRuns_LoserGetsAlreadyOwned, which blocks a
+    // second thread on this exact lock while the first is still inside native-call territory) this
+    // intermittently threw System.IO.IOException ("The handle is invalid.") from deep inside
+    // System.Threading.Lock.Exit -> SignalWaiterIfNecessary -> EventWaitHandle.Set() on CI runners
+    // -- entirely inside the new Lock type's own contention-event bookkeeping, not in any code this
+    // class owns. Reverting to a plain object monitored via the classic `lock` statement (Monitor,
+    // same reentrant-per-thread semantics as `Lock`) avoids that internal code path entirely and is
+    // the well-established, battle-tested primitive for this exact use.
+    private readonly object _sync = new();
     private SafeProcessHandle? _processHandle;
     private SafeHandle? _jobHandle;
 
     internal int? ProcessId { get; private set; }
     internal bool IsOwned => _processHandle is not null;
+
+    /// <summary>True only when the retained handle came from a fully successful production arm
+    /// sequence (CreateProcess -&gt; Job -&gt; KILL_ON_JOB_CLOSE -&gt; Assign -&gt; ResumeThread all
+    /// succeeded, i.e. <see cref="HelperStartResult.Started"/>) -- distinct from
+    /// <see cref="IsOwned"/>, which is also true for a job-less <see cref="HelperStartResult.PartialCleanupUnconfirmed"/>
+    /// residue retained solely so a later <see cref="Stop"/>/<see cref="Dispose"/> can still target
+    /// the exact process. A job-less retained handle never had KILL_ON_JOB_CLOSE armed for it and
+    /// never completed the operational arm sequence, so <see cref="_jobHandle"/> is null in every
+    /// construction-failure path (never assigned, or explicitly disposed before failure) and is set
+    /// only on the successful <see cref="HelperStartResult.Started"/> path below -- callers must
+    /// treat this, not <see cref="IsOwned"/> alone, as the authority for "eligible to be Armed".
+    /// </summary>
+    internal bool IsOperationallyOwned => _processHandle is not null && _jobHandle is not null;
+
+    /// <summary>Zero-time liveness classification of the exact retained helper handle -- never
+    /// process-name or PID rediscovery. <see cref="HelperLivenessState.Uncertain"/> (native
+    /// WAIT_FAILED) must never be treated as either Alive or Exited by callers.</summary>
+    internal HelperLivenessState PollLiveness()
+    {
+        lock (_sync)
+        {
+            if (_processHandle is null) return HelperLivenessState.NotOwned;
+            return _api.PollLiveness(_processHandle) switch
+            {
+                LiveProcessProbeStatus.Alive => HelperLivenessState.Alive,
+                LiveProcessProbeStatus.Exited => HelperLivenessState.Exited,
+                _ => HelperLivenessState.Uncertain
+            };
+        }
+    }
+
+    /// <summary>Releases the retained handles for a helper already confirmed exited via
+    /// <see cref="PollLiveness"/> (WAIT_OBJECT_0) -- no TerminateProcess/WaitForExit call is made,
+    /// since the process is already known gone; this only retires the now-stale ownership record.
+    /// A no-op when nothing is owned.</summary>
+    internal void RetireConfirmedExited()
+    {
+        lock (_sync)
+        {
+            if (_processHandle is null) return;
+            DisposeCore();
+        }
+    }
 
     /// <summary>Starts and takes ownership of exactly one helper. Refuses (returns
     /// <see cref="HelperStartResult.AlreadyOwned"/>, no native calls made) while a helper is
