@@ -175,9 +175,9 @@ internal sealed class CenterMMainUiRoutingRetirement
             }
 
             // SC_MINIMIZE was just posted to a foreign process -- an external side effect the
-            // pipeline cannot undo. From here on, finish stabilizing/classifying the resulting
-            // transition with CancellationToken.None; a cancelled caller is only honored again once
-            // that classification is complete (see the method doc comment).
+            // pipeline cannot undo. From here on, finish stabilizing/classifying THIS transition
+            // (hidden-wait and the XInput wait it leads into) with CancellationToken.None; a
+            // cancelled caller is only honored again once that classification is complete.
             var afterMinimize = await WaitUntilHiddenOrExitedAsync(tracked.ProcessId, CancellationToken.None).ConfigureAwait(false);
             switch (afterMinimize.Status)
             {
@@ -188,28 +188,45 @@ internal sealed class CenterMMainUiRoutingRetirement
                     LogFailed(tracked.ProcessId, "MinimizeTimedOut");
                     return CenterMMainUiRoutingRetirementResult.MinimizeTimedOut;
                 case MainUiHideWaitStatus.Exited:
-                    return await VerifyFreshAbsenceAsync().ConfigureAwait(false);
+                {
+                    var absence = await VerifyFreshAbsenceAsync().ConfigureAwait(false);
+                    if (absence == CenterMMainUiRoutingRetirementResult.Retired)
+                        cancellationToken.ThrowIfCancellationRequested();
+                    return absence;
+                }
             }
 
             AppLog.Info("CenterM.RoutingGuard", "MainUI hidden confirmed.", ("ProcessId", tracked.ProcessId));
+
+            AppLog.Info("CenterM.RoutingGuard", "Waiting for native XInput before retirement.", ("ProcessId", tracked.ProcessId));
+            // Still non-cancelable: this XInput wait is the continuation of the SAME external
+            // transition the minimize we just posted caused -- Center M's own minimize lifecycle
+            // (GamePadListener stop -> GoToXInputMode) is expected to converge here.
+            var xInputConfirmed = await WaitForXInputAsync(CancellationToken.None).ConfigureAwait(false);
+            if (!xInputConfirmed)
+            {
+                LogFailed(tracked.ProcessId, "XInputNotConfirmed");
+                return CenterMMainUiRoutingRetirementResult.XInputNotConfirmed;
+            }
         }
         else
         {
+            // Tray/hidden: the Addon has not posted a message, mutated controller mode, or created
+            // any resource yet -- there is no external side effect to finish stabilizing. Caller
+            // cancellation stays fully authoritative, and a single stable native-state capture
+            // (which already performs its own internal topology-settle wait) is enough; there is no
+            // "transition in progress" to poll for, so this must not spin for the full XInput wait
+            // timeout on a definite non-XInput reading.
             AppLog.Info("CenterM.RoutingGuard", "Tray-resident MainUI already hidden; minimize skipped.", ("ProcessId", tracked.ProcessId));
+            cancellationToken.ThrowIfCancellationRequested();
+            var mode = await _nativeModeProbe.CaptureAsync(cancellationToken).ConfigureAwait(false);
+            if (mode != CenterMNativeModeProbeResult.XInput)
+            {
+                LogFailed(tracked.ProcessId, "XInputNotConfirmed");
+                return CenterMMainUiRoutingRetirementResult.XInputNotConfirmed;
+            }
         }
 
-        AppLog.Info("CenterM.RoutingGuard", "Waiting for native XInput before retirement.", ("ProcessId", tracked.ProcessId));
-        // Still CancellationToken.None: once a visible MainUI has been minimized, this wait is part
-        // of finishing that same external transition's classification. For the tray path nothing
-        // external has happened yet, but using the same non-cancelable wait here keeps a single,
-        // simple invariant (Hidden+XInput is always either fully confirmed or fails as a definite,
-        // logged reason) rather than two different cancellation behaviors for the two paths.
-        var xInputConfirmed = await WaitForXInputAsync(CancellationToken.None).ConfigureAwait(false);
-        if (!xInputConfirmed)
-        {
-            LogFailed(tracked.ProcessId, "XInputNotConfirmed");
-            return CenterMMainUiRoutingRetirementResult.XInputNotConfirmed;
-        }
         AppLog.Info("CenterM.RoutingGuard", "Native XInput confirmed before MainUI retirement.", ("ProcessId", tracked.ProcessId));
 
         // The externally-mutated MSI state is now fully known and safe (hidden + physical XInput).

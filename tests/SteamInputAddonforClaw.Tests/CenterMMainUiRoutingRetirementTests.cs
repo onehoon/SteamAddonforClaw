@@ -102,6 +102,46 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Tray_cancellation_during_native_state_verification_propagates_promptly_without_terminating()
+    {
+        // Tray/hidden: nothing external has happened yet (no SC_MINIMIZE, no controller-mode
+        // mutation, no helper/mutex), so caller cancellation must stay fully authoritative --
+        // unlike the visible path's post-minimize stabilization window.
+        using var cts = new CancellationTokenSource();
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 0)]);
+        var probe = new GatedNativeModeProbe();
+        var (retirement, invoker, windowController) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window, nativeModeProbe: probe);
+
+        var task = retirement.PrepareExistingMainUiForRoutingAsync(cts.Token);
+        await probe.Entered;
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        Assert.Equal(0, invoker.TerminateCallCount);
+        Assert.Equal(0, windowController.CallCount);
+    }
+
+    [Fact]
+    public async Task Tray_stable_not_xinput_fails_after_a_single_capture_without_polling_the_full_timeout()
+    {
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 0)]);
+        var probe = new CountingNativeModeProbe(CenterMNativeModeProbeResult.NotXInput);
+        var (retirement, invoker, _) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window, nativeModeProbe: probe);
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        // A single stable capture is enough for the tray path -- no bounded polling loop over the
+        // full XInput wait timeout, since there is no in-progress transition to wait out.
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.XInputNotConfirmed, result);
+        Assert.Equal(1, probe.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
     public async Task Hidden_mainui_with_directinput_native_state_is_not_terminated()
     {
         var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
@@ -452,6 +492,33 @@ public sealed class CenterMMainUiRoutingRetirementTests
     private sealed class FixedNativeModeProbe(CenterMNativeModeProbeResult result) : ICenterMNativeModeProbe
     {
         public Task<CenterMNativeModeProbeResult> CaptureAsync(CancellationToken cancellationToken) => Task.FromResult(result);
+    }
+
+    private sealed class CountingNativeModeProbe(CenterMNativeModeProbeResult result) : ICenterMNativeModeProbe
+    {
+        internal int CallCount { get; private set; }
+        public Task<CenterMNativeModeProbeResult> CaptureAsync(CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(result);
+        }
+    }
+
+    /// <summary>Blocks inside <see cref="CaptureAsync"/> (observing the supplied cancellation token,
+    /// like a real implementation awaiting native work) until the test signals a capture has
+    /// started -- lets a test deterministically cancel while a capture is genuinely in flight,
+    /// without timing sleeps.</summary>
+    private sealed class GatedNativeModeProbe : ICenterMNativeModeProbe
+    {
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal Task Entered => _entered.Task;
+
+        public async Task<CenterMNativeModeProbeResult> CaptureAsync(CancellationToken cancellationToken)
+        {
+            _entered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+            return CenterMNativeModeProbeResult.XInput;
+        }
     }
 
     /// <summary>Cancels the supplied token as a side effect of a successful minimize request --
