@@ -77,12 +77,19 @@ and stale-timeout protection. It receives already-classified semantic presses
 only; it is not wired into production runtime, Event41, lifecycle ownership, or
 any action policy. Production OEM1 behavior therefore remains unchanged.
 
-## PR2-B2 (not started) — Event / gesture policy bridge
+## PR2-B2 — Event / gesture policy bridge (this PR)
 
-Will later forward validated OEM1 Event41 presses to the gesture core, ignore
-OEM2/Event88, gate processing on valid OEM1 custom authority, and convert
-gesture results into semantic policy requests. Quick Access remains deferred to
-PR3+; no `Oem1Action` or action dispatch is implemented here.
+Adds an isolated bridge that forwards only OEM1/Event41 semantic events to the
+PR2-B1 gesture core when an explicitly injected custom-authority boolean is
+active. Authority loss synchronously resets pending gestures; OEM2/Event88 and
+other semantic events are ignored without disturbing OEM1 state. Recognized
+gestures become minimal `Oem1GesturePolicyRequest` values, with downstream
+subscriber exceptions contained at the bridge boundary. The bridge is not
+composed into production and does not query `CenterMOem1LifecycleCoordinator`.
+
+No actual action is executed, Quick Access remains deferred to PR3+, and no
+hardware validation is claimed. Production OEM1/OEM2 behavior remains
+unchanged.
 
 ## PR3+ (not started) — Steam Quick Access / settings / UI
 
