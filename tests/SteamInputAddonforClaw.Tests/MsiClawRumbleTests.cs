@@ -202,6 +202,22 @@ public sealed class MsiClawRumbleTests
         Assert.Equal(2, resolver.Calls);
     }
 
+    [Fact]
+    public async Task Sink_retirement_barrier_waits_for_admitted_write_and_closes_admission()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var transport = new FakeTransport { BlockWrites = true };
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
+        var write = Task.Run(() => sink.SetRumble(new(0xFF00, 0xFF00)));
+        await transport.WriteEntered.Task;
+        var retire = Task.Run(sink.BeginPhysicalSessionRetirement);
+        Assert.False(retire.IsCompleted);
+        transport.ReleaseWrite.Set();
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, (await write).Status);
+        await retire;
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+    }
+
     private sealed class FakeIdentity(MsiClawPhysicalInputIdentity? identity) : IMsiClawPhysicalInputIdentityProvider
     {
         public MsiClawPhysicalInputIdentity? Current { get; set; } = identity;
@@ -241,7 +257,10 @@ public sealed class MsiClawRumbleTests
         public List<byte[]> Packets { get; } = [];
         public MsiClawRumbleTransportResult Result { get; set; } = new(true, "OK");
         public Exception? Exception { get; set; }
-        public MsiClawRumbleTransportResult Write(string _, ReadOnlySpan<byte> packet) { if (Exception is not null) throw Exception; Packets.Add(packet.ToArray()); return Result; }
+        public bool BlockWrites { get; set; }
+        public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim ReleaseWrite { get; } = new(false);
+        public MsiClawRumbleTransportResult Write(string _, ReadOnlySpan<byte> packet) { if (Exception is not null) throw Exception; if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Wait(); } Packets.Add(packet.ToArray()); return Result; }
         public void Dispose() { }
         public void InvalidatePhysicalSession() { }
     }

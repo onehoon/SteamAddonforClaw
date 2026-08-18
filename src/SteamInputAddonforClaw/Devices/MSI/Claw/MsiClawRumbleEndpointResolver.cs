@@ -33,8 +33,7 @@ internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointReso
         var candidates = _catalog(identity).Where(candidate =>
             candidate.VendorId == MsiClawHardware.VendorId &&
             candidate.ProductId == MsiClawHardware.DirectInputProductId &&
-            candidate.InputReportLength == 64 && candidate.OutputReportLength >= 64 && candidate.Writable &&
-            string.Equals(candidate.PnpInstanceId, identity.PnpInstanceId, StringComparison.OrdinalIgnoreCase) &&
+            candidate.InputReportLength == 64 && candidate.OutputReportLength == 64 && candidate.Writable &&
             string.Equals(candidate.PhysicalIdentity, identity.PhysicalIdentity, StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(candidate.DevicePath)).ToArray();
         return candidates.Length switch

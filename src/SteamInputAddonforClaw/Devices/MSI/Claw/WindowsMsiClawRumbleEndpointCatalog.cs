@@ -1,10 +1,14 @@
 using Windows.Devices.Enumeration;
 using Windows.Devices.HumanInterfaceDevice;
+using SteamInputAddonforClaw.Controllers.Detection;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal sealed class WindowsMsiClawRumbleEndpointCatalog
 {
+    private readonly IControllerDeviceEnumerator _devices;
+    internal WindowsMsiClawRumbleEndpointCatalog(IControllerDeviceEnumerator? devices = null) => _devices = devices ?? new WindowsControllerDeviceEnumerator();
+
     internal IReadOnlyList<MsiClawRumbleEndpointCandidate> Find(MsiClawPhysicalInputIdentity identity)
     {
         if (string.IsNullOrWhiteSpace(identity.PnpInstanceId)) return [];
@@ -15,12 +19,17 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
         foreach (var device in devices)
         {
             var pnp = device.Properties.TryGetValue("System.Devices.DeviceInstanceId", out var value) ? value as string : null;
-            if (!string.Equals(pnp, identity.PnpInstanceId, StringComparison.OrdinalIgnoreCase)) continue;
             if (!HasHardwareId(device)) continue;
+            var topology = _devices.EnumeratePresentDevices().Where(candidate =>
+                string.Equals(candidate.InstanceId, pnp, StringComparison.OrdinalIgnoreCase) &&
+                candidate.VendorId == MsiClawHardware.VendorId && candidate.ProductId == MsiClawHardware.DirectInputProductId).ToArray();
+            if (topology.Length != 1) continue;
+            var physicalRoot = topology[0].AncestorInstanceIds.FirstOrDefault(root => root.StartsWith("USB\\VID_0DB0&PID_1902\\", StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(physicalRoot)) continue;
             var inputLength = GetLength(device, "System.Devices.Hid.InputReportByteLength");
             var outputLength = GetLength(device, "System.Devices.Hid.OutputReportByteLength");
             if (inputLength <= 0 || outputLength <= 0) continue;
-            candidates.Add(new(device.Id, pnp!, identity.PhysicalIdentity, MsiClawHardware.VendorId,
+            candidates.Add(new(device.Id, pnp!, physicalRoot, MsiClawHardware.VendorId,
                 MsiClawHardware.DirectInputProductId, inputLength, outputLength, outputLength >= 64));
         }
         return candidates;
