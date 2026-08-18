@@ -89,7 +89,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private bool _launcherReady;
     private bool _serverReady;
     private TrackedCenterMMainUi? _trackedMainUi;
-    private CancellationTokenSource? _debounceCts;
+    private PendingDebounce? _pendingDebounce;
     private long _generation;
     private long _lifecycleEpoch;
     private string? _lastReason;
@@ -142,15 +142,38 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         _identityInspector = identityInspector ?? new Win32ProcessIdentityInspector();
         _stager = stager ?? CenterMHelperStaging.StageFromPublishRoot;
         _delay = delay ?? ((delay, ct) => Task.Delay(delay, ct));
-        // Fails open to "always supported" for existing/default composition -- only a test that
-        // explicitly wants to exercise the eligibility gate injects a stricter predicate.
-        _environmentEligible = environmentEligibility ?? (() => true);
+        // Finding #5: fail-open for THIS feature means "leave MSI's native OEM1 behavior intact",
+        // i.e. never start suppression -- so the default (and any probe exception/unknown result)
+        // must be treated as unsupported/false, never true. A production composition seam must
+        // explicitly inject a device/capability predicate to ever arm suppression at all.
+        _environmentEligible = WrapEnvironmentEligibility(environmentEligibility);
         _hiddenDebounce = hiddenDebounce ?? TimeSpan.FromSeconds(1);
         _helperStopTimeout = helperStopTimeout ?? TimeSpan.FromSeconds(5);
         _mainUiTerminateTimeout = mainUiTerminateTimeout ?? TimeSpan.FromSeconds(5);
     }
 
     public string Name => "CenterMOem1LifecycleCoordinator";
+
+    /// <summary>Finding #5: wraps the injected (or absent) eligibility predicate so neither an
+    /// omitted predicate nor an exception thrown by one can ever be conflated with "supported" --
+    /// both must be treated as unsupported/fail-open while any already-owned helper remains subject
+    /// to normal reconcile-time cleanup.</summary>
+    private static Func<bool> WrapEnvironmentEligibility(Func<bool>? predicate)
+    {
+        if (predicate is null) return static () => false;
+        return () =>
+        {
+            try
+            {
+                return predicate();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn("CenterM.Oem1", "Environment eligibility probe threw; treating as unsupported/fail-open.", ex);
+                return false;
+            }
+        };
+    }
 
     internal CenterMOem1LifecycleSnapshot GetSnapshot()
     {
@@ -456,6 +479,20 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             return;
         }
 
+        if (_trackedMainUi is not null)
+        {
+            // Finding #4: an existing tracked real MainUI identity is authoritative and must be
+            // resolved FIRST, via its exact retained handle, before helper arm/re-adoption is ever
+            // considered -- e.g. on resume after the tracked identity exited during sleep, or when
+            // it remained alive and would otherwise be rediscovered from the process-name snapshot
+            // and re-adopted as a second handle, losing the existing identity-bound SeenVisible
+            // history. ObserveTrackedMainUiCore itself retires an exited identity (and then re-enters
+            // ReconcileCore fresh with _trackedMainUi cleared) or fails open on an uncertain/mismatched
+            // identity without ever considering helper arm.
+            await ObserveTrackedMainUiCore(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (!_environmentEligible())
         {
             // Finding #8: an unsupported/uncertain environment must fail open before ever touching
@@ -518,38 +555,45 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         }
 
         // No foreign same-name process: either arm a fresh helper, or (if we already have a live,
-        // valid, owned helper -- e.g. a redundant reconcile call) simply confirm Armed.
+        // valid, OPERATIONAL owned helper -- e.g. a redundant reconcile call) simply confirm Armed.
         if (_helperOwnership.IsOwned)
         {
-            var liveness = _helperOwnership.PollLiveness();
-            if (liveness != HelperLivenessState.Alive)
+            var validity = EvaluateArmedHelperValidity(sameName, ownedPid);
+            if (validity == ArmedHelperValidity.Valid)
             {
-                // Owned but not confirmed alive with zero same-name processes present is impossible
-                // in a consistent world (the owned helper IS the same-name process) -- fail open
-                // rather than assume anything.
-                _lastReason = "OwnedHelperMissingFromEnumeration";
-                SetState(CenterMOem1LifecycleState.FaultedNative);
+                SetState(CenterMOem1LifecycleState.Armed);
                 return;
             }
 
-            // Finding #3: the Armed invariant is stronger than "our handle says Alive" -- while
-            // Armed, the exact retained helper must ALSO be the only process named "MSI Center M" in
-            // a fresh enumeration. A confidently empty (or foreign/multiple) enumeration must never
-            // be treated as "Valid" just because the retained handle itself looks fine.
-            var invariant = CenterMHelperInvariant.Evaluate(sameName, ownedPid!.Value);
-            if (invariant != CenterMHelperInvariantState.Valid)
-            {
-                _lastReason = $"ExistingHelperInvariantFailed:{invariant}";
-                SetState(CenterMOem1LifecycleState.FaultedNative);
-                AppLog.Warn("CenterM.Oem1", "Existing-helper reconcile failed the authoritative same-name invariant; never committing Armed.", null, ("Invariant", invariant));
-                return;
-            }
-
-            SetState(CenterMOem1LifecycleState.Armed);
+            // Finding #1/#3: owned does not mean operationally armed -- a job-less
+            // PartialCleanupUnconfirmed residue, a liveness that is not confirmed Alive, or a fresh
+            // same-name enumeration that no longer confirms the authoritative invariant must all
+            // fail open into FaultedNative rather than ever being (re-)committed to Armed.
+            _lastReason = $"ExistingHelperInvalid:{validity}";
+            SetState(CenterMOem1LifecycleState.FaultedNative);
+            AppLog.Warn("CenterM.Oem1", "Existing-helper reconcile failed the authoritative armed-helper validity check; never committing Armed.", null, ("Validity", validity));
             return;
         }
 
         await AttemptArm(cancellationToken).ConfigureAwait(false);
+    }
+
+    private enum ArmedHelperValidity { Valid, NotOwned, ResidualCleanupOnly, LivenessNotAlive, InvariantInvalid }
+
+    /// <summary>Single authoritative check for "is the currently retained helper handle eligible to
+    /// be (or remain) Armed", shared by fresh reconciliation (finding #1) and the steady-state Armed
+    /// poll path (finding #3) so the two can never drift apart. Never treats <see cref="CenterMHelperOwnership.IsOwned"/>
+    /// alone as sufficient -- a job-less <see cref="HelperStartResult.PartialCleanupUnconfirmed"/>
+    /// residue never completed the operational arm sequence and must never be promoted to Armed
+    /// merely because it is alive and unique in a fresh enumeration.</summary>
+    private ArmedHelperValidity EvaluateArmedHelperValidity(IReadOnlyList<ProcessSnapshotEntry> sameName, int? ownedPid)
+    {
+        if (ownedPid is null || !_helperOwnership.IsOwned) return ArmedHelperValidity.NotOwned;
+        if (!_helperOwnership.IsOperationallyOwned) return ArmedHelperValidity.ResidualCleanupOnly;
+        if (_helperOwnership.PollLiveness() != HelperLivenessState.Alive) return ArmedHelperValidity.LivenessNotAlive;
+        return CenterMHelperInvariant.Evaluate(sameName, ownedPid.Value) == CenterMHelperInvariantState.Valid
+            ? ArmedHelperValidity.Valid
+            : ArmedHelperValidity.InvariantInvalid;
     }
 
     /// <summary>Attempts to stop any owned helper and reports whether cleanup was actually
@@ -642,9 +686,15 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
         if (sameName.Count == 0)
         {
-            // The helper itself was the only same-name process; nothing remains to adopt.
+            // The helper itself was the only same-name process; nothing remains to adopt. Finding
+            // #6: the helper stop sequence above can involve one or two bounded waits (graceful
+            // terminate/wait, and possibly a Job-close fallback wait) -- eligibility, Launcher/
+            // Server, and AutoRun evidence captured earlier in this same ReconcileCore call may have
+            // drifted during that interval. Never jump directly into AttemptArm from that stale
+            // pre-stop snapshot; re-enter a fresh full reconciliation that recaptures every
+            // prerequisite before ever creating another helper.
             SetState(CenterMOem1LifecycleState.NeedsSetup);
-            await AttemptArm(cancellationToken).ConfigureAwait(false);
+            await ReconcileCore("PostForeignHelperStopReconcile", cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -768,7 +818,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 // HiddenAfterVisible observations while a debounce is already running for the same
                 // identity must never restart the deadline; only an explicit cancellation condition
                 // (visible again, exit, identity/topology change, disable, suspend, shutdown) does.
-                if (_debounceCts is null)
+                if (_pendingDebounce is null)
                     StartHiddenDebounce(tracked);
                 return;
 
@@ -806,33 +856,72 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             return;
         }
 
-        var ownedPid = _helperOwnership.ProcessId;
+        var ownedPid = _helperOwnership.IsOwned ? _helperOwnership.ProcessId : null;
         var foreign = sameName.Where(p => p.ProcessId != ownedPid).ToList();
-        if (foreign.Count == 0) return;
+        if (foreign.Count > 0)
+        {
+            await HandleSameNamePresentDuringReconcile(foreign, cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
-        await HandleSameNamePresentDuringReconcile(foreign, cancellationToken).ConfigureAwait(false);
+        // Finding #3: the steady-state Armed poll path must enforce the same authoritative
+        // validity check as reconciliation -- a confidently empty same-name enumeration must never
+        // be treated as "nothing changed" just because no foreign process appeared. Fails open into
+        // FaultedNative (never re-arms blindly from this poll tick); a later reconcile call is what
+        // may re-establish Armed from a freshly captured world.
+        if (_state == CenterMOem1LifecycleState.Armed)
+        {
+            var validity = EvaluateArmedHelperValidity(sameName, ownedPid);
+            if (validity != ArmedHelperValidity.Valid)
+            {
+                _lastReason = $"ArmedInvariantFailedDuringPoll:{validity}";
+                SetState(CenterMOem1LifecycleState.FaultedNative);
+                AppLog.Warn("CenterM.Oem1", "Steady-state Armed poll failed the authoritative helper validity check; invalidating Armed.", null, ("Validity", validity));
+            }
+        }
+    }
+
+    /// <summary>Finding #2: the pending debounce's identity/ownership -- CTS plus the exact tracked
+    /// identity/generation/epoch it started under. Using a single object (rather than a bare CTS
+    /// reference) as both the "is a debounce currently active" flag and the cancellation handle lets
+    /// <see cref="RunDebounceAsync"/> retire it deterministically, exactly once, and only when it is
+    /// still the CURRENT pending debounce -- never clearing a newer replacement started by a later,
+    /// different continuation.</summary>
+    private sealed class PendingDebounce
+    {
+        internal required CancellationTokenSource Cts { get; init; }
+        internal required TrackedCenterMMainUi Tracked { get; init; }
+        internal required long Generation { get; init; }
+        internal required long Epoch { get; init; }
     }
 
     private void StartHiddenDebounce(TrackedCenterMMainUi tracked)
     {
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
+        // Defensive only: callers only ever invoke this while _pendingDebounce is null.
+        _pendingDebounce?.Cts.Cancel();
+        _pendingDebounce?.Cts.Dispose();
+
         var cts = new CancellationTokenSource();
-        _debounceCts = cts;
-        var generationAtStart = _generation;
-        var epochAtStart = Interlocked.Read(ref _lifecycleEpoch);
-        var token = cts.Token;
+        var pending = new PendingDebounce
+        {
+            Cts = cts,
+            Tracked = tracked,
+            Generation = _generation,
+            Epoch = Interlocked.Read(ref _lifecycleEpoch)
+        };
+        _pendingDebounce = pending;
 
         AppLog.Info("CenterM.Oem1", "Hidden-after-visible debounce started.", ("ProcessId", tracked.ProcessId));
 
         // Fire-and-forget by design: the debounce is a background timer whose only effect is to
         // eventually re-enter the single serialized gate and re-validate everything fresh. It must
         // never run its safety-relevant logic outside that gate.
-        _ = RunDebounceAsync(tracked, generationAtStart, epochAtStart, token);
+        _ = RunDebounceAsync(pending, cts.Token);
     }
 
-    private async Task RunDebounceAsync(TrackedCenterMMainUi tracked, long generationAtStart, long epochAtStart, CancellationToken token)
+    private async Task RunDebounceAsync(PendingDebounce mine, CancellationToken token)
     {
+        var tracked = mine.Tracked;
         try
         {
             try
@@ -862,14 +951,25 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 // this check is authoritative even if this continuation won the race for the gate),
                 // the generation must be exactly what it was, the tracked identity must be the same
                 // reference, and the coordinator must still be in HiddenDebounce.
-                if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart) return;
-                if (_generation != generationAtStart) return;
+                if (Interlocked.Read(ref _lifecycleEpoch) != mine.Epoch) return;
+                if (_generation != mine.Generation) return;
                 if (!ReferenceEquals(_trackedMainUi, tracked)) return;
                 if (_state != CenterMOem1LifecycleState.HiddenDebounce) return;
 
                 await CompleteDebounceCore(tracked).ConfigureAwait(false);
             }
-            finally { _gate.Release(); }
+            finally
+            {
+                // Finding #2: retire exactly once and only if this continuation's pending debounce
+                // is still the current one. Covers every exit path above (shutdown/cancellation/
+                // stale-epoch/stale-generation/stale-identity/stale-state, and the normal
+                // CompleteDebounceCore completion) uniformly -- none of them may otherwise leave a
+                // dead, non-null _pendingDebounce that blocks the next legitimate hidden transition
+                // from ever starting a new debounce. A newer replacement debounce (a different
+                // PendingDebounce instance) is never cleared by an older stale continuation.
+                if (ReferenceEquals(_pendingDebounce, mine)) _pendingDebounce = null;
+                _gate.Release();
+            }
         }
         finally
         {
@@ -911,10 +1011,11 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     private void CancelPendingDebounceCore(string reason)
     {
-        if (_debounceCts is null) return;
-        _debounceCts.Cancel();
-        _debounceCts.Dispose();
-        _debounceCts = null;
+        if (_pendingDebounce is null) return;
+        var pending = _pendingDebounce;
+        _pendingDebounce = null;
+        pending.Cts.Cancel();
+        pending.Cts.Dispose();
         BumpGeneration();
         AppLog.Info("CenterM.Oem1", "Hidden debounce canceled.", ("Reason", reason));
     }

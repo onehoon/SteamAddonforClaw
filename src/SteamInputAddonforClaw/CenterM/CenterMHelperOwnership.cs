@@ -57,6 +57,19 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     internal int? ProcessId { get; private set; }
     internal bool IsOwned => _processHandle is not null;
 
+    /// <summary>True only when the retained handle came from a fully successful production arm
+    /// sequence (CreateProcess -&gt; Job -&gt; KILL_ON_JOB_CLOSE -&gt; Assign -&gt; ResumeThread all
+    /// succeeded, i.e. <see cref="HelperStartResult.Started"/>) -- distinct from
+    /// <see cref="IsOwned"/>, which is also true for a job-less <see cref="HelperStartResult.PartialCleanupUnconfirmed"/>
+    /// residue retained solely so a later <see cref="Stop"/>/<see cref="Dispose"/> can still target
+    /// the exact process. A job-less retained handle never had KILL_ON_JOB_CLOSE armed for it and
+    /// never completed the operational arm sequence, so <see cref="_jobHandle"/> is null in every
+    /// construction-failure path (never assigned, or explicitly disposed before failure) and is set
+    /// only on the successful <see cref="HelperStartResult.Started"/> path below -- callers must
+    /// treat this, not <see cref="IsOwned"/> alone, as the authority for "eligible to be Armed".
+    /// </summary>
+    internal bool IsOperationallyOwned => _processHandle is not null && _jobHandle is not null;
+
     /// <summary>Zero-time liveness classification of the exact retained helper handle -- never
     /// process-name or PID rediscovery. <see cref="HelperLivenessState.Uncertain"/> (native
     /// WAIT_FAILED) must never be treated as either Alive or Exited by callers.</summary>

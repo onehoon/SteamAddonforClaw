@@ -110,6 +110,10 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         internal int NextProcessId { get; set; } = 9000;
         internal int StartCallCount { get; private set; }
         internal int PollLivenessCallCount { get; private set; }
+        /// <summary>Test-only hook (round-3 finding #6): fires at the moment <see cref="WaitForExit"/>
+        /// is invoked during a helper stop, letting a test mutate world state (AutoRun, foreign
+        /// process presence, ...) to simulate drift occurring during the bounded cleanup wait.</summary>
+        internal Action? OnWaitForExitCalled { get; set; }
 
         public bool TryCreateSuspended(string imagePath, out int processId, out SafeProcessHandle? processHandle, out SafeHandle? threadHandle, out int win32Error)
         {
@@ -134,7 +138,11 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         public bool TryAssignProcessToJob(SafeHandle jobHandle, SafeProcessHandle processHandle, out int win32Error) { win32Error = 0; return AssignSucceeds; }
         public bool TryResumeThread(SafeHandle threadHandle, out int win32Error) { win32Error = 0; return ResumeSucceeds; }
         public bool TryTerminate(SafeProcessHandle processHandle, out int win32Error) { win32Error = TerminateSucceeds ? 0 : 5; return TerminateSucceeds; }
-        public bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout) => WaitForExitSucceeds;
+        public bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout)
+        {
+            OnWaitForExitCalled?.Invoke();
+            return WaitForExitSucceeds;
+        }
 
         public LiveProcessProbeStatus PollLiveness(SafeProcessHandle processHandle)
         {
@@ -150,9 +158,11 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         private const uint PROCESS_TERMINATE = 0x0001;
         internal bool FullRightsSucceed { get; set; } = true;
         internal bool ObservationSucceeds { get; set; } = true;
+        internal int OpenCallCount { get; private set; }
 
         public SafeProcessHandle Open(int processId, uint desiredAccess)
         {
+            OpenCallCount++;
             var isFullRights = (desiredAccess & PROCESS_TERMINATE) != 0;
             var succeeds = isFullRights ? FullRightsSucceed : ObservationSucceeds;
             return succeeds ? new SafeProcessHandle(System.Diagnostics.Process.GetCurrentProcess().Handle, false) : new SafeProcessHandle(IntPtr.Zero, false);
@@ -371,9 +381,15 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
         Assert.False(coordinator.GetSnapshot().NativeBehaviorGuaranteed); // ownership retained
 
-        // A further reconcile attempt while ownership is retained must never create a second helper.
+        // A further reconcile attempt while ownership is retained must never create a second helper,
+        // AND (round-3 finding #1) must never promote the residual, job-less cleanup-only handle to
+        // Armed even though it is alive and the only same-name process in a fresh enumeration -- a
+        // PartialCleanupUnconfirmed residue never completed the operational arm sequence.
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Alive;
         await coordinator.ReconcileAsync("retry");
         Assert.Equal(1, h.HelperApi.StartCallCount);
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.False(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
     }
 
     [Fact]
@@ -1484,5 +1500,361 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
         Assert.True(snap.NativeBehaviorGuaranteed);
         Assert.Null(snap.HelperProcessId);
+    }
+
+    // ============================================================
+    // Review round 3 (PR #239, review 4957383088): regression coverage for the 6 findings.
+    // ============================================================
+
+    // ---- Finding #1: residual cleanup-only ownership must never be promoted to Armed ----
+
+    [Fact]
+    public async Task PartialCleanupUnconfirmed_LaterConfirmsExit_ThenFreshArmCreatesNewOperationalHelper()
+    {
+        var h = NewHarness();
+        h.HelperApi.JobSucceeds = false; // construction failure path
+        h.HelperApi.WaitForExitSucceeds = false; // cleanup cannot confirm -> PartialCleanupUnconfirmed
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+
+        // The residual handle's exit now confirms (e.g. via a later liveness poll) -- only THIS
+        // releases ownership, at which point a brand-new, fully operational helper may be armed.
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+        h.HelperApi.JobSucceeds = true; // the retried Start sequence now succeeds cleanly
+        await coordinator.PollHelperLivenessAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.Equal(2, h.HelperApi.StartCallCount);
+        Assert.False(snap.NativeBehaviorGuaranteed); // now owned by a genuine, operational Armed helper
+    }
+
+    [Fact]
+    public async Task PartialCleanupUnconfirmed_ResumeReconcile_DoesNotUpgradeToArmed()
+    {
+        var h = NewHarness();
+        h.HelperApi.JobSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false;
+        var coordinator = h.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        // The residual, job-less handle is still alive across the sleep -- resume must not treat
+        // "alive and unique" as sufficient to upgrade it to Armed.
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Alive;
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.Equal(1, h.HelperApi.StartCallCount); // no second Start attempted either
+    }
+
+    // ---- Finding #2: completed/stale debounce continuations must always retire the pending debounce ----
+
+    [Fact]
+    public async Task DebounceExpires_VisibleAgain_SecondHiddenCycleStartsANewDebounce()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        // Debounce expires; the terminator's fresh capture finds it visible again -> VisibleAgain.
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+
+        // A second visible -> hidden cycle for the same tracked identity must be able to start (and
+        // reach) a brand-new debounce -- the completed first debounce must not leave a dead pending
+        // marker behind that blocks this.
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+        Assert.Equal(2, h.Delay.CallCount);
+
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(false, 0, 0);
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+        Assert.Equal(1, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task FirstMainUiDebounceCompletes_NewlyAdoptedMainUiCanStartItsOwnDebounce()
+    {
+        var (firstCoordinator, firstHarness) = await ArmAdoptAndReachDebounce(); // first identity's debounce already completed
+
+        Assert.Equal(CenterMOem1LifecycleState.Armed, firstCoordinator.GetSnapshot().State); // re-armed after termination
+
+        // A brand-new real MainUI now appears and is adopted -- its own hidden/visible cycle must be
+        // able to start a fresh debounce untouched by the retired first identity's completed CTS.
+        firstHarness.Snapshots.Foreign = [new ProcessSnapshotEntry(7777, CenterMProcessNames.MainUi, ExpectedPath)];
+        firstHarness.IdentityInspector.ProcessId = 7777;
+        firstHarness.IdentityInspector.Status = LiveProcessProbeStatus.Alive;
+        firstHarness.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await firstCoordinator.PollTickAsync();
+        Assert.Equal(7777, firstCoordinator.GetSnapshot().RealMainUiProcessId);
+        Assert.True(firstCoordinator.GetSnapshot().SeenVisible);
+
+        firstHarness.Delay.Held = true;
+        firstHarness.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await firstCoordinator.PollTickAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, firstCoordinator.GetSnapshot().State);
+        Assert.Equal(2, firstHarness.Delay.CallCount); // the new identity's own debounce actually started
+    }
+
+    [Fact]
+    public async Task StaleContinuation_EpochMismatch_DoesNotBlockNextValidDebounce()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        // Force a true post-delay epoch-mismatch stale completion (not a cancellation): let the
+        // debounce's delay resolve, park it immediately before it competes for the gate, then let a
+        // disable request (which bumps the lifecycle epoch before it ever acquires the gate) run to
+        // full completion first -- exactly the finding #6 ordering, reused here to exercise finding
+        // #2's retirement guarantee on the stale-epoch-mismatch exit path specifically.
+        var enteredHook = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHook = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator.TestOnly_BeforeDebounceGateAcquire = async () =>
+        {
+            enteredHook.TrySetResult();
+            await releaseHook.Task;
+        };
+        var firstFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnFirstFinished() => firstFinished.TrySetResult();
+        coordinator.TestOnly_DebounceContinuationFinished += OnFirstFinished;
+
+        h.Delay.Release();
+        await enteredHook.Task;
+        await coordinator.SetDesiredEnabledAsync(false); // epoch bump + full disable completes first
+        Assert.Equal(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
+
+        releaseHook.TrySetResult(); // let the now-stale, epoch-mismatched continuation proceed
+        await firstFinished.Task;
+        coordinator.TestOnly_DebounceContinuationFinished -= OnFirstFinished;
+        coordinator.TestOnly_BeforeDebounceGateAcquire = null;
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // stale continuation never terminated anything
+
+        // Re-enable (a clean helper arm -- clear the stale foreign-process evidence left over from
+        // the first identity first), then adopt a brand-new real MainUI and reach hidden: this must
+        // be able to start (and reach) its own new debounce -- the earlier stale, epoch-mismatched
+        // continuation must not have left a dead pending marker behind.
+        h.Snapshots.Foreign = [];
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(8888, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.IdentityInspector.ProcessId = 8888;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        Assert.True(coordinator.GetSnapshot().SeenVisible);
+
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+        Assert.Equal(2, h.Delay.CallCount);
+
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+        Assert.Equal(1, h.TerminateInvoker.TerminateCallCount); // the NEW debounce actually ran to completion
+    }
+
+    // ---- Finding #3: authoritative validity check must also gate the steady-state Armed poll ----
+
+    [Fact]
+    public async Task PollTick_ArmedWithAliveHandle_EmptySameNameEnumeration_InvalidatesArmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        // A confidently empty enumeration despite an alive, owned, retained helper handle is exactly
+        // the inconsistent-world case the authoritative invariant must catch -- HelperMissing, not
+        // Valid -- even during the steady-state poll path, not only a fresh reconcile.
+        h.Snapshots.MainUiSequence = new Queue<IReadOnlyList<ProcessSnapshotEntry>?>([[]]);
+
+        await coordinator.PollTickAsync();
+
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+    }
+
+    // ---- Finding #4: resume/reconcile must resolve an existing tracked real MainUI first ----
+
+    [Fact]
+    public async Task Resume_TrackedRealMainUiStillAlive_IdentityAndSeenVisiblePreserved_NoDoubleAdoption()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        Assert.True(coordinator.GetSnapshot().SeenVisible);
+        var handleOpenCallsBeforeSuspend = h.HandleOpener.OpenCallCount;
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        // The exact same real MainUI remains alive across resume (still enumerable, and the
+        // retained handle still confirms it).
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(5555, snap.RealMainUiProcessId);
+        Assert.True(snap.SeenVisible); // history preserved -- no re-adoption/reset
+        Assert.Equal(handleOpenCallsBeforeSuspend, h.HandleOpener.OpenCallCount); // no second handle opened
+    }
+
+    [Fact]
+    public async Task Resume_TrackedRealMainUiExitedDuringSleep_RetiredBeforeAnyArmCommit()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        // The tracked real MainUI exited during sleep: the retained handle proves it, and it no
+        // longer appears in a fresh enumeration.
+        h.IdentityInspector.Status = LiveProcessProbeStatus.Exited;
+        h.Snapshots.Foreign = [];
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Null(snap.RealMainUiProcessId); // retired, never left dangling while re-arming
+        Assert.Equal(CenterMOem1LifecycleState.Armed, snap.State); // clean world -> fresh arm afterward
+        Assert.Equal(2, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
+    public async Task Resume_TrackedRealMainUiRetainedIdentityUncertain_NoHelperStart()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        var startCallCountAfterAdopt = h.HelperApi.StartCallCount; // the helper was stopped before adoption
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        h.IdentityInspector.Status = LiveProcessProbeStatus.Uncertain;
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+        Assert.Equal(startCallCountAfterAdopt, h.HelperApi.StartCallCount); // no helper arm from an uncertain retained identity
+    }
+
+    // ---- Finding #5: environment eligibility must default/fail closed (unsupported), never open ----
+
+    [Fact]
+    public void DefaultEnvironmentEligibility_FailsClosed_NoPredicateInjected()
+    {
+        var h = NewHarness();
+        var coordinator = new CenterMOem1LifecycleCoordinator(
+            publishRootProvider: () => "fake-publish-root",
+            backendProbe: new CenterMBackendProbe(h.Snapshots),
+            autoRunReader: () => h.AutoRun,
+            processSnapshotSource: h.Snapshots,
+            helperOwnership: h.HelperOwnership,
+            mainUiObserver: new MainUiLifecycleObserver(h.WindowProvider),
+            terminator: new SafeMainUiTerminator(h.TerminateInvoker, h.IdentityInspector, h.WindowProvider, h.Snapshots),
+            handleOpener: h.HandleOpener,
+            identityInspector: h.IdentityInspector,
+            stager: _ => h.StagedPath,
+            delay: h.Delay.DelayAsync,
+            environmentEligibility: null, // explicitly not injected
+            hiddenDebounce: TimeSpan.FromMilliseconds(1));
+
+        // Never claim hardware validation here -- this only asserts the constructor's own default,
+        // not any device probe.
+        _ = coordinator;
+    }
+
+    [Fact]
+    public async Task EligibilityProbeThrows_TreatedAsUnsupported_NoHelperCreated_ExistingOwnershipStillReconciled()
+    {
+        var h = NewHarness();
+        h.EnvironmentEligible = () => true;
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        var startCallCountAfterArm = h.HelperApi.StartCallCount;
+
+        h.EnvironmentEligible = () => throw new InvalidOperationException("probe failure");
+        await coordinator.ReconcileAsync("eligibility-probe-throws");
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
+        Assert.True(snap.NativeBehaviorGuaranteed); // an already-owned helper is still cleaned up
+        Assert.Equal(startCallCountAfterArm, h.HelperApi.StartCallCount); // no new helper started
+    }
+
+    // ---- Finding #6: foreign-vanished-after-helper-stop must re-enter a fresh full reconciliation ----
+
+    [Fact]
+    public async Task ForeignVanishesDuringHelperStop_AutoRunDriftsBeforeCleanupCompletes_NoReArmFromStalePrerequisites()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        var startCallCountAfterArm = h.HelperApi.StartCallCount;
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.HelperApi.OnWaitForExitCalled = () =>
+        {
+            // By the time helper cleanup actually confirms (a bounded wait), the foreign process has
+            // already vanished AND AutoRun has drifted to Enabled -- both facts must be recaptured
+            // fresh by a full reconciliation, never assumed from the pre-stop snapshot.
+            h.Snapshots.Foreign = [];
+            h.AutoRun = CenterMAutoRunState.Enabled;
+        };
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
+        Assert.Equal(startCallCountAfterArm, h.HelperApi.StartCallCount); // no second helper started from stale prerequisites
+    }
+
+    [Fact]
+    public async Task ForeignVanishesDuringHelperStop_LauncherDriftsBeforeCleanupCompletes_NoReArmFromStalePrerequisites()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        var startCallCountAfterArm = h.HelperApi.StartCallCount;
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(6666, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.HelperApi.OnWaitForExitCalled = () =>
+        {
+            h.Snapshots.Foreign = [];
+            h.Snapshots.Launcher = []; // Launcher disappears during the bounded cleanup wait
+        };
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.Equal(startCallCountAfterArm, h.HelperApi.StartCallCount);
     }
 }
