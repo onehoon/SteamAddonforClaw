@@ -2713,4 +2713,178 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         // ObjectDisposedException against the now-disposed gate.
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
     }
+
+    // ============================================================
+    // Review 4958040630, finding #1 (BLOCKER): the request-time high-priority marker
+    // (IsHighPriorityRequestPending) must gate the hidden-debounce/termination path too, not only
+    // the AttemptArm linearization points -- both at the moment a debounce would be started/
+    // continued from a HiddenAfterVisible observation, and again immediately before any
+    // termination attempt once a debounce continuation re-enters the gate.
+    // ============================================================
+
+    [Fact]
+    public async Task HiddenAfterVisible_HighPriorityRequestAlreadyPending_NeverStartsDebounceOrTerminates()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+
+        // Models a suspend/disable/shutdown request having already marked the request-time barrier
+        // pending (exactly what it does before ever waiting on the gate) while still waiting for the
+        // gate -- the same shared primitive AttemptArm checks, now also consulted by the hidden/
+        // debounce path.
+        coordinator.TestOnly_BeginHighPriorityRequest();
+        try
+        {
+            h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+            await coordinator.PollTickAsync();
+
+            // No debounce may even start while the marker is pending.
+            Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+            Assert.Equal(0, h.Delay.CallCount);
+            Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        }
+        finally
+        {
+            coordinator.TestOnly_EndHighPriorityRequest();
+        }
+    }
+
+    [Fact]
+    public async Task DebounceContinuation_HighPriorityRequestBecomesPendingBeforeGateAcquire_RefusesTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        // The debounce was started (and captured its epoch snapshot) BEFORE any high-priority
+        // request existed. Simulate, deterministically via the test-only gate-acquire hook, a
+        // suspend/disable/shutdown request marking itself pending in the window between the
+        // debounce's delay completing and the continuation actually acquiring the gate -- exactly
+        // the ordering the BLOCKER finding describes, where epoch/generation/identity/state checks
+        // would all still pass.
+        coordinator.TestOnly_BeforeDebounceGateAcquire = () =>
+        {
+            coordinator.TestOnly_BeginHighPriorityRequest();
+            return Task.CompletedTask;
+        };
+
+        try
+        {
+            await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+
+            Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+            Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, coordinator.GetSnapshot().State);
+        }
+        finally
+        {
+            coordinator.TestOnly_EndHighPriorityRequest();
+        }
+    }
+
+    // ============================================================
+    // Review 4958040630, finding #2 (MAJOR): suppression prerequisites must be re-checked fresh
+    // immediately before CompleteDebounceCore invokes the terminator -- not only at the original
+    // HiddenAfterVisible observation that started the ~1-second debounce -- so drift that happens
+    // entirely during the debounce window (with no intervening poll) cannot lead to termination on
+    // stale evidence.
+    // ============================================================
+
+    [Fact]
+    public async Task DebounceExpiry_AutoRunDriftsDuringDebounce_NoInterveningPoll_RefusesTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        // Drift happens entirely during the debounce window; no additional poll observes it before
+        // the debounce is released.
+        h.AutoRun = CenterMAutoRunState.Enabled;
+
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        // Tracked real MainUI is left intact -- passive/native, not FaultedNative, not re-armed.
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, snap.State);
+        Assert.NotNull(snap.RealMainUiProcessId);
+    }
+
+    [Fact]
+    public async Task DebounceExpiry_EnvironmentEligibilityDriftsDuringDebounce_NoInterveningPoll_RefusesTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        h.EnvironmentEligible = () => false;
+
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, snap.State);
+        Assert.NotNull(snap.RealMainUiProcessId);
+    }
+
+    [Fact]
+    public async Task DebounceExpiry_LauncherOrServerVanishesDuringDebounce_NoInterveningPoll_RefusesTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        h.Snapshots.Launcher = []; // Launcher/Server prerequisite vanishes during the debounce window
+
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        var snap = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, snap.State);
+        Assert.NotNull(snap.RealMainUiProcessId);
+    }
+
+    [Fact]
+    public async Task DebounceExpiry_PrerequisitesRemainValid_HappyPathTerminationUnchanged()
+    {
+        // Regression coverage: when prerequisites remain valid through expiry, the existing final
+        // exact-identity/window revalidation performed by SafeMainUiTerminator still runs and
+        // termination behavior is unchanged by the new prerequisite re-check.
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        await coordinator.PollTickAsync();
+        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+
+        // No drift: AutoRun stays Disabled, environment stays eligible, Launcher/Server stay ready.
+        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
+
+        Assert.Equal(1, h.TerminateInvoker.TerminateCallCount);
+        Assert.Null(coordinator.GetSnapshot().RealMainUiProcessId);
+    }
 }

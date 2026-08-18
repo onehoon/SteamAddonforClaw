@@ -1143,7 +1143,16 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 return;
 
             case MainUiLifecycleState.HiddenAfterVisible:
-                if (!prerequisitesValid)
+                // Review 4958040630 finding #1 (BLOCKER): the request-time high-priority marker
+                // (round 6, IsHighPriorityRequestPending) protected the helper-arm linearization
+                // points, but a hidden debounce that is started/continued from this observation is
+                // equally a "later mutation that could adopt an already-bumped epoch as a clean
+                // baseline" -- a suspend/disable/shutdown request can have already marked itself
+                // pending (and bumped the epoch) while still waiting for _gate, only for THIS poll to
+                // win the race and observe HiddenAfterVisible on the old, not-yet-committed world
+                // state. Refuse to start or continue the debounce in that window; cancel any
+                // in-flight one and stay passive/native, exactly like the prerequisites-invalid case.
+                if (!prerequisitesValid || IsHighPriorityRequestPending)
                 {
                     // Review 4957791980 finding #2 (MAJOR): prerequisite drift (environment
                     // eligibility, AutoRun, or Launcher/Server) must never be bypassed just because a
@@ -1151,10 +1160,10 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     // never start a new one, and never terminate -- stay passive/native until a later
                     // fresh reconciliation confirms the prerequisite set is valid again. The retained
                     // identity/SeenVisible history is preserved untouched; only termination is gated.
-                    CancelPendingDebounceCore("PrerequisitesInvalidAtObservation");
-                    _lastReason = "TrackedMainUiHiddenPrerequisitesInvalid";
+                    CancelPendingDebounceCore(prerequisitesValid ? "HighPriorityRequestPendingAtObservation" : "PrerequisitesInvalidAtObservation");
+                    _lastReason = prerequisitesValid ? "TrackedMainUiHiddenHighPriorityRequestPending" : "TrackedMainUiHiddenPrerequisitesInvalid";
                     SetState(CenterMOem1LifecycleState.NativeMainUiActive);
-                    AppLog.Warn("CenterM.Oem1", "Tracked real MainUI observed hidden-after-visible, but environment/AutoRun/Launcher-Server prerequisites are not currently valid; no debounce, no termination, staying passive.", null, ("ProcessId", tracked.ProcessId));
+                    AppLog.Warn("CenterM.Oem1", "Tracked real MainUI observed hidden-after-visible, but prerequisites are invalid or a high-priority disable/suspend/shutdown request is pending; no debounce, no termination, staying passive.", null, ("ProcessId", tracked.ProcessId), ("PrerequisitesValid", prerequisitesValid), ("HighPriorityRequestPending", IsHighPriorityRequestPending));
                     return;
                 }
 
@@ -1326,6 +1335,39 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 if (_generation != mine.Generation) return;
                 if (!ReferenceEquals(_trackedMainUi, tracked)) return;
                 if (_state != CenterMOem1LifecycleState.HiddenDebounce) return;
+
+                // Review 4958040630 finding #1 (BLOCKER): re-check the request-time high-priority
+                // marker AGAIN here, immediately after this continuation has won the race for _gate
+                // and immediately before any termination attempt -- not just at the observation point
+                // that started this debounce. A suspend/disable/shutdown request can have marked
+                // itself pending and bumped the epoch AFTER this debounce's own epoch snapshot was
+                // captured (StartHiddenDebounce runs strictly before that later request), so the
+                // epoch/generation/identity/state checks above can all legitimately still pass while
+                // the marker is set. The epoch check stays as-is; this is a genuinely independent gate
+                // for the "request became pending after this debounce already started" case.
+                if (IsHighPriorityRequestPending)
+                {
+                    _lastReason = "HighPriorityRequestPendingAtDebounceExpiry";
+                    AppLog.Warn("CenterM.Oem1", "A disable/suspend/shutdown request is pending as this debounce reached the gate; termination refused.", null, ("ProcessId", tracked.ProcessId));
+                    SetState(CenterMOem1LifecycleState.NativeMainUiActive);
+                    return;
+                }
+
+                // Review 4958040630 finding #2 (MAJOR): the debounce is intentionally ~1 second long,
+                // and OEM1 feature prerequisites (environment eligibility, AutoRun, Launcher/Server)
+                // are not something SafeMainUiTerminator itself knows about -- it only performs final
+                // retained-handle/process/window/same-name safety checks. Re-capture them fresh here,
+                // immediately before ever invoking the terminator, so drift that happened entirely
+                // during the debounce window (with no intervening poll) cannot lead to a termination
+                // decided on now-stale evidence captured back at the original HiddenAfterVisible
+                // observation.
+                if (!RefreshSuppressionPrerequisites())
+                {
+                    _lastReason = "TrackedMainUiHiddenPrerequisitesInvalidAtDebounceExpiry";
+                    AppLog.Warn("CenterM.Oem1", "OEM1 suppression prerequisites are no longer valid at debounce expiry; termination refused, tracked real MainUI left intact.", null, ("ProcessId", tracked.ProcessId));
+                    SetState(CenterMOem1LifecycleState.NativeMainUiActive);
+                    return;
+                }
 
                 await CompleteDebounceCore(tracked).ConfigureAwait(false);
             }
