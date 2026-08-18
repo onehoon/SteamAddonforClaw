@@ -59,11 +59,7 @@ internal sealed class Oem1TaskDelay : IOem1GestureDelay
 /// <summary>Recognizes semantic OEM1 presses without owning event acquisition or actions.</summary>
 internal sealed class Oem1GestureRecognizer : IDisposable
 {
-    [ThreadStatic]
-    private static HashSet<long>? _currentDeliveries;
-
     private readonly object _gate = new();
-    private readonly object _deliveryGate = new();
     private readonly bool _doubleClickEnabled;
     private readonly TimeSpan _doubleClickWindow;
     private readonly IOem1GestureDelay _delay;
@@ -73,8 +69,6 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private IOem1GestureCancellationSource? _pendingCancellation;
     private long _generation;
     private long _deliveryEpoch;
-    private long _nextDeliveryId;
-    private readonly HashSet<long> _activeDeliveries = [];
     private bool _firstPressPending;
     private long _firstPressTimestamp;
     private bool _disposed;
@@ -171,7 +165,6 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     internal void Reset()
     {
         InvalidatePending();
-        WaitForDeliveriesToDrain();
     }
 
     internal void InvalidatePending()
@@ -202,7 +195,6 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             CancelPendingCore();
         }
 
-        WaitForDeliveriesToDrain();
     }
 
     private async Task CompleteSingleAfterTimeoutAsync(long generation, CancellationToken cancellationToken)
@@ -234,48 +226,15 @@ internal sealed class Oem1GestureRecognizer : IDisposable
 
     private void DeliverGesture(Oem1Gesture gesture, long deliveryEpoch)
     {
-        long deliveryId;
-        lock (_deliveryGate)
+        lock (_gate)
         {
-            lock (_gate)
-            {
-                if (_disposed || deliveryEpoch != _deliveryEpoch)
-                    return;
-
-                deliveryId = ++_nextDeliveryId;
-                _activeDeliveries.Add(deliveryId);
-            }
+            if (_disposed || deliveryEpoch != _deliveryEpoch)
+                return;
         }
 
-        (_currentDeliveries ??= []).Add(deliveryId);
-        try
-        {
-            _deliveryBeforeNotification?.Invoke(deliveryEpoch);
-            GestureRecognizedWithEpoch?.Invoke(gesture, deliveryEpoch);
-            GestureRecognized?.Invoke(gesture);
-        }
-        finally
-        {
-            lock (_deliveryGate)
-            {
-                var current = _currentDeliveries!;
-                var completedDeliveryId = current.Last();
-                current.Remove(completedDeliveryId);
-                _activeDeliveries.Remove(completedDeliveryId);
-                if (current.Count == 0)
-                    _currentDeliveries = null;
-                Monitor.PulseAll(_deliveryGate);
-            }
-        }
-    }
-
-    private void WaitForDeliveriesToDrain()
-    {
-        lock (_deliveryGate)
-        {
-            while (_activeDeliveries.Any(id => _currentDeliveries is null || !_currentDeliveries.Contains(id)))
-                Monitor.Wait(_deliveryGate);
-        }
+        _deliveryBeforeNotification?.Invoke(deliveryEpoch);
+        GestureRecognizedWithEpoch?.Invoke(gesture, deliveryEpoch);
+        GestureRecognized?.Invoke(gesture);
     }
 
     private void BeginPendingPressCore(long timestamp, out long generation, out CancellationToken token)

@@ -293,90 +293,6 @@ public sealed class Oem1EventGestureBridgeTests
     }
 
     [Fact]
-    public async Task Concurrent_timeout_event_and_authority_revocation_complete_without_deadlock()
-    {
-        using var fixture = Create(doubleEnabled: true);
-        fixture.Bridge.SetCustomAuthority(true);
-        fixture.Source.Emit(Oem1());
-
-        var timeout = fixture.Delay.CompleteLastAsync();
-        var revocation = Task.Run(() => fixture.Bridge.SetCustomAuthority(false));
-        await Task.WhenAll(timeout, revocation);
-
-        Assert.InRange(fixture.Results.Count, 0, 1);
-    }
-
-    [Fact]
-    public async Task Contested_timeout_and_event_ordering_completes_without_lock_inversion()
-    {
-        var eventOperationEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseEventOperation = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var armEventBarrier = false;
-        using var fixture = Create(
-            doubleEnabled: true,
-            recognizerOperationEntered: () =>
-            {
-                if (armEventBarrier)
-                {
-                    eventOperationEntered.TrySetResult(null);
-                    releaseEventOperation.Task.GetAwaiter().GetResult();
-                }
-            });
-        fixture.Bridge.SetCustomAuthority(true);
-        fixture.Source.Emit(Oem1());
-        fixture.Clock.Advance(TimeSpan.FromMilliseconds(251));
-        armEventBarrier = true;
-
-        var policyEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        fixture.Bridge.PolicyRequested += _ =>
-        {
-            policyEntered.TrySetResult(null);
-            fixture.Bridge.SetCustomAuthority(false);
-        };
-
-        var eventTask = Task.Run(() => fixture.Source.Emit(Oem1()));
-        await eventOperationEntered.Task;
-        var timeout = fixture.Delay.CompleteLastAsync();
-        await policyEntered.Task;
-        releaseEventOperation.TrySetResult(null);
-        await Task.WhenAll(timeout, eventTask);
-
-        var resultCount = fixture.Results.Count;
-        fixture.Source.Emit(Oem1());
-        Assert.Equal(resultCount, fixture.Results.Count);
-    }
-
-    [Fact]
-    public async Task Revocation_invalidation_does_not_wait_for_reentrant_policy_delivery()
-    {
-        var policyEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var invalidationEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var allowPolicyReentry = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var fixture = Create(
-            doubleEnabled: true,
-            authorityInvalidationEntered: () => invalidationEntered.TrySetResult(null));
-
-        fixture.Bridge.PolicyRequested += _ =>
-        {
-            policyEntered.TrySetResult(null);
-            allowPolicyReentry.Task.GetAwaiter().GetResult();
-            fixture.Bridge.SetCustomAuthority(false);
-        };
-        fixture.Bridge.SetCustomAuthority(true);
-        fixture.Source.Emit(Oem1());
-
-        var timeoutTask = fixture.Delay.CompleteLastAsync();
-        await policyEntered.Task;
-
-        var revokeTask = Task.Run(() => fixture.Bridge.SetCustomAuthority(false));
-        await invalidationEntered.Task;
-        allowPolicyReentry.TrySetResult(null);
-
-        await Task.WhenAll(timeoutTask, revokeTask);
-        Assert.Empty(fixture.Results.Skip(1));
-    }
-
-    [Fact]
     public async Task Delivery_admitted_before_reactivation_cannot_cross_the_new_authority_epoch()
     {
         var deliveryEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -420,11 +336,7 @@ public sealed class Oem1EventGestureBridgeTests
     private static MsiOemEvent Oem2() => new(88, CenterMOemCode.Oem2);
     private static MsiOemEvent Other() => new(99, CenterMOemCode.Other);
 
-    private static Fixture Create(
-        bool doubleEnabled = false,
-        Action? recognizerOperationEntered = null,
-        Action? authorityInvalidationEntered = null,
-        Action<long>? deliveryBeforeNotification = null)
+    private static Fixture Create(bool doubleEnabled = false, Action<long>? deliveryBeforeNotification = null)
     {
         var source = new FakeMsiEventSource();
         var delay = new ControlledDelay();
@@ -437,9 +349,7 @@ public sealed class Oem1EventGestureBridgeTests
             deliveryBeforeNotification: deliveryBeforeNotification);
         var bridge = new Oem1EventGestureBridge(
             source,
-            recognizer,
-            recognizerOperationEntered,
-            authorityInvalidationEntered);
+            recognizer);
         var results = new List<Oem1GesturePolicyRequest>();
         bridge.PolicyRequested += results.Add;
         return new Fixture(source, delay, clock, bridge, results);
