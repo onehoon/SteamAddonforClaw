@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.FrontendTransport;
 
 namespace SteamInputAddonforClaw.Lifecycle;
 
@@ -9,16 +10,19 @@ internal sealed class FrontendProcessLauncher
 {
     private readonly object _sync = new();
     private readonly string _executablePath;
+    private readonly string _logDirectory;
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private bool _runtimeReady;
     private bool _pendingOpen;
     private FrontendOpenReason? _pendingReason;
     private bool _stopping;
 
-    internal FrontendProcessLauncher(string runtimeBaseDirectory, Func<ProcessStartInfo, Process?>? startProcess = null)
+    internal FrontendProcessLauncher(string runtimeBaseDirectory, string logDirectory, Func<ProcessStartInfo, Process?>? startProcess = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeBaseDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(logDirectory);
         _executablePath = Path.Combine(runtimeBaseDirectory, "ui", "SteamInputAddonforClaw.UI.exe");
+        _logDirectory = logDirectory;
         _startProcess = startProcess ?? Process.Start;
     }
 
@@ -73,6 +77,8 @@ internal sealed class FrontendProcessLauncher
     private void LaunchLocked(FrontendOpenReason reason)
     {
         var startInfo = new ProcessStartInfo(_executablePath) { UseShellExecute = false };
+        startInfo.ArgumentList.Add(FrontendLaunchArguments.LogDirectoryOption);
+        startInfo.ArgumentList.Add(_logDirectory);
         AppLog.Info("Frontend", "Frontend process launch attempted.", ("Reason", reason), ("Path", _executablePath));
         try
         {

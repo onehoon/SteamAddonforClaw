@@ -42,7 +42,7 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (_writer is not null) throw new InvalidOperationException("The probe session has already started.");
-        root ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "logs", "ClawSensorProbe");
+        root ??= Path.Combine(AppLog.DirectoryPath, "ClawSensorProbe");
         var sessionId = $"{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff", System.Globalization.CultureInfo.InvariantCulture)}-{Guid.NewGuid():N}";
         _writer = new ClawSensorProbeSessionWriter(root, sessionId);
         _clock = new ClawSensorProbeSessionClock();

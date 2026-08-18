@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.Install;
 
 namespace SteamInputAddonforClaw.Diagnostics;
 
@@ -22,7 +23,6 @@ internal static class AppLog
     private static readonly string LaunchId = Guid.NewGuid().ToString("N")[..10];
     private static readonly DateTimeOffset LaunchTimestamp = DateTimeOffset.Now;
     private static readonly string LaunchFileName = AppLogFileName.Create(LaunchTimestamp, Environment.ProcessId, LaunchId);
-    private static readonly string DefaultDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "logs");
 
     // Only the background writer thread and ResetMaintenanceStateForTests touch this state, never the
     // logging call sites, so a small dedicated lock (instead of the old call-site-wide lock) is enough.
@@ -48,7 +48,7 @@ internal static class AppLog
     /// work when the level is filtered.
     /// </summary>
     internal static bool IsEnabled(AppLogLevel level) => level >= MinimumLevelOverride;
-    internal static string DirectoryPath => DirectoryOverride ?? DefaultDirectory;
+    internal static string DirectoryPath => DirectoryOverride ?? AddonDataPaths.LogDirectory;
     internal static string CurrentLogFileName => LaunchFileName;
     internal static string CurrentLogFilePath => Path.Combine(DirectoryPath, LaunchFileName);
     internal static Func<DateTime> LocalDateProvider { get; set; } = static () => DateTime.Now.Date;

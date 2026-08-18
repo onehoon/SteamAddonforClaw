@@ -10,11 +10,16 @@ internal static class AddonDataPaths
 
     internal static string RecoveryJournalPath => ResolveRecoveryJournalPath(VelopackAppPaths.RootAppDirectory);
 
+    internal static string LogDirectory => ResolveLogDirectory(VelopackAppPaths.RootAppDirectory);
+
     internal static string ResolveSettingsPath(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "settings.json");
 
     internal static string ResolveRecoveryJournalPath(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "recovery.json");
+
+    internal static string ResolveLogDirectory(string rootAppDirectory) =>
+        Path.Combine(ResolveDataRoot(rootAppDirectory), "logs");
 
     internal static string ResolveDataRoot(string rootAppDirectory)
     {
