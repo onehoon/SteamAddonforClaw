@@ -41,4 +41,12 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
 
     /// <summary>Optional borrowed physical-feedback capability; null is valid for a backend without rumble.</summary>
     IPhysicalRumbleSink? PhysicalRumbleSink { get; }
+
+    /// <summary>
+    /// Registers the callback the composition must invoke when it detects a fatal backend runtime
+    /// fault -- currently, unexpected loss of an owned physical-input session -- that invalidates
+    /// the currently active routing pipeline. The reported reason is a short stable string, not a
+    /// user-facing message. A backend with nothing to report may simply never invoke it.
+    /// </summary>
+    void SetRuntimeFaultHandler(Func<string, ValueTask> handler);
 }

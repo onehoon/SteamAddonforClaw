@@ -83,6 +83,18 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             pipelineSessionCoordinator,
             handheldRoutingComposition.SessionBoundaryParticipants);
         deckStage.SetOutputFaultHandler(async () => { await coordinator.FailClosedAsync().ConfigureAwait(false); });
+        handheldRoutingComposition.SetRuntimeFaultHandler(async reason =>
+        {
+            // Latch before fail-close: otherwise a still-eligible Steam session could immediately
+            // re-enter routing right after this rollback completes, and if the physical device was
+            // externally changed underneath us that would tug-of-war with whatever put it there.
+            if (safetySession is not null)
+                await safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);
+
+            var rollback = await coordinator.FailClosedAsync().ConfigureAwait(false);
+            if (!rollback.Succeeded)
+                AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
+        });
 
         return new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator);
     }

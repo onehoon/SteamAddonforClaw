@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Input.DirectInput;
@@ -40,6 +41,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     private readonly IReadOnlyList<IRoutingPipelineStage> _stages;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
+    private Func<string, ValueTask>? _runtimeFaultHandler;
 
     internal MsiClawRoutingComposition(
         MsiClawNativeStateManager nativeState,
@@ -74,6 +76,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         PhysicalInputStage.PhysicalSessionRetiring += PhysicalRumbleSink.BeginPhysicalSessionRetirement;
         PhysicalInputStage.PhysicalSessionStarted += PhysicalRumbleSink.BeginPhysicalSession;
         PhysicalInputStage.PhysicalSessionRetired += PhysicalRumbleSink.InvalidatePhysicalSession;
+        PhysicalInputSource.TestCompleted += OnPhysicalInputCompleted;
 
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage];
         _sessionBoundaryParticipants = [NativeModeSession];
@@ -88,8 +91,60 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     IRoutingSafetySession? IHandheldRoutingComposition.SafetySession => NativeModeSession;
     IPhysicalRumbleSink? IHandheldRoutingComposition.PhysicalRumbleSink => PhysicalRumbleSink;
 
+    void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, ValueTask> handler) =>
+        _runtimeFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+
+    /// <summary>
+    /// Forwards the physical-input source's completion summary to the registered runtime-fault
+    /// handler when it represents an unexpected termination of a session routing currently owns
+    /// (<see cref="MsiClawPhysicalInputFaultPolicy"/>). Expected stops -- normal pipeline rollback
+    /// (<see cref="MsiClawInputStopReason.Stopped"/>) and any stop before
+    /// <see cref="MsiClawPhysicalInputStage"/> has committed ownership -- are not reported.
+    /// Internal (rather than private) so the decision/dispatch wiring can be exercised directly in
+    /// tests without a real DirectInput device.
+    /// </summary>
+    internal void OnPhysicalInputCompleted(object? sender, MsiClawInputTestSummary summary)
+    {
+        if (!MsiClawPhysicalInputFaultPolicy.IsFatal(summary.StopReason, PhysicalInputStage.CurrentIdentity is not null))
+            return;
+
+        AppLog.Warn("Routing.Runtime", "Owned physical-input session terminated unexpectedly; requesting routing fail-close.", null,
+            ("Event", "PhysicalInputSessionLost"), ("StopReason", summary.StopReason), ("Action", "FailClosed"));
+        ReportRuntimeFault(MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason);
+    }
+
+    /// <summary>
+    /// Internal (rather than private) so the dispatch/exception-containment behavior can be
+    /// exercised directly in tests without needing committed physical-input ownership, which
+    /// requires real DirectInput hardware.
+    /// </summary>
+    internal void ReportRuntimeFault(string reason)
+    {
+        if (_runtimeFaultHandler is not { } handler)
+            return;
+
+        // Do not synchronously await the handler here: it eventually rolls back this same physical
+        // input stage, which awaits the polling task raising this very event -- a self-await
+        // deadlock. Detach onto a background task instead, matching the existing Steam output
+        // fault-forwarding pattern (CanonicalSteamDeckOutputStage.ReportOutputFault).
+        _ = Task.Run(() => RunRuntimeFaultHandlerAsync(handler, reason));
+    }
+
+    private static async Task RunRuntimeFaultHandlerAsync(Func<string, ValueTask> handler, string reason)
+    {
+        try
+        {
+            await handler(reason).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Routing.Runtime", "Backend runtime fault handler failed.", exception, ("Reason", reason));
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
+        PhysicalInputSource.TestCompleted -= OnPhysicalInputCompleted;
         PhysicalInputStage.PhysicalSessionRetired -= PhysicalRumbleSink.InvalidatePhysicalSession;
         PhysicalInputStage.PhysicalSessionRetiring -= PhysicalRumbleSink.BeginPhysicalSessionRetirement;
         PhysicalInputStage.PhysicalSessionStarted -= PhysicalRumbleSink.BeginPhysicalSession;

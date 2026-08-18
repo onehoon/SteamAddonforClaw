@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Power;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -226,6 +227,32 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task FailClosedCancelsAnInFlightEnterBeforeForwardCompletion()
+    {
+        // FailClosedAsync() must preempt an in-flight routing Enter rather than sitting behind
+        // _transitionGate while that Enter is still free to keep mutating forward -- otherwise a
+        // caller reporting a fault that already invalidates the active session (e.g. the owned
+        // MSI physical-input session dying mid-Enter) could still race a later stage (e.g. Steam
+        // output attach) into completing before rollback ever starts.
+        var executor = new FakeExecutor { BlockNextExecute = true };
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+
+        var entering = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var failClosing = bridge.Bridge.FailClosedAsync().AsTask();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => entering);
+        await executor.ExecuteCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var result = await failClosing;
+        Assert.True(result.Succeeded);
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.Equal(RoutingOperationalState.Passive, bridge.Bridge.CurrentOperationalState);
+    }
+
+    [Fact]
     public async Task PublisherFaultInvokesTheActualRuntimeFailClosedPath()
     {
         var executor = new FakeExecutor();
@@ -245,6 +272,44 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         await publisher.StopAsync();
         Assert.Single(executor.RollbackPlans);
         Assert.Null(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task BackendRuntimeFaultLatchesThenInvokesTheActualRuntimeFailClosedPath()
+    {
+        // Mirrors AddonRoutingRuntime.Create's registered runtime-fault handler: latch the routing
+        // safety fault, then drive the same canonical FailClosedAsync() the Steam-output publisher
+        // fault path already uses (PublisherFaultInvokesTheActualRuntimeFailClosedPath above) --
+        // proving an unexpected physical-input loss retires the active session/Steam output via
+        // the existing fail-close path, with no second fault mechanism.
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        Assert.True(bridge.Bridge.ActiveSessionHasSteamOutputEnabled);
+
+        var events = new List<string>();
+        var safetySession = new FakeSafetySession(events);
+        Func<string, ValueTask> runtimeFaultHandler = async reason =>
+        {
+            await safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);
+            events.Add("FailCloseStarted");
+            var rollback = await bridge.Bridge.FailClosedAsync().ConfigureAwait(false);
+            Assert.True(rollback.Succeeded);
+        };
+
+        await runtimeFaultHandler(MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason);
+
+        Assert.Equal([MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason], safetySession.LatchedReasons);
+        Assert.Single(executor.RollbackPlans);
+        Assert.Null(bridge.Session.ActiveSession);
+        Assert.False(bridge.Bridge.ActiveSessionHasSteamOutputEnabled);
+        Assert.Equal(RoutingOperationalState.Passive, bridge.Bridge.CurrentOperationalState);
+
+        // The fault must be latched strictly before fail-close runs, not merely both eventually
+        // called -- otherwise a still-eligible Steam session could race back in immediately after
+        // rollback completes.
+        Assert.Equal(["Latch:PhysicalInputSessionLost", "FailCloseStarted"], events);
     }
 
     [Fact]
@@ -725,6 +790,24 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
             }
             return _snapshots.Count > 0 ? _snapshots.Dequeue() : snapshots[^1];
         }
+    }
+
+    private sealed class FakeSafetySession(List<string> events) : IRoutingSafetySession
+    {
+        internal List<string> LatchedReasons { get; } = [];
+        public bool IsActive => false;
+        public bool HasOwnedRecoveryBoundary => false;
+        public Guid? CurrentRecoverySessionId => null;
+
+        public Task LatchRoutingFaultAsync(string reason, CancellationToken cancellationToken = default)
+        {
+            LatchedReasons.Add(reason);
+            events.Add($"Latch:{reason}");
+            return Task.CompletedTask;
+        }
+
+        public Task FailClosedAsync(string reason, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class SuspendBoundaryParticipant : IRoutingRuntimeSessionBoundaryParticipant

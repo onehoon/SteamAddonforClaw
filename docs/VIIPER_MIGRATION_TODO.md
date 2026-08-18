@@ -54,6 +54,16 @@ Addon-side stale startup virtual-output journal retirement now has a
 current-world PnP evidence gate in code. This is safety hardening only and
 does not advance SD3 hardware validation.
 
+Unexpected termination of the owned PID_1902 physical-input DirectInput
+session while routing is active now requests canonical routing fail-close
+(`RoutingPipelineRuntimeCoordinator.FailClosedAsync()`, with the routing
+safety fault latched first via the existing `IRoutingSafetySession`). This
+protects against device re-enumeration, firmware/mode-manager mutation
+(including MSI Center M's own DInput/MSI/XInput switching), and unexpected
+HID/driver failure while Steam routing is active -- not just Center M
+specifically. This is software safety hardening only and does not advance SD3
+hardware validation; real hardware validation of this path remains required.
+
 Complete real MSI Claw EX validation for:
 
 - native-mode entry and restoration;

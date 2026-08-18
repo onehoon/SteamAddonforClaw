@@ -59,6 +59,83 @@ public sealed class MsiClawRoutingCompositionTests
         Assert.False(composition.PhysicalInputSource.IsRunning);
     }
 
+    [Fact]
+    public async Task Normal_stop_reason_does_not_report_a_runtime_fault()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
+        var reasons = new List<string>();
+        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler(reason => { reasons.Add(reason); return ValueTask.CompletedTask; });
+
+        composition.OnPhysicalInputCompleted(composition, StoppedSummary(MsiClawInputStopReason.Stopped));
+        await Task.Delay(50);
+
+        Assert.Empty(reasons);
+    }
+
+    [Fact]
+    public async Task Fatal_stop_reason_before_ownership_was_ever_committed_does_not_report_a_runtime_fault()
+    {
+        // PhysicalInputStage.CurrentIdentity is null here because ownership was never committed
+        // (no ExecuteMutationAsync ran) -- this is the natural state without real DirectInput
+        // hardware, and exercises the "failure before routing entered" path from the work order.
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
+        Assert.Null(composition.PhysicalInputStage.CurrentIdentity);
+        var reasons = new List<string>();
+        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler(reason => { reasons.Add(reason); return ValueTask.CompletedTask; });
+
+        composition.OnPhysicalInputCompleted(composition, StoppedSummary(MsiClawInputStopReason.ReadStateFailed));
+        await Task.Delay(50);
+
+        Assert.Empty(reasons);
+    }
+
+    [Fact]
+    public async Task Stopped_summary_never_invokes_the_runtime_fault_handler()
+    {
+        // The handler would throw if invoked -- the point of this test is that Stopped must never
+        // reach it, not exception containment (that is covered separately below, since Stopped is
+        // rejected by MsiClawPhysicalInputFaultPolicy before dispatch is ever reached).
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
+        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler(_ => throw new InvalidOperationException("handler bug"));
+
+        var exception = Record.Exception(() => composition.OnPhysicalInputCompleted(composition, StoppedSummary(MsiClawInputStopReason.Stopped)));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task A_throwing_runtime_fault_handler_does_not_escape_a_dispatched_fault()
+    {
+        // ReportRuntimeFault is the actual dispatch point OnPhysicalInputCompleted's fatal branch
+        // calls -- exercised directly here (internal seam) because driving a real fatal+owned
+        // dispatch requires committed PhysicalInputStage ownership, which needs real DirectInput
+        // hardware (see the pre-ownership tests above). The exception-containment logic itself does
+        // not depend on which fatal condition triggered the dispatch.
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
+        var handlerInvoked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler(_ =>
+        {
+            handlerInvoked.TrySetResult();
+            throw new InvalidOperationException("handler bug");
+        });
+
+        var exception = Record.Exception(() => composition.ReportRuntimeFault(MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason));
+        await handlerInvoked.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Null(exception);
+    }
+
+    private static MsiClawInputTestSummary StoppedSummary(MsiClawInputStopReason stopReason) =>
+        new(TestSession: 1, DurationMs: 1, M1Observed: false, M2Observed: false, Independent: false, ReadFailures: 0, CleanupSucceeded: true, stopReason);
+
     private sealed class FakeDeviceEnumerator(MsiClawNativeMode initialMode) : IControllerDeviceEnumerator
     {
         private readonly Guid _containerId = Guid.NewGuid();
