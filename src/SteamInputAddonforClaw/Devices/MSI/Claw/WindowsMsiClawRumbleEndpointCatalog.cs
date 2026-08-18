@@ -15,12 +15,13 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
         const string hidInterfaceClassGuid = "{4D1E55B2-F16F-11CF-88CB-001111000030}";
         var devices = DeviceInformation.FindAllAsync($"System.Devices.InterfaceClassGuid:=\"{hidInterfaceClassGuid}\"", ["System.Devices.DeviceInstanceId", "System.Devices.Hid.InputReportByteLength", "System.Devices.Hid.OutputReportByteLength", "System.Devices.HardwareIds"])
             .AsTask().GetAwaiter().GetResult();
+        var pnpDevices = _devices.EnumeratePresentDevices();
         var candidates = new List<MsiClawRumbleEndpointCandidate>();
         foreach (var device in devices)
         {
             var pnp = device.Properties.TryGetValue("System.Devices.DeviceInstanceId", out var value) ? value as string : null;
             if (!HasHardwareId(device)) continue;
-            var topology = _devices.EnumeratePresentDevices().Where(candidate =>
+            var topology = pnpDevices.Where(candidate =>
                 string.Equals(candidate.InstanceId, pnp, StringComparison.OrdinalIgnoreCase) &&
                 candidate.VendorId == MsiClawHardware.VendorId && candidate.ProductId == MsiClawHardware.DirectInputProductId).ToArray();
             if (topology.Length != 1) continue;

@@ -85,6 +85,7 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
             _admissionOpen = false;
             _endpointGeneration = null;
             _cachedEndpoint = default;
+            _transport.InvalidatePhysicalSession();
         }
     }
 
