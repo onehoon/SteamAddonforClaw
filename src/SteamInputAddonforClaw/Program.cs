@@ -21,7 +21,7 @@ public static class Program
             AddonLogRetention.PruneDefaultDirectory();
             var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
             VelopackApp.Build().Run();
-            var persistedLogLevel = LogLevelBootstrap.Read(VelopackAppPaths.SettingsPath);
+            var persistedLogLevel = LogLevelBootstrap.Read(AddonDataPaths.SettingsPath);
             AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(persistedLogLevel);
             AppLog.Info("App", "Application startup entered.", ("PID", Environment.ProcessId), ("RestartRequested", restartRequested), ("BackgroundRequested", args.Contains("--background", StringComparer.OrdinalIgnoreCase)));
             AppLog.Debug("Velopack", "Velopack bootstrap completed.");
