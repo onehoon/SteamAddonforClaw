@@ -198,7 +198,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 var preflight = _physicalRumbleSink.SetRumble(TwoMotorRumble.Stopped);
                 if (preflight.Status != PhysicalRumbleWriteStatus.Succeeded)
                 {
-                    AppLog.Warn("Rumble", "Physical rumble unavailable; Steam Deck routing will continue without physical feedback.", null, ("Source", "SteamDeck"), ("PID", 1902), ("Result", preflight.Status), ("Reason", preflight.Reason));
+                    AppLog.Warn("Rumble", "Physical rumble unavailable; Steam Deck routing will continue without physical feedback.", null, ("Source", "SteamDeck"), ("Result", preflight.Status), ("Reason", preflight.Reason));
                 }
                 else
                 {
