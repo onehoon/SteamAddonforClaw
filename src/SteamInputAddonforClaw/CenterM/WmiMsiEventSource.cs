@@ -68,18 +68,26 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
 {
     private readonly IManagementEventWatcherAdapter _adapter;
     private int _disposed;
+    private int _started;
 
     internal WmiMsiEventSource(IManagementEventWatcherAdapter? adapter = null) =>
         _adapter = adapter ?? new ManagementEventWatcherAdapter();
 
     public event Action<MsiOemEvent>? EventReceived;
 
+    /// <summary>One-shot: a repeated call while already started, or any call after
+    /// <see cref="Dispose"/>, is refused (returns false, no adapter interaction) rather than
+    /// risking a duplicated subscription or touching an already-disposed native watcher.</summary>
     public bool Start()
     {
+        if (Volatile.Read(ref _disposed) != 0) return false;
+        if (Interlocked.CompareExchange(ref _started, 1, 0) != 0) return false;
+
         _adapter.MsiEventArrived += OnMsiEventArrived;
         if (_adapter.TryStart(out var error)) return true;
 
         _adapter.MsiEventArrived -= OnMsiEventArrived;
+        _started = 0;
         AppLog.Warn("CenterM.MsiEvent", "MSI_Event WMI watcher failed to start.", error);
         return false;
     }

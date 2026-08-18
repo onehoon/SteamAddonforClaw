@@ -32,6 +32,15 @@ internal static class CenterMHelperStaging
             Directory.CreateDirectory(RuntimeDirectory);
             var stagedPath = Path.Combine(RuntimeDirectory, StagedBinaryName);
             File.Copy(sourcePath, stagedPath, overwrite: true);
+
+            // A freshly written self-contained single-file executable, when created suspended
+            // immediately afterward, was observed to intermittently fail its own bundle
+            // self-extraction (falling back to an invalid framework-dependent-style DLL lookup) --
+            // reproducibly fixed by forcing one full read of the file here, before the caller ever
+            // creates it suspended, so any on-access scan/cache settles while the process is not
+            // yet held stationary. See PR review discussion for the reproduction.
+            _ = File.ReadAllBytes(stagedPath);
+
             return stagedPath;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)

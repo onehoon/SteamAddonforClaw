@@ -18,9 +18,11 @@ internal sealed class Win32HelperProcessNativeApi : IHelperProcessNativeApi
 {
     private const uint CREATE_SUSPENDED = 0x00000004;
     private const uint CREATE_NO_WINDOW = 0x08000000;
+    private const uint CREATE_BREAKAWAY_FROM_JOB = 0x01000000;
     private const int JobObjectExtendedLimitInformation = 9;
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
     private const uint WAIT_OBJECT_0 = 0;
+    private const int ERROR_ACCESS_DENIED = 5;
 
     public bool TryCreateSuspended(string imagePath, out int processId, out SafeProcessHandle? processHandle, out SafeHandle? threadHandle, out int win32Error)
     {
@@ -29,8 +31,23 @@ internal sealed class Win32HelperProcessNativeApi : IHelperProcessNativeApi
         // though the helper takes no arguments.
         var commandLine = new System.Text.StringBuilder($"\"{imagePath}\"");
 
+        // If the Addon's own process happens to be running inside an outer Job Object (some
+        // launch/shell/container environments do this), a plain child inherits membership in
+        // that job. Assigning it into our own dedicated Job as well can then interact with the
+        // outer job's own limits/cleanup semantics in ways this Addon does not control. Breaking
+        // away first, when the outer job permits it (JOB_OBJECT_LIMIT_BREAKAWAY_OK), keeps the
+        // helper's lifetime governed only by the Job this class itself owns and closes.
         var created = CreateProcessW(null, commandLine, IntPtr.Zero, IntPtr.Zero, false,
-            CREATE_SUSPENDED | CREATE_NO_WINDOW, IntPtr.Zero, null, ref startupInfo, out var info);
+            CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB, IntPtr.Zero, null, ref startupInfo, out var info);
+
+        if (!created && Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED)
+        {
+            // The outer job does not permit breakaway -- fall back to ordinary (nested-job)
+            // creation rather than failing outright.
+            commandLine = new System.Text.StringBuilder($"\"{imagePath}\"");
+            created = CreateProcessW(null, commandLine, IntPtr.Zero, IntPtr.Zero, false,
+                CREATE_SUSPENDED | CREATE_NO_WINDOW, IntPtr.Zero, null, ref startupInfo, out info);
+        }
 
         if (!created)
         {

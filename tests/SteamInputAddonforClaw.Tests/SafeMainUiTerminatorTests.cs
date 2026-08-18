@@ -19,180 +19,184 @@ public sealed class SafeMainUiTerminatorTests
         FreshWindowSnapshot: new MainUiWindowSnapshot(true, 1, 0),
         AdditionalForeignMainUiExists: false);
 
+    // -- Pure precondition decision (Evaluate): each individual failure reason, independent of
+    // however the evidence was captured. --
+
     [Fact]
-    public void AllChecksPass_Terminates_AndCallsNativeTerminateExactlyOnce()
+    public void Evaluate_AllChecksPass_ReturnsTerminated() =>
+        Assert.Equal(SafeMainUiTerminationResult.Terminated,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence()));
+
+    [Fact]
+    public void Evaluate_AlreadyExited() =>
+        Assert.Equal(SafeMainUiTerminationResult.AlreadyExited,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { ProcessAlive = false }));
+
+    [Fact]
+    public void Evaluate_NeverSeenVisible_IsIdentityMismatch() =>
+        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { SeenVisible = false }));
+
+    [Fact]
+    public void Evaluate_VisibleAgain() =>
+        Assert.Equal(SafeMainUiTerminationResult.VisibleAgain,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { FreshWindowSnapshot = new MainUiWindowSnapshot(true, 1, 1) }));
+
+    [Fact]
+    public void Evaluate_PidMismatch_IsIdentityMismatch() =>
+        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { HandleProcessId = TrackedPid + 1 }));
+
+    [Fact]
+    public void Evaluate_HandleInvalid_IsIdentityMismatch() =>
+        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { HandleStillValid = false }));
+
+    [Fact]
+    public void Evaluate_PathMismatch_IsIdentityMismatch() =>
+        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { CurrentExecutablePath = @"C:\Users\someone\Desktop\MSI Center M.exe" }));
+
+    [Fact]
+    public void Evaluate_PathUnreadable_IsIdentityMismatch() =>
+        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { CurrentExecutablePath = null }));
+
+    [Fact]
+    public void Evaluate_ProcessNameMismatch_IsIdentityMismatch() =>
+        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { CurrentProcessName = "notepad" }));
+
+    [Fact]
+    public void Evaluate_ForeignSameNameProcessExists() =>
+        Assert.Equal(SafeMainUiTerminationResult.AdditionalMainUiDetected,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { AdditionalForeignMainUiExists = true }));
+
+    [Fact]
+    public void Evaluate_WindowEnumerationUncertain() =>
+        Assert.Equal(SafeMainUiTerminationResult.IdentityUncertain,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { FreshWindowSnapshot = null }));
+
+    [Fact]
+    public void Evaluate_NoTerminateRights_IsAccessDenied() =>
+        Assert.Equal(SafeMainUiTerminationResult.AccessDenied,
+            SafeMainUiTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, false), ValidEvidence()));
+
+    // -- TryTerminate: proves the fresh capture itself drives the decision, never a stale
+    // caller-supplied snapshot. Each fake seam is configured to disagree with what a stale
+    // "everything looked fine a moment ago" assumption would have been. --
+
+    [Fact]
+    public void TryTerminate_AllFreshFactsGood_TerminatesExactlyOnce()
     {
         var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var terminator = new SafeMainUiTerminator(invoker);
+        var terminator = new SafeMainUiTerminator(
+            new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true),
+            new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
 
-        var result = terminator.TryTerminate(tracked, ValidEvidence(), TimeSpan.FromSeconds(2));
+        var result = terminator.TryTerminate(tracked, seenVisible: true, TimeSpan.FromSeconds(1));
 
         Assert.Equal(SafeMainUiTerminationResult.Terminated, result);
-        Assert.Equal(1, invoker.TerminateCallCount);
     }
 
     [Fact]
-    public void AlreadyExited_DoesNotCallTerminate()
+    public void TryTerminate_FreshWindowSnapshotShowsVisibleAgain_OverridesStaleAssumption_DoesNotTerminate()
     {
         var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
         var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { ProcessAlive = false };
+        var terminator = new SafeMainUiTerminator(
+            invoker,
+            new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 1)), // fresh: visible again
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
 
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
-
-        Assert.Equal(SafeMainUiTerminationResult.AlreadyExited, result);
-        Assert.Equal(0, invoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public void NeverSeenVisible_RejectsAsIdentityMismatch_DoesNotCallTerminate()
-    {
-        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { SeenVisible = false };
-
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
-
-        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch, result);
-        Assert.Equal(0, invoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public void VisibleAgain_Rejects_DoesNotCallTerminate()
-    {
-        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { FreshWindowSnapshot = new MainUiWindowSnapshot(true, 1, 1) };
-
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
+        var result = terminator.TryTerminate(tracked, seenVisible: true, TimeSpan.FromSeconds(1));
 
         Assert.Equal(SafeMainUiTerminationResult.VisibleAgain, result);
         Assert.Equal(0, invoker.TerminateCallCount);
     }
 
     [Fact]
-    public void PidMismatch_Rejects_DoesNotCallTerminate()
+    public void TryTerminate_FreshEnumerationShowsForeignProcess_OverridesStaleAssumption_DoesNotTerminate()
     {
         var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
         var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { HandleProcessId = TrackedPid + 1 };
+        var terminator = new SafeMainUiTerminator(
+            invoker,
+            new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource([
+                new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath),
+                new ProcessSnapshotEntry(TrackedPid + 1, "MSI Center M", @"C:\Program Files\WindowsApps\...\MSI Center M\MSI Center M.exe")]));
 
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
-
-        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch, result);
-        Assert.Equal(0, invoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public void HandleInvalid_Rejects_DoesNotCallTerminate()
-    {
-        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { HandleStillValid = false };
-
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
-
-        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch, result);
-        Assert.Equal(0, invoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public void PathMismatch_Rejects_DoesNotCallTerminate()
-    {
-        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { CurrentExecutablePath = @"C:\Users\someone\Desktop\MSI Center M.exe" };
-
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
-
-        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch, result);
-        Assert.Equal(0, invoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public void PathUnreadable_Rejects_DoesNotCallTerminate()
-    {
-        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { CurrentExecutablePath = null };
-
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
-
-        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch, result);
-        Assert.Equal(0, invoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public void ProcessNameMismatch_Rejects_DoesNotCallTerminate()
-    {
-        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { CurrentProcessName = "notepad" };
-
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
-
-        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch, result);
-        Assert.Equal(0, invoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public void ForeignSameNameProcessExists_Rejects_DoesNotCallTerminate()
-    {
-        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { AdditionalForeignMainUiExists = true };
-
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
+        var result = terminator.TryTerminate(tracked, seenVisible: true, TimeSpan.FromSeconds(1));
 
         Assert.Equal(SafeMainUiTerminationResult.AdditionalMainUiDetected, result);
         Assert.Equal(0, invoker.TerminateCallCount);
     }
 
     [Fact]
-    public void WindowEnumerationUncertain_Rejects_DoesNotCallTerminate()
+    public void TryTerminate_IdentityInspectorReportsExited_ReturnsAlreadyExited_DoesNotTerminate()
     {
         var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
         var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var evidence = ValidEvidence() with { FreshWindowSnapshot = null };
+        var terminator = new SafeMainUiTerminator(
+            invoker,
+            new FakeIdentityInspector(LiveProcessProbeStatus.Exited, null, null, null),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource([]));
 
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, evidence, TimeSpan.FromSeconds(1));
+        var result = terminator.TryTerminate(tracked, seenVisible: true, TimeSpan.FromSeconds(1));
 
-        Assert.Equal(SafeMainUiTerminationResult.IdentityUncertain, result);
+        Assert.Equal(SafeMainUiTerminationResult.AlreadyExited, result);
         Assert.Equal(0, invoker.TerminateCallCount);
     }
 
     [Fact]
-    public void NoTerminateRights_ReportsAccessDenied_DoesNotCallTerminate()
+    public void TryTerminate_IdentityInspectorUncertain_ReturnsIdentityMismatch_DoesNotTerminate()
     {
-        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: false);
+        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
         var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
+        var terminator = new SafeMainUiTerminator(
+            invoker,
+            new FakeIdentityInspector(LiveProcessProbeStatus.Uncertain, null, null, null),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource([]));
 
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, ValidEvidence(), TimeSpan.FromSeconds(1));
+        var result = terminator.TryTerminate(tracked, seenVisible: true, TimeSpan.FromSeconds(1));
 
-        Assert.Equal(SafeMainUiTerminationResult.AccessDenied, result);
+        Assert.Equal(SafeMainUiTerminationResult.IdentityMismatch, result);
         Assert.Equal(0, invoker.TerminateCallCount);
     }
 
     [Fact]
-    public void NativeTerminateFails_ReportsFailed()
+    public void TryTerminate_NativeTerminateFails_ReportsFailed()
     {
         var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: false, waitSucceeds: true);
+        var terminator = new SafeMainUiTerminator(
+            new RecordingInvoker(terminateSucceeds: false, waitSucceeds: true),
+            new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
 
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, ValidEvidence(), TimeSpan.FromSeconds(1));
+        var result = terminator.TryTerminate(tracked, seenVisible: true, TimeSpan.FromSeconds(1));
 
         Assert.Equal(SafeMainUiTerminationResult.Failed, result);
-        Assert.Equal(1, invoker.TerminateCallCount);
     }
 
     [Fact]
-    public void WaitTimesOut_ReportsWaitTimedOut()
+    public void TryTerminate_WaitTimesOut_ReportsWaitTimedOut()
     {
         var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: false);
+        var terminator = new SafeMainUiTerminator(
+            new RecordingInvoker(terminateSucceeds: true, waitSucceeds: false),
+            new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
 
-        var result = new SafeMainUiTerminator(invoker).TryTerminate(tracked, ValidEvidence(), TimeSpan.FromMilliseconds(1));
+        var result = terminator.TryTerminate(tracked, seenVisible: true, TimeSpan.FromMilliseconds(1));
 
         Assert.Equal(SafeMainUiTerminationResult.WaitTimedOut, result);
     }
@@ -209,5 +213,20 @@ public sealed class SafeMainUiTerminatorTests
         }
 
         public bool WaitForExit(SafeProcessHandle handle, TimeSpan timeout) => waitSucceeds;
+    }
+
+    private sealed class FakeIdentityInspector(LiveProcessProbeStatus status, int? processId, string? processName, string? executablePath) : IProcessIdentityInspector
+    {
+        public LiveProcessIdentity Inspect(SafeProcessHandle handle) => new(status, processId, processName, executablePath);
+    }
+
+    private sealed class FakeWindowProvider(MainUiWindowSnapshot? snapshot) : IMainUiWindowSnapshotProvider
+    {
+        public MainUiWindowSnapshot? Capture(int processId) => snapshot;
+    }
+
+    private sealed class FakeProcessSnapshotSource(IReadOnlyList<ProcessSnapshotEntry> entries) : IProcessSnapshotSource
+    {
+        public IReadOnlyList<ProcessSnapshotEntry> GetProcessesByName(string processName) => entries;
     }
 }

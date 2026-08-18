@@ -24,12 +24,24 @@
     <ProjectReference Include="..\SteamInputAddonforClaw.CenterMHelper\SteamInputAddonforClaw.CenterMHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
 
+  <!-- The staged/renamed helper must be genuinely self-contained at its final path (no separate
+       runtimeconfig/deps/managed payload it depends on next to it), so it is built here via its
+       own Publish target (which PublishSingleFile bundles into one EXE) rather than just its
+       ordinary Build output. -->
+  <Target Name="PublishCenterMHelper" BeforeTargets="CopyCenterMHelperOutput">
+    <MSBuild
+      Projects="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\SteamInputAddonforClaw.CenterMHelper.csproj"
+      Targets="Publish"
+      Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\" />
+  </Target>
+
   <Target Name="CopyCenterMHelperOutput" AfterTargets="Build;Publish">
     <ItemGroup>
-      <CenterMHelperOutput Include="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\CenterMHelper.exe" />
+      <CenterMHelperOutput Include="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\CenterMHelper.exe" />
     </ItemGroup>
-    <Copy SourceFiles="@(CenterMHelperOutput)" DestinationFolder="$(OutDir)CenterMHelperSource\" Condition="Exists('%(CenterMHelperOutput.Identity)')" />
-    <Copy SourceFiles="@(CenterMHelperOutput)" DestinationFolder="$(PublishDir)CenterMHelperSource\" Condition="'$(PublishDir)' != '' AND Exists('%(CenterMHelperOutput.Identity)')" />
+    <Error Text="CenterMHelper publish output not found -- the staged helper would not be self-contained." Condition="!Exists('%(CenterMHelperOutput.Identity)')" />
+    <Copy SourceFiles="@(CenterMHelperOutput)" DestinationFolder="$(OutDir)CenterMHelperSource\" />
+    <Copy SourceFiles="@(CenterMHelperOutput)" DestinationFolder="$(PublishDir)CenterMHelperSource\" Condition="'$(PublishDir)' != ''" />
   </Target>
 
   <ItemGroup>

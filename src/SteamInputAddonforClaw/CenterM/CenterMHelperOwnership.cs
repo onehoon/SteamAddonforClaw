@@ -7,6 +7,7 @@ namespace SteamInputAddonforClaw.CenterM;
 internal enum HelperStartResult
 {
     Started,
+    AlreadyOwned,
     CreateProcessFailed,
     JobObjectFailed,
     JobLimitFailed,
@@ -31,8 +32,17 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     internal int? ProcessId { get; private set; }
     internal bool IsOwned => _processHandle is not null;
 
+    /// <summary>Starts and takes ownership of exactly one helper. Refuses (returns
+    /// <see cref="HelperStartResult.AlreadyOwned"/>, no native calls made) while a helper is
+    /// already owned -- a duplicate arm/reconcile call must never create a second helper and
+    /// silently lose ownership of the first, which would both violate the Armed same-name
+    /// invariant and leave the first Job/process handles to nondeterministic finalization instead
+    /// of explicit lifecycle ownership. Callers that intend to replace an owned helper must call
+    /// <see cref="Stop"/> first.</summary>
     internal HelperStartResult Start(string imagePath)
     {
+        if (IsOwned) return HelperStartResult.AlreadyOwned;
+
         if (!_api.TryCreateSuspended(imagePath, out var processId, out var processHandle, out var threadHandle, out var createError))
         {
             AppLog.Warn("CenterM.Helper", "Helper CreateProcess(SUSPENDED) failed.", null, ("Win32Error", createError));
@@ -70,10 +80,15 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
 
         if (!_api.TryResumeThread(ownedThreadHandle, out var resumeError))
         {
-            // Already assigned to the Job: disposing the job handle closes it, and
-            // KILL_ON_JOB_CLOSE takes the still-suspended helper down with it.
+            // Already assigned to the Job: closing the Job (KILL_ON_JOB_CLOSE) requests the kill
+            // of the still-suspended helper. The process handle is retained until a bounded wait
+            // confirms the kill actually completed -- deterministic evidence the helper is gone,
+            // not just a request that it should be.
             AppLog.Warn("CenterM.Helper", "ResumeThread failed; closing Job to kill suspended helper.", null, ("Win32Error", resumeError));
             ownedJobHandle.Dispose();
+            var exited = _api.WaitForExit(ownedProcessHandle, TimeSpan.FromSeconds(5));
+            if (!exited)
+                AppLog.Warn("CenterM.Helper", "Helper did not confirm exit after Job close following ResumeThread failure.", null, ("ProcessId", processId));
             ownedProcessHandle.Dispose();
             return HelperStartResult.ResumeFailed;
         }

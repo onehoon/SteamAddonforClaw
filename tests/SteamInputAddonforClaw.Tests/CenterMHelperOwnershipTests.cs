@@ -87,9 +87,27 @@ public sealed class CenterMHelperOwnershipTests
         var result = ownership.Start(@"C:\fake\MSI Center M.exe");
 
         Assert.Equal(HelperStartResult.ResumeFailed, result);
-        Assert.Equal(["CreateSuspended", "CreateJobObject", "SetKillOnJobClose", "AssignProcessToJob", "ResumeThread"], api.Calls);
+        Assert.Equal(["CreateSuspended", "CreateJobObject", "SetKillOnJobClose", "AssignProcessToJob", "ResumeThread", "WaitForExit"], api.Calls);
         Assert.DoesNotContain("Terminate", api.Calls);
         Assert.False(ownership.IsOwned);
+    }
+
+    [Fact]
+    public void SecondStart_WhileAlreadyOwned_IsRefused_NoNativeCallsAndFirstOwnershipRetained()
+    {
+        var api = new RecordingApi();
+        var ownership = new CenterMHelperOwnership(api);
+        var firstResult = ownership.Start(@"C:\fake\MSI Center M.exe");
+        var firstProcessId = ownership.ProcessId;
+        var callsAfterFirstStart = api.Calls.Count;
+
+        var secondResult = ownership.Start(@"C:\fake\MSI Center M.exe");
+
+        Assert.Equal(HelperStartResult.Started, firstResult);
+        Assert.Equal(HelperStartResult.AlreadyOwned, secondResult);
+        Assert.Equal(callsAfterFirstStart, api.Calls.Count); // no further native calls at all
+        Assert.Equal(firstProcessId, ownership.ProcessId);
+        Assert.True(ownership.IsOwned);
     }
 
     [Fact]

@@ -41,6 +41,34 @@ public sealed class CenterMOemEventTests
     }
 
     [Fact]
+    public void Repeated_Start_is_refused_and_does_not_touch_the_adapter_again()
+    {
+        var adapter = new FakeManagementEventWatcherAdapter(startSucceeds: true);
+        using var source = new WmiMsiEventSource(adapter);
+
+        Assert.True(source.Start());
+        var callsAfterFirstStart = adapter.TryStartCallCount;
+        var secondStart = source.Start();
+
+        Assert.False(secondStart);
+        Assert.Equal(callsAfterFirstStart, adapter.TryStartCallCount);
+    }
+
+    [Fact]
+    public void Start_after_Dispose_is_refused_and_never_touches_the_disposed_adapter()
+    {
+        var adapter = new FakeManagementEventWatcherAdapter(startSucceeds: true);
+        var source = new WmiMsiEventSource(adapter);
+        Assert.True(source.Start());
+        source.Dispose();
+
+        var result = source.Start();
+
+        Assert.False(result);
+        Assert.Equal(1, adapter.TryStartCallCount);
+    }
+
+    [Fact]
     public void Event_arriving_after_dispose_does_not_reenter_subscribers()
     {
         var adapter = new FakeManagementEventWatcherAdapter(startSucceeds: true);
@@ -72,10 +100,13 @@ public sealed class CenterMOemEventTests
 
     private sealed class FakeManagementEventWatcherAdapter(bool startSucceeds) : IManagementEventWatcherAdapter
     {
+        internal int TryStartCallCount { get; private set; }
+
         public event Action<object?>? MsiEventArrived;
 
         public bool TryStart(out Exception? error)
         {
+            TryStartCallCount++;
             error = startSucceeds ? null : new InvalidOperationException("WMI unavailable in test.");
             return startSucceeds;
         }
