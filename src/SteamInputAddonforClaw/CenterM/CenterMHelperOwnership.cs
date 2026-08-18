@@ -131,15 +131,19 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
     }
 
     /// <summary>Stops the owned helper via its retained handle (never by re-querying PID) and
-    /// releases ownership -- but only once termination is actually confirmed, or a Job
-    /// (KILL_ON_JOB_CLOSE) is present as a crash-safety net that itself guarantees the kill when
-    /// closed. If neither holds (a job-less retained handle -- e.g. a
-    /// <see cref="HelperStartResult.PartialCleanupUnconfirmed"/> identity from before Job
-    /// assignment -- whose termination attempt fails again), ownership is deliberately NOT
-    /// released: the handle is the only authority left, and discarding it would abandon a possibly
-    /// still-alive same-name process with no way to resolve it later except process-name/PID
-    /// rediscovery, which this class never does. Idempotent when it does resolve. Internally
-    /// serialized against Start/Dispose.</summary>
+    /// releases ownership -- but only once termination is actually confirmed on that exact handle.
+    /// A Job (KILL_ON_JOB_CLOSE) present as a crash-safety net is used as a fallback kill request
+    /// when the initial graceful terminate/wait does not confirm exit in time, but closing the Job
+    /// is never itself treated as confirmation: the exact process handle is kept open and a second
+    /// bounded wait on that same handle is what actually confirms exit before ownership is
+    /// released, matching the production DISARM ordering (terminate -&gt; confirm exit -&gt; close
+    /// handles). If exit still cannot be confirmed after the Job-close fallback (or there was no
+    /// Job to fall back on -- e.g. a job-less retained handle from a
+    /// <see cref="HelperStartResult.PartialCleanupUnconfirmed"/> identity), ownership is
+    /// deliberately NOT released: the handle is the only authority left, and discarding it would
+    /// abandon a possibly still-alive same-name process with no way to resolve it later except
+    /// process-name/PID rediscovery, which this class never does. Idempotent when it does resolve.
+    /// Internally serialized against Start/Dispose.</summary>
     internal bool Stop(TimeSpan waitTimeout)
     {
         lock (_sync) return StopCore(waitTimeout);
@@ -156,18 +160,28 @@ internal sealed class CenterMHelperOwnership(IHelperProcessNativeApi? api = null
         // means gone, regardless of why (this call, an external actor, a prior Job kill, ...).
         _api.TryTerminate(_processHandle, out _);
         var terminated = _api.WaitForExit(_processHandle, waitTimeout);
-        AppLog.Info("CenterM.Helper", "Helper stop attempted.", ("Terminated", terminated), ("ProcessId", ProcessId), ("JobBacked", _jobHandle is not null));
 
-        if (terminated || _jobHandle is not null)
+        if (!terminated && _jobHandle is not null)
         {
-            // Either confirmed exit directly, or a Job with KILL_ON_JOB_CLOSE is present -- closing
-            // it here is itself a guaranteed, effective kill even when the graceful
-            // TerminateProcess/wait above did not confirm exit in time.
-            DisposeCore();
-            return terminated;
+            // Fallback: request the kill via KILL_ON_JOB_CLOSE, but this is a request, not
+            // confirmation -- the process handle stays open across the Job close so a second
+            // bounded wait on the exact same handle can still authoritatively confirm exit before
+            // ownership is released, rather than assuming closing the Job alone is sufficient.
+            AppLog.Warn("CenterM.Helper", "Graceful terminate/wait unconfirmed; closing Job as a kill fallback and re-confirming exit on the retained handle.", null, ("ProcessId", ProcessId));
+            _jobHandle.Dispose();
+            _jobHandle = null;
+            terminated = _api.WaitForExit(_processHandle, waitTimeout);
         }
 
-        AppLog.Warn("CenterM.Helper", "Stop could not confirm helper termination and no Job fail-safe exists; ownership retained for retry.", null, ("ProcessId", ProcessId));
+        AppLog.Info("CenterM.Helper", "Helper stop attempted.", ("Terminated", terminated), ("ProcessId", ProcessId));
+
+        if (terminated)
+        {
+            DisposeCore();
+            return true;
+        }
+
+        AppLog.Warn("CenterM.Helper", "Stop could not confirm helper termination even after the Job-close fallback; ownership retained for retry.", null, ("ProcessId", ProcessId));
         return false;
     }
 

@@ -308,6 +308,46 @@ public sealed class CenterMOemEventTests
         Assert.Equal(1, adapter.DisposeCallCount);
     }
 
+    [Fact]
+    public async Task External_Dispose_arriving_after_a_reentrant_Dispose_has_already_returned_still_waits_for_the_callback_to_drain()
+    {
+        // The reentrant call must return immediately (it cannot wait on itself), but a *different*,
+        // non-reentrant caller that arrives afterward -- while the admitted callback is still
+        // running -- must still block until that callback (and deferred disposal) actually
+        // completes. Marking `_disposed` on the first call must not let a later external caller
+        // skip the drain it is contractually owed.
+        var adapter = new FakeManagementEventWatcherAdapter(startSucceeds: true);
+        var source = new WmiMsiEventSource(adapter);
+        Assert.True(source.Start());
+
+        var reentrantDisposeReturned = new ManualResetEventSlim(false);
+        var releaseCallback = new ManualResetEventSlim(false);
+        source.EventReceived += _ =>
+        {
+            source.Dispose(); // reentrant -- must return immediately without waiting on itself
+            reentrantDisposeReturned.Set();
+            releaseCallback.Wait(TimeSpan.FromSeconds(10)); // callback still "in flight" here
+        };
+
+        var raiseTask = Task.Run(() => adapter.Raise(0x220029));
+        Assert.True(reentrantDisposeReturned.Wait(TimeSpan.FromSeconds(5)));
+
+        var externalDisposeTask = Task.Run(source.Dispose);
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Assert.False(externalDisposeTask.IsCompleted,
+            "External Dispose() called after a reentrant Dispose() already returned must still " +
+            "block until the still-executing admitted callback drains and disposal completes.");
+
+        releaseCallback.Set();
+
+        await raiseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await externalDisposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, adapter.DisposeCallCount);
+
+        adapter.Raise(0x220058);
+    }
+
     private sealed class FakeManagementEventWatcherAdapter(bool startSucceeds) : IManagementEventWatcherAdapter
     {
         internal int TryStartCallCount { get; private set; }

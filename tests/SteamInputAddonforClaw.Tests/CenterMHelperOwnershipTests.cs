@@ -343,20 +343,48 @@ public sealed class CenterMHelperOwnershipTests
     }
 
     [Fact]
-    public void Stop_JobBackedHelper_GracefulTerminateUnconfirmed_StillResolvesViaJobCloseFailSafe()
+    public void Stop_JobBackedHelper_GracefulTerminateUnconfirmed_JobCloseFallback_SecondWaitConfirms_ResolvesAndClearsOwnership()
     {
         // For a fully-armed (Job-backed) helper, TerminateProcess/wait not confirming exit is not
         // the end of the story: closing the Job (KILL_ON_JOB_CLOSE, already set during Start()) is
-        // itself a guaranteed kill, so Stop() may still safely release ownership even though the
-        // reported result reflects that graceful termination specifically was not confirmed.
-        var api = new RecordingApi { WaitForExitSucceeds = false };
+        // a valid kill *request*, but the exact process handle must stay open and a second bounded
+        // wait on that same handle must confirm exit before ownership is released -- matching the
+        // production DISARM ordering (terminate -> confirm exit -> close handles), not "Job closed,
+        // therefore assume gone."
+        var api = new RecordingApi { WaitForExitResults = new Queue<bool>([false, true]) };
         var ownership = new CenterMHelperOwnership(api);
         Assert.Equal(HelperStartResult.Started, ownership.Start(@"C:\fake\MSI Center M.exe"));
 
         var stopped = ownership.Stop(TimeSpan.FromSeconds(1));
 
-        Assert.False(stopped); // graceful termination itself was not confirmed
-        Assert.False(ownership.IsOwned); // but the Job fail-safe still resolves ownership
+        Assert.True(stopped); // the second, post-Job-close wait on the exact handle confirmed exit
+        Assert.False(ownership.IsOwned);
+        Assert.Equal(2, api.Calls.Count(c => c == "WaitForExit"));
+    }
+
+    [Fact]
+    public void Stop_JobBackedHelper_GracefulTerminateUnconfirmed_JobCloseFallbackAlsoUnconfirmed_OwnershipRemainsRetained()
+    {
+        // If even the post-Job-close wait cannot confirm exit, the exact process handle is the only
+        // remaining authority (the Job is already gone) -- ownership must stay retained rather than
+        // being discarded just because the Job fail-safe was requested, so a later retry can still
+        // resolve it via the same exact handle.
+        var api = new RecordingApi { WaitForExitResults = new Queue<bool>([false, false]) };
+        var ownership = new CenterMHelperOwnership(api);
+        Assert.Equal(HelperStartResult.Started, ownership.Start(@"C:\fake\MSI Center M.exe"));
+
+        var stopped = ownership.Stop(TimeSpan.FromSeconds(1));
+
+        Assert.False(stopped);
+        Assert.True(ownership.IsOwned); // exact handle retained -- no name/PID rediscovery needed
+        Assert.Equal(2, api.Calls.Count(c => c == "WaitForExit"));
+
+        // A later retry whose exact-handle wait finally succeeds resolves it.
+        api.WaitForExitResults!.Enqueue(true);
+        var retried = ownership.Stop(TimeSpan.FromSeconds(1));
+
+        Assert.True(retried);
+        Assert.False(ownership.IsOwned);
     }
 
     [Fact]
@@ -387,6 +415,12 @@ public sealed class CenterMHelperOwnershipTests
         internal bool ResumeSucceeds { get; init; } = true;
         internal bool TerminateSucceeds { get; set; } = true;
         internal bool WaitForExitSucceeds { get; set; } = true;
+
+        /// <summary>When set, successive <see cref="WaitForExit"/> calls dequeue their result from
+        /// here instead of using <see cref="WaitForExitSucceeds"/> -- lets a test model a first
+        /// wait that times out followed by a second (post-Job-close) wait with a different
+        /// outcome.</summary>
+        internal Queue<bool>? WaitForExitResults { get; init; }
 
         /// <summary>When set, TryCreateSuspended signals <see cref="CreateSuspendedEntered"/> and
         /// blocks until this is released -- lets a test prove a concurrent Start() call is
@@ -455,7 +489,7 @@ public sealed class CenterMHelperOwnershipTests
         public bool WaitForExit(SafeProcessHandle processHandle, TimeSpan timeout)
         {
             Calls.Add("WaitForExit");
-            return WaitForExitSucceeds;
+            return WaitForExitResults is { Count: > 0 } queue ? queue.Dequeue() : WaitForExitSucceeds;
         }
 
         private static IntPtr GetCurrentProcessHandle() => System.Diagnostics.Process.GetCurrentProcess().Handle;

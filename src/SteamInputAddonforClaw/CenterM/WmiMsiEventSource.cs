@@ -197,18 +197,23 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
     }
 
     /// <summary>
-    /// Closes admission (no callback entering after this point can proceed past its admission
-    /// check), then waits for any callback that was already admitted to finish before disposing
-    /// the native watcher -- once this returns, no subscriber callback that entered earlier can
-    /// still be beginning or completing. Exception: if called reentrantly from within *this exact
-    /// instance's* own currently-admitted callback (e.g. a subscriber that synchronously triggers
-    /// teardown), waiting here would deadlock against that same callback -- final adapter disposal
-    /// is deferred instead to run from that callback's own finally block once it (and any callback
+    /// Closes admission exactly once (no callback entering after this point can proceed past its
+    /// admission check), then waits for any admitted callback to fully drain and the native watcher
+    /// to be disposed before returning -- once this returns, no subscriber callback that entered
+    /// earlier can still be beginning or completing, REGARDLESS of whether this particular call was
+    /// the one that closed admission. <c>_disposed</c> only marks "admission closed" -- it is
+    /// deliberately not used to let a later caller skip the wait: a caller that arrives after
+    /// admission was already closed by an earlier (possibly reentrant) call must still block until
+    /// draining/disposal has actually completed, or a genuine external lifecycle owner could return
+    /// from Dispose() while an admitted callback -- and the reentrant Dispose() call it made -- are
+    /// still unwinding. The only caller allowed to return early is one running reentrantly from
+    /// *this exact instance's* own currently-admitted callback (e.g. a subscriber that synchronously
+    /// triggers teardown): waiting there would deadlock against itself, so final adapter disposal is
+    /// deferred instead to run from that callback's own finally block once it (and any callback
     /// nested inside it) has fully unwound. Reentrancy is detected via a depth-aware, per-instance
-    /// check (<see cref="IsThisInstancesCallbackOnCurrentThread"/>), not a bare thread-wide flag:
-    /// an unrelated source's callback on this thread must not make this instance skip its own
-    /// drain, and a nested callback on this same instance must not un-mark the still-active outer
-    /// callback.
+    /// check (<see cref="IsThisInstancesCallbackOnCurrentThread"/>), not a bare thread-wide flag: an
+    /// unrelated source's callback on this thread must not make this instance skip its own drain,
+    /// and a nested callback on this same instance must not un-mark the still-active outer callback.
     /// </summary>
     public void Dispose()
     {
@@ -216,28 +221,34 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
 
         lock (_sync)
         {
-            if (_disposed) return;
-            _disposed = true;
-            _adapter.MsiEventArrived -= OnMsiEventArrived;
+            if (!_disposed)
+            {
+                _disposed = true;
+                _adapter.MsiEventArrived -= OnMsiEventArrived;
+            }
 
             if (reentrant)
             {
                 // This instance's own admitted callback (or one nested inside it) is still on this
                 // thread's call stack, so _activeCallbacks cannot be zero yet. Defer final
                 // disposal to the moment it actually reaches zero (in OnMsiEventArrived's finally)
-                // rather than disposing the adapter from inside its own callback stack.
+                // rather than disposing the adapter from inside its own callback stack, and return
+                // immediately so this call cannot deadlock against itself.
                 _finalDisposePending = true;
                 return;
             }
         }
 
-        // Waited outside the lock: an admitted callback needs to acquire _sync itself (on exit) to
-        // decrement/signal, so holding it here would deadlock against that. No timeout: a bounded
-        // wait that then proceeds anyway would let an already-admitted callback invoke
+        // Every non-reentrant caller -- including one that arrives after admission was already
+        // closed by an earlier call -- waits here and (idempotently, via DisposeAdapterOnce) drives
+        // disposal itself, rather than trusting that some other in-flight call will eventually get
+        // around to it. Waited outside the lock: an admitted callback needs to acquire _sync itself
+        // (on exit) to decrement/signal, so holding it here would deadlock against that. No timeout:
+        // a bounded wait that then proceeds anyway would let an already-admitted callback invoke
         // EventReceived after Dispose() has returned -- exactly the state this barrier exists to
         // rule out. Subscriber invocation is expected to be fast (parse + forward); a subscriber
         // that stalls indefinitely is a bug in that subscriber, not something this source should
-        // paper over by breaking its own drain guarantee. This wait is safe for an unrelated
+        // paper over by breaking its own drain guarantee. This wait is also safe for an unrelated
         // source's callback that happens to be executing on this thread (the cross-instance case):
         // it simply blocks the calling thread until that other work lets this instance's own
         // admitted callback (on whichever thread it is running) finish.
