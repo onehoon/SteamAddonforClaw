@@ -2660,6 +2660,39 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.False(h.HelperOwnership.IsOwned);
     }
 
+    [Fact]
+    public async Task TimedOutSuspendDuringTrackedObservation_DoesNotStartStaleDebounce()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+
+        // Clear the initial hidden debounce, then create a fresh visible -> hidden edge for the
+        // poll whose prerequisite refresh will be interrupted by the timed-out suspend.
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = true;
+        var delayStartsBefore = h.Delay.CallCount;
+
+        using var suspendCts = new CancellationTokenSource();
+        Task? suspendTask = null;
+        h.EnvironmentEligible = () =>
+        {
+            suspendTask = coordinator.QuiesceForSuspendAsync(
+                DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, suspendCts.Token);
+            suspendCts.Cancel();
+            Assert.ThrowsAny<OperationCanceledException>(() => suspendTask!.GetAwaiter().GetResult());
+            return true;
+        };
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+
+        await coordinator.PollTickAsync();
+
+        Assert.NotNull(suspendTask);
+        Assert.Equal(delayStartsBefore, h.Delay.CallCount);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
+    }
+
     // ============================================================
     // Review 4957507443, finding #3 (MAJOR): DisposeAsync must drain the fire-and-forget debounce
     // continuation before disposing the gate.

@@ -339,7 +339,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     await DisableCore(cancellationToken).ConfigureAwait(false);
                     return;
                 }
-                await ReconcileCore("SetDesiredEnabled(true)", cancellationToken).ConfigureAwait(false);
+                await ReconcileCore("SetDesiredEnabled(true)", Interlocked.Read(ref _lifecycleEpoch), cancellationToken).ConfigureAwait(false);
             }
             finally { _gate.Release(); }
         }
@@ -358,7 +358,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         try
         {
             if (_shutdown) return;
-            await ReconcileCore(reason, cancellationToken).ConfigureAwait(false);
+            await ReconcileCore(reason, Interlocked.Read(ref _lifecycleEpoch), cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -398,7 +398,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                         return;
                     }
                     AppLog.Warn("CenterM.Oem1", "Reconciling fresh after unexpected helper exit.", null);
-                    await ReconcileCore("HelperUnexpectedExit", cancellationToken).ConfigureAwait(false);
+                    await ReconcileCore("HelperUnexpectedExit", Interlocked.Read(ref _lifecycleEpoch), cancellationToken).ConfigureAwait(false);
                     return;
                 case HelperLivenessState.Uncertain:
                     // Review 4957630432 finding #1 (BLOCKER): WAIT_FAILED means suppression
@@ -436,6 +436,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 return;
             }
 
+            var pollEpoch = Interlocked.Read(ref _lifecycleEpoch);
+
             if (_trackedMainUi is not null)
             {
                 // Review 4957791980 finding #2: this poll tick calls ObserveTrackedMainUiCore
@@ -444,12 +446,12 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 // exact same bypass the finding describes for resume/ReconcileCore would still be
                 // reachable from this entry point.
                 var prerequisitesValid = RefreshSuppressionPrerequisites();
-                await ObserveTrackedMainUiCore(cancellationToken, prerequisitesValid).ConfigureAwait(false);
+                await ObserveTrackedMainUiCore(cancellationToken, prerequisitesValid, pollEpoch).ConfigureAwait(false);
                 return;
             }
 
             if (_state == CenterMOem1LifecycleState.Armed)
-                await CheckForForeignMainUiCore(cancellationToken).ConfigureAwait(false);
+                await CheckForForeignMainUiCore(pollEpoch, cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -519,7 +521,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 }
             }
 
-            await ReconcileCore("ResumeReconcile", cancellationToken).ConfigureAwait(false);
+            await ReconcileCore("ResumeReconcile", Interlocked.Read(ref _lifecycleEpoch), cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -666,7 +668,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         await Task.CompletedTask;
     }
 
-    private async Task ReconcileCore(string reason, CancellationToken cancellationToken)
+    private async Task ReconcileCore(string reason, long expectedEpoch, CancellationToken cancellationToken)
     {
         _lastReason = reason;
 
@@ -705,7 +707,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         // Capture the reconciliation epoch once. A suspend participant may time out while this
         // gate-held reconciliation is in flight; its pending marker can then be cleared, but this
         // epoch must still prevent stale Armed publication.
-        var reconciliationEpoch = Interlocked.Read(ref _lifecycleEpoch);
+        var reconciliationEpoch = expectedEpoch;
 
         if (_trackedMainUi is not null)
         {
@@ -729,7 +731,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             // ObserveTrackedMainUiCore may treat a HiddenAfterVisible observation as a termination
             // candidate.
             var prerequisitesValid = RefreshSuppressionPrerequisites();
-            await ObserveTrackedMainUiCore(cancellationToken, prerequisitesValid).ConfigureAwait(false);
+            await ObserveTrackedMainUiCore(cancellationToken, prerequisitesValid, expectedEpoch).ConfigureAwait(false);
             return;
         }
 
@@ -795,7 +797,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
         if (foreign.Count > 0)
         {
-            await HandleSameNamePresentDuringReconcile(foreign, cancellationToken).ConfigureAwait(false);
+            await HandleSameNamePresentDuringReconcile(foreign, reconciliationEpoch, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1038,7 +1040,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         await Task.CompletedTask;
     }
 
-    private async Task HandleSameNamePresentDuringReconcile(IReadOnlyList<ProcessSnapshotEntry> sameName, CancellationToken cancellationToken)
+    private async Task HandleSameNamePresentDuringReconcile(IReadOnlyList<ProcessSnapshotEntry> sameName, long expectedEpoch, CancellationToken cancellationToken)
     {
         if (_helperOwnership.IsOwned)
         {
@@ -1076,7 +1078,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             // pre-stop snapshot; re-enter a fresh full reconciliation that recaptures every
             // prerequisite before ever creating another helper.
             SetState(CenterMOem1LifecycleState.NeedsSetup);
-            await ReconcileCore("PostForeignHelperStopReconcile", cancellationToken).ConfigureAwait(false);
+            await ReconcileCore("PostForeignHelperStopReconcile", expectedEpoch, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1087,10 +1089,10 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             return;
         }
 
-        await TryAdoptRealMainUi(sameName[0], cancellationToken).ConfigureAwait(false);
+        await TryAdoptRealMainUi(sameName[0], expectedEpoch, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task TryAdoptRealMainUi(ProcessSnapshotEntry candidate, CancellationToken cancellationToken)
+    private async Task TryAdoptRealMainUi(ProcessSnapshotEntry candidate, long expectedEpoch, CancellationToken cancellationToken)
     {
         if (!string.Equals(candidate.ProcessName, CenterMProcessNames.MainUi, StringComparison.Ordinal)
             || !SafeMainUiTerminator.PathMatchesExpectedPackage(candidate.ExecutablePath))
@@ -1145,7 +1147,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         // _mainUiObserver.Reset() was just called above, so the very first observation below can
         // never itself be a HiddenAfterVisible termination candidate. Passing true here is therefore
         // consistent with -- not a bypass of -- review 4957791980 finding #2's prerequisite gate.
-        await ObserveTrackedMainUiCore(cancellationToken, prerequisitesValid: true).ConfigureAwait(false);
+        await ObserveTrackedMainUiCore(cancellationToken, prerequisitesValid: true, expectedEpoch).ConfigureAwait(false);
     }
 
     /// <summary>Fresh visibility/exit observation for the currently tracked real MainUI. Drives
@@ -1157,7 +1159,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// termination -- prerequisite drift must leave native Center M behavior intact rather than
     /// continue a destructive custom-lifecycle action from pre-suspend/stale assumptions. Does not
     /// affect natural-exit/uncertain/mismatch handling, which already fail open unconditionally.</param>
-    private async Task ObserveTrackedMainUiCore(CancellationToken cancellationToken, bool prerequisitesValid)
+    private async Task ObserveTrackedMainUiCore(CancellationToken cancellationToken, bool prerequisitesValid, long expectedEpoch)
     {
         var tracked = _trackedMainUi!;
 
@@ -1172,7 +1174,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             // PID/window provider now reports something alive/visible for the same numeric PID
             // (reused by an unrelated process), that evidence must never be treated as a continuation
             // of this identity. SeenVisible must never transfer to a reused PID.
-            await HandleTrackedMainUiNaturalExit(cancellationToken).ConfigureAwait(false);
+            await HandleTrackedMainUiNaturalExit(expectedEpoch, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1215,7 +1217,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 // win the race and observe HiddenAfterVisible on the old, not-yet-committed world
                 // state. Refuse to start or continue the debounce in that window; cancel any
                 // in-flight one and stay passive/native, exactly like the prerequisites-invalid case.
-                if (!prerequisitesValid || IsHighPriorityRequestPending)
+                if (!prerequisitesValid || !TryLinearizeOrdinaryMutationStart(expectedEpoch))
                 {
                     // Review 4957791980 finding #2 (MAJOR): prerequisite drift (environment
                     // eligibility, AutoRun, or Launcher/Server) must never be bypassed just because a
@@ -1223,7 +1225,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     // never start a new one, and never terminate -- stay passive/native until a later
                     // fresh reconciliation confirms the prerequisite set is valid again. The retained
                     // identity/SeenVisible history is preserved untouched; only termination is gated.
-                    CancelPendingDebounceCore(prerequisitesValid ? "HighPriorityRequestPendingAtObservation" : "PrerequisitesInvalidAtObservation");
+                    CancelPendingDebounceCore(prerequisitesValid ? "LifecycleInvalidatedAtObservation" : "PrerequisitesInvalidAtObservation");
                     _lastReason = prerequisitesValid ? "TrackedMainUiHiddenHighPriorityRequestPending" : "TrackedMainUiHiddenPrerequisitesInvalid";
                     SetState(CenterMOem1LifecycleState.NativeMainUiActive);
                     AppLog.Warn("CenterM.Oem1", "Tracked real MainUI observed hidden-after-visible, but prerequisites are invalid or a high-priority disable/suspend/shutdown request is pending; no debounce, no termination, staying passive.", null, ("ProcessId", tracked.ProcessId), ("PrerequisitesValid", prerequisitesValid), ("HighPriorityRequestPending", IsHighPriorityRequestPending));
@@ -1237,12 +1239,12 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 // identity must never restart the deadline; only an explicit cancellation condition
                 // (visible again, exit, identity/topology change, disable, suspend, shutdown) does.
                 if (_pendingDebounce is null)
-                    StartHiddenDebounce(tracked);
+                    StartHiddenDebounce(tracked, expectedEpoch);
                 return;
 
             case MainUiLifecycleState.Exited:
             case MainUiLifecycleState.Absent:
-                await HandleTrackedMainUiNaturalExit(cancellationToken).ConfigureAwait(false);
+                await HandleTrackedMainUiNaturalExit(expectedEpoch, cancellationToken).ConfigureAwait(false);
                 return;
 
             case MainUiLifecycleState.Uncertain:
@@ -1252,7 +1254,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         }
     }
 
-    private async Task HandleTrackedMainUiNaturalExit(CancellationToken cancellationToken)
+    private async Task HandleTrackedMainUiNaturalExit(long expectedEpoch, CancellationToken cancellationToken)
     {
         CancelPendingDebounceCore("NaturalExit");
         _trackedMainUi?.Dispose();
@@ -1261,10 +1263,10 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         BumpGeneration();
         _lastReason = "RealMainUiNaturalExit";
         AppLog.Info("CenterM.Oem1", "Tracked real MainUI exited naturally; reconciling fresh.");
-        await ReconcileCore("NaturalMainUiExitReconcile", cancellationToken).ConfigureAwait(false);
+        await ReconcileCore("NaturalMainUiExitReconcile", expectedEpoch, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task CheckForForeignMainUiCore(CancellationToken cancellationToken)
+    private async Task CheckForForeignMainUiCore(long expectedEpoch, CancellationToken cancellationToken)
     {
         var sameName = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
         if (sameName is null)
@@ -1285,7 +1287,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         var foreign = sameName.Where(p => p.ProcessId != ownedPid).ToList();
         if (foreign.Count > 0)
         {
-            await HandleSameNamePresentDuringReconcile(foreign, cancellationToken).ConfigureAwait(false);
+            await HandleSameNamePresentDuringReconcile(foreign, expectedEpoch, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1323,7 +1325,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         internal required long Epoch { get; init; }
     }
 
-    private void StartHiddenDebounce(TrackedCenterMMainUi tracked)
+    private void StartHiddenDebounce(TrackedCenterMMainUi tracked, long expectedEpoch)
     {
         // Defensive only: callers only ever invoke this while _pendingDebounce is null.
         _pendingDebounce?.Cts.Cancel();
@@ -1335,7 +1337,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             Cts = cts,
             Tracked = tracked,
             Generation = _generation,
-            Epoch = Interlocked.Read(ref _lifecycleEpoch)
+            Epoch = expectedEpoch
         };
         _pendingDebounce = pending;
 
@@ -1460,7 +1462,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     return;
                 }
 
-                await CompleteDebounceCore(tracked).ConfigureAwait(false);
+                await CompleteDebounceCore(tracked, mine.Epoch).ConfigureAwait(false);
             }
             finally
             {
@@ -1481,7 +1483,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         }
     }
 
-    private async Task CompleteDebounceCore(TrackedCenterMMainUi tracked)
+    private async Task CompleteDebounceCore(TrackedCenterMMainUi tracked, long expectedEpoch)
     {
         var result = _terminator.TryTerminate(tracked, _mainUiObserver.SeenVisible, _mainUiTerminateTimeout);
         AppLog.Info("CenterM.Oem1", "Debounce expired; safe termination evaluated.", ("Result", result), ("ProcessId", tracked.ProcessId));
@@ -1495,7 +1497,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 _mainUiObserver.Reset();
                 BumpGeneration();
                 _lastReason = $"SafeTerminationCompleted:{result}";
-                await ReconcileCore("PostTerminationReconcile", CancellationToken.None).ConfigureAwait(false);
+                await ReconcileCore("PostTerminationReconcile", expectedEpoch, CancellationToken.None).ConfigureAwait(false);
                 return;
 
             case SafeMainUiTerminationResult.VisibleAgain:
