@@ -64,9 +64,11 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private readonly TimeSpan _doubleClickWindow;
     private readonly IOem1GestureDelay _delay;
     private readonly IOem1GestureClock _clock;
+    private readonly Action<long>? _deliveryBeforeNotification;
     private readonly IOem1GestureCancellationSourceFactory _cancellationSourceFactory;
     private IOem1GestureCancellationSource? _pendingCancellation;
     private long _generation;
+    private long _deliveryEpoch;
     private bool _firstPressPending;
     private long _firstPressTimestamp;
     private bool _disposed;
@@ -76,7 +78,8 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         TimeSpan doubleClickWindow,
         IOem1GestureDelay? delay = null,
         IOem1GestureClock? clock = null,
-        IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null)
+        IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null,
+        Action<long>? deliveryBeforeNotification = null)
     {
         if (doubleClickEnabled && doubleClickWindow <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(doubleClickWindow), "The double-click window must be positive.");
@@ -86,13 +89,25 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         _delay = delay ?? new Oem1TaskDelay();
         _clock = clock ?? new Oem1StopwatchClock();
         _cancellationSourceFactory = cancellationSourceFactory ?? new Oem1GestureCancellationSourceFactory();
+        _deliveryBeforeNotification = deliveryBeforeNotification;
     }
 
     internal event Action<Oem1Gesture>? GestureRecognized;
+    internal event Action<Oem1Gesture, long>? GestureRecognizedWithEpoch;
+
+    internal long CurrentDeliveryEpoch
+    {
+        get
+        {
+            lock (_gate)
+                return _deliveryEpoch;
+        }
+    }
 
     internal void OnPress()
     {
         Oem1Gesture? immediate = null;
+        long immediateDeliveryEpoch = 0;
         long generation = 0;
         CancellationToken token = default;
         var startTimeout = false;
@@ -106,6 +121,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                 if (!_doubleClickEnabled)
                 {
                     immediate = Oem1Gesture.Single;
+                    immediateDeliveryEpoch = _deliveryEpoch;
                 }
                 else if (_firstPressPending)
                 {
@@ -115,6 +131,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                         _generation++;
                         CancelPendingCore();
                         immediate = Oem1Gesture.Double;
+                        immediateDeliveryEpoch = _deliveryEpoch;
                     }
                     else
                     {
@@ -122,6 +139,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                         _generation++;
                         CancelPendingCore();
                         immediate = Oem1Gesture.Single;
+                        immediateDeliveryEpoch = _deliveryEpoch;
                         BeginPendingPressCore(now, out generation, out token);
                         startTimeout = true;
                     }
@@ -132,9 +150,10 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                     startTimeout = true;
                 }
 
-                if (immediate.HasValue)
-                    GestureRecognized?.Invoke(immediate.Value);
             }
+
+            if (immediate.HasValue)
+                DeliverGesture(immediate.Value, immediateDeliveryEpoch);
         }
         finally
         {
@@ -145,12 +164,18 @@ internal sealed class Oem1GestureRecognizer : IDisposable
 
     internal void Reset()
     {
+        InvalidatePending();
+    }
+
+    internal void InvalidatePending()
+    {
         lock (_gate)
         {
             if (_disposed)
                 return;
 
             _generation++;
+            _deliveryEpoch++;
             _firstPressPending = false;
             CancelPendingCore();
         }
@@ -165,13 +190,16 @@ internal sealed class Oem1GestureRecognizer : IDisposable
 
             _disposed = true;
             _generation++;
+            _deliveryEpoch++;
             _firstPressPending = false;
             CancelPendingCore();
         }
+
     }
 
     private async Task CompleteSingleAfterTimeoutAsync(long generation, CancellationToken cancellationToken)
     {
+        long deliveryEpoch;
         try
         {
             await _delay.DelayAsync(_doubleClickWindow, cancellationToken).ConfigureAwait(false);
@@ -190,8 +218,23 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             var completedCancellation = _pendingCancellation;
             _pendingCancellation = null;
             completedCancellation?.Dispose();
-            GestureRecognized?.Invoke(Oem1Gesture.Single);
+            deliveryEpoch = _deliveryEpoch;
         }
+
+        DeliverGesture(Oem1Gesture.Single, deliveryEpoch);
+    }
+
+    private void DeliverGesture(Oem1Gesture gesture, long deliveryEpoch)
+    {
+        lock (_gate)
+        {
+            if (_disposed || deliveryEpoch != _deliveryEpoch)
+                return;
+        }
+
+        _deliveryBeforeNotification?.Invoke(deliveryEpoch);
+        GestureRecognizedWithEpoch?.Invoke(gesture, deliveryEpoch);
+        GestureRecognized?.Invoke(gesture);
     }
 
     private void BeginPendingPressCore(long timestamp, out long generation, out CancellationToken token)
