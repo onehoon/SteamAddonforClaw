@@ -4,6 +4,7 @@ using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Feedback;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -337,6 +338,72 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task FeedbackCallbackRegistrationFailureRollsBackAfterNeutral()
+    {
+        var session = new FakeCanonicalSession { SetOutputCallbackResult = false };
+        var sink = new RecordingRumbleSink();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("SteamDeckFeedbackCallbackRegistrationFailed", result.Reason);
+        Assert.Equal(["Start", "Neutral", "SetOutputCallback", "Remove", "CompleteCleanup", "Dispose"], session.Trace);
+        Assert.Empty(sink.Values);
+    }
+
+    [Fact]
+    public async Task FinalStopFailureBlocksClearAndRemovalUntilRetry()
+    {
+        var session = new FakeCanonicalSession();
+        var sink = new RecordingRumbleSink { NextResult = new(PhysicalRumbleWriteStatus.Failed, "test") };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var first = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.False(first.Succeeded);
+        Assert.Equal("PhysicalRumbleFinalStopFailed", first.Reason);
+        Assert.Equal(0, session.ClearOutputCallbackCalls);
+        Assert.Equal(0, session.RemoveCalls);
+
+        sink.NextResult = new(PhysicalRumbleWriteStatus.Succeeded, "");
+        var second = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.True(second.Succeeded, second.Reason);
+        Assert.Equal(1, session.ClearOutputCallbackCalls);
+        Assert.Equal(1, session.RemoveCalls);
+        Assert.Equal([TwoMotorRumble.Stopped, TwoMotorRumble.Stopped], sink.Values);
+    }
+
+    [Fact]
+    public async Task CallbackClearFailureRetainsCallbackForRetry()
+    {
+        var session = new FakeCanonicalSession { ClearOutputCallbackResult = false };
+        var sink = new RecordingRumbleSink();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var first = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.False(first.Succeeded);
+        Assert.Equal("SteamDeckFeedbackCallbackClearFailed", first.Reason);
+        Assert.Equal(1, session.ClearOutputCallbackCalls);
+        Assert.Equal(0, session.RemoveCalls);
+
+        session.ClearOutputCallbackResult = true;
+        var second = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.True(second.Succeeded, second.Reason);
+        Assert.Equal(2, session.ClearOutputCallbackCalls);
+        Assert.Equal(1, session.RemoveCalls);
+        Assert.Equal([TwoMotorRumble.Stopped, TwoMotorRumble.Stopped], sink.Values);
+    }
+
+    [Fact]
     public async Task NeutralRejectionRetainsFailureOperationTimingAndLogsOnce()
     {
         var session = new FakeCanonicalSession { NeutralAccepted = false };
@@ -611,14 +678,14 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
-    private CanonicalSteamDeckOutputStage Create(FakeCanonicalSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null)
+    private CanonicalSteamDeckOutputStage Create(FakeCanonicalSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null, IPhysicalRumbleSink? sink = null)
     {
         Directory.CreateDirectory(_directory);
         var store = new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"));
         var recovery = new RecoveryManager(storeWriteFailsAfterSeed ? new FailingReplaceStore(store) : store);
         var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, _session, DateTimeOffset.UtcNow, null, new());
         File.WriteAllText(Path.Combine(_directory, "recovery.json"), System.Text.Json.JsonSerializer.Serialize(journal));
-        return new(() => session, enumerator, new(new SteamDeckVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks);
+        return new(() => session, enumerator, new(new SteamDeckVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks, new FeedbackAuthority(), sink);
     }
 
     private CanonicalSteamDeckOutputStage CreateFactoryFailure(IControllerDeviceEnumerator enumerator, FakeHidHide hid)
@@ -676,9 +743,12 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public bool InputAccepted { get; init; } = true;
         public bool RemoveResult { get; init; } = true;
         public bool StartResult { get; init; } = true;
+        public bool SetOutputCallbackResult { get; init; } = true;
+        public bool ClearOutputCallbackResult { get; set; } = true;
         public bool BlockInput { get; init; }
         public Action? OnRemoveDeviceCalled;
         public int RemoveCalls { get; private set; }
+        public int ClearOutputCallbackCalls { get; private set; }
         public TaskCompletionSource InputEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseInput { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -713,8 +783,8 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
             return NeutralAccepted;
         }
 
-        public bool SetOutputCallback(SteamDeckOutputCallback callback) => State == CanonicalSteamDeckSessionState.Active;
-        public bool ClearOutputCallback() => State == CanonicalSteamDeckSessionState.Active;
+        public bool SetOutputCallback(SteamDeckOutputCallback callback) { Trace.Add("SetOutputCallback"); return State == CanonicalSteamDeckSessionState.Active && SetOutputCallbackResult; }
+        public bool ClearOutputCallback() { Trace.Add("ClearOutputCallback"); ClearOutputCallbackCalls++; return State == CanonicalSteamDeckSessionState.Active && ClearOutputCallbackResult; }
 
         public bool RemoveDevice()
         {
@@ -756,6 +826,13 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
     private sealed class FakeSnapshot : IControllerStateSnapshotSource
     { public ControllerState LatestState => new(new AuxiliaryButtonState([false, false])); }
+
+    private sealed class RecordingRumbleSink : IPhysicalRumbleSink
+    {
+        public List<TwoMotorRumble> Values { get; } = [];
+        public PhysicalRumbleWriteResult NextResult { get; set; } = new(PhysicalRumbleWriteStatus.Succeeded, "");
+        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble) { Values.Add(rumble); return NextResult; }
+    }
 
     private sealed class ManualTicks : IInputReportTickSource
     {
