@@ -23,6 +23,7 @@ internal sealed class Oem1EventGestureBridge : IDisposable
     private bool _customAuthority;
     private bool _disposed;
     private long _authorityEpoch;
+    private long _activeRecognizerDeliveryEpoch;
     private int _activePolicyDeliveries;
 
     internal Oem1EventGestureBridge(
@@ -36,7 +37,7 @@ internal sealed class Oem1EventGestureBridge : IDisposable
         _recognizerOperationEntered = recognizerOperationEntered;
         _authorityInvalidationEntered = authorityInvalidationEntered;
         _eventSource.EventReceived += OnMsiEvent;
-        _recognizer.GestureRecognized += OnGestureRecognized;
+        _recognizer.GestureRecognizedWithEpoch += OnGestureRecognized;
     }
 
     internal event Action<Oem1GesturePolicyRequest>? PolicyRequested;
@@ -55,6 +56,8 @@ internal sealed class Oem1EventGestureBridge : IDisposable
                 _customAuthority = active;
                 _authorityEpoch++;
                 resetRecognizer = !active;
+                if (active)
+                    _activeRecognizerDeliveryEpoch = _recognizer.CurrentDeliveryEpoch;
                 shouldDrain = !active;
             }
 
@@ -84,7 +87,7 @@ internal sealed class Oem1EventGestureBridge : IDisposable
                 _authorityEpoch++;
                 shouldDrain = true;
                 _eventSource.EventReceived -= OnMsiEvent;
-                _recognizer.GestureRecognized -= OnGestureRecognized;
+                _recognizer.GestureRecognizedWithEpoch -= OnGestureRecognized;
             }
 
             _recognizer.InvalidatePending();
@@ -123,13 +126,13 @@ internal sealed class Oem1EventGestureBridge : IDisposable
         }
     }
 
-    private void OnGestureRecognized(Oem1Gesture gesture)
+    private void OnGestureRecognized(Oem1Gesture gesture, long deliveryEpoch)
     {
         lock (_policyDeliveryGate)
         {
             lock (_gate)
             {
-                if (_disposed || !_customAuthority)
+                if (_disposed || !_customAuthority || deliveryEpoch != _activeRecognizerDeliveryEpoch)
                     return;
 
                 _activePolicyDeliveries++;

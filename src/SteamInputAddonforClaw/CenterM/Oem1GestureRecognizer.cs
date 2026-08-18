@@ -68,6 +68,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private readonly TimeSpan _doubleClickWindow;
     private readonly IOem1GestureDelay _delay;
     private readonly IOem1GestureClock _clock;
+    private readonly Action<long>? _deliveryBeforeNotification;
     private readonly IOem1GestureCancellationSourceFactory _cancellationSourceFactory;
     private IOem1GestureCancellationSource? _pendingCancellation;
     private long _generation;
@@ -82,7 +83,8 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         TimeSpan doubleClickWindow,
         IOem1GestureDelay? delay = null,
         IOem1GestureClock? clock = null,
-        IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null)
+        IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null,
+        Action<long>? deliveryBeforeNotification = null)
     {
         if (doubleClickEnabled && doubleClickWindow <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(doubleClickWindow), "The double-click window must be positive.");
@@ -92,9 +94,20 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         _delay = delay ?? new Oem1TaskDelay();
         _clock = clock ?? new Oem1StopwatchClock();
         _cancellationSourceFactory = cancellationSourceFactory ?? new Oem1GestureCancellationSourceFactory();
+        _deliveryBeforeNotification = deliveryBeforeNotification;
     }
 
     internal event Action<Oem1Gesture>? GestureRecognized;
+    internal event Action<Oem1Gesture, long>? GestureRecognizedWithEpoch;
+
+    internal long CurrentDeliveryEpoch
+    {
+        get
+        {
+            lock (_gate)
+                return _deliveryEpoch;
+        }
+    }
 
     internal void OnPress()
     {
@@ -234,6 +247,8 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         _deliveryDepth++;
         try
         {
+            _deliveryBeforeNotification?.Invoke(deliveryEpoch);
+            GestureRecognizedWithEpoch?.Invoke(gesture, deliveryEpoch);
             GestureRecognized?.Invoke(gesture);
         }
         finally

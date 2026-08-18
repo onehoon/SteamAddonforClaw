@@ -377,6 +377,37 @@ public sealed class Oem1EventGestureBridgeTests
     }
 
     [Fact]
+    public async Task Delivery_admitted_before_reactivation_cannot_cross_the_new_authority_epoch()
+    {
+        var deliveryEntered = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDelivery = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var armDeliveryBarrier = false;
+        using var fixture = Create(
+            doubleEnabled: true,
+            deliveryBeforeNotification: _ =>
+            {
+                if (!armDeliveryBarrier)
+                    return;
+
+                deliveryEntered.TrySetResult(null);
+                releaseDelivery.Task.GetAwaiter().GetResult();
+            });
+
+        fixture.Bridge.SetCustomAuthority(true);
+        fixture.Source.Emit(Oem1());
+        armDeliveryBarrier = true;
+        var timeoutTask = fixture.Delay.CompleteLastAsync();
+        await deliveryEntered.Task;
+
+        fixture.Bridge.SetCustomAuthority(false);
+        fixture.Bridge.SetCustomAuthority(true);
+        releaseDelivery.TrySetResult(null);
+        await timeoutTask;
+
+        Assert.Empty(fixture.Results);
+    }
+
+    [Fact]
     public void Bridge_does_not_query_or_depend_on_lifecycle_coordinator()
     {
         using var fixture = Create();
@@ -392,12 +423,18 @@ public sealed class Oem1EventGestureBridgeTests
     private static Fixture Create(
         bool doubleEnabled = false,
         Action? recognizerOperationEntered = null,
-        Action? authorityInvalidationEntered = null)
+        Action? authorityInvalidationEntered = null,
+        Action<long>? deliveryBeforeNotification = null)
     {
         var source = new FakeMsiEventSource();
         var delay = new ControlledDelay();
         var clock = new ControlledClock();
-        var recognizer = new Oem1GestureRecognizer(doubleEnabled, TimeSpan.FromMilliseconds(250), delay, clock);
+        var recognizer = new Oem1GestureRecognizer(
+            doubleEnabled,
+            TimeSpan.FromMilliseconds(250),
+            delay,
+            clock,
+            deliveryBeforeNotification: deliveryBeforeNotification);
         var bridge = new Oem1EventGestureBridge(
             source,
             recognizer,
