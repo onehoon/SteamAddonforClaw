@@ -94,9 +94,37 @@ public sealed class Oem1ActionDispatcherTests
             Oem1ActionBindings.Default,
             () => StatusWithSteamOutput(true),
             () => pulseCount++);
+        var source = new ImmediateMsiEventSource();
+        var recognizer = new Oem1GestureRecognizer(
+            doubleClickEnabled: false,
+            TimeSpan.FromMilliseconds(250),
+            new ImmediateDelay(),
+            new ZeroClock());
+        using var bridge = new Oem1EventGestureBridge(source, recognizer);
+        bridge.PolicyRequested += dispatcher.Dispatch;
+        bridge.SetCustomAuthority(true);
 
-        dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
+        source.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
 
         Assert.Equal(1, pulseCount);
+    }
+
+    private sealed class ImmediateMsiEventSource : IMsiEventSource
+    {
+        public event Action<MsiOemEvent>? EventReceived;
+        public bool Start() => true;
+        internal void Emit(MsiOemEvent value) => EventReceived?.Invoke(value);
+        public void Dispose() { }
+    }
+
+    private sealed class ImmediateDelay : IOem1GestureDelay
+    {
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class ZeroClock : IOem1GestureClock
+    {
+        public long GetTimestamp() => 0;
+        public TimeSpan GetElapsedTime(long startTimestamp, long endTimestamp) => TimeSpan.Zero;
     }
 }
