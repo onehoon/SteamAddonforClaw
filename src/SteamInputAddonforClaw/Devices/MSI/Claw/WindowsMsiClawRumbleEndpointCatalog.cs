@@ -1,6 +1,7 @@
 using Windows.Devices.Enumeration;
 using Windows.Devices.HumanInterfaceDevice;
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -30,8 +31,9 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
             var inputLength = GetLength(device, "System.Devices.Hid.InputReportByteLength");
             var outputLength = GetLength(device, "System.Devices.Hid.OutputReportByteLength");
             if (inputLength <= 0 || outputLength <= 0) continue;
+            AppLog.Debug("Rumble", "Rumble endpoint candidate", ("VID", MsiClawHardware.VendorId), ("PID", MsiClawHardware.DirectInputProductId), ("InputReportLength", inputLength), ("OutputReportLength", outputLength), ("Writable", outputLength == 64), ("PhysicalRootMatch", true));
             candidates.Add(new(device.Id, pnp!, physicalRoot, MsiClawHardware.VendorId,
-                MsiClawHardware.DirectInputProductId, inputLength, outputLength, outputLength >= 64));
+                MsiClawHardware.DirectInputProductId, inputLength, outputLength, outputLength == 64));
         }
         return candidates;
     }

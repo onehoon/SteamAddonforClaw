@@ -52,6 +52,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     private FeedbackAuthorityToken? _feedbackToken;
     private bool _feedbackCallbackRegistered;
     private bool _feedbackRevoked;
+    private bool _feedbackArmed;
     private sealed class CreationTiming
     {
         internal long Started { get; } = Stopwatch.GetTimestamp();
@@ -193,20 +194,32 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             if (!neutralAccepted) return await FailAndRollbackCoreAsync("NeutralReportRejected", timing).ConfigureAwait(false);
             if (_physicalRumbleSink is not null)
             {
-                var token = _feedbackAuthority!.Acquire("SteamDeck");
-                _feedbackToken = token;
-                _feedbackBridge = new SteamDeckRumbleFeedbackBridge(_feedbackAuthority, token, _physicalRumbleSink);
-                if (!_canonicalSession.SetOutputCallback(_feedbackBridge.Callback))
+                AppLog.Debug("Rumble", "Physical rumble preflight started.", ("Source", "SteamDeck"), ("Device", "MSIClaw"), ("PID", 1902));
+                var preflight = _physicalRumbleSink.SetRumble(TwoMotorRumble.Stopped);
+                if (preflight.Status != PhysicalRumbleWriteStatus.Succeeded)
                 {
-                    _feedbackAuthority.RevokeAndDrain();
-                    _feedbackRevoked = true;
-                    _feedbackBridge = null;
-                    _feedbackToken = null;
-                    return await FailAndRollbackCoreAsync("SteamDeckFeedbackCallbackRegistrationFailed", timing).ConfigureAwait(false);
+                    AppLog.Warn("Rumble", "Physical rumble unavailable; Steam Deck routing will continue without physical feedback.", null, ("Source", "SteamDeck"), ("PID", 1902), ("Result", preflight.Status), ("Reason", preflight.Reason));
                 }
-                _feedbackCallbackRegistered = true;
-                AppLog.Debug("Rumble", "Steam Deck feedback callback registered.", ("Source", "SteamDeck"));
-                _feedbackRevoked = false;
+                else
+                {
+                    _feedbackArmed = true;
+                    AppLog.Debug("Rumble", "Physical rumble preflight succeeded.", ("Source", "SteamDeck"), ("Device", "MSIClaw"), ("PID", 1902), ("Result", "Success"));
+                    var token = _feedbackAuthority!.Acquire("SteamDeck");
+                    _feedbackToken = token;
+                    _feedbackBridge = new SteamDeckRumbleFeedbackBridge(_feedbackAuthority, token, _physicalRumbleSink);
+                    if (!_canonicalSession.SetOutputCallback(_feedbackBridge.Callback))
+                    {
+                        _feedbackAuthority.RevokeAndDrain();
+                        _feedbackRevoked = true;
+                        _feedbackBridge = null;
+                        _feedbackToken = null;
+                        _feedbackArmed = false;
+                        return await FailAndRollbackCoreAsync("SteamDeckFeedbackCallbackRegistrationFailed", timing).ConfigureAwait(false);
+                    }
+                    _feedbackCallbackRegistered = true;
+                    AppLog.Debug("Rumble", "Steam Deck feedback callback registered.", ("Source", "SteamDeck"));
+                    _feedbackRevoked = false;
+                }
             }
             Interlocked.Exchange(ref _outputFaultReported, 0);
             _publisher = new CanonicalSteamDeckInputPublisher(_snapshot, _canonicalSession, _reportTicks,
@@ -275,7 +288,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             _feedbackRevoked = true;
             AppLog.Debug("Rumble", "Steam Deck feedback authority revoked/drained.", ("Source", "SteamDeck"));
         }
-        if (_physicalRumbleSink is not null && _feedbackToken is not null)
+        if (_feedbackArmed && _physicalRumbleSink is not null && _feedbackToken is not null)
         {
             var stop = _physicalRumbleSink.SetRumble(TwoMotorRumble.Stopped);
             if (stop.Status != PhysicalRumbleWriteStatus.Succeeded)
@@ -293,6 +306,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 return RollbackFailure("SteamDeckFeedbackCallbackClearFailed");
             }
             _feedbackCallbackRegistered = false;
+            _feedbackArmed = false;
             AppLog.Debug("Rumble", "Steam Deck feedback callback cleared.", ("Source", "SteamDeck"));
         }
         if (_sessionId() is not { } session) return RollbackFailure("RecoverySessionUnavailable");
