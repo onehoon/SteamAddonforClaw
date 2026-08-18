@@ -166,7 +166,7 @@ public sealed class MsiClawRumbleTests
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
         MsiClawRumbleEndpointCandidate Candidate(string path, ushort pid = 0x1902, int length = 64, bool writable = true, string pnp = "PNP-A", string physical = "ROOT-A") =>
-            new(path, pnp, physical, 0x0DB0, pid, length, writable);
+            new(path, pnp, physical, 0x0DB0, pid, 64, length, writable);
 
         Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => []).Resolve(identity).Reason);
         Assert.Equal("AmbiguousEndpoints", new MsiClawRumbleEndpointResolver(_ => [Candidate("a"), Candidate("b")]).Resolve(identity).Reason);
