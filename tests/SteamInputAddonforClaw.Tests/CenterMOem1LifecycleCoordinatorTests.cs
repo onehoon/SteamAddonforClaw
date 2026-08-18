@@ -2630,6 +2630,36 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.NotNull(coordinator.GetSnapshot().RealMainUiProcessId);
     }
 
+    [Fact]
+    public async Task TimedOutSuspendDuringFreshPrerequisiteCapture_NeverLetsAttemptArmAdoptBumpedEpoch()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        using var suspendCts = new CancellationTokenSource();
+        Task? suspendTask = null;
+
+        h.Snapshots.OnMainUiQueried = call =>
+        {
+            if (call != 1) return;
+
+            // ReconcileCore still owns _gate. The real suspend participant therefore performs its
+            // synchronous BeginHighPriorityRequest + epoch bump, then waits on the gate. Cancel it
+            // completely before ReconcileCore enters AttemptArm: pending is zero, but the captured
+            // reconciliation epoch is now stale.
+            suspendTask = coordinator.QuiesceForSuspendAsync(
+                DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, suspendCts.Token);
+            suspendCts.Cancel();
+            Assert.ThrowsAny<OperationCanceledException>(() => suspendTask!.GetAwaiter().GetResult());
+        };
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        Assert.NotNull(suspendTask);
+        Assert.Equal(0, h.HelperApi.StartCallCount);
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.False(h.HelperOwnership.IsOwned);
+    }
+
     // ============================================================
     // Review 4957507443, finding #3 (MAJOR): DisposeAsync must drain the fire-and-forget debounce
     // continuation before disposing the gate.

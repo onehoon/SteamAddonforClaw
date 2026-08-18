@@ -836,7 +836,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             return;
         }
 
-        await AttemptArm(cancellationToken).ConfigureAwait(false);
+        await AttemptArm(reconciliationEpoch, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Review 4957791980 finding #2: captures the same fresh prerequisite facts
@@ -918,7 +918,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         return stopped;
     }
 
-    private async Task AttemptArm(CancellationToken cancellationToken)
+    private async Task AttemptArm(long expectedEpoch, CancellationToken cancellationToken)
     {
         // Finding #2 (review 4957507443): the request-time suspend boundary (QuiesceForSuspendAsync
         // bumps _lifecycleEpoch BEFORE it ever waits for _gate) must invalidate an arm already in
@@ -926,7 +926,10 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         // acquires _gate -- i.e. strictly AFTER this method (which holds the gate throughout) has
         // already returned. Capture the epoch now so it can be re-checked immediately before ever
         // committing Armed below.
-        var epochAtStart = Interlocked.Read(ref _lifecycleEpoch);
+        // Keep the epoch captured by ReconcileCore. A timed-out suspend may have bumped the
+        // lifecycle epoch and cleared its pending marker before this child operation is entered;
+        // that newer value is not a valid baseline for the prerequisite/topology evidence that
+        // caused this arm.
 
         var publishRoot = _publishRootProvider();
         var stagedPath = _stager(publishRoot);
@@ -956,7 +959,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         if (TestOnly_BeforeHelperStartLinearization is { } beforeStartHook)
             await beforeStartHook().ConfigureAwait(false);
 
-        if (!TryLinearizeOrdinaryMutationStart(epochAtStart))
+        if (!TryLinearizeOrdinaryMutationStart(expectedEpoch))
         {
             _lastReason = "SuspendRequestedDuringArmBeforeStart";
             SetState(CenterMOem1LifecycleState.NeedsSetup);
@@ -984,7 +987,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
         // Review 4957791980 finding #1: same independent-of-epoch-delta reasoning as the pre-Start
         // check above.
-        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart || IsHighPriorityRequestPending)
+        if (Interlocked.Read(ref _lifecycleEpoch) != expectedEpoch || IsHighPriorityRequestPending)
         {
             // Finding #2: a suspend (or disable/shutdown) request became authoritative while this
             // arm was already in flight, strictly after the helper was created. The newly-created
@@ -1016,7 +1019,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             if (TestOnly_BeforeArmedCommitLinearization is { } beforeCommitHook)
                 await beforeCommitHook().ConfigureAwait(false);
 
-            if (!TryCommitArmedState(epochAtStart))
+            if (!TryCommitArmedState(expectedEpoch))
             {
                 var cleanedAtCommit = _helperOwnership.Stop(_helperStopTimeout);
                 _lastReason = cleanedAtCommit ? "SuspendRequestedDuringArmCommit" : "SuspendRequestedDuringArmCommitCleanupUnconfirmed";
