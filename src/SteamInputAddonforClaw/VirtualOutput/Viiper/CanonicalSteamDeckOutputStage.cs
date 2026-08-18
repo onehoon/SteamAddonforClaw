@@ -194,7 +194,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             if (!neutralAccepted) return await FailAndRollbackCoreAsync("NeutralReportRejected", timing).ConfigureAwait(false);
             if (_physicalRumbleSink is not null)
             {
-                AppLog.Debug("Rumble", "Physical rumble preflight started.", ("Source", "SteamDeck"), ("Device", "MSIClaw"), ("PID", 1902));
+                AppLog.Debug("Rumble", "Physical rumble preflight started.", ("Source", "SteamDeck"));
                 var preflight = _physicalRumbleSink.SetRumble(TwoMotorRumble.Stopped);
                 if (preflight.Status != PhysicalRumbleWriteStatus.Succeeded)
                 {
@@ -203,7 +203,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 else
                 {
                     _feedbackArmed = true;
-                    AppLog.Debug("Rumble", "Physical rumble preflight succeeded.", ("Source", "SteamDeck"), ("Device", "MSIClaw"), ("PID", 1902), ("Result", "Success"));
+                    AppLog.Debug("Rumble", "Physical rumble preflight succeeded.", ("Source", "SteamDeck"), ("Result", "Success"));
                     var token = _feedbackAuthority!.Acquire("SteamDeck");
                     _feedbackToken = token;
                     _feedbackBridge = new SteamDeckRumbleFeedbackBridge(_feedbackAuthority, token, _physicalRumbleSink);

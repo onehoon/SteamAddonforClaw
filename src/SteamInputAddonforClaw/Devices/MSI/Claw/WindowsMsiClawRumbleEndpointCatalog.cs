@@ -31,12 +31,16 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
             var inputLength = GetLength(device, "System.Devices.Hid.InputReportByteLength");
             var outputLength = GetLength(device, "System.Devices.Hid.OutputReportByteLength");
             if (inputLength <= 0 || outputLength <= 0) continue;
-            AppLog.Debug("Rumble", "Rumble endpoint candidate", ("VID", MsiClawHardware.VendorId), ("PID", MsiClawHardware.DirectInputProductId), ("InputReportLength", inputLength), ("OutputReportLength", outputLength), ("Writable", outputLength == 64), ("PhysicalRootMatch", true));
+            var physicalRootMatch = MatchesPhysicalRoot(physicalRoot, identity.PhysicalIdentity);
+            AppLog.Debug("Rumble", "Rumble endpoint candidate", ("VID", MsiClawHardware.VendorId), ("PID", MsiClawHardware.DirectInputProductId), ("InputReportLength", inputLength), ("OutputReportLength", outputLength), ("OutputReportContractMatch", outputLength == 64), ("PhysicalRootMatch", physicalRootMatch));
             candidates.Add(new(device.Id, pnp!, physicalRoot, MsiClawHardware.VendorId,
                 MsiClawHardware.DirectInputProductId, inputLength, outputLength, outputLength == 64));
         }
         return candidates;
     }
+
+    internal static bool MatchesPhysicalRoot(string candidateRoot, string expectedRoot) =>
+        string.Equals(candidateRoot, expectedRoot, StringComparison.OrdinalIgnoreCase);
 
     private static int GetLength(DeviceInformation device, string key) =>
         device.Properties.TryGetValue(key, out var value) && value is not null ? Convert.ToInt32(value) : 0;

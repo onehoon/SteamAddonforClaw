@@ -7,6 +7,12 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class MsiClawRumbleTests
 {
+    [Fact]
+    public void Endpoint_diagnostics_compare_physical_roots_case_insensitively()
+    {
+        Assert.True(WindowsMsiClawRumbleEndpointCatalog.MatchesPhysicalRoot("USB\\VID_0DB0&PID_1902\\A", "usb\\vid_0db0&pid_1902\\a"));
+        Assert.False(WindowsMsiClawRumbleEndpointCatalog.MatchesPhysicalRoot("USB\\VID_0DB0&PID_1902\\A", "USB\\VID_0DB0&PID_1902\\B"));
+    }
     [Theory]
     [InlineData(0, 0)]
     [InlineData(255, 0)]
