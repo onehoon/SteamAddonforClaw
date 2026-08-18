@@ -95,44 +95,52 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         Oem1Gesture? immediate = null;
         long generation = 0;
         CancellationToken token = default;
+        var startTimeout = false;
         var now = _clock.GetTimestamp();
 
-        lock (_gate)
+        try
         {
-            ThrowIfDisposed();
-            if (!_doubleClickEnabled)
+            lock (_gate)
             {
-                immediate = Oem1Gesture.Single;
-            }
-            else if (_firstPressPending)
-            {
-                if (_clock.GetElapsedTime(_firstPressTimestamp, now) < _doubleClickWindow)
+                ThrowIfDisposed();
+                if (!_doubleClickEnabled)
                 {
-                    _firstPressPending = false;
-                    _generation++;
-                    CancelPendingCore();
-                    immediate = Oem1Gesture.Double;
+                    immediate = Oem1Gesture.Single;
+                }
+                else if (_firstPressPending)
+                {
+                    if (_clock.GetElapsedTime(_firstPressTimestamp, now) < _doubleClickWindow)
+                    {
+                        _firstPressPending = false;
+                        _generation++;
+                        CancelPendingCore();
+                        immediate = Oem1Gesture.Double;
+                    }
+                    else
+                    {
+                        _firstPressPending = false;
+                        _generation++;
+                        CancelPendingCore();
+                        immediate = Oem1Gesture.Single;
+                        BeginPendingPressCore(now, out generation, out token);
+                        startTimeout = true;
+                    }
                 }
                 else
                 {
-                    _firstPressPending = false;
-                    _generation++;
-                    CancelPendingCore();
-                    immediate = Oem1Gesture.Single;
                     BeginPendingPressCore(now, out generation, out token);
+                    startTimeout = true;
                 }
-            }
-            else
-            {
-                BeginPendingPressCore(now, out generation, out token);
-            }
 
-            if (immediate.HasValue)
-                GestureRecognized?.Invoke(immediate.Value);
+                if (immediate.HasValue)
+                    GestureRecognized?.Invoke(immediate.Value);
+            }
         }
-
-        if (token != default)
-            _ = CompleteSingleAfterTimeoutAsync(generation, token);
+        finally
+        {
+            if (startTimeout)
+                _ = CompleteSingleAfterTimeoutAsync(generation, token);
+        }
     }
 
     internal void Reset()

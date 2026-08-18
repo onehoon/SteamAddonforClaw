@@ -280,6 +280,29 @@ public sealed class Oem1GestureRecognizerTests
     }
 
     [Fact]
+    public async Task Expired_first_press_subscriber_failure_does_not_strand_new_sequence()
+    {
+        var delay = new ControlledDelay();
+        var clock = new ControlledClock();
+        using var recognizer = Create(true, delay, clock: clock);
+        var deliveries = 0;
+        recognizer.GestureRecognized += _ =>
+        {
+            deliveries++;
+            if (deliveries == 1)
+                throw new InvalidOperationException("subscriber failure");
+        };
+
+        recognizer.OnPress();
+        clock.Advance(TimeSpan.FromMilliseconds(251));
+
+        Assert.Throws<InvalidOperationException>(recognizer.OnPress);
+        await delay.CompleteNextAsync();
+
+        Assert.Equal(2, deliveries);
+    }
+
+    [Fact]
     public void Invalid_enabled_window_is_rejected()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => Create(true, new ControlledDelay(), TimeSpan.Zero));
