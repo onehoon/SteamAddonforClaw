@@ -126,9 +126,52 @@ public sealed class CenterMMainUiRoutingTerminatorTests
         Assert.Equal(CenterMRoutingTerminationResult.WaitTimedOut, result);
     }
 
+    [Fact]
+    public void TryTerminate_TerminateDeniedButExactHandleAlreadySignaled_IsAlreadyExited()
+    {
+        // TerminateProcess can legitimately fail (e.g. ERROR_ACCESS_DENIED) when the target already
+        // exited naturally in the race between fresh-evidence capture and this call -- the exact
+        // retained handle's own WaitForExit signal is still authoritative and must not be skipped
+        // just because the mutation request itself returned false.
+        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
+        var invoker = new RecordingInvoker(terminateSucceeds: false, waitSucceeds: true);
+        var terminator = new CenterMMainUiRoutingTerminator(
+            invoker,
+            new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
+
+        var result = terminator.TryTerminate(tracked, TimeSpan.FromSeconds(1));
+
+        Assert.Equal(CenterMRoutingTerminationResult.AlreadyExited, result);
+        Assert.Equal(1, invoker.TerminateCallCount);
+        Assert.Equal(1, invoker.WaitForExitCallCount);
+    }
+
+    [Fact]
+    public void TryTerminate_TerminateDeniedAndExactHandleNeverSignals_IsFailed()
+    {
+        // A real termination failure -- distinct from the already-exited race above -- must never be
+        // silently downgraded into a clean exit just because WaitForExit was still called.
+        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
+        var invoker = new RecordingInvoker(terminateSucceeds: false, waitSucceeds: false);
+        var terminator = new CenterMMainUiRoutingTerminator(
+            invoker,
+            new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
+
+        var result = terminator.TryTerminate(tracked, TimeSpan.FromMilliseconds(1));
+
+        Assert.Equal(CenterMRoutingTerminationResult.Failed, result);
+        Assert.Equal(1, invoker.TerminateCallCount);
+        Assert.Equal(1, invoker.WaitForExitCallCount);
+    }
+
     private sealed class RecordingInvoker(bool terminateSucceeds, bool waitSucceeds) : ITerminateProcessInvoker
     {
         internal int TerminateCallCount { get; private set; }
+        internal int WaitForExitCallCount { get; private set; }
 
         public bool TryTerminate(SafeProcessHandle handle, out int win32Error)
         {
@@ -137,7 +180,11 @@ public sealed class CenterMMainUiRoutingTerminatorTests
             return terminateSucceeds;
         }
 
-        public bool WaitForExit(SafeProcessHandle handle, TimeSpan timeout) => waitSucceeds;
+        public bool WaitForExit(SafeProcessHandle handle, TimeSpan timeout)
+        {
+            WaitForExitCallCount++;
+            return waitSucceeds;
+        }
     }
 
     private sealed class FakeIdentityInspector(LiveProcessProbeStatus status, int? processId, string? processName, string? executablePath) : IProcessIdentityInspector

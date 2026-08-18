@@ -70,16 +70,29 @@ internal sealed class CenterMMainUiRoutingTerminator(
         if (result != CenterMRoutingTerminationResult.Terminated) return result;
 
         AppLog.Info("CenterM.RoutingGuard", "MainUI routing retirement termination started.", ("ProcessId", tracked.ProcessId));
-        if (!_invoker.TryTerminate(tracked.Handle, out var win32Error))
+        var terminateRequested = _invoker.TryTerminate(tracked.Handle, out var win32Error);
+
+        // TerminateProcess is a best-effort mutation request, not the authoritative outcome --
+        // Windows can legitimately return failure (e.g. ERROR_ACCESS_DENIED) when the target already
+        // exited naturally in the race between fresh-evidence capture and this call, matching the
+        // exact-handle-exit rule CenterMHelperOwnership already relies on. WaitForExit on the exact
+        // retained handle is the authoritative confirmation and must always be checked, regardless of
+        // what TryTerminate returned.
+        if (_invoker.WaitForExit(tracked.Handle, waitTimeout))
         {
-            AppLog.Warn("CenterM.RoutingGuard", "TerminateProcess failed during routing retirement.", null, ("Win32Error", win32Error));
+            AppLog.Info("CenterM.RoutingGuard", "MainUI routing retirement exit confirmed.",
+                ("ProcessId", tracked.ProcessId), ("TerminateRequested", terminateRequested));
+            return terminateRequested ? CenterMRoutingTerminationResult.Terminated : CenterMRoutingTerminationResult.AlreadyExited;
+        }
+
+        if (!terminateRequested)
+        {
+            AppLog.Warn("CenterM.RoutingGuard", "TerminateProcess failed and exact-handle exit was not confirmed.", null,
+                ("ProcessId", tracked.ProcessId), ("Win32Error", win32Error));
             return CenterMRoutingTerminationResult.Failed;
         }
 
-        if (!_invoker.WaitForExit(tracked.Handle, waitTimeout)) return CenterMRoutingTerminationResult.WaitTimedOut;
-
-        AppLog.Info("CenterM.RoutingGuard", "MainUI routing retirement exit confirmed.", ("ProcessId", tracked.ProcessId));
-        return CenterMRoutingTerminationResult.Terminated;
+        return CenterMRoutingTerminationResult.WaitTimedOut;
     }
 
     private CenterMRoutingTerminationEvidence CaptureFreshEvidence(TrackedCenterMMainUi tracked)

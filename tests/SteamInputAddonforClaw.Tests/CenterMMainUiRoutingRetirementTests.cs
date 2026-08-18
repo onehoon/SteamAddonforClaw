@@ -499,6 +499,30 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Terminate_denied_but_exact_handle_exit_confirmed_still_completes_retirement()
+    {
+        // TerminateProcess returning false (e.g. the target already exited naturally in the race
+        // right before this call) must not by itself refuse routing -- the exact retained handle's
+        // own WaitForExit confirmation is authoritative, and fresh same-name absence verification
+        // must still run to completion on that path.
+        var snapshots = new QueueProcessSnapshotSource(
+        [
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)], // discovery
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)], // terminator recheck
+            [] // fresh absence after termination
+        ]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 0)]);
+        var (retirement, invoker, _) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            nativeModeProbe: new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput), terminateSucceeds: false, waitForExitSucceeds: true);
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.Retired, result);
+        Assert.Equal(1, invoker.TerminateCallCount);
+    }
+
+    [Fact]
     public async Task Another_mainui_present_after_termination_rejects_stale_success()
     {
         var snapshots = new QueueProcessSnapshotSource(
@@ -529,11 +553,12 @@ public sealed class CenterMMainUiRoutingRetirementTests
         TimeSpan? minimizeWaitPollInterval = null,
         TimeSpan? xInputWaitTimeout = null,
         TimeSpan? xInputWaitPollInterval = null,
-        bool waitForExitSucceeds = true)
+        bool waitForExitSucceeds = true,
+        bool terminateSucceeds = true)
     {
         var identity = identityInspector ?? new QueueIdentityInspector([]);
         var window = windowSnapshotProvider ?? new QueueWindowSnapshotProvider([]);
-        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: waitForExitSucceeds);
+        var invoker = new RecordingInvoker(terminateSucceeds: terminateSucceeds, waitSucceeds: waitForExitSucceeds);
         var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshotSource);
         var windowController = new FixedWindowController(minimizeResult);
         var retirement = new CenterMMainUiRoutingRetirement(
