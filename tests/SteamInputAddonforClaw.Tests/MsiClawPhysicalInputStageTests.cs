@@ -98,17 +98,22 @@ public sealed class MsiClawPhysicalInputStageTests
         var transport = new BlockingTransport();
         using var sink = new MsiClawRumbleSink(stage, transport, new TestResolver());
         stage.PhysicalSessionStarted += sink.BeginPhysicalSession;
+        var retirementReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stage.PhysicalSessionRetiring += () => retirementReached.TrySetResult();
         stage.PhysicalSessionRetiring += sink.BeginPhysicalSessionRetirement;
         stage.PhysicalSessionRetired += sink.InvalidatePhysicalSession;
+        input.BeforeStop = () => transport.InvalidateCount > 0;
 
         var write = Task.Run(() => sink.SetRumble(new(0xFF00, 0xFF00)));
         await transport.Entered.Task;
         var rollback = Task.Run(async () => await stage.RollbackMutationAsync(CancellationToken.None));
+        await retirementReached.Task;
         Assert.Equal(0, input.StopCount);
         transport.Release.Set();
         Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, (await write).Status);
         await rollback;
         Assert.Equal(1, input.StopCount);
+        Assert.Equal(2, transport.InvalidateCount);
         Assert.Null(stage.CurrentIdentity);
     }
 
@@ -140,6 +145,7 @@ public sealed class MsiClawPhysicalInputStageTests
         public bool FirstValidStateObserved { get; set; } = true;
         public int StartPreparedCount { get; private set; }
         public int StopCount { get; private set; }
+        public Func<bool>? BeforeStop { get; set; }
         public DirectInputDeviceDescriptor? PreparedDescriptor { get; private set; }
         public MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor)
         {
@@ -149,7 +155,7 @@ public sealed class MsiClawPhysicalInputStageTests
             return new(MsiClawInputStartStatus.Started, "Started");
         }
         public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken) => Task.FromResult(FirstValidStateObserved);
-        public Task StopAsync() { StopCount++; IsRunning = false; return Task.CompletedTask; }
+        public Task StopAsync() { Assert.True(BeforeStop?.Invoke() ?? true); StopCount++; IsRunning = false; return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
@@ -162,13 +168,14 @@ public sealed class MsiClawPhysicalInputStageTests
     {
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim Release { get; } = new(false);
+        public int InvalidateCount { get; private set; }
         public MsiClawRumbleTransportResult Write(string path, ReadOnlySpan<byte> packet)
         {
             Entered.TrySetResult();
             Release.Wait();
             return new(true, "OK");
         }
-        public void InvalidatePhysicalSession() { }
+        public void InvalidatePhysicalSession() => InvalidateCount++;
         public void Dispose() { }
     }
 }
