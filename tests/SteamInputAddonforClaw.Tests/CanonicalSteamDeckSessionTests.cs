@@ -61,6 +61,33 @@ public sealed class CanonicalSteamDeckSessionTests
     }
 
     [Fact]
+    public void Output_callback_wrapper_rejects_invalid_states_and_propagates_native_failures()
+    {
+        var beforeStartNative = new FakeNative();
+        using var beforeStart = new CanonicalSteamDeckSession(beforeStartNative);
+        SteamDeckOutputCallback callback = (_, _, _) => { };
+        Assert.False(beforeStart.SetOutputCallback(callback));
+        Assert.False(beforeStart.ClearOutputCallback());
+
+        var native = new FakeNative { RegistrationResult = false, ClearResult = false };
+        using var session = new CanonicalSteamDeckSession(native);
+        Assert.True(session.Start());
+        Assert.False(session.SetOutputCallback(callback));
+        Assert.False(session.ClearOutputCallback());
+        Assert.Equal(CanonicalSteamDeckSessionState.Active, session.State);
+        Assert.Equal((uint)9, session.LogicalDeviceId);
+
+        native.RegistrationResult = true;
+        native.ClearResult = true;
+        Assert.True(session.SetOutputCallback(callback));
+        Assert.True(session.ClearOutputCallback());
+        Assert.True(session.RemoveDevice());
+        Assert.False(session.SetOutputCallback(callback));
+        Assert.False(session.ClearOutputCallback());
+        Assert.Equal((nuint)0, session.DeviceHandle);
+    }
+
+    [Fact]
     public void Known_remove_failure_retains_device_and_allows_only_explicit_retry()
     {
         var native = new FakeNative
@@ -286,6 +313,8 @@ public sealed class CanonicalSteamDeckSessionTests
         internal bool IdentityResult { get; init; } = true;
         internal uint IdentityBusId { get; init; } = 42;
         internal bool AttachResult { get; init; } = true;
+        internal bool RegistrationResult { get; set; } = true;
+        internal bool ClearResult { get; set; } = true;
         internal List<(nuint Handle, bool Registered)> Callbacks { get; } = [];
         internal string? Address { get; private set; }
         internal bool AutoAttach { get; private set; }
@@ -310,7 +339,7 @@ public sealed class CanonicalSteamDeckSessionTests
         public bool CreateSteamDeckDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct)
         { Calls.Add("CreateSteamDeckDevice"); deviceHandle = 20; AutoAttach = autoAttachLocalhost; Vendor = idVendor; Product = idProduct; return CreateDeviceResult; }
         public bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); States.Add(state); return true; }
-        public bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback) { Calls.Add("SetSteamDeckOutputCallback"); Callbacks.Add((deviceHandle, callback is not null)); return true; }
+        public bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback) { Calls.Add("SetSteamDeckOutputCallback"); Callbacks.Add((deviceHandle, callback is not null)); return callback is null ? ClearResult : RegistrationResult; }
         public bool RemoveSteamDeckDevice(nuint deviceHandle) { Calls.Add("RemoveSteamDeckDevice"); return true; }
         public SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle)
         { Calls.Add("RemoveSteamDeckDeviceEx"); return RemoveDeviceResults.Count == 0 ? SteamDeckDeviceRemoveResult.Success : RemoveDeviceResults.Dequeue(); }
