@@ -197,9 +197,121 @@ public sealed class CenterMOemEventTests
         Assert.Equal(1, deliveredCount);
     }
 
+    [Fact]
+    public async Task Cross_instance_reentrancy_does_not_make_an_unrelated_source_skip_its_own_drain()
+    {
+        // Source A's admitted callback synchronously calls sourceB.Dispose() while B has its own
+        // admitted callback blocked in flight on a different thread. B must not mistake "some
+        // callback is on this thread" for "my own callback is on this thread" and must still block
+        // until its own admitted callback actually drains.
+        var adapterA = new FakeManagementEventWatcherAdapter(startSucceeds: true);
+        var sourceA = new WmiMsiEventSource(adapterA);
+        var adapterB = new FakeManagementEventWatcherAdapter(startSucceeds: true);
+        var sourceB = new WmiMsiEventSource(adapterB);
+        Assert.True(sourceA.Start());
+        Assert.True(sourceB.Start());
+
+        var bCallbackEntered = new ManualResetEventSlim(false);
+        var releaseBCallback = new ManualResetEventSlim(false);
+        sourceB.EventReceived += _ =>
+        {
+            bCallbackEntered.Set();
+            releaseBCallback.Wait(TimeSpan.FromSeconds(10));
+        };
+
+        var bRaiseTask = Task.Run(() => adapterB.Raise(0x220029));
+        Assert.True(bCallbackEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        var disposeBTask = Task.Run(() => { });
+        sourceA.EventReceived += _ =>
+        {
+            disposeBTask = Task.Run(sourceB.Dispose);
+            // Give the (wrongly reentrant-detected) Dispose() a chance to return early if the bug
+            // were still present -- it must not.
+            Assert.False(disposeBTask.Wait(TimeSpan.FromSeconds(1)),
+                "B.Dispose() must not return before B's own in-flight callback drains, even though " +
+                "it was called from inside A's callback on the same thread.");
+        };
+        adapterA.Raise(0x220058);
+
+        releaseBCallback.Set();
+        await bRaiseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await disposeBTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        sourceA.Dispose();
+    }
+
+    [Fact]
+    public async Task Nested_same_instance_callback_then_outer_Dispose_does_not_deadlock_and_disposes_exactly_once()
+    {
+        // An outer admitted callback synchronously triggers a nested raise on the *same* instance;
+        // the nested callback completes and unwinds first. Only then does the still-active outer
+        // callback call Dispose(). The depth-aware check must still recognize the outer callback as
+        // "this instance's own callback on this thread" even though the nested one already popped.
+        var adapter = new FakeManagementEventWatcherAdapter(startSucceeds: true);
+        var source = new WmiMsiEventSource(adapter);
+        Assert.True(source.Start());
+
+        var deliveredCount = 0;
+        var nestedRaised = false;
+        source.EventReceived += evt =>
+        {
+            deliveredCount++;
+            if (!nestedRaised && evt.Code == CenterMOemCode.Oem1)
+            {
+                nestedRaised = true;
+                adapter.Raise(0x220058); // nested, same instance, same thread -- runs and unwinds here
+                source.Dispose(); // now called reentrantly from the still-active outer callback
+            }
+        };
+
+        var raiseTask = Task.Run(() => adapter.Raise(0x220029));
+        await raiseTask.WaitAsync(TimeSpan.FromSeconds(5)); // times out (test fails) if it deadlocks
+
+        Assert.Equal(2, deliveredCount);
+        Assert.Equal(1, adapter.DisposeCallCount);
+
+        adapter.Raise(0x220029);
+        Assert.Equal(2, deliveredCount);
+    }
+
+    [Fact]
+    public async Task Adapter_dispose_happens_exactly_once_under_concurrent_reentrant_and_external_teardown()
+    {
+        var adapter = new FakeManagementEventWatcherAdapter(startSucceeds: true);
+        var source = new WmiMsiEventSource(adapter);
+        Assert.True(source.Start());
+
+        var callbackEntered = new ManualResetEventSlim(false);
+        var releaseCallback = new ManualResetEventSlim(false);
+        source.EventReceived += _ =>
+        {
+            callbackEntered.Set();
+            releaseCallback.Wait(TimeSpan.FromSeconds(10));
+            source.Dispose(); // reentrant
+        };
+
+        var raiseTask = Task.Run(() => adapter.Raise(0x220029));
+        Assert.True(callbackEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        // A concurrent external Dispose() races the reentrant one; it must block on the real drain
+        // (it is not itself running inside the admitted callback) rather than double-disposing.
+        var externalDisposeTask = Task.Run(source.Dispose);
+        await Task.Delay(50);
+        Assert.False(externalDisposeTask.IsCompleted);
+
+        releaseCallback.Set();
+
+        await raiseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await externalDisposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, adapter.DisposeCallCount);
+    }
+
     private sealed class FakeManagementEventWatcherAdapter(bool startSucceeds) : IManagementEventWatcherAdapter
     {
         internal int TryStartCallCount { get; private set; }
+        internal int DisposeCallCount { get; private set; }
 
         public event Action<object?>? MsiEventArrived;
 
@@ -212,7 +324,7 @@ public sealed class CenterMOemEventTests
 
         internal void Raise(object? rawPropertyValue) => MsiEventArrived?.Invoke(rawPropertyValue);
 
-        public void Dispose() { }
+        public void Dispose() => DisposeCallCount++;
     }
 
     /// <summary>Blocks inside TryStart until explicitly released, so a test can deterministically

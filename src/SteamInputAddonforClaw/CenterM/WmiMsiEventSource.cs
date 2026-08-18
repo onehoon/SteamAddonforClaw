@@ -82,12 +82,19 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
     private int _activeCallbacks;
     private bool _disposed;
     private bool _started;
-    // Set/cleared only on the thread currently running an admitted callback, around the
-    // subscriber invocation. Lets Dispose() detect it is being called reentrantly from within its
-    // own EventReceived subscriber (a subscriber that synchronously triggers teardown) and avoid
-    // deadlocking on _drained -- that admitted callback cannot reach its own finally block (which
-    // is what would signal _drained) until Dispose() itself returns.
-    [ThreadStatic] private static bool _isInsideAdmittedCallback;
+    private bool _adapterDisposed;
+    // Set once Dispose() is called reentrantly (from inside this exact instance's own admitted
+    // callback) while a callback is still admitted. Final native adapter disposal is then deferred
+    // to that callback's own finally block instead of happening on the callback's call stack.
+    private bool _finalDisposePending;
+    // Per-thread stack of WmiMsiEventSource instances whose admitted callback is currently
+    // executing on this thread, pushed/popped around subscriber invocation. Lets Dispose() detect
+    // "is *this exact instance's* admitted callback currently on this call stack" -- a plain
+    // per-thread bool cannot answer that: it is not instance-specific (a callback on an unrelated
+    // instance A must not make instance B skip its own drain) and not depth-aware (a nested
+    // callback on the same instance clearing a bool on exit would wrongly un-mark the still-active
+    // outer callback, reintroducing the very self-deadlock this exists to prevent).
+    [ThreadStatic] private static Stack<WmiMsiEventSource>? _activeCallbacksOnThisThread;
 
     internal WmiMsiEventSource(IManagementEventWatcherAdapter? adapter = null) =>
         _adapter = adapter ?? new ManagementEventWatcherAdapter();
@@ -127,7 +134,9 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
             _activeCallbacks++;
         }
 
-        _isInsideAdmittedCallback = true;
+        var stack = _activeCallbacksOnThisThread ??= new Stack<WmiMsiEventSource>();
+        stack.Push(this);
+        var shouldDisposeAdapter = false;
         try
         {
             if (!TryParseRawCode(propertyValue, out var rawCode)) return;
@@ -135,13 +144,35 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
         }
         finally
         {
-            _isInsideAdmittedCallback = false;
+            stack.Pop();
             lock (_sync)
             {
                 _activeCallbacks--;
-                if (_activeCallbacks == 0) _drained.Set();
+                if (_activeCallbacks == 0)
+                {
+                    _drained.Set();
+                    // A reentrant Dispose() during this (possibly nested) callback deferred final
+                    // adapter disposal rather than disposing on the callback's own stack -- once no
+                    // admitted callback remains, this is the one place that deferred disposal runs.
+                    if (_finalDisposePending) shouldDisposeAdapter = true;
+                }
             }
         }
+
+        if (shouldDisposeAdapter) DisposeAdapterOnce();
+    }
+
+    private bool IsThisInstancesCallbackOnCurrentThread() =>
+        _activeCallbacksOnThisThread?.Contains(this) == true;
+
+    private void DisposeAdapterOnce()
+    {
+        lock (_sync)
+        {
+            if (_adapterDisposed) return;
+            _adapterDisposed = true;
+        }
+        _adapter.Dispose();
     }
 
     /// <summary>
@@ -169,29 +200,35 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
     /// Closes admission (no callback entering after this point can proceed past its admission
     /// check), then waits for any callback that was already admitted to finish before disposing
     /// the native watcher -- once this returns, no subscriber callback that entered earlier can
-    /// still be beginning or completing. Exception: if called reentrantly from within this
-    /// source's own admitted callback (e.g. a subscriber that synchronously triggers teardown),
-    /// waiting would deadlock against that same callback -- see the reentrant branch below.
+    /// still be beginning or completing. Exception: if called reentrantly from within *this exact
+    /// instance's* own currently-admitted callback (e.g. a subscriber that synchronously triggers
+    /// teardown), waiting here would deadlock against that same callback -- final adapter disposal
+    /// is deferred instead to run from that callback's own finally block once it (and any callback
+    /// nested inside it) has fully unwound. Reentrancy is detected via a depth-aware, per-instance
+    /// check (<see cref="IsThisInstancesCallbackOnCurrentThread"/>), not a bare thread-wide flag:
+    /// an unrelated source's callback on this thread must not make this instance skip its own
+    /// drain, and a nested callback on this same instance must not un-mark the still-active outer
+    /// callback.
     /// </summary>
     public void Dispose()
     {
+        var reentrant = IsThisInstancesCallbackOnCurrentThread();
+
         lock (_sync)
         {
             if (_disposed) return;
             _disposed = true;
             _adapter.MsiEventArrived -= OnMsiEventArrived;
-        }
 
-        if (_isInsideAdmittedCallback)
-        {
-            // Reentrant: this call is running on the same thread as the one and only admitted
-            // callback currently in flight (WMI delivers to this source serially). Admission is
-            // already closed above, so no further callback can ever be admitted -- it is safe to
-            // dispose the native watcher immediately rather than wait for a drain condition that
-            // can only become true after this very call returns and the callback unwinds through
-            // its own finally block.
-            _adapter.Dispose();
-            return;
+            if (reentrant)
+            {
+                // This instance's own admitted callback (or one nested inside it) is still on this
+                // thread's call stack, so _activeCallbacks cannot be zero yet. Defer final
+                // disposal to the moment it actually reaches zero (in OnMsiEventArrived's finally)
+                // rather than disposing the adapter from inside its own callback stack.
+                _finalDisposePending = true;
+                return;
+            }
         }
 
         // Waited outside the lock: an admitted callback needs to acquire _sync itself (on exit) to
@@ -200,8 +237,11 @@ internal sealed class WmiMsiEventSource : IMsiEventSource
         // EventReceived after Dispose() has returned -- exactly the state this barrier exists to
         // rule out. Subscriber invocation is expected to be fast (parse + forward); a subscriber
         // that stalls indefinitely is a bug in that subscriber, not something this source should
-        // paper over by breaking its own drain guarantee.
+        // paper over by breaking its own drain guarantee. This wait is safe for an unrelated
+        // source's callback that happens to be executing on this thread (the cross-instance case):
+        // it simply blocks the calling thread until that other work lets this instance's own
+        // admitted callback (on whichever thread it is running) finish.
         _drained.Wait();
-        _adapter.Dispose();
+        DisposeAdapterOnce();
     }
 }
