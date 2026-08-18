@@ -64,6 +64,33 @@ HID/driver failure while Steam routing is active -- not just Center M
 specifically. This is software safety hardening only and does not advance SD3
 hardware validation; real hardware validation of this path remains required.
 
+A routing-time MSI Center M MainUI launch guard (Phase 1) now arms/disarms
+around routing entry/exit -- `Local\MSI Center M.exe` mutex ownership plus the
+existing staged same-name helper, gating native-mode/PID1902 mutation on the
+guard reaching `Armed`. This is software only and does not advance SD3
+hardware validation. Required first hardware validation (precondition: real
+MSI Center M MainUI fully exited):
+
+1. Start Addon, enter Steam BPM/routing; confirm physical PID1902 active,
+   virtual Steam Deck active, DirectInput controls working, and the Addon log
+   shows the routing guard Armed.
+2. Launch MSI Center M manually from the Windows Start Menu; observe for
+   several seconds. PASS requires: no operational Center M MainWindow
+   appears (or one briefly starts and exits immediately); the MSI MainUI log
+   contains no `GotoMSIMode` for that launch; PID1902 remains present;
+   PID1901 does not appear; the Addon DirectInput feeder stays alive;
+   D-pad/buttons keep working; Steam Deck remains the active virtual
+   controller; no routing teardown/re-entry occurs.
+3. Exit BPM/routing; confirm physical native/XInput restoration completes and
+   the routing guard disarms.
+4. Launch Center M from the Start Menu again; PASS requires it opens normally
+   and no stale helper/mutex keeps it blocked.
+
+If the hardware test fails, classify the failure (real MainUI reached
+`GotoMSIMode`; Center M stays blocked after routing exits; PID1902
+disappeared despite no `GotoMSIMode`) before adding any process-kill logic --
+do not immediately introduce automatic termination.
+
 Complete real MSI Claw EX validation for:
 
 - native-mode entry and restoration;

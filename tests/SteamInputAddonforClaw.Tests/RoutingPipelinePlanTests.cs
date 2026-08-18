@@ -6,7 +6,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class RoutingPipelinePlanTests
 {
     [Fact]
-    public void InitialStageSet_IsExactlyTheSevenMvpStages() => Assert.Equal(
+    public void InitialStageSet_IsExactlyTheDefinedStages() => Assert.Equal(
         [
             RoutingStageKind.NativeMode,
             RoutingStageKind.PhysicalInput,
@@ -14,7 +14,8 @@ public sealed class RoutingPipelinePlanTests
             RoutingStageKind.ThirdPartyIsolation,
             RoutingStageKind.SteamOutput,
             RoutingStageKind.XboxOutput,
-            RoutingStageKind.GameBarRouting
+            RoutingStageKind.GameBarRouting,
+            RoutingStageKind.CenterMGuard
         ],
         Enum.GetValues<RoutingStageKind>());
 
@@ -37,6 +38,7 @@ public sealed class RoutingPipelinePlanTests
         Assert.Equal(RoutingStageMode.Enabled, plan.SteamOutput);
         Assert.Equal(RoutingStageMode.Disabled, plan.XboxOutput);
         Assert.Equal(RoutingStageMode.Disabled, plan.GameBarRouting);
+        Assert.Equal(RoutingStageMode.Enabled, plan.CenterMGuard);
     }
 
     [Fact]

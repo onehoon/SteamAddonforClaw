@@ -20,8 +20,14 @@ internal interface IRoutingPipelineStage
 
 internal static class RoutingPipelineStageOrder
 {
+    // CenterMGuard runs first on entry -- routing must not begin native-mode/PID1902 mutation until
+    // the routing-time real-MainUI launch guard is proven Armed -- and last on rollback, so the
+    // guard is only released after native/physical restoration below has already completed or been
+    // classified (never release Center M launch protection while the physical controller is still
+    // expected to remain PID1902).
     internal static IReadOnlyList<RoutingStageKind> Forward { get; } =
     [
+        RoutingStageKind.CenterMGuard,
         RoutingStageKind.NativeMode,
         RoutingStageKind.PhysicalInput,
         RoutingStageKind.PhysicalIsolation,
@@ -39,7 +45,8 @@ internal static class RoutingPipelineStageOrder
         RoutingStageKind.ThirdPartyIsolation,
         RoutingStageKind.PhysicalInput,
         RoutingStageKind.NativeMode,
-        RoutingStageKind.PhysicalIsolation
+        RoutingStageKind.PhysicalIsolation,
+        RoutingStageKind.CenterMGuard
     ];
 
     internal static bool IsRollbackFailureBarrier(RoutingStageKind kind) =>

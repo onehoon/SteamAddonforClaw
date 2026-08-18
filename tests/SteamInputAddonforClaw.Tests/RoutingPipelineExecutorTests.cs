@@ -8,8 +8,8 @@ public sealed class RoutingPipelineExecutorTests
     [Fact]
     public void StageOrder_IsExplicitAndDependencyAwareForRollback()
     {
-        Assert.Equal([RoutingStageKind.NativeMode, RoutingStageKind.PhysicalInput, RoutingStageKind.PhysicalIsolation, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.SteamOutput, RoutingStageKind.XboxOutput, RoutingStageKind.GameBarRouting], RoutingPipelineStageOrder.Forward);
-        Assert.Equal([RoutingStageKind.GameBarRouting, RoutingStageKind.XboxOutput, RoutingStageKind.SteamOutput, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalIsolation], RoutingPipelineStageOrder.Rollback);
+        Assert.Equal([RoutingStageKind.CenterMGuard, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalInput, RoutingStageKind.PhysicalIsolation, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.SteamOutput, RoutingStageKind.XboxOutput, RoutingStageKind.GameBarRouting], RoutingPipelineStageOrder.Forward);
+        Assert.Equal([RoutingStageKind.GameBarRouting, RoutingStageKind.XboxOutput, RoutingStageKind.SteamOutput, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalIsolation, RoutingStageKind.CenterMGuard], RoutingPipelineStageOrder.Rollback);
     }
 
     [Fact]
@@ -235,6 +235,35 @@ public sealed class RoutingPipelineExecutorTests
         Assert.False(result.Succeeded);
         Assert.Equal(RoutingStageKind.SteamOutput, result.FailedStage);
         Assert.Equal(["NativeMode.Prepare", "NativeMode.Execute", "PhysicalInput.Prepare", "PhysicalInput.Execute", "PhysicalIsolation.Prepare", "PhysicalIsolation.Execute", "SteamOutput.Prepare", "SteamOutput.Execute", "SteamOutput.Rollback", "PhysicalInput.Rollback", "NativeMode.Rollback", "PhysicalIsolation.Rollback"], trace);
+    }
+
+    [Fact]
+    public async Task CenterMGuard_ExecutesFirstOnEntry_AndRollsBackLastOnFailure()
+    {
+        // The CenterM MainUI routing guard must be Armed before any native-mode/PID1902 mutation
+        // begins, and must only disarm after every other stage (in particular native-mode
+        // restoration) has already rolled back or been classified.
+        var trace = new List<string>();
+        var guard = new FakeStage(RoutingStageKind.CenterMGuard, trace);
+        var native = new FakeStage(RoutingStageKind.NativeMode, trace);
+        var output = new FakeStage(RoutingStageKind.SteamOutput, trace) { ThrowOnExecute = true };
+        var plan = RoutingPipelinePlan.AllDisabled with
+        {
+            CenterMGuard = RoutingStageMode.Enabled,
+            NativeMode = RoutingStageMode.Enabled,
+            SteamOutput = RoutingStageMode.Enabled
+        };
+
+        var result = await new RoutingPipelineExecutor([guard, native, output]).ExecuteAsync(plan, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(
+        [
+            "CenterMGuard.Prepare", "CenterMGuard.Execute",
+            "NativeMode.Prepare", "NativeMode.Execute",
+            "SteamOutput.Prepare", "SteamOutput.Execute",
+            "SteamOutput.Rollback", "NativeMode.Rollback", "CenterMGuard.Rollback"
+        ], trace);
     }
 
     [Fact]
