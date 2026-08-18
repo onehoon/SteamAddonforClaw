@@ -329,7 +329,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
 
     public void Dispose() { try { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); } catch { } }
 
-    private sealed class FakeInput(MsiClawPhysicalInputIdentity identity) : IMsiClawPhysicalInputIdentityProvider { public MsiClawPhysicalInputIdentity? CurrentIdentity => identity; }
+    private sealed class FakeInput(MsiClawPhysicalInputIdentity identity) : IMsiClawPhysicalInputIdentityProvider { public MsiClawPhysicalInputIdentity? CurrentIdentity => identity; public long CurrentSessionGeneration => 1; }
     private sealed class FakeSession(Guid id) : IRoutingRecoverySessionProvider { public Guid? CurrentRecoverySessionId => id; }
     private sealed class FakeHidHide : IHidHideClient
     {

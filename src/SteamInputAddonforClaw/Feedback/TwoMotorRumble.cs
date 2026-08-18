@@ -7,5 +7,5 @@ internal readonly record struct TwoMotorRumble(ushort LargeMotor, ushort SmallMo
 
 internal interface IPhysicalRumbleSink
 {
-    void SetRumble(TwoMotorRumble rumble);
+    PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble);
 }
