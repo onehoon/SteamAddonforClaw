@@ -108,6 +108,24 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private string? _lastReason;
     private bool _shutdown;
 
+    /// <summary>Review 4957791980 finding #1 (BLOCKER): an explicit, request-time-scoped barrier
+    /// distinct from <see cref="_lifecycleEpoch"/>. <see cref="_lifecycleEpoch"/> only records "the
+    /// world changed since some earlier snapshot" -- it cannot distinguish "this arm attempt started
+    /// cleanly" from "this arm attempt started AFTER a higher-priority request had already bumped
+    /// the epoch and is still waiting for <see cref="_gate"/>", because a later waiter is not
+    /// guaranteed to lose the race for a <see cref="SemaphoreSlim"/> against an earlier one. This
+    /// counter is incremented by <see cref="SetDesiredEnabledAsync"/> (disable only),
+    /// <see cref="QuiesceForSuspendAsync"/>, and <see cref="ShutdownAsync"/> BEFORE they ever wait on
+    /// <see cref="_gate"/>, and decremented only after that same call has finished running under the
+    /// gate (win or lose the race). Any arm-committing path must check
+    /// <see cref="IsHighPriorityRequestPending"/> -- not just the epoch delta -- immediately before
+    /// every destructive/arming commit point, so a later mutation can never adopt an
+    /// already-bumped epoch as a "clean" baseline while a disable/suspend/shutdown request is still
+    /// pending. Interlocked-based rather than a new lock: the existing concurrency history on this
+    /// branch (CI flakiness from a contended `Lock`) argues strongly for a simple atomic counter over
+    /// another synchronization primitive layered around <see cref="_gate"/>.</summary>
+    private int _pendingHighPriorityRequests;
+
     /// <summary>Suspended mutation barrier (finding #1). While true, no arm/reconcile/destructive
     /// polling path may mutate helper ownership or MainUI tracking -- only
     /// <see cref="ReconcileAfterResumeAsync"/> clears it and performs the fresh resume
@@ -133,6 +151,19 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// <see cref="ShutdownAsync"/> do before ever waiting on <see cref="_gate"/>. Never touched by
     /// production code.</summary>
     internal void TestOnly_BumpLifecycleEpoch() => BumpLifecycleEpoch();
+
+    /// <summary>Test-only synchronization seam (review 4957791980, finding #1): deterministically
+    /// simulates a disable/suspend/shutdown request having already marked itself pending via the
+    /// request-time barrier -- mirroring exactly what <see cref="SetDesiredEnabledAsync"/>(false)/
+    /// <see cref="QuiesceForSuspendAsync"/>/<see cref="ShutdownAsync"/> do before ever waiting on
+    /// <see cref="_gate"/> -- without any real timing race. Never touched by production code. Must be
+    /// paired with <see cref="TestOnly_EndHighPriorityRequest"/> once the test no longer needs the
+    /// marker set.</summary>
+    internal void TestOnly_BeginHighPriorityRequest() => BeginHighPriorityRequest();
+
+    /// <summary>Test-only synchronization seam (review 4957791980, finding #1): retires a marker set
+    /// by <see cref="TestOnly_BeginHighPriorityRequest"/>. Never touched by production code.</summary>
+    internal void TestOnly_EndHighPriorityRequest() => EndHighPriorityRequest();
 
     /// <summary>Test-only accessor (review 4957630432 finding #3): exposes the coordinator's own
     /// <see cref="CenterMHelperOwnership"/> instance -- whether caller-injected or constructed
@@ -249,21 +280,33 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         // Bumped BEFORE acquiring the gate (finding #6): a disable request becomes authoritative to
         // any debounce continuation that re-enters the gate later, even if that continuation happens
         // to win the race for the gate itself.
-        if (!enabled) BumpLifecycleEpoch();
+        //
+        // Review 4957791980 finding #1: also marks the request pending via the request-time barrier
+        // BEFORE ever waiting on the gate -- a later waiter that wins the race for the gate first
+        // must see this, not just a same-valued epoch snapshot, so it can never adopt the
+        // already-bumped epoch as a clean baseline for a new arm.
+        if (!enabled) { BeginHighPriorityRequest(); BumpLifecycleEpoch(); }
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_shutdown) return;
-            _desiredEnabled = enabled;
-            if (!enabled)
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                await DisableCore(cancellationToken).ConfigureAwait(false);
-                return;
+                if (_shutdown) return;
+                _desiredEnabled = enabled;
+                if (!enabled)
+                {
+                    await DisableCore(cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                await ReconcileCore("SetDesiredEnabled(true)", cancellationToken).ConfigureAwait(false);
             }
-            await ReconcileCore("SetDesiredEnabled(true)", cancellationToken).ConfigureAwait(false);
+            finally { _gate.Release(); }
         }
-        finally { _gate.Release(); }
+        finally
+        {
+            if (!enabled) EndHighPriorityRequest();
+        }
     }
 
     /// <summary>General-purpose fresh reconciliation entry point (arm attempt, helper-death
@@ -355,7 +398,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
             if (_trackedMainUi is not null)
             {
-                await ObserveTrackedMainUiCore(cancellationToken).ConfigureAwait(false);
+                // Review 4957791980 finding #2: this poll tick calls ObserveTrackedMainUiCore
+                // directly (not through ReconcileCore), so it must independently refresh the same
+                // prerequisite facts before permitting hidden-debounce termination -- otherwise the
+                // exact same bypass the finding describes for resume/ReconcileCore would still be
+                // reachable from this entry point.
+                var prerequisitesValid = RefreshSuppressionPrerequisites();
+                await ObserveTrackedMainUiCore(cancellationToken, prerequisitesValid).ConfigureAwait(false);
                 return;
             }
 
@@ -373,18 +422,25 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
     {
         // Bumped BEFORE acquiring the gate (finding #6), same reasoning as SetDesiredEnabledAsync.
+        // Review 4957791980 finding #1: also marks the request pending via the request-time barrier
+        // for the same reason -- see SetDesiredEnabledAsync.
+        BeginHighPriorityRequest();
         BumpLifecycleEpoch();
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            CancelPendingDebounceCore("Suspend");
-            _suspended = true;
-            _lastReason = "SuspendQuiesced";
-            AppLog.Info("CenterM.Oem1", "Suspend quiesce completed; suspended mutation barrier established.", ("State", _state));
-            return true;
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                CancelPendingDebounceCore("Suspend");
+                _suspended = true;
+                _lastReason = "SuspendQuiesced";
+                AppLog.Info("CenterM.Oem1", "Suspend quiesce completed; suspended mutation barrier established.", ("State", _state));
+                return true;
+            }
+            finally { _gate.Release(); }
         }
-        finally { _gate.Release(); }
+        finally { EndHighPriorityRequest(); }
     }
 
     /// <summary>Fresh, complete OEM1 reconciliation on resume, independent of Steam/VIIPER routing
@@ -436,32 +492,39 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     internal async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
         // Bumped BEFORE acquiring the gate (finding #6), same reasoning as SetDesiredEnabledAsync.
+        // Review 4957791980 finding #1: also marks the request pending via the request-time barrier
+        // for the same reason -- see SetDesiredEnabledAsync.
+        BeginHighPriorityRequest();
         BumpLifecycleEpoch();
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            CancelPendingDebounceCore("Shutdown");
-            _shutdown = true;
-            _trackedMainUi?.Dispose();
-            _trackedMainUi = null;
-
-            if (_helperOwnership.IsOwned)
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                var stopped = _helperOwnership.Stop(_helperStopTimeout);
-                AppLog.Info("CenterM.Oem1", "Shutdown helper stop attempted.", ("Confirmed", stopped));
-                if (!stopped)
-                {
-                    _lastReason = "ShutdownCleanupUnconfirmed";
-                    SetState(CenterMOem1LifecycleState.FaultedNative);
-                    AppLog.Warn("CenterM.Oem1", "Shutdown could not confirm helper cleanup; ownership retained, not reporting clean Disabled state.", null, ("ProcessId", _helperOwnership.ProcessId));
-                    return;
-                }
-            }
+                CancelPendingDebounceCore("Shutdown");
+                _shutdown = true;
+                _trackedMainUi?.Dispose();
+                _trackedMainUi = null;
 
-            SetState(CenterMOem1LifecycleState.Disabled);
+                if (_helperOwnership.IsOwned)
+                {
+                    var stopped = _helperOwnership.Stop(_helperStopTimeout);
+                    AppLog.Info("CenterM.Oem1", "Shutdown helper stop attempted.", ("Confirmed", stopped));
+                    if (!stopped)
+                    {
+                        _lastReason = "ShutdownCleanupUnconfirmed";
+                        SetState(CenterMOem1LifecycleState.FaultedNative);
+                        AppLog.Warn("CenterM.Oem1", "Shutdown could not confirm helper cleanup; ownership retained, not reporting clean Disabled state.", null, ("ProcessId", _helperOwnership.ProcessId));
+                        return;
+                    }
+                }
+
+                SetState(CenterMOem1LifecycleState.Disabled);
+            }
+            finally { _gate.Release(); }
         }
-        finally { _gate.Release(); }
+        finally { EndHighPriorityRequest(); }
     }
 
     public async ValueTask DisposeAsync()
@@ -601,15 +664,27 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
         if (_trackedMainUi is not null)
         {
-            // Finding #4: an existing tracked real MainUI identity is authoritative and must be
-            // resolved FIRST, via its exact retained handle, before helper arm/re-adoption is ever
-            // considered -- e.g. on resume after the tracked identity exited during sleep, or when
-            // it remained alive and would otherwise be rediscovered from the process-name snapshot
-            // and re-adopted as a second handle, losing the existing identity-bound SeenVisible
-            // history. ObserveTrackedMainUiCore itself retires an exited identity (and then re-enters
-            // ReconcileCore fresh with _trackedMainUi cleared) or fails open on an uncertain/mismatched
-            // identity without ever considering helper arm.
-            await ObserveTrackedMainUiCore(cancellationToken).ConfigureAwait(false);
+            // Finding #4 (review 4957507443): an existing tracked real MainUI identity is
+            // authoritative and must be RESOLVED first, via its exact retained handle, before helper
+            // arm/re-adoption is ever considered -- e.g. on resume after the tracked identity exited
+            // during sleep, or when it remained alive and would otherwise be rediscovered from the
+            // process-name snapshot and re-adopted as a second handle, losing the existing
+            // identity-bound SeenVisible history. ObserveTrackedMainUiCore itself retires an exited
+            // identity (and then re-enters ReconcileCore fresh with _trackedMainUi cleared) or fails
+            // open on an uncertain/mismatched identity without ever considering helper arm.
+            //
+            // Review 4957791980 finding #2 (MAJOR): "identity resolved first" is not the same as
+            // "termination is still permitted". Refresh the same prerequisite facts (environment
+            // eligibility, AutoRun, Launcher/Server) that gate helper arm/suppression BEFORE ever
+            // starting or continuing hidden-debounce termination -- resume must re-check the complete
+            // current-world prerequisite set, and prerequisite drift during sleep must leave native
+            // Center M behavior intact rather than continue a destructive custom-lifecycle action
+            // (debounce -> terminate) from pre-suspend assumptions. This never disturbs the retained
+            // identity/SeenVisible resolution order above; it only additionally gates whether
+            // ObserveTrackedMainUiCore may treat a HiddenAfterVisible observation as a termination
+            // candidate.
+            var prerequisitesValid = RefreshSuppressionPrerequisites();
+            await ObserveTrackedMainUiCore(cancellationToken, prerequisitesValid).ConfigureAwait(false);
             return;
         }
 
@@ -686,6 +761,18 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             var validity = EvaluateArmedHelperValidity(sameName, ownedPid);
             if (validity == ArmedHelperValidity.Valid)
             {
+                // Review 4957791980 finding #1: re-confirming Armed for an already-owned, already-
+                // valid helper is still a commit point -- a disable/suspend/shutdown request that
+                // became pending after this reconcile started (and is still waiting for the gate)
+                // must never be papered over by simply re-confirming the old Armed state.
+                if (IsHighPriorityRequestPending)
+                {
+                    var disarmedPending = DisarmOwnedHelperForFailOpen();
+                    _lastReason = disarmedPending ? "HighPriorityRequestPendingDuringArmedConfirm:Disarmed" : "HighPriorityRequestPendingDuringArmedConfirm:DisarmCleanupUnconfirmed";
+                    SetState(CenterMOem1LifecycleState.FaultedNative);
+                    AppLog.Warn("CenterM.Oem1", "A disable/suspend/shutdown request became pending while re-confirming an already-valid Armed helper; disarm attempted, Armed never re-committed.", null, ("Disarmed", disarmedPending));
+                    return;
+                }
                 SetState(CenterMOem1LifecycleState.Armed);
                 return;
             }
@@ -705,6 +792,37 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         }
 
         await AttemptArm(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Review 4957791980 finding #2: captures the same fresh prerequisite facts
+    /// (environment eligibility, AutoRun, Launcher/Server) that gate helper arm/suppression
+    /// readiness elsewhere in <see cref="ReconcileCore"/>, WITHOUT performing any helper cleanup --
+    /// used purely to decide whether hidden-debounce termination of an already-tracked real MainUI
+    /// may proceed. Short-circuits (never touches Launcher/Server/<see cref="_launcherReady"/>/
+    /// <see cref="_serverReady"/> beyond resetting them to false) once an earlier prerequisite is
+    /// already known invalid, matching the same fail-fast order used by the no-tracked-MainUI path
+    /// below.</summary>
+    private bool RefreshSuppressionPrerequisites()
+    {
+        if (!_environmentEligible())
+        {
+            _launcherReady = false;
+            _serverReady = false;
+            return false;
+        }
+
+        _lastAutoRun = _autoRunReader();
+        if (_lastAutoRun != CenterMAutoRunState.Disabled)
+        {
+            _launcherReady = false;
+            _serverReady = false;
+            return false;
+        }
+
+        var backend = _backendProbe.Capture();
+        _launcherReady = backend.LauncherPresent;
+        _serverReady = backend.ServerPresent;
+        return _launcherReady && _serverReady;
     }
 
     private enum ArmedHelperValidity { Valid, NotOwned, ResidualCleanupOnly, LivenessNotAlive, InvariantInvalid }
@@ -779,11 +897,17 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         // where a suspend/disable/shutdown request became authoritative during staging (before
         // Start was even entered) and a helper could still be newly created. If it already changed,
         // nothing has been created yet, so there is nothing to clean up.
-        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart)
+        //
+        // Review 4957791980 finding #1 (BLOCKER): the epoch-delta check alone is not enough -- a
+        // request that bumped the epoch and is still waiting for the gate is invisible to a delta
+        // check taken entirely after that bump (epochAtStart already reflects it as the "clean"
+        // baseline). IsHighPriorityRequestPending is checked independently of the epoch delta for
+        // exactly this reason.
+        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart || IsHighPriorityRequestPending)
         {
             _lastReason = "SuspendRequestedDuringArmBeforeStart";
             SetState(CenterMOem1LifecycleState.NeedsSetup);
-            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed (suspend/disable/shutdown requested) before helper Start was ever entered; no helper created, Armed never committed.", null);
+            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request is pending (suspend/disable/shutdown) before helper Start was ever entered; no helper created, Armed never committed.", null);
             return;
         }
 
@@ -805,7 +929,9 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 return;
         }
 
-        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart)
+        // Review 4957791980 finding #1: same independent-of-epoch-delta reasoning as the pre-Start
+        // check above.
+        if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart || IsHighPriorityRequestPending)
         {
             // Finding #2: a suspend (or disable/shutdown) request became authoritative while this
             // arm was already in flight, strictly after the helper was created. The newly-created
@@ -815,7 +941,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             var cleaned = _helperOwnership.Stop(_helperStopTimeout);
             _lastReason = cleaned ? "SuspendRequestedDuringArm" : "SuspendRequestedDuringArmCleanupUnconfirmed";
             SetState(cleaned ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
-            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed (suspend/disable/shutdown requested) while an arm was in flight; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleaned));
+            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request is pending (suspend/disable/shutdown) while an arm was in flight; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleaned));
             return;
         }
 
@@ -824,6 +950,19 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         var invariant = CenterMHelperInvariant.Evaluate(fresh, _helperOwnership.ProcessId!.Value);
         if (invariant == CenterMHelperInvariantState.Valid)
         {
+            // Review 4957791980 finding #1 (second bullet): the final linearization point. A
+            // suspend/disable/shutdown request that became pending during the fresh post-start
+            // invariant capture above must still be caught here, immediately before ever committing
+            // Armed -- this is the last checkpoint before publication.
+            if (Interlocked.Read(ref _lifecycleEpoch) != epochAtStart || IsHighPriorityRequestPending)
+            {
+                var cleanedAtCommit = _helperOwnership.Stop(_helperStopTimeout);
+                _lastReason = cleanedAtCommit ? "SuspendRequestedDuringArmCommit" : "SuspendRequestedDuringArmCommitCleanupUnconfirmed";
+                SetState(cleanedAtCommit ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
+                AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request became pending during the post-start invariant capture; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleanedAtCommit));
+                return;
+            }
+
             _lastReason = "Armed";
             SetState(CenterMOem1LifecycleState.Armed);
             return;
@@ -937,13 +1076,25 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         _lastReason = "RealMainUiAdopted";
         AppLog.Info("CenterM.Oem1", "Real MainUI adopted; yielding to native Center M.", ("ProcessId", tracked.ProcessId));
 
-        await ObserveTrackedMainUiCore(cancellationToken).ConfigureAwait(false);
+        // This adoption is reached only after the same ReconcileCore call already confirmed
+        // environment eligibility, AutoRun == Disabled, and Launcher/Server readiness earlier in
+        // this exact invocation (the foreign-same-name branch runs strictly after those checks), and
+        // _mainUiObserver.Reset() was just called above, so the very first observation below can
+        // never itself be a HiddenAfterVisible termination candidate. Passing true here is therefore
+        // consistent with -- not a bypass of -- review 4957791980 finding #2's prerequisite gate.
+        await ObserveTrackedMainUiCore(cancellationToken, prerequisitesValid: true).ConfigureAwait(false);
     }
 
     /// <summary>Fresh visibility/exit observation for the currently tracked real MainUI. Drives
     /// Visible / HiddenAfterVisible-debounce / natural-exit reconciliation. Assumes the gate is
     /// already held and <see cref="_trackedMainUi"/> is not null.</summary>
-    private async Task ObserveTrackedMainUiCore(CancellationToken cancellationToken)
+    /// <param name="prerequisitesValid">Review 4957791980 finding #2: whether environment
+    /// eligibility, AutoRun, and Launcher/Server were all freshly re-confirmed valid THIS call. When
+    /// false, a HiddenAfterVisible observation must never start or continue hidden-debounce
+    /// termination -- prerequisite drift must leave native Center M behavior intact rather than
+    /// continue a destructive custom-lifecycle action from pre-suspend/stale assumptions. Does not
+    /// affect natural-exit/uncertain/mismatch handling, which already fail open unconditionally.</param>
+    private async Task ObserveTrackedMainUiCore(CancellationToken cancellationToken, bool prerequisitesValid)
     {
         var tracked = _trackedMainUi!;
 
@@ -992,6 +1143,21 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 return;
 
             case MainUiLifecycleState.HiddenAfterVisible:
+                if (!prerequisitesValid)
+                {
+                    // Review 4957791980 finding #2 (MAJOR): prerequisite drift (environment
+                    // eligibility, AutoRun, or Launcher/Server) must never be bypassed just because a
+                    // real MainUI identity is already tracked. Cancel any debounce already in flight,
+                    // never start a new one, and never terminate -- stay passive/native until a later
+                    // fresh reconciliation confirms the prerequisite set is valid again. The retained
+                    // identity/SeenVisible history is preserved untouched; only termination is gated.
+                    CancelPendingDebounceCore("PrerequisitesInvalidAtObservation");
+                    _lastReason = "TrackedMainUiHiddenPrerequisitesInvalid";
+                    SetState(CenterMOem1LifecycleState.NativeMainUiActive);
+                    AppLog.Warn("CenterM.Oem1", "Tracked real MainUI observed hidden-after-visible, but environment/AutoRun/Launcher-Server prerequisites are not currently valid; no debounce, no termination, staying passive.", null, ("ProcessId", tracked.ProcessId));
+                    return;
+                }
+
                 SetState(CenterMOem1LifecycleState.HiddenDebounce);
                 // Finding #4: the debounce is edge-triggered and identity-bound -- it starts once
                 // when first entering HiddenDebounce for this tracked identity. Repeated
@@ -1228,6 +1394,25 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private void BumpGeneration() => _generation++;
 
     private void BumpLifecycleEpoch() => Interlocked.Increment(ref _lifecycleEpoch);
+
+    /// <summary>Review 4957791980 finding #1: marks a disable/suspend/shutdown request as pending,
+    /// BEFORE that request ever waits on <see cref="_gate"/>. Must be paired with exactly one
+    /// <see cref="EndHighPriorityRequest"/> regardless of outcome (success, early return, or an
+    /// exception/cancellation while waiting for the gate).</summary>
+    private void BeginHighPriorityRequest() => Interlocked.Increment(ref _pendingHighPriorityRequests);
+
+    /// <summary>Review 4957791980 finding #1: retires a request marked pending by
+    /// <see cref="BeginHighPriorityRequest"/>. Deliberately not tied to the exact moment the
+    /// authoritative flag (<c>_desiredEnabled</c>/<c>_suspended</c>/<c>_shutdown</c>) is committed --
+    /// holding the marker slightly longer (through the rest of that call's own gate-held work) is
+    /// always safe, only ever making a concurrent arm-committing path more conservative, never less.</summary>
+    private void EndHighPriorityRequest() => Interlocked.Decrement(ref _pendingHighPriorityRequests);
+
+    /// <summary>Review 4957791980 finding #1: true while at least one disable/suspend/shutdown
+    /// request has bumped its request-time marker but has not yet finished running under
+    /// <see cref="_gate"/>. Checked by every arm-committing path in addition to (never instead of)
+    /// the existing epoch-delta check.</summary>
+    private bool IsHighPriorityRequestPending => Interlocked.CompareExchange(ref _pendingHighPriorityRequests, 0, 0) != 0;
 
     private void SetState(CenterMOem1LifecycleState next)
     {

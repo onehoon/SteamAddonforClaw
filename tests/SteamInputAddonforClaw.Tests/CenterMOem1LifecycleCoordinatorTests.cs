@@ -82,12 +82,19 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         /// tests that need to assert on a specific raw sequence.</summary>
         internal Queue<IReadOnlyList<ProcessSnapshotEntry>?>? MainUiSequence { get; set; }
         internal int MainUiCallCount { get; private set; }
+        /// <summary>Review 4957791980 finding #1: fires with the 1-based call count on every
+        /// "MSI Center M" enumeration, letting a test act at a specific call (e.g. AttemptArm's
+        /// fresh post-start invariant capture, which is always the 2nd MainUI enumeration in a clean
+        /// arm sequence -- the 1st happens earlier in the same <c>ReconcileCore</c> call) without any
+        /// real timing race.</summary>
+        internal Action<int>? OnMainUiQueried { get; set; }
 
         public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName)
         {
             if (processName == CenterMProcessNames.MainUi)
             {
                 MainUiCallCount++;
+                OnMainUiQueried?.Invoke(MainUiCallCount);
                 if (MainUiSequence is { Count: > 0 } q) return q.Dequeue();
                 if (MainUiEnumerationUncertain) return null;
 
@@ -1185,6 +1192,155 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     // ============================================================
+    // Review 4957791980, finding #2 (MAJOR): ReconcileCore resolved an existing tracked real MainUI
+    // BEFORE re-validating the environment eligibility / AutoRun / Launcher+Server prerequisites that
+    // actually authorize destructive MainUI lifecycle handling -- so prerequisite drift during sleep
+    // (or between reconcile calls) was bypassed whenever a real MainUI was already tracked. The fix
+    // refreshes those prerequisites before ever permitting hidden-debounce termination, while still
+    // resolving the exact retained identity/SeenVisible history first.
+    // ============================================================
+
+    [Fact]
+    public async Task Resume_TrackedSeenVisibleHiddenAtResume_AutoRunDrifted_ZeroDebounceOrTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        Assert.True(coordinator.GetSnapshot().SeenVisible);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        // Prerequisite drift during sleep: AutoRun is no longer Disabled.
+        h.AutoRun = CenterMAutoRunState.Enabled;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0); // hidden at resume
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
+        Assert.Equal(0, h.Delay.CallCount); // no debounce ever started
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // never terminated
+        // Retained identity preserved as non-destructive/native state, not discarded.
+        Assert.Equal(5555, snap.RealMainUiProcessId);
+    }
+
+    [Fact]
+    public async Task Resume_TrackedSeenVisibleHiddenAtResume_AutoRunUnknown_ZeroDebounceOrTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        h.AutoRun = CenterMAutoRunState.Unknown;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
+        Assert.Equal(0, h.Delay.CallCount);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Resume_TrackedSeenVisibleHiddenAtResume_EnvironmentEligibilityFalse_ZeroDebounceOrTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        // Environment eligibility drift during sleep -- covers both the "false" and "uncertain"
+        // (predicate throws, treated as unsupported/fail-open) cases via the same wrapped predicate.
+        h.EnvironmentEligible = () => false;
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
+        Assert.Equal(0, h.Delay.CallCount);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Resume_TrackedSeenVisibleHiddenAtResume_LauncherMissing_ZeroDebounceOrTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        h.Snapshots.Launcher = []; // prerequisite drift during sleep
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
+        Assert.Equal(0, h.Delay.CallCount);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Resume_TrackedSeenVisibleHiddenAtResume_ServerMissing_ZeroDebounceOrTermination()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        h.Snapshots.Server = []; // prerequisite drift during sleep
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
+        Assert.Equal(0, h.Delay.CallCount);
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Resume_TrackedIdentityExitedDuringSleep_PrerequisitesInvalid_RetiresIdentity_NoArmFromSameResume()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        // During sleep: the tracked identity exits AND a prerequisite (AutoRun) drifts invalid.
+        h.IdentityInspector.Status = LiveProcessProbeStatus.Exited;
+        h.AutoRun = CenterMAutoRunState.Enabled;
+        h.Snapshots.Foreign = []; // the exited real MainUI no longer appears in enumeration either
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        var snap = coordinator.GetSnapshot();
+        // The exact identity is retired -- no longer tracked.
+        Assert.Null(snap.RealMainUiProcessId);
+        // But the same resume reconciliation must never arm a helper while AutoRun is still drifted:
+        // the natural-exit path re-enters ReconcileCore fresh, which re-evaluates prerequisites and
+        // fails open into NeedsSetup instead of arming.
+        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
+        Assert.Equal(1, h.HelperApi.StartCallCount); // no re-arm from this same resume reconciliation
+        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // never attempted to terminate (already exited)
+    }
+
+    // ============================================================
     // Concurrency races
     // ============================================================
 
@@ -2113,6 +2269,205 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
         Assert.Equal(0, h.HelperApi.StartCallCount); // Start must never even be called
         Assert.False(h.HelperOwnership.IsOwned);
+    }
+
+    // ============================================================
+    // Review 4957791980, finding #1 (BLOCKER): the request-time epoch alone was not a complete
+    // high-priority mutation barrier -- a later mutation that wins the race for the gate can still
+    // capture an already-bumped epoch as a "clean" baseline while a disable/suspend/shutdown request
+    // is genuinely still pending. A separate request-time marker, checked independently of the
+    // epoch delta, closes this gap at three checkpoints inside AttemptArm.
+    // ============================================================
+
+    [Fact]
+    public async Task AttemptArm_SuspendBecomesPendingWhileGateHeldByEnable_CannotArmBeforeSuspendCommits()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        // Holds the gate inside the FIRST enable's own AttemptArm (at the stager call) so a
+        // concurrently-issued suspend request can genuinely become a waiter on the gate -- bumping
+        // its request-time epoch/marker BEFORE it ever acquires the gate, exactly as
+        // QuiesceForSuspendAsync always does -- while this first enable call is still in flight
+        // holding the gate. No real timing race: the pause point is deterministic.
+        var stagerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseStager = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.OnStagerCalled = () =>
+        {
+            stagerEntered.TrySetResult();
+            releaseStager.Task.GetAwaiter().GetResult();
+        };
+
+        // Run on a background thread: OnStagerCalled blocks synchronously below (the stager delegate
+        // itself is synchronous), and _gate.WaitAsync completes synchronously on the fast path since
+        // the gate starts free -- without Task.Run, that synchronous block would happen on this very
+        // test method's calling thread before it ever reached the code that unblocks it.
+        var enableTask = Task.Run(() => coordinator.SetDesiredEnabledAsync(true));
+        await stagerEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Suspend becomes a genuine waiter on the gate here: its BumpLifecycleEpoch/marker-set
+        // already happened (before it ever tries to acquire the gate), but it cannot yet commit
+        // _suspended because the gate is still held by the paused enable call above.
+        var suspendTask = coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        releaseStager.SetResult();
+        await Task.WhenAll(enableTask, suspendTask).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // The enable call that was holding the gate first must never have armed -- the suspend
+        // request became request-time-authoritative before enable's arm could commit, regardless of
+        // which of the two eventually won the gate race.
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.False(h.HelperOwnership.IsOwned);
+
+        // Suspend itself did commit _suspended -- proven by the suspended mutation barrier now
+        // blocking a further reconcile attempt entirely (no new helper created) until resume.
+        await coordinator.ReconcileAsync("post-race-reconcile-while-suspended");
+        Assert.False(h.HelperOwnership.IsOwned);
+
+        await coordinator.ReconcileAfterResumeAsync();
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State); // resume is the explicit re-arm boundary
+    }
+
+    [Fact]
+    public async Task AttemptArm_HighPriorityRequestPendingDuringPostStartInvariantCapture_ArmedNeverCommitted_HelperCleaned()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        // The fresh post-start invariant capture inside AttemptArm is always the SECOND "MSI Center M"
+        // enumeration in a clean arm sequence (the 1st happens earlier in the same ReconcileCore
+        // call, before AttemptArm is even entered). Marking the request-time barrier pending exactly
+        // there -- strictly AFTER Start succeeded and the first post-Start epoch check already
+        // passed, but BEFORE Armed is ever committed -- deterministically exercises the final
+        // linearization checkpoint without relying on the epoch delta at all (the epoch itself never
+        // changes in this scenario).
+        h.Snapshots.OnMainUiQueried = count =>
+        {
+            if (count == 2) coordinator.TestOnly_BeginHighPriorityRequest();
+        };
+
+        try
+        {
+            await coordinator.SetDesiredEnabledAsync(true);
+
+            var snap = coordinator.GetSnapshot();
+            Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+            // The exact newly-created helper was cleaned, not left running -- Armed was never
+            // published even though Start succeeded and both epoch checks passed.
+            Assert.False(h.HelperOwnership.IsOwned);
+            Assert.Equal(1, h.HelperApi.StartCallCount); // no second helper created
+            Assert.True(h.HelperApi.TerminateCallCount > 0); // cleanup was actually attempted
+        }
+        finally
+        {
+            coordinator.TestOnly_EndHighPriorityRequest();
+        }
+    }
+
+    [Fact]
+    public async Task AttemptArm_HighPriorityRequestPendingDuringPostStartInvariantCapture_CleanupUnconfirmed_RetainedFaultedNative()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        h.HelperApi.TerminateSucceeds = false;
+        h.HelperApi.WaitForExitSucceeds = false; // cleanup of the newly-created helper cannot be confirmed
+
+        h.Snapshots.OnMainUiQueried = count =>
+        {
+            if (count == 2) coordinator.TestOnly_BeginHighPriorityRequest();
+        };
+
+        try
+        {
+            await coordinator.SetDesiredEnabledAsync(true);
+
+            var snap = coordinator.GetSnapshot();
+            Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
+            // Never discarded: the exact retained handle stays retained for later resolution rather
+            // than silently losing the only authority over a possibly still-alive helper.
+            Assert.True(h.HelperOwnership.IsOwned);
+        }
+        finally
+        {
+            coordinator.TestOnly_EndHighPriorityRequest();
+        }
+    }
+
+    // ---- Same shared request-time-barrier primitive: disable and shutdown ----
+
+    [Fact]
+    public async Task AttemptArm_DisableAlreadyPendingViaSharedBarrier_NeverArms()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        // Models SetDesiredEnabledAsync(false) having already marked the request-time barrier
+        // pending (exactly what it does before ever waiting on the gate) while still waiting for the
+        // gate -- the same shared primitive AttemptArm checks regardless of which of
+        // disable/suspend/shutdown set it.
+        coordinator.TestOnly_BeginHighPriorityRequest();
+        try
+        {
+            await coordinator.SetDesiredEnabledAsync(true);
+
+            var snap = coordinator.GetSnapshot();
+            Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+            Assert.Equal(0, h.HelperApi.StartCallCount); // never even reached Start
+            Assert.False(h.HelperOwnership.IsOwned);
+        }
+        finally
+        {
+            coordinator.TestOnly_EndHighPriorityRequest();
+        }
+    }
+
+    [Fact]
+    public async Task AttemptArm_ShutdownAlreadyPendingViaSharedBarrier_NeverArms()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+
+        // Same shared primitive as above, modeling ShutdownAsync having already marked the
+        // request-time barrier pending while still waiting for the gate.
+        coordinator.TestOnly_BeginHighPriorityRequest();
+        try
+        {
+            await coordinator.SetDesiredEnabledAsync(true);
+
+            var snap = coordinator.GetSnapshot();
+            Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+            Assert.Equal(0, h.HelperApi.StartCallCount);
+            Assert.False(h.HelperOwnership.IsOwned);
+        }
+        finally
+        {
+            coordinator.TestOnly_EndHighPriorityRequest();
+        }
+    }
+
+    [Fact]
+    public async Task ReconcileCore_ArmedConfirmBranch_HighPriorityRequestPending_DisarmsInsteadOfReconfirming()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        // A redundant reconcile call while a high-priority request is pending must not simply
+        // re-confirm the existing valid Armed helper -- it must disarm instead.
+        coordinator.TestOnly_BeginHighPriorityRequest();
+        try
+        {
+            await coordinator.ReconcileAsync("redundant-reconcile-while-request-pending");
+
+            var snap = coordinator.GetSnapshot();
+            Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+            Assert.False(h.HelperOwnership.IsOwned);
+        }
+        finally
+        {
+            coordinator.TestOnly_EndHighPriorityRequest();
+        }
     }
 
     // ============================================================
