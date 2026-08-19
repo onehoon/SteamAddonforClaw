@@ -95,4 +95,6 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
         Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
         Action requestQuickAccessPulse,
         Settings.IOem1MappingPreference mappingPreference) => Task.CompletedTask;
+
+    Task ReconcileOem1PrerequisitesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

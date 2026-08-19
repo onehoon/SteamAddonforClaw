@@ -42,7 +42,11 @@ public sealed class SettingsStore
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
             var settings = new AppSettings(startup, logLevel, steamInputRoutingEnabled, suppressDeveloperMenuWarning)
             {
-                Oem1Mapping = ReadOem1Mapping(root)
+                Oem1Mapping = ReadOem1Mapping(root),
+                CenterMAutoRunOwnedByAddon = root.TryGetProperty("CenterMAutoRunOwnedByAddon", out var owned) && owned.ValueKind == JsonValueKind.True && owned.GetBoolean(),
+                CenterMAutoRunMutationPending = root.TryGetProperty("CenterMAutoRunMutationPending", out var pending) && pending.ValueKind == JsonValueKind.True && pending.GetBoolean(),
+                OriginalAutoRun = ReadNullableInt(root, "OriginalAutoRun"),
+                AppliedAutoRun = ReadNullableInt(root, "AppliedAutoRun")
             };
             AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
             return settings;
@@ -139,11 +143,14 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning, settings.Oem1Mapping };
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning, settings.Oem1Mapping, settings.CenterMAutoRunOwnedByAddon, settings.CenterMAutoRunMutationPending, settings.OriginalAutoRun, settings.AppliedAutoRun };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");
     }
+
+    private static int? ReadNullableInt(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var value) ? value : null;
 }
 
 internal sealed record SettingsLoadResult(AppSettings Settings, bool IsReliable, string Reason);

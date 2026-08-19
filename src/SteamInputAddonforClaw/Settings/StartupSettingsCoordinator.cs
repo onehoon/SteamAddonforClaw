@@ -19,6 +19,7 @@ public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference, I
     public bool SteamInputRoutingEnabled => Settings.SteamInputRoutingEnabled;
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public Oem1MappingSettings Oem1Mapping => Settings.Oem1Mapping;
+    public bool CenterMAutoRunMutationPending => Settings.CenterMAutoRunMutationPending;
     public event EventHandler? SteamInputRoutingEnabledChanged;
     public event EventHandler? Oem1MappingChanged;
 
@@ -78,6 +79,18 @@ public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference, I
     }
 
     public StartupRegistrationResult Repair() => _startupManager.Synchronize(Settings.LaunchAtWindowsStartup);
+
+    internal void RefreshCenterMAutoRunOwnershipFromDisk()
+    {
+        var persisted = _settingsStore.Load();
+        Settings = Settings with
+        {
+            CenterMAutoRunOwnedByAddon = persisted.CenterMAutoRunOwnedByAddon,
+            CenterMAutoRunMutationPending = persisted.CenterMAutoRunMutationPending,
+            OriginalAutoRun = persisted.OriginalAutoRun,
+            AppliedAutoRun = persisted.AppliedAutoRun
+        };
+    }
 }
 
 public interface ISteamInputRoutingPreference
@@ -99,5 +112,10 @@ public interface ISteamInputRoutingPreference
 public interface IOem1MappingPreference
 {
     Oem1MappingSettings Oem1Mapping { get; }
+    /// <summary>True while a Center M AutoRun registry mutation's write/read-back confirmation is
+    /// still unresolved (crash-attribution marker). OEM1 must stay desired-disabled while this is
+    /// true even when <see cref="Oem1Mapping"/>'s remapping switch is on -- an unconfirmed HKLM
+    /// mutation must never be promoted to armed suppression.</summary>
+    bool CenterMAutoRunMutationPending { get; }
     event EventHandler? Oem1MappingChanged;
 }

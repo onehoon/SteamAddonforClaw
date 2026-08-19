@@ -3,16 +3,25 @@ using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-public sealed class FrontendPrerequisiteSetupBridgeTests
+public sealed class FrontendPrerequisiteSetupBridgeTests : IDisposable
 {
+    private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_testDirectory)) Directory.Delete(_testDirectory, recursive: true);
+    }
+
     [Fact]
     public async Task Fresh_non_installable_revalidation_does_not_launch_and_returns_fresh_status()
     {
@@ -80,6 +89,72 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
     }
 
     [Fact]
+    public async Task Failed_helper_result_still_reconciles_independent_oem1_lifecycle()
+    {
+        var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
+        {
+            Result = new(ElevatedProcessResultKind.Completed, 3)
+        };
+        var reconcileCount = 0;
+        var control = new InProcessAddonFrontendControl(
+            null!, new QueueStatusProvider([Snapshot("pre"), Snapshot("post")]), null, null!, "",
+            executor, () => "test-runtime.exe", () => new(true, RoutingOperationalState.Passive, false, false),
+            reconcileOem1Prerequisites: _ => { reconcileCount++; return Task.CompletedTask; });
+
+        var result = await control.RunPrerequisiteSetupAsync();
+
+        Assert.Equal(FrontendPrerequisiteSetupResultKind.Blocked, result.Result);
+        Assert.Equal(1, reconcileCount);
+    }
+
+    [Fact]
+    public async Task Unresolved_AutoRun_mutation_stays_pending_and_skips_OEM1_reconcile()
+    {
+        var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
+        {
+            Result = new(ElevatedProcessResultKind.Completed, 3)
+        };
+        var reconcileCount = 0;
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var settings = new AppSettings { CenterMAutoRunMutationPending = true };
+        store.Save(settings);
+        var coordinator = new StartupSettingsCoordinator(settings, store, new NoOpStartupManager());
+        var control = new InProcessAddonFrontendControl(
+            coordinator, new QueueStatusProvider([Snapshot("pre"), Snapshot("post")]), null, new SteamInputAddonforClaw.Developer.DeveloperTestModeState(), "",
+            executor, () => "test-runtime.exe", () => new(true, RoutingOperationalState.Passive, false, false),
+            reconcileOem1Prerequisites: _ => { reconcileCount++; return Task.CompletedTask; });
+
+        await control.RunPrerequisiteSetupAsync();
+
+        Assert.True(coordinator.Settings.CenterMAutoRunMutationPending);
+        Assert.Equal(0, reconcileCount);
+    }
+
+    [Fact]
+    public async Task Confirmed_AutoRun_with_later_unrelated_failure_still_reconciles_OEM1()
+    {
+        var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
+        {
+            Result = new(ElevatedProcessResultKind.Completed, 3)
+        };
+        var reconcileCount = 0;
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var settings = new AppSettings { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = 1, AppliedAutoRun = 0 };
+        store.Save(settings);
+        var coordinator = new StartupSettingsCoordinator(settings, store, new NoOpStartupManager());
+        var control = new InProcessAddonFrontendControl(
+            coordinator, new QueueStatusProvider([Snapshot("pre"), Snapshot("post")]), null, new SteamInputAddonforClaw.Developer.DeveloperTestModeState(), "",
+            executor, () => "test-runtime.exe", () => new(true, RoutingOperationalState.Passive, false, false),
+            reconcileOem1Prerequisites: _ => { reconcileCount++; return Task.CompletedTask; });
+
+        var result = await control.RunPrerequisiteSetupAsync();
+
+        Assert.Equal(FrontendPrerequisiteSetupResultKind.Blocked, result.Result);
+        Assert.False(coordinator.Settings.CenterMAutoRunMutationPending);
+        Assert.Equal(1, reconcileCount);
+    }
+
+    [Fact]
     public async Task Process_shutdown_barrier_rejects_new_frontend_mutations()
     {
         var control = CreateControl([Snapshot("initial")], new FakeExecutor(new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.SteamActive, false)));
@@ -123,6 +198,11 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
         public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) => Task.FromResult(_snapshots.Count > 1 ? _snapshots.Dequeue() : _snapshots.Peek());
     }
 
+    private sealed class NoOpStartupManager : IWindowsStartupManager
+    {
+        public StartupRegistrationResult Synchronize(bool enabled) => StartupRegistrationResult.Enabled();
+    }
+
     private sealed class FakeExecutor(FirstTimeSetupAssessment assessment) : IFrontendPrerequisiteSetupExecutor
     {
         public ElevatedProcessResult? Result { get; init; }
@@ -131,7 +211,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
         public string? ExecutablePath { get; private set; }
         public FirstTimeSetupAssessment? SuppliedAssessment { get; private set; }
 
-        public FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot)
+        public FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot, bool oem1RemappingEnabled)
         {
             EvaluateCallCount++;
             return assessment;

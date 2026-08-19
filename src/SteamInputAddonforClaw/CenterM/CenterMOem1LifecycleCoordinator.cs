@@ -476,7 +476,29 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             }
 
             if (_state == CenterMOem1LifecycleState.Armed)
+            {
+                // Review (re-review of a8c8658): steady-state Armed must keep revalidating the same
+                // AutoRun/environment/Launcher/Server prerequisites that gated the original arm --
+                // helper liveness/same-name topology alone (CheckForForeignMainUiCore) never catches
+                // AutoRun drifting back to Enabled/Unknown, or Launcher/Server disappearing, while
+                // already Armed. Reuses the existing RefreshSuppressionPrerequisites/
+                // DisarmOwnedHelperForFailOpen primitives (same ones ReconcileCore and the
+                // tracked-MainUI poll branch above already use) rather than adding a new validator.
+                var prerequisitesValid = RefreshSuppressionPrerequisites();
+                if (!prerequisitesValid)
+                {
+                    var disarmed = DisarmOwnedHelperForFailOpen();
+                    _lastReason = disarmed
+                        ? $"ArmedPrerequisiteDrift:AutoRun={_lastAutoRun}:Launcher={_launcherReady}:Server={_serverReady}:Disarmed"
+                        : "ArmedPrerequisiteDrift:DisarmCleanupUnconfirmed";
+                    SetState(disarmed ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
+                    AppLog.Warn("CenterM.Oem1", "Armed prerequisite drift detected; custom suppression is failing open.", null,
+                        ("AutoRun", _lastAutoRun), ("LauncherPresent", _launcherReady), ("ServerPresent", _serverReady), ("Disarmed", disarmed));
+                    return;
+                }
+
                 await CheckForForeignMainUiCore(pollEpoch, cancellationToken).ConfigureAwait(false);
+            }
         }
         finally { _gate.Release(); }
     }
@@ -760,13 +782,15 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             return;
         }
 
-        if (!_environmentEligible())
+        var environmentEligible = _environmentEligible();
+        if (!environmentEligible)
         {
             // Finding #8: an unsupported/uncertain environment must fail open before ever touching
             // Launcher/Server/AutoRun/helper staging.
             var eligibilityClean = await EnsureNoHelperOwned(cancellationToken).ConfigureAwait(false);
-            _lastReason = eligibilityClean ? "UnsupportedEnvironment" : "UnsupportedEnvironmentCleanupUnconfirmed";
+            _lastReason = eligibilityClean ? "HardwareEnvironmentIneligible" : "HardwareEnvironmentIneligibleCleanupUnconfirmed";
             SetState(eligibilityClean ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
+            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, null, null, null);
             return;
         }
 
@@ -780,7 +804,9 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 SetState(CenterMOem1LifecycleState.FaultedNative);
                 return;
             }
+            _lastReason = _lastAutoRun == CenterMAutoRunState.Enabled ? "AutoRunEnabled" : "AutoRunUnknown";
             SetState(CenterMOem1LifecycleState.NeedsSetup);
+            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, _lastAutoRun, null, null);
             return;
         }
 
@@ -796,10 +822,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 SetState(CenterMOem1LifecycleState.FaultedNative);
                 return;
             }
+            _lastReason = !_launcherReady ? "LauncherMissing" : "ServerMissing";
             SetState(CenterMOem1LifecycleState.NeedsSetup);
+            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, _lastAutoRun, _launcherReady, _serverReady);
             return;
         }
 
+        LogPrerequisiteSnapshot("ReadyToArm", environmentEligible, _lastAutoRun, _launcherReady, _serverReady);
         SetState(CenterMOem1LifecycleState.Reconciling);
 
         var sameName = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
@@ -895,6 +924,31 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         _launcherReady = backend.LauncherPresent;
         _serverReady = backend.ServerPresent;
         return _launcherReady && _serverReady;
+    }
+
+    internal async Task ReconcilePrerequisitesAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_shutdown || !_desiredEnabled) return;
+            await ReconcileCore("ExplicitPrerequisiteSetupReconcile", Interlocked.Read(ref _lifecycleEpoch), cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    private void LogPrerequisiteSnapshot(string decision, bool? environmentEligible, CenterMAutoRunState? autoRun, bool? launcherPresent, bool? serverPresent)
+    {
+        AppLog.Info("CenterM.Oem1", "Fresh prerequisite snapshot evaluated.",
+            ("EnvironmentEligible", environmentEligible),
+            ("RemappingEnabled", _desiredEnabled),
+            ("AutoRun", autoRun),
+            ("LauncherPresent", launcherPresent),
+            ("ServerPresent", serverPresent),
+            ("HelperOwned", _helperOwnership.IsOwned),
+            ("HelperProcessId", _helperOwnership.ProcessId),
+            ("Decision", decision),
+            ("Reason", _lastReason));
     }
 
     private enum ArmedHelperValidity { Valid, NotOwned, ResidualCleanupOnly, LivenessNotAlive, InvariantInvalid }
@@ -995,6 +1049,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         }
 
         var startResult = _helperOwnership.Start(stagedPath);
+        AppLog.Info("CenterM.Oem1", "Helper create/start result.", ("Result", startResult), ("ProcessId", _helperOwnership.ProcessId));
         switch (startResult)
         {
             case HelperStartResult.Started:
@@ -1054,6 +1109,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 AppLog.Warn("CenterM.Oem1", "A high-priority request won the request boundary at the final Armed commit point; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleanedAtCommit));
                 return;
             }
+
+            AppLog.Info("CenterM.Oem1", "OEM1 suppression lifecycle armed.", ("State", CenterMOem1LifecycleState.Armed), ("SuppressionReady", true), ("ProcessId", _helperOwnership.ProcessId));
 
             return;
         }

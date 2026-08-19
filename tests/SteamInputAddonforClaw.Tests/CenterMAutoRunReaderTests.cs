@@ -1,4 +1,7 @@
 using SteamInputAddonforClaw.CenterM;
+using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Prerequisites;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -19,4 +22,95 @@ public sealed class CenterMAutoRunReaderTests
     [InlineData("1")]
     public void OtherValues_AreUnknown_NeverGuessedAsDisabled(object? rawValue) =>
         Assert.Equal(CenterMAutoRunState.Unknown, CenterMAutoRunReader.Classify(rawValue));
+
+    [Theory]
+    [InlineData((int)CenterMAutoRunState.Disabled, false, true)]
+    [InlineData((int)CenterMAutoRunState.Enabled, false, false)]
+    [InlineData((int)CenterMAutoRunState.Unknown, true, false)]
+    public void PendingAutoRunRestart_ReconcilesBeforeOem1Activation(
+        int observed,
+        bool expectedPending,
+        bool expectedOwned)
+    {
+        var initial = new AppSettings
+        {
+            Oem1Mapping = Oem1MappingSettings.Default,
+            CenterMAutoRunMutationPending = true,
+            CenterMAutoRunOwnedByAddon = false,
+            OriginalAutoRun = 1,
+            AppliedAutoRun = 0
+        };
+
+        var result = CenterMAutoRunReader.ReconcilePendingState(initial, (CenterMAutoRunState)observed);
+
+        Assert.Equal(expectedPending, result.CenterMAutoRunMutationPending);
+        Assert.Equal(expectedOwned, result.CenterMAutoRunOwnedByAddon);
+    }
+
+    [Theory]
+    [InlineData((int)CenterMAutoRunState.Disabled, false, true)]
+    [InlineData((int)CenterMAutoRunState.Enabled, false, false)]
+    public void PendingAutoRunRecovery_IsIndependentOfCurrentRemappingPreference(int observed, bool expectedPending, bool expectedOwned)
+    {
+        var initial = new AppSettings
+        {
+            Oem1Mapping = Oem1MappingSettings.Default with { RemappingEnabled = false },
+            CenterMAutoRunMutationPending = true,
+            OriginalAutoRun = 1,
+            AppliedAutoRun = 0
+        };
+
+        var result = CenterMAutoRunReader.ReconcilePendingState(initial, (CenterMAutoRunState)observed);
+
+        Assert.Equal(expectedPending, result.CenterMAutoRunMutationPending);
+        Assert.Equal(expectedOwned, result.CenterMAutoRunOwnedByAddon);
+    }
+
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData(1, null)]
+    [InlineData(null, null)]
+    [InlineData(1, 1)]
+    public void PendingAutoRunRecovery_WithIncompleteDurableIntent_NeverFabricatesOwnership(int? originalAutoRun, int? appliedAutoRun)
+    {
+        var initial = new AppSettings
+        {
+            Oem1Mapping = Oem1MappingSettings.Default,
+            CenterMAutoRunMutationPending = true,
+            CenterMAutoRunOwnedByAddon = false,
+            OriginalAutoRun = originalAutoRun,
+            AppliedAutoRun = appliedAutoRun
+        };
+
+        var result = CenterMAutoRunReader.ReconcilePendingState(initial, CenterMAutoRunState.Disabled);
+
+        // An incomplete/corrupt pending record (missing or unexpected OriginalAutoRun/AppliedAutoRun)
+        // must never be promoted to confirmed ownership merely because the registry reads Disabled --
+        // the pending marker alone proves only that a mutation was attempted, never what the original
+        // value was.
+        Assert.True(result.CenterMAutoRunMutationPending);
+        Assert.False(result.CenterMAutoRunOwnedByAddon);
+        Assert.Equal(originalAutoRun, result.OriginalAutoRun);
+        Assert.Equal(appliedAutoRun, result.AppliedAutoRun);
+    }
+
+    [Fact]
+    public void UnconfirmedAutoRunMutation_PreservesPendingIntentWithoutOwnership()
+    {
+        var initial = new AppSettings
+        {
+            Oem1Mapping = Oem1MappingSettings.Default,
+            CenterMAutoRunMutationPending = true,
+            CenterMAutoRunOwnedByAddon = false,
+            OriginalAutoRun = 1,
+            AppliedAutoRun = 0
+        };
+
+        var result = ElevatedPrerequisiteSetup.ReconcileAutoRunMutationResult(initial, confirmed: false, originalAutoRun: null);
+
+        Assert.True(result.CenterMAutoRunMutationPending);
+        Assert.False(result.CenterMAutoRunOwnedByAddon);
+        Assert.Equal(1, result.OriginalAutoRun);
+        Assert.Equal(0, result.AppliedAutoRun);
+    }
 }

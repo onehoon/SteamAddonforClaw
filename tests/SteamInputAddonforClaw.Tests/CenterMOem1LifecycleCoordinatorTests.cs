@@ -699,6 +699,67 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
     }
 
+    // ============================================================
+    // Steady-state Armed prerequisite drift revalidation
+    // ============================================================
+
+    [Fact]
+    public async Task Armed_AutoRunDriftsBackToEnabled_DisarmsAndLeavesArmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        h.AutoRun = CenterMAutoRunState.Enabled;
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.False(snap.SuppressionReady);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+        Assert.Equal(1, h.HelperApi.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Armed_LauncherDisappears_DisarmsAndLeavesArmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        h.Snapshots.Launcher = null;
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.False(snap.SuppressionReady);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+        Assert.Equal(1, h.HelperApi.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Armed_ServerDisappears_DisarmsAndLeavesArmed()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+
+        h.Snapshots.Server = null;
+
+        await coordinator.PollTickAsync();
+
+        var snap = coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.False(snap.SuppressionReady);
+        Assert.True(snap.NativeBehaviorGuaranteed);
+        Assert.Equal(1, h.HelperApi.TerminateCallCount);
+    }
+
     [Fact]
     public async Task UnconfirmedHelperStop_BlocksAdoptionAndReArm()
     {

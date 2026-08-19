@@ -346,12 +346,63 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // can join it before the coordinator it calls into is disposed, AND the production startup
         // boundary can await the SAME task before routing/power observation begins. When remapping is
         // switched off this still resolves normally -- it simply never enables anything.
-        var enabled = mappingPreference.Oem1Mapping.RemappingEnabled;
+        var enabled = ComputeOem1CanArm(mappingPreference);
         lock (_oem1TaskSync)
         {
             _oem1RemappingEnabled = enabled;
             return _oem1ActivationTask = ApplyOem1RemappingEnabledAsync(enabled);
         }
+    }
+
+    /// <summary>Review fix (BLOCKER): an unresolved <c>CenterMAutoRunMutationPending</c> receipt must
+    /// keep OEM1 desired-disabled even when the persisted remapping switch is on -- an unconfirmed
+    /// HKLM AutoRun mutation must never be promoted to armed suppression merely because the registry
+    /// happens to read Disabled on a fresh probe. Shared by the startup path
+    /// (<see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>), the mapping-change path
+    /// (<see cref="OnOem1MappingChanged"/>), and the explicit post-setup reconcile path
+    /// (<see cref="IHandheldRoutingComposition.ReconcileOem1PrerequisitesAsync"/>) so all three apply
+    /// the exact same gate.</summary>
+    private static bool ComputeOem1CanArm(Settings.IOem1MappingPreference preference) =>
+        preference.Oem1Mapping.RemappingEnabled && !preference.CenterMAutoRunMutationPending;
+
+    /// <summary>Requests the given desired-enabled value be applied through the SAME serialized
+    /// activation chain <see cref="OnOem1MappingChanged"/> already uses for every enable/disable
+    /// transition, and returns the (possibly already-completed) task representing that request so a
+    /// caller that needs to observe completion -- unlike the fire-and-forget mapping-change
+    /// notification -- can await it. A no-op (returns the current task unchanged) when nothing needs
+    /// to change, the composition is stopping, or a fail-open latch has already revoked custom
+    /// authority.</summary>
+    private Task RequestOem1EnabledTransitionAsync(bool enabled)
+    {
+        lock (_oem1TaskSync)
+        {
+            if (_oem1Stopping || !_startCenterMOem1LifecycleRuntime) return _oem1ActivationTask;
+            if (enabled && _oem1FailOpenTask is not null) return _oem1ActivationTask;
+            if (_oem1RemappingEnabled == enabled) return _oem1ActivationTask;
+
+            _oem1RemappingEnabled = enabled;
+            var previous = _oem1ActivationTask;
+            return _oem1ActivationTask = ContinueOem1RemappingAsync(previous, enabled);
+        }
+    }
+
+    async Task IHandheldRoutingComposition.ReconcileOem1PrerequisitesAsync(CancellationToken cancellationToken)
+    {
+        if (!_hardwareSupported) return;
+
+        if (_oem1MappingPreference is { } preference)
+        {
+            // The elevated helper may have confirmed OEM1's own AutoRun prerequisite (or cleared an
+            // unresolved pending marker) independent of the overall setup result. Startup may have
+            // left desired-enabled false while the marker was still pending, so promote it here now
+            // that the live settings authority has been refreshed -- mirroring the exact gate
+            // ConfigureOem1ActionPath/OnOem1MappingChanged already apply.
+            await RequestOem1EnabledTransitionAsync(ComputeOem1CanArm(preference)).ConfigureAwait(false);
+        }
+
+        if (!_oem1RemappingEnabled) return;
+        await CenterMOem1Coordinator.ReconcilePrerequisitesAsync(cancellationToken).ConfigureAwait(false);
+        RefreshOem1BridgeAuthority();
     }
 
     /// <summary>
@@ -412,18 +463,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private void OnOem1MappingChanged(object? sender, EventArgs args)
     {
         if (_oem1MappingPreference is not { } preference) return;
-        var enabled = preference.Oem1Mapping.RemappingEnabled;
-
-        lock (_oem1TaskSync)
-        {
-            if (_oem1Stopping || !_startCenterMOem1LifecycleRuntime) return;
-            if (enabled && _oem1FailOpenTask is not null) return;
-            if (_oem1RemappingEnabled == enabled) return;
-
-            _oem1RemappingEnabled = enabled;
-            var previous = _oem1ActivationTask;
-            _oem1ActivationTask = ContinueOem1RemappingAsync(previous, enabled);
-        }
+        RequestOem1EnabledTransitionAsync(ComputeOem1CanArm(preference));
     }
 
     private async Task ContinueOem1RemappingAsync(Task previous, bool enabled)
