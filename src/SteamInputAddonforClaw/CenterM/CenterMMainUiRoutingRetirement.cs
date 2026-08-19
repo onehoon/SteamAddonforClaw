@@ -20,12 +20,26 @@ internal enum CenterMMainUiRoutingRetirementResult
     XInputNotConfirmed,
     TerminationFailed,
     TerminationTimedOut,
-    AbsenceCheckFailed
+    AbsenceCheckFailed,
+    RoutingPreflightRejected
 }
 
 internal enum MainUiHideWaitStatus { Hidden, Exited, TimedOut, Uncertain }
 
 internal readonly record struct MainUiHideWaitResult(MainUiHideWaitStatus Status, MainUiWindowSnapshot? Snapshot);
+
+internal readonly record struct CenterMRoutingPreflightResult(bool Succeeded, string Reason);
+
+/// <summary>Read-only early look at the SAME canonical NativeMode route authority
+/// (<c>MsiClawNativeModeSessionCoordinator.InspectForPipelineAsync</c>) that will run again, for
+/// real, in the next pipeline stage after this guard. Used ONLY to avoid retiring a real MainUI for
+/// a route the canonical authority was already able to reject (routing-fault latch, recovery safety,
+/// power gate, active/recovery-boundary conflict) -- never a substitute for NativeMode's own Prepare,
+/// since world state can still drift between this check and the next stage actually running.</summary>
+internal interface ICenterMRoutingPreflightProbe
+{
+    ValueTask<CenterMRoutingPreflightResult> InspectAsync(CancellationToken cancellationToken);
+}
 
 /// <summary>
 /// Retires an already-running real MSI Center M MainUI before the Phase-1
@@ -48,9 +62,11 @@ internal sealed class CenterMMainUiRoutingRetirement
     private readonly IProcessSnapshotSource _processSnapshotSource;
     private readonly IProcessHandleOpener? _handleOpener;
     private readonly IProcessIdentityInspector _identityInspector;
+    private readonly ICenterMRetainedProcessScopeInspector _retainedScopeInspector;
     private readonly IMainUiWindowSnapshotProvider _windowSnapshotProvider;
     private readonly ICenterMMainUiWindowController _windowController;
     private readonly ICenterMNativeModeProbe _nativeModeProbe;
+    private readonly ICenterMRoutingPreflightProbe? _routingPreflightProbe;
     private readonly CenterMMainUiRoutingTerminator _terminator;
     private readonly TimeSpan _minimizeWaitTimeout;
     private readonly TimeSpan _minimizeWaitPollInterval;
@@ -60,9 +76,11 @@ internal sealed class CenterMMainUiRoutingRetirement
 
     internal CenterMMainUiRoutingRetirement(
         ICenterMNativeModeProbe nativeModeProbe,
+        ICenterMRoutingPreflightProbe? routingPreflightProbe = null,
         IProcessSnapshotSource? processSnapshotSource = null,
         IProcessHandleOpener? handleOpener = null,
         IProcessIdentityInspector? identityInspector = null,
+        ICenterMRetainedProcessScopeInspector? retainedScopeInspector = null,
         IMainUiWindowSnapshotProvider? windowSnapshotProvider = null,
         ICenterMMainUiWindowController? windowController = null,
         CenterMMainUiRoutingTerminator? terminator = null,
@@ -73,12 +91,16 @@ internal sealed class CenterMMainUiRoutingRetirement
         TimeSpan? terminateWaitTimeout = null)
     {
         _nativeModeProbe = nativeModeProbe ?? throw new ArgumentNullException(nameof(nativeModeProbe));
+        _routingPreflightProbe = routingPreflightProbe;
         _processSnapshotSource = processSnapshotSource ?? new Win32ProcessSnapshotSource();
         _handleOpener = handleOpener;
         _identityInspector = identityInspector ?? new Win32ProcessIdentityInspector();
+        _retainedScopeInspector = retainedScopeInspector ?? new Win32CenterMRetainedProcessScopeInspector();
         _windowSnapshotProvider = windowSnapshotProvider ?? new Win32MainUiWindowSnapshotProvider();
         _windowController = windowController ?? new Win32CenterMMainUiWindowController();
-        _terminator = terminator ?? new CenterMMainUiRoutingTerminator(processSnapshotSource: _processSnapshotSource, windowProvider: _windowSnapshotProvider, identityInspector: _identityInspector);
+        _terminator = terminator ?? new CenterMMainUiRoutingTerminator(
+            processSnapshotSource: _processSnapshotSource, windowProvider: _windowSnapshotProvider,
+            identityInspector: _identityInspector, retainedScopeInspector: _retainedScopeInspector);
         _minimizeWaitTimeout = minimizeWaitTimeout ?? TimeSpan.FromSeconds(5);
         _minimizeWaitPollInterval = minimizeWaitPollInterval ?? TimeSpan.FromMilliseconds(200);
         _xInputWaitTimeout = xInputWaitTimeout ?? TimeSpan.FromSeconds(5);
@@ -138,6 +160,21 @@ internal sealed class CenterMMainUiRoutingRetirement
         {
             LogFailed(tracked.ProcessId, "IdentityMismatch");
             return CenterMMainUiRoutingRetirementResult.IdentityMismatch;
+        }
+
+        // Anchor session/user scope authority to THIS exact retained handle, not to the earlier PID
+        // snapshot -- a PID-only scope check performed before the handle was opened leaves a race
+        // window (the original process exits and the PID is reused before Create()) where the
+        // retained handle could point at a different process object than the one whose scope was
+        // verified. Re-checked again immediately before termination in the terminator itself.
+        var scope = _retainedScopeInspector.Inspect(tracked.Handle);
+        if (scope != ProcessScopeProbeStatus.Match)
+        {
+            var reason = scope == ProcessScopeProbeStatus.Foreign ? "ForeignProcessScope" : "ProcessScopeUncertain";
+            LogFailed(tracked.ProcessId, reason);
+            return scope == ProcessScopeProbeStatus.Foreign
+                ? CenterMMainUiRoutingRetirementResult.IdentityMismatch
+                : CenterMMainUiRoutingRetirementResult.IdentityUncertain;
         }
 
         // Fail before ever mutating the user's Center M window/controller lifecycle if we already
@@ -227,6 +264,23 @@ internal sealed class CenterMMainUiRoutingRetirement
         // The externally-mutated MSI state is now fully known and safe (hidden + physical XInput).
         // Only now is cancellation honored again -- a cancelled routing request stops here WITHOUT
         // terminating the MainUI, rather than killing it for a route that no longer exists.
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Early, READ-ONLY look at the same canonical NativeMode route authority that runs again for
+        // real in the very next pipeline stage -- avoids retiring the user's real MainUI for a route
+        // that authority was already going to reject (routing-fault latch, recovery safety, power
+        // gate, active/recovery-boundary conflict). This is never a substitute for NativeMode's own
+        // Prepare, which still always runs afterward against then-current world state.
+        if (_routingPreflightProbe is not null)
+        {
+            var preflight = await _routingPreflightProbe.InspectAsync(cancellationToken).ConfigureAwait(false);
+            if (!preflight.Succeeded)
+            {
+                LogFailed(tracked.ProcessId, $"RoutingPreflightRejected:{preflight.Reason}");
+                return CenterMMainUiRoutingRetirementResult.RoutingPreflightRejected;
+            }
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
 
         var terminationResult = _terminator.TryTerminate(tracked, _terminateWaitTimeout);

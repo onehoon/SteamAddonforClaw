@@ -94,7 +94,13 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         var scopedCenterMProcesses = new ScopedCenterMProcessSnapshotSource(new Win32ProcessSnapshotSource(), new Win32CenterMProcessScopeInspector());
         CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard(
             processSnapshotSource: scopedCenterMProcesses,
-            retirement: new CenterMMainUiRoutingRetirement(new MsiClawCenterMNativeModeProbe(nativeState), processSnapshotSource: scopedCenterMProcesses));
+            retirement: new CenterMMainUiRoutingRetirement(
+                new MsiClawCenterMNativeModeProbe(nativeState),
+                // Same NativeModeSession instance the real stage below uses -- an early read-only
+                // look at the same route authority, so an already-doomed route (fault latch,
+                // recovery safety, power gate) never retires the user's real MainUI first.
+                new MsiClawCenterMRoutingPreflightProbe(NativeModeSession),
+                processSnapshotSource: scopedCenterMProcesses));
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage, CenterMGuardStage];

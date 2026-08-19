@@ -368,12 +368,14 @@ public sealed class CenterMMainUiRoutingGuardTests
         var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, existingMainUiPid, "MSI Center M", expectedPath)]);
         var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 0)]);
         var terminateInvoker = new RecordingTerminateInvoker();
-        var terminator = new CenterMMainUiRoutingTerminator(terminateInvoker, identity, window, snapshots);
+        var scope = new FixedRetainedScopeInspector(ProcessScopeProbeStatus.Match);
+        var terminator = new CenterMMainUiRoutingTerminator(terminateInvoker, identity, window, snapshots, scope);
         var retirement = new CenterMMainUiRoutingRetirement(
             new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput),
             processSnapshotSource: snapshots,
             handleOpener: new RealSelfProcessHandleOpener(),
             identityInspector: identity,
+            retainedScopeInspector: scope,
             windowSnapshotProvider: window,
             terminator: terminator,
             minimizeWaitTimeout: TimeSpan.FromMilliseconds(200),
@@ -458,6 +460,11 @@ public sealed class CenterMMainUiRoutingGuardTests
     private sealed class FixedNativeModeProbe(CenterMNativeModeProbeResult result) : ICenterMNativeModeProbe
     {
         public Task<CenterMNativeModeProbeResult> CaptureAsync(CancellationToken cancellationToken) => Task.FromResult(result);
+    }
+
+    private sealed class FixedRetainedScopeInspector(ProcessScopeProbeStatus status) : ICenterMRetainedProcessScopeInspector
+    {
+        public ProcessScopeProbeStatus Inspect(SafeProcessHandle processHandle) => status;
     }
 
     private sealed class RecordingTerminateInvoker : ITerminateProcessInvoker

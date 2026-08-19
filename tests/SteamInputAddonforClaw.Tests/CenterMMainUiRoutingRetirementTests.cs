@@ -274,6 +274,163 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Retained_handle_scope_foreign_blocks_before_any_mutation()
+    {
+        // The PID-based discovery snapshot says the candidate is in-scope, but the exact retained
+        // handle's own scope check (anchored to the SAME process object about to be mutated) says
+        // Foreign -- e.g. the original process exited and the PID was reused by a foreign-session
+        // process before the handle was opened. Must fail before minimize, before the native-mode
+        // probe, and before any TerminateProcess call.
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var probe = new CountingNativeModeProbe(CenterMNativeModeProbeResult.XInput);
+        var (retirement, invoker, windowController) = Create(snapshots, identityInspector: identity, nativeModeProbe: probe,
+            retainedScopeInspector: new FixedRetainedScopeInspector(ProcessScopeProbeStatus.Foreign));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.IdentityMismatch, result);
+        Assert.Equal(0, windowController.CallCount);
+        Assert.Equal(0, probe.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Retained_handle_scope_uncertain_fails_closed_before_any_mutation()
+    {
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var probe = new CountingNativeModeProbe(CenterMNativeModeProbeResult.XInput);
+        var (retirement, invoker, windowController) = Create(snapshots, identityInspector: identity, nativeModeProbe: probe,
+            retainedScopeInspector: new FixedRetainedScopeInspector(ProcessScopeProbeStatus.Uncertain));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.IdentityUncertain, result);
+        Assert.Equal(0, windowController.CallCount);
+        Assert.Equal(0, probe.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Scope_drift_between_discovery_and_termination_yields_zero_terminate_calls()
+    {
+        // Scope was Match at the initial retirement-level check, but drifts to Foreign by the time
+        // the terminator re-verifies immediately before the destructive kill (simulating scope drift
+        // between the two checkpoints) -- must still never call TerminateProcess.
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 0)]);
+        var drifting = new DriftingScopeInspector(ProcessScopeProbeStatus.Match, ProcessScopeProbeStatus.Foreign);
+        var (retirement, invoker, _) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            nativeModeProbe: new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput), retainedScopeInspector: drifting);
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.IdentityMismatch, result);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    /// <summary>Returns <paramref name="first"/> on the first call (the retirement-level check), then
+    /// <paramref name="thereafter"/> on every call after that (the terminator's own fresh recheck) --
+    /// models scope drift between the two checkpoints.</summary>
+    private sealed class DriftingScopeInspector(ProcessScopeProbeStatus first, ProcessScopeProbeStatus thereafter) : ICenterMRetainedProcessScopeInspector
+    {
+        private bool _firstCallDone;
+
+        public ProcessScopeProbeStatus Inspect(SafeProcessHandle processHandle)
+        {
+            if (_firstCallDone) return thereafter;
+            _firstCallDone = true;
+            return first;
+        }
+    }
+
+    [Fact]
+    public async Task Routing_preflight_rejection_leaves_mainui_intact()
+    {
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 0)]);
+        var preflight = new FixedRoutingPreflightProbe(succeeded: false, reason: "RecoverySafetyNotSafe");
+        var (retirement, invoker, _) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            nativeModeProbe: new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput), routingPreflightProbe: preflight);
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.RoutingPreflightRejected, result);
+        Assert.Equal(1, preflight.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Routing_preflight_rejection_after_visible_minimize_still_leaves_mainui_intact()
+    {
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider(
+        [
+            new MainUiWindowSnapshot(true, 1, 1), // upfront: visible
+            new MainUiWindowSnapshot(true, 1, 0) // minimize-wait loop observes hidden
+        ]);
+        var preflight = new FixedRoutingPreflightProbe(succeeded: false, reason: "RoutingFaultLatched");
+        var (retirement, invoker, windowController) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            nativeModeProbe: new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput), routingPreflightProbe: preflight);
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.RoutingPreflightRejected, result);
+        // Stabilization (minimize + hidden + XInput confirm) still completed -- only the destructive
+        // kill itself was withheld.
+        Assert.Equal(1, windowController.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task Routing_preflight_success_does_not_change_the_happy_path()
+    {
+        var snapshots = new QueueProcessSnapshotSource(
+        [
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)],
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)],
+            []
+        ]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 0)]);
+        var preflight = new FixedRoutingPreflightProbe(succeeded: true);
+        var (retirement, invoker, _) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            nativeModeProbe: new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput), routingPreflightProbe: preflight);
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.Retired, result);
+        Assert.Equal(1, preflight.CallCount);
+        Assert.Equal(1, invoker.TerminateCallCount);
+    }
+
+    [Fact]
+    public async Task No_routing_preflight_probe_configured_preserves_prior_behavior()
+    {
+        // A retirement service without a preflight probe configured (routingPreflightProbe: null)
+        // must behave exactly as it did before this check existed.
+        var snapshots = new QueueProcessSnapshotSource(
+        [
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)],
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)],
+            []
+        ]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 0)]);
+        var (retirement, invoker, _) = Create(snapshots, identityInspector: identity, windowSnapshotProvider: window,
+            nativeModeProbe: new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.Retired, result);
+        Assert.Equal(1, invoker.TerminateCallCount);
+    }
+
+    [Fact]
     public async Task Late_xinput_observation_past_deadline_is_rejected()
     {
         // Models a probe whose call does not observe the supplied cancellation token until after its
@@ -408,7 +565,8 @@ public sealed class CenterMMainUiRoutingRetirementTests
             new MainUiWindowSnapshot(true, 1, 0) // minimize-wait loop observes hidden
         ]);
         var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
-        var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshots);
+        var scope = new FixedRetainedScopeInspector(ProcessScopeProbeStatus.Match);
+        var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshots, scope);
         // Cancels the token as a side effect of the minimize request itself succeeding -- simulates
         // cancellation racing in immediately after the external side effect is posted.
         var windowController = new CancelingWindowController(cts, CenterMMainUiMinimizeResult.Requested);
@@ -417,6 +575,7 @@ public sealed class CenterMMainUiRoutingRetirementTests
             processSnapshotSource: snapshots,
             handleOpener: new FakeHandleOpener(),
             identityInspector: identity,
+            retainedScopeInspector: scope,
             windowSnapshotProvider: window,
             windowController: windowController,
             terminator: terminator,
@@ -463,12 +622,14 @@ public sealed class CenterMMainUiRoutingRetirementTests
         // Cancels the token as a side effect of WaitForExit confirming the exit -- simulates
         // cancellation racing in exactly while termination is in flight.
         var invoker = new CancelingInvoker(cts);
-        var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshots);
+        var scope = new FixedRetainedScopeInspector(ProcessScopeProbeStatus.Match);
+        var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshots, scope);
         var retirement = new CenterMMainUiRoutingRetirement(
             new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput),
             processSnapshotSource: snapshots,
             handleOpener: new FakeHandleOpener(),
             identityInspector: identity,
+            retainedScopeInspector: scope,
             windowSnapshotProvider: window,
             terminator: terminator,
             terminateWaitTimeout: TimeSpan.FromMilliseconds(50));
@@ -578,18 +739,23 @@ public sealed class CenterMMainUiRoutingRetirementTests
         TimeSpan? xInputWaitTimeout = null,
         TimeSpan? xInputWaitPollInterval = null,
         bool waitForExitSucceeds = true,
-        bool terminateSucceeds = true)
+        bool terminateSucceeds = true,
+        ICenterMRetainedProcessScopeInspector? retainedScopeInspector = null,
+        ICenterMRoutingPreflightProbe? routingPreflightProbe = null)
     {
         var identity = identityInspector ?? new QueueIdentityInspector([]);
         var window = windowSnapshotProvider ?? new QueueWindowSnapshotProvider([]);
+        var scope = retainedScopeInspector ?? new FixedRetainedScopeInspector(ProcessScopeProbeStatus.Match);
         var invoker = new RecordingInvoker(terminateSucceeds: terminateSucceeds, waitSucceeds: waitForExitSucceeds);
-        var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshotSource);
+        var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshotSource, scope);
         var windowController = new FixedWindowController(minimizeResult);
         var retirement = new CenterMMainUiRoutingRetirement(
             nativeModeProbe ?? new FixedNativeModeProbe(CenterMNativeModeProbeResult.XInput),
+            routingPreflightProbe: routingPreflightProbe,
             processSnapshotSource: snapshotSource,
             handleOpener: handleOpener ?? new FakeHandleOpener(),
             identityInspector: identity,
+            retainedScopeInspector: scope,
             windowSnapshotProvider: window,
             windowController: windowController,
             terminator: terminator,
@@ -599,6 +765,22 @@ public sealed class CenterMMainUiRoutingRetirementTests
             xInputWaitPollInterval: xInputWaitPollInterval ?? TimeSpan.FromMilliseconds(20),
             terminateWaitTimeout: TimeSpan.FromMilliseconds(50));
         return (retirement, invoker, windowController);
+    }
+
+    private sealed class FixedRetainedScopeInspector(ProcessScopeProbeStatus status) : ICenterMRetainedProcessScopeInspector
+    {
+        public ProcessScopeProbeStatus Inspect(SafeProcessHandle processHandle) => status;
+    }
+
+    private sealed class FixedRoutingPreflightProbe(bool succeeded, string reason = "Test") : ICenterMRoutingPreflightProbe
+    {
+        internal int CallCount { get; private set; }
+
+        public ValueTask<CenterMRoutingPreflightResult> InspectAsync(CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return ValueTask.FromResult(new CenterMRoutingPreflightResult(succeeded, reason));
+        }
     }
 
     private sealed class QueueProcessSnapshotSource(IEnumerable<IReadOnlyList<ProcessSnapshotEntry>?> responses) : IProcessSnapshotSource

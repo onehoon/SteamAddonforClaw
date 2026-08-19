@@ -134,6 +134,11 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
                     CenterMMainUiRoutingRetirementResult.IdentityUncertain
                         or CenterMMainUiRoutingRetirementResult.WindowStateUncertain
                         or CenterMMainUiRoutingRetirementResult.AbsenceCheckFailed => CenterMMainUiRoutingGuardResult.Uncertain,
+                    // Not a Center M fact -- the canonical NativeMode route authority already
+                    // rejected this route (routing-fault latch, recovery safety, power gate,
+                    // active/recovery-boundary conflict) before the MainUI was ever touched, so
+                    // diagnostics must not blame Center M for a prerequisite it had no part in.
+                    CenterMMainUiRoutingRetirementResult.RoutingPreflightRejected => CenterMMainUiRoutingGuardResult.PrerequisiteFailure,
                     _ => CenterMMainUiRoutingGuardResult.RealMainUiPresent
                 };
             }

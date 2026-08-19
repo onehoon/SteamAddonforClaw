@@ -15,6 +15,7 @@ public sealed class CenterMMainUiRoutingTerminatorTests
         ProcessAlive: true,
         CurrentProcessName: "MSI Center M",
         CurrentExecutablePath: ExpectedPath,
+        ProcessScope: ProcessScopeProbeStatus.Match,
         FreshWindowSnapshot: new MainUiWindowSnapshot(true, 1, 0),
         AdditionalForeignMainUiExists: false);
 
@@ -73,6 +74,18 @@ public sealed class CenterMMainUiRoutingTerminatorTests
             CenterMMainUiRoutingTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true), ValidEvidence() with { SameNameEnumerationUncertain = true }));
 
     [Fact]
+    public void Evaluate_ForeignRetainedHandleScope_IsIdentityMismatch() =>
+        Assert.Equal(CenterMRoutingTerminationResult.IdentityMismatch,
+            CenterMMainUiRoutingTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true),
+                ValidEvidence() with { ProcessScope = ProcessScopeProbeStatus.Foreign }));
+
+    [Fact]
+    public void Evaluate_UncertainRetainedHandleScope_IsIdentityUncertain() =>
+        Assert.Equal(CenterMRoutingTerminationResult.IdentityUncertain,
+            CenterMMainUiRoutingTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true),
+                ValidEvidence() with { ProcessScope = ProcessScopeProbeStatus.Uncertain }));
+
+    [Fact]
     public void Evaluate_NoTerminateRights_IsAccessDenied() =>
         Assert.Equal(CenterMRoutingTerminationResult.AccessDenied,
             CenterMMainUiRoutingTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, false), ValidEvidence()));
@@ -86,7 +99,8 @@ public sealed class CenterMMainUiRoutingTerminatorTests
             invoker,
             new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
             new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
-            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]),
+            new FakeRetainedScopeInspector(ProcessScopeProbeStatus.Match));
 
         var result = terminator.TryTerminate(tracked, TimeSpan.FromSeconds(1));
 
@@ -103,7 +117,8 @@ public sealed class CenterMMainUiRoutingTerminatorTests
             invoker,
             new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
             new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 1)),
-            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]),
+            new FakeRetainedScopeInspector(ProcessScopeProbeStatus.Match));
 
         var result = terminator.TryTerminate(tracked, TimeSpan.FromSeconds(1));
 
@@ -119,7 +134,8 @@ public sealed class CenterMMainUiRoutingTerminatorTests
             new RecordingInvoker(terminateSucceeds: true, waitSucceeds: false),
             new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
             new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
-            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]),
+            new FakeRetainedScopeInspector(ProcessScopeProbeStatus.Match));
 
         var result = terminator.TryTerminate(tracked, TimeSpan.FromMilliseconds(1));
 
@@ -139,7 +155,8 @@ public sealed class CenterMMainUiRoutingTerminatorTests
             invoker,
             new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
             new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
-            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]),
+            new FakeRetainedScopeInspector(ProcessScopeProbeStatus.Match));
 
         var result = terminator.TryTerminate(tracked, TimeSpan.FromSeconds(1));
 
@@ -159,13 +176,37 @@ public sealed class CenterMMainUiRoutingTerminatorTests
             invoker,
             new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
             new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
-            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]));
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]),
+            new FakeRetainedScopeInspector(ProcessScopeProbeStatus.Match));
 
         var result = terminator.TryTerminate(tracked, TimeSpan.FromMilliseconds(1));
 
         Assert.Equal(CenterMRoutingTerminationResult.Failed, result);
         Assert.Equal(1, invoker.TerminateCallCount);
         Assert.Equal(1, invoker.WaitForExitCallCount);
+    }
+
+    [Fact]
+    public void TryTerminate_RetainedHandleScopeForeign_NeverTerminates()
+    {
+        var tracked = TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, hasTerminateRights: true);
+        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
+        var terminator = new CenterMMainUiRoutingTerminator(
+            invoker,
+            new FakeIdentityInspector(LiveProcessProbeStatus.Alive, TrackedPid, "MSI Center M", ExpectedPath),
+            new FakeWindowProvider(new MainUiWindowSnapshot(true, 1, 0)),
+            new FakeProcessSnapshotSource([new ProcessSnapshotEntry(TrackedPid, "MSI Center M", ExpectedPath)]),
+            new FakeRetainedScopeInspector(ProcessScopeProbeStatus.Foreign));
+
+        var result = terminator.TryTerminate(tracked, TimeSpan.FromSeconds(1));
+
+        Assert.Equal(CenterMRoutingTerminationResult.IdentityMismatch, result);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    private sealed class FakeRetainedScopeInspector(ProcessScopeProbeStatus status) : ICenterMRetainedProcessScopeInspector
+    {
+        public ProcessScopeProbeStatus Inspect(SafeProcessHandle processHandle) => status;
     }
 
     private sealed class RecordingInvoker(bool terminateSucceeds, bool waitSucceeds) : ITerminateProcessInvoker

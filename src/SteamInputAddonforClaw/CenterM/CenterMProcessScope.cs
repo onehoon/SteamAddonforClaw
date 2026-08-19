@@ -102,6 +102,85 @@ internal sealed class Win32CenterMProcessScopeInspector : ICenterMProcessScopeIn
     private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out SafeAccessTokenHandle tokenHandle);
 }
 
+/// <summary>Same session/user authority as <see cref="ICenterMProcessScopeInspector"/>, but anchored
+/// to an already-retained process handle instead of a PID. A PID-based scope check performed before
+/// <see cref="TrackedCenterMMainUi.Create"/> acquires its own handle leaves a race window: if the
+/// original process exits and the PID is reused before the retained handle is opened, the retained
+/// handle can end up pointing at a DIFFERENT process object than the one whose scope was checked --
+/// silently defeating the session/user safety boundary for the exact object about to be mutated.
+/// This inspector reads session/user directly off the SAME handle that will be terminated, so scope
+/// authority can never drift from the exact process object in play.</summary>
+internal interface ICenterMRetainedProcessScopeInspector
+{
+    ProcessScopeProbeStatus Inspect(SafeProcessHandle processHandle);
+}
+
+internal sealed class Win32CenterMRetainedProcessScopeInspector : ICenterMRetainedProcessScopeInspector
+{
+    private const uint TOKEN_QUERY = 0x0008;
+
+    private readonly uint? _currentSessionId;
+    private readonly string? _currentUserSid;
+
+    internal Win32CenterMRetainedProcessScopeInspector()
+    {
+        _currentSessionId = TryGetSessionId((uint)Environment.ProcessId);
+        _currentUserSid = TryGetCurrentUserSid();
+    }
+
+    public ProcessScopeProbeStatus Inspect(SafeProcessHandle processHandle)
+    {
+        if (_currentSessionId is null || _currentUserSid is null) return ProcessScopeProbeStatus.Uncertain;
+        if (processHandle is null || processHandle.IsInvalid) return ProcessScopeProbeStatus.Uncertain;
+
+        if (!GetProcessId(processHandle.DangerousGetHandle(), out var processId) || processId == 0)
+            return ProcessScopeProbeStatus.Uncertain;
+
+        var sessionId = TryGetSessionId(processId);
+        if (sessionId is null) return ProcessScopeProbeStatus.Uncertain;
+        if (sessionId != _currentSessionId) return ProcessScopeProbeStatus.Foreign;
+
+        if (!OpenProcessToken(processHandle.DangerousGetHandle(), TOKEN_QUERY, out var tokenHandle))
+            return ProcessScopeProbeStatus.Uncertain;
+        using (tokenHandle)
+        {
+            string? userSid;
+            try
+            {
+                using var identity = new WindowsIdentity(tokenHandle.DangerousGetHandle());
+                userSid = identity.User?.Value;
+            }
+            catch (Exception ex) when (ex is SecurityException or ArgumentException or UnauthorizedAccessException)
+            {
+                return ProcessScopeProbeStatus.Uncertain;
+            }
+
+            if (userSid is null) return ProcessScopeProbeStatus.Uncertain;
+
+            return string.Equals(userSid, _currentUserSid, StringComparison.Ordinal)
+                ? ProcessScopeProbeStatus.Match
+                : ProcessScopeProbeStatus.Foreign;
+        }
+    }
+
+    private static string? TryGetCurrentUserSid()
+    {
+        try { return WindowsIdentity.GetCurrent().User?.Value; }
+        catch (SecurityException) { return null; }
+    }
+
+    private static uint? TryGetSessionId(uint processId) => ProcessIdToSessionId(processId, out var sessionId) ? sessionId : null;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool ProcessIdToSessionId(uint dwProcessId, out uint pSessionId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetProcessId(IntPtr process, out uint processId);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out SafeAccessTokenHandle tokenHandle);
+}
+
 /// <summary>
 /// Filters an inner <see cref="IProcessSnapshotSource"/> to only the same-session/same-user
 /// candidates -- the exact scope of the real MSI Center M MainUI's own <c>Local\</c> singleton

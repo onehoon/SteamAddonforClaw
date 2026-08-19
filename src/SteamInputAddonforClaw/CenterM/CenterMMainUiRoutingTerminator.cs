@@ -24,6 +24,7 @@ internal readonly record struct CenterMRoutingTerminationEvidence(
     bool ProcessAlive,
     string? CurrentProcessName,
     string? CurrentExecutablePath,
+    ProcessScopeProbeStatus ProcessScope,
     MainUiWindowSnapshot? FreshWindowSnapshot,
     bool AdditionalForeignMainUiExists,
     bool SameNameEnumerationUncertain = false);
@@ -44,12 +45,14 @@ internal sealed class CenterMMainUiRoutingTerminator(
     ITerminateProcessInvoker? invoker = null,
     IProcessIdentityInspector? identityInspector = null,
     IMainUiWindowSnapshotProvider? windowProvider = null,
-    IProcessSnapshotSource? processSnapshotSource = null)
+    IProcessSnapshotSource? processSnapshotSource = null,
+    ICenterMRetainedProcessScopeInspector? retainedScopeInspector = null)
 {
     private readonly ITerminateProcessInvoker _invoker = invoker ?? new Win32TerminateProcessInvoker();
     private readonly IProcessIdentityInspector _identityInspector = identityInspector ?? new Win32ProcessIdentityInspector();
     private readonly IMainUiWindowSnapshotProvider _windowProvider = windowProvider ?? new Win32MainUiWindowSnapshotProvider();
     private readonly IProcessSnapshotSource _processSnapshotSource = processSnapshotSource ?? new Win32ProcessSnapshotSource();
+    private readonly ICenterMRetainedProcessScopeInspector _retainedScopeInspector = retainedScopeInspector ?? new Win32CenterMRetainedProcessScopeInspector();
 
     internal CenterMRoutingTerminationResult TryTerminate(TrackedCenterMMainUi tracked, TimeSpan waitTimeout)
     {
@@ -100,10 +103,15 @@ internal sealed class CenterMMainUiRoutingTerminator(
         var identity = _identityInspector.Inspect(tracked.Handle);
 
         if (identity.Status == LiveProcessProbeStatus.Exited)
-            return new(true, tracked.ProcessId, ProcessAlive: false, null, null, null, false);
+            return new(true, tracked.ProcessId, ProcessAlive: false, null, null, ProcessScopeProbeStatus.Uncertain, null, false);
 
         if (identity.Status == LiveProcessProbeStatus.Uncertain)
-            return new(false, null, ProcessAlive: true, null, null, null, false);
+            return new(false, null, ProcessAlive: true, null, null, ProcessScopeProbeStatus.Uncertain, null, false);
+
+        // Re-check scope off the SAME retained handle immediately before the destructive kill --
+        // the earlier PID-based discovery scope check cannot protect against scope drift/PID reuse
+        // between discovery and this exact-handle termination boundary.
+        var scope = _retainedScopeInspector.Inspect(tracked.Handle);
 
         var windowSnapshot = _windowProvider.Capture(tracked.ProcessId);
         var sameNameProcesses = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
@@ -114,6 +122,7 @@ internal sealed class CenterMMainUiRoutingTerminator(
             ProcessAlive: true,
             CurrentProcessName: identity.ProcessName,
             CurrentExecutablePath: identity.ExecutablePath,
+            ProcessScope: scope,
             FreshWindowSnapshot: windowSnapshot,
             AdditionalForeignMainUiExists: sameNameProcesses?.Any(p => p.ProcessId != tracked.ProcessId) ?? false,
             SameNameEnumerationUncertain: sameNameProcesses is null);
@@ -135,6 +144,12 @@ internal sealed class CenterMMainUiRoutingTerminator(
 
         if (!SafeMainUiTerminator.PathMatchesExpectedPackage(evidence.CurrentExecutablePath))
             return CenterMRoutingTerminationResult.IdentityMismatch;
+
+        if (evidence.ProcessScope == ProcessScopeProbeStatus.Foreign)
+            return CenterMRoutingTerminationResult.IdentityMismatch;
+
+        if (evidence.ProcessScope != ProcessScopeProbeStatus.Match)
+            return CenterMRoutingTerminationResult.IdentityUncertain;
 
         if (evidence.FreshWindowSnapshot is null)
             return CenterMRoutingTerminationResult.IdentityUncertain;
