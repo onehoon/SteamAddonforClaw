@@ -212,9 +212,23 @@ internal sealed class CenterMMainUiRoutingRetirement
             cancellationToken.ThrowIfCancellationRequested();
 
             AppLog.Info("CenterM.RoutingGuard", "MainUI minimize requested.", ("ProcessId", tracked.ProcessId));
-            var minimizeResult = _windowController.TryMinimizeRecognizedMainUi(tracked.ProcessId);
+            var lastAuthority = CenterMWindowMutationAuthority.Uncertain;
+            var minimizeResult = _windowController.TryMinimizeRecognizedMainUi(tracked.ProcessId, () =>
+            {
+                lastAuthority = RevalidateWindowMutationAuthority(tracked);
+                return lastAuthority;
+            });
             if (minimizeResult != CenterMMainUiMinimizeResult.Requested)
             {
+                // A numeric PID/HWND match alone is not process-object identity -- the retained
+                // handle is the final authority immediately before PostMessageW. If that authority
+                // check specifically observed the exact retained MainUI as already exited, this is
+                // the already-supported benign natural-exit race, not a minimize failure: confirm
+                // fresh global absence and continue, rather than reporting MinimizeFailed for a
+                // window that no longer belongs to the process we ever intended to touch.
+                if (minimizeResult == CenterMMainUiMinimizeResult.TargetChanged && lastAuthority == CenterMWindowMutationAuthority.Exited)
+                    return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
+
                 LogFailed(tracked.ProcessId, $"MinimizeFailed:{minimizeResult}");
                 return CenterMMainUiRoutingRetirementResult.MinimizeFailed;
             }
@@ -461,6 +475,31 @@ internal sealed class CenterMMainUiRoutingRetirement
             var delay = remaining < _xInputWaitPollInterval ? remaining : _xInputWaitPollInterval;
             await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Final retained-process-object authority check the window controller runs
+    /// immediately before <c>PostMessageW</c> -- reuses the exact same identity/scope inspectors and
+    /// checks already used earlier in this method, rather than inventing new identity logic, so the
+    /// external mutation can only ever be authorized by the SAME retained handle this whole retirement
+    /// attempt is anchored to.</summary>
+    private CenterMWindowMutationAuthority RevalidateWindowMutationAuthority(TrackedCenterMMainUi tracked)
+    {
+        var identity = _identityInspector.Inspect(tracked.Handle);
+        if (identity.Status == LiveProcessProbeStatus.Exited) return CenterMWindowMutationAuthority.Exited;
+        if (identity.Status != LiveProcessProbeStatus.Alive) return CenterMWindowMutationAuthority.Uncertain;
+
+        if (identity.ProcessId != tracked.ProcessId
+            || !string.Equals(identity.ProcessName, CenterMProcessNames.MainUi, StringComparison.Ordinal)
+            || !SafeMainUiTerminator.PathMatchesExpectedPackage(identity.ExecutablePath))
+            return CenterMWindowMutationAuthority.Mismatch;
+
+        return _retainedScopeInspector.Inspect(tracked.Handle) switch
+        {
+            ProcessScopeProbeStatus.Match => CenterMWindowMutationAuthority.Match,
+            ProcessScopeProbeStatus.Exited => CenterMWindowMutationAuthority.Exited,
+            ProcessScopeProbeStatus.Foreign => CenterMWindowMutationAuthority.Mismatch,
+            _ => CenterMWindowMutationAuthority.Uncertain
+        };
     }
 
     private static void LogFailed(int? processId, string reason) =>

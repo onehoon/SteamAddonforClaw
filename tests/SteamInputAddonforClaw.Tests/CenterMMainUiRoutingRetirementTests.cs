@@ -477,6 +477,64 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Retained_authority_mismatch_immediately_before_post_blocks_minimize_and_termination()
+    {
+        // Both HWND enumeration passes inside the window controller stay stable (numeric PID match),
+        // but the retirement-level retained-handle authority check reports Mismatch right before the
+        // post would happen -- e.g. the PID was reused by a different process. Must never post the
+        // minimize, probe native mode, or terminate anything.
+        var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var window = new QueueWindowSnapshotProvider([new MainUiWindowSnapshot(true, 1, 1)]);
+        var probe = new CountingNativeModeProbe(CenterMNativeModeProbeResult.XInput);
+        var authorityGatedController = new AuthorityGatedWindowController();
+        // The identity/path stay valid (so RevalidateWindowMutationAuthority itself would say Match),
+        // but the injected scope inspector flips to Foreign only on the SECOND call (discovery-time
+        // scope check passes; the controller's final pre-post authority check does not).
+        var scope = new DriftingScopeInspector(ProcessScopeProbeStatus.Match, ProcessScopeProbeStatus.Foreign);
+        var invoker = new RecordingInvoker(terminateSucceeds: true, waitSucceeds: true);
+        var terminator = new CenterMMainUiRoutingTerminator(invoker, identity, window, snapshots, scope);
+        var retirement = new CenterMMainUiRoutingRetirement(
+            probe,
+            processSnapshotSource: snapshots,
+            handleOpener: new FakeHandleOpener(),
+            identityInspector: identity,
+            retainedScopeInspector: scope,
+            windowSnapshotProvider: window,
+            windowController: authorityGatedController,
+            terminator: terminator,
+            minimizeWaitTimeout: TimeSpan.FromMilliseconds(200),
+            minimizeWaitPollInterval: TimeSpan.FromMilliseconds(20),
+            xInputWaitTimeout: TimeSpan.FromMilliseconds(200),
+            xInputWaitPollInterval: TimeSpan.FromMilliseconds(20),
+            terminateWaitTimeout: TimeSpan.FromMilliseconds(50));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.MinimizeFailed, result);
+        Assert.Equal(1, authorityGatedController.CallCount);
+        Assert.Equal(0, probe.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    /// <summary>Mimics the production controller's own contract: calls the supplied authority
+    /// callback and only reports <see cref="CenterMMainUiMinimizeResult.Requested"/> when it returns
+    /// <see cref="CenterMWindowMutationAuthority.Match"/>; otherwise reports
+    /// <see cref="CenterMMainUiMinimizeResult.TargetChanged"/> without "posting" anything.</summary>
+    private sealed class AuthorityGatedWindowController : ICenterMMainUiWindowController
+    {
+        internal int CallCount { get; private set; }
+
+        public CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId, Func<CenterMWindowMutationAuthority> revalidateAuthority)
+        {
+            CallCount++;
+            return revalidateAuthority() == CenterMWindowMutationAuthority.Match
+                ? CenterMMainUiMinimizeResult.Requested
+                : CenterMMainUiMinimizeResult.TargetChanged;
+        }
+    }
+
+    [Fact]
     public async Task Visible_mainui_minimize_command_failure_does_not_terminate()
     {
         var snapshots = new QueueProcessSnapshotSource([[new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)]]);
@@ -936,10 +994,14 @@ public sealed class CenterMMainUiRoutingRetirementTests
     {
         internal int CallCount { get; private set; }
 
-        public CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId)
+        public CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId, Func<CenterMWindowMutationAuthority> revalidateAuthority)
         {
             CallCount++;
-            if (result == CenterMMainUiMinimizeResult.Requested) cancelOnMinimize.Cancel();
+            if (result == CenterMMainUiMinimizeResult.Requested)
+            {
+                revalidateAuthority();
+                cancelOnMinimize.Cancel();
+            }
             return result;
         }
     }
@@ -947,9 +1009,10 @@ public sealed class CenterMMainUiRoutingRetirementTests
     private sealed class FixedWindowController(CenterMMainUiMinimizeResult result) : ICenterMMainUiWindowController
     {
         internal int CallCount { get; private set; }
-        public CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId)
+        public CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId, Func<CenterMWindowMutationAuthority> revalidateAuthority)
         {
             CallCount++;
+            if (result == CenterMMainUiMinimizeResult.Requested) revalidateAuthority();
             return result;
         }
     }
