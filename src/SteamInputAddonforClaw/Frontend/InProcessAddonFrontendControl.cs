@@ -133,6 +133,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         // Preserve that distinction from an elevated helper that actually returns Blocked.
         if (result is null) return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
         var resultKind = MapResultKind(ElevatedPrerequisiteSetup.TranslateExitCode(result));
+        if (resultKind is FrontendPrerequisiteSetupResultKind.Installed or FrontendPrerequisiteSetupResultKind.Ready)
+        {
+            if (_runtime is not null)
+            {
+                _settings.RefreshCenterMAutoRunOwnershipFromDisk();
+                await _runtime.ReconcileOem1PrerequisitesAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
         FrontendStatusSnapshot? postStatus = null;
         try
         {

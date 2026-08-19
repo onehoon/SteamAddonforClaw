@@ -6,6 +6,7 @@ using SteamInputAddonforClaw.HidHide;
 using System.Security.Cryptography;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.CenterM;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -22,6 +23,32 @@ public sealed class FirstTimeSetupPolicyTests
 
     [Fact]
     public void ReadyInstallableComponents_AreCompleteWhenViiperIsUnavailable() => Assert.Equal(FirstTimeSetupStatus.Complete, FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready)).Status);
+
+    [Fact]
+    public void Oem1AutoRunEnabled_OffersExplicitSetupWhenComponentsAreAlreadyReady()
+    {
+        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
+        {
+            Oem1RemappingEnabled = true,
+            CenterMAutoRun = CenterMAutoRunState.Enabled
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, result.Status);
+        Assert.Equal(FirstTimeSetupReason.CenterMAutoRunEnabled, result.Reason);
+        Assert.True(result.CanInstallRequiredComponents);
+    }
+
+    [Fact]
+    public void Oem1Disabled_DoesNotOfferAutoRunMutation()
+    {
+        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
+        {
+            Oem1RemappingEnabled = false,
+            CenterMAutoRun = CenterMAutoRunState.Enabled
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Complete, result.Status);
+    }
 
     [Theory]
     [InlineData((int)HardwareCompatibilityStatus.Unsupported, (int)FirstTimeSetupStatus.NotApplicable)]

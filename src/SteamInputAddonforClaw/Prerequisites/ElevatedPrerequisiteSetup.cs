@@ -65,10 +65,15 @@ internal static class ElevatedPrerequisiteSetup
             var hidStore = new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
             var usbStore = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath);
             if (!LogAndAllowSafetyGate("Initial")) return 1;
+            var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
+            var settings = settingsStore.Load();
             var autoRunBefore = CenterMAutoRunReader.Read();
-            if (autoRunBefore == CenterMAutoRunState.Enabled)
+            if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Enabled)
             {
                 AppLog.Info("PrerequisiteSetup", "Explicit AutoRun setup requested.", ("OriginalAutoRun", 1), ("AppliedAutoRun", 0));
+                // Durable intent is written before HKLM mutation. If this elevated process dies
+                // after the registry write, the next startup can still attribute the change.
+                settingsStore.Save(settings with { CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = 1, AppliedAutoRun = 0 });
                 if (!CenterMAutoRunReader.TryDisableExplicitly(out var confirmedAutoRun, out var originalAutoRun)
                     || confirmedAutoRun != CenterMAutoRunState.Disabled)
                 {
@@ -77,11 +82,9 @@ internal static class ElevatedPrerequisiteSetup
                     return 1;
                 }
                 AppLog.Info("PrerequisiteSetup", "AutoRun setup confirmed by read-back.", ("OriginalAutoRun", originalAutoRun), ("AppliedAutoRun", 0));
-                var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
-                var settings = settingsStore.Load();
                 settingsStore.Save(settings with { CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = originalAutoRun, AppliedAutoRun = 0 });
             }
-            else if (autoRunBefore == CenterMAutoRunState.Unknown)
+            else if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Unknown)
             {
                 AppLog.Warn("PrerequisiteSetup", "AutoRun state is unknown; refusing registry mutation.", null, ("Reason", "AutoRunUnknown"));
                 return 1;

@@ -760,14 +760,15 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             return;
         }
 
-        if (!_environmentEligible())
+        var environmentEligible = _environmentEligible();
+        if (!environmentEligible)
         {
             // Finding #8: an unsupported/uncertain environment must fail open before ever touching
             // Launcher/Server/AutoRun/helper staging.
             var eligibilityClean = await EnsureNoHelperOwned(cancellationToken).ConfigureAwait(false);
             _lastReason = eligibilityClean ? "HardwareEnvironmentIneligible" : "HardwareEnvironmentIneligibleCleanupUnconfirmed";
             SetState(eligibilityClean ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
-            LogPrerequisiteSnapshot("NeedsSetup");
+            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, null, null, null);
             return;
         }
 
@@ -781,9 +782,9 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 SetState(CenterMOem1LifecycleState.FaultedNative);
                 return;
             }
-            SetState(CenterMOem1LifecycleState.NeedsSetup);
             _lastReason = _lastAutoRun == CenterMAutoRunState.Enabled ? "AutoRunEnabled" : "AutoRunUnknown";
-            LogPrerequisiteSnapshot("NeedsSetup");
+            SetState(CenterMOem1LifecycleState.NeedsSetup);
+            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, _lastAutoRun, null, null);
             return;
         }
 
@@ -799,13 +800,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 SetState(CenterMOem1LifecycleState.FaultedNative);
                 return;
             }
-            SetState(CenterMOem1LifecycleState.NeedsSetup);
             _lastReason = !_launcherReady ? "LauncherMissing" : "ServerMissing";
-            LogPrerequisiteSnapshot("NeedsSetup");
+            SetState(CenterMOem1LifecycleState.NeedsSetup);
+            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, _lastAutoRun, _launcherReady, _serverReady);
             return;
         }
 
-        LogPrerequisiteSnapshot("ReadyToArm");
+        LogPrerequisiteSnapshot("ReadyToArm", environmentEligible, _lastAutoRun, _launcherReady, _serverReady);
         SetState(CenterMOem1LifecycleState.Reconciling);
 
         var sameName = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
@@ -903,14 +904,25 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         return _launcherReady && _serverReady;
     }
 
-    private void LogPrerequisiteSnapshot(string decision)
+    internal async Task ReconcilePrerequisitesAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_shutdown || !_desiredEnabled) return;
+            await ReconcileCore("ExplicitPrerequisiteSetupReconcile", Interlocked.Read(ref _lifecycleEpoch), cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    private void LogPrerequisiteSnapshot(string decision, bool? environmentEligible, CenterMAutoRunState? autoRun, bool? launcherPresent, bool? serverPresent)
     {
         AppLog.Info("CenterM.Oem1", "Fresh prerequisite snapshot evaluated.",
-            ("EnvironmentEligible", _environmentEligible()),
+            ("EnvironmentEligible", environmentEligible),
             ("RemappingEnabled", _desiredEnabled),
-            ("AutoRun", _lastAutoRun),
-            ("LauncherPresent", _launcherReady),
-            ("ServerPresent", _serverReady),
+            ("AutoRun", autoRun),
+            ("LauncherPresent", launcherPresent),
+            ("ServerPresent", serverPresent),
             ("HelperOwned", _helperOwnership.IsOwned),
             ("HelperProcessId", _helperOwnership.ProcessId),
             ("Decision", decision),

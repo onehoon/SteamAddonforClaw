@@ -354,6 +354,13 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         }
     }
 
+    async Task IHandheldRoutingComposition.ReconcileOem1PrerequisitesAsync(CancellationToken cancellationToken)
+    {
+        if (!_hardwareSupported || !_oem1RemappingEnabled) return;
+        await CenterMOem1Coordinator.ReconcilePrerequisitesAsync(cancellationToken).ConfigureAwait(false);
+        RefreshOem1BridgeAuthority();
+    }
+
     /// <summary>
     /// The global "Center M Button Remapping" switch, applied to the EXISTING suppression lifecycle
     /// owner -- this composition never becomes a second one. On means the coordinator is asked to

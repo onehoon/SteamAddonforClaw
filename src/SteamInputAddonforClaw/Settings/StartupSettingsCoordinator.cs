@@ -78,6 +78,17 @@ public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference, I
     }
 
     public StartupRegistrationResult Repair() => _startupManager.Synchronize(Settings.LaunchAtWindowsStartup);
+
+    internal void RefreshCenterMAutoRunOwnershipFromDisk()
+    {
+        var persisted = _settingsStore.Load();
+        Settings = Settings with
+        {
+            CenterMAutoRunOwnedByAddon = persisted.CenterMAutoRunOwnedByAddon,
+            OriginalAutoRun = persisted.OriginalAutoRun,
+            AppliedAutoRun = persisted.AppliedAutoRun
+        };
+    }
 }
 
 public interface ISteamInputRoutingPreference

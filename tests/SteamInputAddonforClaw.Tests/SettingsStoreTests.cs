@@ -41,6 +41,24 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveAndLoad_PreservesCenterMAutoRunOwnershipMetadata()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        store.Save(new AppSettings
+        {
+            CenterMAutoRunOwnedByAddon = true,
+            OriginalAutoRun = 1,
+            AppliedAutoRun = 0
+        });
+
+        var settings = store.Load();
+
+        Assert.True(settings.CenterMAutoRunOwnedByAddon);
+        Assert.Equal(1, settings.OriginalAutoRun);
+        Assert.Equal(0, settings.AppliedAutoRun);
+    }
+
+    [Fact]
     public void SaveAndLoad_PreservesStartupSetting()
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
