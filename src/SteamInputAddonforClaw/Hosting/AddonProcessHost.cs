@@ -38,6 +38,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private IAddonFrontendControl? _frontendControl;
     private NamedPipeAddonFrontendServer? _frontendServer;
     private readonly FrontendProcessLauncher _frontendLauncher;
+    private readonly QamHostProcessController _qamHostController;
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
 
@@ -45,6 +46,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         _updateRestartArguments = updateRestartArguments;
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
+        _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
     }
 
     internal bool IsTrayAvailable => _systemTrayIcon?.IsAvailable == true;
@@ -101,7 +103,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startupComposition.RuntimeRecoveryManager,
             startupComposition.StockCenterMBaseline,
             startupResult.RecoverySafe,
-            startupResult.HardwareSupported);
+            startupResult.HardwareSupported,
+            _qamHostController.OnBigPictureStateChanged);
 
         // Review fix (BLOCKER): the OEM1 coordinator and the routing guard share the SAME underlying
         // helper ownership, but only their exact-handle Start() call itself serializes between them.
@@ -165,6 +168,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
         _frontendLauncher.StopAcceptingRequests();
+        _qamHostController.BeginShutdown();
         _startupCancellationTokenSource.Cancel();
         PrepareRuntimeForShutdown();
     }
@@ -189,6 +193,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             await _runtimeHost.DisposeAsync().ConfigureAwait(false);
             _runtimeHost = null;
         }
+        await _qamHostController.DisposeAsync().ConfigureAwait(false);
         _startupComposition = null;
     }
 

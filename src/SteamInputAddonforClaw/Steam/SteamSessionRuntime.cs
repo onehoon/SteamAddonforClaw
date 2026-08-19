@@ -34,6 +34,7 @@ internal sealed class SteamSessionRuntime : IDisposable
         _sessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
         _bigPictureWatcher = new SteamBigPictureWatcher();
         DeveloperTestModeState = new DeveloperTestModeState();
+        _bigPictureWatcher.StateChanged += OnBigPictureStateChanged;
         _bigPictureWatcher.Start();
         _effectiveSource = new EffectiveSteamSessionSource(_sessionWatcher, _bigPictureWatcher, DeveloperTestModeState, routingPreference);
         _effectiveSource.StateChanged += OnEffectiveStateChanged;
@@ -42,6 +43,10 @@ internal sealed class SteamSessionRuntime : IDisposable
     internal DeveloperTestModeState DeveloperTestModeState { get; }
     internal SteamSessionState State => _effectiveSource.State;
     internal event EventHandler<SteamSessionStateChangedEventArgs>? StateChanged;
+    internal event Action<bool>? BigPictureStateChanged;
+    internal bool IsBigPictureActive => _bigPictureWatcher.IsActive;
+
+    private void OnBigPictureStateChanged(object? sender, EventArgs args) => BigPictureStateChanged?.Invoke(_bigPictureWatcher.IsActive);
 
     /// <summary>
     /// Starts the primary Steam session watcher and refreshes the effective state. Callers must

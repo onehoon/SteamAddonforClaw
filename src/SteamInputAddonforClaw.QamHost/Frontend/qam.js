@@ -29,6 +29,13 @@
     console.log("[SteamInputAddon:QAM] " + message);
   }
 
+  function logOnce(key, message) {
+    state.diagnostics ??= {};
+    if (state.diagnostics[key]) return;
+    state.diagnostics[key] = true;
+    log(message);
+  }
+
   function findWebpackRequire() {
     const chunkGlobalNames = ["webpackChunksteamui", "webpackChunk_steamclient"];
     for (const name of chunkGlobalNames) {
@@ -49,6 +56,7 @@
       }
 
       if (typeof capturedRequire === "function") {
+        logOnce("webpack", `webpack runtime captured: ${name}`);
         return capturedRequire;
       }
     }
@@ -58,6 +66,7 @@
   function collectSearchableModules(webpackRequire) {
     const modules = [];
     const seen = new Set();
+    let loadFailures = 0;
 
     const add = (moduleExports) => {
       if (!moduleExports || typeof moduleExports !== "object" || seen.has(moduleExports)) return;
@@ -78,8 +87,11 @@
         add(webpackRequire(id));
       } catch (err) {
         // Some Steam modules have side effects or unmet prerequisites; skip only that module.
+        loadFailures++;
       }
     }
+
+    logOnce("moduleDiscovery", `webpack modules: cached=${Object.keys(webpackRequire.c || {}).length} registered=${Object.keys(webpackRequire.m || {}).length} loaded=${modules.length} loadFailures=${loadFailures}`);
 
     return modules;
   }
@@ -114,6 +126,7 @@
   function findReact(webpackRequire) {
     for (const mod of collectSearchableModules(webpackRequire)) {
       if (mod && mod.createElement && mod.Component) {
+        logOnce("react", "React export found.");
         return mod;
       }
     }
@@ -152,28 +165,74 @@
         typeof candidate.type === "function",
       0
     );
-    if (!node) return false;
+    if (!node) {
+      // Review fix: distinguishes "outer renderer invoked, but the live tree did not contain the
+      // expected nested producer shape" from every other silent stop below -- without this, a log
+      // ending at "QAM outer renderer patched." is ambiguous between "never invoked" and "invoked
+      // but nested producer missing".
+      logOnce("nestedProducerMissing", "QAM outer renderer invoked, but nested tabs producer was not found.");
+      return false;
+    }
+    logOnce("nestedProducerFound", "Nested tabs producer found.");
 
     const originalType = node.type;
-    let patchedType = state.nestedTypes && state.nestedTypes.get(originalType);
-    if (!patchedType) {
-      patchedType = function patchedTabsProducer(...args) {
+    state.nestedPatches ??= new Map();
+    let record = state.nestedPatches.get(originalType);
+    if (!record) {
+      record = { node: null, originalType, patchedType: null, tabs: null };
+      record.patchedType = function patchedTabsProducer(...args) {
         const result = originalType.apply(this, args);
-        const owner = findTabsPropOwner(result, 0);
-        if (owner && !owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
-          owner.props.tabs.push(buildAddonTab(React));
+        if (!state.installed) return result;
+        // Review fix: proves the patched nested producer actually rendered live, separating
+        // "never invoked" from "invoked but props.tabs owner missing" below.
+        logOnce("nestedProducerInvoked", "Nested tabs producer invoked.");
+        try {
+          const owner = findTabsPropOwner(result, 0);
+          if (!owner) {
+            logOnce("tabsOwnerMissing", "Nested tabs producer rendered, but props.tabs owner was not found.");
+            return result;
+          }
+          record.tabs = owner.props.tabs;
+          logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
+          if (!owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
+            owner.props.tabs.push(buildAddonTab(React));
+            logOnce("tabInserted", "Steam Input Addon tab inserted.");
+          } else {
+            logOnce("duplicateTab", "Duplicate tab already present; insertion skipped.");
+          }
+        } catch (err) {
+          logOnce("nestedAugmentationFailed", `QAM nested augmentation failed: ${String(err)}`);
         }
         return result;
       };
-
-      if (!state.nestedTypes) state.nestedTypes = new Map();
-      state.nestedTypes.set(originalType, patchedType);
+      state.nestedPatches.set(originalType, record);
     }
 
+    record.node = node;
     if (node.type === originalType) {
-      node.type = patchedType;
+      node.type = record.patchedType;
+      logOnce("nestedPatch", "Nested tabs producer patched.");
     }
     return true;
+  }
+
+  /*
+   * The nested producer can remain mounted in an already-created React tree after
+   * the outer renderer is restored. Keep the wrapper inert and remove only our tab
+   * before releasing the records.
+   */
+  function restoreNestedPatches() {
+    for (const record of state.nestedPatches?.values() ?? []) {
+      if (record.node?.type === record.patchedType) {
+        record.node.type = record.originalType;
+      }
+
+      if (Array.isArray(record.tabs)) {
+        for (let index = record.tabs.length - 1; index >= 0; index--) {
+          if (record.tabs[index]?.[TAB_MARKER]) record.tabs.splice(index, 1);
+        }
+      }
+    }
   }
 
   function buildAddonTab(React) {
@@ -209,6 +268,8 @@
       return true;
     }
 
+    state.diagnostics = {};
+
     const webpackRequire = findWebpackRequire();
     if (!webpackRequire) {
       log("QAM integration unavailable (webpack runtime not found).");
@@ -216,6 +277,7 @@
     }
 
     const patches = findQamRenderers(webpackRequire);
+    logOnce("rendererCount", `QAM renderer count=${patches.length}.`);
     if (patches.length === 0) {
       log("QAM integration unavailable (renderer not found).");
       return false;
@@ -232,18 +294,26 @@
 
       function patchedType(...args) {
         const result = originalType.apply(this, args);
-        patchTabsProducer(result, React);
+        // Review fix: proves the patched outer renderer actually ran on live Steam, separating
+        // "never invoked" from every failure mode further down the augmentation chain.
+        logOnce("outerRendererInvoked", "QAM outer renderer invoked.");
+        try {
+          patchTabsProducer(result, React);
+        } catch (err) {
+          logOnce("outerAugmentationFailed", `QAM outer augmentation failed: ${String(err)}`);
+        }
         return result;
       }
 
       patch.patchedType = patchedType;
       patch.renderer.type = patchedType;
+      logOnce("outerPatch", "QAM outer renderer patched.");
     }
 
     Object.assign(state, {
       installed: true,
       patches,
-      nestedTypes: new Map(),
+      nestedPatches: new Map(),
       install,
       uninstall,
     });
@@ -258,24 +328,26 @@
       return true;
     }
 
+    state.installed = false;
+    restoreNestedPatches();
+
     for (const patch of state.patches) {
       // Only restore if nothing else re-patched the renderer after us.
       if (patch.renderer.type === patch.patchedType) {
         patch.renderer.type = patch.originalType;
+        logOnce("outerRestore", "outer patch restored.");
       }
     }
 
-    state.nestedTypes?.clear();
-
     Object.assign(state, {
-      installed: false,
       patches: null,
-      nestedTypes: null,
+      nestedPatches: null,
       install,
       uninstall,
     });
 
     log("QAM hook uninstalled.");
+    logOnce("uninstall", "uninstall completed.");
     return true;
   }
 

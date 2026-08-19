@@ -12,7 +12,8 @@ function New-Fixture {
         (Join-Path $root 'Dependencies\HidHide'),
         (Join-Path $root 'Dependencies\UsbIpWin2'),
         (Join-Path $root 'Dependencies\Viiper'),
-        (Join-Path $root 'ui\Views')
+        (Join-Path $root 'ui\Views'),
+        (Join-Path $root 'qam\Frontend')
     )
     New-Item -ItemType Directory -Force -Path $directories | Out-Null
 
@@ -37,6 +38,8 @@ function New-Fixture {
         'ui\Views\DeveloperPage.xbf' = 'developer xbf'
         'ui\Microsoft.WindowsAppRuntime.1.8.pri' = 'dependency pri'
         'ui\Microsoft.UI.Xaml.winmd' = 'winmd payload'
+        'qam\SteamInputAddonforClaw.QamHost.exe' = 'qam executable'
+        'qam\Frontend\qam.js' = 'qam frontend'
     }
 
     foreach ($entry in $files.GetEnumerator()) {

@@ -1,5 +1,12 @@
 using SteamInputAddonforClaw.QamHost;
 
+var managed = args.Contains("--managed", StringComparer.OrdinalIgnoreCase);
+string? logDirectory = null;
+for (var index = 0; index < args.Length - 1; index++)
+    if (string.Equals(args[index], "--log-directory", StringComparison.OrdinalIgnoreCase)) logDirectory = args[index + 1];
+using var log = new QamHostLogger(logDirectory);
+log.Info($"QamHost starting. ManagedMode={managed}. DevToolsEndpoint=http://127.0.0.1:8080");
+
 // Development-only bootstrap for PR1: assumes Steam is already running with CEF remote
 // debugging enabled on the default DevTools endpoint. This is NOT a production Steam bootstrap
 // contract; it will be replaced by a private CDP pipe connection in a later PR. QamHost never
@@ -7,73 +14,102 @@ using SteamInputAddonforClaw.QamHost;
 var devToolsEndpoint = new Uri("http://127.0.0.1:8080");
 var frontendPath = Path.Combine(AppContext.BaseDirectory, "Frontend", "qam.js");
 
-Console.WriteLine("QamHost starting.");
-
 if (!File.Exists(frontendPath))
 {
-    Console.WriteLine($"QAM frontend script not found at {frontendPath}; exiting.");
+    log.Error($"Frontend script not found. Path={frontendPath}");
     return 1;
 }
 
 var frontendScript = await File.ReadAllTextAsync(frontendPath);
+log.Info($"Frontend script loaded. Path={frontendPath} Bytes={frontendScript.Length}");
 
 await using var client = new SteamGamepadUiCdpClient(devToolsEndpoint);
+client.AddonQamConsoleMessage += message => log.Info(message);
+using var lifetime = managed ? QamHostManagedLifetime.Start(() => Console.In.ReadLineAsync()) : null;
+Task? managedStopTask = null;
+if (managed)
+{
+    managedStopTask = lifetime!.StopTask;
+}
+var lifetimeToken = lifetime?.Token ?? CancellationToken.None;
 
-IReadOnlyList<CdpTarget> targets;
+CdpTarget? gamepadUiTarget = null;
 try
 {
-    targets = await client.ListTargetsAsync(CancellationToken.None);
+    var deadline = DateTimeOffset.UtcNow.AddSeconds(managed ? 10 : 0);
+    while (true)
+    {
+        IReadOnlyList<CdpTarget> targets;
+        try { targets = await client.ListTargetsAsync(lifetimeToken); }
+        catch (Exception ex) when (managed && ex is HttpRequestException or TaskCanceledException && DateTimeOffset.UtcNow < deadline)
+        { await Task.Delay(250, lifetimeToken); continue; }
+
+        log.Info($"target count={targets.Count}");
+        foreach (var target in targets) log.Info($"Target Type={target.Type} Title={target.Title} Url={target.Url}");
+        gamepadUiTarget = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
+        if (gamepadUiTarget is not null || !managed || DateTimeOffset.UtcNow >= deadline) break;
+        await Task.Delay(250, lifetimeToken);
+    }
 }
 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
 {
-    Console.WriteLine($"DevTools endpoint unavailable ({ex.GetType().Name}: {ex.Message}). Is Steam running with remote debugging enabled? Exiting cleanly.");
+    if (lifetimeToken.IsCancellationRequested)
+    {
+        log.Info("QamHost stop requested during startup.");
+        return 0;
+    }
+    log.Warn($"DevTools endpoint unavailable. {ex.GetType().Name}: {ex.Message}");
     return 0;
 }
 
-Console.WriteLine($"target count: {targets.Count}");
-
-var gamepadUiTarget = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
 if (gamepadUiTarget is null)
 {
-    Console.WriteLine("GamepadUI target not found. Exiting cleanly; Steam and the Addon Runtime are unaffected.");
+    log.Warn("GamepadUI target not found.");
     return 0;
 }
 
-Console.WriteLine($"GamepadUI target selected: {gamepadUiTarget.Title} ({gamepadUiTarget.Url})");
+log.Info($"GamepadUI target selected. Id={gamepadUiTarget.Id} Title={gamepadUiTarget.Title} Url={gamepadUiTarget.Url}");
 
 try
 {
-    await client.ConnectAsync(gamepadUiTarget, CancellationToken.None);
-    Console.WriteLine("CDP connected.");
+    await client.ConnectAsync(gamepadUiTarget, lifetimeToken);
+    log.Info("CDP connected.");
 
-    var rawEvalResult = await client.EvaluateAsync(frontendScript, CancellationToken.None);
+    var rawEvalResult = await client.EvaluateAsync(frontendScript, lifetimeToken);
     var evalResult = CdpEvaluateResult.Parse(rawEvalResult);
 
     if (!evalResult.Succeeded)
     {
-        Console.WriteLine($"frontend injection failed: {evalResult.ErrorText}. Exiting cleanly.");
+        log.Error($"qam.js evaluation exception. {evalResult.ErrorText}");
         return 0;
     }
 
     if (evalResult.BooleanValue != true)
     {
-        Console.WriteLine("QAM integration unavailable (install() reported failure). Exiting cleanly.");
+        log.Warn("install() returned false.");
         return 0;
     }
 
-    Console.WriteLine("frontend injection succeeded.");
-    Console.WriteLine("QAM hook installed.");
-
-    Console.WriteLine("Press Ctrl+C to stop QamHost and clean up the QAM hook.");
-    using var shutdown = new ManualResetEventSlim(initialState: false);
-    Console.CancelKeyPress += (_, e) =>
+    if (lifetimeToken.IsCancellationRequested)
     {
-        e.Cancel = true;
-        shutdown.Set();
-    };
-    shutdown.Wait();
+        await BestEffortUninstallAsync(client, log);
+        return 0;
+    }
 
-    Console.WriteLine("cleanup requested.");
+    log.Info("Frontend evaluation succeeded. QAM hook installed.");
+
+    if (managed)
+    {
+        await managedStopTask!.ConfigureAwait(false);
+    }
+    else
+    {
+        using var shutdown = new ManualResetEventSlim(initialState: false);
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Set(); };
+        shutdown.Wait();
+    }
+
+    log.Info("uninstall requested.");
     var rawCleanupResult = await client.EvaluateAsync(
         "window.__STEAM_INPUT_ADDON_QAM__?.uninstall?.() ?? false",
         CancellationToken.None);
@@ -81,17 +117,38 @@ try
 
     if (!cleanupResult.Succeeded || cleanupResult.BooleanValue != true)
     {
-        Console.WriteLine($"QAM cleanup failed: {cleanupResult.ErrorText ?? "uninstall() returned false"}.");
+        log.Error($"QAM cleanup failed: {cleanupResult.ErrorText ?? "uninstall() returned false"}.");
     }
     else
     {
-        Console.WriteLine("cleanup completed.");
+        log.Info("cleanup completed.");
     }
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"QamHost error: {ex.GetType().Name}: {ex.Message}. Exiting cleanly.");
+    if (lifetimeToken.IsCancellationRequested)
+    {
+        await BestEffortUninstallAsync(client, log);
+        log.Info("QamHost stop requested before installation completed.");
+        return 0;
+    }
+    log.Error($"QamHost error at runtime. {ex.GetType().Name}: {ex.Message}");
     return 0;
 }
 
 return 0;
+
+static async Task BestEffortUninstallAsync(SteamGamepadUiCdpClient client, QamHostLogger log)
+{
+    try
+    {
+        var raw = await client.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.uninstall?.() ?? true", CancellationToken.None).ConfigureAwait(false);
+        var result = CdpEvaluateResult.Parse(raw);
+        if (!result.Succeeded || result.BooleanValue != true)
+            log.Warn($"Defensive uninstall did not confirm success: {result.ErrorText ?? "returned false"}");
+    }
+    catch (Exception exception)
+    {
+        log.Warn($"Defensive uninstall failed: {exception.GetType().Name}: {exception.Message}");
+    }
+}
