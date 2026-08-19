@@ -14,6 +14,14 @@ namespace SteamInputAddonforClaw.Tests;
 /// must report it, the setter must persist it and return the authoritative stored value, and the
 /// obsolete Big-Picture-only contract must be gone from the production interface entirely.
 /// </summary>
+/// <remarks>
+/// CI fix: this test touches the shared static <see cref="SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride"/> (via
+/// <see cref="CreateControl"/>), so it must join the "AppLog" collection like every other test class
+/// that touches that global -- otherwise xUnit can run it in parallel against, e.g.,
+/// <c>AppLogTests</c>, letting a stray background-writer log write land in the wrong directory at the
+/// wrong moment and intermittently fail an unrelated test's directory cleanup.
+/// </remarks>
+[Collection("AppLog")]
 public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
 {
     private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
