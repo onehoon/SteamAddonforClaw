@@ -6,7 +6,13 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
 
-public static class FrontendTransportProtocol { public const int CurrentVersion = 1; }
+// Review fix (MAJOR): the Steam Input Routing master-switch PR renamed FrontendRpcMethod.
+// SetRouteInSteamBigPicture -> SetSteamInputRoutingEnabled (and the matching request record /
+// FrontendSettingsSnapshot property), which FrontendRpcMethodJsonConverter serializes by exact
+// string name. Bumping the version here makes an old v1 peer fail the handshake up front instead
+// of connecting successfully and only failing later as UnsupportedMethod/payload-deserialization
+// errors once it tries the renamed RPC.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 2; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID

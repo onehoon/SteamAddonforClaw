@@ -66,6 +66,24 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Previous_protocol_version_is_rejected_at_handshake()
+    {
+        // Review fix (MAJOR): the Steam Input Routing master-switch PR renamed
+        // FrontendRpcMethod.SetRouteInSteamBigPicture -> SetSteamInputRoutingEnabled (and the
+        // matching request record / FrontendSettingsSnapshot property), which
+        // FrontendRpcMethodJsonConverter serializes by exact string name. A stale v1 peer must be
+        // rejected up front at the protocol-version handshake gate, not allowed to connect and only
+        // fail later as UnsupportedMethod/payload-deserialization errors once it tries the renamed RPC.
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
+
+        await Assert.ThrowsAsync<FrontendProtocolException>(() => client.ConnectAsync());
+        Assert.Equal(0, fake.TotalCalls);
+    }
+
+    [Fact]
     public async Task Post_handshake_protocol_mismatch_closes_connection_without_frontend_call()
     {
         var fake = new RecordingFrontendControl();
@@ -730,7 +748,7 @@ public sealed class FrontendNamedPipeTransportTests
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
         Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
 
-        await WriteRawFrameAsync(pipe, "{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"FutureMethod\"}");
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"FutureMethod\"}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
         Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
@@ -754,7 +772,7 @@ public sealed class FrontendNamedPipeTransportTests
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
         Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
 
-        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\"}}");
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\"}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
         Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
@@ -762,10 +780,14 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(0, fake.TotalCalls);
     }
 
+    // Attribute arguments must be compile-time constants, so these literal ProtocolVersion values
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep them in sync with it
+    // by hand. A stale value here would make the frame rejected at the version check instead of
+    // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":2,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":2,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":2,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -822,7 +844,7 @@ public sealed class FrontendNamedPipeTransportTests
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
         Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
 
-        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\",\"Payload\":{payload}}}");
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\",\"Payload\":{payload}}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
         Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
@@ -842,7 +864,7 @@ public sealed class FrontendNamedPipeTransportTests
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
         Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
 
-        await WriteRawFrameAsync(pipe, "{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"GetBootstrap\",\"Payload\":{}}");
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"GetBootstrap\",\"Payload\":{{}}}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
         Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
