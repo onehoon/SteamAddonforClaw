@@ -80,6 +80,25 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
     }
 
     [Fact]
+    public async Task Failed_helper_result_still_reconciles_independent_oem1_lifecycle()
+    {
+        var executor = new FakeExecutor(new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true))
+        {
+            Result = new(ElevatedProcessResultKind.Completed, 3)
+        };
+        var reconcileCount = 0;
+        var control = new InProcessAddonFrontendControl(
+            null!, new QueueStatusProvider([Snapshot("pre"), Snapshot("post")]), null, null!, "",
+            executor, () => "test-runtime.exe", () => new(true, RoutingOperationalState.Passive, false, false),
+            reconcileOem1Prerequisites: _ => { reconcileCount++; return Task.CompletedTask; });
+
+        var result = await control.RunPrerequisiteSetupAsync();
+
+        Assert.Equal(FrontendPrerequisiteSetupResultKind.Blocked, result.Result);
+        Assert.Equal(1, reconcileCount);
+    }
+
+    [Fact]
     public async Task Process_shutdown_barrier_rejects_new_frontend_mutations()
     {
         var control = CreateControl([Snapshot("initial")], new FakeExecutor(new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.SteamActive, false)));

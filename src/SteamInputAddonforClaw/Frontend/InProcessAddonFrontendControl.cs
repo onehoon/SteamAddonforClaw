@@ -23,6 +23,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly IFrontendPrerequisiteSetupExecutor _setupExecutor;
     private readonly Func<string?> _processPath;
     private readonly bool _oem1MappingAvailable;
+    private readonly Func<CancellationToken, Task>? _reconcileOem1Prerequisites;
     private int _shutdownStarted;
 
     /// <param name="oem1MappingAvailable">The startup hardware-support result
@@ -30,9 +31,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// UI gates the Center M Button feature on the SAME fact the routing composition's OEM1 action
     /// path gates on. Defaults to false so any construction path that never established hardware
     /// support reports the feature unavailable rather than offering it.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, Func<CancellationToken, Task>? reconcileOem1Prerequisites = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
+        _reconcileOem1Prerequisites = reconcileOem1Prerequisites ?? (runtime is null ? null : runtime.ReconcileOem1PrerequisitesAsync);
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -134,12 +136,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (result is null) return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
         _settings?.RefreshCenterMAutoRunOwnershipFromDisk();
         var resultKind = MapResultKind(ElevatedPrerequisiteSetup.TranslateExitCode(result));
-        if (resultKind is FrontendPrerequisiteSetupResultKind.Installed or FrontendPrerequisiteSetupResultKind.Ready)
+        if (_reconcileOem1Prerequisites is not null)
         {
-            if (_runtime is not null)
-            {
-                await _runtime.ReconcileOem1PrerequisitesAsync(cancellationToken).ConfigureAwait(false);
-            }
+            // OEM1 AutoRun is independent of HidHide/usbip. The elevated helper may have
+            // confirmed AutoRun before a later unrelated prerequisite fails, so always let the
+            // coordinator perform its own fresh fail-closed prerequisite evaluation.
+            await _reconcileOem1Prerequisites(cancellationToken).ConfigureAwait(false);
         }
         FrontendStatusSnapshot? postStatus = null;
         try
