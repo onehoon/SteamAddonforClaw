@@ -2,13 +2,15 @@
  * Steam Input Addon - native QAM tab injection.
  *
  * Independent implementation (does not use or port Decky Loader / Millennium code).
- * Evaluated once inside Steam's GamepadUI CEF context via CDP Runtime.evaluate.
+ * Evaluated once inside Steam's GamepadUI CEF context via CDP Runtime.evaluate. The top-level
+ * expression evaluates to the Boolean result of install(), so QamHost can tell success from
+ * failure directly from the Runtime.evaluate response instead of assuming success.
  *
  * Responsibilities:
  *   1. Locate Steam's webpack module runtime.
- *   2. Find the module exporting the QAM renderer (signature: QuickAccessMenuBrowserView /
- *      QuickAccessMenuEmbedded).
- *   3. Wrap that renderer so its returned React element tree gains one extra tab, keyed so
+ *   2. Find the QAM renderer element: a module export whose `.type` function source contains the
+ *      QuickAccessMenuBrowserView / QuickAccessMenuEmbedded signature.
+ *   3. Patch that element's `.type` so its returned React tree gains one extra tab, keyed so
  *      re-running this script is a no-op (idempotent).
  *   4. Expose install()/uninstall() on a single Addon-owned global so QamHost can clean up on
  *      graceful shutdown.
@@ -53,28 +55,45 @@
     return null;
   }
 
-  function findQamModule(webpackRequire) {
-    const cache = webpackRequire.c || webpackRequire.m;
+  // Finds the React element whose `.type` render function is Steam's QAM renderer, by matching
+  // the signature strings against the function's own source (not the module's export names).
+  function findQamRenderer(webpackRequire) {
+    const cache = webpackRequire.c;
     if (!cache) return null;
 
-    for (const key of Object.keys(cache)) {
-      const mod = cache[key] && cache[key].exports;
-      if (!mod) continue;
+    for (const moduleRecord of Object.values(cache)) {
+      const moduleExports = moduleRecord && moduleRecord.exports;
+      if (!moduleExports) continue;
 
-      const text = safeStringifyModule(mod);
-      if (QAM_SIGNATURES.some((sig) => text.includes(sig))) {
-        return { key, exports: mod };
+      for (const candidate of Object.values(moduleExports)) {
+        const render = candidate && typeof candidate.type === "function" ? candidate.type : null;
+        if (!render) continue;
+
+        let source;
+        try {
+          source = Function.prototype.toString.call(render);
+        } catch (err) {
+          continue;
+        }
+
+        if (QAM_SIGNATURES.some((sig) => source.includes(sig))) {
+          return { renderer: candidate, originalType: render };
+        }
       }
     }
     return null;
   }
 
-  function safeStringifyModule(mod) {
-    try {
-      return Object.keys(mod).join(" ") + " " + String(mod.default || "");
-    } catch (err) {
-      return "";
+  function findReact(webpackRequire) {
+    const cache = webpackRequire.c;
+    if (!cache) return null;
+    for (const moduleRecord of Object.values(cache)) {
+      const mod = moduleRecord && moduleRecord.exports;
+      if (mod && mod.createElement && mod.Component) {
+        return mod;
+      }
     }
+    return null;
   }
 
   function findTabsPropOwner(element, depth) {
@@ -94,18 +113,25 @@
   }
 
   function buildAddonTab(React) {
+    const icon = React.createElement(
+      "svg",
+      { viewBox: "0 0 24 24", width: 24, height: 24 },
+      React.createElement("circle", { cx: 12, cy: 12, r: 9, fill: "currentColor" })
+    );
+
+    const panel = React.createElement(
+      "div",
+      { style: { padding: "16px" } },
+      React.createElement("h2", null, "Steam Input Addon"),
+      React.createElement("p", null, "QAM integration test")
+    );
+
     return {
       [TAB_MARKER]: true,
       key: "steam-input-addon",
       title: "Steam Input Addon",
-      icon: React.createElement("svg", { viewBox: "0 0 24 24", width: 24, height: 24 },
-        React.createElement("circle", { cx: 12, cy: 12, r: 9, fill: "currentColor" })),
-      content: React.createElement(
-        "div",
-        { style: { padding: "16px" } },
-        React.createElement("h2", null, "Steam Input Addon"),
-        React.createElement("p", null, "QAM integration test")
-      ),
+      tab: icon,
+      panel,
     };
   }
 
@@ -122,29 +148,22 @@
       return false;
     }
 
-    const found = findQamModule(webpackRequire);
+    const found = findQamRenderer(webpackRequire);
     if (!found) {
-      log("QAM integration unavailable (renderer module not found).");
+      log("QAM integration unavailable (renderer not found).");
       return false;
     }
 
-    const React = webpackRequire.__addonReact || findReact(webpackRequire);
+    const React = findReact(webpackRequire);
     if (!React) {
       log("QAM integration unavailable (React not found).");
       return false;
     }
 
-    const moduleExports = found.exports;
-    const rendererKey = Object.keys(moduleExports).find((k) => typeof moduleExports[k] === "function");
-    if (!rendererKey) {
-      log("QAM integration unavailable (no renderer function on module).");
-      return false;
-    }
+    const { renderer, originalType } = found;
 
-    const originalRenderer = moduleExports[rendererKey];
-
-    function patchedRenderer(...args) {
-      const result = originalRenderer.apply(this, args);
+    function patchedType(...args) {
+      const result = originalType.apply(this, args);
       const owner = findTabsPropOwner(result, 0);
       if (owner && !owner.props.tabs.some((t) => t && t[TAB_MARKER])) {
         owner.props.tabs = owner.props.tabs.concat([buildAddonTab(React)]);
@@ -152,29 +171,16 @@
       return result;
     }
 
-    moduleExports[rendererKey] = patchedRenderer;
+    renderer.type = patchedType;
 
     window[GLOBAL_KEY] = {
       installed: true,
-      moduleExports,
-      rendererKey,
-      originalRenderer,
+      renderer,
+      originalType,
     };
 
     log("QAM hook installed.");
     return true;
-  }
-
-  function findReact(webpackRequire) {
-    const cache = webpackRequire.c || webpackRequire.m;
-    if (!cache) return null;
-    for (const key of Object.keys(cache)) {
-      const mod = cache[key] && cache[key].exports;
-      if (mod && mod.createElement && mod.Component) {
-        return mod;
-      }
-    }
-    return null;
   }
 
   function uninstall() {
@@ -184,7 +190,7 @@
       return true;
     }
 
-    state.moduleExports[state.rendererKey] = state.originalRenderer;
+    state.renderer.type = state.originalType;
     window[GLOBAL_KEY] = { installed: false };
     log("QAM hook uninstalled.");
     return true;
@@ -194,5 +200,5 @@
   window[GLOBAL_KEY].install = install;
   window[GLOBAL_KEY].uninstall = uninstall;
 
-  install();
+  return install();
 })();

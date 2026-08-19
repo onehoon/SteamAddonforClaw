@@ -8,6 +8,17 @@ public static class GamepadUiTargetSelector
 {
     private const string LoopbackHost = "steamloopback.host";
 
+    // Steam's GamepadUI page does not identify itself with "gamepadui" in the URL or title.
+    // It is a steamloopback.host page under /routes/... or the /index.html shared context,
+    // presented under one of Steam's shared-context titles.
+    private static readonly string[] SharedContextTitles =
+    [
+        "SharedJSContext",
+        "Steam Shared Context presented by Valve™",
+        "Steam",
+        "SP",
+    ];
+
     /// <summary>Returns the GamepadUI target, or null if none can be identified confidently.</summary>
     public static CdpTarget? SelectGamepadUiTarget(IReadOnlyList<CdpTarget> targets)
     {
@@ -38,7 +49,11 @@ public static class GamepadUiTargetSelector
             return false;
         }
 
-        return uri.AbsolutePath.Contains("gamepadui", StringComparison.OrdinalIgnoreCase)
-            || target.Title.Contains("GamepadUI", StringComparison.OrdinalIgnoreCase);
+        var pathMatches = uri.AbsolutePath.StartsWith("/routes/", StringComparison.OrdinalIgnoreCase)
+            || uri.AbsolutePath.Equals("/index.html", StringComparison.OrdinalIgnoreCase);
+
+        var titleMatches = SharedContextTitles.Contains(target.Title, StringComparer.OrdinalIgnoreCase);
+
+        return pathMatches && titleMatches;
     }
 }

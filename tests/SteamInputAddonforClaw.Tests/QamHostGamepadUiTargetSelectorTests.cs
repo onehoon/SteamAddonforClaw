@@ -14,14 +14,29 @@ public class QamHostGamepadUiTargetSelectorTests
         var targets = new[]
         {
             Page("Steam", "https://store.steampowered.com/"),
-            Page("SP Overlay: GamepadUI", "https://steamloopback.host/routes/gamepadui/index.html"),
+            Page("SharedJSContext", "https://steamloopback.host/routes/library/home"),
             Page("Friends", "https://steamloopback.host/friends"),
         };
 
         var selected = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
 
         Assert.NotNull(selected);
-        Assert.Contains("gamepadui", selected!.Url, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("SharedJSContext", selected!.Title);
+    }
+
+    [Fact]
+    public void SelectsTheSharedContextIndexPage()
+    {
+        var targets = new[]
+        {
+            Page("SP", "https://steamloopback.host/index.html"),
+            Page("Notifications", "https://steamloopback.host/notifications"),
+        };
+
+        var selected = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
+
+        Assert.NotNull(selected);
+        Assert.Equal("https://steamloopback.host/index.html", selected!.Url);
     }
 
     [Fact]
@@ -39,12 +54,12 @@ public class QamHostGamepadUiTargetSelectorTests
     }
 
     [Fact]
-    public void DoesNotSelectAnArbitraryUnrelatedLoopbackPage()
+    public void DoesNotSelectALoopbackPageWithoutASharedContextTitle()
     {
         var targets = new[]
         {
-            Page("Steam Big Picture", "https://steamloopback.host/index.html"),
-            Page("Notifications", "https://steamloopback.host/notifications"),
+            Page("Steam Big Picture Mode", "https://steamloopback.host/index.html"),
+            Page("Notifications", "https://steamloopback.host/routes/notifications"),
         };
 
         var selected = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
@@ -57,7 +72,7 @@ public class QamHostGamepadUiTargetSelectorTests
     {
         var targets = new[]
         {
-            Page("SP Overlay: GamepadUI", "https://steamloopback.host/routes/gamepadui/index.html", ws: null),
+            Page("SharedJSContext", "https://steamloopback.host/routes/library/home", ws: null),
         };
 
         var selected = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
@@ -70,8 +85,8 @@ public class QamHostGamepadUiTargetSelectorTests
     {
         var targets = new[]
         {
-            Page("SP Overlay: GamepadUI", "https://steamloopback.host/routes/gamepadui/index.html"),
-            Page("SP Overlay: GamepadUI (2)", "https://steamloopback.host/routes/gamepadui/index.html?x=2"),
+            Page("SharedJSContext", "https://steamloopback.host/routes/library/home"),
+            Page("Steam", "https://steamloopback.host/routes/library/app/440"),
         };
 
         var selected = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);

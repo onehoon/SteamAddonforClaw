@@ -46,8 +46,22 @@ try
     await client.ConnectAsync(gamepadUiTarget, CancellationToken.None);
     Console.WriteLine("CDP connected.");
 
-    var evalResult = await client.EvaluateAsync(frontendScript, CancellationToken.None);
-    Console.WriteLine($"frontend injection result: {evalResult}");
+    var rawEvalResult = await client.EvaluateAsync(frontendScript, CancellationToken.None);
+    var evalResult = CdpEvaluateResult.Parse(rawEvalResult);
+
+    if (!evalResult.Succeeded)
+    {
+        Console.WriteLine($"frontend injection failed: {evalResult.ErrorText}. Exiting cleanly.");
+        return 0;
+    }
+
+    if (evalResult.BooleanValue != true)
+    {
+        Console.WriteLine("QAM integration unavailable (install() reported failure). Exiting cleanly.");
+        return 0;
+    }
+
+    Console.WriteLine("frontend injection succeeded.");
     Console.WriteLine("QAM hook installed.");
 
     Console.WriteLine("Press Ctrl+C to stop QamHost and clean up the QAM hook.");
