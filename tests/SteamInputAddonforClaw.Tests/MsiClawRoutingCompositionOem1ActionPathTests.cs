@@ -93,6 +93,35 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     }
 
     [Fact]
+    public async Task Pending_AutoRun_mutation_keeps_OEM1_desired_disabled_at_startup_and_arms_once_it_clears()
+    {
+        var (composition, eventSource, mapping) = BuildArmable();
+        mapping.SetAutoRunMutationPending(true);
+        IHandheldRoutingComposition handheld = composition;
+
+        // Startup: RemappingEnabled is true, but the unresolved pending marker must keep OEM1
+        // desired-disabled -- an unconfirmed HKLM AutoRun mutation must never be promoted to armed
+        // suppression merely because a fresh registry read happens to be Disabled.
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+
+        Assert.False(eventSource.StartCalled);
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, composition.CenterMOem1Coordinator.GetSnapshot().State);
+        Assert.False(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+
+        // The elevated helper confirms the mutation and the live settings authority is refreshed;
+        // the explicit post-setup reconcile must now promote OEM1 to Armed.
+        mapping.SetAutoRunMutationPending(false);
+        await handheld.ReconcileOem1PrerequisitesAsync(CancellationToken.None);
+
+        Assert.True(eventSource.StartCalled);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, composition.CenterMOem1Coordinator.GetSnapshot().State);
+        Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
     public async Task Unsupported_hardware_never_starts_WMI_observation_or_enables_the_lifecycle()
     {
         // RemappingEnabled is deliberately true and persisted: the hardware gate must suppress the
@@ -506,11 +535,18 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     internal sealed class FakeOem1MappingPreference(Oem1MappingSettings initial) : SteamInputAddonforClaw.Settings.IOem1MappingPreference
     {
         public Oem1MappingSettings Oem1Mapping { get; private set; } = initial;
+        public bool CenterMAutoRunMutationPending { get; private set; }
         public event EventHandler? Oem1MappingChanged;
 
         internal void Set(Oem1MappingSettings next)
         {
             Oem1Mapping = next;
+            Oem1MappingChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        internal void SetAutoRunMutationPending(bool pending)
+        {
+            CenterMAutoRunMutationPending = pending;
             Oem1MappingChanged?.Invoke(this, EventArgs.Empty);
         }
     }

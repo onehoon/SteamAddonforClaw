@@ -66,6 +66,22 @@ public sealed class FirstTimeSetupPolicyTests
     }
 
     [Fact]
+    public void Oem1AutoRunUnknown_WithMissingRoutingComponents_StillOffersRoutingSetup()
+    {
+        // OEM1's own AutoRun uncertainty must never block independently-required HidHide/usbip
+        // provisioning -- mapping and routing are intentionally separate features.
+        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Missing) with
+        {
+            Oem1RemappingEnabled = true,
+            CenterMAutoRun = CenterMAutoRunState.Unknown
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, result.Status);
+        Assert.Equal(FirstTimeSetupReason.MissingComponents, result.Reason);
+        Assert.True(result.CanInstallRequiredComponents);
+    }
+
+    [Fact]
     public void Oem1AutoRunEnabled_WhileSteamActive_IsBlockedFromMutation()
     {
         var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with

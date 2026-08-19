@@ -45,13 +45,25 @@ internal static class FirstTimeSetupPolicy
         if ((input.Provisioning.HidHide == ComponentProvisioningState.PendingReboot && !input.Provisioning.HidHideBootSessionChanged)
             || (input.Provisioning.UsbIpWin2 == ComponentProvisioningState.PendingReboot && !input.Provisioning.UsbIpWin2BootSessionChanged))
             return new(FirstTimeSetupStatus.RestartRequired, FirstTimeSetupReason.PendingReboot, false);
+        // Routing prerequisites (HidHide/usbip-win2) are independently required regardless of OEM1
+        // mapping/AutoRun state -- an uncertain/unresolved OEM1-only AutoRun prerequisite must never
+        // block provisioning routing components that are still genuinely missing.
+        if (!componentsReady)
+        {
+            if (input.HidHideInstallation.Status is ComponentInstallationStatus.ExistingUnverified or ComponentInstallationStatus.Incompatible or ComponentInstallationStatus.Indeterminate
+                || input.UsbIpWin2Installation.Status is ComponentInstallationStatus.ExistingUnverified or ComponentInstallationStatus.Incompatible or ComponentInstallationStatus.Indeterminate)
+                return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
+            if (input.Steam.IsActive) return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.SteamActive, false);
+            return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true);
+        }
+
+        // Routing prerequisites are now complete; only the OEM1-only AutoRun prerequisite remains.
         if (input.Oem1RemappingEnabled && input.CenterMAutoRun == CenterMAutoRunState.Unknown)
         {
             // The coordinator treats an unresolved AutoRun read as fail-open/NeedsSetup and refuses
             // to arm. Reporting "Complete" here just because HidHide/usbip are ready would let the UI
             // claim setup finished while OEM1 stays intentionally unavailable, so surface the
-            // uncertainty explicitly and keep it non-installable rather than falling through to
-            // componentsReady below.
+            // uncertainty explicitly and keep it non-installable.
             return new(FirstTimeSetupStatus.Indeterminate, FirstTimeSetupReason.CenterMAutoRunUnknown, false);
         }
         if (input.Oem1RemappingEnabled && input.CenterMAutoRun == CenterMAutoRunState.Enabled)
@@ -60,11 +72,6 @@ internal static class FirstTimeSetupPolicy
                 return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.SteamActive, false);
             return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.CenterMAutoRunEnabled, true);
         }
-        if (componentsReady) return new(FirstTimeSetupStatus.Complete, FirstTimeSetupReason.Complete, false);
-        if (input.HidHideInstallation.Status is ComponentInstallationStatus.ExistingUnverified or ComponentInstallationStatus.Incompatible or ComponentInstallationStatus.Indeterminate
-            || input.UsbIpWin2Installation.Status is ComponentInstallationStatus.ExistingUnverified or ComponentInstallationStatus.Incompatible or ComponentInstallationStatus.Indeterminate)
-            return new(FirstTimeSetupStatus.Blocked, FirstTimeSetupReason.ProvisioningUncertain, false);
-        if (input.Steam.IsActive) return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.SteamActive, false);
-        return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true);
+        return new(FirstTimeSetupStatus.Complete, FirstTimeSetupReason.Complete, false);
     }
 }

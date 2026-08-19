@@ -243,6 +243,7 @@ public sealed class AddonRoutingRuntimeTests
     private sealed class DefaultOem1MappingPreference : SteamInputAddonforClaw.Settings.IOem1MappingPreference
     {
         public SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Oem1Mapping => SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings.Default;
+        public bool CenterMAutoRunMutationPending => false;
         public event EventHandler? Oem1MappingChanged { add { } remove { } }
     }
 }
