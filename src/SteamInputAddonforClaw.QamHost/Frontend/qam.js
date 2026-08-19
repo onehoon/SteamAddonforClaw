@@ -165,7 +165,15 @@
         typeof candidate.type === "function",
       0
     );
-    if (!node) return false;
+    if (!node) {
+      // Review fix: distinguishes "outer renderer invoked, but the live tree did not contain the
+      // expected nested producer shape" from every other silent stop below -- without this, a log
+      // ending at "QAM outer renderer patched." is ambiguous between "never invoked" and "invoked
+      // but nested producer missing".
+      logOnce("nestedProducerMissing", "QAM outer renderer invoked, but nested tabs producer was not found.");
+      return false;
+    }
+    logOnce("nestedProducerFound", "Nested tabs producer found.");
 
     const originalType = node.type;
     state.nestedPatches ??= new Map();
@@ -175,9 +183,15 @@
       record.patchedType = function patchedTabsProducer(...args) {
         const result = originalType.apply(this, args);
         if (!state.installed) return result;
+        // Review fix: proves the patched nested producer actually rendered live, separating
+        // "never invoked" from "invoked but props.tabs owner missing" below.
+        logOnce("nestedProducerInvoked", "Nested tabs producer invoked.");
         try {
           const owner = findTabsPropOwner(result, 0);
-          if (!owner) return result;
+          if (!owner) {
+            logOnce("tabsOwnerMissing", "Nested tabs producer rendered, but props.tabs owner was not found.");
+            return result;
+          }
           record.tabs = owner.props.tabs;
           logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
           if (!owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
@@ -280,6 +294,9 @@
 
       function patchedType(...args) {
         const result = originalType.apply(this, args);
+        // Review fix: proves the patched outer renderer actually ran on live Steam, separating
+        // "never invoked" from every failure mode further down the augmentation chain.
+        logOnce("outerRendererInvoked", "QAM outer renderer invoked.");
         try {
           patchTabsProducer(result, React);
         } catch (err) {
