@@ -182,6 +182,45 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Endpoint_resolver_retries_once_after_transient_catalog_exception_then_succeeds()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        MsiClawRumbleEndpointCandidate Candidate(string path) => new(path, "PNP-A", "ROOT-A", 0x0DB0, 0x1902, 64, 64, true);
+
+        var calls = 0;
+        var delays = new List<TimeSpan>();
+        var resolver = new MsiClawRumbleEndpointResolver(_ =>
+        {
+            calls++;
+            if (calls == 1) throw new InvalidOperationException("transient");
+            return [Candidate("a")];
+        }, delays.Add);
+
+        var result = resolver.Resolve(identity);
+
+        Assert.Equal("a", result.DevicePath);
+        Assert.Equal(2, calls);
+        Assert.Single(delays);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_stops_retrying_after_max_attempts_and_rethrows()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        var calls = 0;
+        var resolver = new MsiClawRumbleEndpointResolver(_ =>
+        {
+            calls++;
+            throw new InvalidOperationException($"attempt-{calls}");
+        }, _ => { });
+
+        var exception = Assert.Throws<InvalidOperationException>(() => resolver.Resolve(identity));
+
+        Assert.Equal("attempt-2", exception.Message);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
     public void Sink_rejects_identity_that_becomes_stale_before_write_admission()
     {
         var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
