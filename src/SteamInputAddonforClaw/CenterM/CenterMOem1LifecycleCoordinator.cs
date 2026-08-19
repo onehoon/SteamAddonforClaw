@@ -476,7 +476,29 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             }
 
             if (_state == CenterMOem1LifecycleState.Armed)
+            {
+                // Review (re-review of a8c8658): steady-state Armed must keep revalidating the same
+                // AutoRun/environment/Launcher/Server prerequisites that gated the original arm --
+                // helper liveness/same-name topology alone (CheckForForeignMainUiCore) never catches
+                // AutoRun drifting back to Enabled/Unknown, or Launcher/Server disappearing, while
+                // already Armed. Reuses the existing RefreshSuppressionPrerequisites/
+                // DisarmOwnedHelperForFailOpen primitives (same ones ReconcileCore and the
+                // tracked-MainUI poll branch above already use) rather than adding a new validator.
+                var prerequisitesValid = RefreshSuppressionPrerequisites();
+                if (!prerequisitesValid)
+                {
+                    var disarmed = DisarmOwnedHelperForFailOpen();
+                    _lastReason = disarmed
+                        ? $"ArmedPrerequisiteDrift:AutoRun={_lastAutoRun}:Launcher={_launcherReady}:Server={_serverReady}:Disarmed"
+                        : "ArmedPrerequisiteDrift:DisarmCleanupUnconfirmed";
+                    SetState(disarmed ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
+                    AppLog.Warn("CenterM.Oem1", "Armed prerequisite drift detected; custom suppression is failing open.", null,
+                        ("AutoRun", _lastAutoRun), ("LauncherPresent", _launcherReady), ("ServerPresent", _serverReady), ("Disarmed", disarmed));
+                    return;
+                }
+
                 await CheckForForeignMainUiCore(pollEpoch, cancellationToken).ConfigureAwait(false);
+            }
         }
         finally { _gate.Release(); }
     }
