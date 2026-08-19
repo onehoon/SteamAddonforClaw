@@ -1,11 +1,20 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Settings;
 
 public sealed class SettingsStore
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        WriteIndented = true,
+        // The OEM1 mapping is the only nested payload here, and its enums must round-trip as names:
+        // a numeric action/key/slot value in the settings file would silently change meaning the
+        // moment an enum member is inserted.
+        Converters = { new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) }
+    };
     private readonly string _settingsPath;
 
     public SettingsStore(string settingsPath)
@@ -31,7 +40,10 @@ public sealed class SettingsStore
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
             var steamInputRoutingEnabled = !root.TryGetProperty("SteamInputRoutingEnabled", out var routeProperty) || routeProperty.ValueKind == JsonValueKind.True;
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
-            var settings = new AppSettings(startup, logLevel, steamInputRoutingEnabled, suppressDeveloperMenuWarning);
+            var settings = new AppSettings(startup, logLevel, steamInputRoutingEnabled, suppressDeveloperMenuWarning)
+            {
+                Oem1Mapping = ReadOem1Mapping(root)
+            };
             AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
             return settings;
         }
@@ -44,6 +56,49 @@ public sealed class SettingsStore
         {
             AppLog.Warn("Settings", "Settings read failed. Using defaults.", exception, ("Action", "Defaults"));
             return new AppSettings();
+        }
+    }
+
+    /// <summary>
+    /// Reads the persisted OEM1 mapping. Missing entirely (no value has ever been saved / first
+    /// install) uses the locked first-install defaults, including remapping ON. A present but
+    /// corrupt/unreadable value is a DIFFERENT case and must not silently turn suppression back on.
+    /// </summary>
+    /// <remarks>
+    /// Review fix (MAJOR): the previous fallback was unconditionally <see cref="Oem1MappingSettings.Default"/>
+    /// (remapping <c>true</c>) for both "never saved" and "saved but unparseable" -- but an existing
+    /// settings file with a corrupt <c>Oem1Mapping</c> object can still legitimately record
+    /// <c>RemappingEnabled: false</c> at the top level of that same object. Falling back to the ON
+    /// default in that case would silently re-enable OEM1 suppression against an explicit persisted
+    /// Off, which is exactly the kind of behind-the-user's-back reactivation this setting exists to
+    /// prevent. The salvage below reads only the top-level <c>RemappingEnabled</c> boolean directly
+    /// (itself defaulting to <see langword="false"/> -- fail-OPEN to native Center M, never fail
+    /// toward suppression -- if even that cannot be read) and otherwise falls back to the default
+    /// bindings; bindings are not safety-relevant the way the switch is.
+    /// </remarks>
+    private static Oem1MappingSettings ReadOem1Mapping(JsonElement root)
+    {
+        if (!root.TryGetProperty("Oem1Mapping", out var mappingProperty) || mappingProperty.ValueKind != JsonValueKind.Object)
+            return Oem1MappingSettings.Default; // genuinely absent -- first install, locked defaults apply
+
+        var salvagedEnabled = mappingProperty.TryGetProperty("RemappingEnabled", out var enabledProperty)
+            && enabledProperty.ValueKind is JsonValueKind.True or JsonValueKind.False
+            && enabledProperty.GetBoolean();
+
+        try
+        {
+            var parsed = mappingProperty.Deserialize<Oem1MappingSettings>(SerializerOptions)
+                ?? throw new JsonException("OEM1 mapping was null.");
+
+            if (parsed.NormalSingle is null || parsed.NormalDouble is null || parsed.RoutingSingle is null || parsed.RoutingDouble is null)
+                throw new JsonException("OEM1 mapping contains a null slot binding.");
+
+            return parsed;
+        }
+        catch (JsonException exception)
+        {
+            AppLog.Warn("Settings", "OEM1 mapping settings could not be parsed; preserving the persisted remapping switch and falling back to default bindings.", exception, ("SalvagedRemappingEnabled", salvagedEnabled));
+            return Oem1MappingSettings.Default with { RemappingEnabled = salvagedEnabled };
         }
     }
 
@@ -63,8 +118,10 @@ public sealed class SettingsStore
             var route = root.TryGetProperty("SteamInputRoutingEnabled", out var routeProperty)
                 ? routeProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? routeProperty.GetBoolean() : throw new JsonException("SteamInputRoutingEnabled must be boolean.")
                 : true;
-            // Developer-menu warning suppression is UI preference data, not a safety-gate input.
-            // Keep malformed values from affecting the prerequisite mutation decision.
+            // Developer-menu warning suppression and the OEM1 mapping are UI/feature preference data,
+            // not safety-gate inputs. Keep malformed values from affecting the prerequisite mutation
+            // decision -- and note this result is only ever evaluated, never saved back, so omitting
+            // them here cannot erase what is persisted.
             return new(new AppSettings(startup, logLevel, route), true, "Loaded");
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -82,7 +139,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning };
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning, settings.Oem1Mapping };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

@@ -1,8 +1,9 @@
+using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Install;
 
 namespace SteamInputAddonforClaw.Settings;
 
-public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference
+public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference, IOem1MappingPreference
 {
     private readonly SettingsStore _settingsStore;
     private readonly IWindowsStartupManager _startupManager;
@@ -17,7 +18,9 @@ public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference
     public AppSettings Settings { get; private set; }
     public bool SteamInputRoutingEnabled => Settings.SteamInputRoutingEnabled;
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
+    public Oem1MappingSettings Oem1Mapping => Settings.Oem1Mapping;
     public event EventHandler? SteamInputRoutingEnabledChanged;
+    public event EventHandler? Oem1MappingChanged;
 
     public StartupRegistrationResult ChangeLaunchAtWindowsStartup(bool enabled)
     {
@@ -46,6 +49,26 @@ public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference
         SteamInputRoutingEnabledChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// Persists a complete new OEM1 mapping (remapping switch + four slot bindings) and notifies the
+    /// runtime. Save-then-publish, exactly like <see cref="ChangeSteamInputRoutingEnabled"/>: a
+    /// subscriber must never observe a mapping that is not already on disk.
+    /// </summary>
+    /// <remarks>
+    /// Takes the whole record rather than per-slot mutators so there is one write path and the
+    /// "turning remapping off never erases the bindings" guarantee is structural -- the caller sends
+    /// back the same bindings it was given with only <c>RemappingEnabled</c> changed.
+    /// </remarks>
+    public void ChangeOem1Mapping(Oem1MappingSettings mapping)
+    {
+        ArgumentNullException.ThrowIfNull(mapping);
+        if (Settings.Oem1Mapping == mapping) return;
+        var next = Settings with { Oem1Mapping = mapping };
+        _settingsStore.Save(next);
+        Settings = next;
+        Oem1MappingChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public void SuppressDeveloperMenuWarningPermanently()
     {
         if (Settings.SuppressDeveloperMenuWarning) return;
@@ -61,4 +84,20 @@ public interface ISteamInputRoutingPreference
 {
     bool SteamInputRoutingEnabled { get; }
     event EventHandler? SteamInputRoutingEnabledChanged;
+}
+
+/// <summary>
+/// The read side of the OEM1 mapping the runtime consumes: the current mapping, captured fresh on
+/// every OEM1 gesture, plus a change notification so the global remapping switch can drive the
+/// existing suppression lifecycle.
+/// </summary>
+/// <remarks>
+/// Narrow on purpose -- the routing composition receives only this, never the settings coordinator
+/// itself, so an OEM1 feature can never reach any unrelated preference. Mirrors the shape
+/// <see cref="ISteamInputRoutingPreference"/> already established for the routing master switch.
+/// </remarks>
+public interface IOem1MappingPreference
+{
+    Oem1MappingSettings Oem1Mapping { get; }
+    event EventHandler? Oem1MappingChanged;
 }

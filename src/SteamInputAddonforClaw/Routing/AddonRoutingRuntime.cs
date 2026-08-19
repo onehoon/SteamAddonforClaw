@@ -71,9 +71,14 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker,
         RecoveryManager recovery,
         PowerMutationGate powerGate,
-        RecoverySafetyState recoverySafety)
+        RecoverySafetyState recoverySafety,
+        Settings.IOem1MappingPreference oem1MappingPreference,
+        bool hardwareSupported)
     {
-        var handheldRoutingComposition = new HandheldRoutingCompositionFactory().Create(handheldDeviceAdapter, recovery, powerGate, recoverySafety);
+        ArgumentNullException.ThrowIfNull(oem1MappingPreference);
+        // Forwarded, never recomputed: the startup hardware-support result is the single authority
+        // both routing and the device composition's OEM1 availability gate read.
+        var handheldRoutingComposition = new HandheldRoutingCompositionFactory().Create(handheldDeviceAdapter, recovery, powerGate, recoverySafety, hardwareSupported);
         if (handheldRoutingComposition is null) return null;
 
         var safetySession = handheldRoutingComposition.SafetySession;
@@ -123,7 +128,11 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         // duplicating its field construction here, so the two can never drift apart.
         runtime.Oem1ActivationTask = handheldRoutingComposition.ConfigureOem1ActionPath(
             captureRoutingStatus: runtime.CaptureStatus,
-            requestQuickAccessPulse: deckStage.RequestQuickAccessPulse);
+            requestQuickAccessPulse: deckStage.RequestQuickAccessPulse,
+            // The persisted OEM1 mapping travels alongside those two facts rather than through the
+            // routing layer's own state: this runtime never reads it, and the mapping never becomes a
+            // routing input.
+            mappingPreference: oem1MappingPreference);
 
         return runtime;
     }

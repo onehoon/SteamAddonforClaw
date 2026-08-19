@@ -42,6 +42,8 @@
 
             <views:ControllerPage x:Name="ControllerContent" Visibility="Collapsed" />
 
+            <views:CenterMButtonPage x:Name="CenterMButtonContent" Visibility="Collapsed" />
+
             <views:SettingsPage x:Name="SettingsContent" Visibility="Collapsed" />
 
             <views:DeveloperPage x:Name="DeveloperMenuContent" Visibility="Collapsed" />

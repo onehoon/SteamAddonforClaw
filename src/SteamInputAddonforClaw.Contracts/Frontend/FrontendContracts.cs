@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Contracts.Oem1;
+
 namespace SteamInputAddonforClaw.Contracts.Frontend;
 
 public enum FrontendLogLevel { Off, Info, Debug }
@@ -34,9 +36,18 @@ public enum FrontendAddonOperationalStatus
     RecoveryRequired
 }
 
-public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SteamInputRoutingEnabled, bool SuppressDeveloperMenuWarning);
+/// <remarks><see cref="Oem1Mapping"/> is the settings-layer projection of the persisted OEM1 mapping.
+/// The frontend deliberately carries the SAME <see cref="Oem1MappingSettings"/> the runtime persists
+/// and the dispatcher validates against, rather than a parallel frontend-shaped copy -- the settings
+/// UI and runtime capability validation must never be able to disagree.</remarks>
+public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SteamInputRoutingEnabled, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping);
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
-public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, string StartupRegistrationMessage, FrontendDeveloperSnapshot Developer, string LogDirectoryPath);
+/// <param name="Oem1MappingAvailable">Whether the Center M (OEM1) mapping feature exists at all on
+/// this machine. It is the runtime's single startup hardware-support result (a supported MSI Claw),
+/// NOT a routing/Steam/BPM/runtime condition, and NOT the persisted remapping switch -- a machine
+/// that is not a recognized Claw reports false while its saved mapping stays untouched. A startup
+/// fact, so it lives on bootstrap rather than on the settings snapshot every setter returns.</param>
+public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, string StartupRegistrationMessage, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool Oem1MappingAvailable);
 public sealed record FrontendLaunchAtStartupResult(FrontendSettingsSnapshot Settings, string RegistrationMessage);
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
@@ -71,6 +82,10 @@ public interface IAddonFrontendControl
     Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetSteamInputRoutingEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken cancellationToken = default);
+    /// <summary>Persists a COMPLETE new OEM1 mapping (remapping switch + all four slot bindings).
+    /// Whole-record, not per-slot: it is what makes "turning remapping off never erases the mappings"
+    /// structural rather than a rule each caller has to remember.</summary>
+    Task<FrontendSettingsSnapshot> SetOem1MappingAsync(Oem1MappingSettings mapping, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default);
     Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default);

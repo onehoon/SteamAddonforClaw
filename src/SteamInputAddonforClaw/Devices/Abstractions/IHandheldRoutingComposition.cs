@@ -83,6 +83,16 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
     /// helper ownership, so the OEM1 activation decision must be settled before the routing guard's
     /// own arm transaction can start.
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="mappingPreference"/> is the persisted OEM1 mapping source of truth (global
+    /// remapping switch + the four slot bindings). It is read fresh per gesture and its change event
+    /// drives the remapping switch onto the composition's existing suppression lifecycle -- it is
+    /// deliberately NOT a routing input and carries nothing about Steam routing.
+    /// </para>
     /// </summary>
-    Task ConfigureOem1ActionPath(Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus, Action requestQuickAccessPulse) => Task.CompletedTask;
+    Task ConfigureOem1ActionPath(
+        Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
+        Action requestQuickAccessPulse,
+        Settings.IOem1MappingPreference mappingPreference) => Task.CompletedTask;
 }

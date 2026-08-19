@@ -24,7 +24,9 @@ public sealed class AddonRoutingRuntimeTests
             new AddonOwnedVirtualDeviceTracker(),
             new RecoveryManager(new MemoryJournalStore()),
             new PowerMutationGate(initiallyOpen: true),
-            new RecoverySafetyState(RecoverySafety.Safe));
+            new RecoverySafetyState(RecoverySafety.Safe),
+        new DefaultOem1MappingPreference(),
+            hardwareSupported: true);
 
         Assert.Null(runtime);
         if (runtime is not null) await runtime.DisposeAsync();
@@ -190,7 +192,9 @@ public sealed class AddonRoutingRuntimeTests
         new AddonOwnedVirtualDeviceTracker(),
         new RecoveryManager(new MemoryJournalStore()),
         new PowerMutationGate(initiallyOpen: true),
-        new RecoverySafetyState(RecoverySafety.Safe));
+        new RecoverySafetyState(RecoverySafety.Safe),
+        new DefaultOem1MappingPreference(),
+        hardwareSupported: true);
 
     private static SystemStatusSnapshot Snapshot(RoutingDecision decision) =>
         new(new("Test", "Test", "Test", []), null!, [], null!, null!, null!, decision, null!, true, false);
@@ -233,5 +237,12 @@ public sealed class AddonRoutingRuntimeTests
         public void WriteNew(RecoveryJournal journal) => _journal = journal;
         public void ReplaceExisting(RecoveryJournal journal) { if (_journal is null) throw new IOException(); _journal = journal; }
         public void Delete() => _journal = null;
+    }
+
+    /// <summary>Default OEM1 mapping; these tests are about routing/host lifecycle, not mapping.</summary>
+    private sealed class DefaultOem1MappingPreference : SteamInputAddonforClaw.Settings.IOem1MappingPreference
+    {
+        public SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Oem1Mapping => SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings.Default;
+        public event EventHandler? Oem1MappingChanged { add { } remove { } }
     }
 }

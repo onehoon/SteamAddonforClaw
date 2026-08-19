@@ -17,7 +17,7 @@ public sealed class HandheldRoutingCompositionFactoryTests
         var adapter = new MsiClawDeviceAdapter(new EmptyDeviceEnumerator());
         var factory = new HandheldRoutingCompositionFactory();
 
-        await using var composition = factory.Create(adapter, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
+        await using var composition = factory.Create(adapter, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), hardwareSupported: true);
 
         Assert.NotNull(composition);
         Assert.NotNull(composition.SafetySession);
@@ -31,7 +31,7 @@ public sealed class HandheldRoutingCompositionFactoryTests
     {
         var factory = new HandheldRoutingCompositionFactory();
 
-        var composition = factory.Create(new FakeUnsupportedAdapter(), new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
+        var composition = factory.Create(new FakeUnsupportedAdapter(), new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), hardwareSupported: true);
 
         // No silent MSI fallback: an adapter the factory does not know how to build a runtime
         // composition for must yield no composition at all, not the MSI one.

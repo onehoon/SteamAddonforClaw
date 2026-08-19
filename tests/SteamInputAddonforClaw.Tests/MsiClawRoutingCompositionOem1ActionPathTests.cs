@@ -1,6 +1,7 @@
 using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.CenterM;
+using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -26,10 +27,13 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     private static RoutingRuntimeStatusSnapshot Status(bool steamOutputActive) =>
         new(Available: true, OperationalState: RoutingOperationalState.OverrideActive, SteamOutputActive: steamOutputActive, NativeDirectInputActive: false);
 
-    private static (MsiClawRoutingComposition Composition, FakeMsiEventSource EventSource) BuildArmable(
+    private static (MsiClawRoutingComposition Composition, FakeMsiEventSource EventSource, FakeOem1MappingPreference Mapping) BuildArmable(
         bool wmiStartSucceeds = true,
-        Action? launchBigPicture = null)
+        Action? launchBigPicture = null,
+        Oem1MappingSettings? initialMapping = null,
+        bool hardwareSupported = true)
     {
+        var mapping = new FakeOem1MappingPreference(initialMapping ?? Oem1MappingSettings.Default);
         var devices = new FakeDeviceEnumerator();
         var native = new MsiClawNativeStateManager(devices, new FakeModeController());
         var snapshots = new FakeSnapshotSource();
@@ -54,6 +58,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
             new RecoveryManager(new MemoryJournalStore()),
             new PowerMutationGate(initiallyOpen: true),
             new RecoverySafetyState(RecoverySafety.Safe),
+            hardwareSupported: hardwareSupported,
             centerMOem1Coordinator: coordinator,
             testOnlyOem1EventSource: eventSource,
             // Review fix (MAJOR): deterministic gesture recognition (no real-time sleeps -- the
@@ -64,18 +69,84 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
             testOnlyOem1GestureClock: new ZeroGestureClock(),
             testOnlyOem1LaunchBigPicture: launchBigPicture);
 
-        return (composition, eventSource);
+        return (composition, eventSource, mapping);
     }
 
     // ---- Production suppression activation (Scope 7/8) ----
 
+    // ---- Supported-MSI-Claw hardware availability gate (PR #256 follow-up) ----
+
+    [Fact]
+    public async Task Supported_hardware_allows_the_OEM1_action_path_to_activate()
+    {
+        var (composition, eventSource, mapping) = BuildArmable(hardwareSupported: true);
+        IHandheldRoutingComposition handheld = composition;
+
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+
+        Assert.True(eventSource.StartCalled);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, composition.CenterMOem1Coordinator.GetSnapshot().State);
+        Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Unsupported_hardware_never_starts_WMI_observation_or_enables_the_lifecycle()
+    {
+        // RemappingEnabled is deliberately true and persisted: the hardware gate must suppress the
+        // FEATURE, never rewrite the user's saved settings.
+        var enabled = Oem1MappingSettings.Default with { RemappingEnabled = true };
+        var (composition, eventSource, mapping) = BuildArmable(hardwareSupported: false, initialMapping: enabled);
+        IHandheldRoutingComposition handheld = composition;
+
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+
+        Assert.False(eventSource.StartCalled);
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, composition.CenterMOem1Coordinator.GetSnapshot().State);
+        Assert.False(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+        // Nothing was wired, so no gesture bridge exists to admit a Center M press either.
+        Assert.Null(composition.TestOnly_Oem1Bridge);
+        // Persistence guarantee: the saved mapping is exactly what it was, so the same settings used
+        // later on real Claw hardware still carry the user's bindings and switch.
+        Assert.Equal(enabled, mapping.Oem1Mapping);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Unsupported_hardware_ignores_a_later_remapping_switch_change_without_rewriting_it()
+    {
+        var (composition, eventSource, mapping) = BuildArmable(
+            hardwareSupported: false,
+            initialMapping: Oem1MappingSettings.Default with { RemappingEnabled = false });
+        IHandheldRoutingComposition handheld = composition;
+
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+
+        var turnedOn = Oem1MappingSettings.Default with { RemappingEnabled = true };
+        mapping.Set(turnedOn);
+        await composition.TestOnly_Oem1ActivationTask;
+
+        Assert.False(eventSource.StartCalled);
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, composition.CenterMOem1Coordinator.GetSnapshot().State);
+        // The switch the user set stays set; only the runtime effect is withheld.
+        Assert.Equal(turnedOn, mapping.Oem1Mapping);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+
     [Fact]
     public async Task Wmi_start_success_arms_suppression_and_bridge_authority_turns_on()
     {
-        var (composition, _) = BuildArmable(wmiStartSucceeds: true);
+        var (composition, _, mapping) = BuildArmable(wmiStartSucceeds: true);
         IHandheldRoutingComposition handheld = composition;
 
-        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
         await composition.TestOnly_Oem1ActivationTask;
 
         Assert.Equal(CenterMOem1LifecycleState.Armed, composition.CenterMOem1Coordinator.GetSnapshot().State);
@@ -87,10 +158,10 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     [Fact]
     public async Task Wmi_start_failure_never_arms_suppression()
     {
-        var (composition, _) = BuildArmable(wmiStartSucceeds: false);
+        var (composition, _, mapping) = BuildArmable(wmiStartSucceeds: false);
         IHandheldRoutingComposition handheld = composition;
 
-        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
         await composition.TestOnly_Oem1ActivationTask;
 
         Assert.NotEqual(CenterMOem1LifecycleState.Armed, composition.CenterMOem1Coordinator.GetSnapshot().State);
@@ -104,10 +175,10 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     {
         // Work order Scope 12 (core acceptance test): routing setting OFF must never disable the
         // custom bridge/suppression -- normal mapping (Big Picture) stays reachable.
-        var (composition, _) = BuildArmable();
+        var (composition, _, mapping) = BuildArmable();
         IHandheldRoutingComposition handheld = composition;
 
-        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
         await composition.TestOnly_Oem1ActivationTask;
 
         Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
@@ -124,9 +195,9 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         // single-click debounce resolves without any real-time wait; a TaskCompletionSource lets this
         // test await the actual signal instead of guessing a sleep duration.
         var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var (composition, eventSource) = BuildArmable(launchBigPicture: () => launched.TrySetResult());
+        var (composition, eventSource, mapping) = BuildArmable(launchBigPicture: () => launched.TrySetResult());
         IHandheldRoutingComposition handheld = composition;
-        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
         await composition.TestOnly_Oem1ActivationTask;
         Assert.NotNull(composition.TestOnly_Oem1Bridge);
 
@@ -144,10 +215,10 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     [Fact]
     public async Task Event88_never_reaches_oem1_mapping()
     {
-        var (composition, eventSource) = BuildArmable();
+        var (composition, eventSource, mapping) = BuildArmable();
         IHandheldRoutingComposition handheld = composition;
         var dispatchedGestures = new List<Oem1GesturePolicyRequest>();
-        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
         await composition.TestOnly_Oem1ActivationTask;
         composition.TestOnly_Oem1Bridge!.PolicyRequested += dispatchedGestures.Add;
 
@@ -159,14 +230,103 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         await ((IAsyncDisposable)composition).DisposeAsync();
     }
 
+    // ---- Global remapping switch ----
+
+    [Fact]
+    public async Task Remapping_off_at_startup_never_arms_suppression_and_leaves_native_center_m()
+    {
+        var (composition, _, mapping) = BuildArmable(initialMapping: Oem1MappingSettings.Default with { RemappingEnabled = false });
+        IHandheldRoutingComposition handheld = composition;
+
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+
+        var snapshot = composition.CenterMOem1Coordinator.GetSnapshot();
+        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snapshot.State);
+        Assert.False(snapshot.SuppressionReady);
+        Assert.True(snapshot.NativeBehaviorGuaranteed);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Turning_remapping_off_disables_suppression_and_turning_it_on_again_re_arms()
+    {
+        var (composition, _, mapping) = BuildArmable();
+        IHandheldRoutingComposition handheld = composition;
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+        Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+
+        mapping.Set(mapping.Oem1Mapping with { RemappingEnabled = false });
+        await composition.TestOnly_Oem1ActivationTask;
+
+        var disabled = composition.CenterMOem1Coordinator.GetSnapshot();
+        Assert.False(disabled.SuppressionReady);
+        Assert.True(disabled.NativeBehaviorGuaranteed);
+        // The mappings themselves are untouched by the lifecycle transition.
+        Assert.Equal(Oem1Action.SteamBigPicture, mapping.Oem1Mapping.NormalSingle.Action);
+
+        mapping.Set(mapping.Oem1Mapping with { RemappingEnabled = true });
+        await composition.TestOnly_Oem1ActivationTask;
+
+        Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Editing_a_slot_binding_never_disturbs_the_suppression_lifecycle()
+    {
+        var (composition, _, mapping) = BuildArmable();
+        IHandheldRoutingComposition handheld = composition;
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+        var armedPid = composition.CenterMOem1Coordinator.GetSnapshot().HelperProcessId;
+        Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+
+        mapping.Set(mapping.Oem1Mapping with { NormalDouble = Oem1SlotBinding.Of(Oem1Action.KeyboardHotkey) });
+        await composition.TestOnly_Oem1ActivationTask;
+
+        var snapshot = composition.CenterMOem1Coordinator.GetSnapshot();
+        Assert.True(snapshot.SuppressionReady);
+        // Same exact owned helper: no disarm/re-arm cycle was triggered by a pure mapping edit.
+        Assert.Equal(armedPid, snapshot.HelperProcessId);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
+    public async Task A_routing_transition_alone_never_touches_the_suppression_lifecycle()
+    {
+        // Work order requirement: routing start/stop only changes which mapping DOMAIN the next
+        // gesture resolves in -- it must never arm, disarm, or reinitialize OEM1 suppression.
+        var steamOutputActive = false;
+        var (composition, _, mapping) = BuildArmable();
+        IHandheldRoutingComposition handheld = composition;
+        await handheld.ConfigureOem1ActionPath(() => Status(steamOutputActive), () => { }, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+        var before = composition.CenterMOem1Coordinator.GetSnapshot();
+
+        steamOutputActive = true;
+        await Task.Delay(20);
+
+        var after = composition.CenterMOem1Coordinator.GetSnapshot();
+        Assert.Equal(before.State, after.State);
+        Assert.Equal(before.HelperProcessId, after.HelperProcessId);
+        Assert.True(after.SuppressionReady);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
     // ---- Shutdown (Scope 15) ----
 
     [Fact]
     public async Task Shutdown_revokes_custom_authority_and_disposes_the_action_path()
     {
-        var (composition, _) = BuildArmable();
+        var (composition, _, mapping) = BuildArmable();
         IHandheldRoutingComposition handheld = composition;
-        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
         await composition.TestOnly_Oem1ActivationTask;
         var bridge = composition.TestOnly_Oem1Bridge!;
 
@@ -188,13 +348,13 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         // either throw out of DisposeAsync or leave that task's continuation touching a disposed
         // coordinator.
         var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var (composition, eventSource) = BuildArmable(launchBigPicture: () =>
+        var (composition, eventSource, mapping) = BuildArmable(launchBigPicture: () =>
         {
             launched.TrySetResult();
             throw new InvalidOperationException("simulated Big Picture launch failure");
         });
         IHandheldRoutingComposition handheld = composition;
-        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
         await composition.TestOnly_Oem1ActivationTask;
 
         eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
@@ -224,14 +384,14 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         // the inversion regressed.
         var launchCount = 0;
         var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var (composition, eventSource) = BuildArmable(launchBigPicture: () =>
+        var (composition, eventSource, mapping) = BuildArmable(launchBigPicture: () =>
         {
             Interlocked.Increment(ref launchCount);
             launched.TrySetResult();
             throw new InvalidOperationException("simulated Big Picture launch failure");
         });
         IHandheldRoutingComposition handheld = composition;
-        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
         await composition.TestOnly_Oem1ActivationTask;
         Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
 
@@ -279,9 +439,9 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         // DisposeAsync() returns control -- a press emitted right after starting (not yet awaiting)
         // disposal must never reach the dispatcher.
         var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var (composition, eventSource) = BuildArmable(launchBigPicture: () => launched.TrySetResult());
+        var (composition, eventSource, mapping) = BuildArmable(launchBigPicture: () => launched.TrySetResult());
         IHandheldRoutingComposition handheld = composition;
-        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
         await composition.TestOnly_Oem1ActivationTask;
 
         var disposeTask = ((IAsyncDisposable)composition).DisposeAsync().AsTask();
@@ -297,7 +457,14 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     private sealed class FakeMsiEventSource(bool startSucceeds) : IMsiEventSource
     {
         public event Action<MsiOemEvent>? EventReceived;
-        public bool Start() => startSucceeds;
+        /// <summary>Proves whether Event41 WMI observation was ever actually started -- the exact
+        /// thing unsupported hardware must never reach.</summary>
+        internal bool StartCalled { get; private set; }
+        public bool Start()
+        {
+            StartCalled = true;
+            return startSucceeds;
+        }
         internal void Emit(MsiOemEvent value) => EventReceived?.Invoke(value);
         public void Dispose() { }
     }
@@ -330,6 +497,21 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
                     : [];
             }
             return [];
+        }
+    }
+
+    /// <summary>Stands in for the settings coordinator: the composition only ever sees the narrow
+    /// mapping-preference seam, so a test can drive the global remapping switch without any file
+    /// I/O.</summary>
+    internal sealed class FakeOem1MappingPreference(Oem1MappingSettings initial) : SteamInputAddonforClaw.Settings.IOem1MappingPreference
+    {
+        public Oem1MappingSettings Oem1Mapping { get; private set; } = initial;
+        public event EventHandler? Oem1MappingChanged;
+
+        internal void Set(Oem1MappingSettings next)
+        {
+            Oem1Mapping = next;
+            Oem1MappingChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 

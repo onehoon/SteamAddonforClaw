@@ -15,6 +15,39 @@
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <ToggleSwitch x:Name="SteamInputRoutingToggleSwitch" OffContent="" OnContent="" Toggled="SteamInputRoutingToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
+
+            <!--
+                The toggle changes ONLY the global remapping switch; clicking anywhere else on the
+                card (the chevron area) opens the detail page. IsClickEnabled gives the card the
+                standard Windows 11 navigation chevron, and the nested ToggleSwitch keeps its own
+                click for itself.
+            -->
+            <ctcontrols:SettingsCard
+                x:Name="CenterMButtonCard"
+                Click="CenterMButtonCard_Click"
+                Description="Customize Center M button actions"
+                Header="Center M Button"
+                IsClickEnabled="True">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Setting" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <!--
+                    Exactly one of these two is ever visible. On hardware the Addon does not
+                    recognize as a supported MSI Claw the feature does not exist at all, so the
+                    toggle is disabled AND replaced by the same plain "Unavailable" text badge the
+                    Status page uses for an unavailable controller path, never shown as merely Off.
+                -->
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock
+                        x:Name="CenterMUnavailableText"
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Text="Unavailable"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed" />
+                    <ToggleSwitch x:Name="CenterMRemappingToggleSwitch" OffContent="" OnContent="" Toggled="CenterMRemappingToggleSwitch_Toggled" />
+                </StackPanel>
+            </ctcontrols:SettingsCard>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

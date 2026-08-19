@@ -36,7 +36,8 @@ internal static class AddonRuntimeCompositionFactory
         AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker,
         RecoveryManager recoveryManager,
         IStockCenterMStartupBaseline? stockCenterMBaseline,
-        bool recoverySafe)
+        bool recoverySafe,
+        bool hardwareSupported)
     {
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
@@ -75,7 +76,9 @@ internal static class AddonRuntimeCompositionFactory
             addonOwnedVirtualDeviceTracker,
             recoveryManager,
             powerGate,
-            recoverySafetyState);
+            recoverySafetyState,
+            startupSettings,
+            hardwareSupported);
 
         Func<CancellationToken, Task<bool>> establishBaseline = stockCenterMBaseline is null
             ? _ => Task.FromResult(false)

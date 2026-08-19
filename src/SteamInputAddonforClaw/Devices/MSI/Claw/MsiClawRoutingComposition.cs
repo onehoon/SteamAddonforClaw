@@ -76,6 +76,18 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private readonly IReadOnlyList<IRoutingPipelineStage> _stages;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
     private readonly bool _startCenterMOem1LifecycleRuntime;
+
+    /// <summary>The startup hardware-support result (<see cref="Startup.StartupResult.HardwareSupported"/>),
+    /// forwarded by <see cref="HandheldRoutingCompositionFactory"/>. It is a HARDWARE gate only --
+    /// never a routing/Steam/BPM condition -- and its single effect is that
+    /// <see cref="ConfigureOem1ActionPath"/> wires nothing at all on unrecognized hardware: no Event41
+    /// WMI observation, no <see cref="CenterMOem1Coordinator"/> enable, no gesture bridge, and no
+    /// subscription to the persisted mapping. Persisted OEM1 settings are never read for a decision
+    /// nor written here, so a machine with <c>RemappingEnabled = true</c> saved keeps it saved.
+    /// Defaults to true because the only production construction site (the factory above) always
+    /// passes it explicitly; direct test constructions opt out by passing false.</summary>
+    private readonly bool _hardwareSupported;
+
     private Func<string, ValueTask>? _runtimeFaultHandler;
 
     // PR3: development-only OEM1 production E2E POC action path -- Event41 observation, gesture
@@ -113,11 +125,31 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private Task? _oem1FailOpenTask;
     private bool _oem1Stopping;
 
+    /// <summary>The persisted OEM1 mapping source of truth. Read fresh on every gesture (never
+    /// cached into the dispatcher) and watched so the global remapping switch can drive the existing
+    /// suppression lifecycle. Null until <see cref="ConfigureOem1ActionPath"/> runs.</summary>
+    private Settings.IOem1MappingPreference? _oem1MappingPreference;
+
+    /// <summary>Last remapping-switch value actually APPLIED to the lifecycle, not the last value
+    /// persisted. Guarded by <see cref="_oem1TaskSync"/>. Its whole purpose is that editing a slot
+    /// binding -- by far the common settings change -- raises the same change event but must not
+    /// touch suppression ownership at all: only a real On/Off transition schedules lifecycle work.
+    /// It is also the extra condition on custom gesture authority, so a revoke takes effect
+    /// immediately rather than only once the coordinator's next reconcile observes it.</summary>
+    private bool _oem1RemappingEnabled;
+
+    /// <summary>WMI observation is started lazily and exactly once, the first time remapping is
+    /// actually enabled -- a user who has the feature switched off must never have Event41
+    /// observation started on their behalf, and a later On must still be able to start it. Only ever
+    /// touched from inside the serialized <see cref="_oem1ActivationTask"/> chain.</summary>
+    private bool _oem1ObservationStarted;
+
     internal MsiClawRoutingComposition(
         MsiClawNativeStateManager nativeState,
         RecoveryManager recovery,
         PowerMutationGate powerGate,
         RecoverySafetyState recoverySafety,
+        bool hardwareSupported = true,
         Func<IMsiClawRumbleEndpointResolver>? rumbleEndpointResolverFactory = null,
         CenterMHelperOwnership? centerMHelperOwnership = null,
         CenterMMainUiRoutingGuard? centerMGuard = null,
@@ -129,6 +161,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         IOem1GestureClock? testOnlyOem1GestureClock = null,
         Action? testOnlyOem1LaunchBigPicture = null)
     {
+        _hardwareSupported = hardwareSupported;
         _testOnlyOem1EventSource = testOnlyOem1EventSource;
         _testOnlyOem1GestureDelay = testOnlyOem1GestureDelay;
         _testOnlyOem1GestureClock = testOnlyOem1GestureClock;
@@ -262,18 +295,34 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// </summary>
     Task IHandheldRoutingComposition.ConfigureOem1ActionPath(
         Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
-        Action requestQuickAccessPulse)
+        Action requestQuickAccessPulse,
+        Settings.IOem1MappingPreference mappingPreference)
     {
+        ArgumentNullException.ThrowIfNull(mappingPreference);
         if (_oem1ActionPathConfigured) return Task.CompletedTask;
         _oem1ActionPathConfigured = true;
+
+        // Hardware availability gate: OEM1 mapping only exists on hardware startup already recognized
+        // as a supported MSI Claw. Returning here -- before anything is constructed -- is what makes
+        // "unsupported hardware never reaches Event41 observation / coordinator enable / suppression
+        // arming" structural rather than a condition each step below has to remember. The persisted
+        // Oem1MappingSettings is deliberately neither read nor written on this path.
+        if (!_hardwareSupported)
+        {
+            AppLog.Info("CenterM.Oem1", "OEM1 mapping is unavailable on this hardware; the OEM1 action path is not wired.",
+                ("Reason", "HardwareNotSupported"), ("Action", "Passive"));
+            return Task.CompletedTask;
+        }
 
         var eventSource = _testOnlyOem1EventSource ?? new WmiMsiEventSource();
         var recognizer = new Oem1GestureRecognizer(doubleClickEnabled: true, doubleClickWindow: TimeSpan.FromMilliseconds(400),
             delay: _testOnlyOem1GestureDelay, clock: _testOnlyOem1GestureClock);
         var bridge = new Oem1EventGestureBridge(eventSource, recognizer);
         var dispatcher = new Oem1ActionDispatcher(
-            normalBindings: Oem1ActionBindings.NormalDefault,
-            routingActiveBindings: Oem1ActionBindings.RoutingActiveDefault,
+            // Captured fresh per gesture, exactly like routing status: a mapping the user changed a
+            // moment ago must take effect on the very next press with no re-wiring, and neither the
+            // dispatcher nor this composition may hold a stale copy of it.
+            captureMapping: () => mappingPreference.Oem1Mapping,
             captureRoutingStatus: captureRoutingStatus,
             requestQuickAccessPulse: requestQuickAccessPulse,
             launchBigPicture: _testOnlyOem1LaunchBigPicture ?? Oem1BigPictureLauncher.Launch);
@@ -287,38 +336,104 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         _oem1EventSource = eventSource;
         _oem1GestureRecognizer = recognizer;
         _oem1Bridge = bridge;
+        _oem1MappingPreference = mappingPreference;
+        mappingPreference.Oem1MappingChanged += OnOem1MappingChanged;
 
         if (!_startCenterMOem1LifecycleRuntime)
             return Task.CompletedTask;
 
-        // Scope 8: WMI startup failure must remain feature-local -- never arm custom suppression,
-        // leave native Center M available, continue the Addon runtime otherwise unaffected.
-        if (!eventSource.Start())
-        {
-            AppLog.Warn("CenterM.Oem1", "OEM1 WMI observation failed to start; custom OEM1 suppression will not be armed, native Center M remains available.", null);
-            return Task.CompletedTask;
-        }
-
-        // Scope 7: request lifecycle enable only after WMI observation has actually started and the
-        // gesture/action wiring above is already subscribed. Explicitly OWNED (see _oem1TaskSync) so
-        // DisposeAsync can join it before the coordinator it calls into is disposed, AND now also
-        // returned to the caller so the production startup boundary can await the SAME task before
-        // routing/power observation begins.
+        // Scope 7: the returned task is the one OWNED activation (see _oem1TaskSync) so DisposeAsync
+        // can join it before the coordinator it calls into is disposed, AND the production startup
+        // boundary can await the SAME task before routing/power observation begins. When remapping is
+        // switched off this still resolves normally -- it simply never enables anything.
+        var enabled = mappingPreference.Oem1Mapping.RemappingEnabled;
         lock (_oem1TaskSync)
-            return _oem1ActivationTask = EnableOem1Async();
+        {
+            _oem1RemappingEnabled = enabled;
+            return _oem1ActivationTask = ApplyOem1RemappingEnabledAsync(enabled);
+        }
     }
 
-    private async Task EnableOem1Async()
+    /// <summary>
+    /// The global "Center M Button Remapping" switch, applied to the EXISTING suppression lifecycle
+    /// owner -- this composition never becomes a second one. On means the coordinator is asked to
+    /// enable (arming suppression once its own prerequisites are met); off means it is asked to
+    /// disable, restoring native MSI Center M behaviour. Persisted mappings are untouched either way.
+    /// </summary>
+    private async Task ApplyOem1RemappingEnabledAsync(bool enabled)
     {
         try
         {
-            await CenterMOem1Coordinator.SetDesiredEnabledAsync(true).ConfigureAwait(false);
+            // Scope 8: WMI startup failure must remain feature-local -- never arm custom suppression,
+            // leave native Center M available, continue the Addon runtime otherwise unaffected.
+            if (enabled && !TryStartOem1Observation())
+                return;
+
+            await CenterMOem1Coordinator.SetDesiredEnabledAsync(enabled).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            AppLog.Error("CenterM.Oem1", "Requesting OEM1 lifecycle enable failed.", exception);
+            AppLog.Error("CenterM.Oem1", "Applying the OEM1 remapping switch to the suppression lifecycle failed.", exception, ("Enabled", enabled));
         }
         RefreshOem1BridgeAuthority();
+    }
+
+    /// <summary>Starts Event41 observation at most once, and only on behalf of a user who actually
+    /// has remapping switched on. Only ever called from inside the serialized activation chain.</summary>
+    private bool TryStartOem1Observation()
+    {
+        if (_oem1EventSource is not { } eventSource) return false;
+        if (_oem1ObservationStarted) return true;
+
+        if (!eventSource.Start())
+        {
+            AppLog.Warn("CenterM.Oem1", "OEM1 WMI observation failed to start; custom OEM1 suppression will not be armed, native Center M remains available.", null);
+            return false;
+        }
+
+        _oem1ObservationStarted = true;
+        return true;
+    }
+
+    /// <summary>
+    /// Reacts to a persisted OEM1 mapping change. Only an actual remapping On/Off transition does
+    /// anything here: a slot-binding edit is picked up by the dispatcher's per-gesture capture and
+    /// must never disturb suppression ownership, the helper, or the gesture bridge.
+    /// </summary>
+    /// <remarks>
+    /// Lifecycle work is CHAINED onto <see cref="_oem1ActivationTask"/> rather than started
+    /// concurrently, so rapid toggling can never run two conflicting enable/disable requests against
+    /// the coordinator at once, and <see cref="DisposeAsync"/> keeps exactly one task to join. A
+    /// composition whose fail-open latch has already fired stays fail-open for the rest of its
+    /// lifetime -- re-enabling from here would re-arm suppression while custom gesture authority is
+    /// permanently revoked, i.e. a dead Center M button, which is strictly worse than native
+    /// behaviour.
+    /// </remarks>
+    private void OnOem1MappingChanged(object? sender, EventArgs args)
+    {
+        if (_oem1MappingPreference is not { } preference) return;
+        var enabled = preference.Oem1Mapping.RemappingEnabled;
+
+        lock (_oem1TaskSync)
+        {
+            if (_oem1Stopping || !_startCenterMOem1LifecycleRuntime) return;
+            if (enabled && _oem1FailOpenTask is not null) return;
+            if (_oem1RemappingEnabled == enabled) return;
+
+            _oem1RemappingEnabled = enabled;
+            var previous = _oem1ActivationTask;
+            _oem1ActivationTask = ContinueOem1RemappingAsync(previous, enabled);
+        }
+    }
+
+    private async Task ContinueOem1RemappingAsync(Task previous, bool enabled)
+    {
+        // The predecessor's own failures are already logged where they happen; this chain only needs
+        // it to have FINISHED, so a faulted predecessor must not abort the newly requested change.
+        try { await previous.ConfigureAwait(false); }
+        catch { /* observed above */ }
+
+        await ApplyOem1RemappingEnabledAsync(enabled).ConfigureAwait(false);
     }
 
     /// <summary>Test-only observability: awaits the fire-and-forget startup activation
@@ -372,10 +487,14 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // activate" decision is passed down as a predicate the bridge evaluates from INSIDE its own
         // lock -- _oem1TaskSync is only ever acquired after entering the bridge, never before, so the
         // lock order is always bridge -> _oem1TaskSync, everywhere.
+        // _oem1RemappingEnabled is evaluated inside the same predicate for the same reason the
+        // fail-open latch is: a user who just switched remapping off must stop having their Center M
+        // presses intercepted immediately, not only once the coordinator's next reconcile happens to
+        // publish SuppressionReady == false.
         bridge.SetCustomAuthority(ready, allowActivation: () =>
         {
             lock (_oem1TaskSync)
-                return !_oem1Stopping && _oem1FailOpenTask is null;
+                return !_oem1Stopping && _oem1FailOpenTask is null && _oem1RemappingEnabled;
         });
     }
 
@@ -488,6 +607,12 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // operation) guarantees no new PolicyRequested callback can begin once Dispose() returns, so
         // capturing the owned tasks under _oem1TaskSync afterward is safe without ever reversing the
         // bridge -> _oem1TaskSync lock order RefreshOem1BridgeAuthority/OnOem1ActionFailed rely on.
+        // Unsubscribed alongside the bridge teardown, not later: once admission is closed there is
+        // nothing left for a settings change to drive, and a live subscription would keep this
+        // composition reachable from the process-lifetime settings coordinator.
+        if (_oem1MappingPreference is { } mappingPreference)
+            mappingPreference.Oem1MappingChanged -= OnOem1MappingChanged;
+
         _oem1Bridge?.Dispose();
         _oem1EventSource?.Dispose();
         _oem1GestureRecognizer?.Dispose();

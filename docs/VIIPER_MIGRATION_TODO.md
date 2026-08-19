@@ -221,6 +221,25 @@ WMI/process/launch dependencies. Hardware validation (does OEM1 actually
 suppress native Center M and launch Big Picture / pulse QAM on a physical MSI
 Claw) remains pending before SD5 can be considered complete.
 
+A mapping-framework PR has since replaced the hard-coded POC bindings with a
+small configurable model plus settings UI. `Oem1ActionBindings` is gone; the
+one source of truth is now `Oem1MappingSettings` in
+`SteamInputAddonforClaw.Contracts/Oem1` -- the global "Center M Button
+Remapping" switch plus four slots (`NormalSingle`, `NormalDouble`,
+`RoutingSingle`, `RoutingDouble`), persisted through the existing
+`AppSettings`/`SettingsStore` file. Actions are `None`, `SteamBigPicture`,
+`SteamQuickAccess`, `KeyboardHotkey`, `LaunchApplication`, restricted per slot
+by the single `Oem1ActionCapabilities` table that both the settings UI's
+ComboBoxes and the dispatcher's pre-execution validation read. Domain
+selection is unchanged and still reads only
+`RoutingRuntimeStatusSnapshot.SteamOutputActive`; a routing transition still
+never arms/disarms suppression. The remapping switch drives the EXISTING
+`CenterMOem1LifecycleCoordinator` (no second lifecycle owner) and never erases
+the saved bindings. UI is a Controller-page `SettingsCard` plus a Center M
+Button detail page. **Still does not mark SD5 complete: no real-hardware
+validation has been performed** -- all coverage remains deterministic
+automated tests with fake WMI/process/launch/key-injection seams.
+
 ### SD6 — gyro and accelerometer
 
 Status: **SEPARATE FEATURE TRACK**

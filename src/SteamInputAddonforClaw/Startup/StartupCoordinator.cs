@@ -65,9 +65,13 @@ internal sealed class StartupCoordinator
         }
 
         var hardware = await EvaluateHardwareCompatibilityWithStabilizationAsync(cancellationToken).ConfigureAwait(false);
+        // The ONE decision of "is this a supported MSI Claw" for the whole process lifetime. It is
+        // carried on StartupResult so every downstream consumer -- routing, and the OEM1 mapping
+        // hardware-availability gate -- reads the same result instead of re-evaluating hardware.
+        var hardwareSupported = hardware.Status == HardwareCompatibilityStatus.Supported;
         AppLog.Info("Hardware", "Startup hardware compatibility assessment completed.",
             ("Status", hardware.Status), ("DeviceFamily", hardware.DeviceFamily), ("DeviceModel", hardware.DeviceModel), ("Reason", hardware.Reason),
-            ("Action", hardware.Status == HardwareCompatibilityStatus.Supported ? "Continue" : "Passive"));
+            ("Action", hardwareSupported ? "Continue" : "Passive"));
         if (hardware.Status == HardwareCompatibilityStatus.Unsupported)
             return new StartupResult(true, ControllerEnvironmentMode.Unsupported, ControllerEnvironmentReadiness.NotApplicable);
         if (hardware.Status == HardwareCompatibilityStatus.Indeterminate)
@@ -80,38 +84,38 @@ internal sealed class StartupCoordinator
         if (environment.Mode == ControllerEnvironmentMode.Indeterminate)
         {
             AppLog.Warn("Environment", "Environment decision is indeterminate.", null, ("Action", "Passive"), ("Reason", "EnvironmentDetectionIndeterminate"));
-            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate);
+            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.Indeterminate, HardwareSupported: hardwareSupported);
         }
         if (environment.Mode is ControllerEnvironmentMode.HHCManaged or ControllerEnvironmentMode.Unsupported)
         {
             AppLog.Info("Environment", "Unsupported controller manager detected.", ("Manager", environment.Mode), ("Action", "Passive"), ("Reason", environment.Mode == ControllerEnvironmentMode.HHCManaged ? "HandheldCompanionNotSupportedByCurrentVersion" : "ClawTweaksNotSupportedByCurrentVersion"));
-            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.NotApplicable);
+            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.NotApplicable, HardwareSupported: hardwareSupported);
         }
         if (environment.Mode != ControllerEnvironmentMode.StockCenterM)
         {
             AppLog.Warn("Environment", "Stock MSI Center M baseline is not permitted for this controller environment.", null,
                 ("Mode", environment.Mode), ("Action", "Passive"));
-            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.NotApplicable);
+            return new StartupResult(true, environment.Mode, ControllerEnvironmentReadiness.NotApplicable, HardwareSupported: hardwareSupported);
         }
         var readinessStopwatch = Stopwatch.StartNew();
         AppLog.Info("Environment", "Controller environment readiness wait started.", ("Mode", environment.Mode));
         var readiness = await _environmentWaiter.WaitUntilStableAsync(environment.Mode, cancellationToken).ConfigureAwait(false);
         AppLog.Info("Environment", "Controller environment readiness completed.", ("Result", readiness), ("ReadinessElapsedMs", readinessStopwatch.ElapsedMilliseconds), ("StartupTotalElapsedMs", stopwatch.ElapsedMilliseconds));
         if (readiness != ControllerEnvironmentReadiness.Stable)
-            return new StartupResult(true, environment.Mode, readiness);
+            return new StartupResult(true, environment.Mode, readiness, HardwareSupported: hardwareSupported);
 
         if (_stockCenterMBaseline is null)
         {
             AppLog.Warn("Startup", "Stock MSI Center M baseline service is unavailable; routing remains passive.", null, ("Action", "Passive"));
-            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
+            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false, HardwareSupported: hardwareSupported);
         }
 
         var baseline = await _stockCenterMBaseline.EstablishAsync(cancellationToken).ConfigureAwait(false);
         if (!baseline.Succeeded)
-            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false);
+            return new StartupResult(true, environment.Mode, readiness, RecoverySafe: false, HardwareSupported: hardwareSupported);
 
         var recoverySafe = await ResolveStaleRecoveryAsync(cancellationToken).ConfigureAwait(false);
-        return new StartupResult(true, environment.Mode, readiness, RecoverySafe: recoverySafe);
+        return new StartupResult(true, environment.Mode, readiness, RecoverySafe: recoverySafe, HardwareSupported: hardwareSupported);
     }
 
     /// <summary>
@@ -269,4 +273,8 @@ internal sealed class StartupCoordinator
         || (assessment.Status == HardwareCompatibilityStatus.Unsupported && assessment.Reason == "No handheld-device adapter matched.");
 }
 
-internal sealed record StartupResult(bool ShouldStartRuntime, ControllerEnvironmentMode EnvironmentMode, ControllerEnvironmentReadiness EnvironmentReadiness, bool RecoverySafe = false);
+/// <param name="HardwareSupported">The single startup decision of whether this machine is a
+/// supported MSI Claw (<see cref="HardwareCompatibilityStatus.Supported"/>). Defaults to false so a
+/// construction path that does not reach the hardware gate can never report support it never
+/// established. Consumed by the OEM1 mapping availability gate; never recomputed downstream.</param>
+internal sealed record StartupResult(bool ShouldStartRuntime, ControllerEnvironmentMode EnvironmentMode, ControllerEnvironmentReadiness EnvironmentReadiness, bool RecoverySafe = false, bool HardwareSupported = false);
