@@ -69,6 +69,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ? AddonProcessStartupOutcome.RuntimeReady
                 : AddonProcessStartupOutcome.UpdateRestartScheduled;
             _startupResult = startupResult;
+
+            // QamHost itself remains BPM-scoped. Prepare only Steam's persistent CEF bootstrap
+            // marker here so a normal future Steam/steamwebhelper launch exposes the loopback CDP
+            // endpoint without requiring the user to add launch flags manually. Failure is
+            // feature-local: controller/routing Runtime startup must continue normally.
+            if (startupResult.ShouldStartRuntime)
+                _ = SteamCefDebugBootstrap.Ensure();
+
             return _startupOutcome.Value;
         }
         catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested)

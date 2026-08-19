@@ -1,0 +1,94 @@
+using Microsoft.Win32;
+using SteamInputAddonforClaw.Diagnostics;
+
+namespace SteamInputAddonforClaw.Steam;
+
+/// <summary>
+/// Ensures Steam's built-in CEF remote-debugging bootstrap marker exists before a future
+/// steamwebhelper launch. QamHost remains BPM-scoped; this is only the persistent Steam startup
+/// prerequisite that makes Steam expose its loopback DevTools endpoint without manual launch flags.
+/// </summary>
+internal static class SteamCefDebugBootstrap
+{
+    private const string SteamRegistryPath = "Software\\Valve\\Steam";
+    private const string SteamPathValueName = "SteamPath";
+    private const string InstallPathValueName = "InstallPath";
+    internal const string MarkerFileName = ".cef-enable-remote-debugging";
+
+    internal static bool Ensure()
+    {
+        try
+        {
+            using var steamKey = Registry.CurrentUser.OpenSubKey(SteamRegistryPath, writable: false);
+            var steamDirectory = steamKey?.GetValue(SteamPathValueName) as string;
+            if (string.IsNullOrWhiteSpace(steamDirectory))
+                steamDirectory = steamKey?.GetValue(InstallPathValueName) as string;
+
+            if (string.IsNullOrWhiteSpace(steamDirectory))
+            {
+                AppLog.Warn("QAM.Bootstrap", "Steam install path was not found; CEF debugging bootstrap skipped.");
+                return false;
+            }
+
+            return EnsureForSteamDirectory(steamDirectory);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("QAM.Bootstrap", "Steam CEF debugging bootstrap failed; Runtime remains available.", exception);
+            return false;
+        }
+    }
+
+    internal static bool EnsureForSteamDirectory(string steamDirectory)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(steamDirectory)) return false;
+
+            var normalizedDirectory = Path.GetFullPath(steamDirectory.Trim().Trim('"'));
+            var steamExecutable = Path.Combine(normalizedDirectory, "steam.exe");
+            if (!File.Exists(steamExecutable))
+            {
+                AppLog.Warn(
+                    "QAM.Bootstrap",
+                    "Steam install path did not contain steam.exe; CEF debugging bootstrap skipped.",
+                    null,
+                    ("SteamDirectory", normalizedDirectory));
+                return false;
+            }
+
+            var markerPath = Path.Combine(normalizedDirectory, MarkerFileName);
+            if (File.Exists(markerPath))
+            {
+                AppLog.Info("QAM.Bootstrap", "Steam CEF remote-debugging marker already present.", ("Path", markerPath));
+                return true;
+            }
+
+            try
+            {
+                using var marker = new FileStream(markerPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            }
+            catch (IOException) when (File.Exists(markerPath))
+            {
+                // Another same-user process won the create race. The required end state is satisfied.
+                AppLog.Info("QAM.Bootstrap", "Steam CEF remote-debugging marker already present.", ("Path", markerPath));
+                return true;
+            }
+
+            AppLog.Info(
+                "QAM.Bootstrap",
+                "Steam CEF remote-debugging marker created. Restart Steam once if it is already running.",
+                ("Path", markerPath));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn(
+                "QAM.Bootstrap",
+                "Steam CEF remote-debugging marker could not be prepared; Runtime remains available.",
+                exception,
+                ("SteamDirectory", steamDirectory));
+            return false;
+        }
+    }
+}
