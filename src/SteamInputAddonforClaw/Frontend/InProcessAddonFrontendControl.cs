@@ -136,7 +136,15 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (result is null) return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
         _settings?.RefreshCenterMAutoRunOwnershipFromDisk();
         var resultKind = MapResultKind(ElevatedPrerequisiteSetup.TranslateExitCode(result));
-        if (_reconcileOem1Prerequisites is not null)
+        if (_settings is not null && _settings.Settings.CenterMAutoRunMutationPending)
+        {
+            // The AutoRun write/read-back is explicitly unresolved (crash-attribution marker still
+            // set). Reconciling OEM1 now could let a coincidentally-Disabled fresh registry read
+            // arm suppression before the mutation is actually confirmed, so OEM1 must stay
+            // fail-open until a later pass resolves the pending marker.
+            AppLog.Warn("PrerequisiteSetup", "AutoRun confirmation remains pending; OEM1 stays fail-open.", null, ("Reason", "AutoRunMutationPending"));
+        }
+        else if (_reconcileOem1Prerequisites is not null)
         {
             // OEM1 AutoRun is independent of HidHide/usbip. The elevated helper may have
             // confirmed AutoRun before a later unrelated prerequisite fails, so always let the

@@ -51,6 +51,21 @@ public sealed class FirstTimeSetupPolicyTests
     }
 
     [Fact]
+    public void Oem1AutoRunUnknown_WithComponentsReady_IsNotReportedComplete()
+    {
+        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
+        {
+            Oem1RemappingEnabled = true,
+            CenterMAutoRun = CenterMAutoRunState.Unknown
+        });
+
+        Assert.NotEqual(FirstTimeSetupStatus.Complete, result.Status);
+        Assert.Equal(FirstTimeSetupStatus.Indeterminate, result.Status);
+        Assert.Equal(FirstTimeSetupReason.CenterMAutoRunUnknown, result.Reason);
+        Assert.False(result.CanInstallRequiredComponents);
+    }
+
+    [Fact]
     public void Oem1AutoRunEnabled_WhileSteamActive_IsBlockedFromMutation()
     {
         var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with

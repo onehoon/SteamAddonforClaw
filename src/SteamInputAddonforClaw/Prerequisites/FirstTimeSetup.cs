@@ -9,7 +9,7 @@ internal enum ComponentProvisioningState { None, Provisioned, InstallStarted, Pe
 internal sealed record ProvisioningStateAssessment(ComponentProvisioningState HidHide, ComponentProvisioningState UsbIpWin2, bool HidHideBootSessionChanged = false, bool UsbIpWin2BootSessionChanged = false);
 internal sealed record FirstTimeSetupInput(HardwareCompatibilityAssessment HardwareCompatibility, ControllerEnvironmentCompatibilityAssessment Compatibility, bool RecoverySafe, bool AddonOwnedOutputIdentityUncertain, SteamSessionState Steam, PrerequisiteAssessment HidHide, PrerequisiteAssessment UsbIpWin2, ComponentInstallationAssessment HidHideInstallation, ComponentInstallationAssessment UsbIpWin2Installation, ProvisioningStateAssessment Provisioning, bool Oem1RemappingEnabled = false, CenterMAutoRunState CenterMAutoRun = CenterMAutoRunState.Unknown);
 internal enum FirstTimeSetupStatus { Complete, Required, RestartRequired, Blocked, NotApplicable, Indeterminate }
-internal enum FirstTimeSetupReason { Complete, MissingComponents, CenterMAutoRunEnabled, PendingReboot, RecoveryUnsafe, AddonOwnedOutputIdentityUncertain, HardwareUnsupported, HardwareIndeterminate, CompatibilityUnsupported, CompatibilityIndeterminate, SteamActive, ProvisioningUncertain, LegacyHidHideMissing }
+internal enum FirstTimeSetupReason { Complete, MissingComponents, CenterMAutoRunEnabled, CenterMAutoRunUnknown, PendingReboot, RecoveryUnsafe, AddonOwnedOutputIdentityUncertain, HardwareUnsupported, HardwareIndeterminate, CompatibilityUnsupported, CompatibilityIndeterminate, SteamActive, ProvisioningUncertain, LegacyHidHideMissing }
 internal sealed record FirstTimeSetupAssessment(FirstTimeSetupStatus Status, FirstTimeSetupReason Reason, bool CanInstallRequiredComponents);
 
 internal static class FirstTimeSetupPolicy
@@ -45,6 +45,15 @@ internal static class FirstTimeSetupPolicy
         if ((input.Provisioning.HidHide == ComponentProvisioningState.PendingReboot && !input.Provisioning.HidHideBootSessionChanged)
             || (input.Provisioning.UsbIpWin2 == ComponentProvisioningState.PendingReboot && !input.Provisioning.UsbIpWin2BootSessionChanged))
             return new(FirstTimeSetupStatus.RestartRequired, FirstTimeSetupReason.PendingReboot, false);
+        if (input.Oem1RemappingEnabled && input.CenterMAutoRun == CenterMAutoRunState.Unknown)
+        {
+            // The coordinator treats an unresolved AutoRun read as fail-open/NeedsSetup and refuses
+            // to arm. Reporting "Complete" here just because HidHide/usbip are ready would let the UI
+            // claim setup finished while OEM1 stays intentionally unavailable, so surface the
+            // uncertainty explicitly and keep it non-installable rather than falling through to
+            // componentsReady below.
+            return new(FirstTimeSetupStatus.Indeterminate, FirstTimeSetupReason.CenterMAutoRunUnknown, false);
+        }
         if (input.Oem1RemappingEnabled && input.CenterMAutoRun == CenterMAutoRunState.Enabled)
         {
             if (input.Steam.IsActive)
