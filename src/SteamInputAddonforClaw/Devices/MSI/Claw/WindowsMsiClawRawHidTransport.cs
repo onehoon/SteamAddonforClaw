@@ -64,6 +64,13 @@ internal interface IMsiClawNativeHidApi
     int LastError { get; }
     SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition);
     bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten);
+
+    /// <summary>
+    /// Reads the true input/output report byte lengths for an opened HID interface via
+    /// HidD_GetPreparsedData + HidP_GetCaps. This is the authoritative source for report
+    /// lengths -- DeviceInformation has no valid property keys for HID report lengths.
+    /// </summary>
+    bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength);
 }
 
 internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
@@ -84,9 +91,71 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
         return result;
     }
 
+    public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength)
+    {
+        inputReportLength = 0;
+        outputReportLength = 0;
+        if (!HidD_GetPreparsedData(handle, out var preparsedData) || preparsedData == IntPtr.Zero)
+        {
+            LastError = Marshal.GetLastWin32Error();
+            return false;
+        }
+        try
+        {
+            if (HidP_GetCaps(preparsedData, out var caps) != HidpStatusSuccess)
+            {
+                LastError = Marshal.GetLastWin32Error();
+                return false;
+            }
+            inputReportLength = caps.InputReportByteLength;
+            outputReportLength = caps.OutputReportByteLength;
+            LastError = 0;
+            return true;
+        }
+        finally
+        {
+            HidD_FreePreparsedData(preparsedData);
+        }
+    }
+
+    private const int HidpStatusSuccess = 0x00110000;
+
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess, uint shareMode, IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WriteFile(SafeFileHandle file, byte[] buffer, uint numberOfBytesToWrite, out uint numberOfBytesWritten, IntPtr overlapped);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_GetPreparsedData(SafeFileHandle hidDeviceObject, out IntPtr preparsedData);
+
+    [DllImport("hid.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_FreePreparsedData(IntPtr preparsedData);
+
+    [DllImport("hid.dll")]
+    private static extern int HidP_GetCaps(IntPtr preparsedData, out HIDP_CAPS capabilities);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HIDP_CAPS
+    {
+        public ushort Usage;
+        public ushort UsagePage;
+        public ushort InputReportByteLength;
+        public ushort OutputReportByteLength;
+        public ushort FeatureReportByteLength;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 17)]
+        public ushort[] Reserved;
+        public ushort NumberLinkCollectionNodes;
+        public ushort NumberInputButtonCaps;
+        public ushort NumberInputValueCaps;
+        public ushort NumberInputDataIndices;
+        public ushort NumberOutputButtonCaps;
+        public ushort NumberOutputValueCaps;
+        public ushort NumberOutputDataIndices;
+        public ushort NumberFeatureButtonCaps;
+        public ushort NumberFeatureValueCaps;
+        public ushort NumberFeatureDataIndices;
+    }
 }

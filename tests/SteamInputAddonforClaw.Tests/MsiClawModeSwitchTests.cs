@@ -434,5 +434,11 @@ public sealed class MsiClawModeSwitchTests
             bytesWritten = BytesWritten;
             return WriteResult;
         }
+        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength)
+        {
+            inputReportLength = 0;
+            outputReportLength = 0;
+            return false;
+        }
     }
 }
