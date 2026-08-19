@@ -133,37 +133,66 @@
     return null;
   }
 
-  function findReactNode(node, predicate, depth) {
-    if (node == null || depth > 16) return null;
+  // Purpose-built, bounded walker for the specific React node shapes Steam exposes for QAM: plain
+  // React elements (props.children) and Fiber-like nodes (child/sibling). Not a generic object
+  // graph crawler -- it only descends through these four named links, with a visited set and a
+  // hard node budget so it can never loop or blow up on a large/cyclic tree.
+  const REACT_WALK_NODE_BUDGET = 4000;
 
-    if (Array.isArray(node)) {
-      for (const child of node) {
-        const found = findReactNode(child, predicate, depth + 1);
-        if (found) return found;
+  function findReactNode(root, predicate) {
+    const visited = new Set();
+    const stack = [root];
+    let budget = REACT_WALK_NODE_BUDGET;
+
+    while (stack.length > 0 && budget > 0) {
+      const node = stack.pop();
+      if (node == null) continue;
+
+      if (Array.isArray(node)) {
+        for (const child of node) stack.push(child);
+        continue;
       }
-      return null;
+
+      if (typeof node !== "object") continue;
+      if (visited.has(node)) continue;
+      visited.add(node);
+      budget--;
+
+      if (predicate(node)) return node;
+
+      const children = node.props && node.props.children;
+      if (children != null) stack.push(children);
+      if (node.child != null) stack.push(node.child);
+      if (node.sibling != null) stack.push(node.sibling);
     }
 
-    if (typeof node !== "object") return null;
-    if (predicate(node)) return node;
-
-    const children = node.props && node.props.children;
-    return children == null ? null : findReactNode(children, predicate, depth + 1);
+    return null;
   }
 
-  function findTabsPropOwner(node, depth) {
+  function findTabsPropOwner(node) {
     return findReactNode(node, (candidate) =>
-      candidate.props && Array.isArray(candidate.props.tabs), depth);
+      candidate.props && Array.isArray(candidate.props.tabs));
+  }
+
+  // Resolves the concrete function to patch/invoke for a discovered producer node's `.type`.
+  // Handles only the shapes actually observed for Steam QAM nodes: a plain function component,
+  // or a memo/forwardRef-like object wrapper exposing `.render` or `.type` as a function. Anything
+  // else is reported unsupported rather than guessed at.
+  function resolveComponentTarget(type) {
+    if (typeof type === "function") return { kind: "function", target: type };
+    if (type && typeof type === "object") {
+      if (typeof type.render === "function") return { kind: "object.render", target: type.render };
+      if (typeof type.type === "function") return { kind: "object.type", target: type.type };
+    }
+    return null;
   }
 
   function patchTabsProducer(outerResult, React) {
+    // Discovery signal: the QAM lifecycle prop. Component shape (function vs. object wrapper) is
+    // handled separately below -- it is not part of discovery.
     const node = findReactNode(
       outerResult,
-      (candidate) =>
-        candidate.props &&
-        typeof candidate.props.onFocusNavDeactivated === "function" &&
-        typeof candidate.type === "function",
-      0
+      (candidate) => candidate.props && typeof candidate.props.onFocusNavDeactivated === "function"
     );
     if (!node) {
       // Review fix: distinguishes "outer renderer invoked, but the live tree did not contain the
@@ -173,21 +202,36 @@
       logOnce("nestedProducerMissing", "QAM outer renderer invoked, but nested tabs producer was not found.");
       return false;
     }
-    logOnce("nestedProducerFound", "Nested tabs producer found.");
 
-    const originalType = node.type;
+    const nodeType = node.type;
+    const typeKind = typeof nodeType;
+    logOnce("nestedProducerFound", `Nested tabs producer found. Type=${typeKind}`);
+    if (typeKind === "object" && nodeType) {
+      logOnce(
+        "nestedProducerShape",
+        `Nested tabs producer shape. hasType=${typeof nodeType.type === "function"} hasRender=${typeof nodeType.render === "function"} hasPrototypeRender=${typeof nodeType.prototype?.render === "function"}`
+      );
+    }
+
+    const resolved = resolveComponentTarget(nodeType);
+    if (!resolved) {
+      logOnce("nestedProducerUnsupported", "Nested tabs producer found but component type is unsupported.");
+      return false;
+    }
+
+    const originalTarget = resolved.target;
     state.nestedPatches ??= new Map();
-    let record = state.nestedPatches.get(originalType);
+    let record = state.nestedPatches.get(originalTarget);
     if (!record) {
-      record = { node: null, originalType, patchedType: null, tabs: null };
-      record.patchedType = function patchedTabsProducer(...args) {
-        const result = originalType.apply(this, args);
+      record = { node: null, originalType: null, patchedType: null, tabs: null };
+      const patchedTarget = function patchedTabsProducer(...args) {
+        const result = originalTarget.apply(this, args);
         if (!state.installed) return result;
         // Review fix: proves the patched nested producer actually rendered live, separating
         // "never invoked" from "invoked but props.tabs owner missing" below.
         logOnce("nestedProducerInvoked", "Nested tabs producer invoked.");
         try {
-          const owner = findTabsPropOwner(result, 0);
+          const owner = findTabsPropOwner(result);
           if (!owner) {
             logOnce("tabsOwnerMissing", "Nested tabs producer rendered, but props.tabs owner was not found.");
             return result;
@@ -205,11 +249,25 @@
         }
         return result;
       };
-      state.nestedPatches.set(originalType, record);
+
+      // Rebuild the patched `.type` in the same shape the original was found in, so React keeps
+      // treating it as the same kind of type (function component vs. object wrapper).
+      let patchedType;
+      if (resolved.kind === "function") {
+        patchedType = patchedTarget;
+      } else if (resolved.kind === "object.render") {
+        patchedType = Object.assign({}, nodeType, { render: patchedTarget });
+      } else {
+        patchedType = Object.assign({}, nodeType, { type: patchedTarget });
+      }
+
+      record.originalType = nodeType;
+      record.patchedType = patchedType;
+      state.nestedPatches.set(originalTarget, record);
     }
 
     record.node = node;
-    if (node.type === originalType) {
+    if (node.type === record.originalType) {
       node.type = record.patchedType;
       logOnce("nestedPatch", "Nested tabs producer patched.");
     }
