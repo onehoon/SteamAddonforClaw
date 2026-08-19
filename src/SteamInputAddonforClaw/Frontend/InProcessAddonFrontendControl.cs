@@ -109,6 +109,15 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(new FrontendDeveloperSnapshot(_developer.IsEnabled));
     }
 
+    public async Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        if (!_developer.IsEnabled) return new FrontendVibrationTestResult(false, "Enable Test Mode from Developer Menu.", null);
+        if (!_captureRoutingStatus().SteamOutputActive) return new FrontendVibrationTestResult(false, "Steam Deck output is not active.", null);
+        var success = await (_runtime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(false)).ConfigureAwait(false);
+        return new FrontendVibrationTestResult(success, success ? "Succeeded" : "Feedback bridge is unavailable or the test was cancelled.", null);
+    }
+
     public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();

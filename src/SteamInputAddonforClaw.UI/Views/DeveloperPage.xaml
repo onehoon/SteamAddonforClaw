@@ -29,6 +29,10 @@
                 <ToggleSwitch x:Name="TestModeToggleSwitch" OffContent="" OnContent="" Toggled="TestModeToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
 
+            <ctcontrols:SettingsCard Header="Vibration Test" Description="Test Steam Deck rumble and haptic feedback through the physical MSI Claw motors. Requires Developer Test Mode.">
+                <Button Content="Open" Click="OpenVibrationTestButton_Click" />
+            </ctcontrols:SettingsCard>
+
             <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
                 <Grid ColumnSpacing="16">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

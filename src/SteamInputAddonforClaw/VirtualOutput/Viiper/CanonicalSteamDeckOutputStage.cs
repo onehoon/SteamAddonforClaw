@@ -6,6 +6,8 @@ using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Feedback;
+using SteamInputAddonforClaw.Contracts.Frontend;
+using System.Buffers.Binary;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
@@ -91,6 +93,19 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     /// actually active; see docs/VIIPER_MIGRATION_TODO.md SD5.
     /// </summary>
     internal void RequestQuickAccessPulse() => _systemButtonOverlay.RequestQuickAccessPulse();
+    internal Task<bool> RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken)
+    {
+        if (!_feedbackArmed || _feedbackBridge is null) return Task.FromResult(false);
+        var report = new byte[64];
+        switch (command)
+        {
+            case FrontendVibrationTestCommand.Rumble: report[0] = 0xEB; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(2), 0x8000); BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(4), 0x8000); break;
+            case FrontendVibrationTestCommand.Haptic: report[0] = 0xEA; report[1] = 128; break;
+            case FrontendVibrationTestCommand.HapticPulse: report[0] = 0x8F; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(1), 25000); report[3] = 10; break;
+            case FrontendVibrationTestCommand.Stop: report[0] = 0xEB; break;
+        }
+        return _feedbackBridge.ProcessDeveloperTestAsync(report, command == FrontendVibrationTestCommand.Stop, cancellationToken);
+    }
     internal Action? FeedbackBeforeLease
     {
         set { if (_feedbackBridge is not null) _feedbackBridge.BeforeLease = value; }

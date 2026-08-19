@@ -3,6 +3,7 @@ using SteamInputAddonforClaw.Contracts.Oem1;
 namespace SteamInputAddonforClaw.Contracts.Frontend;
 
 public enum FrontendLogLevel { Off, Info, Debug }
+public enum FrontendVibrationTestCommand { Rumble, Haptic, HapticPulse, Stop }
 public enum FrontendSetupStatus { Complete, Required, Blocked, RestartRequired, NotApplicable, Indeterminate }
 public enum FrontendHardwareStatus { Supported, Unsupported, Indeterminate }
 public enum FrontendControllerEnvironmentStatus { Supported, Unsupported, Indeterminate }
@@ -42,6 +43,7 @@ public enum FrontendAddonOperationalStatus
 /// UI and runtime capability validation must never be able to disagree.</remarks>
 public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SteamInputRoutingEnabled, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping);
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
+public sealed record FrontendVibrationTestResult(bool Succeeded, string Reason, string? LogFilePath);
 /// <param name="Oem1MappingAvailable">Whether the Center M (OEM1) mapping feature exists at all on
 /// this machine. It is the runtime's single startup hardware-support result (a supported MSI Claw),
 /// NOT a routing/Steam/BPM/runtime condition, and NOT the persisted remapping switch -- a machine
@@ -88,6 +90,8 @@ public interface IAddonFrontendControl
     Task<FrontendSettingsSnapshot> SetOem1MappingAsync(Oem1MappingSettings mapping, CancellationToken cancellationToken = default);
     Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default);
     Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendVibrationTestResult(false, "Vibration test is unavailable.", null));
     Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default);
     Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default);
 }

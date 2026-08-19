@@ -40,7 +40,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SetOem1Mapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SetOem1Mapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, RunVibrationTest }
 internal enum FrontendNotificationKind { StateInvalidated }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -50,6 +50,7 @@ internal sealed record SetSteamInputRoutingEnabledRequest(bool Enabled);
 internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetOem1MappingRequest(SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Mapping);
 internal sealed record SetDeveloperTestModeRequest(bool Enabled);
+internal sealed record RunVibrationTestRequest(FrontendVibrationTestCommand Command);
 
 internal static class FrontendWireCodec
 {

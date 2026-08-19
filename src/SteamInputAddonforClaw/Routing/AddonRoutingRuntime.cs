@@ -42,12 +42,14 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     private readonly IHandheldRoutingComposition _composition;
     private readonly IRoutingSafetySession? _safetySession;
     private readonly RoutingPipelineRuntimeCoordinator _coordinator;
+    private readonly CanonicalSteamDeckOutputStage _deckStage;
 
-    private AddonRoutingRuntime(IHandheldRoutingComposition composition, IRoutingSafetySession? safetySession, RoutingPipelineRuntimeCoordinator coordinator)
+    private AddonRoutingRuntime(IHandheldRoutingComposition composition, IRoutingSafetySession? safetySession, RoutingPipelineRuntimeCoordinator coordinator, CanonicalSteamDeckOutputStage deckStage)
     {
         _composition = composition;
         _safetySession = safetySession;
         _coordinator = coordinator;
+        _deckStage = deckStage;
     }
 
     /// <summary>Review fix (BLOCKER): the OEM1 action path's startup activation
@@ -116,7 +118,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
         });
 
-        var runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator);
+        var runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator, deckStage);
 
         // PR3: development-only OEM1 production E2E POC. The only two facts a device-specific OEM1
         // feature needs from this generic routing/output layer -- fresh routing status and the
@@ -158,6 +160,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         OperationalState: _coordinator.CurrentOperationalState,
         SteamOutputActive: _coordinator.ActiveSessionHasSteamOutputEnabled,
         NativeDirectInputActive: _safetySession?.IsActive == true);
+    internal Task<bool> RunDeveloperVibrationTestAsync(Contracts.Frontend.FrontendVibrationTestCommand command, CancellationToken cancellationToken) => CaptureStatus().SteamOutputActive ? _deckStage.RunDeveloperVibrationTestAsync(command, cancellationToken) : Task.FromResult(false);
 
     internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() => _coordinator.CaptureTerminationSnapshot();
 

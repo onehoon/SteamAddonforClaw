@@ -74,6 +74,9 @@ public sealed partial class MainWindow : Window
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
+        DeveloperMenuContent.VibrationTestRequested += (_, _) => ShowPage(_navigationState.OpenVibrationTest());
+        VibrationTestContent.Initialize(_frontend, _bootstrap);
+        VibrationTestContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         _frontend.StateInvalidated += OnFrontendStateInvalidated;
         StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
         MainNavigationView.SelectedItem = StatusNavigationItem;
@@ -178,6 +181,7 @@ public sealed partial class MainWindow : Window
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
         CenterMButtonContent.Visibility = page == MainNavigationPage.CenterMButton ? Visibility.Visible : Visibility.Collapsed;
+        VibrationTestContent.Visibility = page == MainNavigationPage.VibrationTest ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
     }
 

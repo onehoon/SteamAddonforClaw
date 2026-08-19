@@ -14,6 +14,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     private CancellationTokenSource? _pendingStop;
     private long _sequence;
     private bool _disposed;
+    private CancellationTokenSource? _developerTest;
 
     internal SteamDeckRumbleFeedbackBridge(FeedbackAuthority authority, FeedbackAuthorityToken token, IPhysicalRumbleSink sink)
     {
@@ -25,6 +26,22 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
     internal SteamDeckOutputCallback Callback { get; }
     internal Action? BeforeLease { get; set; }
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam")
+    {
+        var decoded = SteamDeckRumbleDecoder.Decode(report);
+        if (!decoded.IsSupported) return false;
+        var sequence = BeginFeedback();
+        BeforeLease?.Invoke();
+        if (!TryWrite(sequence, decoded.Rumble))
+        {
+            AppLog.Debug("Rumble", "SteamDeck feedback DROP", ("Reason", "AuthorityRejected"), ("Origin", origin));
+            return false;
+        }
+        if (decoded.Command == SteamDeckFeedbackCommand.HapticPulse && decoded.PulseDurationMilliseconds is { } delay)
+            ArmStop(sequence, delay);
+        AppLog.Debug("Rumble", "Steam Deck feedback processed.", ("Origin", origin), ("Command", decoded.Command));
+        return true;
+    }
 
     internal void Dispose()
     {
@@ -35,6 +52,35 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             _pendingStop?.Cancel();
             _pendingStop?.Dispose();
             _pendingStop = null;
+            _developerTest?.Cancel();
+            _developerTest?.Dispose();
+            _developerTest = null;
+        }
+    }
+
+    internal async Task<bool> ProcessDeveloperTestAsync(ReadOnlyMemory<byte> report, bool explicitStop, CancellationToken cancellationToken)
+    {
+        CancellationTokenSource linked;
+        lock (_gate)
+        {
+            _developerTest?.Cancel();
+            _developerTest?.Dispose();
+            linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _developerTest = linked;
+        }
+        try
+        {
+            if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest")) return false;
+            if (explicitStop) return true;
+            await Task.Delay(250, linked.Token).ConfigureAwait(false);
+            var stop = new byte[64]; stop[0] = 0xEB;
+            return ProcessNormalizedReport(stop, "DeveloperVibrationTest");
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested) { return false; }
+        finally
+        {
+            lock (_gate) if (ReferenceEquals(_developerTest, linked)) _developerTest = null;
+            linked.Dispose();
         }
     }
 
@@ -65,16 +111,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             else
                 AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command));
 
-            if (!decoded.IsSupported) return;
-            var sequence = BeginFeedback();
-            BeforeLease?.Invoke();
-            if (!TryWrite(sequence, decoded.Rumble))
-            {
-                AppLog.Debug("Rumble", "SteamDeck feedback DROP", ("Reason", "AuthorityRejected"));
-                return;
-            }
-            if (decoded.Command == SteamDeckFeedbackCommand.HapticPulse && decoded.PulseDurationMilliseconds is { } delay)
-                ArmStop(sequence, delay);
+            ProcessNormalizedReport(report, "Steam");
         }
         catch (Exception exception)
         {
