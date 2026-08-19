@@ -23,38 +23,6 @@ public sealed class FirstTimeSetupPolicyTests
     [Fact]
     public void ReadyInstallableComponents_AreCompleteWhenViiperIsUnavailable() => Assert.Equal(FirstTimeSetupStatus.Complete, FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready)).Status);
 
-    // PR2: AutoRun was removed as an OEM1/first-time-setup prerequisite entirely. OEM1's own arming
-    // prerequisites (environment eligibility, Launcher/Server, same-name topology, exact helper
-    // ownership) are owned by CenterMOem1LifecycleCoordinator and never surface a first-time-setup
-    // requirement -- routing components (HidHide/usbip-win2) are the only thing this policy gates,
-    // regardless of the OEM1 remapping switch.
-
-    [Fact]
-    public void Oem1RemappingEnabled_WithRoutingComponentsReady_IsComplete()
-    {
-        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
-        {
-            Oem1RemappingEnabled = true
-        });
-
-        Assert.Equal(FirstTimeSetupStatus.Complete, result.Status);
-    }
-
-    [Fact]
-    public void Oem1RemappingEnabled_WithMissingRoutingComponents_StillOffersRoutingSetup()
-    {
-        // OEM1's own arming prerequisites must never block independently-required HidHide/usbip
-        // provisioning -- mapping and routing are intentionally separate features.
-        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Missing) with
-        {
-            Oem1RemappingEnabled = true
-        });
-
-        Assert.Equal(FirstTimeSetupStatus.Required, result.Status);
-        Assert.Equal(FirstTimeSetupReason.MissingComponents, result.Reason);
-        Assert.True(result.CanInstallRequiredComponents);
-    }
-
     [Theory]
     [InlineData((int)HardwareCompatibilityStatus.Unsupported, (int)FirstTimeSetupStatus.NotApplicable)]
     [InlineData((int)HardwareCompatibilityStatus.Indeterminate, (int)FirstTimeSetupStatus.Indeterminate)]

@@ -64,8 +64,6 @@ internal static class ElevatedPrerequisiteSetup
             var hidStore = new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
             var usbStore = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath);
             if (!LogAndAllowSafetyGate("Initial")) return 1;
-            var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
-            var settings = settingsStore.Load();
             var restartRequired = false;
             var hidHide = new WindowsHidHidePackageProbe().Inspect();
             AppLog.Info("PrerequisiteSetup", "HidHide package probe completed.", ("Installed", hidHide.Installed), ("Version", hidHide.Version), ("InspectionSucceeded", hidHide.InspectionSucceeded));

@@ -164,9 +164,6 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     internal Task<bool> ReconcileFreshAfterResumeAsync(CancellationToken cancellationToken) =>
         _coordinator.ReconcileFreshAfterResumeAsync(cancellationToken).AsTask();
 
-    internal Task ReconcileOem1PrerequisitesAsync(CancellationToken cancellationToken = default) =>
-        _composition.ReconcileOem1PrerequisitesAsync(cancellationToken);
-
     internal Task<bool> RetryResidualCleanupForResumeAsync(CancellationToken cancellationToken) =>
         _coordinator.RetryResidualCleanupForResumeAsync(cancellationToken).AsTask();
 

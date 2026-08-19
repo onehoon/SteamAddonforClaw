@@ -896,17 +896,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         return _launcherReady && _serverReady;
     }
 
-    internal async Task ReconcilePrerequisitesAsync(CancellationToken cancellationToken = default)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_shutdown || !_desiredEnabled) return;
-            await ReconcileCore("ExplicitPrerequisiteSetupReconcile", Interlocked.Read(ref _lifecycleEpoch), cancellationToken).ConfigureAwait(false);
-        }
-        finally { _gate.Release(); }
-    }
-
     private void LogPrerequisiteSnapshot(string decision, bool? environmentEligible, bool? launcherPresent, bool? serverPresent)
     {
         AppLog.Info("CenterM.Oem1", "Fresh prerequisite snapshot evaluated.",

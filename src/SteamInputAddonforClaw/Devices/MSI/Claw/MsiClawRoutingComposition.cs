@@ -356,12 +356,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     /// <summary>Whether OEM1 desired-enabled should be requested, based solely on the persisted
     /// remapping switch. Shared by the startup path
-    /// (<see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>), the mapping-change path
-    /// (<see cref="OnOem1MappingChanged"/>), and the explicit post-setup reconcile path
-    /// (<see cref="IHandheldRoutingComposition.ReconcileOem1PrerequisitesAsync"/>) so all three apply
-    /// the exact same gate. The rest of the arming decision (environment eligibility, Launcher/Server
-    /// readiness, same-name topology, exact helper ownership) is owned entirely by
-    /// <see cref="CenterMOem1LifecycleCoordinator"/>.</summary>
+    /// (<see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>) and the mapping-change path
+    /// (<see cref="OnOem1MappingChanged"/>) so both apply the exact same gate. The rest of the arming
+    /// decision (environment eligibility, Launcher/Server readiness, same-name topology, exact helper
+    /// ownership) is owned entirely by <see cref="CenterMOem1LifecycleCoordinator"/>.</summary>
     private static bool ComputeOem1CanArm(Settings.IOem1MappingPreference preference) =>
         preference.Oem1Mapping.RemappingEnabled;
 
@@ -384,23 +382,6 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             var previous = _oem1ActivationTask;
             return _oem1ActivationTask = ContinueOem1RemappingAsync(previous, enabled);
         }
-    }
-
-    async Task IHandheldRoutingComposition.ReconcileOem1PrerequisitesAsync(CancellationToken cancellationToken)
-    {
-        if (!_hardwareSupported) return;
-
-        if (_oem1MappingPreference is { } preference)
-        {
-            // Re-apply the same remapping-switch gate ConfigureOem1ActionPath/OnOem1MappingChanged
-            // already use, in case startup left desired-enabled false for a reason that has since
-            // cleared (e.g. the mapping preference was not yet available at startup).
-            await RequestOem1EnabledTransitionAsync(ComputeOem1CanArm(preference)).ConfigureAwait(false);
-        }
-
-        if (!_oem1RemappingEnabled) return;
-        await CenterMOem1Coordinator.ReconcilePrerequisitesAsync(cancellationToken).ConfigureAwait(false);
-        RefreshOem1BridgeAuthority();
     }
 
     /// <summary>
