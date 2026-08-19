@@ -1,0 +1,70 @@
+using SteamInputAddonforClaw.Steam;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+public sealed class SteamCefDebugBootstrapTests
+{
+    [Fact]
+    public void Missing_marker_is_created_as_empty_file()
+    {
+        using var scope = new SteamDirectoryScope();
+
+        Assert.True(SteamCefDebugBootstrap.EnsureForSteamDirectory(scope.Path));
+
+        var marker = System.IO.Path.Combine(scope.Path, SteamCefDebugBootstrap.MarkerFileName);
+        Assert.True(File.Exists(marker));
+        Assert.Equal(0, new FileInfo(marker).Length);
+    }
+
+    [Fact]
+    public void Existing_marker_is_preserved()
+    {
+        using var scope = new SteamDirectoryScope();
+        var marker = System.IO.Path.Combine(scope.Path, SteamCefDebugBootstrap.MarkerFileName);
+        File.WriteAllText(marker, "owned-by-another-tool");
+
+        Assert.True(SteamCefDebugBootstrap.EnsureForSteamDirectory(scope.Path));
+
+        Assert.Equal("owned-by-another-tool", File.ReadAllText(marker));
+    }
+
+    [Fact]
+    public void Directory_without_steam_executable_is_rejected_without_creating_marker()
+    {
+        var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "steam-cef-bootstrap-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            Assert.False(SteamCefDebugBootstrap.EnsureForSteamDirectory(directory));
+            Assert.False(File.Exists(System.IO.Path.Combine(directory, SteamCefDebugBootstrap.MarkerFileName)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Empty_directory_value_fails_open()
+    {
+        Assert.False(SteamCefDebugBootstrap.EnsureForSteamDirectory("   "));
+    }
+
+    private sealed class SteamDirectoryScope : IDisposable
+    {
+        internal SteamDirectoryScope()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "steam-cef-bootstrap-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path);
+            File.WriteAllText(System.IO.Path.Combine(Path, "steam.exe"), string.Empty);
+        }
+
+        internal string Path { get; }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path)) Directory.Delete(Path, recursive: true);
+        }
+    }
+}
