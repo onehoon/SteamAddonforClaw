@@ -87,13 +87,15 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
 
     public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
     {
+        bytesWritten = 0;
         var overlapped = Marshal.AllocHGlobal(Marshal.SizeOf<NativeOverlapped>());
         var eventHandle = CreateEventW(IntPtr.Zero, true, false, null);
+        var pinned = GCHandle.Alloc(buffer, GCHandleType.Pinned);
         try
         {
             var state = new NativeOverlapped { EventHandle = eventHandle };
             Marshal.StructureToPtr(state, overlapped, false);
-            var result = WriteFile(handle, buffer, (uint)buffer.Length, out bytesWritten, overlapped);
+            var result = WriteFile(handle, pinned.AddrOfPinnedObject(), (uint)buffer.Length, IntPtr.Zero, overlapped);
             if (!result)
             {
                 LastError = Marshal.GetLastWin32Error();
@@ -107,6 +109,7 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
         }
         finally
         {
+            pinned.Free();
             if (eventHandle != IntPtr.Zero) CloseHandle(eventHandle);
             Marshal.FreeHGlobal(overlapped);
         }
@@ -152,7 +155,7 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     private static extern bool CloseHandle(IntPtr handle);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WriteFile(SafeFileHandle file, byte[] buffer, uint numberOfBytesToWrite, out uint numberOfBytesWritten, IntPtr overlapped);
+    private static extern bool WriteFile(SafeFileHandle file, IntPtr buffer, uint numberOfBytesToWrite, IntPtr numberOfBytesWritten, IntPtr overlapped);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetOverlappedResult(SafeFileHandle file, IntPtr overlapped, out uint numberOfBytesTransferred, bool wait);
