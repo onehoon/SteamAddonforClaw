@@ -139,26 +139,20 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
                 processSnapshotSource: centerMProcesses));
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
-        // Review fix (MAJOR): Local\MSI Center M.exe -- the suppression/launch-protection primitive
-        // both the routing guard and this coordinator use -- is a session-local kernel object, so a
-        // same-name MSI Center M.exe running in a different Windows session must never become this
-        // lifecycle's real-MainUI authority or inflate its same-name process topology. Scope the
-        // OEM1 coordinator's own process observation (and its default backend probe, which is built
-        // from the same source unless overridden) to this Addon's current session; unknown scope
-        // fails open to uncertain, never to "assume in-scope".
-        var oem1Processes = new CurrentSessionCenterMProcessSnapshotSource(
-            new Win32ProcessSnapshotSource(), new Win32CurrentSessionScopeInspector());
-
         // PR2: production-compose the already-implemented CenterMOem1LifecycleCoordinator into
         // this same shared CenterMHelperOwnership authority (work order requirement 1) -- never a
-        // second, independent production helper owner. This composition only ever exists for an
-        // MSI Claw adapter (HandheldRoutingCompositionFactory), so `() => true` here IS the
-        // required explicit MSI Claw environment-eligibility predicate (requirement 9) -- distinct
-        // from, and never widening, the coordinator's own fail-open default of false for any
-        // caller that omits one.
+        // second, independent production helper owner. Review correction: the supported product
+        // model is one Windows user / one interactive session (no Fast User Switching/RDP/multi-
+        // session), so this reuses the SAME simple centerMProcesses source the routing guard/
+        // retirement path above already uses on that model, rather than adding a session-scoping
+        // wrapper that would only protect against an explicitly unsupported scenario. This
+        // composition only ever exists for an MSI Claw adapter (HandheldRoutingCompositionFactory),
+        // so `() => true` here IS the required explicit MSI Claw environment-eligibility predicate
+        // (requirement 9) -- distinct from, and never widening, the coordinator's own fail-open
+        // default of false for any caller that omits one.
         CenterMOem1Coordinator = centerMOem1Coordinator ?? new CenterMOem1LifecycleCoordinator(
             publishRootProvider: () => AppContext.BaseDirectory,
-            processSnapshotSource: oem1Processes,
+            processSnapshotSource: centerMProcesses,
             helperOwnership: CenterMHelperOwnership,
             environmentEligibility: () => true);
         CenterMOem1Runtime = centerMOem1Runtime ?? new CenterMOem1LifecycleRuntime(
