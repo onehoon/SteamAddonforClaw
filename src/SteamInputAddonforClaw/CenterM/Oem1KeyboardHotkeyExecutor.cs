@@ -17,6 +17,11 @@ namespace SteamInputAddonforClaw.CenterM;
 /// </remarks>
 internal static class Oem1KeyboardHotkeyExecutor
 {
+    /// <summary>Test-only seam: when set, intercepts every individual key press/release in place of
+    /// the real <c>SendInput</c> call, so a test can deterministically make one specific release fail
+    /// without touching the real OS input queue. Null (the default) in production.</summary>
+    internal static Action<ushort, bool>? TestOnly_SendKeyOverride;
+
     internal static void Send(Oem1HotkeyBinding hotkey)
     {
         ArgumentNullException.ThrowIfNull(hotkey);
@@ -25,6 +30,7 @@ internal static class Oem1KeyboardHotkeyExecutor
 
         var keys = BuildKeySequence(hotkey);
         var pressed = 0;
+        Exception? releaseFailure = null;
         try
         {
             for (; pressed < keys.Length; pressed++)
@@ -32,9 +38,21 @@ internal static class Oem1KeyboardHotkeyExecutor
         }
         finally
         {
+            // Review fix (MAJOR): a throwing SendKey here used to abort the release loop immediately,
+            // so a failure releasing (say) the FIRST-pressed key meant every later modifier in the
+            // sequence was never even attempted -- leaving Ctrl/Shift/Alt/Win logically held down in
+            // Windows even though the OEM1 action itself correctly reports failure and fails open.
+            // Release every successfully pressed key best-effort regardless of an earlier release
+            // failure, and surface only the first such failure once cleanup is done.
             for (var index = pressed - 1; index >= 0; index--)
-                SendKey(keys[index], keyUp: true);
+            {
+                try { SendKey(keys[index], keyUp: true); }
+                catch (Exception exception) { releaseFailure ??= exception; }
+            }
         }
+
+        if (releaseFailure is not null)
+            throw new InvalidOperationException("One or more OEM1 hotkey key-up events failed.", releaseFailure);
     }
 
     /// <summary>Modifiers first (in a fixed, conventional order), the single key last.</summary>
@@ -51,6 +69,12 @@ internal static class Oem1KeyboardHotkeyExecutor
 
     private static void SendKey(ushort virtualKey, bool keyUp)
     {
+        if (TestOnly_SendKeyOverride is { } testOverride)
+        {
+            testOverride(virtualKey, keyUp);
+            return;
+        }
+
         var input = new Input
         {
             Type = InputKeyboard,

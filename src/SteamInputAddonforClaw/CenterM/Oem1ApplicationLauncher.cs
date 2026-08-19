@@ -1,17 +1,24 @@
 using System.Diagnostics;
+using System.IO;
 using SteamInputAddonforClaw.Contracts.Oem1;
 
 namespace SteamInputAddonforClaw.CenterM;
 
 /// <summary>
-/// Launches the configured application. Mirrors <see cref="Oem1BigPictureLauncher"/> exactly: start
+/// Launches the configured executable. Mirrors <see cref="Oem1BigPictureLauncher"/> exactly: start
 /// it and forget it.
 /// </summary>
 /// <remarks>
 /// The Addon never becomes an owner of what it starts here -- no process tracking, no toggle/kill,
-/// no singleton detection, no shell scripting. <c>UseShellExecute</c> is on so the target resolves
-/// the same way it would from Explorer (including shortcuts and registered handlers) and inherits
-/// its own working directory rather than the Addon's.
+/// no singleton detection.
+///
+/// Review fix (MAJOR): this action is scoped to "launch an executable", never a general shell-open.
+/// <c>UseShellExecute = true</c> plus a <c>.lnk</c>/wildcard file picker would have let a saved
+/// binding resolve through the shell's own file-type handler -- a script, a document, anything
+/// registered to "open" -- which is exactly the scripting/arbitrary-shell-action surface this
+/// feature is explicitly scoped to exclude. <c>UseShellExecute = false</c> starts the named file as
+/// a process directly with no shell resolution, and the extension check below refuses anything that
+/// is not literally an <c>.exe</c> before that ever happens.
 /// </remarks>
 internal static class Oem1ApplicationLauncher
 {
@@ -21,13 +28,15 @@ internal static class Oem1ApplicationLauncher
         // An unfinished configuration is not a failure -- there is simply nothing to launch.
         if (!application.IsConfigured) return;
 
+        if (!string.Equals(Path.GetExtension(application.ExecutablePath), ".exe", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The OEM1 application action requires an .exe target.");
+
         var startInfo = new ProcessStartInfo
         {
             FileName = application.ExecutablePath,
-            UseShellExecute = true
+            Arguments = application.Arguments ?? string.Empty,
+            UseShellExecute = false
         };
-        if (!string.IsNullOrWhiteSpace(application.Arguments))
-            startInfo.Arguments = application.Arguments;
 
         Process.Start(startInfo);
     }

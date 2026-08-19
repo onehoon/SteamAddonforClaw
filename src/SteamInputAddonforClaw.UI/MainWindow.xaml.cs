@@ -32,6 +32,16 @@ public sealed partial class MainWindow : Window
     private bool _setupPromptPendingActivation;
     private bool _prerequisiteSetupInProgress;
 
+    // Review fix (BLOCKER): the single ordered mutation path for the OEM1 mapping, shared by the
+    // Controller page's remapping toggle and the Center M Button detail page's slot editors -- see
+    // QueueOem1Mutation. _oem1UiMapping is the latest edit either surface has requested (advanced
+    // synchronously, before persistence even starts); _oem1PersistedMapping is the last value this
+    // window knows is actually on disk, used to roll a failed save back to.
+    private Contracts.Oem1.Oem1MappingSettings _oem1UiMapping = Contracts.Oem1.Oem1MappingSettings.Default;
+    private Contracts.Oem1.Oem1MappingSettings _oem1PersistedMapping = Contracts.Oem1.Oem1MappingSettings.Default;
+    private Task _oem1SaveChain = Task.CompletedTask;
+    private long _oem1EditVersion;
+
     internal MainWindow(
         IAddonFrontendControl frontend,
         FrontendBootstrapSnapshot bootstrap)
@@ -39,6 +49,8 @@ public sealed partial class MainWindow : Window
         _frontend = frontend ?? throw new ArgumentNullException(nameof(frontend));
         _bootstrap = bootstrap ?? throw new ArgumentNullException(nameof(bootstrap));
         _suppressDeveloperMenuWarning = bootstrap.Settings.SuppressDeveloperMenuWarning;
+        _oem1UiMapping = bootstrap.Settings.Oem1Mapping;
+        _oem1PersistedMapping = bootstrap.Settings.Oem1Mapping;
 
         InitializeComponent();
         Title = FormatWindowTitle(GetDisplayVersion());
@@ -48,16 +60,17 @@ public sealed partial class MainWindow : Window
         Closed += OnWindowClosed;
         SettingsContent.Initialize(_frontend, _bootstrap);
         ControllerContent.Initialize(_frontend, _bootstrap);
-        CenterMButtonContent.Initialize(_frontend, _bootstrap, () => WindowNative.GetWindowHandle(this));
+        CenterMButtonContent.Initialize(_bootstrap, () => WindowNative.GetWindowHandle(this));
         ControllerContent.CenterMButtonRequested += (_, _) => OpenCenterMButton();
         CenterMButtonContent.BackRequested += (_, _) => ReturnToController("BackButton");
-        // Review fix (BLOCKER): both pages are initialized once from the same startup bootstrap and
-        // otherwise drift apart -- without the reverse wire, toggling remapping on the Controller
-        // page left the detail page holding the stale startup snapshot, so its next slot edit sent
-        // that whole stale record back and could resurrect the value the Controller toggle just
-        // changed. Keep both pages in step with whichever surface last saved successfully.
-        CenterMButtonContent.MappingChanged += (_, mapping) => ControllerContent.ApplyOem1Mapping(mapping);
-        ControllerContent.MappingChanged += (_, mapping) => CenterMButtonContent.Apply(mapping);
+        // Review fix (BLOCKER): a per-page save chain only serialized edits made ON that page --
+        // leaving the detail page mid-save and immediately toggling on the Controller page had no
+        // ordering relationship between the two pages' independent RPCs, so either could land last
+        // and silently undo the other. Both pages now only ever REQUEST an edit; this window is the
+        // single owner of the current OEM1 mapping and its one ordered save chain, exactly as it
+        // already owns navigation between the two pages.
+        ControllerContent.MappingEditRequested += (_, mapping) => QueueOem1Mutation(mapping);
+        CenterMButtonContent.MappingEditRequested += (_, mapping) => QueueOem1Mutation(mapping);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
@@ -352,6 +365,60 @@ public sealed partial class MainWindow : Window
             ("PreviousPage", previousPage),
             ("CurrentPage", _navigationState.CurrentPage),
             ("Reason", reason));
+    }
+
+    /// <summary>
+    /// The single ordered mutation path for the OEM1 mapping (review fix, BLOCKER). Advances the
+    /// current edit synchronously and pushes it into BOTH pages immediately -- before persistence
+    /// even starts -- so an edit made on one page is visible on the other the instant the user
+    /// switches, whether or not its save has completed yet. The actual save is chained behind
+    /// whatever is already in flight, and only the save that is still the newest edit when it
+    /// completes is allowed to touch the controls again.
+    /// </summary>
+    private void QueueOem1Mutation(Contracts.Oem1.Oem1MappingSettings next)
+    {
+        _oem1UiMapping = next;
+        var version = ++_oem1EditVersion;
+
+        ControllerContent.ApplyOem1Mapping(next);
+        CenterMButtonContent.Apply(next);
+
+        _oem1SaveChain = SaveOem1AfterAsync(_oem1SaveChain, next, version);
+    }
+
+    private async Task SaveOem1AfterAsync(Task previous, Contracts.Oem1.Oem1MappingSettings next, long version)
+    {
+        // The predecessor's own failure (if any) was already handled where it happened; this chain
+        // only needs it to have FINISHED before this save starts, so a faulted predecessor must not
+        // abort the newly queued one.
+        try { await previous; }
+        catch { /* observed above */ }
+
+        try
+        {
+            var result = await _frontend.SetOem1MappingAsync(next);
+            _oem1PersistedMapping = result.Oem1Mapping;
+
+            // A newer edit was queued while this request was in flight -- its own save is already
+            // chained behind this one and will apply the true final state; applying this now-stale
+            // response would visibly revert what the user just did on either page.
+            if (version != _oem1EditVersion) return;
+
+            _oem1UiMapping = result.Oem1Mapping;
+            ControllerContent.ApplyOem1Mapping(result.Oem1Mapping);
+            CenterMButtonContent.Apply(result.Oem1Mapping);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Window", "Center M mapping save failed.", exception);
+            // Roll both pages back to what is actually persisted -- but only if nothing newer is
+            // already queued to resolve this itself.
+            if (version != _oem1EditVersion) return;
+
+            _oem1UiMapping = _oem1PersistedMapping;
+            ControllerContent.ApplyOem1Mapping(_oem1PersistedMapping);
+            CenterMButtonContent.Apply(_oem1PersistedMapping);
+        }
     }
 
     private void ReturnToSettings(string reason)

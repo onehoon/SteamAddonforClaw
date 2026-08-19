@@ -31,12 +31,14 @@ public sealed partial class ControllerPage : UserControl
     /// as it does for the Settings page's Developer Menu card.</summary>
     internal event EventHandler? CenterMButtonRequested;
 
-    /// <summary>Raised after a successful save so the host can push the authoritative mapping into
-    /// the detail page too. Both pages were initialized once from the same startup bootstrap and
-    /// otherwise drift: without this, opening the detail page after toggling remapping here would
-    /// edit against a stale whole-record snapshot and could resurrect the value this toggle just
-    /// changed.</summary>
-    internal event EventHandler<Oem1MappingSettings>? MappingChanged;
+    /// <summary>
+    /// Review fix (BLOCKER): this page used to persist the toggle itself and only notify the detail
+    /// page AFTER a successful save -- but an edit already in flight on the detail page when the
+    /// user switched back here had no relationship to this toggle's own write, so either surface's
+    /// RPC could land last and silently undo the other. The host now owns the single ordered
+    /// mutation path for both surfaces; this page only reports the mapping it wants next.
+    /// </summary>
+    internal event EventHandler<Oem1MappingSettings>? MappingEditRequested;
 
     internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap)
     {
@@ -84,22 +86,10 @@ public sealed partial class ControllerPage : UserControl
         CenterMButtonRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private async void CenterMRemappingToggleSwitch_Toggled(object sender, RoutedEventArgs args)
+    private void CenterMRemappingToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
-        if (_isLoading || _frontend is null) return;
-        try
-        {
-            var result = await _frontend.SetOem1MappingAsync(_oem1Mapping with { RemappingEnabled = CenterMRemappingToggleSwitch.IsOn });
-            ApplyOem1Mapping(result.Oem1Mapping);
-            MappingChanged?.Invoke(this, result.Oem1Mapping);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("Controller", "Center M remapping update failed.", exception);
-            // Re-show what is actually persisted rather than leaving the toggle asserting a change
-            // that did not happen.
-            ApplyOem1Mapping(_oem1Mapping);
-        }
+        if (_isLoading) return;
+        MappingEditRequested?.Invoke(this, _oem1Mapping with { RemappingEnabled = CenterMRemappingToggleSwitch.IsOn });
     }
 
     private async void SteamInputRoutingToggleSwitch_Toggled(object sender, RoutedEventArgs args)
