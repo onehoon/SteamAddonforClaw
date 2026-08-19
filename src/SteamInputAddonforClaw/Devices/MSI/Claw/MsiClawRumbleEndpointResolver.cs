@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -29,7 +30,10 @@ internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointReso
     // COMException when it races the PnP device-tree churn produced by VIIPER's own Steam
     // Deck virtual device attach (observed in production telemetry immediately after PnP
     // identity resolution completes). One short retry absorbs that race without meaningfully
-    // extending the routing-activation critical path on the (common) success path.
+    // extending the routing-activation critical path on the (common) success path. Only
+    // COMException is retried -- a deterministic failure (bad data, a programming error) is
+    // not transient and retrying it would just add latency while MsiClawRumbleSink holds its
+    // serialization lock.
     private const int MaxCatalogAttempts = 2;
     private static readonly TimeSpan CatalogRetryDelay = TimeSpan.FromMilliseconds(150);
 
@@ -68,7 +72,7 @@ internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointReso
             {
                 return _catalog(identity);
             }
-            catch (Exception exception) when (attempt < MaxCatalogAttempts)
+            catch (COMException exception) when (attempt < MaxCatalogAttempts)
             {
                 AppLog.Debug("Rumble", "MSI rumble endpoint catalog query failed; retrying.",
                     ("Attempt", attempt), ("Exception", exception.GetType().Name), ("HResult", exception.HResult), ("Message", exception.Message));

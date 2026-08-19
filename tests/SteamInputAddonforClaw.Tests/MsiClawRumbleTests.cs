@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Feedback;
@@ -182,7 +183,7 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public void Endpoint_resolver_retries_once_after_transient_catalog_exception_then_succeeds()
+    public void Endpoint_resolver_retries_once_after_transient_com_exception_then_succeeds()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
         MsiClawRumbleEndpointCandidate Candidate(string path) => new(path, "PNP-A", "ROOT-A", 0x0DB0, 0x1902, 64, 64, true);
@@ -192,7 +193,7 @@ public sealed class MsiClawRumbleTests
         var resolver = new MsiClawRumbleEndpointResolver(_ =>
         {
             calls++;
-            if (calls == 1) throw new InvalidOperationException("transient");
+            if (calls == 1) throw new COMException("transient");
             return [Candidate("a")];
         }, delays.Add);
 
@@ -211,13 +212,31 @@ public sealed class MsiClawRumbleTests
         var resolver = new MsiClawRumbleEndpointResolver(_ =>
         {
             calls++;
-            throw new InvalidOperationException($"attempt-{calls}");
+            throw new COMException($"attempt-{calls}");
         }, _ => { });
 
-        var exception = Assert.Throws<InvalidOperationException>(() => resolver.Resolve(identity));
+        var exception = Assert.Throws<COMException>(() => resolver.Resolve(identity));
 
         Assert.Equal("attempt-2", exception.Message);
         Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_does_not_retry_non_com_exceptions()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        var calls = 0;
+        var delayed = false;
+        var resolver = new MsiClawRumbleEndpointResolver(_ =>
+        {
+            calls++;
+            throw new InvalidOperationException("deterministic");
+        }, _ => delayed = true);
+
+        Assert.Throws<InvalidOperationException>(() => resolver.Resolve(identity));
+
+        Assert.Equal(1, calls);
+        Assert.False(delayed);
     }
 
     [Fact]
