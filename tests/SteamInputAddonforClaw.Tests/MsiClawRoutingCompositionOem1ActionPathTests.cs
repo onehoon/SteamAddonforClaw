@@ -206,19 +206,30 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     }
 
     [Fact]
-    public async Task Action_failure_revocation_is_never_undone_by_a_racing_stale_authority_refresh()
+    public async Task Real_action_failure_never_deadlocks_against_a_concurrent_stale_authority_refresh()
     {
-        // Review fix (BLOCKER): RefreshOem1BridgeAuthority (the production driver's onReconciled
-        // callback) and OnOem1ActionFailed used to run fully independently. A refresh that had
-        // already read a stale SuppressionReady == true snapshot could still call
-        // bridge.SetCustomAuthority(true) AFTER an action failure's own SetCustomAuthority(false),
-        // undoing the fail-open admission boundary while the owned disable was still in flight. Both
-        // paths now share the _oem1TaskSync lock; this test pauses a refresh mid-publish (via
-        // TestOnly_BeforeOem1BridgeAuthorityPublish, inside that same locked region) and proves a
-        // concurrent action-failure revocation cannot interleave with it -- the revocation must wait
-        // for the stale refresh's publish to finish, and its own false write must win afterward.
+        // Review fix (BLOCKER): lock-order inversion. Oem1EventGestureBridge.OnGestureRecognized
+        // deliberately holds _recognizerOperationGate while invoking PolicyRequested, so a REAL
+        // replacement-action failure reaches OnOem1ActionFailed while that bridge lock is already
+        // held (re-entrant, same thread). A prior fix round made RefreshOem1BridgeAuthority take
+        // _oem1TaskSync BEFORE calling into the bridge -- the exact reverse order -- which could
+        // deadlock a real action failure against a concurrent lifecycle refresh. The fix makes the
+        // bridge itself evaluate the "may activate" guard from inside its own lock
+        // (SetCustomAuthority's allowActivation parameter), so the lock order is always
+        // bridge -> _oem1TaskSync, never the reverse.
+        //
+        // This drives the REAL Event41 -> recognizer -> bridge -> dispatcher -> OnOem1ActionFailed
+        // path (not a direct test-only call) concurrently with a refresh paused just before it enters
+        // the bridge, and asserts both complete within a bounded timeout -- a hang here would mean
+        // the inversion regressed.
         var launchCount = 0;
-        var (composition, eventSource) = BuildArmable(launchBigPicture: () => Interlocked.Increment(ref launchCount));
+        var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (composition, eventSource) = BuildArmable(launchBigPicture: () =>
+        {
+            Interlocked.Increment(ref launchCount);
+            launched.TrySetResult();
+            throw new InvalidOperationException("simulated Big Picture launch failure");
+        });
         IHandheldRoutingComposition handheld = composition;
         await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
         await composition.TestOnly_Oem1ActivationTask;
@@ -232,25 +243,26 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
             releaseRefresh.Task.GetAwaiter().GetResult();
         };
 
-        // Simulate a lifecycle tick's stale refresh that already read ready == true and is about to
-        // publish it, but is paused right before doing so.
-        var refreshTask = Task.Run(() => composition.TestOnly_RefreshOem1BridgeAuthority());
+        // Simulate a lifecycle tick's refresh that already read ready == true and is paused right
+        // before it enters the bridge to publish it.
+        var refreshTask = Task.Run(composition.TestOnly_RefreshOem1BridgeAuthority);
         await refreshEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // A concurrent action-failure revocation must be serialized behind the same lock -- it must
-        // not be able to complete while the stale refresh's publish is still paused.
-        var failTask = Task.Run(composition.TestOnly_InvokeOnOem1ActionFailed);
-        await Task.Delay(50);
-        Assert.False(failTask.IsCompleted);
+        // Drive the REAL failure path while the refresh is paused. A bounded wait here (rather than
+        // an unbounded one) is itself the deadlock check: a regressed lock-order inversion would hang.
+        eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+        await launched.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         releaseRefresh.TrySetResult();
-        await Task.WhenAll(refreshTask, failTask).WaitAsync(TimeSpan.FromSeconds(5));
+        await refreshTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(100); // let OnOem1ActionFailed's synchronous tail settle
 
-        // The revocation ran strictly after the stale refresh's publish (never interleaved), so its
-        // false write is the final word -- a subsequent physical press must be ignored.
+        // The one-way fail-open latch means custom OEM1 admission never re-activates for the rest of
+        // this composition's lifetime, regardless of how the refresh/failure ordering landed.
+        Assert.Equal(1, launchCount);
         eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
         await Task.Delay(100);
-        Assert.Equal(0, launchCount);
+        Assert.Equal(1, launchCount);
 
         await ((IAsyncDisposable)composition).DisposeAsync();
     }

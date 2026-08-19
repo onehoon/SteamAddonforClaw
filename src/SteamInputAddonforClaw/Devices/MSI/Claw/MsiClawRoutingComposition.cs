@@ -99,9 +99,18 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     // previously untracked/detached Task.Run work that DisposeAsync had no way to wait for before
     // tearing down the coordinator they call into. _oem1Stopping (set under the same lock) prevents a
     // new fail-open task from being scheduled once teardown has begun.
+    //
+    // Review fix (BLOCKER): _oem1FailOpenTask is a one-way lifetime latch (null = never failed yet;
+    // non-null = a replacement-action failure has occurred and custom OEM1 admission stays fail-open
+    // for the rest of this composition's lifetime -- never re-armed). This lets RefreshOem1BridgeAuthority
+    // decide "may custom authority activate" with a plain null-check evaluated from INSIDE the bridge's
+    // own lock (see Oem1EventGestureBridge.SetCustomAuthority's allowActivation parameter), instead of
+    // this composition taking _oem1TaskSync BEFORE calling into the bridge -- which used to invert lock
+    // order against OnGestureRecognized's bridge-lock-then-PolicyRequested-callback path and could
+    // deadlock a real action failure against a concurrent lifecycle refresh/disposal.
     private readonly object _oem1TaskSync = new();
     private Task _oem1ActivationTask = Task.CompletedTask;
-    private Task _oem1FailOpenTask = Task.CompletedTask;
+    private Task? _oem1FailOpenTask;
     private bool _oem1Stopping;
 
     internal MsiClawRoutingComposition(
@@ -337,53 +346,42 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// </summary>
     private void RefreshOem1BridgeAuthority()
     {
-        // Review fix (BLOCKER): republishing readiness and revoking on action failure must share ONE
-        // linearization boundary (_oem1TaskSync), or a lifecycle tick's readiness snapshot taken just
-        // before/racing a replacement-action failure can re-enable the bridge (SetCustomAuthority(true))
-        // after OnOem1ActionFailed already declared custom OEM1 unsafe and started its owned disable --
-        // undoing the fail-open admission boundary while that disable is still in flight. Once a
-        // fail-open is in flight (or teardown has begun), this must never republish true, regardless of
-        // what the coordinator's snapshot currently says.
-        lock (_oem1TaskSync)
+        if (_oem1Bridge is not { } bridge)
+            return;
+
+        bool ready;
+        try
         {
-            if (_oem1Bridge is not { } bridge)
-                return;
-
-            if (_oem1Stopping || !_oem1FailOpenTask.IsCompleted)
-            {
-                bridge.SetCustomAuthority(false);
-                return;
-            }
-
-            bool ready;
-            try
-            {
-                ready = CenterMOem1Coordinator.GetSnapshot().SuppressionReady;
-            }
-            catch (ObjectDisposedException)
-            {
-                return;
-            }
-
-            // Test-only synchronization seam: lets a test pause a stale-but-otherwise-successful
-            // readiness read here, inside this same _oem1TaskSync-protected region, so it can prove a
-            // concurrent OnOem1ActionFailed is serialized against (never interleaved with) this
-            // publication rather than racing it. Never touched by production code.
-            TestOnly_BeforeOem1BridgeAuthorityPublish?.Invoke();
-
-            bridge.SetCustomAuthority(ready);
+            ready = CenterMOem1Coordinator.GetSnapshot().SuppressionReady;
         }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        // Test-only synchronization seam: lets a test pause a stale-but-otherwise-successful
+        // readiness read here, before the bridge call below, so it can prove a concurrent
+        // OnOem1ActionFailed (a real Event41 -> bridge -> dispatcher failure) never deadlocks
+        // against it and never gets undone by it. Never touched by production code.
+        TestOnly_BeforeOem1BridgeAuthorityPublish?.Invoke();
+
+        // Review fix (BLOCKER): lock-order inversion. Taking _oem1TaskSync here BEFORE calling into
+        // the bridge would invert the lock order against OnGestureRecognized, which deliberately holds
+        // the bridge's _recognizerOperationGate while invoking PolicyRequested (i.e. while a real
+        // action failure can reach OnOem1ActionFailed). Instead, the "may custom authority actually
+        // activate" decision is passed down as a predicate the bridge evaluates from INSIDE its own
+        // lock -- _oem1TaskSync is only ever acquired after entering the bridge, never before, so the
+        // lock order is always bridge -> _oem1TaskSync, everywhere.
+        bridge.SetCustomAuthority(ready, allowActivation: () =>
+        {
+            lock (_oem1TaskSync)
+                return !_oem1Stopping && _oem1FailOpenTask is null;
+        });
     }
 
     /// <summary>See the invocation site inside <see cref="RefreshOem1BridgeAuthority"/>. Never touched
     /// by production code.</summary>
     internal Action? TestOnly_BeforeOem1BridgeAuthorityPublish;
-
-    /// <summary>Test-only seam: invokes the exact same action-failure fail-open path a real dispatcher
-    /// failure triggers, so a test can drive it concurrently with a held-open
-    /// <see cref="TestOnly_BeforeOem1BridgeAuthorityPublish"/> pause. Never touched by production
-    /// code.</summary>
-    internal void TestOnly_InvokeOnOem1ActionFailed() => OnOem1ActionFailed();
 
     /// <summary>
     /// Scope 9: an actual replacement-action execution failure (e.g. the Big Picture launch backend
@@ -392,19 +390,22 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// </summary>
     private void OnOem1ActionFailed()
     {
+        // Re-entrant on the bridge's own _recognizerOperationGate when called synchronously from
+        // within a PolicyRequested subscriber (the real production path) -- see
+        // Oem1EventGestureBridge.OnGestureRecognized's doc comment. Must run BEFORE this method takes
+        // _oem1TaskSync below, preserving the same bridge -> _oem1TaskSync lock order
+        // RefreshOem1BridgeAuthority uses, so a real action failure can never deadlock against a
+        // concurrent lifecycle refresh/disposal.
+        _oem1Bridge?.SetCustomAuthority(false);
+
         lock (_oem1TaskSync)
         {
-            // Same lock as readiness publication above: whichever side wins the race is unambiguously
-            // ordered, so a concurrent RefreshOem1BridgeAuthority can never republish true after this
-            // revocation, and this revocation is never undone by a readiness snapshot taken just before it.
-            _oem1Bridge?.SetCustomAuthority(false);
-
-            // Once teardown has begun, no new fail-open task may start -- DisposeAsync is (or is
-            // about to be) the sole owner draining outstanding OEM1 background work before the
-            // coordinator it targets is disposed. A fail-open already in flight is left to finish
-            // naturally; a second one is unnecessary (SetDesiredEnabledAsync(false) is idempotent-ish
-            // via the coordinator's own gate) and would just create a second untracked reference.
-            if (_oem1Stopping || !_oem1FailOpenTask.IsCompleted)
+            // _oem1FailOpenTask is a one-way lifetime latch (see field doc comment): once set, custom
+            // OEM1 admission stays fail-open for the rest of this composition's lifetime. Once teardown
+            // has begun, no new fail-open task may start either -- DisposeAsync is (or is about to be)
+            // the sole owner draining outstanding OEM1 background work before the coordinator it
+            // targets is disposed.
+            if (_oem1Stopping || _oem1FailOpenTask is not null)
                 return;
 
             _oem1FailOpenTask = DisableOem1AfterActionFailureAsync();
@@ -482,26 +483,25 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // flight. The stated shutdown contract is "close custom gesture admission first, then tear
         // down the rest" -- so this boundary must not wait behind any of that unrelated teardown.
         //
-        // Review fix (BLOCKER): the revocation and setting _oem1Stopping now share the SAME
-        // _oem1TaskSync lock RefreshOem1BridgeAuthority/OnOem1ActionFailed use -- otherwise a
-        // concurrent lifecycle tick's RefreshOem1BridgeAuthority could still republish
-        // SetCustomAuthority(true) in the small window between this revocation and _oem1Stopping
-        // actually being observed true. Also captures whatever activation/fail-open work is
-        // currently owned/in-flight BEFORE disposing the bridge/event source below -- both
-        // background operations call into the coordinator this method eventually disposes, so
-        // neither may still be capable of entering it once DisposeAsync returns.
-        Task oem1ActivationTask, oem1FailOpenTask;
-        lock (_oem1TaskSync)
-        {
-            _oem1Bridge?.SetCustomAuthority(false);
-            _oem1Stopping = true;
-            oem1ActivationTask = _oem1ActivationTask;
-            oem1FailOpenTask = _oem1FailOpenTask;
-        }
-
+        // Review fix (BLOCKER): permanently close/drain the bridge BEFORE taking _oem1TaskSync, never
+        // after -- disposing the bridge first (which internally revokes authority as part of the same
+        // operation) guarantees no new PolicyRequested callback can begin once Dispose() returns, so
+        // capturing the owned tasks under _oem1TaskSync afterward is safe without ever reversing the
+        // bridge -> _oem1TaskSync lock order RefreshOem1BridgeAuthority/OnOem1ActionFailed rely on.
         _oem1Bridge?.Dispose();
         _oem1EventSource?.Dispose();
         _oem1GestureRecognizer?.Dispose();
+
+        // Captures whatever activation/fail-open work is currently owned/in-flight -- both background
+        // operations call into the coordinator this method eventually disposes, so neither may still
+        // be capable of entering it once DisposeAsync returns.
+        Task oem1ActivationTask, oem1FailOpenTask;
+        lock (_oem1TaskSync)
+        {
+            _oem1Stopping = true;
+            oem1ActivationTask = _oem1ActivationTask;
+            oem1FailOpenTask = _oem1FailOpenTask ?? Task.CompletedTask;
+        }
 
         PhysicalInputSource.TestCompleted -= OnPhysicalInputCompleted;
         PhysicalInputStage.PhysicalSessionRetired -= PhysicalRumbleSink.InvalidatePhysicalSession;

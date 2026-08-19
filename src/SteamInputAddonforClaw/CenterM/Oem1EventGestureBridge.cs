@@ -31,10 +31,25 @@ internal sealed class Oem1EventGestureBridge : IDisposable
 
     internal event Action<Oem1GesturePolicyRequest>? PolicyRequested;
 
-    internal void SetCustomAuthority(bool active)
+    internal void SetCustomAuthority(bool active) => SetCustomAuthority(active, allowActivation: null);
+
+    // Review fix (BLOCKER): lock-order inversion. OnGestureRecognized deliberately holds
+    // _recognizerOperationGate while invoking PolicyRequested, so a real replacement-action failure
+    // reaches the composition's fail-open path WHILE that lock is already held. If the composition
+    // then took its own lock first and called back into SetCustomAuthority (acquiring
+    // _recognizerOperationGate second), that is the exact reverse order of a concurrent lifecycle
+    // refresh/disposal (composition lock -> this method -> _recognizerOperationGate) -- a classic
+    // inversion that can deadlock. The fix: any external fail-open/teardown guard the composition
+    // needs must be evaluated from INSIDE this method's _recognizerOperationGate critical section
+    // (via allowActivation), never by the caller taking its own lock first. This keeps exactly one
+    // lock order everywhere: bridge (_recognizerOperationGate) before any composition-owned lock.
+    internal void SetCustomAuthority(bool active, Func<bool>? allowActivation)
     {
         lock (_recognizerOperationGate)
         {
+            if (active && allowActivation is not null && !allowActivation())
+                active = false;
+
             var resetRecognizer = false;
             lock (_gate)
             {
