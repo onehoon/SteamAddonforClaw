@@ -65,24 +65,22 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
         _receiveLoopCts = new CancellationTokenSource();
         _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token, AddonQamConsoleMessage);
-        await EvaluateAsync("Runtime.enable", cancellationToken).ConfigureAwait(false);
+        await SendCommandAsync("Runtime.enable", parameters: null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Runs <c>Runtime.evaluate</c> with the given JS expression and returns the raw JSON result.</summary>
     public async Task<string> EvaluateAsync(string expression, CancellationToken cancellationToken)
     {
+        return await SendCommandAsync("Runtime.evaluate", new { expression, awaitPromise = false, returnByValue = true }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<string> SendCommandAsync(string method, object? parameters, CancellationToken cancellationToken)
+    {
         if (_socket is not { State: WebSocketState.Open })
-        {
             throw new InvalidOperationException("Not connected to a CDP target.");
-        }
 
         var id = _correlator.NextId();
-        var payload = JsonSerializer.Serialize(new
-        {
-            id,
-            method = "Runtime.evaluate",
-            @params = new { expression, awaitPromise = false, returnByValue = true },
-        });
+        var payload = JsonSerializer.Serialize(new { id, method, @params = parameters ?? new { } });
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(ResponseTimeout);

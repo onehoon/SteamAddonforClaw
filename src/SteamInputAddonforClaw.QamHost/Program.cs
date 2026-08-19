@@ -25,6 +25,17 @@ log.Info($"Frontend script loaded. Path={frontendPath} Bytes={frontendScript.Len
 
 await using var client = new SteamGamepadUiCdpClient(devToolsEndpoint);
 client.AddonQamConsoleMessage += message => log.Info(message);
+using var lifetime = new CancellationTokenSource();
+Task? managedStopTask = null;
+if (managed)
+{
+    managedStopTask = Task.Run(async () =>
+    {
+        while (await Console.In.ReadLineAsync() is { } line && !string.Equals(line.Trim(), "stop", StringComparison.OrdinalIgnoreCase)) { }
+        lifetime.Cancel();
+    });
+}
+var lifetimeToken = lifetime.Token;
 
 CdpTarget? gamepadUiTarget = null;
 try
@@ -33,19 +44,24 @@ try
     while (true)
     {
         IReadOnlyList<CdpTarget> targets;
-        try { targets = await client.ListTargetsAsync(CancellationToken.None); }
+        try { targets = await client.ListTargetsAsync(lifetimeToken); }
         catch (Exception ex) when (managed && ex is HttpRequestException or TaskCanceledException && DateTimeOffset.UtcNow < deadline)
-        { await Task.Delay(250); continue; }
+        { await Task.Delay(250, lifetimeToken); continue; }
 
         log.Info($"target count={targets.Count}");
         foreach (var target in targets) log.Info($"Target Type={target.Type} Title={target.Title} Url={target.Url}");
         gamepadUiTarget = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
         if (gamepadUiTarget is not null || !managed || DateTimeOffset.UtcNow >= deadline) break;
-        await Task.Delay(250);
+        await Task.Delay(250, lifetimeToken);
     }
 }
 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
 {
+    if (lifetimeToken.IsCancellationRequested)
+    {
+        log.Info("QamHost stop requested during startup.");
+        return 0;
+    }
     log.Warn($"DevTools endpoint unavailable. {ex.GetType().Name}: {ex.Message}");
     return 0;
 }
@@ -60,10 +76,10 @@ log.Info($"GamepadUI target selected. Id={gamepadUiTarget.Id} Title={gamepadUiTa
 
 try
 {
-    await client.ConnectAsync(gamepadUiTarget, CancellationToken.None);
+    await client.ConnectAsync(gamepadUiTarget, lifetimeToken);
     log.Info("CDP connected.");
 
-    var rawEvalResult = await client.EvaluateAsync(frontendScript, CancellationToken.None);
+    var rawEvalResult = await client.EvaluateAsync(frontendScript, lifetimeToken);
     var evalResult = CdpEvaluateResult.Parse(rawEvalResult);
 
     if (!evalResult.Succeeded)
@@ -82,13 +98,7 @@ try
 
     if (managed)
     {
-        var managedStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _ = Task.Run(async () =>
-        {
-            while (await Console.In.ReadLineAsync() is { } line && !string.Equals(line.Trim(), "stop", StringComparison.OrdinalIgnoreCase)) { }
-            managedStop.TrySetResult();
-        });
-        await managedStop.Task;
+        await managedStopTask!.ConfigureAwait(false);
     }
     else
     {
@@ -114,6 +124,11 @@ try
 }
 catch (Exception ex)
 {
+    if (lifetimeToken.IsCancellationRequested)
+    {
+        log.Info("QamHost stop requested before installation completed.");
+        return 0;
+    }
     log.Error($"QamHost error at runtime. {ex.GetType().Name}: {ex.Message}");
     return 0;
 }

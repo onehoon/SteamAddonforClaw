@@ -81,23 +81,38 @@ internal sealed class QamHostProcessController : IAsyncDisposable
     {
         Process? process;
         lock (_sync) process = _process;
-        if (process is null || process.HasExited) return;
+        if (process is null) return;
 
-        AppLog.Info("QAM.Host", "QamHost graceful stop requested.", ("PID", process.Id));
         try
         {
-            await process.StandardInput.WriteLineAsync("stop").ConfigureAwait(false);
-            process.StandardInput.Close();
-            await process.WaitForExitAsync().WaitAsync(ShutdownTimeout).ConfigureAwait(false);
+            if (!process.HasExited)
+            {
+                AppLog.Info("QAM.Host", "QamHost graceful stop requested.", ("PID", process.Id));
+                try
+                {
+                    await process.StandardInput.WriteLineAsync("stop").ConfigureAwait(false);
+                    process.StandardInput.Close();
+                    await process.WaitForExitAsync().WaitAsync(ShutdownTimeout).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("QAM.Host", "QamHost graceful stop failed; terminating process.", exception, ("PID", process.Id));
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(false);
+                }
+            }
+
             AppLog.Info("QAM.Host", "QamHost process exited.", ("PID", process.Id), ("ExitCode", process.ExitCode));
         }
-        catch (TimeoutException)
+        catch (Exception exception)
         {
-            AppLog.Warn("QAM.Host", "QamHost graceful stop timed out; terminating process.", null, ("PID", process.Id));
-            try { process.Kill(entireProcessTree: true); await process.WaitForExitAsync().ConfigureAwait(false); } catch { }
+            AppLog.Warn("QAM.Host", "QamHost stop verification failed.", exception, ("PID", process.Id));
         }
-        catch (Exception exception) { AppLog.Warn("QAM.Host", "QamHost graceful stop failed.", exception, ("PID", process.Id)); }
-        finally { process.Dispose(); lock (_sync) { if (ReferenceEquals(_process, process)) _process = null; } }
+        finally
+        {
+            process.Dispose();
+            lock (_sync) { if (ReferenceEquals(_process, process)) _process = null; }
+        }
     }
 
     internal void BeginShutdown() { lock (_sync) _stopping = true; _ = StopAsync(); }
