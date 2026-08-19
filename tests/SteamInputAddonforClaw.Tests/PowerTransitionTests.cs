@@ -27,6 +27,39 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public async Task EstablishBaseline_runs_entirely_before_the_power_gate_opens_and_afterRecovery_runs_only_once_open()
+    {
+        // PR2 review fix (BLOCKER): PowerTransitionCoordinator opens PowerMutationGate as soon as
+        // establishBaseline succeeds -- strictly BEFORE afterRecovery ever runs. AddonRuntimeHost's
+        // OEM1 auxiliary resume reconcile therefore has to run INSIDE establishBaseline (while the
+        // gate is still closed to normal routing re-entry), not inside afterRecovery (where it could
+        // already be racing an already-open gate). This test proves the exact mechanism that
+        // ordering choice depends on, directly against PowerTransitionCoordinator.
+        var gate = new PowerMutationGate(false);
+        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+        var gateOpenDuringBaseline = true;
+        var gateOpenDuringAfterRecovery = false;
+        var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
+            hasIncompleteRecovery: () => false,
+            establishBaseline: _ =>
+            {
+                gateOpenDuringBaseline = gate.IsOpen;
+                return Task.FromResult(true);
+            },
+            afterRecovery: _ =>
+            {
+                gateOpenDuringAfterRecovery = gate.IsOpen;
+                return Task.FromResult(true);
+            });
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+
+        Assert.False(gateOpenDuringBaseline);
+        Assert.True(gateOpenDuringAfterRecovery);
+        Assert.True(gate.IsOpen);
+    }
+
+    [Fact]
     public async Task JournalRemainsAfterCanonicalCleanup_FailsClosedWithoutReplayOrBaseline()
     {
         var gate = new PowerMutationGate(false);
