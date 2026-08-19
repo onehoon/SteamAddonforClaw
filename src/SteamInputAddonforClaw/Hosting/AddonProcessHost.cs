@@ -106,7 +106,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage);
         _frontendServer = new NamedPipeAddonFrontendServer(
-            FrontendPipeEndpoint.CreateForCurrentUserSession(),
+            FrontendPipeEndpoint.CreateForCurrentUser(),
             _frontendControl);
         await _frontendServer.StartAsync().ConfigureAwait(false);
         _frontendLauncher.MarkRuntimeReady();
