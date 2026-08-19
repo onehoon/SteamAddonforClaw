@@ -12,6 +12,8 @@ public sealed class QamFrontendContractTests
         Assert.Contains("fiber.elementType !== patch.renderer", source);
         Assert.Contains("fiber.type = patch.patchedType", source);
         Assert.Contains("fiber.alternate.type = patch.patchedType", source);
+        Assert.Contains("return container.current ?? container", source);
+        Assert.Contains("root._reactRootContainer?._internalRoot?.current ?? null", source);
         Assert.Contains("record.fiber.type === record.patchedType", source);
         Assert.Contains("record.alternate.type === record.patchedType", source);
         Assert.Contains("state.liveFibers = []", source);

@@ -142,7 +142,13 @@ async Task TeardownAsync()
         else log.Info("cleanup completed.");
     }
     catch (Exception exception)
+        when (exception is InvalidOperationException && exception.Message == "Not connected to a CDP target." ||
+              exception is System.Net.WebSockets.WebSocketException)
     {
         log.Info($"QAM target already closed; explicit uninstall was not available. {exception.GetType().Name}: {exception.Message}");
+    }
+    catch (Exception exception)
+    {
+        log.Warn($"QAM cleanup failed unexpectedly. {exception.GetType().Name}: {exception.Message}");
     }
 }

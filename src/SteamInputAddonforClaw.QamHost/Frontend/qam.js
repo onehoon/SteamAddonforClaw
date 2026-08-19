@@ -221,7 +221,9 @@
     if (!root) return null;
 
     for (const key of Object.keys(root)) {
-      if (key.startsWith("__reactContainer$") && root[key]?.current) return root[key].current;
+      if (!key.startsWith("__reactContainer$")) continue;
+      const container = root[key];
+      if (container) return container.current ?? container;
     }
 
     return root._reactRootContainer?._internalRoot?.current ?? null;
