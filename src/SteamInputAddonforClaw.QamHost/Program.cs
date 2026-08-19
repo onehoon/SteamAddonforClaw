@@ -7,10 +7,9 @@ for (var index = 0; index < args.Length - 1; index++)
 using var log = new QamHostLogger(logDirectory);
 log.Info($"QamHost starting. ManagedMode={managed}. DevToolsEndpoint=http://127.0.0.1:8080");
 
-// Development-only bootstrap for PR1: assumes Steam is already running with CEF remote
-// debugging enabled on the default DevTools endpoint. This is NOT a production Steam bootstrap
-// contract; it will be replaced by a private CDP pipe connection in a later PR. QamHost never
-// starts, stops, or patches Steam itself.
+// The Runtime prepares Steam's .cef-enable-remote-debugging marker during Addon startup. Steam
+// consumes that marker when its CEF/steamwebhelper session starts and exposes the loopback DevTools
+// endpoint below. QamHost itself remains BPM-scoped and never starts/stops/restarts Steam.
 var devToolsEndpoint = new Uri("http://127.0.0.1:8080");
 var frontendPath = Path.Combine(AppContext.BaseDirectory, "Frontend", "qam.js");
 
@@ -58,7 +57,7 @@ catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         log.Info("QamHost stop requested during startup.");
         return 0;
     }
-    log.Warn($"DevTools endpoint unavailable. {ex.GetType().Name}: {ex.Message}");
+    log.Warn($"DevTools endpoint unavailable. Steam CEF debugging is not active for this Steam session. If the Addon just created .cef-enable-remote-debugging while Steam was already running, restart Steam once. {ex.GetType().Name}: {ex.Message}");
     return 0;
 }
 
