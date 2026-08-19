@@ -27,7 +27,8 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         new(Available: true, OperationalState: RoutingOperationalState.OverrideActive, SteamOutputActive: steamOutputActive, NativeDirectInputActive: false);
 
     private static (MsiClawRoutingComposition Composition, FakeMsiEventSource EventSource) BuildArmable(
-        bool wmiStartSucceeds = true)
+        bool wmiStartSucceeds = true,
+        Action? launchBigPicture = null)
     {
         var devices = new FakeDeviceEnumerator();
         var native = new MsiClawNativeStateManager(devices, new FakeModeController());
@@ -54,7 +55,14 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
             new PowerMutationGate(initiallyOpen: true),
             new RecoverySafetyState(RecoverySafety.Safe),
             centerMOem1Coordinator: coordinator,
-            testOnlyOem1EventSource: eventSource);
+            testOnlyOem1EventSource: eventSource,
+            // Review fix (MAJOR): deterministic gesture recognition (no real-time sleeps -- the
+            // single-click debounce resolves as soon as it's awaited) and an observable replacement
+            // action, so a test can actually prove Event41 reaches the normal mapping end-to-end
+            // instead of merely asserting nothing threw.
+            testOnlyOem1GestureDelay: new ImmediateGestureDelay(),
+            testOnlyOem1GestureClock: new ZeroGestureClock(),
+            testOnlyOem1LaunchBigPicture: launchBigPicture);
 
         return (composition, eventSource);
     }
@@ -110,20 +118,25 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     [Fact]
     public async Task Event41_reaches_normal_mapping_while_armed_and_routing_inactive()
     {
-        var (composition, eventSource) = BuildArmable();
+        // Review fix (MAJOR): actually observe the replacement action firing end-to-end (Event41 ->
+        // recognizer -> bridge -> dispatcher -> normal-mapping action), rather than only asserting
+        // nothing threw. Deterministic gesture delay/clock fakes (via BuildArmable) mean the
+        // single-click debounce resolves without any real-time wait; a TaskCompletionSource lets this
+        // test await the actual signal instead of guessing a sleep duration.
+        var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (composition, eventSource) = BuildArmable(launchBigPicture: () => launched.TrySetResult());
         IHandheldRoutingComposition handheld = composition;
         handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
         await composition.TestOnly_Oem1ActivationTask;
-
-        // Swap in a real launch is not possible in a unit test -- assert dispatch reached the bridge
-        // and custom authority is active; the actual Big Picture launch delegate is exercised in
-        // Oem1ActionDispatcherTests.
         Assert.NotNull(composition.TestOnly_Oem1Bridge);
+
         eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
 
-        // No exception/failure should have revoked authority as a result of a normal-mapping dispatch
-        // (Big Picture actually launching a real process is not exercised here).
-        await Task.Delay(50);
+        await launched.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // No action-execution failure should have revoked authority as a result of this successful
+        // normal-mapping dispatch.
+        Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
 
         await ((IAsyncDisposable)composition).DisposeAsync();
     }
@@ -165,12 +178,52 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public async Task Shutdown_drains_an_in_flight_action_failure_fail_open_before_disposing_the_coordinator()
+    {
+        // Review fix (BLOCKER): the action-failure fail-open path (OnOem1ActionFailed) was previously
+        // an untracked Task.Run that could still be entering the coordinator while DisposeAsync tore
+        // it down. Trigger a real action failure, then dispose with no extra wait -- if the owned
+        // fail-open task were not drained before the coordinator is disposed below it, this would
+        // either throw out of DisposeAsync or leave that task's continuation touching a disposed
+        // coordinator.
+        var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (composition, eventSource) = BuildArmable(launchBigPicture: () =>
+        {
+            launched.TrySetResult();
+            throw new InvalidOperationException("simulated Big Picture launch failure");
+        });
+        IHandheldRoutingComposition handheld = composition;
+        handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await composition.TestOnly_Oem1ActivationTask;
+
+        eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+        await launched.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var exception = await Record.ExceptionAsync(async () => await ((IAsyncDisposable)composition).DisposeAsync());
+
+        Assert.Null(exception);
+    }
+
     private sealed class FakeMsiEventSource(bool startSucceeds) : IMsiEventSource
     {
         public event Action<MsiOemEvent>? EventReceived;
         public bool Start() => startSucceeds;
         internal void Emit(MsiOemEvent value) => EventReceived?.Invoke(value);
         public void Dispose() { }
+    }
+
+    /// <summary>Resolves the gesture recognizer's single/double-click debounce delay immediately --
+    /// lets a test drive real gesture recognition without any real-time wait.</summary>
+    private sealed class ImmediateGestureDelay : IOem1GestureDelay
+    {
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class ZeroGestureClock : IOem1GestureClock
+    {
+        public long GetTimestamp() => 0;
+        public TimeSpan GetElapsedTime(long startTimestamp, long endTimestamp) => TimeSpan.Zero;
     }
 
     private sealed class FakeSnapshotSource : IProcessSnapshotSource

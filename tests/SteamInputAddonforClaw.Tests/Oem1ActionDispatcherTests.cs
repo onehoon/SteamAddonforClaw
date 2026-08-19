@@ -233,6 +233,21 @@ public sealed class Oem1ActionDispatcherTests
     }
 
     [Fact]
+    public void Routing_status_capture_exception_causes_dispatch_to_report_failure()
+    {
+        // Review fix (BLOCKER): status capture and domain resolution must share the same failure
+        // boundary as action execution -- if this throws, it must still be treated as an OEM1
+        // replacement-action failure (fail-open), not escape Dispatch uncaught (which would leave
+        // Oem1EventGestureBridge merely logging a subscriber failure without ever reaching
+        // OnOem1ActionFailed, so suppression could remain armed with no action ever selected).
+        var dispatcher = CreateDispatcher(() => throw new InvalidOperationException("status unavailable"));
+
+        var ok = dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
+
+        Assert.False(ok);
+    }
+
+    [Fact]
     public void Routing_unavailable_is_not_a_dispatch_failure()
     {
         var dispatcher = CreateDispatcher(() => RoutingRuntimeStatusSnapshot.Unavailable);

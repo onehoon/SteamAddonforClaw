@@ -86,6 +86,22 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private Oem1EventGestureBridge? _oem1Bridge;
     private bool _oem1ActionPathConfigured;
     private readonly IMsiEventSource? _testOnlyOem1EventSource;
+    // Review fix (MAJOR): lets a test drive Oem1GestureRecognizer's single/double-click debounce
+    // deterministically (no real-time sleeps) and observe the normal-mapping replacement action
+    // without spawning a real process -- never supplied by production composition.
+    private readonly IOem1GestureDelay? _testOnlyOem1GestureDelay;
+    private readonly IOem1GestureClock? _testOnlyOem1GestureClock;
+    private readonly Action? _testOnlyOem1LaunchBigPicture;
+
+    // Review fix (BLOCKER): explicit ownership/join boundary for the two background operations the
+    // OEM1 action path can start (startup activation, action-failure fail-open disable) -- both were
+    // previously untracked/detached Task.Run work that DisposeAsync had no way to wait for before
+    // tearing down the coordinator they call into. _oem1Stopping (set under the same lock) prevents a
+    // new fail-open task from being scheduled once teardown has begun.
+    private readonly object _oem1TaskSync = new();
+    private Task _oem1ActivationTask = Task.CompletedTask;
+    private Task _oem1FailOpenTask = Task.CompletedTask;
+    private bool _oem1Stopping;
 
     internal MsiClawRoutingComposition(
         MsiClawNativeStateManager nativeState,
@@ -98,9 +114,15 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         CenterMOem1LifecycleCoordinator? centerMOem1Coordinator = null,
         CenterMOem1LifecycleRuntime? centerMOem1Runtime = null,
         bool startCenterMOem1LifecycleRuntime = true,
-        IMsiEventSource? testOnlyOem1EventSource = null)
+        IMsiEventSource? testOnlyOem1EventSource = null,
+        IOem1GestureDelay? testOnlyOem1GestureDelay = null,
+        IOem1GestureClock? testOnlyOem1GestureClock = null,
+        Action? testOnlyOem1LaunchBigPicture = null)
     {
         _testOnlyOem1EventSource = testOnlyOem1EventSource;
+        _testOnlyOem1GestureDelay = testOnlyOem1GestureDelay;
+        _testOnlyOem1GestureClock = testOnlyOem1GestureClock;
+        _testOnlyOem1LaunchBigPicture = testOnlyOem1LaunchBigPicture;
         NativeModeSession = new MsiClawNativeModeSessionCoordinator(
             nativeState,
             recovery,
@@ -227,14 +249,15 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         _oem1ActionPathConfigured = true;
 
         var eventSource = _testOnlyOem1EventSource ?? new WmiMsiEventSource();
-        var recognizer = new Oem1GestureRecognizer(doubleClickEnabled: true, doubleClickWindow: TimeSpan.FromMilliseconds(400));
+        var recognizer = new Oem1GestureRecognizer(doubleClickEnabled: true, doubleClickWindow: TimeSpan.FromMilliseconds(400),
+            delay: _testOnlyOem1GestureDelay, clock: _testOnlyOem1GestureClock);
         var bridge = new Oem1EventGestureBridge(eventSource, recognizer);
         var dispatcher = new Oem1ActionDispatcher(
             normalBindings: Oem1ActionBindings.NormalDefault,
             routingActiveBindings: Oem1ActionBindings.RoutingActiveDefault,
             captureRoutingStatus: captureRoutingStatus,
             requestQuickAccessPulse: requestQuickAccessPulse,
-            launchBigPicture: Oem1BigPictureLauncher.Launch);
+            launchBigPicture: _testOnlyOem1LaunchBigPicture ?? Oem1BigPictureLauncher.Launch);
 
         bridge.PolicyRequested += request =>
         {
@@ -258,32 +281,32 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         }
 
         // Scope 7: request lifecycle enable only after WMI observation has actually started and the
-        // gesture/action wiring above is already subscribed. Fire-and-forget: the coordinator performs
-        // its own fresh safety checks and this composition only learns readiness back through
+        // gesture/action wiring above is already subscribed. Fire-and-forget from this synchronous
+        // composition seam's point of view, but explicitly OWNED (see _oem1TaskSync) so DisposeAsync
+        // can join it before the coordinator it calls into is disposed -- the coordinator performs its
+        // own fresh safety checks and this composition only learns readiness back through
         // RefreshOem1BridgeAuthority (driven by CenterMOem1Runtime's onReconciled seam), never by
         // assuming this call itself reached Armed.
-        _oem1ActivationTask = Task.Run(async () =>
-        {
-            try
+        lock (_oem1TaskSync)
+            _oem1ActivationTask = Task.Run(async () =>
             {
-                await CenterMOem1Coordinator.SetDesiredEnabledAsync(true).ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                AppLog.Error("CenterM.Oem1", "Requesting OEM1 lifecycle enable failed.", exception);
-            }
-            RefreshOem1BridgeAuthority();
-        });
+                try
+                {
+                    await CenterMOem1Coordinator.SetDesiredEnabledAsync(true).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Error("CenterM.Oem1", "Requesting OEM1 lifecycle enable failed.", exception);
+                }
+                RefreshOem1BridgeAuthority();
+            });
     }
-
-    private Task? _oem1ActivationTask;
 
     /// <summary>Test-only observability: awaits the fire-and-forget startup activation
     /// (<c>SetDesiredEnabledAsync(true)</c> + the resulting bridge-authority refresh) triggered by
     /// <see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>, so a test can deterministically
-    /// observe the outcome instead of racing a background task. Null until that method has run and
-    /// actually started WMI successfully. Never touched by production code.</summary>
-    internal Task TestOnly_Oem1ActivationTask => _oem1ActivationTask ?? Task.CompletedTask;
+    /// observe the outcome instead of racing a background task. Never touched by production code.</summary>
+    internal Task TestOnly_Oem1ActivationTask { get { lock (_oem1TaskSync) return _oem1ActivationTask; } }
 
     /// <summary>Test-only observability seam onto the wired OEM1 gesture bridge -- lets a test assert
     /// custom authority state directly without a real WMI/hardware event. Never touched by production
@@ -323,17 +346,31 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private void OnOem1ActionFailed()
     {
         _oem1Bridge?.SetCustomAuthority(false);
-        _ = Task.Run(async () =>
+
+        lock (_oem1TaskSync)
         {
-            try
-            {
-                await CenterMOem1Coordinator.SetDesiredEnabledAsync(false).ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                AppLog.Error("CenterM.Oem1", "Disabling OEM1 lifecycle after a replacement-action failure did not complete.", exception);
-            }
-        });
+            // Once teardown has begun, no new fail-open task may start -- DisposeAsync is (or is
+            // about to be) the sole owner draining outstanding OEM1 background work before the
+            // coordinator it targets is disposed. A fail-open already in flight is left to finish
+            // naturally; a second one is unnecessary (SetDesiredEnabledAsync(false) is idempotent-ish
+            // via the coordinator's own gate) and would just create a second untracked reference.
+            if (_oem1Stopping || !_oem1FailOpenTask.IsCompleted)
+                return;
+
+            _oem1FailOpenTask = DisableOem1AfterActionFailureAsync();
+        }
+    }
+
+    private async Task DisableOem1AfterActionFailureAsync()
+    {
+        try
+        {
+            await CenterMOem1Coordinator.SetDesiredEnabledAsync(false).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("CenterM.Oem1", "Disabling OEM1 lifecycle after a replacement-action failure did not complete.", exception);
+        }
     }
 
     /// <summary>
@@ -406,9 +443,27 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // WMI callback or gesture continuation must never be able to reach a disposed dispatcher/
         // coordinator.
         _oem1Bridge?.SetCustomAuthority(false);
+
+        // Review fix (BLOCKER): close admission to new fail-open scheduling and capture whatever
+        // activation/fail-open work is currently owned/in-flight BEFORE disposing the bridge/event
+        // source -- both background operations call into the coordinator this method is about to
+        // dispose below, so neither may still be capable of entering it once DisposeAsync returns.
+        Task oem1ActivationTask, oem1FailOpenTask;
+        lock (_oem1TaskSync)
+        {
+            _oem1Stopping = true;
+            oem1ActivationTask = _oem1ActivationTask;
+            oem1FailOpenTask = _oem1FailOpenTask;
+        }
+
         _oem1Bridge?.Dispose();
         _oem1EventSource?.Dispose();
         _oem1GestureRecognizer?.Dispose();
+
+        try { await oem1ActivationTask.ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Error("CenterM.Oem1", "OEM1 startup activation did not complete cleanly during shutdown.", exception); }
+        try { await oem1FailOpenTask.ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Error("CenterM.Oem1", "OEM1 action-failure fail-open did not complete cleanly during shutdown.", exception); }
 
         // Shutdown ordering (work order requirement 14): stop the OEM1 periodic driver and dispose
         // the coordinator BEFORE the routing guard's own terminal cleanup below -- a timer callback
