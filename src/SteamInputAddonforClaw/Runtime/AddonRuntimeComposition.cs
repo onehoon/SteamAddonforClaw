@@ -20,7 +20,12 @@ internal sealed record AddonRuntimeComposition(
     AddonRuntimeHost RuntimeHost,
     StartupSettingsCoordinator StartupSettings,
     string StartupRegistrationMessage,
-    ISystemStatusProvider StatusProvider);
+    ISystemStatusProvider StatusProvider,
+    /// <summary>Review fix (BLOCKER): the routing composition's OEM1 action-path startup activation
+    /// (see <see cref="AddonRoutingRuntime.Oem1ActivationTask"/>), forwarded so
+    /// <see cref="Hosting.AddonProcessHost.InitializeRuntimeAsync"/> can await it before routing/power
+    /// observation begins. <see cref="Task.CompletedTask"/> when there is no routing runtime.</summary>
+    Task Oem1ActivationTask);
 
 internal static class AddonRuntimeCompositionFactory
 {
@@ -85,6 +90,8 @@ internal static class AddonRuntimeCompositionFactory
             () => recoveryManager.HasIncompleteRecovery,
             establishBaseline);
 
-        return new AddonRuntimeComposition(runtimeHost, startupSettings, startupRegistrationResult.Message, statusProvider);
+        return new AddonRuntimeComposition(
+            runtimeHost, startupSettings, startupRegistrationResult.Message, statusProvider,
+            routingRuntime?.Oem1ActivationTask ?? Task.CompletedTask);
     }
 }

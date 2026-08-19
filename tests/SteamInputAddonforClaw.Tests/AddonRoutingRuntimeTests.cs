@@ -149,6 +149,41 @@ public sealed class AddonRoutingRuntimeTests
         }
     }
 
+    [Fact]
+    public async Task ReconcileSafelyAsync_cannot_enter_the_routing_coordinator_until_OEM1_activation_resolves()
+    {
+        // Review fix (BLOCKER): InitializeRuntimeAsync's await of Oem1ActivationTask only orders the
+        // caller-driven startup path -- AddonRuntimeHost's SteamSessionRuntime.StateChanged
+        // subscription is wired earlier and can fire a real event-driven reconcile (via
+        // ReconcileSafelyAsync) while OEM1 activation is still in flight. Since the OEM1 coordinator
+        // and the routing guard share the same helper ownership, every normal reconcile entry point
+        // must wait behind the same one-shot activation task before the routing coordinator can run.
+        var runtime = CreateMsiRuntime(new FakeStatusProvider(Snapshot(WaitingForSteam())));
+        Assert.NotNull(runtime);
+        try
+        {
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            runtime.TestOnly_SetOem1ActivationTask(gate.Task);
+
+            var refreshCount = 0;
+            var reconcileTask = runtime.ReconcileSafelyAsync(() => refreshCount++);
+
+            await Task.Delay(50);
+            Assert.False(reconcileTask.IsCompleted);
+            Assert.Equal(0, refreshCount);
+
+            gate.SetResult();
+            await reconcileTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(1, refreshCount);
+        }
+        finally
+        {
+            await runtime.ShutdownAsync();
+            await runtime.DisposeAsync();
+        }
+    }
+
     private static AddonRoutingRuntime? CreateMsiRuntime(ISystemStatusProvider? statusProvider = null) => AddonRoutingRuntime.Create(
         new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
         statusProvider ?? new FakeStatusProvider(),

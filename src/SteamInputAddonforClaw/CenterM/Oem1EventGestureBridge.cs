@@ -31,10 +31,25 @@ internal sealed class Oem1EventGestureBridge : IDisposable
 
     internal event Action<Oem1GesturePolicyRequest>? PolicyRequested;
 
-    internal void SetCustomAuthority(bool active)
+    internal void SetCustomAuthority(bool active) => SetCustomAuthority(active, allowActivation: null);
+
+    // Review fix (BLOCKER): lock-order inversion. OnGestureRecognized deliberately holds
+    // _recognizerOperationGate while invoking PolicyRequested, so a real replacement-action failure
+    // reaches the composition's fail-open path WHILE that lock is already held. If the composition
+    // then took its own lock first and called back into SetCustomAuthority (acquiring
+    // _recognizerOperationGate second), that is the exact reverse order of a concurrent lifecycle
+    // refresh/disposal (composition lock -> this method -> _recognizerOperationGate) -- a classic
+    // inversion that can deadlock. The fix: any external fail-open/teardown guard the composition
+    // needs must be evaluated from INSIDE this method's _recognizerOperationGate critical section
+    // (via allowActivation), never by the caller taking its own lock first. This keeps exactly one
+    // lock order everywhere: bridge (_recognizerOperationGate) before any composition-owned lock.
+    internal void SetCustomAuthority(bool active, Func<bool>? allowActivation)
     {
         lock (_recognizerOperationGate)
         {
+            if (active && allowActivation is not null && !allowActivation())
+                active = false;
+
             var resetRecognizer = false;
             lock (_gate)
             {
@@ -104,21 +119,32 @@ internal sealed class Oem1EventGestureBridge : IDisposable
         }
     }
 
+    // Review fix (BLOCKER): the final authority check and the policy-request delivery must be
+    // serialized against SetCustomAuthority()/Dispose() using the SAME _recognizerOperationGate those
+    // two already hold for their entire duration -- otherwise a gesture that passes the check just
+    // before a concurrent revoke/dispose returns could still deliver PolicyRequested afterward,
+    // starting the BPM/QAM replacement action after custom authority was already revoked or the
+    // bridge was already disposed. _recognizerOperationGate (a plain Monitor lock) is re-entrant, so
+    // a production PolicyRequested subscriber may still synchronously call
+    // SetCustomAuthority(false)/Dispose() from within this same call without deadlocking.
     private void OnGestureRecognized(Oem1Gesture gesture, long deliveryEpoch)
     {
-        lock (_gate)
+        lock (_recognizerOperationGate)
         {
-            if (_disposed || !_customAuthority || deliveryEpoch != _activeRecognizerDeliveryEpoch)
-                return;
-        }
+            lock (_gate)
+            {
+                if (_disposed || !_customAuthority || deliveryEpoch != _activeRecognizerDeliveryEpoch)
+                    return;
+            }
 
-        try
-        {
-            PolicyRequested?.Invoke(new Oem1GesturePolicyRequest(gesture));
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("CenterM.Oem1", "OEM1 gesture policy subscriber failed; observation continues.", exception);
+            try
+            {
+                PolicyRequested?.Invoke(new Oem1GesturePolicyRequest(gesture));
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("CenterM.Oem1", "OEM1 gesture policy subscriber failed; observation continues.", exception);
+            }
         }
     }
 }

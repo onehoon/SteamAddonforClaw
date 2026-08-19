@@ -292,7 +292,7 @@ public sealed class PowerTransitionTests
         var spy = new CountingParticipant();
         var slow = new BlockingParticipant();
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [spy, slow],
-            suspendQuiesceBudget: TimeSpan.FromMilliseconds(1000));
+            suspendQuiesceBudget: TimeSpan.FromMilliseconds(3000));
         gate.EnterNewCycleBarrier(out _, out var epoch);
 
         await coordinator.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, epoch, true));
@@ -314,12 +314,15 @@ public sealed class PowerTransitionTests
         // observe remaining > 0 immediately after slow's timeout fired, reproducing even locally
         // (~1-in-4) once run alongside the rest of this test class -- consistent with wall-clock vs.
         // monotonic-timer drift/scheduling jitter, not a one-off CI fluke. 1000ms eliminated it across
-        // repeated local runs (10/10) while keeping the test well under a couple of seconds.
+        // repeated local runs (18+/18+), but still flaked twice on the GitHub Actions Windows runner
+        // (2026-08-19), which under contention/virtualization shows meaningfully worse scheduling
+        // jitter than a local dev machine. Bumped to 3000ms for real headroom against that -- this
+        // only slows the test itself (it waits out the budget once), never the production default.
         var gate = new PowerMutationGate(true);
         var spy = new CountingParticipant();
         var slow = new BlockingParticipant();
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [slow, spy],
-            suspendQuiesceBudget: TimeSpan.FromMilliseconds(1000));
+            suspendQuiesceBudget: TimeSpan.FromMilliseconds(3000));
         gate.EnterNewCycleBarrier(out _, out var epoch);
 
         await coordinator.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, epoch, true));

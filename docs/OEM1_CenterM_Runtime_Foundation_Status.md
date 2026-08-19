@@ -302,11 +302,91 @@ without ever enabling suppression in a real Addon process. No hardware
 validation is claimed by this PR -- all coverage is deterministic automated
 tests with fake dependencies.
 
-## PR3+ (not started) — action wiring, settings / UI / production activation
+## PR3 — Production E2E POC: independent normal mapping + routing-active QAM + real suppression — this PR
 
-The next PR wires WMI Event41 -> gesture -> action dispatch -> Quick Access
-into production and then enables custom OEM1 authority (`DesiredEnabled =
-true`) atomically, so native Center M suppression and the replacement action
-never go live independently of each other. Controller settings "Center M
-Button" action selector, status presentation, named-pipe settings
-transport/persistence, and localization remain unstarted.
+**Development-only E2E POC. Not release-ready.** This is the first PR that
+turns on real OEM1 production suppression and a real replacement action on
+real MSI Claw hardware, to validate the complete path end-to-end:
+`Physical OEM1 -> MSI Event41 -> WmiMsiEventSource -> Oem1EventGestureBridge
+-> Oem1ActionDispatcher -> real replacement action -> real Center M
+suppression`.
+
+**The central architectural rule: normal OEM1 mapping and Steam routing are
+independent features.** Normal OEM1 mapping does not require routing to be
+enabled, available, initialized, eligible, or active. Only while canonical
+Steam Deck routing is *actually active right now* does a routing-side mapping
+get selected instead -- and the moment routing stops being active, the very
+next OEM1 press goes back to normal mapping, with no explicit re-arm step.
+
+- POC normal mapping (used whenever canonical Steam Deck routing is not
+  actually active right now, including routing disabled/unavailable/idle/no
+  game routed/Steam not running): `Single -> SteamBigPicture` (new
+  `Oem1Action` member; `Process.Start("steam://open/bigpicture")`),
+  `Double -> None`.
+- POC routing-active mapping (used only while
+  `RoutingRuntimeStatusSnapshot.SteamOutputActive == true`, captured fresh at
+  every dispatch, never cached, never gated on `Available`):
+  `Single -> SteamQuickAccess` (via the existing, unmodified
+  `CanonicalSteamDeckOutputStage.RequestQuickAccessPulse()`), `Double -> None`.
+- `Oem1ActionBindings` now exposes two independent default instances
+  (`NormalDefault`, `RoutingActiveDefault`) instead of one combined `Default`
+  -- two separate binding/resolve domains, never one action that internally
+  decides based on routing state. `Oem1ActionDispatcher.Dispatch` selects the
+  domain first (`SteamOutputActive` fact only, never `Available`), then
+  resolves the gesture within that domain, and returns `false` only when a
+  bound action was actually invoked and its execution threw (an actual
+  replacement-backend failure, distinct from routing simply being
+  unavailable/inactive, which is normal and never a failure).
+- **Real OEM1 suppression is now enabled in production**, independent of any
+  routing setting: `MsiClawRoutingComposition` wires the previously-dormant
+  Event41 chain (`WmiMsiEventSource -> Oem1GestureRecognizer ->
+  Oem1EventGestureBridge -> Oem1ActionDispatcher`) via a new
+  `IHandheldRoutingComposition.ConfigureOem1ActionPath(captureRoutingStatus,
+  requestQuickAccessPulse)` seam that `AddonRoutingRuntime.Create` calls with
+  the only two routing/output-layer facts OEM1 needs -- fresh routing status
+  and the QAM pulse primitive. If WMI observation starts successfully, the
+  composition requests `CenterMOem1LifecycleCoordinator.SetDesiredEnabledAsync(true)`;
+  if WMI startup fails, OEM1 stays feature-local-disabled (native Center M
+  remains available, the rest of the Addon runtime is unaffected). The
+  existing coordinator/`CenterMOem1LifecycleRuntime` remain the single
+  lifecycle authority -- no second state machine, no second poller. A new,
+  narrow, optional `CenterMOem1LifecycleRuntime` callback
+  (`onReconciled`, invoked after every poll tick and after resume
+  reconciliation; `onSuspending`, invoked at the start of suspend) lets the
+  composition mirror the coordinator's own `SuppressionReady` onto the
+  gesture bridge's custom authority -- bridge authority is never driven by
+  the routing setting, only by the coordinator's own state.
+- Routing setting OFF (core acceptance test): OEM1 custom feature stays
+  active, Center M suppression stays Armed, and pressing OEM1 still reaches
+  normal mapping (Big Picture) -- the absence of an active routing session
+  never disables the bridge, suppression, or the helper.
+- Suspend/resume/shutdown ordering from PR2 is preserved exactly; suspend now
+  additionally revokes custom gesture admission immediately (via
+  `onSuspending`), and `MsiClawRoutingComposition.DisposeAsync()` now revokes
+  bridge authority and disposes the event/gesture/action path before the
+  existing coordinator/driver teardown.
+- OEM2/Event88 is untouched -- it never reaches the bridge (rejected before
+  gesture recognition, unchanged from PR2-B2).
+
+**Still not implemented in this PR (unchanged non-goals):** settings UI,
+persistence, the final configurable mapping framework, keyboard/gamepad/EXE
+mapping, per-gesture UI, AutoRun writer, OEM2 mapping, an E0 39 keyboard
+hook, and any new BPM/Steam process polling.
+
+**No real-hardware validation has been performed in this session.** All
+coverage (`Oem1ActionDispatcherTests`,
+`MsiClawRoutingCompositionOem1ActionPathTests`, plus the unmodified existing
+`CenterMOem1LifecycleCoordinator`/`Oem1EventGestureBridge`/
+`Oem1GestureRecognizer` suites) is deterministic automated tests with fake
+WMI/process/launch dependencies -- no real WMI, no real process launches, no
+real MSI Claw hardware. Real-hardware validation (SD5: does OEM1 actually
+suppress native Center M and launch Big Picture / pulse QAM on a physical MSI
+Claw) remains pending and must happen before this POC is considered anything
+beyond a development E2E validation vehicle.
+
+## PR4+ (not started) — settings / UI / production activation hardening
+
+Controller settings "Center M Button" action selector, status presentation,
+named-pipe settings transport/persistence, localization, and a final
+configurable mapping framework (replacing the two hard-coded POC binding
+defaults from PR3) remain unstarted.

@@ -102,6 +102,22 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startupComposition.StockCenterMBaseline,
             startupResult.RecoverySafe);
 
+        // Review fix (BLOCKER): the OEM1 coordinator and the routing guard share the SAME underlying
+        // helper ownership, but only their exact-handle Start() call itself serializes between them.
+        // This must be awaited BEFORE StartPowerObservation()/the initial ReconcileAsync() (called by
+        // RuntimeProcessApplication only after this method returns) can let routing enter and possibly
+        // start the shared helper first -- otherwise both owners could race toward Start(), or routing
+        // could win first while OEM1 later observes and re-arms around an operational helper the guard
+        // still believes it exclusively owns.
+        try
+        {
+            await composition.Oem1ActivationTask.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("OEM1 startup activation did not complete cleanly.", exception);
+        }
+
         _runtimeHost = composition.RuntimeHost;
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage);

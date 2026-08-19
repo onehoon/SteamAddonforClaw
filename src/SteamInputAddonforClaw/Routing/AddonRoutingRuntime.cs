@@ -50,6 +50,21 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         _coordinator = coordinator;
     }
 
+    /// <summary>Review fix (BLOCKER): the OEM1 action path's startup activation
+    /// (<see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>) and the routing guard
+    /// share the SAME underlying helper ownership, but only their exact-handle Start() call itself
+    /// serializes between them -- so the production startup boundary
+    /// (<see cref="Hosting.AddonProcessHost.InitializeRuntimeAsync"/>) must await this task before
+    /// routing/power observation is allowed to begin, ensuring the long-lived OEM1 owner's activation
+    /// decision is settled first. <see cref="Task.CompletedTask"/> for a backend with no OEM1 feature
+    /// (the interface default).</summary>
+    internal Task Oem1ActivationTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>Test-only seam: lets a test hold OEM1 activation deliberately incomplete and prove
+    /// <see cref="ReconcileSafelyAsync"/> cannot enter the routing coordinator until it resolves.
+    /// Never touched by production code.</summary>
+    internal void TestOnly_SetOem1ActivationTask(Task task) => Oem1ActivationTask = task;
+
     internal static AddonRoutingRuntime? Create(
         IHandheldDeviceAdapter handheldDeviceAdapter,
         ISystemStatusProvider statusProvider,
@@ -96,7 +111,21 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
         });
 
-        return new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator);
+        var runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator);
+
+        // PR3: development-only OEM1 production E2E POC. The only two facts a device-specific OEM1
+        // feature needs from this generic routing/output layer -- fresh routing status and the
+        // canonical Steam Deck output stage's QAM pulse primitive -- passed down through the generic
+        // IHandheldRoutingComposition seam (default no-op for a backend without an OEM1 feature). This
+        // never gates on any routing "enabled" setting: SteamOutputActive reflects only whether
+        // canonical routing is ACTUALLY active right now, exactly the fact OEM1 dispatch requires.
+        // Reuses the same CaptureStatus() the rest of the runtime already uses, rather than
+        // duplicating its field construction here, so the two can never drift apart.
+        runtime.Oem1ActivationTask = handheldRoutingComposition.ConfigureOem1ActionPath(
+            captureRoutingStatus: runtime.CaptureStatus,
+            requestQuickAccessPulse: deckStage.RequestQuickAccessPulse);
+
+        return runtime;
     }
 
     /// <summary>PR2: optional additional power/resume participant the owned composition supplies
@@ -147,6 +176,18 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         {
             try
             {
+                // Review fix (BLOCKER): InitializeRuntimeAsync's own await of Oem1ActivationTask only
+                // orders the CALLER-driven StartPowerObservation()/initial ReconcileAsync() -- it does
+                // nothing to stop AddonRuntimeHost's SteamSessionRuntime.StateChanged subscription
+                // (wired earlier in AddonRuntimeCompositionFactory.Create, before that await) from
+                // firing a real event-driven reconcile while OEM1 activation is still in flight. Since
+                // the OEM1 coordinator and the routing guard (CenterMGuard, the first enabled stage on
+                // entry) share the SAME CenterMHelperOwnership, every normal reconcile entry point --
+                // not just the startup one -- must wait behind the same one-shot activation task before
+                // the routing coordinator/pipeline can run, or the two owners can still race the shared
+                // helper's creation.
+                await Oem1ActivationTask.ConfigureAwait(false);
+
                 var result = await _coordinator.ReconcileAsync(cancellationToken).ConfigureAwait(false);
                 if (!result.Succeeded)
                     AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,

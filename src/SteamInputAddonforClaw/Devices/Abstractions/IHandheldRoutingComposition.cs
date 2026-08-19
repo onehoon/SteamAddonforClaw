@@ -65,4 +65,24 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
     /// extra to reconcile after resume.
     /// </summary>
     IRuntimeResumeParticipant? AuxiliaryResumeParticipant => null;
+
+    /// <summary>
+    /// Optional OEM1 production action-path wiring hook (PR3 development E2E POC). The generic
+    /// routing/output layer is the only place that owns the canonical Steam Deck output stage's QAM
+    /// pulse primitive and the fresh routing-status capture -- this passes just those two narrow
+    /// callbacks down to a composition that has its own OEM1 feature (e.g. MSI Center M), so it can
+    /// wire its dispatcher without the routing/output layer ever learning it is MSI/CenterM specific.
+    /// A backend with no OEM1 feature never overrides this (the default is a no-op). Never called more
+    /// than once per composition instance in production.
+    ///
+    /// <para>
+    /// Returns the (possibly still in-flight) OEM1 lifecycle-enable activation as a single owned
+    /// task, so the production startup boundary can await it before routing/power observation is
+    /// allowed to begin -- see <see cref="Devices.MSI.Claw.MsiClawRoutingComposition"/>'s
+    /// implementation for why: the OEM1 coordinator and the routing guard share the SAME underlying
+    /// helper ownership, so the OEM1 activation decision must be settled before the routing guard's
+    /// own arm transaction can start.
+    /// </para>
+    /// </summary>
+    Task ConfigureOem1ActionPath(Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus, Action requestQuickAccessPulse) => Task.CompletedTask;
 }

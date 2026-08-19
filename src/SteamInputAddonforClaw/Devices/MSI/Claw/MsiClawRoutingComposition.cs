@@ -54,10 +54,11 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     /// <summary>PR2: production-composed OEM1/Center M lifecycle coordinator, sharing the SAME
     /// <see cref="CenterMHelperOwnership"/> as <see cref="CenterMGuard"/> -- never a second,
-    /// competing production helper owner. Production activation stays off: normal composition never
-    /// calls <see cref="CenterMOem1LifecycleCoordinator.SetDesiredEnabledAsync"/> with true. Tests
-    /// may do so explicitly through this property to exercise the full production composition
-    /// seam.</summary>
+    /// competing production helper owner. As of the OEM1 production action path
+    /// (<see cref="ConfigureOem1ActionPath"/>), production DOES call
+    /// <see cref="CenterMOem1LifecycleCoordinator.SetDesiredEnabledAsync"/> with true -- suppression
+    /// is armed once WMI observation actually starts, and disarmed again on action-failure fail-open
+    /// or shutdown.</summary>
     internal CenterMOem1LifecycleCoordinator CenterMOem1Coordinator { get; }
 
     /// <summary>PR2: the one small production driver/lifetime owner around
@@ -74,7 +75,43 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     private readonly IReadOnlyList<IRoutingPipelineStage> _stages;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
+    private readonly bool _startCenterMOem1LifecycleRuntime;
     private Func<string, ValueTask>? _runtimeFaultHandler;
+
+    // PR3: development-only OEM1 production E2E POC action path -- Event41 observation, gesture
+    // recognition/bridge, and dispatch. Never constructed until ConfigureOem1ActionPath is called
+    // (only the real production composition seam, AddonRoutingRuntime.Create, calls it), so every
+    // existing test that constructs this composition directly and never calls it is unaffected.
+    private IMsiEventSource? _oem1EventSource;
+    private Oem1GestureRecognizer? _oem1GestureRecognizer;
+    private Oem1EventGestureBridge? _oem1Bridge;
+    private bool _oem1ActionPathConfigured;
+    private readonly IMsiEventSource? _testOnlyOem1EventSource;
+    // Review fix (MAJOR): lets a test drive Oem1GestureRecognizer's single/double-click debounce
+    // deterministically (no real-time sleeps) and observe the normal-mapping replacement action
+    // without spawning a real process -- never supplied by production composition.
+    private readonly IOem1GestureDelay? _testOnlyOem1GestureDelay;
+    private readonly IOem1GestureClock? _testOnlyOem1GestureClock;
+    private readonly Action? _testOnlyOem1LaunchBigPicture;
+
+    // Review fix (BLOCKER): explicit ownership/join boundary for the two background operations the
+    // OEM1 action path can start (startup activation, action-failure fail-open disable) -- both were
+    // previously untracked/detached Task.Run work that DisposeAsync had no way to wait for before
+    // tearing down the coordinator they call into. _oem1Stopping (set under the same lock) prevents a
+    // new fail-open task from being scheduled once teardown has begun.
+    //
+    // Review fix (BLOCKER): _oem1FailOpenTask is a one-way lifetime latch (null = never failed yet;
+    // non-null = a replacement-action failure has occurred and custom OEM1 admission stays fail-open
+    // for the rest of this composition's lifetime -- never re-armed). This lets RefreshOem1BridgeAuthority
+    // decide "may custom authority activate" with a plain null-check evaluated from INSIDE the bridge's
+    // own lock (see Oem1EventGestureBridge.SetCustomAuthority's allowActivation parameter), instead of
+    // this composition taking _oem1TaskSync BEFORE calling into the bridge -- which used to invert lock
+    // order against OnGestureRecognized's bridge-lock-then-PolicyRequested-callback path and could
+    // deadlock a real action failure against a concurrent lifecycle refresh/disposal.
+    private readonly object _oem1TaskSync = new();
+    private Task _oem1ActivationTask = Task.CompletedTask;
+    private Task? _oem1FailOpenTask;
+    private bool _oem1Stopping;
 
     internal MsiClawRoutingComposition(
         MsiClawNativeStateManager nativeState,
@@ -86,8 +123,16 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         CenterMMainUiRoutingGuard? centerMGuard = null,
         CenterMOem1LifecycleCoordinator? centerMOem1Coordinator = null,
         CenterMOem1LifecycleRuntime? centerMOem1Runtime = null,
-        bool startCenterMOem1LifecycleRuntime = true)
+        bool startCenterMOem1LifecycleRuntime = true,
+        IMsiEventSource? testOnlyOem1EventSource = null,
+        IOem1GestureDelay? testOnlyOem1GestureDelay = null,
+        IOem1GestureClock? testOnlyOem1GestureClock = null,
+        Action? testOnlyOem1LaunchBigPicture = null)
     {
+        _testOnlyOem1EventSource = testOnlyOem1EventSource;
+        _testOnlyOem1GestureDelay = testOnlyOem1GestureDelay;
+        _testOnlyOem1GestureClock = testOnlyOem1GestureClock;
+        _testOnlyOem1LaunchBigPicture = testOnlyOem1LaunchBigPicture;
         NativeModeSession = new MsiClawNativeModeSessionCoordinator(
             nativeState,
             recovery,
@@ -155,13 +200,23 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             processSnapshotSource: centerMProcesses,
             helperOwnership: CenterMHelperOwnership,
             environmentEligibility: () => true);
+        // PR3: the two narrow callbacks below let the OEM1 action path (wired later, only by
+        // ConfigureOem1ActionPath) refresh custom gesture-bridge authority from the coordinator's own
+        // freshly reconciled SuppressionReady snapshot after every tick/resume -- see
+        // RefreshOem1BridgeAuthority. Suspend revokes authority immediately (work order Scope 14).
         CenterMOem1Runtime = centerMOem1Runtime ?? new CenterMOem1LifecycleRuntime(
             CenterMOem1Coordinator,
-            routingGuardIsArmed: () => CenterMGuard.IsArmed);
+            routingGuardIsArmed: () => CenterMGuard.IsArmed,
+            onReconciled: RefreshOem1BridgeAuthority,
+            onSuspending: () => _oem1Bridge?.SetCustomAuthority(false));
+
+        _startCenterMOem1LifecycleRuntime = startCenterMOem1LifecycleRuntime;
 
         // Requirement 3/8: the driver is started as part of normal MSI runtime composition (it is
         // part of the real runtime object lifetime now), but `DesiredEnabled` is never set to true
         // here -- normal production startup never stages/starts the helper via this coordinator.
+        // Only the real production OEM1 action path (ConfigureOem1ActionPath) ever calls
+        // SetDesiredEnabledAsync(true), and only after WMI observation has actually started.
         if (startCenterMOem1LifecycleRuntime)
             CenterMOem1Runtime.Start();
 
@@ -186,6 +241,188 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, ValueTask> handler) =>
         _runtimeFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+
+    /// <summary>
+    /// PR3: development-only OEM1 production E2E POC. Production-composes the already-existing
+    /// Event41 chain (<see cref="WmiMsiEventSource"/> -&gt; <see cref="Oem1EventGestureBridge"/> -&gt;
+    /// <see cref="Oem1ActionDispatcher"/>) and requests OEM1 lifecycle enable -- independent of any
+    /// routing setting (work order's central architectural rule). <paramref name="captureRoutingStatus"/>
+    /// and <paramref name="requestQuickAccessPulse"/> are the only two routing/output-layer facts this
+    /// composition ever receives; it never learns anything else about Steam Deck output/VIIPER
+    /// ownership. Idempotent no-op on a second call.
+    ///
+    /// Review fix (BLOCKER): the returned task is the SAME task retained as
+    /// <see cref="_oem1ActivationTask"/> -- the OEM1 coordinator and the routing guard share the SAME
+    /// <see cref="CenterMHelperOwnership"/>, but only <see cref="CenterMHelperOwnership.Start"/> itself
+    /// serializes the final creation call between them, so the production startup boundary
+    /// (<see cref="Hosting.AddonProcessHost.InitializeRuntimeAsync"/>) must await this before routing's
+    /// own initial reconcile can enter and possibly start the shared helper first. No Task.Run: this
+    /// composition seam is already synchronous only up to its first await, so returning the async
+    /// method's task directly is enough.
+    /// </summary>
+    Task IHandheldRoutingComposition.ConfigureOem1ActionPath(
+        Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
+        Action requestQuickAccessPulse)
+    {
+        if (_oem1ActionPathConfigured) return Task.CompletedTask;
+        _oem1ActionPathConfigured = true;
+
+        var eventSource = _testOnlyOem1EventSource ?? new WmiMsiEventSource();
+        var recognizer = new Oem1GestureRecognizer(doubleClickEnabled: true, doubleClickWindow: TimeSpan.FromMilliseconds(400),
+            delay: _testOnlyOem1GestureDelay, clock: _testOnlyOem1GestureClock);
+        var bridge = new Oem1EventGestureBridge(eventSource, recognizer);
+        var dispatcher = new Oem1ActionDispatcher(
+            normalBindings: Oem1ActionBindings.NormalDefault,
+            routingActiveBindings: Oem1ActionBindings.RoutingActiveDefault,
+            captureRoutingStatus: captureRoutingStatus,
+            requestQuickAccessPulse: requestQuickAccessPulse,
+            launchBigPicture: _testOnlyOem1LaunchBigPicture ?? Oem1BigPictureLauncher.Launch);
+
+        bridge.PolicyRequested += request =>
+        {
+            if (!dispatcher.Dispatch(request))
+                OnOem1ActionFailed();
+        };
+
+        _oem1EventSource = eventSource;
+        _oem1GestureRecognizer = recognizer;
+        _oem1Bridge = bridge;
+
+        if (!_startCenterMOem1LifecycleRuntime)
+            return Task.CompletedTask;
+
+        // Scope 8: WMI startup failure must remain feature-local -- never arm custom suppression,
+        // leave native Center M available, continue the Addon runtime otherwise unaffected.
+        if (!eventSource.Start())
+        {
+            AppLog.Warn("CenterM.Oem1", "OEM1 WMI observation failed to start; custom OEM1 suppression will not be armed, native Center M remains available.", null);
+            return Task.CompletedTask;
+        }
+
+        // Scope 7: request lifecycle enable only after WMI observation has actually started and the
+        // gesture/action wiring above is already subscribed. Explicitly OWNED (see _oem1TaskSync) so
+        // DisposeAsync can join it before the coordinator it calls into is disposed, AND now also
+        // returned to the caller so the production startup boundary can await the SAME task before
+        // routing/power observation begins.
+        lock (_oem1TaskSync)
+            return _oem1ActivationTask = EnableOem1Async();
+    }
+
+    private async Task EnableOem1Async()
+    {
+        try
+        {
+            await CenterMOem1Coordinator.SetDesiredEnabledAsync(true).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("CenterM.Oem1", "Requesting OEM1 lifecycle enable failed.", exception);
+        }
+        RefreshOem1BridgeAuthority();
+    }
+
+    /// <summary>Test-only observability: awaits the fire-and-forget startup activation
+    /// (<c>SetDesiredEnabledAsync(true)</c> + the resulting bridge-authority refresh) triggered by
+    /// <see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>, so a test can deterministically
+    /// observe the outcome instead of racing a background task. Never touched by production code.</summary>
+    internal Task TestOnly_Oem1ActivationTask { get { lock (_oem1TaskSync) return _oem1ActivationTask; } }
+
+    /// <summary>Test-only observability seam onto the wired OEM1 gesture bridge -- lets a test assert
+    /// custom authority state directly without a real WMI/hardware event. Never touched by production
+    /// code.</summary>
+    internal Oem1EventGestureBridge? TestOnly_Oem1Bridge => _oem1Bridge;
+
+    /// <summary>Test-only seam: invokes the exact same authority-refresh path the production driver's
+    /// onReconciled callback calls, so a test can force a refresh to race an action-failure fail-open
+    /// deterministically. Never touched by production code.</summary>
+    internal void TestOnly_RefreshOem1BridgeAuthority() => RefreshOem1BridgeAuthority();
+
+    /// <summary>
+    /// Scope 10/13: the existing <see cref="CenterMOem1LifecycleCoordinator"/> remains the single
+    /// authority for whether OEM1 suppression is currently trusted -- this only mirrors its own
+    /// <see cref="CenterMOem1LifecycleSnapshot.SuppressionReady"/> onto the gesture bridge's custom
+    /// authority, called after every coordinator reconcile tick/resume (never on a timer of its own).
+    /// Bridge authority never depends on routing.
+    /// </summary>
+    private void RefreshOem1BridgeAuthority()
+    {
+        if (_oem1Bridge is not { } bridge)
+            return;
+
+        bool ready;
+        try
+        {
+            ready = CenterMOem1Coordinator.GetSnapshot().SuppressionReady;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        // Test-only synchronization seam: lets a test pause a stale-but-otherwise-successful
+        // readiness read here, before the bridge call below, so it can prove a concurrent
+        // OnOem1ActionFailed (a real Event41 -> bridge -> dispatcher failure) never deadlocks
+        // against it and never gets undone by it. Never touched by production code.
+        TestOnly_BeforeOem1BridgeAuthorityPublish?.Invoke();
+
+        // Review fix (BLOCKER): lock-order inversion. Taking _oem1TaskSync here BEFORE calling into
+        // the bridge would invert the lock order against OnGestureRecognized, which deliberately holds
+        // the bridge's _recognizerOperationGate while invoking PolicyRequested (i.e. while a real
+        // action failure can reach OnOem1ActionFailed). Instead, the "may custom authority actually
+        // activate" decision is passed down as a predicate the bridge evaluates from INSIDE its own
+        // lock -- _oem1TaskSync is only ever acquired after entering the bridge, never before, so the
+        // lock order is always bridge -> _oem1TaskSync, everywhere.
+        bridge.SetCustomAuthority(ready, allowActivation: () =>
+        {
+            lock (_oem1TaskSync)
+                return !_oem1Stopping && _oem1FailOpenTask is null;
+        });
+    }
+
+    /// <summary>See the invocation site inside <see cref="RefreshOem1BridgeAuthority"/>. Never touched
+    /// by production code.</summary>
+    internal Action? TestOnly_BeforeOem1BridgeAuthorityPublish;
+
+    /// <summary>
+    /// Scope 9: an actual replacement-action execution failure (e.g. the Big Picture launch backend
+    /// throwing) is different from routing simply being unavailable/inactive -- revoke custom gesture
+    /// authority and request the existing coordinator disable/fail-open, restoring native Center M.
+    /// </summary>
+    private void OnOem1ActionFailed()
+    {
+        // Re-entrant on the bridge's own _recognizerOperationGate when called synchronously from
+        // within a PolicyRequested subscriber (the real production path) -- see
+        // Oem1EventGestureBridge.OnGestureRecognized's doc comment. Must run BEFORE this method takes
+        // _oem1TaskSync below, preserving the same bridge -> _oem1TaskSync lock order
+        // RefreshOem1BridgeAuthority uses, so a real action failure can never deadlock against a
+        // concurrent lifecycle refresh/disposal.
+        _oem1Bridge?.SetCustomAuthority(false);
+
+        lock (_oem1TaskSync)
+        {
+            // _oem1FailOpenTask is a one-way lifetime latch (see field doc comment): once set, custom
+            // OEM1 admission stays fail-open for the rest of this composition's lifetime. Once teardown
+            // has begun, no new fail-open task may start either -- DisposeAsync is (or is about to be)
+            // the sole owner draining outstanding OEM1 background work before the coordinator it
+            // targets is disposed.
+            if (_oem1Stopping || _oem1FailOpenTask is not null)
+                return;
+
+            _oem1FailOpenTask = DisableOem1AfterActionFailureAsync();
+        }
+    }
+
+    private async Task DisableOem1AfterActionFailureAsync()
+    {
+        try
+        {
+            await CenterMOem1Coordinator.SetDesiredEnabledAsync(false).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("CenterM.Oem1", "Disabling OEM1 lifecycle after a replacement-action failure did not complete.", exception);
+        }
+    }
 
     /// <summary>
     /// Forwards the physical-input source's completion summary to the registered runtime-fault
@@ -237,6 +474,35 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     public async ValueTask DisposeAsync()
     {
+        // Review fix (MAJOR): close custom OEM1 gesture admission and dispose the event/gesture/
+        // bridge path as the VERY FIRST step of composition disposal -- before any other awaited
+        // teardown below. The bridge race fix (Oem1EventGestureBridge.OnGestureRecognized) only
+        // guarantees no policy delivery can begin AFTER SetCustomAuthority(false)/Dispose() returns;
+        // it does nothing to stop a physical OEM1 press from starting a NEW BPM/QAM action while an
+        // earlier awaited step (e.g. NativeModeSession/PhysicalInputSource teardown) is still in
+        // flight. The stated shutdown contract is "close custom gesture admission first, then tear
+        // down the rest" -- so this boundary must not wait behind any of that unrelated teardown.
+        //
+        // Review fix (BLOCKER): permanently close/drain the bridge BEFORE taking _oem1TaskSync, never
+        // after -- disposing the bridge first (which internally revokes authority as part of the same
+        // operation) guarantees no new PolicyRequested callback can begin once Dispose() returns, so
+        // capturing the owned tasks under _oem1TaskSync afterward is safe without ever reversing the
+        // bridge -> _oem1TaskSync lock order RefreshOem1BridgeAuthority/OnOem1ActionFailed rely on.
+        _oem1Bridge?.Dispose();
+        _oem1EventSource?.Dispose();
+        _oem1GestureRecognizer?.Dispose();
+
+        // Captures whatever activation/fail-open work is currently owned/in-flight -- both background
+        // operations call into the coordinator this method eventually disposes, so neither may still
+        // be capable of entering it once DisposeAsync returns.
+        Task oem1ActivationTask, oem1FailOpenTask;
+        lock (_oem1TaskSync)
+        {
+            _oem1Stopping = true;
+            oem1ActivationTask = _oem1ActivationTask;
+            oem1FailOpenTask = _oem1FailOpenTask ?? Task.CompletedTask;
+        }
+
         PhysicalInputSource.TestCompleted -= OnPhysicalInputCompleted;
         PhysicalInputStage.PhysicalSessionRetired -= PhysicalRumbleSink.InvalidatePhysicalSession;
         PhysicalInputStage.PhysicalSessionRetiring -= PhysicalRumbleSink.BeginPhysicalSessionRetirement;
@@ -247,17 +513,23 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // RoutingPipelineStageOrder.Rollback, after native/physical restoration) long before
         // disposal is ever reached -- this composition is only disposed after routing has already
         // been shut down. This is a last-resort fallback for whatever normal rollback did NOT
-        // resolve, so it preserves the same ordering invariant: never release Center M launch
-        // protection before native-mode/physical restoration has at least been attempted.
+        // resolve, so it preserves the same ordering invariant (relative to each other): never
+        // release Center M launch protection before native-mode/physical restoration has at least
+        // been attempted. OEM1 admission above is closed first regardless, per the shutdown contract.
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
+
+        try { await oem1ActivationTask.ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Error("CenterM.Oem1", "OEM1 startup activation did not complete cleanly during shutdown.", exception); }
+        try { await oem1FailOpenTask.ConfigureAwait(false); }
+        catch (Exception exception) { AppLog.Error("CenterM.Oem1", "OEM1 action-failure fail-open did not complete cleanly during shutdown.", exception); }
 
         // Shutdown ordering (work order requirement 14): stop the OEM1 periodic driver and dispose
         // the coordinator BEFORE the routing guard's own terminal cleanup below -- a timer callback
         // must never still be capable of entering coordinator methods once this composition starts
         // tearing down the shared helper authority. Safe even though DesiredEnabled has always been
-        // false in this PR: the coordinator's own DisposeAsync is a no-op stop when it never owned
-        // anything.
+        // false outside the PR3 production action path: the coordinator's own DisposeAsync is a no-op
+        // stop when it never owned anything.
         await CenterMOem1Runtime.DisposeAsync().ConfigureAwait(false);
 
         // Terminal cleanup, not the normal Disarm path: bounded final Stop retries, and -- if the

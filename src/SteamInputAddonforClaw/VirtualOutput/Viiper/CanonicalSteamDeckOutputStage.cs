@@ -85,9 +85,10 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     internal void SetOutputFaultHandler(Func<ValueTask> handler) => _outputFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
 
     /// <summary>
-    /// Forwarding seam for a future PR to request a synthetic Steam Deck Quick Access pulse. Not
-    /// called by anything in this PR -- OEM1/gesture/UI/settings wiring is explicitly out of scope
-    /// here; see docs/VIIPER_MIGRATION_TODO.md SD5.
+    /// Forwarding seam for requesting a synthetic Steam Deck Quick Access pulse. Called by
+    /// <see cref="CenterM.Oem1ActionDispatcher"/> when OEM1 resolves to
+    /// <see cref="CenterM.Oem1Action.SteamQuickAccess"/> while canonical Steam Deck routing is
+    /// actually active; see docs/VIIPER_MIGRATION_TODO.md SD5.
     /// </summary>
     internal void RequestQuickAccessPulse() => _systemButtonOverlay.RequestQuickAccessPulse();
     internal Action? FeedbackBeforeLease

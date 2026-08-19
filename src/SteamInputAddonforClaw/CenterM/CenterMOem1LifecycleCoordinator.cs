@@ -58,10 +58,10 @@ internal readonly record struct CenterMOem1LifecycleSnapshot(
 /// caller (test, or the production composition seam) calling one of the public methods below. A
 /// lifecycle/composition PR production-composes this type into the real MSI Claw runtime lifetime
 /// (see <see cref="Devices.MSI.Claw.MsiClawRoutingComposition"/> and
-/// <see cref="CenterMOem1LifecycleRuntime"/>) and drives its poll contract, but normal production
-/// startup never calls <see cref="SetDesiredEnabledAsync"/> with true -- construction and polling
-/// alone still start no helper and change no native OEM1 behavior; only an explicit enable (still
-/// dormant, left to a future PR) does.
+/// <see cref="CenterMOem1LifecycleRuntime"/>) and drives its poll contract. As of the OEM1 production
+/// action path (<see cref="Devices.MSI.Claw.MsiClawRoutingComposition.ConfigureOem1ActionPath"/>),
+/// production DOES call <see cref="SetDesiredEnabledAsync"/> with true once WMI observation has
+/// actually started, and with false again on action-failure fail-open or shutdown.
 /// </summary>
 internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant, IAsyncDisposable, ICenterMOem1LifecycleDriverTarget
 {
@@ -308,7 +308,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     private CenterMOem1LifecycleSnapshot BuildSnapshotCore()
     {
-        var suppressionReady = _state == CenterMOem1LifecycleState.Armed;
+        // Review fix (BLOCKER): QuiesceForSuspendAsync deliberately keeps an already-armed helper
+        // alive and does not leave the Armed state, so _state == Armed alone is not sufficient once
+        // suspend has revoked custom-action admission (see CenterMOem1LifecycleRuntime.onSuspending).
+        // SuppressionReady must also require the suspend barrier to be clear, or a racing runtime
+        // tick's onReconciled could re-observe SuppressionReady == true and re-enable the bridge
+        // while suspend is still in effect.
+        var suppressionReady = _state == CenterMOem1LifecycleState.Armed && !IsSuspendBarrierActive;
         // "Native behavior guaranteed" means no residual helper ownership could be suppressing the
         // real MSI Center M launch -- distinct from "custom suppression inactive", which is true in
         // every non-Armed state including FaultedNative-with-retained-ownership.
@@ -328,8 +334,10 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             _lastReason);
     }
 
-    /// <summary>Internal runtime control seam -- there is no persisted setting in this PR. Default
-    /// is false; production must never call this with true.</summary>
+    /// <summary>Internal runtime control seam. Called with true by the production OEM1 action path
+    /// (<see cref="Devices.MSI.Claw.MsiClawRoutingComposition.ConfigureOem1ActionPath"/>) once WMI
+    /// observation has actually started, and with false again on action-failure fail-open or
+    /// shutdown.</summary>
     internal async Task SetDesiredEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         // Bumped BEFORE acquiring the gate (finding #6): a disable request becomes authoritative to
