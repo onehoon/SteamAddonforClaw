@@ -99,12 +99,12 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         var report = new byte[64];
         switch (command)
         {
-            case FrontendVibrationTestCommand.Rumble: report[0] = 0xEB; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(2), 0x8000); BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(4), 0x8000); break;
-            case FrontendVibrationTestCommand.Haptic: report[0] = 0xEA; report[1] = 128; break;
-            case FrontendVibrationTestCommand.HapticPulse: report[0] = 0x8F; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(1), 25000); report[3] = 10; break;
+            case FrontendVibrationTestCommand.Rumble: report[0] = 0xEB; report[1] = 9; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(5, 2), 0x8000); BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(7, 2), 0x8000); break;
+            case FrontendVibrationTestCommand.Haptic: report[0] = 0xEA; report[4] = 128; report[5] = 0; break;
+            case FrontendVibrationTestCommand.HapticPulse: report[0] = 0x8F; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(5, 2), 25000); BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(7, 2), 10); report[9] = 0; break;
             case FrontendVibrationTestCommand.Stop: report[0] = 0xEB; report[1] = 9; break;
         }
-        return _feedbackBridge.ProcessDeveloperTestAsync(report, command == FrontendVibrationTestCommand.Stop, cancellationToken);
+        return _feedbackBridge.ProcessDeveloperTestAsync(report, command is FrontendVibrationTestCommand.Rumble or FrontendVibrationTestCommand.Haptic, cancellationToken);
     }
     internal Action? FeedbackBeforeLease
     {

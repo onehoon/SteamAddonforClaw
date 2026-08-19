@@ -58,7 +58,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
     }
 
-    internal async Task<bool> ProcessDeveloperTestAsync(ReadOnlyMemory<byte> report, bool explicitStop, CancellationToken cancellationToken)
+    internal async Task<bool> ProcessDeveloperTestAsync(ReadOnlyMemory<byte> report, bool addDeveloperStop, CancellationToken cancellationToken)
     {
         CancellationTokenSource linked;
         lock (_gate)
@@ -71,7 +71,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         try
         {
             if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest")) return false;
-            if (explicitStop) return true;
+            if (!addDeveloperStop) return true;
             await Task.Delay(250, linked.Token).ConfigureAwait(false);
             var stop = new byte[64]; stop[0] = 0xEB; stop[1] = 9;
             return ProcessNormalizedReport(stop, "DeveloperVibrationTest");

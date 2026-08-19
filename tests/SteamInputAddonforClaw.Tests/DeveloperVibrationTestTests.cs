@@ -16,8 +16,13 @@ public sealed class DeveloperVibrationTestTests
         var sink = new RecordingSink();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
-        Assert.True(await bridge.ProcessDeveloperTestAsync(Report(command), explicitStop: command == FrontendVibrationTestCommand.HapticPulse, CancellationToken.None));
+        Assert.True(await bridge.ProcessDeveloperTestAsync(Report(command), addDeveloperStop: command is FrontendVibrationTestCommand.Rumble or FrontendVibrationTestCommand.Haptic, CancellationToken.None));
         Assert.Equal(new TwoMotorRumble(large, small), sink.Values[0]);
+        if (command == FrontendVibrationTestCommand.HapticPulse)
+        {
+            await Task.Delay(300);
+            Assert.Equal(2, sink.Values.Count);
+        }
     }
 
     [Fact]
@@ -27,7 +32,7 @@ public sealed class DeveloperVibrationTestTests
         var authority = new FeedbackAuthority();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
-        Assert.True(await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), false, CancellationToken.None));
+        Assert.True(await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None));
 
         Assert.Equal([new TwoMotorRumble(32768, 32768), TwoMotorRumble.Stopped], sink.Values);
     }
@@ -39,9 +44,9 @@ public sealed class DeveloperVibrationTestTests
         var authority = new FeedbackAuthority();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
-        var oldTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), false, CancellationToken.None);
+        var oldTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None);
         await Task.Delay(20);
-        var newTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Haptic), false, CancellationToken.None);
+        var newTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Haptic), true, CancellationToken.None);
         await Task.WhenAll(oldTest, newTest);
 
         Assert.Equal([new TwoMotorRumble(32768, 32768), new TwoMotorRumble(32896, 32896), TwoMotorRumble.Stopped], sink.Values);
@@ -53,7 +58,7 @@ public sealed class DeveloperVibrationTestTests
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
-        var test = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), false, CancellationToken.None);
+        var test = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None);
 
         await Task.Delay(20);
         bridge.Dispose();
