@@ -102,7 +102,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             case FrontendVibrationTestCommand.Rumble: report[0] = 0xEB; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(2), 0x8000); BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(4), 0x8000); break;
             case FrontendVibrationTestCommand.Haptic: report[0] = 0xEA; report[1] = 128; break;
             case FrontendVibrationTestCommand.HapticPulse: report[0] = 0x8F; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(1), 25000); report[3] = 10; break;
-            case FrontendVibrationTestCommand.Stop: report[0] = 0xEB; break;
+            case FrontendVibrationTestCommand.Stop: report[0] = 0xEB; report[1] = 9; break;
         }
         return _feedbackBridge.ProcessDeveloperTestAsync(report, command == FrontendVibrationTestCommand.Stop, cancellationToken);
     }

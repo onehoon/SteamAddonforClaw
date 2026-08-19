@@ -73,7 +73,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest")) return false;
             if (explicitStop) return true;
             await Task.Delay(250, linked.Token).ConfigureAwait(false);
-            var stop = new byte[64]; stop[0] = 0xEB;
+            var stop = new byte[64]; stop[0] = 0xEB; stop[1] = 9;
             return ProcessNormalizedReport(stop, "DeveloperVibrationTest");
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { return false; }
