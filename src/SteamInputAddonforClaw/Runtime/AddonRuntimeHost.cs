@@ -132,9 +132,6 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     internal Task ReconcileAsync(CancellationToken cancellationToken = default) =>
         _routingRuntime is null ? Task.CompletedTask : _routingRuntime.ReconcileSafelyAsync(RequestStatusRefresh, cancellationToken);
 
-    internal Task ReconcileOem1PrerequisitesAsync(CancellationToken cancellationToken = default) =>
-        _routingRuntime?.ReconcileOem1PrerequisitesAsync(cancellationToken) ?? Task.CompletedTask;
-
     /// <summary>
     /// Registers for suspend/resume notifications and opens the mutation gate if registration
     /// succeeded and recovery is safe -- exactly the startup sequence previously inlined in App.

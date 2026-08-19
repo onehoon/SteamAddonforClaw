@@ -23,7 +23,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly IFrontendPrerequisiteSetupExecutor _setupExecutor;
     private readonly Func<string?> _processPath;
     private readonly bool _oem1MappingAvailable;
-    private readonly Func<CancellationToken, Task>? _reconcileOem1Prerequisites;
     private int _shutdownStarted;
 
     /// <param name="oem1MappingAvailable">The startup hardware-support result
@@ -31,10 +30,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// UI gates the Center M Button feature on the SAME fact the routing composition's OEM1 action
     /// path gates on. Defaults to false so any construction path that never established hardware
     /// support reports the feature unavailable rather than offering it.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, Func<CancellationToken, Task>? reconcileOem1Prerequisites = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
-        _reconcileOem1Prerequisites = reconcileOem1Prerequisites ?? (runtime is null ? null : runtime.ReconcileOem1PrerequisitesAsync);
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -57,7 +55,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public async Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default)
     {
         var snapshot = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        var setup = _setupExecutor.Evaluate(snapshot, _settings?.Oem1Mapping?.RemappingEnabled ?? false);
+        var setup = _setupExecutor.Evaluate(snapshot);
         return FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(snapshot, _captureRoutingStatus()), setup);
     }
 
@@ -115,7 +113,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         var current = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        var setup = _setupExecutor.Evaluate(current, _settings?.Oem1Mapping?.RemappingEnabled ?? false);
+        var setup = _setupExecutor.Evaluate(current);
         AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
             ("HidHideStatus", current.Prerequisites.HidHide.Status),
             ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
@@ -134,23 +132,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         // RunIfInstallableAsync returns null only when its safety policy declines to launch.
         // Preserve that distinction from an elevated helper that actually returns Blocked.
         if (result is null) return new(FrontendPrerequisiteSetupResultKind.NotInstallable, mapped);
-        _settings?.RefreshCenterMAutoRunOwnershipFromDisk();
         var resultKind = MapResultKind(ElevatedPrerequisiteSetup.TranslateExitCode(result));
-        if (_settings is not null && _settings.Settings.CenterMAutoRunMutationPending)
-        {
-            // The AutoRun write/read-back is explicitly unresolved (crash-attribution marker still
-            // set). Reconciling OEM1 now could let a coincidentally-Disabled fresh registry read
-            // arm suppression before the mutation is actually confirmed, so OEM1 must stay
-            // fail-open until a later pass resolves the pending marker.
-            AppLog.Warn("PrerequisiteSetup", "AutoRun confirmation remains pending; OEM1 stays fail-open.", null, ("Reason", "AutoRunMutationPending"));
-        }
-        else if (_reconcileOem1Prerequisites is not null)
-        {
-            // OEM1 AutoRun is independent of HidHide/usbip. The elevated helper may have
-            // confirmed AutoRun before a later unrelated prerequisite fails, so always let the
-            // coordinator perform its own fresh fail-closed prerequisite evaluation.
-            await _reconcileOem1Prerequisites(cancellationToken).ConfigureAwait(false);
-        }
+        // No OEM1 reconcile here: HidHide/usbip setup no longer mutates any OEM1 prerequisite. OEM1
+        // arming is owned entirely by the mapping-change/startup lifecycle plus the coordinator's own
+        // environment/Launcher/Server/process/helper reconciliation.
         FrontendStatusSnapshot? postStatus = null;
         try
         {

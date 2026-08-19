@@ -28,7 +28,6 @@ internal readonly record struct CenterMOem1LifecycleSnapshot(
     int? HelperProcessId,
     int? RealMainUiProcessId,
     bool SeenVisible,
-    CenterMAutoRunState AutoRunState,
     bool LauncherReady,
     bool ServerReady,
     string? LastReason);
@@ -67,7 +66,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 {
     private readonly Func<string> _publishRootProvider;
     private readonly CenterMBackendProbe _backendProbe;
-    private readonly Func<CenterMAutoRunState> _autoRunReader;
     private readonly IProcessSnapshotSource _processSnapshotSource;
     private readonly CenterMHelperOwnership _helperOwnership;
     private readonly MainUiLifecycleObserver _mainUiObserver;
@@ -89,7 +87,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     private CenterMOem1LifecycleState _state = CenterMOem1LifecycleState.Disabled;
     private bool _desiredEnabled;
-    private CenterMAutoRunState _lastAutoRun = CenterMAutoRunState.Unknown;
     private bool _launcherReady;
     private bool _serverReady;
     private TrackedCenterMMainUi? _trackedMainUi;
@@ -224,7 +221,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     internal CenterMOem1LifecycleCoordinator(
         Func<string> publishRootProvider,
         CenterMBackendProbe? backendProbe = null,
-        Func<CenterMAutoRunState>? autoRunReader = null,
         IProcessSnapshotSource? processSnapshotSource = null,
         CenterMHelperOwnership? helperOwnership = null,
         MainUiLifecycleObserver? mainUiObserver = null,
@@ -242,7 +238,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         _publishRootProvider = publishRootProvider;
         var snapshotSource = processSnapshotSource ?? new Win32ProcessSnapshotSource();
         _backendProbe = backendProbe ?? new CenterMBackendProbe(snapshotSource);
-        _autoRunReader = autoRunReader ?? CenterMAutoRunReader.Read;
         _processSnapshotSource = snapshotSource;
         // testOnlyDefaultHelperNativeApi (review 4957630432 finding #3) only ever substitutes the
         // native API used by the coordinator's OWN internally-constructed CenterMHelperOwnership --
@@ -328,7 +323,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             _helperOwnership.ProcessId,
             _trackedMainUi?.ProcessId,
             _trackedMainUi is not null && _mainUiObserver.SeenVisible,
-            _lastAutoRun,
             _launcherReady,
             _serverReady,
             _lastReason);
@@ -478,22 +472,22 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             if (_state == CenterMOem1LifecycleState.Armed)
             {
                 // Review (re-review of a8c8658): steady-state Armed must keep revalidating the same
-                // AutoRun/environment/Launcher/Server prerequisites that gated the original arm --
-                // helper liveness/same-name topology alone (CheckForForeignMainUiCore) never catches
-                // AutoRun drifting back to Enabled/Unknown, or Launcher/Server disappearing, while
-                // already Armed. Reuses the existing RefreshSuppressionPrerequisites/
-                // DisarmOwnedHelperForFailOpen primitives (same ones ReconcileCore and the
-                // tracked-MainUI poll branch above already use) rather than adding a new validator.
+                // environment/Launcher/Server prerequisites that gated the original arm -- helper
+                // liveness/same-name topology alone (CheckForForeignMainUiCore) never catches
+                // Launcher/Server disappearing while already Armed. Reuses the existing
+                // RefreshSuppressionPrerequisites/DisarmOwnedHelperForFailOpen primitives (same ones
+                // ReconcileCore and the tracked-MainUI poll branch above already use) rather than
+                // adding a new validator.
                 var prerequisitesValid = RefreshSuppressionPrerequisites();
                 if (!prerequisitesValid)
                 {
                     var disarmed = DisarmOwnedHelperForFailOpen();
                     _lastReason = disarmed
-                        ? $"ArmedPrerequisiteDrift:AutoRun={_lastAutoRun}:Launcher={_launcherReady}:Server={_serverReady}:Disarmed"
+                        ? $"ArmedPrerequisiteDrift:Launcher={_launcherReady}:Server={_serverReady}:Disarmed"
                         : "ArmedPrerequisiteDrift:DisarmCleanupUnconfirmed";
                     SetState(disarmed ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
                     AppLog.Warn("CenterM.Oem1", "Armed prerequisite drift detected; custom suppression is failing open.", null,
-                        ("AutoRun", _lastAutoRun), ("LauncherPresent", _launcherReady), ("ServerPresent", _serverReady), ("Disarmed", disarmed));
+                        ("LauncherPresent", _launcherReady), ("ServerPresent", _serverReady), ("Disarmed", disarmed));
                     return;
                 }
 
@@ -534,8 +528,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// <summary>Fresh, complete OEM1 reconciliation on resume, independent of Steam/VIIPER routing
     /// success. This is the explicit boundary that clears the suspended mutation barrier established
     /// by <see cref="QuiesceForSuspendAsync"/> -- no other entry point clears it. Re-checks helper
-    /// liveness, process topology, real MainUI presence/identity, Launcher/Server, and AutoRun before
-    /// ever re-arming.</summary>
+    /// liveness, process topology, real MainUI presence/identity, and Launcher/Server before ever
+    /// re-arming.</summary>
     internal async Task ReconcileAfterResumeAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -769,7 +763,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             //
             // Review 4957791980 finding #2 (MAJOR): "identity resolved first" is not the same as
             // "termination is still permitted". Refresh the same prerequisite facts (environment
-            // eligibility, AutoRun, Launcher/Server) that gate helper arm/suppression BEFORE ever
+            // eligibility, Launcher/Server) that gate helper arm/suppression BEFORE ever
             // starting or continuing hidden-debounce termination -- resume must re-check the complete
             // current-world prerequisite set, and prerequisite drift during sleep must leave native
             // Center M behavior intact rather than continue a destructive custom-lifecycle action
@@ -786,27 +780,11 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         if (!environmentEligible)
         {
             // Finding #8: an unsupported/uncertain environment must fail open before ever touching
-            // Launcher/Server/AutoRun/helper staging.
+            // Launcher/Server/helper staging.
             var eligibilityClean = await EnsureNoHelperOwned(cancellationToken).ConfigureAwait(false);
             _lastReason = eligibilityClean ? "HardwareEnvironmentIneligible" : "HardwareEnvironmentIneligibleCleanupUnconfirmed";
             SetState(eligibilityClean ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
-            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, null, null, null);
-            return;
-        }
-
-        _lastAutoRun = _autoRunReader();
-        if (_lastAutoRun != CenterMAutoRunState.Disabled)
-        {
-            var autoRunClean = await EnsureNoHelperOwned(cancellationToken).ConfigureAwait(false);
-            if (!autoRunClean)
-            {
-                _lastReason = "AutoRunDriftCleanupUnconfirmed";
-                SetState(CenterMOem1LifecycleState.FaultedNative);
-                return;
-            }
-            _lastReason = _lastAutoRun == CenterMAutoRunState.Enabled ? "AutoRunEnabled" : "AutoRunUnknown";
-            SetState(CenterMOem1LifecycleState.NeedsSetup);
-            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, _lastAutoRun, null, null);
+            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, null, null);
             return;
         }
 
@@ -824,11 +802,11 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             }
             _lastReason = !_launcherReady ? "LauncherMissing" : "ServerMissing";
             SetState(CenterMOem1LifecycleState.NeedsSetup);
-            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, _lastAutoRun, _launcherReady, _serverReady);
+            LogPrerequisiteSnapshot("NeedsSetup", environmentEligible, _launcherReady, _serverReady);
             return;
         }
 
-        LogPrerequisiteSnapshot("ReadyToArm", environmentEligible, _lastAutoRun, _launcherReady, _serverReady);
+        LogPrerequisiteSnapshot("ReadyToArm", environmentEligible, _launcherReady, _serverReady);
         SetState(CenterMOem1LifecycleState.Reconciling);
 
         var sameName = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
@@ -896,10 +874,10 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     }
 
     /// <summary>Review 4957791980 finding #2: captures the same fresh prerequisite facts
-    /// (environment eligibility, AutoRun, Launcher/Server) that gate helper arm/suppression
-    /// readiness elsewhere in <see cref="ReconcileCore"/>, WITHOUT performing any helper cleanup --
-    /// used purely to decide whether hidden-debounce termination of an already-tracked real MainUI
-    /// may proceed. Short-circuits (never touches Launcher/Server/<see cref="_launcherReady"/>/
+    /// (environment eligibility, Launcher/Server) that gate helper arm/suppression readiness
+    /// elsewhere in <see cref="ReconcileCore"/>, WITHOUT performing any helper cleanup -- used purely
+    /// to decide whether hidden-debounce termination of an already-tracked real MainUI may proceed.
+    /// Short-circuits (never touches Launcher/Server/<see cref="_launcherReady"/>/
     /// <see cref="_serverReady"/> beyond resetting them to false) once an earlier prerequisite is
     /// already known invalid, matching the same fail-fast order used by the no-tracked-MainUI path
     /// below.</summary>
@@ -912,37 +890,17 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             return false;
         }
 
-        _lastAutoRun = _autoRunReader();
-        if (_lastAutoRun != CenterMAutoRunState.Disabled)
-        {
-            _launcherReady = false;
-            _serverReady = false;
-            return false;
-        }
-
         var backend = _backendProbe.Capture();
         _launcherReady = backend.LauncherPresent;
         _serverReady = backend.ServerPresent;
         return _launcherReady && _serverReady;
     }
 
-    internal async Task ReconcilePrerequisitesAsync(CancellationToken cancellationToken = default)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_shutdown || !_desiredEnabled) return;
-            await ReconcileCore("ExplicitPrerequisiteSetupReconcile", Interlocked.Read(ref _lifecycleEpoch), cancellationToken).ConfigureAwait(false);
-        }
-        finally { _gate.Release(); }
-    }
-
-    private void LogPrerequisiteSnapshot(string decision, bool? environmentEligible, CenterMAutoRunState? autoRun, bool? launcherPresent, bool? serverPresent)
+    private void LogPrerequisiteSnapshot(string decision, bool? environmentEligible, bool? launcherPresent, bool? serverPresent)
     {
         AppLog.Info("CenterM.Oem1", "Fresh prerequisite snapshot evaluated.",
             ("EnvironmentEligible", environmentEligible),
             ("RemappingEnabled", _desiredEnabled),
-            ("AutoRun", autoRun),
             ("LauncherPresent", launcherPresent),
             ("ServerPresent", serverPresent),
             ("HelperOwned", _helperOwnership.IsOwned),
@@ -1154,8 +1112,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         {
             // The helper itself was the only same-name process; nothing remains to adopt. Finding
             // #6: the helper stop sequence above can involve one or two bounded waits (graceful
-            // terminate/wait, and possibly a Job-close fallback wait) -- eligibility, Launcher/
-            // Server, and AutoRun evidence captured earlier in this same ReconcileCore call may have
+            // terminate/wait, and possibly a Job-close fallback wait) -- eligibility and Launcher/
+            // Server evidence captured earlier in this same ReconcileCore call may have
             // drifted during that interval. Never jump directly into AttemptArm from that stale
             // pre-stop snapshot; re-enter a fresh full reconciliation that recaptures every
             // prerequisite before ever creating another helper.
@@ -1224,7 +1182,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         AppLog.Info("CenterM.Oem1", "Real MainUI adopted; yielding to native Center M.", ("ProcessId", tracked.ProcessId));
 
         // This adoption is reached only after the same ReconcileCore call already confirmed
-        // environment eligibility, AutoRun == Disabled, and Launcher/Server readiness earlier in
+        // environment eligibility and Launcher/Server readiness earlier in
         // this exact invocation (the foreign-same-name branch runs strictly after those checks), and
         // _mainUiObserver.Reset() was just called above, so the very first observation below can
         // never itself be a HiddenAfterVisible termination candidate. Passing true here is therefore
@@ -1236,7 +1194,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// Visible / HiddenAfterVisible-debounce / natural-exit reconciliation. Assumes the gate is
     /// already held and <see cref="_trackedMainUi"/> is not null.</summary>
     /// <param name="prerequisitesValid">Review 4957791980 finding #2: whether environment
-    /// eligibility, AutoRun, and Launcher/Server were all freshly re-confirmed valid THIS call. When
+    /// eligibility and Launcher/Server were all freshly re-confirmed valid THIS call. When
     /// false, a HiddenAfterVisible observation must never start or continue hidden-debounce
     /// termination -- prerequisite drift must leave native Center M behavior intact rather than
     /// continue a destructive custom-lifecycle action from pre-suspend/stale assumptions. Does not
@@ -1302,7 +1260,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 if (!prerequisitesValid || !TryLinearizeOrdinaryMutationStart(expectedEpoch))
                 {
                     // Review 4957791980 finding #2 (MAJOR): prerequisite drift (environment
-                    // eligibility, AutoRun, or Launcher/Server) must never be bypassed just because a
+                    // eligibility or Launcher/Server) must never be bypassed just because a
                     // real MainUI identity is already tracked. Cancel any debounce already in flight,
                     // never start a new one, and never terminate -- stay passive/native until a later
                     // fresh reconciliation confirms the prerequisite set is valid again. The retained
@@ -1501,7 +1459,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 }
 
                 // Review 4958040630 finding #2 (MAJOR): the debounce is intentionally ~1 second long,
-                // and OEM1 feature prerequisites (environment eligibility, AutoRun, Launcher/Server)
+                // and OEM1 feature prerequisites (environment eligibility, Launcher/Server)
                 // are not something SafeMainUiTerminator itself knows about -- it only performs final
                 // retained-handle/process/window/same-name safety checks. Re-capture them fresh here,
                 // immediately before ever invoking the terminator, so drift that happened entirely
@@ -1517,7 +1475,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                 }
 
                 // Review 4958332345 (BLOCKER): RefreshSuppressionPrerequisites() itself performs
-                // several externally-observed operations (environment eligibility, AutoRun, Launcher/
+                // several externally-observed operations (environment eligibility, Launcher/
                 // Server capture) and can legitimately take real time. A disable/suspend/shutdown
                 // request can become request-time-authoritative (BeginHighPriorityRequest) WHILE that
                 // refresh is in flight and then sit waiting for _gate -- invisible to the earlier

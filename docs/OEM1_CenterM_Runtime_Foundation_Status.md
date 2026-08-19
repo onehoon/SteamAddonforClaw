@@ -13,7 +13,8 @@ Adds the dormant primitives a future coordinator needs, under
 - `WmiMsiEventSource` — observational MSI_Event WMI watcher (Event41/Event88),
   never suppresses or consumes either event.
 - `CenterMBackendProbe` — read-only Launcher/Server/ControlMode presence probe.
-- `CenterMAutoRunReader` — read-only AutoRun registry probe. No write path exists yet.
+- `CenterMAutoRunReader` — read-only AutoRun registry probe. Removed in the
+  "OEM1 remove AutoRun" PR below; see that section.
 - `MainUiLifecycleObserver` / `MainUiWindowRecognition` — result-state (not
   cause-based) real MainUI lifecycle classification: Absent,
   StartingOrHiddenNeverVisible, Visible, HiddenAfterVisible, Exited, Uncertain.
@@ -43,7 +44,8 @@ Adds `CenterMOem1LifecycleCoordinator` under
 `src/SteamInputAddonforClaw/CenterM/`, composing the PR1 primitives into the
 `Disabled → NeedsSetup → Reconciling → Armed → NativeMainUiActive →
 HiddenDebounce → FaultedNative` lifecycle: prerequisite reconciliation
-(AutoRun/Launcher/Server), helper arm/disarm ordering (stage → own → post-start
+(originally AutoRun/Launcher/Server; AutoRun was removed as an arming
+prerequisite in the "OEM1 remove AutoRun" PR below), helper arm/disarm ordering (stage → own → post-start
 `CenterMHelperInvariant` check, never publishing Armed before that check
 passes), exact-handle helper liveness monitoring (a new
 `CenterMHelperOwnership.PollLiveness()`/`HelperLivenessState`, backed by a new
@@ -383,6 +385,45 @@ real MSI Claw hardware. Real-hardware validation (SD5: does OEM1 actually
 suppress native Center M and launch Big Picture / pulse QAM on a physical MSI
 Claw) remains pending and must happen before this POC is considered anything
 beyond a development E2E validation vehicle.
+
+## PR2 (this branch) — remove OEM1 AutoRun prerequisite
+
+Real-hardware testing showed OEM1 remapping getting stuck at
+`AutoRun=Unknown → NeedsSetup → SuppressionReady=False`, because the Windows
+registry "AutoRun" value the coordinator required as an arming prerequisite is
+unreliable/unknown in practice. The existing same-name-process +
+exact-helper-ownership suppression mechanism routing already relies on works
+correctly independent of that registry value, so AutoRun is removed as an
+OEM1 arming authority entirely rather than replaced with another state
+machine:
+
+- `CenterMAutoRunReader` (the reader class and `CenterMAutoRunState` enum) is
+  deleted.
+- `CenterMOem1LifecycleCoordinator` no longer takes an `autoRunReader`
+  constructor parameter, no longer gates `ReconcileCore`/
+  `RefreshSuppressionPrerequisites`/the steady-state Armed poll on AutoRun, and
+  the `CenterMOem1LifecycleSnapshot.AutoRunState` field is removed. Arming now
+  depends only on: supported MSI Claw + RemappingEnabled + Launcher/Server
+  readiness + safe same-name process topology + exact owned helper.
+- The elevated `AutoRun=1 → 0` HKLM registry mutation in
+  `ElevatedPrerequisiteSetup` is deleted, along with the
+  `CenterMAutoRunOwnedByAddon`/`CenterMAutoRunMutationPending`/
+  `OriginalAutoRun`/`AppliedAutoRun` settings fields (no migration needed --
+  this repo has no released version using them).
+- `FirstTimeSetupPolicy` no longer reports `Indeterminate`/`Required` purely
+  because of AutoRun state; HidHide/usbip-win2 first-time setup is unaffected.
+
+**Unchanged by this PR:** the Center M launch UX (a direct real Center M
+launch still yields to native MainUI in Normal/no-routing; routing/PID1902
+protection via `CenterMMainUiRoutingGuard` is untouched), the shared
+`CenterMHelperOwnership` composition, VIIPER, rumble, HidHide/usbip-win2
+setup, and the OEM1 mapping/UI/dispatch model.
+
+**No real-hardware validation has been performed for this change.** It
+addresses a real-hardware-observed stuck state, but the fix itself has only
+been exercised by the deterministic automated test suite (fakes for process
+snapshot/helper/window/identity/terminate primitives) -- validating on a
+physical MSI Claw remains a required follow-up.
 
 ## PR4+ (not started) — settings / UI / production activation hardening
 

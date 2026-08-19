@@ -354,16 +354,14 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         }
     }
 
-    /// <summary>Review fix (BLOCKER): an unresolved <c>CenterMAutoRunMutationPending</c> receipt must
-    /// keep OEM1 desired-disabled even when the persisted remapping switch is on -- an unconfirmed
-    /// HKLM AutoRun mutation must never be promoted to armed suppression merely because the registry
-    /// happens to read Disabled on a fresh probe. Shared by the startup path
-    /// (<see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>), the mapping-change path
-    /// (<see cref="OnOem1MappingChanged"/>), and the explicit post-setup reconcile path
-    /// (<see cref="IHandheldRoutingComposition.ReconcileOem1PrerequisitesAsync"/>) so all three apply
-    /// the exact same gate.</summary>
+    /// <summary>Whether OEM1 desired-enabled should be requested, based solely on the persisted
+    /// remapping switch. Shared by the startup path
+    /// (<see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>) and the mapping-change path
+    /// (<see cref="OnOem1MappingChanged"/>) so both apply the exact same gate. The rest of the arming
+    /// decision (environment eligibility, Launcher/Server readiness, same-name topology, exact helper
+    /// ownership) is owned entirely by <see cref="CenterMOem1LifecycleCoordinator"/>.</summary>
     private static bool ComputeOem1CanArm(Settings.IOem1MappingPreference preference) =>
-        preference.Oem1Mapping.RemappingEnabled && !preference.CenterMAutoRunMutationPending;
+        preference.Oem1Mapping.RemappingEnabled;
 
     /// <summary>Requests the given desired-enabled value be applied through the SAME serialized
     /// activation chain <see cref="OnOem1MappingChanged"/> already uses for every enable/disable
@@ -384,25 +382,6 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             var previous = _oem1ActivationTask;
             return _oem1ActivationTask = ContinueOem1RemappingAsync(previous, enabled);
         }
-    }
-
-    async Task IHandheldRoutingComposition.ReconcileOem1PrerequisitesAsync(CancellationToken cancellationToken)
-    {
-        if (!_hardwareSupported) return;
-
-        if (_oem1MappingPreference is { } preference)
-        {
-            // The elevated helper may have confirmed OEM1's own AutoRun prerequisite (or cleared an
-            // unresolved pending marker) independent of the overall setup result. Startup may have
-            // left desired-enabled false while the marker was still pending, so promote it here now
-            // that the live settings authority has been refreshed -- mirroring the exact gate
-            // ConfigureOem1ActionPath/OnOem1MappingChanged already apply.
-            await RequestOem1EnabledTransitionAsync(ComputeOem1CanArm(preference)).ConfigureAwait(false);
-        }
-
-        if (!_oem1RemappingEnabled) return;
-        await CenterMOem1Coordinator.ReconcilePrerequisitesAsync(cancellationToken).ConfigureAwait(false);
-        RefreshOem1BridgeAuthority();
     }
 
     /// <summary>

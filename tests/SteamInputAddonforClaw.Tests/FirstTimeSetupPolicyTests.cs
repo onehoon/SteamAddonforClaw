@@ -6,7 +6,6 @@ using SteamInputAddonforClaw.HidHide;
 using System.Security.Cryptography;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
-using SteamInputAddonforClaw.CenterM;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -23,78 +22,6 @@ public sealed class FirstTimeSetupPolicyTests
 
     [Fact]
     public void ReadyInstallableComponents_AreCompleteWhenViiperIsUnavailable() => Assert.Equal(FirstTimeSetupStatus.Complete, FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready)).Status);
-
-    [Fact]
-    public void Oem1AutoRunEnabled_OffersExplicitSetupWhenComponentsAreAlreadyReady()
-    {
-        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
-        {
-            Oem1RemappingEnabled = true,
-            CenterMAutoRun = CenterMAutoRunState.Enabled
-        });
-
-        Assert.Equal(FirstTimeSetupStatus.Required, result.Status);
-        Assert.Equal(FirstTimeSetupReason.CenterMAutoRunEnabled, result.Reason);
-        Assert.True(result.CanInstallRequiredComponents);
-    }
-
-    [Fact]
-    public void Oem1Disabled_DoesNotOfferAutoRunMutation()
-    {
-        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
-        {
-            Oem1RemappingEnabled = false,
-            CenterMAutoRun = CenterMAutoRunState.Enabled
-        });
-
-        Assert.Equal(FirstTimeSetupStatus.Complete, result.Status);
-    }
-
-    [Fact]
-    public void Oem1AutoRunUnknown_WithComponentsReady_IsNotReportedComplete()
-    {
-        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
-        {
-            Oem1RemappingEnabled = true,
-            CenterMAutoRun = CenterMAutoRunState.Unknown
-        });
-
-        Assert.NotEqual(FirstTimeSetupStatus.Complete, result.Status);
-        Assert.Equal(FirstTimeSetupStatus.Indeterminate, result.Status);
-        Assert.Equal(FirstTimeSetupReason.CenterMAutoRunUnknown, result.Reason);
-        Assert.False(result.CanInstallRequiredComponents);
-    }
-
-    [Fact]
-    public void Oem1AutoRunUnknown_WithMissingRoutingComponents_StillOffersRoutingSetup()
-    {
-        // OEM1's own AutoRun uncertainty must never block independently-required HidHide/usbip
-        // provisioning -- mapping and routing are intentionally separate features.
-        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Missing, PrerequisiteStatus.Missing) with
-        {
-            Oem1RemappingEnabled = true,
-            CenterMAutoRun = CenterMAutoRunState.Unknown
-        });
-
-        Assert.Equal(FirstTimeSetupStatus.Required, result.Status);
-        Assert.Equal(FirstTimeSetupReason.MissingComponents, result.Reason);
-        Assert.True(result.CanInstallRequiredComponents);
-    }
-
-    [Fact]
-    public void Oem1AutoRunEnabled_WhileSteamActive_IsBlockedFromMutation()
-    {
-        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
-        {
-            Oem1RemappingEnabled = true,
-            CenterMAutoRun = CenterMAutoRunState.Enabled,
-            Steam = new(true, 123, SteamSessionSource.BigPicture)
-        });
-
-        Assert.Equal(FirstTimeSetupStatus.Required, result.Status);
-        Assert.Equal(FirstTimeSetupReason.SteamActive, result.Reason);
-        Assert.False(result.CanInstallRequiredComponents);
-    }
 
     [Theory]
     [InlineData((int)HardwareCompatibilityStatus.Unsupported, (int)FirstTimeSetupStatus.NotApplicable)]

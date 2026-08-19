@@ -12,7 +12,6 @@ using System.Security.Principal;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Settings;
-using SteamInputAddonforClaw.CenterM;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
@@ -65,56 +64,6 @@ internal static class ElevatedPrerequisiteSetup
             var hidStore = new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
             var usbStore = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath);
             if (!LogAndAllowSafetyGate("Initial")) return 1;
-            var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
-            var settings = settingsStore.Load();
-            var autoRunBefore = CenterMAutoRunReader.Read();
-            var oem1AutoRunFailed = false;
-            if (settings.CenterMAutoRunMutationPending)
-            {
-                // Delegates to the single shared authority (CenterMAutoRunReader.ReconcilePendingState)
-                // instead of duplicating the decision here: a pending marker alone proves only that a
-                // mutation was attempted, never what the original value was, so an incomplete/corrupt
-                // durable intent record (missing/unexpected OriginalAutoRun or AppliedAutoRun) must
-                // stay unresolved rather than being fabricated into confirmed ownership.
-                var reconciled = CenterMAutoRunReader.ReconcilePendingState(settings, autoRunBefore);
-                if (!ReferenceEquals(reconciled, settings))
-                {
-                    settingsStore.Save(reconciled);
-                    settings = settingsStore.Load();
-                    AppLog.Info("PrerequisiteSetup", "Pending AutoRun mutation reconciled.", ("AutoRun", autoRunBefore), ("OwnedByAddon", settings.CenterMAutoRunOwnedByAddon));
-                }
-                else
-                {
-                    AppLog.Warn("PrerequisiteSetup", "Pending AutoRun mutation remains unresolved because the registry state or durable intent record is not confidently confirmed.", null, ("AutoRun", autoRunBefore));
-                    oem1AutoRunFailed = true;
-                }
-            }
-            if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Enabled)
-            {
-                AppLog.Info("PrerequisiteSetup", "Explicit AutoRun setup requested.", ("OriginalAutoRun", 1), ("AppliedAutoRun", 0));
-                // Durable intent is written before HKLM mutation. A pending marker distinguishes
-                // crash-recovery evidence from confirmed ownership.
-                settingsStore.Save(settings with { CenterMAutoRunMutationPending = true, CenterMAutoRunOwnedByAddon = false, OriginalAutoRun = 1, AppliedAutoRun = 0 });
-                var autoRunConfirmed = CenterMAutoRunReader.TryDisableExplicitly(out var confirmedAutoRun, out var originalAutoRun)
-                    && confirmedAutoRun == CenterMAutoRunState.Disabled;
-                if (!autoRunConfirmed)
-                {
-                    AppLog.Warn("PrerequisiteSetup", "AutoRun setup could not be confirmed by read-back; preserving pending intent for reconciliation.", null,
-                        ("OriginalAutoRun", originalAutoRun), ("ConfirmedAutoRun", confirmedAutoRun));
-                    settingsStore.Save(ReconcileAutoRunMutationResult(settings, confirmed: false, originalAutoRun));
-                    oem1AutoRunFailed = true;
-                }
-                else
-                {
-                    AppLog.Info("PrerequisiteSetup", "AutoRun setup confirmed by read-back.", ("OriginalAutoRun", originalAutoRun), ("AppliedAutoRun", 0));
-                    settingsStore.Save(ReconcileAutoRunMutationResult(settings, confirmed: true, originalAutoRun));
-                }
-            }
-            else if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Unknown)
-            {
-                AppLog.Warn("PrerequisiteSetup", "AutoRun state is unknown; refusing registry mutation.", null, ("Reason", "AutoRunUnknown"));
-                oem1AutoRunFailed = true;
-            }
             var restartRequired = false;
             var hidHide = new WindowsHidHidePackageProbe().Inspect();
             AppLog.Info("PrerequisiteSetup", "HidHide package probe completed.", ("Installed", hidHide.Installed), ("Version", hidHide.Version), ("InspectionSucceeded", hidHide.InspectionSucceeded));
@@ -198,7 +147,7 @@ internal static class ElevatedPrerequisiteSetup
                 if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
                 restartRequired |= code == 3010;
             }
-            var result = restartRequired ? 3010 : oem1AutoRunFailed ? 1 : 0;
+            var result = restartRequired ? 3010 : 0;
             AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup completed.", ("ExitCode", result), ("RestartRequired", restartRequired));
             return result;
         }
@@ -208,26 +157,6 @@ internal static class ElevatedPrerequisiteSetup
             return 1;
         }
         }
-    }
-
-    internal static AppSettings ReconcileAutoRunMutationResult(AppSettings settings, bool confirmed, int? originalAutoRun)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        return confirmed
-            ? settings with
-            {
-                CenterMAutoRunMutationPending = false,
-                CenterMAutoRunOwnedByAddon = true,
-                OriginalAutoRun = originalAutoRun,
-                AppliedAutoRun = 0
-            }
-            : settings with
-            {
-                CenterMAutoRunMutationPending = true,
-                CenterMAutoRunOwnedByAddon = false,
-                OriginalAutoRun = originalAutoRun ?? settings.OriginalAutoRun,
-                AppliedAutoRun = 0
-            };
     }
 
     private static (HidHidePackageState Package, PrerequisiteAssessment Prerequisite) WaitForHidHidePostInstallEvidence(string expectedVersion, int installerExitCode)
