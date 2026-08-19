@@ -74,8 +74,19 @@ try
     shutdown.Wait();
 
     Console.WriteLine("cleanup requested.");
-    await client.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__ && window.__STEAM_INPUT_ADDON_QAM__.uninstall();", CancellationToken.None);
-    Console.WriteLine("cleanup completed.");
+    var rawCleanupResult = await client.EvaluateAsync(
+        "window.__STEAM_INPUT_ADDON_QAM__?.uninstall?.() ?? false",
+        CancellationToken.None);
+    var cleanupResult = CdpEvaluateResult.Parse(rawCleanupResult);
+
+    if (!cleanupResult.Succeeded || cleanupResult.BooleanValue != true)
+    {
+        Console.WriteLine($"QAM cleanup failed: {cleanupResult.ErrorText ?? "uninstall() returned false"}.");
+    }
+    else
+    {
+        Console.WriteLine("cleanup completed.");
+    }
 }
 catch (Exception ex)
 {

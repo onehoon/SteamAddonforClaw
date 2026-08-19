@@ -55,12 +55,15 @@
     return null;
   }
 
-  // Finds the React element whose `.type` render function is Steam's QAM renderer, by matching
-  // the signature strings against the function's own source (not the module's export names).
-  function findQamRenderer(webpackRequire) {
+  // Finds every React element whose `.type` render function is one of Steam's QAM renderer
+  // variants (QuickAccessMenuBrowserView / QuickAccessMenuEmbedded), by matching the signature
+  // strings against the function's own source (not the module's export names). Both variants are
+  // patched because enumeration order does not tell us which one the current Steam build renders.
+  function findQamRenderers(webpackRequire) {
     const cache = webpackRequire.c;
-    if (!cache) return null;
+    if (!cache) return [];
 
+    const matches = [];
     for (const moduleRecord of Object.values(cache)) {
       const moduleExports = moduleRecord && moduleRecord.exports;
       if (!moduleExports) continue;
@@ -77,11 +80,12 @@
         }
 
         if (QAM_SIGNATURES.some((sig) => source.includes(sig))) {
-          return { renderer: candidate, originalType: render };
+          matches.push({ renderer: candidate, originalType: render });
         }
       }
     }
-    return null;
+
+    return [...new Map(matches.map((m) => [m.renderer, m])).values()];
   }
 
   function findReact(webpackRequire) {
@@ -135,9 +139,12 @@
     };
   }
 
+  // One stable, Addon-owned state object. install()/uninstall() mutate it in place rather than
+  // replacing it, so the functions exposed on it below always remain callable.
+  const state = window[GLOBAL_KEY] || (window[GLOBAL_KEY] = {});
+
   function install() {
-    const state = window[GLOBAL_KEY];
-    if (state && state.installed) {
+    if (state.installed) {
       log("install() called but already installed; no-op.");
       return true;
     }
@@ -148,8 +155,8 @@
       return false;
     }
 
-    const found = findQamRenderer(webpackRequire);
-    if (!found) {
+    const patches = findQamRenderers(webpackRequire);
+    if (patches.length === 0) {
       log("QAM integration unavailable (renderer not found).");
       return false;
     }
@@ -160,45 +167,58 @@
       return false;
     }
 
-    const { renderer, originalType } = found;
+    for (const patch of patches) {
+      const originalType = patch.originalType;
 
-    function patchedType(...args) {
-      const result = originalType.apply(this, args);
-      const owner = findTabsPropOwner(result, 0);
-      if (owner && !owner.props.tabs.some((t) => t && t[TAB_MARKER])) {
-        owner.props.tabs = owner.props.tabs.concat([buildAddonTab(React)]);
+      function patchedType(...args) {
+        const result = originalType.apply(this, args);
+        const owner = findTabsPropOwner(result, 0);
+        if (owner && !owner.props.tabs.some((t) => t && t[TAB_MARKER])) {
+          owner.props.tabs.push(buildAddonTab(React));
+        }
+        return result;
       }
-      return result;
+
+      patch.patchedType = patchedType;
+      patch.renderer.type = patchedType;
     }
 
-    renderer.type = patchedType;
-
-    window[GLOBAL_KEY] = {
+    Object.assign(state, {
       installed: true,
-      renderer,
-      originalType,
-    };
+      patches,
+      install,
+      uninstall,
+    });
 
-    log("QAM hook installed.");
+    log(`QAM hook installed (${patches.length} renderer variant(s)).`);
     return true;
   }
 
   function uninstall() {
-    const state = window[GLOBAL_KEY];
-    if (!state || !state.installed) {
+    if (!state.installed) {
       log("uninstall() called but not installed; no-op.");
       return true;
     }
 
-    state.renderer.type = state.originalType;
-    window[GLOBAL_KEY] = { installed: false };
+    for (const patch of state.patches) {
+      // Only restore if nothing else re-patched the renderer after us.
+      if (patch.renderer.type === patch.patchedType) {
+        patch.renderer.type = patch.originalType;
+      }
+    }
+
+    Object.assign(state, {
+      installed: false,
+      patches: null,
+      install,
+      uninstall,
+    });
+
     log("QAM hook uninstalled.");
     return true;
   }
 
-  window[GLOBAL_KEY] = window[GLOBAL_KEY] || { installed: false };
-  window[GLOBAL_KEY].install = install;
-  window[GLOBAL_KEY].uninstall = uninstall;
+  Object.assign(state, { install, uninstall });
 
   return install();
 })();
