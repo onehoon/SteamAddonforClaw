@@ -438,8 +438,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     /// <summary>Polls for a foreign same-name "MSI Center M" process while Armed, and for the
     /// tracked real MainUI's visibility/exit while a real identity is being tracked. This is the
-    /// single low-rate reconciliation tick a future PR's timer would call; it is never invoked by
-    /// production in this PR.</summary>
+    /// single low-rate reconciliation tick <see cref="CenterMOem1LifecycleRuntime"/> drives whenever
+    /// the routing guard is not Armed.</summary>
     internal async Task PollTickAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
