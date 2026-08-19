@@ -139,6 +139,14 @@ and `WmiMsiEventSource` remain dormant, and there is still no settings,
 persistence, or UI to change the bindings. This does not advance SD5
 completion, and no hardware validation is claimed.
 
+A helper ownership convergence PR (`CenterM/CenterMMainUiRoutingGuard`,
+`Devices/MSI/Claw/MsiClawRoutingComposition`) has since made the routing
+guard's `CenterMHelperOwnership` a composition-owned shared instance that a
+future OEM1 production composition can reuse without creating a second
+same-name helper. This is ownership/refactoring only -- it does not compose
+`CenterMOem1LifecycleCoordinator` into production and does not advance SD5
+completion.
+
 ### SD6 — gyro and accelerometer
 
 Status: **SEPARATE FEATURE TRACK**
