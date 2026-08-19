@@ -29,6 +29,13 @@
     console.log("[SteamInputAddon:QAM] " + message);
   }
 
+  function logOnce(key, message) {
+    state.diagnostics ??= {};
+    if (state.diagnostics[key]) return;
+    state.diagnostics[key] = true;
+    log(message);
+  }
+
   function findWebpackRequire() {
     const chunkGlobalNames = ["webpackChunksteamui", "webpackChunk_steamclient"];
     for (const name of chunkGlobalNames) {
@@ -49,6 +56,7 @@
       }
 
       if (typeof capturedRequire === "function") {
+        logOnce("webpack", `webpack runtime captured: ${name}`);
         return capturedRequire;
       }
     }
@@ -58,6 +66,7 @@
   function collectSearchableModules(webpackRequire) {
     const modules = [];
     const seen = new Set();
+    let loadFailures = 0;
 
     const add = (moduleExports) => {
       if (!moduleExports || typeof moduleExports !== "object" || seen.has(moduleExports)) return;
@@ -78,8 +87,11 @@
         add(webpackRequire(id));
       } catch (err) {
         // Some Steam modules have side effects or unmet prerequisites; skip only that module.
+        loadFailures++;
       }
     }
+
+    logOnce("moduleDiscovery", `webpack modules: cached=${Object.keys(webpackRequire.c || {}).length} registered=${Object.keys(webpackRequire.m || {}).length} loaded=${modules.length} loadFailures=${loadFailures}`);
 
     return modules;
   }
@@ -114,6 +126,7 @@
   function findReact(webpackRequire) {
     for (const mod of collectSearchableModules(webpackRequire)) {
       if (mod && mod.createElement && mod.Component) {
+        logOnce("react", "React export found.");
         return mod;
       }
     }
@@ -160,8 +173,13 @@
       patchedType = function patchedTabsProducer(...args) {
         const result = originalType.apply(this, args);
         const owner = findTabsPropOwner(result, 0);
-        if (owner && !owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
+        if (!owner) return result;
+        logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
+        if (!owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
           owner.props.tabs.push(buildAddonTab(React));
+          logOnce("tabInserted", "Steam Input Addon tab inserted.");
+        } else {
+          logOnce("duplicateTab", "Duplicate tab already present; insertion skipped.");
         }
         return result;
       };
@@ -172,6 +190,7 @@
 
     if (node.type === originalType) {
       node.type = patchedType;
+      logOnce("nestedPatch", "Nested tabs producer patched.");
     }
     return true;
   }
@@ -216,6 +235,7 @@
     }
 
     const patches = findQamRenderers(webpackRequire);
+    logOnce("rendererCount", `QAM renderer count=${patches.length}.`);
     if (patches.length === 0) {
       log("QAM integration unavailable (renderer not found).");
       return false;
@@ -238,6 +258,7 @@
 
       patch.patchedType = patchedType;
       patch.renderer.type = patchedType;
+      logOnce("outerPatch", "QAM outer renderer patched.");
     }
 
     Object.assign(state, {
@@ -262,6 +283,7 @@
       // Only restore if nothing else re-patched the renderer after us.
       if (patch.renderer.type === patch.patchedType) {
         patch.renderer.type = patch.originalType;
+        logOnce("outerRestore", "outer patch restored.");
       }
     }
 
@@ -276,6 +298,7 @@
     });
 
     log("QAM hook uninstalled.");
+    logOnce("uninstall", "uninstall completed.");
     return true;
   }
 

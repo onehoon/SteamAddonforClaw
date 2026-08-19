@@ -37,7 +37,8 @@ internal static class AddonRuntimeCompositionFactory
         RecoveryManager recoveryManager,
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
-        bool hardwareSupported)
+        bool hardwareSupported,
+        Action<bool>? bigPictureStateChanged = null)
     {
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
@@ -45,6 +46,7 @@ internal static class AddonRuntimeCompositionFactory
         var startupRegistration = new WindowsTaskSchedulerStartupManager();
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
         var steamRuntime = new SteamSessionRuntime(startupSettings);
+        if (bigPictureStateChanged is not null) steamRuntime.BigPictureStateChanged += bigPictureStateChanged;
         var startupRegistrationResult = startupSettings.Repair();
 
         if (recoverySafe)
@@ -92,6 +94,9 @@ internal static class AddonRuntimeCompositionFactory
             recoverySafe,
             () => recoveryManager.HasIncompleteRecovery,
             establishBaseline);
+
+        if (bigPictureStateChanged is not null && steamRuntime.IsBigPictureActive)
+            bigPictureStateChanged(true);
 
         return new AddonRuntimeComposition(
             runtimeHost, startupSettings, startupRegistrationResult.Message, statusProvider,

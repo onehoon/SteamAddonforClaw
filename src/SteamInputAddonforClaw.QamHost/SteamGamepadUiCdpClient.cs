@@ -18,6 +18,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
     private ClientWebSocket? _socket;
     private CancellationTokenSource? _receiveLoopCts;
     private Task? _receiveLoop;
+    public event Action<string>? AddonQamConsoleMessage;
 
     public SteamGamepadUiCdpClient(Uri devToolsEndpoint)
     {
@@ -63,7 +64,8 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         _socket = socket;
 
         _receiveLoopCts = new CancellationTokenSource();
-        _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token);
+        _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token, AddonQamConsoleMessage);
+        await EvaluateAsync("Runtime.enable", cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Runs <c>Runtime.evaluate</c> with the given JS expression and returns the raw JSON result.</summary>
@@ -92,7 +94,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         return await responseTask.ConfigureAwait(false);
     }
 
-    private static async Task RunReceiveLoopAsync(ClientWebSocket socket, CdpCommandCorrelator correlator, CancellationToken cancellationToken)
+    private static async Task RunReceiveLoopAsync(ClientWebSocket socket, CdpCommandCorrelator correlator, CancellationToken cancellationToken, Action<string>? consoleMessage)
     {
         var buffer = new byte[64 * 1024];
         try
@@ -113,7 +115,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
                 } while (!result.EndOfMessage);
 
                 var json = Encoding.UTF8.GetString(messageStream.ToArray());
-                TryDispatch(json, correlator);
+                TryDispatch(json, correlator, consoleMessage);
             }
         }
         catch (OperationCanceledException)
@@ -126,9 +128,16 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         }
     }
 
-    private static void TryDispatch(string json, CdpCommandCorrelator correlator)
+    private static void TryDispatch(string json, CdpCommandCorrelator correlator, Action<string>? consoleMessage)
     {
         using var document = JsonDocument.Parse(json);
+        if (document.RootElement.TryGetProperty("method", out var method) && method.GetString() == "Runtime.consoleAPICalled" &&
+            document.RootElement.TryGetProperty("params", out var parameters) && parameters.TryGetProperty("args", out var args))
+        {
+            foreach (var arg in args.EnumerateArray())
+                if (arg.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { } text && text.StartsWith("[SteamInputAddon:QAM]", StringComparison.Ordinal))
+                    consoleMessage?.Invoke(text);
+        }
         if (document.RootElement.TryGetProperty("id", out var idElement) && idElement.TryGetInt32(out var id))
         {
             correlator.TryComplete(id, json);

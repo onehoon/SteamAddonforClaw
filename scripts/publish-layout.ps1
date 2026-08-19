@@ -11,14 +11,17 @@ $ErrorActionPreference = 'Stop'
 
 $runtimeProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw\SteamInputAddonforClaw.csproj'
 $uiProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.UI\SteamInputAddonforClaw.UI.csproj'
+$qamProject = Join-Path $PSScriptRoot '..\src\SteamInputAddonforClaw.QamHost\SteamInputAddonforClaw.QamHost.csproj'
 $runtimeOutput = [System.IO.Path]::GetFullPath($PublishDirectory)
 $uiOutput = Join-Path $runtimeOutput 'ui'
+$qamOutput = Join-Path $runtimeOutput 'qam'
 
 if (Test-Path -LiteralPath $runtimeOutput) {
     Remove-Item -LiteralPath $runtimeOutput -Recurse -Force
 }
 New-Item -ItemType Directory -Path $runtimeOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $uiOutput -Force | Out-Null
+New-Item -ItemType Directory -Path $qamOutput -Force | Out-Null
 
 $commonArguments = @(
     '--configuration', $Configuration,
@@ -33,5 +36,8 @@ if ($LASTEXITCODE -ne 0) { throw "Runtime publish failed with exit code $LASTEXI
 
 dotnet publish $uiProject @commonArguments '--output' $uiOutput
 if ($LASTEXITCODE -ne 0) { throw "UI publish failed with exit code $LASTEXITCODE." }
+
+dotnet publish $qamProject @commonArguments '--output' $qamOutput
+if ($LASTEXITCODE -ne 0) { throw "QamHost publish failed with exit code $LASTEXITCODE." }
 
 Write-Host "Published Runtime and external UI layout at $runtimeOutput with version $Version."

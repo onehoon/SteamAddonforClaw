@@ -30,7 +30,9 @@ $requiredAssets = @(
     'ui\Views\HowToUsePage.xbf',
     'ui\Views\ControllerPage.xbf',
     'ui\Views\SettingsPage.xbf',
-    'ui\Views\DeveloperPage.xbf'
+    'ui\Views\DeveloperPage.xbf',
+    'qam\SteamInputAddonforClaw.QamHost.exe',
+    'qam\Frontend\qam.js'
 )
 
 $missingAssets = foreach ($asset in $requiredAssets) {
