@@ -438,9 +438,10 @@ public sealed class AppLogTests : IDisposable
 
     public void Dispose()
     {
-        AppLog.DirectoryOverride = null;
         AppLog.MinimumLevelOverride = AppLogLevel.Off;
         AppLog.ResetMaintenanceStateForTests();
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = null;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 }

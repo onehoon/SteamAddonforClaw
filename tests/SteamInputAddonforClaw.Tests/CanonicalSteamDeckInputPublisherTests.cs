@@ -24,10 +24,10 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
 
     public void Dispose()
     {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
         AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
-        AppLog.MinimumLevelOverride = AppLogLevel.Info;
-        try { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); } catch (IOException) { }
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 
     [Fact]
