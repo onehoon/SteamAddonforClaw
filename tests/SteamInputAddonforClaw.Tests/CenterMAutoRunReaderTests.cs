@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.CenterM;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Prerequisites;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -63,5 +64,25 @@ public sealed class CenterMAutoRunReaderTests
 
         Assert.Equal(expectedPending, result.CenterMAutoRunMutationPending);
         Assert.Equal(expectedOwned, result.CenterMAutoRunOwnedByAddon);
+    }
+
+    [Fact]
+    public void UnconfirmedAutoRunMutation_PreservesPendingIntentWithoutOwnership()
+    {
+        var initial = new AppSettings
+        {
+            Oem1Mapping = Oem1MappingSettings.Default,
+            CenterMAutoRunMutationPending = true,
+            CenterMAutoRunOwnedByAddon = false,
+            OriginalAutoRun = 1,
+            AppliedAutoRun = 0
+        };
+
+        var result = ElevatedPrerequisiteSetup.ReconcileAutoRunMutationResult(initial, confirmed: false, originalAutoRun: null);
+
+        Assert.True(result.CenterMAutoRunMutationPending);
+        Assert.False(result.CenterMAutoRunOwnedByAddon);
+        Assert.Equal(1, result.OriginalAutoRun);
+        Assert.Equal(0, result.AppliedAutoRun);
     }
 }

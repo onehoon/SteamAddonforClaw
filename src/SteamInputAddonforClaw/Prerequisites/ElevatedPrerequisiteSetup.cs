@@ -95,15 +95,20 @@ internal static class ElevatedPrerequisiteSetup
                 // Durable intent is written before HKLM mutation. A pending marker distinguishes
                 // crash-recovery evidence from confirmed ownership.
                 settingsStore.Save(settings with { CenterMAutoRunMutationPending = true, CenterMAutoRunOwnedByAddon = false, OriginalAutoRun = 1, AppliedAutoRun = 0 });
-                if (!CenterMAutoRunReader.TryDisableExplicitly(out var confirmedAutoRun, out var originalAutoRun)
-                    || confirmedAutoRun != CenterMAutoRunState.Disabled)
+                var autoRunConfirmed = CenterMAutoRunReader.TryDisableExplicitly(out var confirmedAutoRun, out var originalAutoRun)
+                    && confirmedAutoRun == CenterMAutoRunState.Disabled;
+                if (!autoRunConfirmed)
                 {
                     AppLog.Warn("PrerequisiteSetup", "AutoRun setup could not be confirmed by read-back; preserving pending intent for reconciliation.", null,
                         ("OriginalAutoRun", originalAutoRun), ("ConfirmedAutoRun", confirmedAutoRun));
+                    settingsStore.Save(ReconcileAutoRunMutationResult(settings, confirmed: false, originalAutoRun));
                     oem1AutoRunFailed = true;
                 }
-                AppLog.Info("PrerequisiteSetup", "AutoRun setup confirmed by read-back.", ("OriginalAutoRun", originalAutoRun), ("AppliedAutoRun", 0));
-                settingsStore.Save(settings with { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = originalAutoRun, AppliedAutoRun = 0 });
+                else
+                {
+                    AppLog.Info("PrerequisiteSetup", "AutoRun setup confirmed by read-back.", ("OriginalAutoRun", originalAutoRun), ("AppliedAutoRun", 0));
+                    settingsStore.Save(ReconcileAutoRunMutationResult(settings, confirmed: true, originalAutoRun));
+                }
             }
             else if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Unknown)
             {
@@ -203,6 +208,26 @@ internal static class ElevatedPrerequisiteSetup
             return 1;
         }
         }
+    }
+
+    internal static AppSettings ReconcileAutoRunMutationResult(AppSettings settings, bool confirmed, int? originalAutoRun)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return confirmed
+            ? settings with
+            {
+                CenterMAutoRunMutationPending = false,
+                CenterMAutoRunOwnedByAddon = true,
+                OriginalAutoRun = originalAutoRun,
+                AppliedAutoRun = 0
+            }
+            : settings with
+            {
+                CenterMAutoRunMutationPending = true,
+                CenterMAutoRunOwnedByAddon = false,
+                OriginalAutoRun = originalAutoRun ?? settings.OriginalAutoRun,
+                AppliedAutoRun = 0
+            };
     }
 
     private static (HidHidePackageState Package, PrerequisiteAssessment Prerequisite) WaitForHidHidePostInstallEvidence(string expectedVersion, int installerExitCode)
