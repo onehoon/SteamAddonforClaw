@@ -9,20 +9,12 @@ internal enum CenterMMainUiMinimizeResult
     NoRecognizedVisibleWindow,
     AmbiguousVisibleWindows,
     /// <summary>The unique recognized visible window changed between the initial enumeration and
-    /// the final pre-post revalidation (destroyed, replaced, or a second candidate appeared), OR the
-    /// caller-supplied retained-handle authority check failed immediately before the post -- the
-    /// cached HWND/PID from the earlier passes is never treated as still-authoritative just because
-    /// it was valid a moment ago.</summary>
+    /// the final pre-post revalidation (destroyed, replaced, or a second candidate appeared) -- the
+    /// cached HWND from the first pass is never treated as still-authoritative just because it was
+    /// valid a moment ago.</summary>
     TargetChanged,
     Failed
 }
-
-/// <summary>Outcome of the caller-supplied retained-handle authority check
-/// <see cref="ICenterMMainUiWindowController.TryMinimizeRecognizedMainUi"/> runs immediately before
-/// <c>PostMessageW</c> -- a numeric PID/HWND match alone does not prove the window still belongs to
-/// the SAME process object the caller retained (the PID can be reused by a different process after
-/// the original one exits).</summary>
-internal enum CenterMWindowMutationAuthority { Match, Exited, Mismatch, Uncertain }
 
 /// <summary>Narrow Win32 control seam for the routing-retirement use case only -- distinct from
 /// <see cref="IMainUiWindowSnapshotProvider"/>, which deliberately returns counts only and never
@@ -31,15 +23,11 @@ internal interface ICenterMMainUiWindowController
 {
     /// <summary>Posts a normal minimize command to the single recognized visible MainUI window
     /// owned by <paramref name="processId"/>. Fails closed (no message posted) if zero or more than
-    /// one recognized visible candidate is found, if the target changes between discovery and the
-    /// final pre-post revalidation, or if <paramref name="revalidateAuthority"/> does not report
-    /// <see cref="CenterMWindowMutationAuthority.Match"/> immediately before the post -- a numeric
-    /// PID match is not itself proof of process-object identity (PID reuse), so the caller's retained
-    /// process handle is the final authority for whether the external mutation may proceed. Never
-    /// guesses which window to minimize, and never posts to a stale/reused HWND. Success means only
-    /// that the command was queued; the caller must independently verify the window actually became
-    /// hidden.</summary>
-    CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId, Func<CenterMWindowMutationAuthority> revalidateAuthority);
+    /// one recognized visible candidate is found, or if the target changes between discovery and
+    /// the final pre-post revalidation -- never guesses which window to minimize, and never posts
+    /// to a stale/reused HWND. Success means only that the command was queued; the caller must
+    /// independently verify the window actually became hidden.</summary>
+    CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId);
 }
 
 /// <summary>Native window-enumeration/messaging primitives isolated behind an interface so
@@ -123,7 +111,7 @@ internal sealed class Win32CenterMMainUiWindowController(IWin32MainUiWindowApi? 
 {
     private readonly IWin32MainUiWindowApi _api = api ?? new Win32MainUiWindowApi();
 
-    public CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId, Func<CenterMWindowMutationAuthority> revalidateAuthority)
+    public CenterMMainUiMinimizeResult TryMinimizeRecognizedMainUi(int processId)
     {
         var discovered = EnumerateRecognizedVisibleWindows(processId);
         if (discovered is null) return CenterMMainUiMinimizeResult.Failed;
@@ -141,17 +129,6 @@ internal sealed class Win32CenterMMainUiWindowController(IWin32MainUiWindowApi? 
         var revalidated = EnumerateRecognizedVisibleWindows(processId);
         if (revalidated is null) return CenterMMainUiMinimizeResult.Failed;
         if (revalidated.Count != 1 || revalidated[0] != target) return CenterMMainUiMinimizeResult.TargetChanged;
-
-        // A numeric PID match across both enumeration passes is still not process-object identity --
-        // the original process could have exited and Windows reused its PID for a DIFFERENT process
-        // by this point, with that new process's own recognized window landing on the same HWND. The
-        // caller's retained process handle is the final authority for whether this external mutation
-        // may proceed at all; only a Match result may reach PostMessageW.
-        if (revalidateAuthority() != CenterMWindowMutationAuthority.Match) return CenterMMainUiMinimizeResult.TargetChanged;
-
-        // Re-read the owner PID once more after the retained-handle authority check so the selected
-        // HWND is still associated with the expected numeric PID at the last possible moment.
-        if (_api.GetOwnerProcessId(target) != (uint)processId) return CenterMMainUiMinimizeResult.TargetChanged;
 
         // Success here means only that the command was queued (PostMessageW is fire-and-forget) --
         // never proof that the window minimized, that Center M processed the event, or that its

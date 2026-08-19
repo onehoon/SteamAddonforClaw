@@ -17,7 +17,7 @@ public sealed class CenterMMainUiWindowControllerTests
         api.Windows[MainUiHwnd] = new WindowInfo(Pid, Visible: true, Title: "MSI Center M", ClassName: null);
         var controller = new Win32CenterMMainUiWindowController(api);
 
-        var result = controller.TryMinimizeRecognizedMainUi(Pid, () => CenterMWindowMutationAuthority.Match);
+        var result = controller.TryMinimizeRecognizedMainUi(Pid);
 
         Assert.Equal(CenterMMainUiMinimizeResult.Requested, result);
         Assert.Equal([MainUiHwnd], api.PostMinimizeCalls);
@@ -30,7 +30,7 @@ public sealed class CenterMMainUiWindowControllerTests
         api.Windows[MainUiHwnd] = new WindowInfo(Pid, Visible: true, Title: null, ClassName: "HwndWrapper[MSI Center M.exe;;abc]");
         var controller = new Win32CenterMMainUiWindowController(api);
 
-        var result = controller.TryMinimizeRecognizedMainUi(Pid, () => CenterMWindowMutationAuthority.Match);
+        var result = controller.TryMinimizeRecognizedMainUi(Pid);
 
         Assert.Equal(CenterMMainUiMinimizeResult.Requested, result);
     }
@@ -42,7 +42,7 @@ public sealed class CenterMMainUiWindowControllerTests
         api.Windows[TrayOwnerHwnd] = new WindowInfo(Pid, Visible: false, Title: "WindowsForms10.Window.8", ClassName: null);
         var controller = new Win32CenterMMainUiWindowController(api);
 
-        var result = controller.TryMinimizeRecognizedMainUi(Pid, () => CenterMWindowMutationAuthority.Match);
+        var result = controller.TryMinimizeRecognizedMainUi(Pid);
 
         Assert.Equal(CenterMMainUiMinimizeResult.NoRecognizedVisibleWindow, result);
         Assert.Empty(api.PostMinimizeCalls);
@@ -55,7 +55,7 @@ public sealed class CenterMMainUiWindowControllerTests
         api.Windows[ForeignHwnd] = new WindowInfo(Pid + 1, Visible: true, Title: "MSI Center M", ClassName: null);
         var controller = new Win32CenterMMainUiWindowController(api);
 
-        var result = controller.TryMinimizeRecognizedMainUi(Pid, () => CenterMWindowMutationAuthority.Match);
+        var result = controller.TryMinimizeRecognizedMainUi(Pid);
 
         Assert.Equal(CenterMMainUiMinimizeResult.NoRecognizedVisibleWindow, result);
         Assert.Empty(api.PostMinimizeCalls);
@@ -69,7 +69,7 @@ public sealed class CenterMMainUiWindowControllerTests
         api.Windows[new IntPtr(1002)] = new WindowInfo(Pid, Visible: true, Title: "MSI Center M", ClassName: null);
         var controller = new Win32CenterMMainUiWindowController(api);
 
-        var result = controller.TryMinimizeRecognizedMainUi(Pid, () => CenterMWindowMutationAuthority.Match);
+        var result = controller.TryMinimizeRecognizedMainUi(Pid);
 
         Assert.Equal(CenterMMainUiMinimizeResult.AmbiguousVisibleWindows, result);
         Assert.Empty(api.PostMinimizeCalls);
@@ -81,7 +81,7 @@ public sealed class CenterMMainUiWindowControllerTests
         var api = new FakeWindowApi { EnumerationSucceeds = false };
         var controller = new Win32CenterMMainUiWindowController(api);
 
-        var result = controller.TryMinimizeRecognizedMainUi(Pid, () => CenterMWindowMutationAuthority.Match);
+        var result = controller.TryMinimizeRecognizedMainUi(Pid);
 
         Assert.Equal(CenterMMainUiMinimizeResult.Failed, result);
         Assert.Empty(api.PostMinimizeCalls);
@@ -97,7 +97,7 @@ public sealed class CenterMMainUiWindowControllerTests
         api.RemoveOnNthEnumeration = 2;
         var controller = new Win32CenterMMainUiWindowController(api);
 
-        var result = controller.TryMinimizeRecognizedMainUi(Pid, () => CenterMWindowMutationAuthority.Match);
+        var result = controller.TryMinimizeRecognizedMainUi(Pid);
 
         Assert.Equal(CenterMMainUiMinimizeResult.TargetChanged, result);
         Assert.Empty(api.PostMinimizeCalls);
@@ -116,32 +116,9 @@ public sealed class CenterMMainUiWindowControllerTests
         api.AddOnNthEnumeration = (2, new IntPtr(9999), new WindowInfo(Pid, Visible: true, Title: "MSI Center M", ClassName: null));
         var controller = new Win32CenterMMainUiWindowController(api);
 
-        var result = controller.TryMinimizeRecognizedMainUi(Pid, () => CenterMWindowMutationAuthority.Match);
+        var result = controller.TryMinimizeRecognizedMainUi(Pid);
 
         Assert.Equal(CenterMMainUiMinimizeResult.TargetChanged, result);
-        Assert.Empty(api.PostMinimizeCalls);
-    }
-
-    [Fact]
-    public void Retained_handle_authority_check_failing_immediately_before_post_blocks_the_mutation()
-    {
-        // Both HWND enumeration passes remain stable (numeric PID match), but the caller-supplied
-        // retained-handle authority check fails right before PostMessageW -- e.g. the PID was
-        // reused by a different process after the original one exited. The numeric agreement alone
-        // must never be trusted as process-object identity.
-        var api = new FakeWindowApi();
-        api.Windows[MainUiHwnd] = new WindowInfo(Pid, Visible: true, Title: "MSI Center M", ClassName: null);
-        var controller = new Win32CenterMMainUiWindowController(api);
-        var authorityCallCount = 0;
-
-        var result = controller.TryMinimizeRecognizedMainUi(Pid, () =>
-        {
-            authorityCallCount++;
-            return CenterMWindowMutationAuthority.Mismatch;
-        });
-
-        Assert.Equal(CenterMMainUiMinimizeResult.TargetChanged, result);
-        Assert.Equal(1, authorityCallCount);
         Assert.Empty(api.PostMinimizeCalls);
     }
 

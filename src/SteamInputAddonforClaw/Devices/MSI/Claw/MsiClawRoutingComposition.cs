@@ -85,22 +85,16 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // Phase 2: the same already-owned nativeState instance is reused (never a second
         // MsiClawNativeStateManager) as the guard's read-only native-mode probe, so retirement's
         // XInput verification observes the exact same authority the real NativeMode stage uses.
-        //
-        // The same-name process source is scoped to this Addon's own session/user (the exact scope
-        // the real MainUI's own Local\ duplicate-instance singleton is built on -- research)
-        // BEFORE it ever reaches discovery, retirement, or the Phase-1 helper invariant check below
-        // -- a foreign-session/foreign-user same-name process must never be treated as a routing
-        // candidate, and must never spuriously block arming by inflating the same-name count.
-        var scopedCenterMProcesses = new ScopedCenterMProcessSnapshotSource(new Win32ProcessSnapshotSource(), new Win32CenterMProcessScopeInspector());
+        var centerMProcesses = new Win32ProcessSnapshotSource();
         CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard(
-            processSnapshotSource: scopedCenterMProcesses,
+            processSnapshotSource: centerMProcesses,
             retirement: new CenterMMainUiRoutingRetirement(
                 new MsiClawCenterMNativeModeProbe(nativeState),
                 // Same NativeModeSession instance the real stage below uses -- an early read-only
                 // look at the same route authority, so an already-doomed route (fault latch,
                 // recovery safety, power gate) never retires the user's real MainUI first.
                 new MsiClawCenterMRoutingPreflightProbe(NativeModeSession),
-                processSnapshotSource: scopedCenterMProcesses));
+                processSnapshotSource: centerMProcesses));
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage, CenterMGuardStage];

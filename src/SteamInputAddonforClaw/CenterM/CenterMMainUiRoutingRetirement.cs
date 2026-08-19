@@ -62,7 +62,6 @@ internal sealed class CenterMMainUiRoutingRetirement
     private readonly IProcessSnapshotSource _processSnapshotSource;
     private readonly IProcessHandleOpener? _handleOpener;
     private readonly IProcessIdentityInspector _identityInspector;
-    private readonly ICenterMRetainedProcessScopeInspector _retainedScopeInspector;
     private readonly IMainUiWindowSnapshotProvider _windowSnapshotProvider;
     private readonly ICenterMMainUiWindowController _windowController;
     private readonly ICenterMNativeModeProbe _nativeModeProbe;
@@ -80,7 +79,6 @@ internal sealed class CenterMMainUiRoutingRetirement
         IProcessSnapshotSource? processSnapshotSource = null,
         IProcessHandleOpener? handleOpener = null,
         IProcessIdentityInspector? identityInspector = null,
-        ICenterMRetainedProcessScopeInspector? retainedScopeInspector = null,
         IMainUiWindowSnapshotProvider? windowSnapshotProvider = null,
         ICenterMMainUiWindowController? windowController = null,
         CenterMMainUiRoutingTerminator? terminator = null,
@@ -95,12 +93,11 @@ internal sealed class CenterMMainUiRoutingRetirement
         _processSnapshotSource = processSnapshotSource ?? new Win32ProcessSnapshotSource();
         _handleOpener = handleOpener;
         _identityInspector = identityInspector ?? new Win32ProcessIdentityInspector();
-        _retainedScopeInspector = retainedScopeInspector ?? new Win32CenterMRetainedProcessScopeInspector();
         _windowSnapshotProvider = windowSnapshotProvider ?? new Win32MainUiWindowSnapshotProvider();
         _windowController = windowController ?? new Win32CenterMMainUiWindowController();
         _terminator = terminator ?? new CenterMMainUiRoutingTerminator(
             processSnapshotSource: _processSnapshotSource, windowProvider: _windowSnapshotProvider,
-            identityInspector: _identityInspector, retainedScopeInspector: _retainedScopeInspector);
+            identityInspector: _identityInspector);
         _minimizeWaitTimeout = minimizeWaitTimeout ?? TimeSpan.FromSeconds(5);
         _minimizeWaitPollInterval = minimizeWaitPollInterval ?? TimeSpan.FromMilliseconds(200);
         _xInputWaitTimeout = xInputWaitTimeout ?? TimeSpan.FromSeconds(5);
@@ -162,29 +159,6 @@ internal sealed class CenterMMainUiRoutingRetirement
             return CenterMMainUiRoutingRetirementResult.IdentityMismatch;
         }
 
-        // Anchor session/user scope authority to THIS exact retained handle, not to the earlier PID
-        // snapshot -- a PID-only scope check performed before the handle was opened leaves a race
-        // window (the original process exits and the PID is reused before Create()) where the
-        // retained handle could point at a different process object than the one whose scope was
-        // verified. Re-checked again immediately before termination in the terminator itself.
-        var scope = _retainedScopeInspector.Inspect(tracked.Handle);
-        switch (scope)
-        {
-            case ProcessScopeProbeStatus.Match:
-                break;
-            case ProcessScopeProbeStatus.Exited:
-                // The already-supported benign natural-exit race, not an unrelated scope-lookup
-                // failure -- confirm fresh global absence and continue, exactly like every other
-                // "the MainUI is now gone" observation point.
-                return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
-            case ProcessScopeProbeStatus.Foreign:
-                LogFailed(tracked.ProcessId, "ForeignProcessScope");
-                return CenterMMainUiRoutingRetirementResult.IdentityMismatch;
-            default:
-                LogFailed(tracked.ProcessId, "ProcessScopeUncertain");
-                return CenterMMainUiRoutingRetirementResult.IdentityUncertain;
-        }
-
         // Fail before ever mutating the user's Center M window/controller lifecycle if we already
         // know this attempt can never complete termination -- there is no benefit to minimizing (or
         // observing tray XInput) first, just to fail with AccessDenied afterward.
@@ -212,23 +186,9 @@ internal sealed class CenterMMainUiRoutingRetirement
             cancellationToken.ThrowIfCancellationRequested();
 
             AppLog.Info("CenterM.RoutingGuard", "MainUI minimize requested.", ("ProcessId", tracked.ProcessId));
-            var lastAuthority = CenterMWindowMutationAuthority.Uncertain;
-            var minimizeResult = _windowController.TryMinimizeRecognizedMainUi(tracked.ProcessId, () =>
-            {
-                lastAuthority = RevalidateWindowMutationAuthority(tracked);
-                return lastAuthority;
-            });
+            var minimizeResult = _windowController.TryMinimizeRecognizedMainUi(tracked.ProcessId);
             if (minimizeResult != CenterMMainUiMinimizeResult.Requested)
             {
-                // A numeric PID/HWND match alone is not process-object identity -- the retained
-                // handle is the final authority immediately before PostMessageW. If that authority
-                // check specifically observed the exact retained MainUI as already exited, this is
-                // the already-supported benign natural-exit race, not a minimize failure: confirm
-                // fresh global absence and continue, rather than reporting MinimizeFailed for a
-                // window that no longer belongs to the process we ever intended to touch.
-                if (minimizeResult == CenterMMainUiMinimizeResult.TargetChanged && lastAuthority == CenterMWindowMutationAuthority.Exited)
-                    return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
-
                 LogFailed(tracked.ProcessId, $"MinimizeFailed:{minimizeResult}");
                 return CenterMMainUiRoutingRetirementResult.MinimizeFailed;
             }
@@ -475,31 +435,6 @@ internal sealed class CenterMMainUiRoutingRetirement
             var delay = remaining < _xInputWaitPollInterval ? remaining : _xInputWaitPollInterval;
             await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         }
-    }
-
-    /// <summary>Final retained-process-object authority check the window controller runs
-    /// immediately before <c>PostMessageW</c> -- reuses the exact same identity/scope inspectors and
-    /// checks already used earlier in this method, rather than inventing new identity logic, so the
-    /// external mutation can only ever be authorized by the SAME retained handle this whole retirement
-    /// attempt is anchored to.</summary>
-    private CenterMWindowMutationAuthority RevalidateWindowMutationAuthority(TrackedCenterMMainUi tracked)
-    {
-        var identity = _identityInspector.Inspect(tracked.Handle);
-        if (identity.Status == LiveProcessProbeStatus.Exited) return CenterMWindowMutationAuthority.Exited;
-        if (identity.Status != LiveProcessProbeStatus.Alive) return CenterMWindowMutationAuthority.Uncertain;
-
-        if (identity.ProcessId != tracked.ProcessId
-            || !string.Equals(identity.ProcessName, CenterMProcessNames.MainUi, StringComparison.Ordinal)
-            || !SafeMainUiTerminator.PathMatchesExpectedPackage(identity.ExecutablePath))
-            return CenterMWindowMutationAuthority.Mismatch;
-
-        return _retainedScopeInspector.Inspect(tracked.Handle) switch
-        {
-            ProcessScopeProbeStatus.Match => CenterMWindowMutationAuthority.Match,
-            ProcessScopeProbeStatus.Exited => CenterMWindowMutationAuthority.Exited,
-            ProcessScopeProbeStatus.Foreign => CenterMWindowMutationAuthority.Mismatch,
-            _ => CenterMWindowMutationAuthority.Uncertain
-        };
     }
 
     private static void LogFailed(int? processId, string reason) =>
