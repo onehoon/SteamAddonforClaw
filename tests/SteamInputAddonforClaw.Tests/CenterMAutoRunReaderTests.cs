@@ -1,4 +1,6 @@
 using SteamInputAddonforClaw.CenterM;
+using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.Contracts.Oem1;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -19,4 +21,28 @@ public sealed class CenterMAutoRunReaderTests
     [InlineData("1")]
     public void OtherValues_AreUnknown_NeverGuessedAsDisabled(object? rawValue) =>
         Assert.Equal(CenterMAutoRunState.Unknown, CenterMAutoRunReader.Classify(rawValue));
+
+    [Theory]
+    [InlineData((int)CenterMAutoRunState.Disabled, false, true)]
+    [InlineData((int)CenterMAutoRunState.Enabled, false, false)]
+    [InlineData((int)CenterMAutoRunState.Unknown, true, false)]
+    public void PendingAutoRunRestart_ReconcilesBeforeOem1Activation(
+        int observed,
+        bool expectedPending,
+        bool expectedOwned)
+    {
+        var initial = new AppSettings
+        {
+            Oem1Mapping = Oem1MappingSettings.Default,
+            CenterMAutoRunMutationPending = true,
+            CenterMAutoRunOwnedByAddon = false,
+            OriginalAutoRun = 1,
+            AppliedAutoRun = 0
+        };
+
+        var result = CenterMAutoRunReader.ReconcilePendingState(initial, (CenterMAutoRunState)observed);
+
+        Assert.Equal(expectedPending, result.CenterMAutoRunMutationPending);
+        Assert.Equal(expectedOwned, result.CenterMAutoRunOwnedByAddon);
+    }
 }

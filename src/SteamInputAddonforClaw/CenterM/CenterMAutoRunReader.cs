@@ -58,7 +58,28 @@ internal static class CenterMAutoRunReader
             return settings;
 
         var current = Read();
-        var reconciled = current switch
+        var reconciled = ReconcilePendingState(settings, current);
+
+        if (!ReferenceEquals(reconciled, settings))
+        {
+            store.Save(reconciled);
+            AppLog.Info("CenterM.AutoRun", "Pending AutoRun mutation reconciled during normal startup.", ("ObservedState", current), ("OwnedByAddon", reconciled.CenterMAutoRunOwnedByAddon));
+        }
+        else
+        {
+            AppLog.Warn("CenterM.AutoRun", "Pending AutoRun mutation remains unresolved during normal startup; OEM1 must remain fail-open.", null, ("ObservedState", current));
+        }
+
+        return reconciled;
+    }
+
+    internal static AppSettings ReconcilePendingState(AppSettings settings, CenterMAutoRunState current)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (!settings.CenterMAutoRunMutationPending)
+            return settings;
+
+        return current switch
         {
             CenterMAutoRunState.Disabled => settings with
             {
@@ -76,18 +97,6 @@ internal static class CenterMAutoRunReader
             },
             _ => settings
         };
-
-        if (!ReferenceEquals(reconciled, settings))
-        {
-            store.Save(reconciled);
-            AppLog.Info("CenterM.AutoRun", "Pending AutoRun mutation reconciled during normal startup.", ("ObservedState", current), ("OwnedByAddon", reconciled.CenterMAutoRunOwnedByAddon));
-        }
-        else
-        {
-            AppLog.Warn("CenterM.AutoRun", "Pending AutoRun mutation remains unresolved during normal startup; OEM1 must remain fail-open.", null, ("ObservedState", current));
-        }
-
-        return reconciled;
     }
 
     /// <summary>Pure classification, tested directly: only an exact int 0 or 1 is a confident
