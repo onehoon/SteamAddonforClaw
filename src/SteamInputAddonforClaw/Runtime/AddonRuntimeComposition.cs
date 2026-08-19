@@ -75,7 +75,8 @@ internal static class AddonRuntimeCompositionFactory
             addonOwnedVirtualDeviceTracker,
             recoveryManager,
             powerGate,
-            recoverySafetyState);
+            recoverySafetyState,
+            startupSettings);
 
         Func<CancellationToken, Task<bool>> establishBaseline = stockCenterMBaseline is null
             ? _ => Task.FromResult(false)

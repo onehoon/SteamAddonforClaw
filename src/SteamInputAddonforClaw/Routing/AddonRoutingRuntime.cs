@@ -71,8 +71,10 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         AddonOwnedVirtualDeviceTracker addonOwnedVirtualDeviceTracker,
         RecoveryManager recovery,
         PowerMutationGate powerGate,
-        RecoverySafetyState recoverySafety)
+        RecoverySafetyState recoverySafety,
+        Settings.IOem1MappingPreference oem1MappingPreference)
     {
+        ArgumentNullException.ThrowIfNull(oem1MappingPreference);
         var handheldRoutingComposition = new HandheldRoutingCompositionFactory().Create(handheldDeviceAdapter, recovery, powerGate, recoverySafety);
         if (handheldRoutingComposition is null) return null;
 
@@ -123,7 +125,11 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         // duplicating its field construction here, so the two can never drift apart.
         runtime.Oem1ActivationTask = handheldRoutingComposition.ConfigureOem1ActionPath(
             captureRoutingStatus: runtime.CaptureStatus,
-            requestQuickAccessPulse: deckStage.RequestQuickAccessPulse);
+            requestQuickAccessPulse: deckStage.RequestQuickAccessPulse,
+            // The persisted OEM1 mapping travels alongside those two facts rather than through the
+            // routing layer's own state: this runtime never reads it, and the mapping never becomes a
+            // routing input.
+            mappingPreference: oem1MappingPreference);
 
         return runtime;
     }

@@ -12,7 +12,12 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // string name. Bumping the version here makes an old v1 peer fail the handshake up front instead
 // of connecting successfully and only failing later as UnsupportedMethod/payload-deserialization
 // errors once it tries the renamed RPC.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 2; }
+//
+// Version 3: the OEM1 mapping framework adds FrontendRpcMethod.SetOem1Mapping and a required
+// Oem1Mapping member on FrontendSettingsSnapshot. A v2 peer would connect, then fail every settings
+// response deserialization on the new required member -- failing the handshake up front is the
+// honest outcome.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 3; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -32,7 +37,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SetOem1Mapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport }
 internal enum FrontendNotificationKind { StateInvalidated }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -40,6 +45,7 @@ internal sealed record FrontendWireEnvelope(int ProtocolVersion, FrontendWireMes
 internal sealed record SetLaunchAtWindowsStartupRequest(bool Enabled);
 internal sealed record SetSteamInputRoutingEnabledRequest(bool Enabled);
 internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
+internal sealed record SetOem1MappingRequest(SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Mapping);
 internal sealed record SetDeveloperTestModeRequest(bool Enabled);
 
 internal static class FrontendWireCodec

@@ -403,7 +403,8 @@ public sealed class AddonRuntimeHostTests
         new AddonOwnedVirtualDeviceTracker(),
         new RecoveryManager(new MemoryJournalStore()),
         powerGate,
-        recoverySafetyState);
+        recoverySafetyState,
+        new DefaultOem1MappingPreference());
 
     private sealed class FakeSteamInputRoutingPreference : ISteamInputRoutingPreference
     {
@@ -495,5 +496,12 @@ public sealed class AddonRuntimeHostTests
         public void WriteNew(RecoveryJournal journal) => _journal = journal;
         public void ReplaceExisting(RecoveryJournal journal) { if (_journal is null) throw new IOException(); _journal = journal; }
         public void Delete() => _journal = null;
+    }
+
+    /// <summary>Default OEM1 mapping; these tests are about routing/host lifecycle, not mapping.</summary>
+    private sealed class DefaultOem1MappingPreference : SteamInputAddonforClaw.Settings.IOem1MappingPreference
+    {
+        public SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Oem1Mapping => SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings.Default;
+        public event EventHandler? Oem1MappingChanged { add { } remove { } }
     }
 }

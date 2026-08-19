@@ -15,6 +15,24 @@
                 </ctcontrols:SettingsCard.HeaderIcon>
                 <ToggleSwitch x:Name="SteamInputRoutingToggleSwitch" OffContent="" OnContent="" Toggled="SteamInputRoutingToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
+
+            <!--
+                The toggle changes ONLY the global remapping switch; clicking anywhere else on the
+                card (the chevron area) opens the detail page. IsClickEnabled gives the card the
+                standard Windows 11 navigation chevron, and the nested ToggleSwitch keeps its own
+                click for itself.
+            -->
+            <ctcontrols:SettingsCard
+                x:Name="CenterMButtonCard"
+                Click="CenterMButtonCard_Click"
+                Description="Customize Center M button actions"
+                Header="Center M Button"
+                IsClickEnabled="True">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Setting" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <ToggleSwitch x:Name="CenterMRemappingToggleSwitch" OffContent="" OnContent="" Toggled="CenterMRemappingToggleSwitch_Toggled" />
+            </ctcontrols:SettingsCard>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

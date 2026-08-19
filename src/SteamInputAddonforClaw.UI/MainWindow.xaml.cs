@@ -48,6 +48,12 @@ public sealed partial class MainWindow : Window
         Closed += OnWindowClosed;
         SettingsContent.Initialize(_frontend, _bootstrap);
         ControllerContent.Initialize(_frontend, _bootstrap);
+        CenterMButtonContent.Initialize(_frontend, _bootstrap, () => WindowNative.GetWindowHandle(this));
+        ControllerContent.CenterMButtonRequested += (_, _) => OpenCenterMButton();
+        CenterMButtonContent.BackRequested += (_, _) => ReturnToController("BackButton");
+        // Keep the Controller page's own remapping toggle in step with an edit made on the detail
+        // page, without re-fetching bootstrap (which is captured once at startup).
+        CenterMButtonContent.MappingChanged += (_, mapping) => ControllerContent.ApplyOem1Mapping(mapping);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
@@ -154,6 +160,7 @@ public sealed partial class MainWindow : Window
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
+        CenterMButtonContent.Visibility = page == MainNavigationPage.CenterMButton ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
     }
 
@@ -318,7 +325,29 @@ public sealed partial class MainWindow : Window
             case MainNavigationPage.DeveloperMenu:
                 ReturnToSettings("MouseBackButton");
                 break;
+            case MainNavigationPage.Controller:
+                ReturnToController("MouseBackButton");
+                break;
         }
+    }
+
+    private void OpenCenterMButton()
+    {
+        var previousPage = _navigationState.CurrentPage;
+        ShowPage(_navigationState.OpenCenterMButton());
+        AppLog.Info("Window", "Center M button page opened.",
+            ("PreviousPage", previousPage),
+            ("CurrentPage", _navigationState.CurrentPage));
+    }
+
+    private void ReturnToController(string reason)
+    {
+        var previousPage = _navigationState.CurrentPage;
+        ShowPage(_navigationState.ReturnToController());
+        AppLog.Info("Window", "Center M button page closed.",
+            ("PreviousPage", previousPage),
+            ("CurrentPage", _navigationState.CurrentPage),
+            ("Reason", reason));
     }
 
     private void ReturnToSettings(string reason)

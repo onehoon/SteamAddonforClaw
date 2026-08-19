@@ -8,6 +8,7 @@ internal enum MainNavigationPage
     Settings,
     DeveloperMenu,
     ClawSensorProbe,
+    CenterMButton,
 }
 
 internal sealed class MainNavigationState
@@ -42,12 +43,20 @@ internal sealed class MainNavigationState
 
     internal MainNavigationPage ReturnToDeveloperMenu() => CurrentPage = MainNavigationPage.DeveloperMenu;
 
+    /// <summary>The Center M Button detail page is a child of Controller, exactly as the Developer
+    /// Menu is a child of Settings. It stays reachable regardless of whether remapping is switched
+    /// on -- turning the feature off must never hide the user's saved mappings.</summary>
+    internal MainNavigationPage OpenCenterMButton() => CurrentPage = MainNavigationPage.CenterMButton;
+
+    internal MainNavigationPage ReturnToController() => CurrentPage = MainNavigationPage.Controller;
+
     internal MainNavigationPage OpenClawSensorProbe() => CurrentPage = MainNavigationPage.ClawSensorProbe;
 
     internal MainNavigationPage? GetMouseBackDestination() => CurrentPage switch
     {
         MainNavigationPage.DeveloperMenu => MainNavigationPage.Settings,
         MainNavigationPage.ClawSensorProbe => MainNavigationPage.DeveloperMenu,
+        MainNavigationPage.CenterMButton => MainNavigationPage.Controller,
         _ => null
     };
 }

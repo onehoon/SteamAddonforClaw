@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Prerequisites;
@@ -40,7 +41,7 @@ public sealed class FrontendContractTests
     [Fact]
     public void Settings_snapshot_round_trips_through_SystemTextJson()
     {
-        var value = new FrontendSettingsSnapshot(true, FrontendLogLevel.Debug, false, true);
+        var value = new FrontendSettingsSnapshot(true, FrontendLogLevel.Debug, false, true, Oem1MappingSettings.Default);
         var restored = JsonSerializer.Deserialize<FrontendSettingsSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
     }
@@ -57,7 +58,7 @@ public sealed class FrontendContractTests
     public void Bootstrap_snapshot_round_trips_through_SystemTextJson()
     {
         var value = new FrontendBootstrapSnapshot(
-            new(false, FrontendLogLevel.Info, true, false),
+            new(false, FrontendLogLevel.Info, true, false, Oem1MappingSettings.Default),
             "Registered at startup.",
             new(false),
             @"C:\Logs");
@@ -68,7 +69,7 @@ public sealed class FrontendContractTests
     [Fact]
     public void LaunchAtStartupResult_round_trips_through_SystemTextJson()
     {
-        var value = new FrontendLaunchAtStartupResult(new(true, FrontendLogLevel.Off, false, false), "Registration updated.");
+        var value = new FrontendLaunchAtStartupResult(new(true, FrontendLogLevel.Off, false, false, Oem1MappingSettings.Default), "Registration updated.");
         var restored = JsonSerializer.Deserialize<FrontendLaunchAtStartupResult>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
     }

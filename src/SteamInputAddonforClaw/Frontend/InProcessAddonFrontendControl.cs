@@ -77,6 +77,15 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MapSettings());
     }
 
+    public Task<FrontendSettingsSnapshot> SetOem1MappingAsync(Contracts.Oem1.Oem1MappingSettings mapping, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(mapping);
+        ThrowIfShuttingDown();
+        _settings.ChangeOem1Mapping(mapping);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(MapSettings());
+    }
+
     public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -163,6 +172,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }
     }
 
-    private FrontendSettingsSnapshot MapSettings() => new(_settings.Settings.LaunchAtWindowsStartup, _settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SteamInputRoutingEnabled, _settings.SuppressDeveloperMenuWarning);
+    private FrontendSettingsSnapshot MapSettings() => new(_settings.Settings.LaunchAtWindowsStartup, _settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SteamInputRoutingEnabled, _settings.SuppressDeveloperMenuWarning, _settings.Oem1Mapping);
 
 }
