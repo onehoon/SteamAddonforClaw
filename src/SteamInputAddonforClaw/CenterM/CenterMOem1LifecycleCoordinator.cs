@@ -55,9 +55,13 @@ internal readonly record struct CenterMOem1LifecycleSnapshot(
 ///
 /// Dormant by design: nothing in this type starts a timer, touches the registry, stages a helper, or
 /// terminates any process merely by being constructed. Every transition is driven by an explicit
-/// caller (test, or -- in a later PR -- a small production composition seam) calling one of the
-/// public methods below. Normal production Runtime composition must not construct or call into this
-/// type in this PR.
+/// caller (test, or the production composition seam) calling one of the public methods below. A
+/// lifecycle/composition PR production-composes this type into the real MSI Claw runtime lifetime
+/// (see <see cref="Devices.MSI.Claw.MsiClawRoutingComposition"/> and
+/// <see cref="CenterMOem1LifecycleRuntime"/>) and drives its poll contract, but normal production
+/// startup never calls <see cref="SetDesiredEnabledAsync"/> with true -- construction and polling
+/// alone still start no helper and change no native OEM1 behavior; only an explicit enable (still
+/// dormant, left to a future PR) does.
 /// </summary>
 internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant, IAsyncDisposable, ICenterMOem1LifecycleDriverTarget
 {

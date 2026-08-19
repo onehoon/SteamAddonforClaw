@@ -80,12 +80,18 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         _routingDisposeOverride = routingDisposeOverride;
 
         var powerParticipants = new List<IPowerSuspendParticipant>();
-        if (_routingRuntime is not null) powerParticipants.Add(_routingRuntime);
         // PR2: an optional generic auxiliary power participant the routing composition supplies
         // (e.g. the MSI Center M OEM1 lifecycle driver) -- this host never learns it is MSI/CenterM
         // specific, only that the capability may be present (work order requirement 13).
+        //
+        // Review fix (BLOCKER): PowerTransitionCoordinator gives every participant one SHARED
+        // suspend deadline and stops once no time remains, so this must run BEFORE the routing
+        // participant, not after -- a slow/timed-out routing quiesce must never be able to consume
+        // the whole budget and starve the auxiliary lifecycle's own (intentionally lightweight)
+        // suspend mutation barrier of ever being established.
         if (_routingRuntime?.AuxiliaryPowerParticipant is { } auxiliaryPowerParticipant)
             powerParticipants.Add(auxiliaryPowerParticipant);
+        if (_routingRuntime is not null) powerParticipants.Add(_routingRuntime);
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants,
             token => ReconcileFreshAfterResumeAsync(token),
             recoveryEnabled: recoverySafe,
@@ -153,16 +159,14 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
                 if (!_steamStopped) _steamRuntime.Refresh();
             }
         });
-        var result = await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
-            freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
-            completeSuppression: _resumeFreshReconcileSuppression.Complete,
-            deferredReconcile: () => ReconcileAsync(),
-            requestStatusRefresh: RequestStatusRefresh,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        // PR2 (work order requirement 12): the OEM1 lifecycle's own fresh resume reconciliation
-        // must run exactly once on every resume, independent of whether the routing runtime's own
-        // resume reconciliation above succeeded -- never nested inside its result.
+        // Review fix (BLOCKER): the OEM1 lifecycle's own fresh resume reconciliation must run
+        // BEFORE routing re-enters, not after -- and independent of whether routing's own fresh
+        // reconcile below throws (RunResumeFreshAsync rethrows on failure, which previously skipped
+        // this branch entirely, violating IRuntimeResumeParticipant's "always runs" contract).
+        // Ordering also matters for shared-helper ownership: if the OEM1 helper's ownership was
+        // retired during suspend, restoring/validating it here FIRST means a subsequent routing
+        // entry sees an already-operational shared helper and borrows it, rather than racing to
+        // become its creator and later incorrectly believing it may stop it.
         if (routingRuntime.AuxiliaryResumeParticipant is { } auxiliaryResumeParticipant)
         {
             try
@@ -171,11 +175,18 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
             }
             catch (Exception exception)
             {
+                // Failure here remains feature-local/fail-open (matches the coordinator's own
+                // fail-open design) and must never prevent routing's own resume recovery below.
                 AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception);
             }
         }
 
-        return result;
+        return await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
+            freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
+            completeSuppression: _resumeFreshReconcileSuppression.Complete,
+            deferredReconcile: () => ReconcileAsync(),
+            requestStatusRefresh: RequestStatusRefresh,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

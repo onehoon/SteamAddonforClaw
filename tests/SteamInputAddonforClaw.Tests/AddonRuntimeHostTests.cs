@@ -214,6 +214,59 @@ public sealed class AddonRuntimeHostTests
     }
 
     [Fact]
+    public async Task Resume_reconciles_the_OEM1_auxiliary_participant_before_and_independent_of_a_throwing_routing_reconcile()
+    {
+        // Review fix (BLOCKER): the OEM1 lifecycle's resume reconciliation must run BEFORE routing
+        // re-enters, and independent of whether routing's own fresh reconcile throws --
+        // RunResumeFreshAsync rethrows on failure, so before this fix the auxiliary participant was
+        // never reached at all on this path. Drives the real production MSI Claw composition (real
+        // CenterMOem1LifecycleCoordinator, real CenterMOem1LifecycleRuntime) through a real suspend/
+        // resume pair, exactly like the existing resume tests above, but with a status provider that
+        // throws during routing's own fresh reconcile.
+        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var statusProvider = new ThrowingStatusProvider();
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var oem1Coordinator = ((MsiClawRoutingComposition)routingRuntime.TestOnly_Composition).CenterMOem1Coordinator;
+
+        var source = new FakeSource(succeeds: true);
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime,
+            powerGate, recoverySafetyState, recoverySafe: true,
+            hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true), notificationSource: source);
+        host.StartPowerObservation();
+
+        try
+        {
+            // Suspend first (the OEM1 auxiliary power participant's own QuiesceForSuspendAsync sets
+            // LastReason to "SuspendQuiesced" -- deterministic ground truth before resume even
+            // starts, so the check below can unambiguously attribute a later "ResumeReconcile" to
+            // the resume path specifically, not to suspend).
+            await source.RaiseAsync(4);
+            Assert.True(SpinWait.SpinUntil(() => oem1Coordinator.GetSnapshot().LastReason == "SuspendQuiesced", TimeSpan.FromSeconds(5)));
+
+            await source.RaiseAsync(18);
+
+            // Routing's own fresh reconcile throws (ThrowingStatusProvider), which would previously
+            // have prevented the auxiliary participant from ever being invoked at all (RunResumeFreshAsync
+            // rethrows on failure). It must still run -- observable via the coordinator's own
+            // internal resume reconcile reason -- and the host must not crash/propagate that
+            // exception out of power notification handling (both notifications above completed
+            // without this test itself throwing).
+            Assert.True(SpinWait.SpinUntil(() => oem1Coordinator.GetSnapshot().LastReason == "ResumeReconcile", TimeSpan.FromSeconds(5)));
+
+            // Confirms routing's own fresh reconcile was genuinely attempted (and threw) on this
+            // same resume -- proving this is a real independence test, not a vacuous one.
+            Assert.True(SpinWait.SpinUntil(() => statusProvider.WasCalled, TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task StartPowerObservation_opens_the_gate_when_registration_succeeds_and_recovery_is_safe()
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
@@ -361,6 +414,21 @@ public sealed class AddonRuntimeHostTests
     private sealed class EmptyDeviceEnumerator : IControllerDeviceEnumerator
     {
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => [];
+    }
+
+    /// <summary>Always throws from CaptureAsync -- simulates routing's own fresh resume reconcile
+    /// failing unexpectedly, to prove the OEM1 auxiliary resume participant still runs (and runs
+    /// first) independent of that failure.</summary>
+    private sealed class ThrowingStatusProvider : ISystemStatusProvider
+    {
+        private int _wasCalled;
+        internal bool WasCalled => Volatile.Read(ref _wasCalled) != 0;
+
+        public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
+        {
+            Volatile.Write(ref _wasCalled, 1);
+            throw new InvalidOperationException("Simulated routing status capture failure.");
+        }
     }
 
     private sealed class FakeStatusProvider(SystemStatusSnapshot? snapshot = null) : ISystemStatusProvider

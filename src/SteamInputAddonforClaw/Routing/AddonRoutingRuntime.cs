@@ -106,6 +106,11 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     internal IPowerSuspendParticipant? AuxiliaryPowerParticipant => _composition.AuxiliaryPowerParticipant;
     internal IRuntimeResumeParticipant? AuxiliaryResumeParticipant => _composition.AuxiliaryResumeParticipant;
 
+    /// <summary>Test-only observability seam onto the owned composition (e.g. so a test can inspect
+    /// an MSI-specific composition's own state, such as the OEM1 coordinator's snapshot, to prove a
+    /// capability actually ran). Never touched by production code.</summary>
+    internal IHandheldRoutingComposition TestOnly_Composition => _composition;
+
     internal bool HasResidualSessionState => _coordinator.HasResidualSessionState;
     internal bool IsSafetySessionActive => _safetySession?.IsActive == true;
     internal bool HasOwnedRecoveryBoundary => _safetySession?.HasOwnedRecoveryBoundary == true;

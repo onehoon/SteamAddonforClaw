@@ -115,6 +115,34 @@ public sealed class CenterMOem1ProductionCompositionTests
     }
 
     [Fact]
+    public async Task A_single_failed_tick_does_not_permanently_kill_the_driver()
+    {
+        // Review fix (MAJOR): an unexpected exception from a poll call must not fault the loop task
+        // permanently. Before this fix, only OperationCanceledException was caught around the whole
+        // loop -- any other exception (e.g. from PollHelperLivenessAsync) would propagate out of
+        // RunAsync, fault the backing Task, and DisposeAsync would later observe/rethrow that fault
+        // while joining it, leaving no later helper-liveness/MainUI reconciliation for the rest of
+        // the process lifetime.
+        var target = new FakeDriverTarget { ThrowOnFirstLivenessPoll = true };
+        var tick = new ManualTick();
+        var runtime = new CenterMOem1LifecycleRuntime(target, routingGuardIsArmed: () => false, delay: tick.DelayAsync);
+
+        runtime.Start();
+        tick.ReleaseOneTick(); // first tick: PollHelperLivenessAsync throws -- must be contained
+        tick.ReleaseOneTick(); // second tick: must still run normally afterward
+
+        await target.LivenessPolled.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(target.LivenessPollCount >= 1);
+        Assert.True(runtime.IsRunning);
+
+        // DisposeAsync joining the loop task must not observe/rethrow a fault from the contained
+        // exception -- proving the loop task itself never faulted.
+        var exception = await Record.ExceptionAsync(async () => await runtime.DisposeAsync());
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public async Task Disposing_the_driver_cancels_and_joins_the_periodic_loop()
     {
         var target = new FakeDriverTarget();
@@ -278,9 +306,13 @@ public sealed class CenterMOem1ProductionCompositionTests
         internal int QuiesceCount;
         internal int ResumeReconcileCount;
         internal bool Disposed;
+        internal bool ThrowOnFirstLivenessPoll;
+        private int _livenessAttempts;
 
         public Task PollHelperLivenessAsync(CancellationToken cancellationToken = default)
         {
+            if (ThrowOnFirstLivenessPoll && Interlocked.Increment(ref _livenessAttempts) == 1)
+                throw new InvalidOperationException("Simulated reconciliation tick failure.");
             Interlocked.Increment(ref LivenessPollCount);
             LivenessPolled.Release();
             return Task.CompletedTask;

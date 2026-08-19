@@ -83,19 +83,11 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
 
     private async Task RunAsync(CancellationToken token)
     {
-        try
+        while (!token.IsCancellationRequested)
         {
-            while (!token.IsCancellationRequested)
+            try
             {
-                try
-                {
-                    await _waitForNextTick(token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-
+                await _waitForNextTick(token).ConfigureAwait(false);
                 if (token.IsCancellationRequested) break;
 
                 // Requirement 6: liveness polling always runs, Armed or not -- the shared helper
@@ -103,18 +95,25 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
                 // it.
                 await _coordinator.PollHelperLivenessAsync(token).ConfigureAwait(false);
 
+                // Skipped silently while Armed -- the guard owns transient launch-protection
+                // authority for the whole routing session, so this branch is expected to fire on
+                // every tick throughout routing and must not become continuous per-tick noise.
                 if (!_routingGuardIsArmed())
-                {
                     await _coordinator.PollTickAsync(token).ConfigureAwait(false);
-                }
-                else
-                {
-                    AppLog.Debug("CenterM.Oem1", "Poll skipped because routing guard owns transient authority.");
-                }
             }
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                // Review fix (MAJOR): a single unexpected failure from either poll call (or the
+                // routing-guard predicate) must not permanently kill the production monitor -- the
+                // coordinator's own state machine already handles known uncertainty fail-open;
+                // this only guards against something it didn't anticipate. Contain and retry on the
+                // next low-rate tick rather than letting the loop task fault.
+                AppLog.Error("CenterM.Oem1", "OEM1 lifecycle reconciliation tick failed; the driver will retry on the next tick.", exception);
+            }
         }
     }
 
