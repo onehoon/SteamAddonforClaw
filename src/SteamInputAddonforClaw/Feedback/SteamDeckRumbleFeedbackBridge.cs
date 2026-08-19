@@ -66,13 +66,15 @@ internal sealed class SteamDeckRumbleFeedbackBridge
                 AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command));
 
             if (!decoded.IsSupported) return;
-            var sequence = BeginFeedback(decoded.Command == SteamDeckFeedbackCommand.HapticPulse ? decoded.PulseDurationMilliseconds : null);
+            var sequence = BeginFeedback();
             BeforeLease?.Invoke();
             if (!TryWrite(sequence, decoded.Rumble))
             {
                 AppLog.Debug("Rumble", "SteamDeck feedback DROP", ("Reason", "AuthorityRejected"));
                 return;
             }
+            if (decoded.Command == SteamDeckFeedbackCommand.HapticPulse && decoded.PulseDurationMilliseconds is { } delay)
+                ArmStop(sequence, delay);
         }
         catch (Exception exception)
         {
@@ -81,7 +83,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
     }
 
-    private long BeginFeedback(int? duration)
+    private long BeginFeedback()
     {
         lock (_gate)
         {
@@ -90,13 +92,18 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             _pendingStop?.Dispose();
             _pendingStop = null;
             var sequence = _sequence;
-            if (duration is { } delay)
-            {
-                var cts = new CancellationTokenSource();
-                _pendingStop = cts;
-                _ = StopAfterAsync(sequence, delay, cts);
-            }
             return sequence;
+        }
+    }
+
+    private void ArmStop(long sequence, int duration)
+    {
+        lock (_gate)
+        {
+            if (_disposed || sequence != _sequence) return;
+            var cts = new CancellationTokenSource();
+            _pendingStop = cts;
+            _ = StopAfterAsync(sequence, duration, cts);
         }
     }
 

@@ -227,6 +227,27 @@ public sealed class RumbleV1Tests
     }
 
     [Fact]
+    public async Task Bridge_ArmsOneMillisecondStopOnlyAfterImmediateWrite()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        var sink = new RecordingSink();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new ManualResetEventSlim(false);
+        bridge.BeforeLease = () => { entered.TrySetResult(); release.Wait(); };
+
+        var callback = Task.Run(() => Invoke(bridge.Callback, [0x8F, 0, 0, 0, 0, 0, 0, 1, 0, 0]));
+        await entered.Task;
+        await Task.Delay(20);
+        Assert.Empty(sink.Values);
+        release.Set();
+        await callback;
+        await Task.Delay(20);
+        Assert.Equal([new TwoMotorRumble(4112, 4112), TwoMotorRumble.Stopped], sink.Values);
+    }
+
+    [Fact]
     public void Authority_RejectsStaleAndWrongSourceTokensAcrossRevokeAndReacquire()
     {
         var authority = new FeedbackAuthority();
