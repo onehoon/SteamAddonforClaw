@@ -1,15 +1,14 @@
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.Devices;
-using SteamInputAddonforClaw.CenterM;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
 internal enum ComponentProvisioningState { None, Provisioned, InstallStarted, PendingReboot, AttemptFailed, AttemptCancelled, Corrupt, Indeterminate, Legacy }
 internal sealed record ProvisioningStateAssessment(ComponentProvisioningState HidHide, ComponentProvisioningState UsbIpWin2, bool HidHideBootSessionChanged = false, bool UsbIpWin2BootSessionChanged = false);
-internal sealed record FirstTimeSetupInput(HardwareCompatibilityAssessment HardwareCompatibility, ControllerEnvironmentCompatibilityAssessment Compatibility, bool RecoverySafe, bool AddonOwnedOutputIdentityUncertain, SteamSessionState Steam, PrerequisiteAssessment HidHide, PrerequisiteAssessment UsbIpWin2, ComponentInstallationAssessment HidHideInstallation, ComponentInstallationAssessment UsbIpWin2Installation, ProvisioningStateAssessment Provisioning, bool Oem1RemappingEnabled = false, CenterMAutoRunState CenterMAutoRun = CenterMAutoRunState.Unknown);
+internal sealed record FirstTimeSetupInput(HardwareCompatibilityAssessment HardwareCompatibility, ControllerEnvironmentCompatibilityAssessment Compatibility, bool RecoverySafe, bool AddonOwnedOutputIdentityUncertain, SteamSessionState Steam, PrerequisiteAssessment HidHide, PrerequisiteAssessment UsbIpWin2, ComponentInstallationAssessment HidHideInstallation, ComponentInstallationAssessment UsbIpWin2Installation, ProvisioningStateAssessment Provisioning, bool Oem1RemappingEnabled = false);
 internal enum FirstTimeSetupStatus { Complete, Required, RestartRequired, Blocked, NotApplicable, Indeterminate }
-internal enum FirstTimeSetupReason { Complete, MissingComponents, CenterMAutoRunEnabled, CenterMAutoRunUnknown, PendingReboot, RecoveryUnsafe, AddonOwnedOutputIdentityUncertain, HardwareUnsupported, HardwareIndeterminate, CompatibilityUnsupported, CompatibilityIndeterminate, SteamActive, ProvisioningUncertain, LegacyHidHideMissing }
+internal enum FirstTimeSetupReason { Complete, MissingComponents, PendingReboot, RecoveryUnsafe, AddonOwnedOutputIdentityUncertain, HardwareUnsupported, HardwareIndeterminate, CompatibilityUnsupported, CompatibilityIndeterminate, SteamActive, ProvisioningUncertain, LegacyHidHideMissing }
 internal sealed record FirstTimeSetupAssessment(FirstTimeSetupStatus Status, FirstTimeSetupReason Reason, bool CanInstallRequiredComponents);
 
 internal static class FirstTimeSetupPolicy
@@ -45,9 +44,10 @@ internal static class FirstTimeSetupPolicy
         if ((input.Provisioning.HidHide == ComponentProvisioningState.PendingReboot && !input.Provisioning.HidHideBootSessionChanged)
             || (input.Provisioning.UsbIpWin2 == ComponentProvisioningState.PendingReboot && !input.Provisioning.UsbIpWin2BootSessionChanged))
             return new(FirstTimeSetupStatus.RestartRequired, FirstTimeSetupReason.PendingReboot, false);
-        // Routing prerequisites (HidHide/usbip-win2) are independently required regardless of OEM1
-        // mapping/AutoRun state -- an uncertain/unresolved OEM1-only AutoRun prerequisite must never
-        // block provisioning routing components that are still genuinely missing.
+        // Routing prerequisites (HidHide/usbip-win2) are the only ones this policy gates. OEM1's own
+        // arming prerequisites (environment eligibility, Launcher/Server, same-name topology, exact
+        // helper ownership) are owned entirely by CenterMOem1LifecycleCoordinator and never surface a
+        // first-time-setup requirement here.
         if (!componentsReady)
         {
             if (input.HidHideInstallation.Status is ComponentInstallationStatus.ExistingUnverified or ComponentInstallationStatus.Incompatible or ComponentInstallationStatus.Indeterminate
@@ -57,21 +57,6 @@ internal static class FirstTimeSetupPolicy
             return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.MissingComponents, true);
         }
 
-        // Routing prerequisites are now complete; only the OEM1-only AutoRun prerequisite remains.
-        if (input.Oem1RemappingEnabled && input.CenterMAutoRun == CenterMAutoRunState.Unknown)
-        {
-            // The coordinator treats an unresolved AutoRun read as fail-open/NeedsSetup and refuses
-            // to arm. Reporting "Complete" here just because HidHide/usbip are ready would let the UI
-            // claim setup finished while OEM1 stays intentionally unavailable, so surface the
-            // uncertainty explicitly and keep it non-installable.
-            return new(FirstTimeSetupStatus.Indeterminate, FirstTimeSetupReason.CenterMAutoRunUnknown, false);
-        }
-        if (input.Oem1RemappingEnabled && input.CenterMAutoRun == CenterMAutoRunState.Enabled)
-        {
-            if (input.Steam.IsActive)
-                return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.SteamActive, false);
-            return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.CenterMAutoRunEnabled, true);
-        }
         return new(FirstTimeSetupStatus.Complete, FirstTimeSetupReason.Complete, false);
     }
 }

@@ -22,7 +22,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         internal readonly FakeWindowProvider WindowProvider = new();
         internal readonly ManualDelayGate Delay = new();
 
-        internal CenterMAutoRunState AutoRun = CenterMAutoRunState.Disabled;
         internal string? StagedPath = @"C:\fake\Runtime\MSI Center M.exe";
         internal Func<bool> EnvironmentEligible = () => true;
         internal readonly CenterMHelperOwnership HelperOwnership;
@@ -54,7 +53,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
             return new CenterMOem1LifecycleCoordinator(
                 publishRootProvider: () => "fake-publish-root",
                 backendProbe: backendProbe,
-                autoRunReader: () => AutoRun,
                 processSnapshotSource: Snapshots,
                 helperOwnership: HelperOwnership,
                 mainUiObserver: mainUiObserver,
@@ -124,8 +122,8 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         internal int StartCallCount { get; private set; }
         internal int PollLivenessCallCount { get; private set; }
         /// <summary>Test-only hook (round-3 finding #6): fires at the moment <see cref="WaitForExit"/>
-        /// is invoked during a helper stop, letting a test mutate world state (AutoRun, foreign
-        /// process presence, ...) to simulate drift occurring during the bounded cleanup wait.</summary>
+        /// is invoked during a helper stop, letting a test mutate world state (foreign process
+        /// presence, ...) to simulate drift occurring during the bounded cleanup wait.</summary>
         internal Action? OnWaitForExitCalled { get; set; }
         /// <summary>Test-only hook (round-4 finding #2): fires right after a helper has been
         /// successfully created (before Job/Assign/Resume), letting a test simulate a suspend
@@ -314,31 +312,22 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.Equal(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
     }
 
+    // ---- PR2: AutoRun was removed as an OEM1 arming authority; reaching Armed no longer consults
+    // any AutoRun-equivalent registry state -- only environment eligibility, Launcher/Server
+    // readiness, same-name topology, and exact helper ownership. ----
+
     [Fact]
-    public async Task AutoRunEnabled_NeedsSetup_NoHelperCreated()
+    public async Task RemappingEnabled_NoAutoRunConsulted_ReachesArmed_SuppressionReady()
     {
         var h = NewHarness();
-        h.AutoRun = CenterMAutoRunState.Enabled;
         var coordinator = h.Build();
 
         await coordinator.SetDesiredEnabledAsync(true);
 
         var snap = coordinator.GetSnapshot();
-        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
-        Assert.Equal(0, h.HelperApi.StartCallCount);
-    }
-
-    [Fact]
-    public async Task AutoRunUnknown_NeedsSetup_NoHelperCreated()
-    {
-        var h = NewHarness();
-        h.AutoRun = CenterMAutoRunState.Unknown;
-        var coordinator = h.Build();
-
-        await coordinator.SetDesiredEnabledAsync(true);
-
-        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, coordinator.GetSnapshot().State);
-        Assert.Equal(0, h.HelperApi.StartCallCount);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, snap.State);
+        Assert.True(snap.SuppressionReady);
+        Assert.Equal(1, h.HelperApi.StartCallCount);
     }
 
     [Fact]
@@ -702,25 +691,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     // ============================================================
     // Steady-state Armed prerequisite drift revalidation
     // ============================================================
-
-    [Fact]
-    public async Task Armed_AutoRunDriftsBackToEnabled_DisarmsAndLeavesArmed()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-
-        h.AutoRun = CenterMAutoRunState.Enabled;
-
-        await coordinator.PollTickAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
-        Assert.False(snap.SuppressionReady);
-        Assert.True(snap.NativeBehaviorGuaranteed);
-        Assert.Equal(1, h.HelperApi.TerminateCallCount);
-    }
 
     [Fact]
     public async Task Armed_LauncherDisappears_DisarmsAndLeavesArmed()
@@ -1324,20 +1294,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
-    public async Task Resume_AutoRunChangedDuringSleep_NoReArm()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-
-        h.AutoRun = CenterMAutoRunState.Enabled;
-        await coordinator.ReconcileAfterResumeAsync();
-
-        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, coordinator.GetSnapshot().State);
-        Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
-    }
-
-    [Fact]
     public async Task Resume_LauncherDisappearedDuringSleep_NoReArm()
     {
         var h = NewHarness();
@@ -1380,15 +1336,15 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
     // ============================================================
     // Review 4957791980, finding #2 (MAJOR): ReconcileCore resolved an existing tracked real MainUI
-    // BEFORE re-validating the environment eligibility / AutoRun / Launcher+Server prerequisites that
-    // actually authorize destructive MainUI lifecycle handling -- so prerequisite drift during sleep
-    // (or between reconcile calls) was bypassed whenever a real MainUI was already tracked. The fix
+    // BEFORE re-validating the environment eligibility / Launcher+Server prerequisites that actually
+    // authorize destructive MainUI lifecycle handling -- so prerequisite drift during sleep (or
+    // between reconcile calls) was bypassed whenever a real MainUI was already tracked. The fix
     // refreshes those prerequisites before ever permitting hidden-debounce termination, while still
     // resolving the exact retained identity/SeenVisible history first.
     // ============================================================
 
     [Fact]
-    public async Task Resume_TrackedSeenVisibleHiddenAtResume_AutoRunDrifted_ZeroDebounceOrTermination()
+    public async Task Resume_TrackedSeenVisibleHiddenAtResume_LauncherDrifted_ZeroDebounceOrTermination()
     {
         var h = NewHarness();
         var coordinator = await ArmAndAdoptStartingHidden(h);
@@ -1398,8 +1354,8 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
         await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
 
-        // Prerequisite drift during sleep: AutoRun is no longer Disabled.
-        h.AutoRun = CenterMAutoRunState.Enabled;
+        // Prerequisite drift during sleep: Launcher is no longer present.
+        h.Snapshots.Launcher = [];
         h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0); // hidden at resume
 
         await coordinator.ReconcileAfterResumeAsync();
@@ -1410,27 +1366,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // never terminated
         // Retained identity preserved as non-destructive/native state, not discarded.
         Assert.Equal(5555, snap.RealMainUiProcessId);
-    }
-
-    [Fact]
-    public async Task Resume_TrackedSeenVisibleHiddenAtResume_AutoRunUnknown_ZeroDebounceOrTermination()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        h.AutoRun = CenterMAutoRunState.Unknown;
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
-        Assert.Equal(0, h.Delay.CallCount);
-        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
     }
 
     [Fact]
@@ -1509,9 +1444,9 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
         await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
 
-        // During sleep: the tracked identity exits AND a prerequisite (AutoRun) drifts invalid.
+        // During sleep: the tracked identity exits AND a prerequisite (Launcher) drifts invalid.
         h.IdentityInspector.Status = LiveProcessProbeStatus.Exited;
-        h.AutoRun = CenterMAutoRunState.Enabled;
+        h.Snapshots.Launcher = [];
         h.Snapshots.Foreign = []; // the exited real MainUI no longer appears in enumeration either
 
         await coordinator.ReconcileAfterResumeAsync();
@@ -1519,7 +1454,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         var snap = coordinator.GetSnapshot();
         // The exact identity is retired -- no longer tracked.
         Assert.Null(snap.RealMainUiProcessId);
-        // But the same resume reconciliation must never arm a helper while AutoRun is still drifted:
+        // But the same resume reconciliation must never arm a helper while Launcher is still drifted:
         // the natural-exit path re-enters ReconcileCore fresh, which re-evaluates prerequisites and
         // fails open into NeedsSetup instead of arming.
         Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
@@ -1803,25 +1738,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     // ---- Finding #5: confirmed-clean helper removal before ever reporting a clean state ----
-
-    [Fact]
-    public async Task AutoRunDrift_StopFailure_StaysFaultedNative_NeverNeedsSetup()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-
-        h.AutoRun = CenterMAutoRunState.Enabled; // drift
-        h.HelperApi.TerminateSucceeds = false;
-        h.HelperApi.WaitForExitSucceeds = false;
-
-        await coordinator.ReconcileAsync("autorun-drift");
-
-        var snap = coordinator.GetSnapshot();
-        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
-        Assert.False(snap.NativeBehaviorGuaranteed); // still owned -- cleanup unconfirmed
-    }
 
     [Fact]
     public async Task PrerequisiteDrift_StopFailure_StaysFaultedNative_NeverNeedsSetup()
@@ -2229,7 +2145,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         var coordinator = new CenterMOem1LifecycleCoordinator(
             publishRootProvider: () => "fake-publish-root",
             backendProbe: new CenterMBackendProbe(h.Snapshots),
-            autoRunReader: () => h.AutoRun,
             processSnapshotSource: h.Snapshots,
             helperOwnership: h.HelperOwnership,
             mainUiObserver: new MainUiLifecycleObserver(h.WindowProvider),
@@ -2266,32 +2181,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     // ---- Finding #6: foreign-vanished-after-helper-stop must re-enter a fresh full reconciliation ----
-
-    [Fact]
-    public async Task ForeignVanishesDuringHelperStop_AutoRunDriftsBeforeCleanupCompletes_NoReArmFromStalePrerequisites()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-        var startCallCountAfterArm = h.HelperApi.StartCallCount;
-
-        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
-        h.HelperApi.OnWaitForExitCalled = () =>
-        {
-            // By the time helper cleanup actually confirms (a bounded wait), the foreign process has
-            // already vanished AND AutoRun has drifted to Enabled -- both facts must be recaptured
-            // fresh by a full reconciliation, never assumed from the pre-stop snapshot.
-            h.Snapshots.Foreign = [];
-            h.AutoRun = CenterMAutoRunState.Enabled;
-        };
-
-        await coordinator.PollTickAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
-        Assert.Equal(startCallCountAfterArm, h.HelperApi.StartCallCount); // no second helper started from stale prerequisites
-    }
 
     [Fact]
     public async Task ForeignVanishesDuringHelperStop_LauncherDriftsBeforeCleanupCompletes_NoReArmFromStalePrerequisites()
@@ -3050,7 +2939,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         var coordinator = new CenterMOem1LifecycleCoordinator(
             publishRootProvider: () => "fake-publish-root",
             backendProbe: new CenterMBackendProbe(h.Snapshots),
-            autoRunReader: () => h.AutoRun,
             processSnapshotSource: h.Snapshots,
             helperOwnership: null, // default/internal construction path under test
             mainUiObserver: new MainUiLifecycleObserver(h.WindowProvider),
@@ -3236,31 +3124,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     // ============================================================
 
     [Fact]
-    public async Task DebounceExpiry_AutoRunDriftsDuringDebounce_NoInterveningPoll_RefusesTermination()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-        h.Delay.Held = true;
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-        await coordinator.PollTickAsync();
-        Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
-
-        // Drift happens entirely during the debounce window; no additional poll observes it before
-        // the debounce is released.
-        h.AutoRun = CenterMAutoRunState.Enabled;
-
-        await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
-
-        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
-        // Tracked real MainUI is left intact -- passive/native, not FaultedNative, not re-armed.
-        var snap = coordinator.GetSnapshot();
-        Assert.Equal(CenterMOem1LifecycleState.NativeMainUiActive, snap.State);
-        Assert.NotNull(snap.RealMainUiProcessId);
-    }
-
-    [Fact]
     public async Task DebounceExpiry_EnvironmentEligibilityDriftsDuringDebounce_NoInterveningPoll_RefusesTermination()
     {
         var h = NewHarness();
@@ -3319,7 +3182,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         await coordinator.PollTickAsync();
         Assert.Equal(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
 
-        // No drift: AutoRun stays Disabled, environment stays eligible, Launcher/Server stay ready.
+        // No drift: environment stays eligible, Launcher/Server stay ready.
         await AwaitDebounceCompletionAsync(coordinator, () => h.Delay.Release());
 
         Assert.Equal(1, h.TerminateInvoker.TerminateCallCount);
@@ -3328,7 +3191,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
     // ============================================================
     // Review 4958174221 (BLOCKER): RefreshSuppressionPrerequisites() itself performs
-    // externally-observed work (environment eligibility, AutoRun, Launcher/Server capture) and can
+    // externally-observed work (environment eligibility, Launcher/Server capture) and can
     // legitimately take real time. A disable/suspend/shutdown request can become request-time-
     // authoritative WHILE that refresh is still in flight and only then start waiting for _gate --
     // invisible both to the pre-refresh IsHighPriorityRequestPending check (which already ran) and to
