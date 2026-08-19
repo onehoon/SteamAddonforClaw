@@ -17,10 +17,10 @@ public sealed class FrontendNamedPipeTransportTests
         FrontendAddonOperationalStatus.Ready, "Ready", true, false, FrontendSetupStatus.Complete, "Complete", false);
 
     [Fact]
-    public void Current_user_session_endpoint_is_stable_and_does_not_expose_a_sid()
+    public void Current_user_endpoint_is_stable_and_does_not_expose_a_sid()
     {
-        var first = FrontendPipeEndpoint.CreateForCurrentUserSession();
-        var second = FrontendPipeEndpoint.CreateForCurrentUserSession();
+        var first = FrontendPipeEndpoint.CreateForCurrentUser();
+        var second = FrontendPipeEndpoint.CreateForCurrentUser();
 
         Assert.Equal(first, second);
         Assert.StartsWith("SteamInputAddonforClaw.Frontend.", first);

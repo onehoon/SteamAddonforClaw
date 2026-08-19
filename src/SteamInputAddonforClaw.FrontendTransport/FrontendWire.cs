@@ -9,12 +9,14 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 public static class FrontendTransportProtocol { public const int CurrentVersion = 1; }
 public static class FrontendPipeEndpoint
 {
-    public static string CreateForCurrentUserSession()
+    /// <summary>Supported product model is one Windows user, one interactive session -- the SID
+    /// alone already uniquely identifies the pipe on the machine, so no Windows Terminal Services
+    /// session component is included.</summary>
+    public static string CreateForCurrentUser()
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         var sid = System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidOperationException("The current Windows user SID is unavailable.");
-        var identity = $"{sid}:{System.Diagnostics.Process.GetCurrentProcess().SessionId}";
-        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(sid));
         return $"SteamInputAddonforClaw.Frontend.{Convert.ToHexString(hash.AsSpan(0, 8))}";
     }
 }

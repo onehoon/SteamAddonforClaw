@@ -5,5 +5,5 @@ namespace SteamInputAddonforClaw.UI.Frontend;
 internal static class UiFrontendClientFactory
 {
     internal static NamedPipeAddonFrontendClient Create() =>
-        new(FrontendPipeEndpoint.CreateForCurrentUserSession());
+        new(FrontendPipeEndpoint.CreateForCurrentUser());
 }
