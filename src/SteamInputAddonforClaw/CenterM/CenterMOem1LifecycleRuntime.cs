@@ -31,12 +31,12 @@ internal interface ICenterMOem1LifecycleDriverTarget
 /// before disposing the coordinator so a stale tick can never re-enter it after disposal.
 /// </summary>
 /// <remarks>
-/// Routing-guard coexistence: a cleanly dormant OEM1 coordinator skips its helper liveness policy,
-/// because the shared helper may belong to the routing guard. Once OEM1 is enabled, exact-handle
-/// liveness polling runs on every tick; only the normal MainUI-yield poll
-/// (<see cref="CenterMOem1LifecycleCoordinator.PollTickAsync"/>) is skipped while the guard is
-/// Armed, so this driver never fights the guard's transient <c>Local\MSI Center M.exe</c>
-/// launch-protection authority during routing.
+/// Routing-guard coexistence: the driver invokes the liveness seam on every tick, but a cleanly
+/// dormant OEM1 coordinator skips its helper liveness policy because the shared helper may belong
+/// to the routing guard. Once OEM1 is enabled, exact-handle liveness polling applies normally;
+/// only the normal MainUI-yield poll (<see cref="CenterMOem1LifecycleCoordinator.PollTickAsync"/>)
+/// is skipped while the guard is Armed, so this driver never fights the guard's transient
+/// <c>Local\MSI Center M.exe</c> launch-protection authority during routing.
 /// </remarks>
 internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IRuntimeResumeParticipant, IAsyncDisposable
 {
@@ -90,9 +90,10 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
                 await _waitForNextTick(token).ConfigureAwait(false);
                 if (token.IsCancellationRequested) break;
 
-                // Requirement 6: liveness polling always runs, Armed or not -- the shared helper
-                // remains part of the protection invariant regardless of who is currently borrowing
-                // it.
+                // Invoke the liveness seam on every tick. A cleanly dormant coordinator
+                // intentionally returns without polling the shared helper because it may currently
+                // belong to the routing guard. Once OEM1 authority is enabled/non-dormant,
+                // exact-handle liveness policy applies normally.
                 await _coordinator.PollHelperLivenessAsync(token).ConfigureAwait(false);
 
                 // Skipped silently while Armed -- the guard owns transient launch-protection

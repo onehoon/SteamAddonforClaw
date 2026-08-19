@@ -259,15 +259,17 @@ only, not feature activation.
   is supplied (the coordinator's own default stays fail-open/false for any
   caller that omits one).
 - A new, small production driver, `CenterM/CenterMOem1LifecycleRuntime`, is
-  the coordinator's one lifetime owner: a single low-rate periodic loop calls
-  the coordinator's already-documented `PollHelperLivenessAsync()` on every
-  tick (regardless of routing-guard state, since the shared helper's exact
-  liveness is still part of the protection invariant either way) and
-  `PollTickAsync()` only while `CenterMMainUiRoutingGuard.IsArmed` is false --
-  so the driver's normal MainUI-yield polling never fights the guard's
-  transient `Local\MSI Center M.exe` launch-protection authority during
-  Steam routing. The driver duplicates no coordinator state; the coordinator
-  remains the sole authoritative state machine.
+  the coordinator's one lifetime owner: a single low-rate periodic loop invokes
+  the coordinator's `PollHelperLivenessAsync()` seam on every tick, but a
+  cleanly `Disabled`/`DesiredEnabled == false` coordinator deliberately no-ops
+  so it cannot apply OEM1 cleanup policy to a routing-guard-owned shared
+  helper. Once OEM1 custom authority is enabled, exact-handle liveness
+  reconciliation becomes active. `PollTickAsync()` is called only while
+  `CenterMMainUiRoutingGuard.IsArmed` is false, so the driver's normal
+  MainUI-yield polling never fights the guard's transient
+  `Local\MSI Center M.exe` launch-protection authority during Steam routing.
+  The driver duplicates no coordinator state; the coordinator remains the sole
+  authoritative state machine.
 - Suspend/resume: `CenterMOem1LifecycleRuntime` forwards
   `IPowerSuspendParticipant.QuiesceForSuspendAsync` directly to the
   coordinator's existing suspend participant implementation, and implements a
