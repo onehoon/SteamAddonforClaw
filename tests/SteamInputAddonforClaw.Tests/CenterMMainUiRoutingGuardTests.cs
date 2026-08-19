@@ -171,6 +171,194 @@ public sealed class CenterMMainUiRoutingGuardTests
     }
 
     [Fact]
+    public async Task Arm_with_already_operational_helper_borrows_it_without_starting()
+    {
+        // The shared CenterMHelperOwnership is already operationally owned before this arm attempt
+        // (as it would be if a future OEM1 lifecycle owner already started it) -- the guard must
+        // borrow it rather than call Start a second time.
+        var helperApi = new RecordingHelperApi();
+        var helperOwnership = new CenterMHelperOwnership(helperApi);
+        Assert.Equal(HelperStartResult.Started, helperOwnership.Start("C:\\fake\\MSI Center M.exe"));
+        helperApi.Calls.Clear();
+
+        var owned = new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null);
+        var snapshots = new FakeSnapshotSource([[owned], [owned]]);
+        var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+        var mutexFactory = new FakeMutexFactory();
+        var guard = new CenterMMainUiRoutingGuard(
+            publishRootProvider: () => "C:\\fake\\publish",
+            processSnapshotSource: snapshots,
+            helperOwnership: helperOwnership,
+            mutexOwnership: new CenterMMainUiMutexOwnership(mutexFactory),
+            stager: stager.Stage);
+
+        var result = await guard.ArmAsync();
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, result);
+        Assert.True(guard.IsArmed);
+        Assert.False(stager.Called);
+        Assert.DoesNotContain("CreateSuspended", helperApi.Calls);
+        Assert.Equal(1, mutexFactory.CreateCallCount);
+    }
+
+    [Fact]
+    public async Task Retained_but_non_operational_ownership_fails_closed_without_starting_or_discarding()
+    {
+        // ResumeThread fails and the follow-up cleanup wait never confirms exit: IsOwned stays true
+        // (a job-less PartialCleanupUnconfirmed residue) but IsOperationallyOwned is false. The
+        // guard must fail closed -- never Start a replacement, never discard the retained ownership.
+        var helperApi = new RecordingHelperApi { ResumeSucceeds = false, WaitForExitSucceeds = false };
+        var helperOwnership = new CenterMHelperOwnership(helperApi);
+        Assert.Equal(HelperStartResult.PartialCleanupUnconfirmed, helperOwnership.Start("C:\\fake\\MSI Center M.exe"));
+        Assert.True(helperOwnership.IsOwned);
+        Assert.False(helperOwnership.IsOperationallyOwned);
+        helperApi.Calls.Clear();
+
+        var snapshots = new FakeSnapshotSource([[]]);
+        var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+        var mutexFactory = new FakeMutexFactory();
+        var guard = new CenterMMainUiRoutingGuard(
+            publishRootProvider: () => "C:\\fake\\publish",
+            processSnapshotSource: snapshots,
+            helperOwnership: helperOwnership,
+            mutexOwnership: new CenterMMainUiMutexOwnership(mutexFactory),
+            stager: stager.Stage);
+
+        var result = await guard.ArmAsync();
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.HelperOwnershipUnresolved, result);
+        Assert.False(guard.IsArmed);
+        Assert.False(stager.Called);
+        Assert.DoesNotContain("CreateSuspended", helperApi.Calls);
+        Assert.Equal(0, mutexFactory.CreateCallCount);
+        Assert.True(helperOwnership.IsOwned);
+    }
+
+    [Fact]
+    public async Task Disarm_after_borrowed_helper_releases_mutex_but_does_not_stop_the_helper()
+    {
+        var helperApi = new RecordingHelperApi();
+        var helperOwnership = new CenterMHelperOwnership(helperApi);
+        Assert.Equal(HelperStartResult.Started, helperOwnership.Start("C:\\fake\\MSI Center M.exe"));
+        helperApi.Calls.Clear();
+
+        var owned = new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null);
+        var snapshots = new FakeSnapshotSource([[owned], [owned]]);
+        var mutexFactory = new FakeMutexFactory();
+        var guard = new CenterMMainUiRoutingGuard(
+            publishRootProvider: () => "C:\\fake\\publish",
+            processSnapshotSource: snapshots,
+            helperOwnership: helperOwnership,
+            mutexOwnership: new CenterMMainUiMutexOwnership(mutexFactory),
+            stager: new FakeStager("C:\\fake\\MSI Center M.exe").Stage);
+        await guard.ArmAsync();
+
+        var disarmed = await guard.DisarmAsync();
+
+        Assert.True(disarmed);
+        Assert.False(guard.IsArmed);
+        Assert.DoesNotContain("Terminate", helperApi.Calls);
+        Assert.True(mutexFactory.LastHandle!.Disposed);
+        // The borrowed helper survives routing exit -- it remains operationally owned for its
+        // external owner rather than being stopped merely because this routing arm ended.
+        Assert.True(helperOwnership.IsOperationallyOwned);
+    }
+
+    [Fact]
+    public async Task Borrowed_helper_plus_mutex_failure_never_stops_the_helper()
+    {
+        var helperApi = new RecordingHelperApi();
+        var helperOwnership = new CenterMHelperOwnership(helperApi);
+        Assert.Equal(HelperStartResult.Started, helperOwnership.Start("C:\\fake\\MSI Center M.exe"));
+        helperApi.Calls.Clear();
+
+        var owned = new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null);
+        var snapshots = new FakeSnapshotSource([[owned]]);
+        var mutexFactory = new FakeMutexFactory { NextCreatedNew = false };
+        var guard = new CenterMMainUiRoutingGuard(
+            publishRootProvider: () => "C:\\fake\\publish",
+            processSnapshotSource: snapshots,
+            helperOwnership: helperOwnership,
+            mutexOwnership: new CenterMMainUiMutexOwnership(mutexFactory),
+            stager: new FakeStager("C:\\fake\\MSI Center M.exe").Stage);
+
+        var result = await guard.ArmAsync();
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.MutexFailure, result);
+        Assert.False(guard.IsArmed);
+        Assert.DoesNotContain("Terminate", helperApi.Calls);
+        Assert.True(helperOwnership.IsOperationallyOwned);
+    }
+
+    [Fact]
+    public async Task Borrowed_helper_plus_invariant_failure_releases_mutex_without_stopping_the_helper()
+    {
+        var helperApi = new RecordingHelperApi();
+        var helperOwnership = new CenterMHelperOwnership(helperApi);
+        Assert.Equal(HelperStartResult.Started, helperOwnership.Start("C:\\fake\\MSI Center M.exe"));
+        helperApi.Calls.Clear();
+
+        var owned = new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null);
+        // Post-mutex re-check no longer finds the owned helper -- invariant failure.
+        var snapshots = new FakeSnapshotSource([[owned], []]);
+        var mutexFactory = new FakeMutexFactory();
+        var guard = new CenterMMainUiRoutingGuard(
+            publishRootProvider: () => "C:\\fake\\publish",
+            processSnapshotSource: snapshots,
+            helperOwnership: helperOwnership,
+            mutexOwnership: new CenterMMainUiMutexOwnership(mutexFactory),
+            stager: new FakeStager("C:\\fake\\MSI Center M.exe").Stage);
+
+        var result = await guard.ArmAsync();
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.InvariantFailure, result);
+        Assert.False(guard.IsArmed);
+        Assert.DoesNotContain("Terminate", helperApi.Calls);
+        Assert.True(mutexFactory.LastHandle!.Disposed);
+        Assert.True(helperOwnership.IsOperationallyOwned);
+    }
+
+    [Fact]
+    public async Task Guard_created_helper_plus_mutex_failure_still_stops_the_helper()
+    {
+        // Regression guard: the guard-created (Case A) path must retain its existing cleanup
+        // behavior unchanged by the borrow/start decision added above.
+        var snapshots = new FakeSnapshotSource([[]]);
+        var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+        var helperApi = new RecordingHelperApi();
+        var mutexFactory = new FakeMutexFactory { NextCreatedNew = false };
+        var guard = Create(snapshots, stager, helperApi, mutexFactory);
+
+        var result = await guard.ArmAsync();
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.MutexFailure, result);
+        Assert.False(guard.IsArmed);
+        Assert.Contains("Terminate", helperApi.Calls);
+    }
+
+    [Fact]
+    public async Task Composition_passes_the_shared_helper_ownership_instance_to_the_routing_guard()
+    {
+        // Proves the composition-level requirement: the guard borrows/starts through the SAME
+        // CenterMHelperOwnership instance the composition created, not an unrelated one -- exercised
+        // directly here (rather than via MsiClawRoutingComposition, which always constructs its own
+        // production instance) since that is exactly what constructor injection is for.
+        var helperApi = new RecordingHelperApi();
+        var sharedOwnership = new CenterMHelperOwnership(helperApi);
+        var guard = new CenterMMainUiRoutingGuard(
+            publishRootProvider: () => "C:\\fake\\publish",
+            processSnapshotSource: new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]),
+            helperOwnership: sharedOwnership,
+            mutexOwnership: new CenterMMainUiMutexOwnership(new FakeMutexFactory()),
+            stager: new FakeStager("C:\\fake\\MSI Center M.exe").Stage);
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ArmAsync());
+
+        Assert.True(sharedOwnership.IsOperationallyOwned);
+        Assert.Equal(RecordingHelperApi.FixedProcessId, sharedOwnership.ProcessId);
+    }
+
+    [Fact]
     public async Task Disarm_after_arm_stops_the_helper_and_releases_the_mutex()
     {
         var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
@@ -384,6 +572,7 @@ public sealed class CenterMMainUiRoutingGuardTests
         internal List<string> Calls { get; } = [];
         internal bool CreateSucceeds { get; init; } = true;
         internal bool WaitForExitSucceeds { get; init; } = true;
+        internal bool ResumeSucceeds { get; init; } = true;
 
         /// <summary>When set, the first <see cref="TryCreateSuspended"/> call signals
         /// <see cref="CreateSuspendedEntered"/> and then blocks until this is released -- lets a
@@ -431,7 +620,7 @@ public sealed class CenterMMainUiRoutingGuardTests
         {
             Calls.Add("ResumeThread");
             win32Error = 0;
-            return true;
+            return ResumeSucceeds;
         }
 
         public bool TryTerminate(SafeProcessHandle processHandle, out int win32Error)

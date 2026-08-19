@@ -76,6 +76,28 @@ public sealed class MsiClawRoutingCompositionTests
     }
 
     [Fact]
+    public async Task Composition_uses_the_injected_shared_helper_ownership_as_the_default_guards_authority()
+    {
+        // PR1 ownership convergence: the composition must be the single authority that constructs
+        // CenterMHelperOwnership and hand THAT SAME instance to its default CenterMMainUiRoutingGuard
+        // via constructor injection -- never a second, unrelated production instance. The guard-level
+        // arm/borrow behavior itself is covered by CenterMMainUiRoutingGuardTests.
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        var helperOwnership = new CenterMHelperOwnership(new BlockingTerminateHelperApi(new ManualResetEventSlim(true)));
+        var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), centerMHelperOwnership: helperOwnership);
+
+        Assert.Same(helperOwnership, composition.CenterMHelperOwnership);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+
+        // Sole final disposer: composition disposal reaches the shared instance it created (a no-op
+        // here since nothing was ever started -- this only proves DisposeAsync flows through to it
+        // without throwing).
+        Assert.False(helperOwnership.IsOwned);
+    }
+
+    [Fact]
     public async Task DisposeAsync_disarms_the_guard_even_when_arm_never_ran()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);

@@ -14,7 +14,14 @@ internal enum CenterMMainUiRoutingGuardResult
     HelperFailure,
     MutexFailure,
     InvariantFailure,
-    Uncertain
+    Uncertain,
+    /// <summary>The shared <see cref="CenterMHelperOwnership"/> retains ownership
+    /// (<see cref="CenterMHelperOwnership.IsOwned"/>) but it is not operationally armed
+    /// (<see cref="CenterMHelperOwnership.IsOperationallyOwned"/> is false) -- e.g. a job-less
+    /// <see cref="HelperStartResult.PartialCleanupUnconfirmed"/> residue from a prior owner. The
+    /// guard fails closed: it never starts a second helper, never discards the retained ownership,
+    /// and never treats this as a clean native fallback.</summary>
+    HelperOwnershipUnresolved
 }
 
 /// <summary>
@@ -59,6 +66,15 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private volatile bool _armed;
 
+    /// <summary>Per-arm "did I start it?" state (PR1 ownership convergence). True only when THIS
+    /// arm attempt itself called <see cref="CenterMHelperOwnership.Start"/> and it succeeded --
+    /// false when this arm instead borrowed an already-operational helper owned by an external
+    /// authority (e.g. a future OEM1 lifecycle owner sharing the same <see cref="CenterMHelperOwnership"/>
+    /// instance). Read only by <see cref="UnwindAsync"/> and terminal <see cref="DisposeAsync"/> to
+    /// decide whether this guard may stop/register the helper -- a borrowed helper must never be
+    /// stopped merely because Steam routing ended. Reset at the start of every arm attempt.</summary>
+    private bool _helperStartedByCurrentArm;
+
     internal CenterMMainUiRoutingGuard(
         Func<string>? publishRootProvider = null,
         IProcessSnapshotSource? processSnapshotSource = null,
@@ -94,6 +110,12 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     private async Task<CenterMMainUiRoutingGuardResult> ArmCoreAsync(CancellationToken cancellationToken)
     {
         AppLog.Debug("CenterM.RoutingGuard", "Routing guard arm started.");
+        _helperStartedByCurrentArm = false;
+
+        // The shared CenterMHelperOwnership's own already-owned PID (if operationally armed) is
+        // never itself a "real MainUI appeared" signal -- exclude it before deciding RealMainUiPresent,
+        // matching CenterMOem1LifecycleCoordinator's own same-name/owned-PID distinction.
+        var ownedPid = _helperOwnership.IsOperationallyOwned ? _helperOwnership.ProcessId : null;
 
         var beforeSnapshot = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
         if (beforeSnapshot is null)
@@ -102,37 +124,60 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
             return CenterMMainUiRoutingGuardResult.Uncertain;
         }
 
-        if (beforeSnapshot.Count > 0)
+        var foreignBefore = beforeSnapshot.Where(p => p.ProcessId != ownedPid).ToList();
+        if (foreignBefore.Count > 0)
         {
-            AppLog.Info("CenterM.RoutingGuard", "Real MainUI present; routing guard will not arm.", ("Reason", "RealMainUiPresent"), ("MainUiProcessId", beforeSnapshot[0].ProcessId));
+            AppLog.Info("CenterM.RoutingGuard", "Real MainUI present; routing guard will not arm.", ("Reason", "RealMainUiPresent"), ("MainUiProcessId", foreignBefore[0].ProcessId));
             return CenterMMainUiRoutingGuardResult.RealMainUiPresent;
         }
 
-        var publishRoot = _publishRootProvider();
-        var stagedPath = _stager(publishRoot);
-        if (stagedPath is null)
+        // Borrow-or-start decision (PR1 ownership convergence). IsOwned alone is not sufficient --
+        // a job-less PartialCleanupUnconfirmed residue never completed the operational arm sequence
+        // and must fail closed rather than being silently replaced or treated as a clean fallback.
+        if (_helperOwnership.IsOwned && !_helperOwnership.IsOperationallyOwned)
         {
-            AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: helper staging failed.", null);
-            return CenterMMainUiRoutingGuardResult.HelperFailure;
+            AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: shared helper ownership is retained but not operational; failing closed.", null, ("ProcessId", _helperOwnership.ProcessId));
+            return CenterMMainUiRoutingGuardResult.HelperOwnershipUnresolved;
         }
 
-        // Safe pre-mutation cancellation point: nothing has been created yet, so there is nothing
-        // to unwind -- a cancelled Enter should not still create a helper/mutex only to immediately
-        // tear them down via the pipeline's subsequent rollback.
-        if (cancellationToken.IsCancellationRequested)
+        if (_helperOwnership.IsOperationallyOwned)
         {
-            AppLog.Info("CenterM.RoutingGuard", "Routing guard arm cancelled before any resource was created.", ("Action", "NoOp"));
-            cancellationToken.ThrowIfCancellationRequested();
+            // Case B: an external authority (or a prior arm on this same guard) already has an
+            // operational helper running -- borrow it instead of starting a second one.
+            _helperStartedByCurrentArm = false;
+            AppLog.Info("CenterM.RoutingGuard", "Borrowing already-operational shared helper.", ("HelperProcessId", _helperOwnership.ProcessId));
         }
+        else
+        {
+            // Case A: nothing owned yet -- stage and start it ourselves.
+            var publishRoot = _publishRootProvider();
+            var stagedPath = _stager(publishRoot);
+            if (stagedPath is null)
+            {
+                AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: helper staging failed.", null);
+                return CenterMMainUiRoutingGuardResult.HelperFailure;
+            }
 
-        var startResult = _helperOwnership.Start(stagedPath);
-        if (startResult != HelperStartResult.Started)
-        {
-            AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: helper did not start.", null, ("Result", startResult));
-            await UnwindAsync().ConfigureAwait(false);
-            return CenterMMainUiRoutingGuardResult.HelperFailure;
+            // Safe pre-mutation cancellation point: nothing has been created yet, so there is
+            // nothing to unwind -- a cancelled Enter should not still create a helper/mutex only to
+            // immediately tear them down via the pipeline's subsequent rollback.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                AppLog.Info("CenterM.RoutingGuard", "Routing guard arm cancelled before any resource was created.", ("Action", "NoOp"));
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            var startResult = _helperOwnership.Start(stagedPath);
+            if (startResult != HelperStartResult.Started)
+            {
+                AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: helper did not start.", null, ("Result", startResult));
+                await UnwindAsync().ConfigureAwait(false);
+                return CenterMMainUiRoutingGuardResult.HelperFailure;
+            }
+
+            _helperStartedByCurrentArm = true;
+            AppLog.Info("CenterM.RoutingGuard", "Helper started.", ("HelperProcessId", _helperOwnership.ProcessId));
         }
-        AppLog.Info("CenterM.RoutingGuard", "Helper started.", ("HelperProcessId", _helperOwnership.ProcessId));
 
         var mutexResult = _mutexOwnership.Acquire();
         if (mutexResult == CenterMMainUiMutexAcquireResult.Unavailable)
@@ -207,15 +252,21 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         finally { _gate.Release(); }
     }
 
+    /// <summary>Unwinds only what THIS arm attempt itself acquired. A borrowed helper
+    /// (<see cref="_helperStartedByCurrentArm"/> false) is never stopped here -- it stays
+    /// operational for its external owner regardless of whether this attempt failed partway through
+    /// or a later <see cref="DisarmAsync"/> ends a successful arm. The mutex is always released
+    /// since it is exclusively owned by this guard's own routing-time arm.</summary>
     private Task<bool> UnwindAsync()
     {
         var helperStopped = true;
-        if (_helperOwnership.IsOwned)
+        if (_helperStartedByCurrentArm && _helperOwnership.IsOwned)
         {
             helperStopped = _helperOwnership.Stop(_helperStopTimeout);
             AppLog.Info("CenterM.RoutingGuard", "Helper stop attempted.", ("Confirmed", helperStopped), ("HelperProcessId", _helperOwnership.ProcessId));
         }
 
+        _helperStartedByCurrentArm = false;
         _mutexOwnership.Release();
         AppLog.Info("CenterM.RoutingGuard", "MainUI mutex released.");
         return Task.FromResult(helperStopped);
@@ -228,6 +279,11 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     /// never discarded) to the process-level <see cref="CenterMOrphanedHelperRegistry"/>, mirroring
     /// <see cref="CenterMOem1LifecycleCoordinator.DisposeAsync"/>'s terminal policy for the same
     /// primitive. Never falls back to process-name/PID rediscovery. Idempotent.
+    ///
+    /// This guard no longer assumes that disposing it always means it owns the helper lifetime: if
+    /// the currently armed (or last attempted) arm only borrowed the helper, terminal cleanup is
+    /// skipped entirely -- the shared <see cref="CenterMHelperOwnership"/> stays operational for its
+    /// external owner, which is solely responsible for its own disposal.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -236,6 +292,12 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         {
             _armed = false;
             _mutexOwnership.Release();
+
+            if (!_helperStartedByCurrentArm)
+            {
+                // Borrowed (or never started) helper: this guard has no lifetime authority over it.
+                return;
+            }
 
             for (var attempt = 1; attempt <= DisposeFinalCleanupAttempts && _helperOwnership.IsOwned; attempt++)
             {

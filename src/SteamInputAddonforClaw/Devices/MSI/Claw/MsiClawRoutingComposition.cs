@@ -39,6 +39,15 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     internal MsiClawPhysicalInputStage PhysicalInputStage { get; }
     internal MsiClawPhysicalIsolationStage PhysicalIsolationStage { get; }
     internal MsiClawRumbleSink PhysicalRumbleSink { get; }
+
+    /// <summary>The single authoritative <see cref="CenterM.CenterMHelperOwnership"/> for this MSI
+    /// Claw runtime composition (PR1 ownership convergence). Created here (unless caller-injected,
+    /// e.g. by tests) and passed to <see cref="CenterMGuard"/> via constructor injection so routing
+    /// never constructs a second, competing production ownership object for the same same-name
+    /// helper identity. A future OEM1 production composition seam can receive this SAME instance.
+    /// This composition is the sole final disposer -- <see cref="DisposeAsync"/> disposes it after
+    /// <see cref="CenterMGuard"/> has already released its own routing-time resources.</summary>
+    internal CenterMHelperOwnership CenterMHelperOwnership { get; }
     internal CenterMMainUiRoutingGuard CenterMGuard { get; }
     internal CenterMMainUiRoutingGuardStage CenterMGuardStage { get; }
 
@@ -52,6 +61,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         PowerMutationGate powerGate,
         RecoverySafetyState recoverySafety,
         Func<IMsiClawRumbleEndpointResolver>? rumbleEndpointResolverFactory = null,
+        CenterMHelperOwnership? centerMHelperOwnership = null,
         CenterMMainUiRoutingGuard? centerMGuard = null)
     {
         NativeModeSession = new MsiClawNativeModeSessionCoordinator(
@@ -82,7 +92,12 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         PhysicalInputStage.PhysicalSessionRetired += PhysicalRumbleSink.InvalidatePhysicalSession;
         PhysicalInputSource.TestCompleted += OnPhysicalInputCompleted;
 
-        CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard();
+        // Constructed here -- not inside CenterMMainUiRoutingGuard -- so this composition, not the
+        // guard, is the shared authority a future OEM1 production composition seam can also receive
+        // the SAME instance of. Only used as the guard's default when no guard is caller-injected;
+        // a caller-injected guard (tests today) already carries its own ownership instance.
+        CenterMHelperOwnership = centerMHelperOwnership ?? new CenterMHelperOwnership();
+        CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard(helperOwnership: CenterMHelperOwnership);
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage, CenterMGuardStage];
@@ -170,6 +185,13 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // exact helper handle is still unresolved after those -- hands it to the process-level
         // CenterMOrphanedHelperRegistry rather than letting this composition (and the guard's own
         // ability to retry) become unreachable with the only exact ownership still outstanding.
+        // This only acts if the guard itself started the helper -- a borrowed helper is left
+        // untouched for its external owner (PR1 ownership convergence).
         await CenterMGuard.DisposeAsync().ConfigureAwait(false);
+
+        // Sole final disposer of the shared authority this composition created (PR1 ownership
+        // convergence, requirement 8): a no-op if nothing is owned (never started, already stopped
+        // by the guard above, or still borrowed by an external owner in a future PR).
+        CenterMHelperOwnership.Dispose();
     }
 }
