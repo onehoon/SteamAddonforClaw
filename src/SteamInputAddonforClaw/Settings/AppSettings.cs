@@ -23,6 +23,7 @@ public sealed record AppSettings(
     public Oem1MappingSettings Oem1Mapping { get; init; } = Oem1MappingSettings.Default;
 
     public bool CenterMAutoRunOwnedByAddon { get; init; }
+    public bool CenterMAutoRunMutationPending { get; init; }
     public int? OriginalAutoRun { get; init; }
     public int? AppliedAutoRun { get; init; }
 }

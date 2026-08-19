@@ -44,6 +44,7 @@ public sealed class SettingsStore
             {
                 Oem1Mapping = ReadOem1Mapping(root),
                 CenterMAutoRunOwnedByAddon = root.TryGetProperty("CenterMAutoRunOwnedByAddon", out var owned) && owned.ValueKind == JsonValueKind.True && owned.GetBoolean(),
+                CenterMAutoRunMutationPending = root.TryGetProperty("CenterMAutoRunMutationPending", out var pending) && pending.ValueKind == JsonValueKind.True && pending.GetBoolean(),
                 OriginalAutoRun = ReadNullableInt(root, "OriginalAutoRun"),
                 AppliedAutoRun = ReadNullableInt(root, "AppliedAutoRun")
             };
@@ -142,7 +143,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning, settings.Oem1Mapping, settings.CenterMAutoRunOwnedByAddon, settings.OriginalAutoRun, settings.AppliedAutoRun };
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning, settings.Oem1Mapping, settings.CenterMAutoRunOwnedByAddon, settings.CenterMAutoRunMutationPending, settings.OriginalAutoRun, settings.AppliedAutoRun };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

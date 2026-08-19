@@ -55,7 +55,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public async Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default)
     {
         var snapshot = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        var setup = _setupExecutor.Evaluate(snapshot);
+        var setup = _setupExecutor.Evaluate(snapshot, _settings?.Oem1Mapping?.RemappingEnabled ?? false);
         return FrontendSnapshotMapper.ApplySetup(FrontendSnapshotMapper.Map(snapshot, _captureRoutingStatus()), setup);
     }
 
@@ -113,7 +113,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         var current = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        var setup = _setupExecutor.Evaluate(current);
+        var setup = _setupExecutor.Evaluate(current, _settings?.Oem1Mapping?.RemappingEnabled ?? false);
         AppLog.Info("PrerequisiteSetup", "Prerequisite setup requested.",
             ("HidHideStatus", current.Prerequisites.HidHide.Status),
             ("UsbIpWin2Status", current.Prerequisites.UsbIpWin2.Status),
@@ -137,7 +137,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         {
             if (_runtime is not null)
             {
-                _settings.RefreshCenterMAutoRunOwnershipFromDisk();
+                _settings?.RefreshCenterMAutoRunOwnershipFromDisk();
                 await _runtime.ReconcileOem1PrerequisitesAsync(cancellationToken).ConfigureAwait(false);
             }
         }

@@ -85,6 +85,7 @@ public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference, I
         Settings = Settings with
         {
             CenterMAutoRunOwnedByAddon = persisted.CenterMAutoRunOwnedByAddon,
+            CenterMAutoRunMutationPending = persisted.CenterMAutoRunMutationPending,
             OriginalAutoRun = persisted.OriginalAutoRun,
             AppliedAutoRun = persisted.AppliedAutoRun
         };

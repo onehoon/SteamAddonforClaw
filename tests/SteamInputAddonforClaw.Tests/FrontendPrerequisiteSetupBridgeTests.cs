@@ -131,7 +131,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
         public string? ExecutablePath { get; private set; }
         public FirstTimeSetupAssessment? SuppliedAssessment { get; private set; }
 
-        public FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot)
+        public FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot, bool oem1RemappingEnabled)
         {
             EvaluateCallCount++;
             return assessment;

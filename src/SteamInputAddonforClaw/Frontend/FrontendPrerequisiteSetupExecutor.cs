@@ -10,7 +10,7 @@ namespace SteamInputAddonforClaw.Frontend;
 
 internal interface IFrontendPrerequisiteSetupExecutor
 {
-    FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot);
+    FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot, bool oem1RemappingEnabled);
     Task<ElevatedProcessResult?> RunAsync(FirstTimeSetupAssessment assessment, string executablePath, CancellationToken cancellationToken);
 }
 
@@ -19,7 +19,7 @@ internal sealed class FrontendPrerequisiteSetupExecutor : IFrontendPrerequisiteS
     private readonly IHidHideProvisioningReceiptStore _hidHideReceiptStore = new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
     private readonly IElevatedProcessRunner _setupRunner = new ElevatedProcessRunner();
 
-    public FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot)
+    public FirstTimeSetupAssessment Evaluate(SystemStatusSnapshot snapshot, bool oem1RemappingEnabled)
     {
         var receipt = _hidHideReceiptStore.Load();
         var usbReceipt = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath).Load();
@@ -32,7 +32,7 @@ internal sealed class FrontendPrerequisiteSetupExecutor : IFrontendPrerequisiteS
         var usbBootChanged = usbReceipt.Receipt is { State: UsbIpWin2ProvisioningReceiptState.InstalledPendingReboot } up && BootSession.HasChangedSince(up.StartedAtUtc);
         var hidInstall = ComponentInstallationAssessmentPolicy.AssessHidHide(hidPackage, snapshot.Prerequisites.HidHide, HidHidePackageMetadata.BundledVersion.ToString());
         var usbInstall = ComponentInstallationAssessmentPolicy.AssessUsbIp(usbPackage, snapshot.Prerequisites.UsbIpWin2, UsbIpWin2PackageMetadata.BundledVersion.ToString());
-        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.AddonOwnedOutputIdentityUncertain, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstall, usbInstall, new(hidState, usbState, hidBootChanged, usbBootChanged), snapshot.HardwareCompatibility.Status == HardwareCompatibilityStatus.Supported, CenterMAutoRunReader.Read()));
+        return FirstTimeSetupPolicy.Evaluate(new FirstTimeSetupInput(snapshot.HardwareCompatibility, snapshot.Compatibility, snapshot.RecoverySafe, snapshot.AddonOwnedOutputIdentityUncertain, new SteamSessionState(snapshot.Steam.IsActive, snapshot.Steam.RunningAppId, snapshot.Steam.Source), snapshot.Prerequisites.HidHide, snapshot.Prerequisites.UsbIpWin2, hidInstall, usbInstall, new(hidState, usbState, hidBootChanged, usbBootChanged), oem1RemappingEnabled, CenterMAutoRunReader.Read()));
     }
 
     public Task<ElevatedProcessResult?> RunAsync(FirstTimeSetupAssessment assessment, string executablePath, CancellationToken cancellationToken) =>

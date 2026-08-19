@@ -71,18 +71,19 @@ internal static class ElevatedPrerequisiteSetup
             if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Enabled)
             {
                 AppLog.Info("PrerequisiteSetup", "Explicit AutoRun setup requested.", ("OriginalAutoRun", 1), ("AppliedAutoRun", 0));
-                // Durable intent is written before HKLM mutation. If this elevated process dies
-                // after the registry write, the next startup can still attribute the change.
-                settingsStore.Save(settings with { CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = 1, AppliedAutoRun = 0 });
+                // Durable intent is written before HKLM mutation. A pending marker distinguishes
+                // crash-recovery evidence from confirmed ownership.
+                settingsStore.Save(settings with { CenterMAutoRunMutationPending = true, CenterMAutoRunOwnedByAddon = false, OriginalAutoRun = 1, AppliedAutoRun = 0 });
                 if (!CenterMAutoRunReader.TryDisableExplicitly(out var confirmedAutoRun, out var originalAutoRun)
                     || confirmedAutoRun != CenterMAutoRunState.Disabled)
                 {
+                    settingsStore.Save(settings with { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = false, OriginalAutoRun = null, AppliedAutoRun = null });
                     AppLog.Warn("PrerequisiteSetup", "AutoRun setup could not be confirmed by read-back; aborting prerequisite mutation.", null,
                         ("OriginalAutoRun", originalAutoRun), ("ConfirmedAutoRun", confirmedAutoRun));
                     return 1;
                 }
                 AppLog.Info("PrerequisiteSetup", "AutoRun setup confirmed by read-back.", ("OriginalAutoRun", originalAutoRun), ("AppliedAutoRun", 0));
-                settingsStore.Save(settings with { CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = originalAutoRun, AppliedAutoRun = 0 });
+                settingsStore.Save(settings with { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = originalAutoRun, AppliedAutoRun = 0 });
             }
             else if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Unknown)
             {
