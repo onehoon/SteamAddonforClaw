@@ -110,6 +110,21 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     private async Task<CenterMMainUiRoutingGuardResult> ArmCoreAsync(CancellationToken cancellationToken)
     {
         AppLog.Debug("CenterM.RoutingGuard", "Routing guard arm started.");
+
+        // A previous arm from THIS guard still owns an unresolved exact handle (e.g. an unconfirmed
+        // Stop during a prior DisarmAsync). Resetting the flag below before checking this would
+        // erase the only local record that this guard -- not an external authority -- is
+        // responsible for that retained ownership, so a later terminal DisposeAsync would wrongly
+        // treat it as borrowed/unowned and skip its bounded retry/orphan-registration path. Fail
+        // closed without touching the flag; a fresh arm may proceed once that responsibility is
+        // actually resolved (Stop confirmed, or terminal Dispose has already taken it over).
+        if (_helperStartedByCurrentArm && _helperOwnership.IsOwned)
+        {
+            AppLog.Warn("CenterM.RoutingGuard", "Routing guard cannot re-arm while cleanup from its previous helper is unresolved; failing closed.", null, ("ProcessId", _helperOwnership.ProcessId));
+            return CenterMMainUiRoutingGuardResult.HelperOwnershipUnresolved;
+        }
+
+        // If the prior responsibility is already resolved, a fresh arm may classify ownership normally.
         _helperStartedByCurrentArm = false;
 
         // The shared CenterMHelperOwnership's own already-owned PID (if operationally armed) is

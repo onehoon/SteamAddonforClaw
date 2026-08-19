@@ -499,6 +499,54 @@ public sealed class CenterMMainUiRoutingGuardTests
     }
 
     [Fact]
+    public async Task Rearm_after_unconfirmed_disarm_stop_fails_closed_and_preserves_cleanup_responsibility()
+    {
+        // Review fix (second pass): ArmCoreAsync used to unconditionally reset
+        // _helperStartedByCurrentArm at the very start, which erased this guard's own record of
+        // being responsible for a still-unresolved exact handle left over from a prior arm's
+        // unconfirmed Stop -- even though the very next check (IsOwned && !IsOperationallyOwned)
+        // already correctly refused to re-arm. A later DisposeAsync would then wrongly see the flag
+        // false and skip its bounded retry/orphan-registration path. The re-arm attempt itself must
+        // also not touch the helper or mutex at all.
+        CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        try
+        {
+            var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
+            var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+            var helperApi = new RecordingHelperApi { WaitForExitSucceeds = false };
+            var helperOwnership = new CenterMHelperOwnership(helperApi);
+            var mutexFactory = new FakeMutexFactory();
+            var guard = new CenterMMainUiRoutingGuard(
+                publishRootProvider: () => "C:\\fake\\publish",
+                processSnapshotSource: snapshots,
+                helperOwnership: helperOwnership,
+                mutexOwnership: new CenterMMainUiMutexOwnership(mutexFactory),
+                stager: stager.Stage,
+                helperStopTimeout: TimeSpan.Zero);
+            Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ArmAsync());
+            Assert.False(await guard.DisarmAsync());
+            Assert.True(helperOwnership.IsOwned);
+            Assert.False(helperOwnership.IsOperationallyOwned);
+            helperApi.Calls.Clear();
+            var createCallCountBeforeRearm = mutexFactory.CreateCallCount;
+
+            var rearmResult = await guard.ArmAsync();
+
+            Assert.Equal(CenterMMainUiRoutingGuardResult.HelperOwnershipUnresolved, rearmResult);
+            Assert.DoesNotContain("CreateSuspended", helperApi.Calls);
+            Assert.Equal(createCallCountBeforeRearm, mutexFactory.CreateCallCount);
+
+            await guard.DisposeAsync();
+
+            Assert.True(CenterMOrphanedHelperRegistry.Contains(helperOwnership));
+        }
+        finally
+        {
+            CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        }
+    }
+
+    [Fact]
     public async Task DisposeAsync_does_not_register_a_helper_whose_termination_is_confirmed()
     {
         CenterMOrphanedHelperRegistry.TestOnly_Clear();
