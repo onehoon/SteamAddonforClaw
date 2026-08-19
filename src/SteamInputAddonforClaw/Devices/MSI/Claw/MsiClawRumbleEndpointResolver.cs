@@ -8,7 +8,7 @@ internal sealed record MsiClawRumbleEndpointCandidate(
     ushort ProductId,
     int InputReportLength,
     int OutputReportLength,
-    bool Writable);
+    bool OpenSucceeded);
 
 internal readonly record struct MsiClawRumbleEndpointResolution(string? DevicePath, string Reason)
 {
@@ -36,7 +36,7 @@ internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointReso
         var candidates = _catalog(identity).Where(candidate =>
             candidate.VendorId == MsiClawHardware.VendorId &&
             candidate.ProductId == MsiClawHardware.DirectInputProductId &&
-            candidate.InputReportLength == 64 && candidate.OutputReportLength == 64 && candidate.Writable &&
+            candidate.InputReportLength == 64 && candidate.OutputReportLength == 64 && candidate.OpenSucceeded &&
             string.Equals(candidate.PhysicalIdentity, identity.PhysicalIdentity, StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(candidate.DevicePath)).ToArray();
         return candidates.Length switch
