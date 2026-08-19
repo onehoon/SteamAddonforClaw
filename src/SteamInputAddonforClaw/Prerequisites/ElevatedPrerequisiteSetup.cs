@@ -12,6 +12,7 @@ using System.Security.Principal;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.CenterM;
 
 namespace SteamInputAddonforClaw.Prerequisites;
 
@@ -64,6 +65,27 @@ internal static class ElevatedPrerequisiteSetup
             var hidStore = new HidHideProvisioningReceiptStore(VelopackAppPaths.HidHideProvisioningReceiptPath);
             var usbStore = new UsbIpWin2ProvisioningReceiptStore(VelopackAppPaths.UsbIpWin2ProvisioningReceiptPath);
             if (!LogAndAllowSafetyGate("Initial")) return 1;
+            var autoRunBefore = CenterMAutoRunReader.Read();
+            if (autoRunBefore == CenterMAutoRunState.Enabled)
+            {
+                AppLog.Info("PrerequisiteSetup", "Explicit AutoRun setup requested.", ("OriginalAutoRun", 1), ("AppliedAutoRun", 0));
+                if (!CenterMAutoRunReader.TryDisableExplicitly(out var confirmedAutoRun, out var originalAutoRun)
+                    || confirmedAutoRun != CenterMAutoRunState.Disabled)
+                {
+                    AppLog.Warn("PrerequisiteSetup", "AutoRun setup could not be confirmed by read-back; aborting prerequisite mutation.", null,
+                        ("OriginalAutoRun", originalAutoRun), ("ConfirmedAutoRun", confirmedAutoRun));
+                    return 1;
+                }
+                AppLog.Info("PrerequisiteSetup", "AutoRun setup confirmed by read-back.", ("OriginalAutoRun", originalAutoRun), ("AppliedAutoRun", 0));
+                var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
+                var settings = settingsStore.Load();
+                settingsStore.Save(settings with { CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = originalAutoRun, AppliedAutoRun = 0 });
+            }
+            else if (autoRunBefore == CenterMAutoRunState.Unknown)
+            {
+                AppLog.Warn("PrerequisiteSetup", "AutoRun state is unknown; refusing registry mutation.", null, ("Reason", "AutoRunUnknown"));
+                return 1;
+            }
             var restartRequired = false;
             var hidHide = new WindowsHidHidePackageProbe().Inspect();
             AppLog.Info("PrerequisiteSetup", "HidHide package probe completed.", ("Installed", hidHide.Installed), ("Version", hidHide.Version), ("InspectionSucceeded", hidHide.InspectionSucceeded));

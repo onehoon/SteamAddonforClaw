@@ -21,4 +21,8 @@ public sealed record AppSettings(
     /// routing master switch, this is the Center M remapping feature. Neither reads the other.
     /// </remarks>
     public Oem1MappingSettings Oem1Mapping { get; init; } = Oem1MappingSettings.Default;
+
+    public bool CenterMAutoRunOwnedByAddon { get; init; }
+    public int? OriginalAutoRun { get; init; }
+    public int? AppliedAutoRun { get; init; }
 }
