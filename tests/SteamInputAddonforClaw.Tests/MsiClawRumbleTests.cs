@@ -174,13 +174,14 @@ public sealed class MsiClawRumbleTests
         var hidApi = new FakeCapabilityHidApi { InputReportLength = 64, OutputReportLength = 64 };
         var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
 
-        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out var writable, out var win32Error);
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out var writable, out var win32Error, out var hidStatus);
 
         Assert.True(succeeded);
         Assert.Equal(64, input);
         Assert.Equal(64, output);
         Assert.True(writable);
         Assert.Equal(0, win32Error);
+        Assert.Equal(0x00110000, hidStatus);
         Assert.Equal(1, hidApi.OpenCalls);
         Assert.Equal(1, hidApi.CapabilityCalls);
     }
@@ -191,7 +192,7 @@ public sealed class MsiClawRumbleTests
         var hidApi = new FakeCapabilityHidApi { OpenSucceeds = false };
         var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
 
-        var succeeded = catalog.TryReadHidCapabilities("path-a", out _, out _, out var writable, out var win32Error);
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out _, out _, out var writable, out var win32Error, out _);
 
         Assert.False(succeeded);
         Assert.False(writable);
@@ -205,12 +206,13 @@ public sealed class MsiClawRumbleTests
         var hidApi = new FakeCapabilityHidApi { CapabilitiesSucceed = false };
         var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
 
-        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out _, out var win32Error);
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out _, out var win32Error, out var hidStatus);
 
         Assert.False(succeeded);
         Assert.Equal(0, input);
         Assert.Equal(0, output);
-        Assert.NotEqual(0, win32Error);
+        Assert.Equal(0, win32Error);
+        Assert.NotEqual(0, hidStatus);
     }
 
     [Fact]
@@ -256,25 +258,18 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public void Endpoint_resolver_retries_once_after_transient_com_exception_then_succeeds()
+    public void Endpoint_resolver_does_not_retry_a_com_exception_without_authoritative_transient_hresult()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
-        MsiClawRumbleEndpointCandidate Candidate(string path) => new(path, "PNP-A", "ROOT-A", 0x0DB0, 0x1902, 64, 64, true);
-
         var calls = 0;
-        var delays = new List<TimeSpan>();
         var resolver = new MsiClawRumbleEndpointResolver(_ =>
         {
             calls++;
-            if (calls == 1) throw new COMException("transient");
-            return [Candidate("a")];
-        }, delays.Add);
+            throw new COMException("deterministic", unchecked((int)0x80070057));
+        });
 
-        var result = resolver.Resolve(identity);
-
-        Assert.Equal("a", result.DevicePath);
-        Assert.Equal(2, calls);
-        Assert.Single(delays);
+        Assert.Throws<COMException>(() => resolver.Resolve(identity));
+        Assert.Equal(1, calls);
     }
 
     [Fact]
@@ -290,8 +285,8 @@ public sealed class MsiClawRumbleTests
 
         var exception = Assert.Throws<COMException>(() => resolver.Resolve(identity));
 
-        Assert.Equal("attempt-2", exception.Message);
-        Assert.Equal(2, calls);
+        Assert.Equal("attempt-1", exception.Message);
+        Assert.Equal(1, calls);
     }
 
     [Fact]
@@ -466,10 +461,11 @@ public sealed class MsiClawRumbleTests
             LastError = WriteResult ? 0 : 5;
             return WriteResult;
         }
-        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength)
+        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
         {
             inputReportLength = 0;
             outputReportLength = 0;
+            hidStatus = 0;
             return false;
         }
     }
@@ -501,14 +497,14 @@ public sealed class MsiClawRumbleTests
             return true;
         }
 
-        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength)
+        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
         {
             CapabilityCalls++;
+            hidStatus = CapabilitiesSucceed ? 0x00110000 : unchecked((int)0xC0110001);
             if (!CapabilitiesSucceed)
             {
                 inputReportLength = 0;
                 outputReportLength = 0;
-                LastError = 1784;
                 return false;
             }
             inputReportLength = InputReportLength;

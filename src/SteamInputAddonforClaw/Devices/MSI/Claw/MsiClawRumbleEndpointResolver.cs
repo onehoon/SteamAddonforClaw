@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -26,31 +25,18 @@ internal interface IMsiClawRumbleEndpointResolver
 /// <summary>Resolves only explicitly catalogued, identity-correlated MSI HID endpoints.</summary>
 internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointResolver
 {
-    // The underlying DeviceInformation.FindAllAsync query can transiently fail with a
-    // COMException when it races the PnP device-tree churn produced by VIIPER's own Steam
-    // Deck virtual device attach (observed in production telemetry immediately after PnP
-    // identity resolution completes). One short retry absorbs that race without meaningfully
-    // extending the routing-activation critical path on the (common) success path. Only
-    // COMException is retried -- a deterministic failure (bad data, a programming error) is
-    // not transient and retrying it would just add latency while MsiClawRumbleSink holds its
-    // serialization lock.
-    private const int MaxCatalogAttempts = 2;
-    private static readonly TimeSpan CatalogRetryDelay = TimeSpan.FromMilliseconds(150);
-
     private readonly Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>> _catalog;
-    private readonly Action<TimeSpan> _delay;
 
     internal MsiClawRumbleEndpointResolver(
         Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>>? catalog = null,
         Action<TimeSpan>? delay = null)
     {
         _catalog = catalog ?? (identity => new WindowsMsiClawRumbleEndpointCatalog().Find(identity));
-        _delay = delay ?? Thread.Sleep;
     }
 
     public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity)
     {
-        var candidates = FindCatalogCandidatesWithRetry(identity).Where(candidate =>
+        var candidates = _catalog(identity).Where(candidate =>
             candidate.VendorId == MsiClawHardware.VendorId &&
             candidate.ProductId == MsiClawHardware.DirectInputProductId &&
             candidate.InputReportLength == 64 && candidate.OutputReportLength == 64 && candidate.Writable &&
@@ -64,20 +50,4 @@ internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointReso
         };
     }
 
-    private IReadOnlyList<MsiClawRumbleEndpointCandidate> FindCatalogCandidatesWithRetry(MsiClawPhysicalInputIdentity identity)
-    {
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                return _catalog(identity);
-            }
-            catch (COMException exception) when (attempt < MaxCatalogAttempts)
-            {
-                AppLog.Debug("Rumble", "MSI rumble endpoint catalog query failed; retrying.",
-                    ("Attempt", attempt), ("Exception", exception.GetType().Name), ("HResult", exception.HResult), ("Message", exception.Message));
-                _delay(CatalogRetryDelay);
-            }
-        }
-    }
 }

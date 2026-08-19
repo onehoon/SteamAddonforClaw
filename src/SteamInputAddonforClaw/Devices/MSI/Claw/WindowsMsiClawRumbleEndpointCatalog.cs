@@ -59,9 +59,9 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
                 AppLog.Debug("Rumble", "Rumble endpoint candidate rejected: no physical root.", ("PnpInstanceId", pnp));
                 continue;
             }
-            if (!TryReadHidCapabilities(device.Id, out var inputLength, out var outputLength, out var writable, out var win32Error))
+            if (!TryReadHidCapabilities(device.Id, out var inputLength, out var outputLength, out var writable, out var win32Error, out var hidStatus))
             {
-                AppLog.Debug("Rumble", "Rumble endpoint candidate rejected: HID capability query failed.", ("PnpInstanceId", pnp), ("PhysicalRoot", physicalRoot), ("Win32Error", win32Error));
+                AppLog.Debug("Rumble", "Rumble endpoint candidate rejected: HID capability query failed.", ("PnpInstanceId", pnp), ("PhysicalRoot", physicalRoot), ("Win32Error", win32Error), ("HidStatus", hidStatus));
                 continue;
             }
             var physicalRootMatch = MatchesPhysicalRoot(physicalRoot, identity.PhysicalIdentity);
@@ -77,12 +77,13 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
     /// HidD_GetPreparsedData + HidP_GetCaps. Internal (not private) so the narrow HID-capability
     /// seam is directly testable with a fake IMsiClawNativeHidApi.
     /// </summary>
-    internal bool TryReadHidCapabilities(string devicePath, out int inputLength, out int outputLength, out bool writable, out int win32Error)
+    internal bool TryReadHidCapabilities(string devicePath, out int inputLength, out int outputLength, out bool writable, out int win32Error, out int hidStatus)
     {
         inputLength = 0;
         outputLength = 0;
         writable = false;
         win32Error = 0;
+        hidStatus = 0;
         using var handle = _hidApi.Open(devicePath, GenericReadWrite, ShareReadWrite, OpenExisting);
         if (handle.IsInvalid)
         {
@@ -90,7 +91,7 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
             return false;
         }
         writable = true;
-        if (!_hidApi.TryGetReportLengths(handle, out inputLength, out outputLength))
+        if (!_hidApi.TryGetReportLengths(handle, out inputLength, out outputLength, out hidStatus))
         {
             win32Error = _hidApi.LastError;
             return false;

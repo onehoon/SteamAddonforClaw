@@ -70,7 +70,7 @@ internal interface IMsiClawNativeHidApi
     /// HidD_GetPreparsedData + HidP_GetCaps. This is the authoritative source for report
     /// lengths -- DeviceInformation has no valid property keys for HID report lengths.
     /// </summary>
-    bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength);
+    bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus);
 }
 
 internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
@@ -91,10 +91,11 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
         return result;
     }
 
-    public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength)
+    public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
     {
         inputReportLength = 0;
         outputReportLength = 0;
+        hidStatus = 0;
         if (!HidD_GetPreparsedData(handle, out var preparsedData) || preparsedData == IntPtr.Zero)
         {
             LastError = Marshal.GetLastWin32Error();
@@ -102,9 +103,9 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
         }
         try
         {
-            if (HidP_GetCaps(preparsedData, out var caps) != HidpStatusSuccess)
+            hidStatus = HidP_GetCaps(preparsedData, out var caps);
+            if (hidStatus != HidpStatusSuccess)
             {
-                LastError = Marshal.GetLastWin32Error();
                 return false;
             }
             inputReportLength = caps.InputReportByteLength;
