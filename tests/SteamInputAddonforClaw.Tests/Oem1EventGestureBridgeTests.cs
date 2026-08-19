@@ -324,6 +324,70 @@ public sealed class Oem1EventGestureBridgeTests
     }
 
     [Fact]
+    public async Task Revocation_cannot_complete_until_an_already_admitted_policy_delivery_finishes_and_then_blocks_future_input()
+    {
+        // Review fix (BLOCKER): the final authority check and PolicyRequested delivery must be
+        // serialized against SetCustomAuthority()/Dispose() -- otherwise a gesture that passes the
+        // check just before a concurrent revoke returns could still deliver PolicyRequested
+        // afterward, starting the replacement action after custom authority was already revoked.
+        using var fixture = Create();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var deliveries = 0;
+        fixture.Bridge.PolicyRequested += _ =>
+        {
+            Interlocked.Increment(ref deliveries);
+            entered.TrySetResult();
+            release.Task.GetAwaiter().GetResult();
+        };
+        fixture.Bridge.SetCustomAuthority(true);
+
+        var emit = Task.Run(() => fixture.Source.Emit(Oem1()));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // The admitted delivery above is still blocked inside PolicyRequested -- revocation must not
+        // be able to complete while holding the same serialization boundary that delivery is using.
+        var revoke = Task.Run(() => fixture.Bridge.SetCustomAuthority(false));
+        await Task.Yield();
+        Assert.False(revoke.IsCompleted);
+
+        release.TrySetResult();
+        await Task.WhenAll(emit, revoke).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Revocation completed only after the admitted delivery finished; no stale delivery could
+        // begin afterward, and authority is now off for any new input.
+        fixture.Source.Emit(Oem1());
+
+        Assert.Equal(1, deliveries);
+    }
+
+    [Fact]
+    public async Task Dispose_cannot_complete_until_an_already_admitted_policy_delivery_finishes()
+    {
+        var source = new FakeMsiEventSource();
+        var recognizer = new Oem1GestureRecognizer(false, TimeSpan.FromMilliseconds(250), new ControlledDelay(), new ControlledClock());
+        var bridge = new Oem1EventGestureBridge(source, recognizer);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bridge.PolicyRequested += _ =>
+        {
+            entered.TrySetResult();
+            release.Task.GetAwaiter().GetResult();
+        };
+        bridge.SetCustomAuthority(true);
+
+        var emit = Task.Run(() => source.Emit(Oem1()));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var dispose = Task.Run(bridge.Dispose);
+        await Task.Yield();
+        Assert.False(dispose.IsCompleted);
+
+        release.TrySetResult();
+        await Task.WhenAll(emit, dispose).WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public void Bridge_does_not_query_or_depend_on_lifecycle_coordinator()
     {
         using var fixture = Create();

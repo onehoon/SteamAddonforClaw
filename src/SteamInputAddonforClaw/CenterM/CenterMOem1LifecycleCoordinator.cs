@@ -58,10 +58,10 @@ internal readonly record struct CenterMOem1LifecycleSnapshot(
 /// caller (test, or the production composition seam) calling one of the public methods below. A
 /// lifecycle/composition PR production-composes this type into the real MSI Claw runtime lifetime
 /// (see <see cref="Devices.MSI.Claw.MsiClawRoutingComposition"/> and
-/// <see cref="CenterMOem1LifecycleRuntime"/>) and drives its poll contract, but normal production
-/// startup never calls <see cref="SetDesiredEnabledAsync"/> with true -- construction and polling
-/// alone still start no helper and change no native OEM1 behavior; only an explicit enable (still
-/// dormant, left to a future PR) does.
+/// <see cref="CenterMOem1LifecycleRuntime"/>) and drives its poll contract. As of the OEM1 production
+/// action path (<see cref="Devices.MSI.Claw.MsiClawRoutingComposition.ConfigureOem1ActionPath"/>),
+/// production DOES call <see cref="SetDesiredEnabledAsync"/> with true once WMI observation has
+/// actually started, and with false again on action-failure fail-open or shutdown.
 /// </summary>
 internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant, IAsyncDisposable, ICenterMOem1LifecycleDriverTarget
 {
@@ -328,8 +328,10 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             _lastReason);
     }
 
-    /// <summary>Internal runtime control seam -- there is no persisted setting in this PR. Default
-    /// is false; production must never call this with true.</summary>
+    /// <summary>Internal runtime control seam. Called with true by the production OEM1 action path
+    /// (<see cref="Devices.MSI.Claw.MsiClawRoutingComposition.ConfigureOem1ActionPath"/>) once WMI
+    /// observation has actually started, and with false again on action-failure fail-open or
+    /// shutdown.</summary>
     internal async Task SetDesiredEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         // Bumped BEFORE acquiring the gate (finding #6): a disable request becomes authoritative to

@@ -54,10 +54,11 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     /// <summary>PR2: production-composed OEM1/Center M lifecycle coordinator, sharing the SAME
     /// <see cref="CenterMHelperOwnership"/> as <see cref="CenterMGuard"/> -- never a second,
-    /// competing production helper owner. Production activation stays off: normal composition never
-    /// calls <see cref="CenterMOem1LifecycleCoordinator.SetDesiredEnabledAsync"/> with true. Tests
-    /// may do so explicitly through this property to exercise the full production composition
-    /// seam.</summary>
+    /// competing production helper owner. As of the OEM1 production action path
+    /// (<see cref="ConfigureOem1ActionPath"/>), production DOES call
+    /// <see cref="CenterMOem1LifecycleCoordinator.SetDesiredEnabledAsync"/> with true -- suppression
+    /// is armed once WMI observation actually starts, and disarmed again on action-failure fail-open
+    /// or shutdown.</summary>
     internal CenterMOem1LifecycleCoordinator CenterMOem1Coordinator { get; }
 
     /// <summary>PR2: the one small production driver/lifetime owner around

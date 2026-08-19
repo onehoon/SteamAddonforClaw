@@ -104,21 +104,32 @@ internal sealed class Oem1EventGestureBridge : IDisposable
         }
     }
 
+    // Review fix (BLOCKER): the final authority check and the policy-request delivery must be
+    // serialized against SetCustomAuthority()/Dispose() using the SAME _recognizerOperationGate those
+    // two already hold for their entire duration -- otherwise a gesture that passes the check just
+    // before a concurrent revoke/dispose returns could still deliver PolicyRequested afterward,
+    // starting the BPM/QAM replacement action after custom authority was already revoked or the
+    // bridge was already disposed. _recognizerOperationGate (a plain Monitor lock) is re-entrant, so
+    // a production PolicyRequested subscriber may still synchronously call
+    // SetCustomAuthority(false)/Dispose() from within this same call without deadlocking.
     private void OnGestureRecognized(Oem1Gesture gesture, long deliveryEpoch)
     {
-        lock (_gate)
+        lock (_recognizerOperationGate)
         {
-            if (_disposed || !_customAuthority || deliveryEpoch != _activeRecognizerDeliveryEpoch)
-                return;
-        }
+            lock (_gate)
+            {
+                if (_disposed || !_customAuthority || deliveryEpoch != _activeRecognizerDeliveryEpoch)
+                    return;
+            }
 
-        try
-        {
-            PolicyRequested?.Invoke(new Oem1GesturePolicyRequest(gesture));
-        }
-        catch (Exception exception)
-        {
-            AppLog.Warn("CenterM.Oem1", "OEM1 gesture policy subscriber failed; observation continues.", exception);
+            try
+            {
+                PolicyRequested?.Invoke(new Oem1GesturePolicyRequest(gesture));
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("CenterM.Oem1", "OEM1 gesture policy subscriber failed; observation continues.", exception);
+            }
         }
     }
 }
