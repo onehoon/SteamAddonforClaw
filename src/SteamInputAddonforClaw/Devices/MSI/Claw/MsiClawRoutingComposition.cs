@@ -106,7 +106,21 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // a caller-injected guard (tests today) already carries its own ownership instance.
         _ownsCenterMHelperOwnership = centerMHelperOwnership is null;
         CenterMHelperOwnership = centerMHelperOwnership ?? new CenterMHelperOwnership();
-        CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard(helperOwnership: CenterMHelperOwnership);
+
+        // Phase 2: the same already-owned nativeState instance is reused (never a second
+        // MsiClawNativeStateManager) as the guard's read-only native-mode probe, so retirement's
+        // XInput verification observes the exact same authority the real NativeMode stage uses.
+        var centerMProcesses = new Win32ProcessSnapshotSource();
+        CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard(
+            processSnapshotSource: centerMProcesses,
+            helperOwnership: CenterMHelperOwnership,
+            retirement: new CenterMMainUiRoutingRetirement(
+                new MsiClawCenterMNativeModeProbe(nativeState),
+                // Same NativeModeSession instance the real stage below uses -- an early read-only
+                // look at the same route authority, so an already-doomed route (fault latch,
+                // recovery safety, power gate) never retires the user's real MainUI first.
+                new MsiClawCenterMRoutingPreflightProbe(NativeModeSession),
+                processSnapshotSource: centerMProcesses));
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage, CenterMGuardStage];

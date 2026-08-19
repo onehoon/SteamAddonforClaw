@@ -27,20 +27,29 @@ internal enum CenterMMainUiRoutingGuardResult
 /// <summary>
 /// Arms/disarms transient, routing-time prevention of a NEW real MSI Center M MainUI becoming
 /// operational, so PID1902/DirectInput routing can remain authoritative while Steam routing is
-/// active. This is Phase 1 only: it never terminates an already-running real MainUI (arm simply
-/// refuses when one is present) and it has no knowledge of OEM1 gestures, Quick Access, Game Bar,
-/// VIIPER, or native controller-mode mutation -- routing calls <see cref="ArmAsync"/> before any of
-/// that, and <see cref="DisarmAsync"/> only after native/output mutation has already been rolled
-/// back or classified.
+/// active. Has no knowledge of OEM1 gestures, Quick Access, Game Bar, VIIPER, or native
+/// controller-mode mutation of its own -- routing calls <see cref="ArmAsync"/> before any of that,
+/// and <see cref="DisarmAsync"/> only after native/output mutation has already been rolled back or
+/// classified.
+///
+/// When a <see cref="CenterMMainUiRoutingRetirement"/> service is configured (the production MSI
+/// Claw composition), an existing exact real MainUI (tray-resident or visible) is first retired
+/// under the Phase-2 tray/visible policy -- see that type's own remarks -- before the Phase-1
+/// helper/mutex sequence below ever runs. When no retirement service is configured, Phase-1
+/// behavior is preserved exactly: any existing same-name real MainUI causes arm to fail
+/// (<see cref="CenterMMainUiRoutingGuardResult.RealMainUiPresent"/>) before helper/mutex/native-mode
+/// mutation.
 ///
 /// Arm sequence (safety-critical ordering, research: MSI_COMPLETE_RESEARCH_RESULT.md section 4 --
 /// the real MainUI's own duplicate-instance check, keyed on the same
 /// <see cref="CenterMMainUiMutexOwnership.MutexName"/> this class owns, runs before
 /// <c>MainWindow</c>/controller-mode initialization):
 /// 1. fresh same-name process snapshot -- any match means a real MainUI may already be present;
-/// 2. stage + start the dedicated helper (process-name half of the guard);
-/// 3. acquire the MainUI mutex (mutex half of the guard);
-/// 4. fresh same-name snapshot again, verified via the existing
+/// 2. if present and retirement is configured, retire it (tray XInput-verify-then-kill, or
+///    visible minimize-then-hidden-then-XInput-verify-then-kill); otherwise fail immediately;
+/// 3. stage + start the dedicated helper (process-name half of the guard);
+/// 4. acquire the MainUI mutex (mutex half of the guard);
+/// 5. fresh same-name snapshot again, verified via the existing
 ///    <see cref="CenterMHelperInvariant"/> -- the only same-name process must be the owned helper.
 /// Any failure at any step unwinds only what this attempt itself acquired and never commits Armed.
 /// </summary>
@@ -58,6 +67,10 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     private readonly CenterMMainUiMutexOwnership _mutexOwnership;
     private readonly Func<string, string?> _stager;
     private readonly TimeSpan _helperStopTimeout;
+    /// <summary>Phase 2: retires an already-running real MainUI (tray-resident or visible) before
+    /// the helper/mutex arm sequence below. Null is a valid, fully-Phase-1-compatible configuration
+    /// -- an existing real MainUI then still simply refuses to arm, exactly as before.</summary>
+    private readonly CenterMMainUiRoutingRetirement? _retirement;
     // Guards the ENTIRE Arm/Disarm transaction (not just the _armed flag) -- Arm does multiple
     // sequential native operations (stage, start helper, acquire mutex, re-verify), and a second
     // concurrent Arm/Disarm observing a stale _armed value mid-sequence could stop a helper the
@@ -81,7 +94,8 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         CenterMHelperOwnership? helperOwnership = null,
         CenterMMainUiMutexOwnership? mutexOwnership = null,
         Func<string, string?>? stager = null,
-        TimeSpan? helperStopTimeout = null)
+        TimeSpan? helperStopTimeout = null,
+        CenterMMainUiRoutingRetirement? retirement = null)
     {
         _publishRootProvider = publishRootProvider ?? (() => AppContext.BaseDirectory);
         _processSnapshotSource = processSnapshotSource ?? new Win32ProcessSnapshotSource();
@@ -89,6 +103,7 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         _mutexOwnership = mutexOwnership ?? new CenterMMainUiMutexOwnership();
         _stager = stager ?? CenterMHelperStaging.StageFromPublishRoot;
         _helperStopTimeout = helperStopTimeout ?? TimeSpan.FromSeconds(5);
+        _retirement = retirement;
     }
 
     internal bool IsArmed => _armed;
@@ -139,21 +154,59 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
             return CenterMMainUiRoutingGuardResult.Uncertain;
         }
 
-        var foreignBefore = beforeSnapshot.Where(p => p.ProcessId != ownedPid).ToList();
-        if (foreignBefore.Count > 0)
-        {
-            AppLog.Info("CenterM.RoutingGuard", "Real MainUI present; routing guard will not arm.", ("Reason", "RealMainUiPresent"), ("MainUiProcessId", foreignBefore[0].ProcessId));
-            return CenterMMainUiRoutingGuardResult.RealMainUiPresent;
-        }
-
-        // Borrow-or-start decision (PR1 ownership convergence). IsOwned alone is not sufficient --
-        // a job-less PartialCleanupUnconfirmed residue never completed the operational arm sequence
-        // and must fail closed rather than being silently replaced or treated as a clean fallback.
+        // Ownership resolution (PR1 ownership convergence) is checked BEFORE retirement ever runs:
+        // IsOwned alone is not sufficient -- a job-less PartialCleanupUnconfirmed residue never
+        // completed the operational arm sequence and must fail closed rather than being silently
+        // replaced, borrowed, or (worse) used as the basis for retiring/terminating a real MainUI
+        // while this guard's own helper ownership is itself unresolved.
         if (_helperOwnership.IsOwned && !_helperOwnership.IsOperationallyOwned)
         {
             AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: shared helper ownership is retained but not operational; failing closed.", null, ("ProcessId", _helperOwnership.ProcessId));
             return CenterMMainUiRoutingGuardResult.HelperOwnershipUnresolved;
         }
+
+        var foreignBefore = beforeSnapshot.Where(p => p.ProcessId != ownedPid).ToList();
+        if (foreignBefore.Count > 0)
+        {
+            if (_retirement is null)
+            {
+                // Phase 1 behavior, preserved exactly when no retirement service is configured.
+                AppLog.Info("CenterM.RoutingGuard", "Real MainUI present; routing guard will not arm.", ("Reason", "RealMainUiPresent"), ("MainUiProcessId", foreignBefore[0].ProcessId));
+                return CenterMMainUiRoutingGuardResult.RealMainUiPresent;
+            }
+
+            // The shared helper's own PID must never be treated as a routing-retirement candidate
+            // -- retirement only ever acts on a same-name process that is NOT the already-owned
+            // helper, matching the exact exclusion beforeSnapshot itself already applied above.
+            var retirementResult = await _retirement.PrepareExistingMainUiForRoutingAsync(cancellationToken, ignoredSameNameProcessId: ownedPid).ConfigureAwait(false);
+            if (retirementResult is not (CenterMMainUiRoutingRetirementResult.NoMainUiPresent or CenterMMainUiRoutingRetirementResult.Retired))
+            {
+                return retirementResult switch
+                {
+                    CenterMMainUiRoutingRetirementResult.IdentityUncertain
+                        or CenterMMainUiRoutingRetirementResult.WindowStateUncertain
+                        or CenterMMainUiRoutingRetirementResult.AbsenceCheckFailed => CenterMMainUiRoutingGuardResult.Uncertain,
+                    // Not a Center M fact -- the canonical NativeMode route authority already
+                    // rejected this route (routing-fault latch, recovery safety, power gate,
+                    // active/recovery-boundary conflict) before the MainUI was ever touched, so
+                    // diagnostics must not blame Center M for a prerequisite it had no part in.
+                    CenterMMainUiRoutingRetirementResult.RoutingPreflightRejected => CenterMMainUiRoutingGuardResult.PrerequisiteFailure,
+                    _ => CenterMMainUiRoutingGuardResult.RealMainUiPresent
+                };
+            }
+        }
+
+        // Do not trust beforeSnapshot for the arm-continuation decision below: retirement (if it
+        // ran) already performed its own fresh absence verification, and if no real MainUI was ever
+        // present this snapshot was already empty.
+        //
+        // Cancellation checkpoint BEFORE any staging/Start below: retirement/current-world
+        // classification has fully completed by this point (it only ever returns while cancellation
+        // is still authoritative via its own OperationCanceledException, never as a plain Retired
+        // result), so no Addon-owned resource has been created yet -- but staging itself is not a
+        // pure read (CenterMHelperStaging.StageFromPublishRoot creates a directory and copies/reads
+        // a file), so a cancelled Enter must not still perform that filesystem mutation.
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (_helperOwnership.IsOperationallyOwned)
         {

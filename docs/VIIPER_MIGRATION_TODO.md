@@ -91,6 +91,38 @@ If the hardware test fails, classify the failure (real MainUI reached
 disappeared despite no `GotoMSIMode`) before adding any process-kill logic --
 do not immediately introduce automatic termination.
 
+Phase 2 adds retirement of an already-running real MainUI (tray-resident or
+visible) before the Phase-1 guard's helper/mutex arm, so routing entry is no
+longer unconditionally refused merely because a real MainUI already exists.
+This is software only and does not advance SD3 hardware validation. Required
+hardware validation:
+
+**Test A -- tray-resident Center M.** Precondition: Center M running in the
+tray (MainUI window not visible), physical controller stock XInput/PID1901.
+Start Addon, confirm real `MSI Center M.exe` alive in tray, enter Test Mode.
+PASS: exact real MainUI detected; logs show the tray/hidden path; no minimize
+request; XInput verified; exact `MSI Center M.exe` terminates;
+Server/Launcher/ControlMode remain alive; Addon helper starts;
+`Local\MSI Center M.exe` guard arms; PID1901 -> PID1902 occurs; Test Mode
+becomes active; controls work normally. Exit Test Mode -- PASS: native XInput
+restores, guard disarms, helper terminates, Center M launches normally again.
+
+**Test B -- visible Center M.** Precondition: Center M MainUI visibly open.
+Enter Test Mode or Steam routing. PASS: visible Center M minimizes normally
+(`WM_SYSCOMMAND`/`SC_MINIMIZE`); no hard kill while still visible; XInput
+confirmed before termination; only `MSI Center M.exe` is retired; MSI backend
+processes remain; routing succeeds.
+
+**Test C -- routing-active direct Start Menu launch.** While routing from
+Test A or B is active, launch MSI Center M from the Windows Start Menu. PASS:
+real MainUI does not become operational, no `GotoMSIMode`, PID1902 remains,
+routing/input stays active -- confirms Phase 2 did not regress Phase 1.
+
+**Test D -- routing exit.** Exit routing/Test Mode, confirm native XInput
+restoration, launch Center M normally. PASS: real Center M launches and works
+normally; no stale helper; no stale `Local\MSI Center M.exe`; no persistent
+package/system policy change.
+
 Complete real MSI Claw EX validation for:
 
 - native-mode entry and restoration;
