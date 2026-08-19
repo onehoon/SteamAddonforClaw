@@ -80,7 +80,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
             throw new InvalidOperationException("Not connected to a CDP target.");
 
         var id = _correlator.NextId();
-        var payload = JsonSerializer.Serialize(new { id, method, @params = parameters ?? new { } });
+        var payload = SerializeCommandPayload(id, method, parameters);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(ResponseTimeout);
@@ -91,6 +91,9 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
         return await responseTask.ConfigureAwait(false);
     }
+
+    internal static string SerializeCommandPayload(int id, string method, object? parameters) =>
+        JsonSerializer.Serialize(new { id, method, @params = parameters ?? new { } });
 
     private static async Task RunReceiveLoopAsync(ClientWebSocket socket, CdpCommandCorrelator correlator, CancellationToken cancellationToken, Action<string>? consoleMessage)
     {

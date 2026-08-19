@@ -1,11 +1,33 @@
 using System.Diagnostics;
 using SteamInputAddonforClaw.Lifecycle;
+using SteamInputAddonforClaw.QamHost;
+using System.Text.Json;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class QamHostProcessControllerTests
 {
+    [Fact]
+    public void Runtime_enable_is_serialized_as_a_CDP_method_not_an_expression()
+    {
+        using var document = JsonDocument.Parse(SteamGamepadUiCdpClient.SerializeCommandPayload(1, "Runtime.enable", null));
+        var root = document.RootElement;
+        Assert.Equal("Runtime.enable", root.GetProperty("method").GetString());
+        Assert.False(root.GetProperty("params").TryGetProperty("expression", out _));
+    }
+
+    [Fact]
+    public async Task Managed_stop_cancels_readiness_before_endpoint_becomes_available()
+    {
+        var input = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var lifetime = QamHostManagedLifetime.Start(() => input.Task);
+        input.SetResult("stop");
+
+        await lifetime.StopTask;
+        Assert.True(lifetime.Token.IsCancellationRequested);
+    }
+
     [Fact]
     public void Launch_uses_managed_mode_hidden_stdin_and_canonical_log_directory()
     {

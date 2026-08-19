@@ -25,17 +25,13 @@ log.Info($"Frontend script loaded. Path={frontendPath} Bytes={frontendScript.Len
 
 await using var client = new SteamGamepadUiCdpClient(devToolsEndpoint);
 client.AddonQamConsoleMessage += message => log.Info(message);
-using var lifetime = new CancellationTokenSource();
+using var lifetime = managed ? QamHostManagedLifetime.Start(() => Console.In.ReadLineAsync()) : null;
 Task? managedStopTask = null;
 if (managed)
 {
-    managedStopTask = Task.Run(async () =>
-    {
-        while (await Console.In.ReadLineAsync() is { } line && !string.Equals(line.Trim(), "stop", StringComparison.OrdinalIgnoreCase)) { }
-        lifetime.Cancel();
-    });
+    managedStopTask = lifetime!.StopTask;
 }
-var lifetimeToken = lifetime.Token;
+var lifetimeToken = lifetime?.Token ?? CancellationToken.None;
 
 CdpTarget? gamepadUiTarget = null;
 try
