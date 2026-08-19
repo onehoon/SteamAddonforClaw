@@ -5,9 +5,10 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 // Layout-equivalent to the generated dist/libVIIPER/libVIIPER.h Xbox360DeviceState struct from
 // VIIPER main@e10b5f02945b1322f33c33468e583546600ba000: same size, same field offsets, fields in
 // the same declared order -- except the native uint8_t Reserved[6] is represented here as six
-// inline Reserved0..Reserved5 byte fields rather than a managed array (see below). Preparation
-// only: no Xbox360 native API delegates, exports, or P/Invoke calls exist yet -- see
-// Xbox360DeviceStateMapper. This type is not consumed by CanonicalViiperNativeApi.
+// inline Reserved0..Reserved5 byte fields rather than a managed array (see below). Managed
+// Xbox360 create/state/remove ABI is exposed by CanonicalViiperNativeApi (buttons/D-pad/sticks/
+// triggers only -- no rumble callback bound). Production Xbox360 composition/publishing remains
+// deferred to SD7 -- see docs/VIIPER_MIGRATION_TODO.md and Xbox360DeviceStateMapper.
 [StructLayout(LayoutKind.Sequential)]
 internal struct Xbox360DeviceState
 {

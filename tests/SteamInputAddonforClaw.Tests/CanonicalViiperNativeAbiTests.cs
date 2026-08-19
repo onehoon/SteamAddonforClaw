@@ -315,9 +315,11 @@ public sealed class CanonicalViiperNativeAbiTests
         try
         {
             Assert.False(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
-            // No ownership means teardown never has to track it: a subsequent bus/server release for
-            // this (non-existent) device must be a no-op, not throw or double-remove.
-            Assert.Equal(Xbox360DeviceRemoveResult.Success, api.RemoveXbox360DeviceEx(deviceHandle));
+            Assert.Equal((nuint)0, deviceHandle);
+
+            var ownershipField = typeof(CanonicalViiperNativeApi).GetField("_deviceOwnership", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var ownership = (Dictionary<nuint, (nuint ServerHandle, uint BusId)>)ownershipField.GetValue(api)!;
+            Assert.Empty(ownership);
         }
         finally
         {
@@ -456,14 +458,14 @@ public sealed class CanonicalViiperNativeAbiTests
     // clean up) rather than acting on stale ownership evidence.
     private static void AssertXbox360OwnershipReleased(CanonicalViiperNativeApi api, nuint deviceHandle)
     {
-        var ownershipField = typeof(CanonicalViiperNativeApi).GetField("_xbox360DeviceOwnership", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var ownershipField = typeof(CanonicalViiperNativeApi).GetField("_deviceOwnership", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var ownership = (Dictionary<nuint, (nuint ServerHandle, uint BusId)>)ownershipField.GetValue(api)!;
         Assert.False(ownership.ContainsKey(deviceHandle));
     }
 
     private static void AssertXbox360OwnershipRetained(CanonicalViiperNativeApi api, nuint deviceHandle)
     {
-        var ownershipField = typeof(CanonicalViiperNativeApi).GetField("_xbox360DeviceOwnership", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var ownershipField = typeof(CanonicalViiperNativeApi).GetField("_deviceOwnership", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var ownership = (Dictionary<nuint, (nuint ServerHandle, uint BusId)>)ownershipField.GetValue(api)!;
         Assert.True(ownership.ContainsKey(deviceHandle));
     }

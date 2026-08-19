@@ -106,12 +106,13 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     private readonly object _callbackGate = new();
     private readonly Dictionary<nuint, SteamDeckOutputCallback> _steamDeckOutputCallbacks = [];
     private readonly Dictionary<nuint, ViiperLogCallback> _logCallbacks = [];
+    // Shared logical-device ownership map for both Steam Deck and Xbox360 handles. Safe to share:
+    // VIIPER's canonical implementation allocates every typed device handle from the same
+    // process-global cgo.Handle space and records all families in the same global
+    // deviceHandleRecords table, so a Deck handle and an Xbox360 handle are never independently
+    // allocated and can never collide. Releasing a Steam Deck output callback root for an Xbox360
+    // handle (which never had one) is a harmless no-op.
     private readonly Dictionary<nuint, (nuint ServerHandle, uint BusId)> _deviceOwnership = [];
-    // Xbox360 logical-device ownership only -- no callback root exists for Xbox360 in this PR (no
-    // rumble callback is bound). Deliberately a separate collection from _deviceOwnership rather
-    // than a shared/keyed map, so a Deck handle and an Xbox360 handle can never collide or be
-    // mistaken for each other regardless of how VIIPER allocates its typed handle values.
-    private readonly Dictionary<nuint, (nuint ServerHandle, uint BusId)> _xbox360DeviceOwnership = [];
 
     internal CanonicalViiperNativeApi(nint library, Func<nint, string, nint>? exportResolver = null)
     {
@@ -158,7 +159,6 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
             lock (_callbackGate)
             {
                 ReleaseOutputCallbacksLocked(ownership => ownership.ServerHandle == serverHandle);
-                ReleaseXbox360OwnershipLocked(ownership => ownership.ServerHandle == serverHandle);
                 _logCallbacks.Remove(serverHandle);
             }
         }
@@ -174,10 +174,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         if (succeeded)
         {
             lock (_callbackGate)
-            {
                 ReleaseOutputCallbacksLocked(ownership => ownership.ServerHandle == serverHandle && ownership.BusId == busId);
-                ReleaseXbox360OwnershipLocked(ownership => ownership.ServerHandle == serverHandle && ownership.BusId == busId);
-            }
         }
         return succeeded;
     }
@@ -287,8 +284,11 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     // ---- Canonical typed Xbox360 surface (ABI/foundation only -- see
     // docs/VIIPER_MIGRATION_TODO.md SD7, still PLANNED). No Xbox360 logical device is created,
-    // attached, published, or production-composed by anything in this file's callers today. Only
-    // logical-device ownership is tracked here -- no rumble callback is bound in this PR. ----
+    // attached, published, or production-composed by anything in this file's callers today.
+    // Ownership is tracked in the shared _deviceOwnership map (see its declaration above) -- no
+    // rumble callback is bound in this PR, so there is nothing Xbox360-specific to root/release
+    // beyond that shared ownership record. RemoveUSBBus/CloseUSBServer already release it via the
+    // existing ReleaseOutputCallbacksLocked path. ----
 
     public bool CreateXbox360Device(
         nuint serverHandle,
@@ -309,7 +309,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
             xinputSubType));
         if (succeeded)
         {
-            lock (_callbackGate) _xbox360DeviceOwnership[deviceHandle] = (serverHandle, busId);
+            lock (_callbackGate) _deviceOwnership[deviceHandle] = (serverHandle, busId);
         }
         return succeeded;
     }
@@ -320,7 +320,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     public bool RemoveXbox360Device(nuint deviceHandle)
     {
         var succeeded = Succeeded(_removeXbox360Device(deviceHandle));
-        if (succeeded) ReleaseXbox360DeviceOwnership(deviceHandle);
+        if (succeeded) ReleaseDeviceOwnership(deviceHandle);
         return succeeded;
     }
 
@@ -328,21 +328,8 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     {
         var result = _removeXbox360DeviceEx(deviceHandle);
         if (result == Xbox360DeviceRemoveResult.Success)
-            ReleaseXbox360DeviceOwnership(deviceHandle);
+            ReleaseDeviceOwnership(deviceHandle);
         return result;
-    }
-
-    private void ReleaseXbox360DeviceOwnership(nuint deviceHandle)
-    {
-        lock (_callbackGate) _xbox360DeviceOwnership.Remove(deviceHandle);
-    }
-
-    private void ReleaseXbox360OwnershipLocked(Func<(nuint ServerHandle, uint BusId), bool> predicate)
-    {
-        foreach (var (deviceHandle, ownership) in _xbox360DeviceOwnership.ToArray())
-        {
-            if (predicate(ownership)) _xbox360DeviceOwnership.Remove(deviceHandle);
-        }
     }
 
     private static T Bind<T>(nint library, Func<nint, string, nint> resolver, string export) where T : Delegate
