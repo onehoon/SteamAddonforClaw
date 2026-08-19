@@ -50,6 +50,21 @@ public sealed class FirstTimeSetupPolicyTests
         Assert.Equal(FirstTimeSetupStatus.Complete, result.Status);
     }
 
+    [Fact]
+    public void Oem1AutoRunEnabled_WhileSteamActive_IsBlockedFromMutation()
+    {
+        var result = FirstTimeSetupPolicy.Evaluate(Input(PrerequisiteStatus.Ready, PrerequisiteStatus.Ready) with
+        {
+            Oem1RemappingEnabled = true,
+            CenterMAutoRun = CenterMAutoRunState.Enabled,
+            Steam = new(true, 123, SteamSessionSource.BigPicture)
+        });
+
+        Assert.Equal(FirstTimeSetupStatus.Required, result.Status);
+        Assert.Equal(FirstTimeSetupReason.SteamActive, result.Reason);
+        Assert.False(result.CanInstallRequiredComponents);
+    }
+
     [Theory]
     [InlineData((int)HardwareCompatibilityStatus.Unsupported, (int)FirstTimeSetupStatus.NotApplicable)]
     [InlineData((int)HardwareCompatibilityStatus.Indeterminate, (int)FirstTimeSetupStatus.Indeterminate)]

@@ -68,6 +68,26 @@ internal static class ElevatedPrerequisiteSetup
             var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
             var settings = settingsStore.Load();
             var autoRunBefore = CenterMAutoRunReader.Read();
+            if (settings.Oem1Mapping.RemappingEnabled && settings.CenterMAutoRunMutationPending)
+            {
+                if (autoRunBefore == CenterMAutoRunState.Disabled)
+                {
+                    settingsStore.Save(settings with { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = settings.OriginalAutoRun ?? 1, AppliedAutoRun = 0 });
+                    settings = settingsStore.Load();
+                    AppLog.Info("PrerequisiteSetup", "Pending AutoRun mutation reconciled as confirmed from current registry state.", ("AutoRun", autoRunBefore));
+                }
+                else if (autoRunBefore == CenterMAutoRunState.Enabled)
+                {
+                    settingsStore.Save(settings with { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = false, OriginalAutoRun = null, AppliedAutoRun = null });
+                    settings = settingsStore.Load();
+                    AppLog.Info("PrerequisiteSetup", "Pending AutoRun mutation reconciled as not applied.", ("AutoRun", autoRunBefore));
+                }
+                else
+                {
+                    AppLog.Warn("PrerequisiteSetup", "Pending AutoRun mutation remains unresolved because the registry state is unknown.", null, ("Reason", "AutoRunUnknown"));
+                    return 1;
+                }
+            }
             if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Enabled)
             {
                 AppLog.Info("PrerequisiteSetup", "Explicit AutoRun setup requested.", ("OriginalAutoRun", 1), ("AppliedAutoRun", 0));
@@ -77,8 +97,7 @@ internal static class ElevatedPrerequisiteSetup
                 if (!CenterMAutoRunReader.TryDisableExplicitly(out var confirmedAutoRun, out var originalAutoRun)
                     || confirmedAutoRun != CenterMAutoRunState.Disabled)
                 {
-                    settingsStore.Save(settings with { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = false, OriginalAutoRun = null, AppliedAutoRun = null });
-                    AppLog.Warn("PrerequisiteSetup", "AutoRun setup could not be confirmed by read-back; aborting prerequisite mutation.", null,
+                    AppLog.Warn("PrerequisiteSetup", "AutoRun setup could not be confirmed by read-back; preserving pending intent for reconciliation.", null,
                         ("OriginalAutoRun", originalAutoRun), ("ConfirmedAutoRun", confirmedAutoRun));
                     return 1;
                 }

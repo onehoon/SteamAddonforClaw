@@ -46,7 +46,11 @@ internal static class FirstTimeSetupPolicy
             || (input.Provisioning.UsbIpWin2 == ComponentProvisioningState.PendingReboot && !input.Provisioning.UsbIpWin2BootSessionChanged))
             return new(FirstTimeSetupStatus.RestartRequired, FirstTimeSetupReason.PendingReboot, false);
         if (input.Oem1RemappingEnabled && input.CenterMAutoRun == CenterMAutoRunState.Enabled)
+        {
+            if (input.Steam.IsActive)
+                return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.SteamActive, false);
             return new(FirstTimeSetupStatus.Required, FirstTimeSetupReason.CenterMAutoRunEnabled, true);
+        }
         if (componentsReady) return new(FirstTimeSetupStatus.Complete, FirstTimeSetupReason.Complete, false);
         if (input.HidHideInstallation.Status is ComponentInstallationStatus.ExistingUnverified or ComponentInstallationStatus.Incompatible or ComponentInstallationStatus.Indeterminate
             || input.UsbIpWin2Installation.Status is ComponentInstallationStatus.ExistingUnverified or ComponentInstallationStatus.Incompatible or ComponentInstallationStatus.Indeterminate)
