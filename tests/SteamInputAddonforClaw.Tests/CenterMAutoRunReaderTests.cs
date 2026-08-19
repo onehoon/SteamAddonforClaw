@@ -66,6 +66,34 @@ public sealed class CenterMAutoRunReaderTests
         Assert.Equal(expectedOwned, result.CenterMAutoRunOwnedByAddon);
     }
 
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData(1, null)]
+    [InlineData(null, null)]
+    [InlineData(1, 1)]
+    public void PendingAutoRunRecovery_WithIncompleteDurableIntent_NeverFabricatesOwnership(int? originalAutoRun, int? appliedAutoRun)
+    {
+        var initial = new AppSettings
+        {
+            Oem1Mapping = Oem1MappingSettings.Default,
+            CenterMAutoRunMutationPending = true,
+            CenterMAutoRunOwnedByAddon = false,
+            OriginalAutoRun = originalAutoRun,
+            AppliedAutoRun = appliedAutoRun
+        };
+
+        var result = CenterMAutoRunReader.ReconcilePendingState(initial, CenterMAutoRunState.Disabled);
+
+        // An incomplete/corrupt pending record (missing or unexpected OriginalAutoRun/AppliedAutoRun)
+        // must never be promoted to confirmed ownership merely because the registry reads Disabled --
+        // the pending marker alone proves only that a mutation was attempted, never what the original
+        // value was.
+        Assert.True(result.CenterMAutoRunMutationPending);
+        Assert.False(result.CenterMAutoRunOwnedByAddon);
+        Assert.Equal(originalAutoRun, result.OriginalAutoRun);
+        Assert.Equal(appliedAutoRun, result.AppliedAutoRun);
+    }
+
     [Fact]
     public void UnconfirmedAutoRunMutation_PreservesPendingIntentWithoutOwnership()
     {

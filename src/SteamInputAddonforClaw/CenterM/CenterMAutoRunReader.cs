@@ -79,23 +79,34 @@ internal static class CenterMAutoRunReader
         if (!settings.CenterMAutoRunMutationPending)
             return settings;
 
-        return current switch
+        if (current == CenterMAutoRunState.Enabled)
         {
-            CenterMAutoRunState.Disabled => settings with
-            {
-                CenterMAutoRunMutationPending = false,
-                CenterMAutoRunOwnedByAddon = true,
-                OriginalAutoRun = settings.OriginalAutoRun ?? 1,
-                AppliedAutoRun = 0
-            },
-            CenterMAutoRunState.Enabled => settings with
+            return settings with
             {
                 CenterMAutoRunMutationPending = false,
                 CenterMAutoRunOwnedByAddon = false,
                 OriginalAutoRun = null,
                 AppliedAutoRun = null
-            },
-            _ => settings
+            };
+        }
+
+        if (current != CenterMAutoRunState.Disabled || settings.OriginalAutoRun != 1 || settings.AppliedAutoRun != 0)
+        {
+            // The registry isn't confidently Disabled, or the durable intent record itself is
+            // incomplete/corrupt (missing/unexpected OriginalAutoRun or AppliedAutoRun). A pending
+            // marker alone proves only that a mutation was attempted, never what the original value
+            // was -- fabricating OriginalAutoRun=1 here would let a later restore/uninstall path
+            // write a value that was never actually recorded as the user's original setting.
+            // Preserve the pending marker and stay fail-open until it can be resolved.
+            return settings;
+        }
+
+        return settings with
+        {
+            CenterMAutoRunMutationPending = false,
+            CenterMAutoRunOwnedByAddon = true,
+            OriginalAutoRun = 1,
+            AppliedAutoRun = 0
         };
     }
 

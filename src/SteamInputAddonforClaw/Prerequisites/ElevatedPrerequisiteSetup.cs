@@ -71,21 +71,21 @@ internal static class ElevatedPrerequisiteSetup
             var oem1AutoRunFailed = false;
             if (settings.CenterMAutoRunMutationPending)
             {
-                if (autoRunBefore == CenterMAutoRunState.Disabled)
+                // Delegates to the single shared authority (CenterMAutoRunReader.ReconcilePendingState)
+                // instead of duplicating the decision here: a pending marker alone proves only that a
+                // mutation was attempted, never what the original value was, so an incomplete/corrupt
+                // durable intent record (missing/unexpected OriginalAutoRun or AppliedAutoRun) must
+                // stay unresolved rather than being fabricated into confirmed ownership.
+                var reconciled = CenterMAutoRunReader.ReconcilePendingState(settings, autoRunBefore);
+                if (!ReferenceEquals(reconciled, settings))
                 {
-                    settingsStore.Save(settings with { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = settings.OriginalAutoRun ?? 1, AppliedAutoRun = 0 });
+                    settingsStore.Save(reconciled);
                     settings = settingsStore.Load();
-                    AppLog.Info("PrerequisiteSetup", "Pending AutoRun mutation reconciled as confirmed from current registry state.", ("AutoRun", autoRunBefore));
-                }
-                else if (autoRunBefore == CenterMAutoRunState.Enabled)
-                {
-                    settingsStore.Save(settings with { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = false, OriginalAutoRun = null, AppliedAutoRun = null });
-                    settings = settingsStore.Load();
-                    AppLog.Info("PrerequisiteSetup", "Pending AutoRun mutation reconciled as not applied.", ("AutoRun", autoRunBefore));
+                    AppLog.Info("PrerequisiteSetup", "Pending AutoRun mutation reconciled.", ("AutoRun", autoRunBefore), ("OwnedByAddon", settings.CenterMAutoRunOwnedByAddon));
                 }
                 else
                 {
-                    AppLog.Warn("PrerequisiteSetup", "Pending AutoRun mutation remains unresolved because the registry state is unknown.", null, ("Reason", "AutoRunUnknown"));
+                    AppLog.Warn("PrerequisiteSetup", "Pending AutoRun mutation remains unresolved because the registry state or durable intent record is not confidently confirmed.", null, ("AutoRun", autoRunBefore));
                     oem1AutoRunFailed = true;
                 }
             }
