@@ -216,6 +216,58 @@
     return true;
   }
 
+  function findReactRootFiber() {
+    const root = document.getElementById("root");
+    if (!root) return null;
+
+    for (const key of Object.keys(root)) {
+      if (!key.startsWith("__reactContainer$")) continue;
+      const container = root[key];
+      if (container) return container.current ?? container;
+    }
+
+    return root._reactRootContainer?._internalRoot?.current ?? null;
+  }
+
+  function patchExistingQamFibers(patches) {
+    const rootFiber = findReactRootFiber();
+    if (!rootFiber) {
+      log("React root fiber was not found.");
+      return;
+    }
+
+    const visited = new Set();
+    const stack = [rootFiber];
+    let count = 0;
+    while (stack.length > 0) {
+      const fiber = stack.pop();
+      if (!fiber || visited.has(fiber)) continue;
+      visited.add(fiber);
+
+      for (const patch of patches) {
+        if (fiber.elementType !== patch.renderer) continue;
+        const record = {
+          fiber,
+          previousType: fiber.type,
+          alternate: fiber.alternate,
+          alternatePreviousType: fiber.alternate?.type,
+          patchedType: patch.patchedType,
+        };
+        fiber.type = patch.patchedType;
+        if (fiber.alternate) fiber.alternate.type = patch.patchedType;
+        state.liveFibers.push(record);
+        count++;
+        break;
+      }
+
+      if (fiber.sibling) stack.push(fiber.sibling);
+      if (fiber.child) stack.push(fiber.child);
+    }
+
+    if (count === 0) log("Existing QAM fiber was not found.");
+    log(`Existing QAM fiber patch count=${count}.`);
+  }
+
   /*
    * The nested producer can remain mounted in an already-created React tree after
    * the outer renderer is restored. Keep the wrapper inert and remove only our tab
@@ -233,6 +285,16 @@
         }
       }
     }
+  }
+
+  function restoreLiveFibers() {
+    for (const record of state.liveFibers ?? []) {
+      if (record.fiber.type === record.patchedType) record.fiber.type = record.previousType;
+      if (record.alternate && record.alternate.type === record.patchedType) {
+        record.alternate.type = record.alternatePreviousType;
+      }
+    }
+    state.liveFibers = [];
   }
 
   function buildAddonTab(React) {
@@ -294,6 +356,7 @@
 
       function patchedType(...args) {
         const result = originalType.apply(this, args);
+        if (!state.installed) return result;
         // Review fix: proves the patched outer renderer actually ran on live Steam, separating
         // "never invoked" from every failure mode further down the augmentation chain.
         logOnce("outerRendererInvoked", "QAM outer renderer invoked.");
@@ -309,6 +372,9 @@
       patch.renderer.type = patchedType;
       logOnce("outerPatch", "QAM outer renderer patched.");
     }
+
+    state.liveFibers = [];
+    patchExistingQamFibers(patches);
 
     Object.assign(state, {
       installed: true,
@@ -330,6 +396,7 @@
 
     state.installed = false;
     restoreNestedPatches();
+    restoreLiveFibers();
 
     for (const patch of state.patches) {
       // Only restore if nothing else re-patched the renderer after us.

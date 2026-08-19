@@ -33,6 +33,8 @@ if (managed)
 var lifetimeToken = lifetime?.Token ?? CancellationToken.None;
 
 CdpTarget? gamepadUiTarget = null;
+var installationSucceeded = false;
+var teardownAttempted = false;
 try
 {
     var deadline = DateTimeOffset.UtcNow.AddSeconds(managed ? 10 : 0);
@@ -89,13 +91,14 @@ try
         return 0;
     }
 
+    log.Info("Frontend evaluation succeeded. QAM hook installed.");
+    installationSucceeded = true;
+
     if (lifetimeToken.IsCancellationRequested)
     {
-        await BestEffortUninstallAsync(client, log);
+        await TeardownAsync();
         return 0;
     }
-
-    log.Info("Frontend evaluation succeeded. QAM hook installed.");
 
     if (managed)
     {
@@ -108,46 +111,44 @@ try
         shutdown.Wait();
     }
 
-    log.Info("uninstall requested.");
-    var rawCleanupResult = await client.EvaluateAsync(
-        "window.__STEAM_INPUT_ADDON_QAM__?.uninstall?.() ?? false",
-        CancellationToken.None);
-    var cleanupResult = CdpEvaluateResult.Parse(rawCleanupResult);
-
-    if (!cleanupResult.Succeeded || cleanupResult.BooleanValue != true)
-    {
-        log.Error($"QAM cleanup failed: {cleanupResult.ErrorText ?? "uninstall() returned false"}.");
-    }
-    else
-    {
-        log.Info("cleanup completed.");
-    }
+    await TeardownAsync();
 }
 catch (Exception ex)
 {
     if (lifetimeToken.IsCancellationRequested)
     {
-        await BestEffortUninstallAsync(client, log);
-        log.Info("QamHost stop requested before installation completed.");
+        if (installationSucceeded) await TeardownAsync();
+        else log.Info("QamHost stop requested before installation completed.");
         return 0;
     }
+    if (installationSucceeded) await TeardownAsync();
     log.Error($"QamHost error at runtime. {ex.GetType().Name}: {ex.Message}");
     return 0;
 }
 
 return 0;
 
-static async Task BestEffortUninstallAsync(SteamGamepadUiCdpClient client, QamHostLogger log)
+async Task TeardownAsync()
 {
+    if (!installationSucceeded || teardownAttempted) return;
+    teardownAttempted = true;
+    log.Info("uninstall requested.");
     try
     {
-        var raw = await client.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.uninstall?.() ?? true", CancellationToken.None).ConfigureAwait(false);
+        var raw = await client.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.uninstall?.() ?? false", CancellationToken.None).ConfigureAwait(false);
         var result = CdpEvaluateResult.Parse(raw);
         if (!result.Succeeded || result.BooleanValue != true)
-            log.Warn($"Defensive uninstall did not confirm success: {result.ErrorText ?? "returned false"}");
+            log.Error($"QAM cleanup failed: {result.ErrorText ?? "uninstall() returned false"}.");
+        else log.Info("cleanup completed.");
+    }
+    catch (Exception exception)
+        when (exception is InvalidOperationException && exception.Message == "Not connected to a CDP target." ||
+              exception is System.Net.WebSockets.WebSocketException)
+    {
+        log.Info($"QAM target already closed; explicit uninstall was not available. {exception.GetType().Name}: {exception.Message}");
     }
     catch (Exception exception)
     {
-        log.Warn($"Defensive uninstall failed: {exception.GetType().Name}: {exception.Message}");
+        log.Warn($"QAM cleanup failed unexpectedly. {exception.GetType().Name}: {exception.Message}");
     }
 }
