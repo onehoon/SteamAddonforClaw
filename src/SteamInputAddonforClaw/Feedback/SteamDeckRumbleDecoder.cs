@@ -62,7 +62,7 @@ internal static class SteamDeckRumbleDecoder
             var count = (ushort)(report[7] | report[8] << 8);
             var gain = report[9];
             var strength8 = (byte)Math.Min(255, count * 16 + gain);
-            var duration = Math.Max(1, (int)Math.Ceiling(period * count / 1000.0));
+            var duration = Math.Max(1, (int)Math.Ceiling(period * (long)count / 1000.0));
             var strength16 = (ushort)(strength8 * 257);
             return new(SteamDeckFeedbackCommand.HapticPulse, new TwoMotorRumble(strength16, strength16), duration, Gain: gain, PulsePeriod: period, PulseCount: count, Strength8: strength8);
         }

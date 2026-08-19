@@ -68,12 +68,11 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             if (!decoded.IsSupported) return;
             var sequence = BeginFeedback(decoded.Command == SteamDeckFeedbackCommand.HapticPulse ? decoded.PulseDurationMilliseconds : null);
             BeforeLease?.Invoke();
-            if (!TryWrite(sequence, decoded.Rumble, out var lease) || lease is null)
+            if (!TryWrite(sequence, decoded.Rumble))
             {
                 AppLog.Debug("Rumble", "SteamDeck feedback DROP", ("Reason", "AuthorityRejected"));
                 return;
             }
-            using (lease) _sink.SetRumble(decoded.Rumble);
         }
         catch (Exception exception)
         {
@@ -101,12 +100,12 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
     }
 
-    private bool TryWrite(long sequence, TwoMotorRumble rumble, out FeedbackAuthority.FeedbackAuthorityLease? lease)
+    private bool TryWrite(long sequence, TwoMotorRumble rumble)
     {
-        lease = null;
         lock (_gate)
         {
-            if (_disposed || sequence != _sequence || !_authority.TryAcquireLease(_token, out lease) || lease is null) return false;
+            if (_disposed || sequence != _sequence || !_authority.TryAcquireLease(_token, out var lease) || lease is null) return false;
+            using (lease) _sink.SetRumble(rumble);
             return true;
         }
     }
@@ -116,8 +115,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         try
         {
             await Task.Delay(duration, cts.Token).ConfigureAwait(false);
-            if (!TryWrite(sequence, TwoMotorRumble.Stopped, out var lease) || lease is null) return;
-            using (lease) _sink.SetRumble(TwoMotorRumble.Stopped);
+            if (!TryWrite(sequence, TwoMotorRumble.Stopped)) return;
             lock (_gate) if (ReferenceEquals(_pendingStop, cts)) _pendingStop = null;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested) { }

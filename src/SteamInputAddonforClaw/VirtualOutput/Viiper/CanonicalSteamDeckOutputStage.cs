@@ -292,13 +292,13 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             _publisher = null;
         }
         _systemButtonOverlay.Clear();
-        _feedbackBridge?.Dispose();
         if (_feedbackAuthority is not null && _feedbackToken is not null && !_feedbackRevoked)
         {
             _feedbackAuthority.RevokeAndDrain();
             _feedbackRevoked = true;
             AppLog.Debug("Rumble", "Steam Deck feedback authority revoked/drained.", ("Source", "SteamDeck"));
         }
+        _feedbackBridge?.Dispose();
         if (_feedbackArmed && _physicalRumbleSink is not null && _feedbackToken is not null)
         {
             var stop = _physicalRumbleSink.SetRumble(TwoMotorRumble.Stopped);

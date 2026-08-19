@@ -169,6 +169,13 @@ public sealed class RumbleV1Tests
     }
 
     [Fact]
+    public void Decoder_HapticPulseDurationUsesWidenedMultiplication()
+    {
+        var result = SteamDeckRumbleDecoder.Decode([0x8F, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0]);
+        Assert.Equal((int)Math.Ceiling(65535L * 65535 / 1000.0), result.PulseDurationMilliseconds!.Value);
+    }
+
+    [Fact]
     public async Task Bridge_PulseStopIsStaleSafeAndTeardownCancelsIt()
     {
         var authority = new FeedbackAuthority();
@@ -198,6 +205,25 @@ public sealed class RumbleV1Tests
         await Task.Delay(30);
         Assert.Equal(2, sink.Values.Count);
         Assert.Equal(newerOpcode == 0xEA ? new TwoMotorRumble(257, 257) : new TwoMotorRumble(9, 10), sink.Values[1]);
+    }
+
+    [Fact]
+    public async Task Bridge_DelayedStopHoldsBridgeGateAcrossPhysicalWrite()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        var sink = new BlockingStopSink();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
+        Invoke(bridge.Callback, [0x8F, 0, 0, 0, 0, 1, 0, 1, 0, 0]);
+        await sink.StopEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var newer = Task.Run(() => Invoke(bridge.Callback, Packet(9, 10)));
+        await Task.Delay(20);
+        Assert.False(newer.IsCompleted);
+        sink.ReleaseStop.Set();
+        await newer;
+        Assert.Equal(TwoMotorRumble.Stopped, sink.Values[1]);
+        Assert.Equal(new TwoMotorRumble(9, 10), sink.Values[^1]);
+        Assert.DoesNotContain(TwoMotorRumble.Stopped, sink.Values.Skip(2));
     }
 
     [Fact]
@@ -281,5 +307,23 @@ public sealed class RumbleV1Tests
         Assert.True(newToken.Generation > token.Generation);
         Assert.True(authority.TryAcquireLease(newToken, out var newLease));
         newLease!.Dispose();
+    }
+
+    private sealed class BlockingStopSink : IPhysicalRumbleSink
+    {
+        public List<TwoMotorRumble> Values { get; } = [];
+        public TaskCompletionSource StopEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim ReleaseStop { get; } = new(false);
+
+        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
+        {
+            if (rumble == TwoMotorRumble.Stopped)
+            {
+                StopEntered.TrySetResult();
+                ReleaseStop.Wait();
+            }
+            Values.Add(rumble);
+            return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
+        }
     }
 }
