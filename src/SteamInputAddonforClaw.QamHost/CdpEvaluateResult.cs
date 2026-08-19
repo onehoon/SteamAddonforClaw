@@ -1,0 +1,40 @@
+using System.Text.Json;
+
+namespace SteamInputAddonforClaw.QamHost;
+
+/// <summary>Interpreted outcome of a <c>Runtime.evaluate</c> response.</summary>
+public sealed record CdpEvaluateResult(bool Succeeded, bool? BooleanValue, string? ErrorText)
+{
+    /// <summary>
+    /// Parses a raw <c>Runtime.evaluate</c> JSON-RPC response. Treats a CDP-level
+    /// <c>exceptionDetails</c> as failure, and otherwise surfaces the result value as a boolean
+    /// when the evaluated expression returned one (our qam.js contract).
+    /// </summary>
+    public static CdpEvaluateResult Parse(string rawJson)
+    {
+        using var document = JsonDocument.Parse(rawJson);
+        var root = document.RootElement;
+
+        if (!root.TryGetProperty("result", out var result))
+        {
+            return new CdpEvaluateResult(Succeeded: false, BooleanValue: null, ErrorText: "no result field in CDP response");
+        }
+
+        if (result.TryGetProperty("exceptionDetails", out var exceptionDetails))
+        {
+            var text = exceptionDetails.TryGetProperty("text", out var t) ? t.GetString() : "exception thrown during evaluation";
+            return new CdpEvaluateResult(Succeeded: false, BooleanValue: null, ErrorText: text);
+        }
+
+        if (!result.TryGetProperty("result", out var valueContainer) || !valueContainer.TryGetProperty("value", out var value))
+        {
+            return new CdpEvaluateResult(Succeeded: true, BooleanValue: null, ErrorText: null);
+        }
+
+        var booleanValue = value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False
+            ? value.GetBoolean()
+            : (bool?)null;
+
+        return new CdpEvaluateResult(Succeeded: true, BooleanValue: booleanValue, ErrorText: null);
+    }
+}
