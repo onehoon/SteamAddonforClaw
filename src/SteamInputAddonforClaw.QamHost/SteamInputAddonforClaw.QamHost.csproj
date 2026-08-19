@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- QamHost is the production Steam GamepadUI QAM integration process. It talks to Steam's
+         CEF DevTools protocol only, injects a small independent QAM frontend hook, and exits.
+         It must never reference the Addon Runtime or VIIPER: a Steam UI/QAM failure here must
+         have zero effect on controller routing. -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <AssemblyName>SteamInputAddonforClaw.QamHost</AssemblyName>
+    <RootNamespace>SteamInputAddonforClaw.QamHost</RootNamespace>
+    <Version>0.1.0</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="Frontend\qam.js" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

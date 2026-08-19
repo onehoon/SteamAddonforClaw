@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw\SteamInputAddonforClaw.csproj" />
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw.FrontendTransport\SteamInputAddonforClaw.FrontendTransport.csproj" />
+    <ProjectReference Include="..\..\src\SteamInputAddonforClaw.QamHost\SteamInputAddonforClaw.QamHost.csproj" />
     <ProjectReference Include="..\..\src\SteamInputAddonforClaw.UI\SteamInputAddonforClaw.UI.csproj" />
   </ItemGroup>
 </Project>
