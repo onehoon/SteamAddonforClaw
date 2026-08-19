@@ -379,13 +379,15 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     }
 
     /// <summary>Polls the exact retained helper handle for unexpected death while Armed. A no-op
-    /// (returns immediately) when no helper is owned.</summary>
+    /// (returns immediately) when shutdown is active or this coordinator is cleanly dormant;
+    /// the latter prevents it from applying OEM1 policy to a helper borrowed by the routing guard.</summary>
     internal async Task PollHelperLivenessAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_shutdown) return;
+            if (!_desiredEnabled && _state == CenterMOem1LifecycleState.Disabled) return;
             var liveness = _helperOwnership.PollLiveness();
             switch (liveness)
             {

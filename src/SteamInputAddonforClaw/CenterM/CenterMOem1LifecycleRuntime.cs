@@ -31,12 +31,12 @@ internal interface ICenterMOem1LifecycleDriverTarget
 /// before disposing the coordinator so a stale tick can never re-enter it after disposal.
 /// </summary>
 /// <remarks>
-/// Routing-guard coexistence (work order requirement 5/6): helper exact-handle liveness polling
-/// always runs on every tick, regardless of whether an MSI Center M routing guard is currently
-/// Armed -- the shared same-name helper remains part of the protection invariant either way. Only
-/// the normal MainUI-yield poll (<see cref="CenterMOem1LifecycleCoordinator.PollTickAsync"/>) is
-/// skipped while the guard is Armed, so this driver never fights the guard's transient
-/// <c>Local\MSI Center M.exe</c> launch-protection authority during routing.
+/// Routing-guard coexistence: a cleanly dormant OEM1 coordinator skips its helper liveness policy,
+/// because the shared helper may belong to the routing guard. Once OEM1 is enabled, exact-handle
+/// liveness polling runs on every tick; only the normal MainUI-yield poll
+/// (<see cref="CenterMOem1LifecycleCoordinator.PollTickAsync"/>) is skipped while the guard is
+/// Armed, so this driver never fights the guard's transient <c>Local\MSI Center M.exe</c>
+/// launch-protection authority during routing.
 /// </remarks>
 internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IRuntimeResumeParticipant, IAsyncDisposable
 {
