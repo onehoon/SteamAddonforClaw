@@ -22,15 +22,20 @@ namespace SteamInputAddonforClaw.Devices;
 /// </remarks>
 internal sealed class HandheldRoutingCompositionFactory
 {
+    /// <param name="hardwareSupported">The startup hardware-support result
+    /// (<see cref="Startup.StartupResult.HardwareSupported"/>). Forwarded unchanged to the device
+    /// composition, which uses it only to gate device features that require recognized hardware
+    /// (currently the OEM1 Center M mapping action path). This factory never re-evaluates it.</param>
     internal IHandheldRoutingComposition? Create(
         IHandheldDeviceAdapter adapter,
         RecoveryManager recovery,
         PowerMutationGate powerGate,
-        RecoverySafetyState recoverySafety)
+        RecoverySafetyState recoverySafety,
+        bool hardwareSupported)
     {
         if (adapter is MsiClawDeviceAdapter && adapter.NativeState is MsiClawNativeStateManager nativeState)
         {
-            return new MsiClawRoutingComposition(nativeState, recovery, powerGate, recoverySafety);
+            return new MsiClawRoutingComposition(nativeState, recovery, powerGate, recoverySafety, hardwareSupported: hardwareSupported);
         }
 
         return null;

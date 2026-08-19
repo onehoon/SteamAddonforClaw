@@ -42,7 +42,12 @@ public enum FrontendAddonOperationalStatus
 /// UI and runtime capability validation must never be able to disagree.</remarks>
 public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SteamInputRoutingEnabled, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping);
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
-public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, string StartupRegistrationMessage, FrontendDeveloperSnapshot Developer, string LogDirectoryPath);
+/// <param name="Oem1MappingAvailable">Whether the Center M (OEM1) mapping feature exists at all on
+/// this machine. It is the runtime's single startup hardware-support result (a supported MSI Claw),
+/// NOT a routing/Steam/BPM/runtime condition, and NOT the persisted remapping switch -- a machine
+/// that is not a recognized Claw reports false while its saved mapping stays untouched. A startup
+/// fact, so it lives on bootstrap rather than on the settings snapshot every setter returns.</param>
+public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, string StartupRegistrationMessage, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool Oem1MappingAvailable);
 public sealed record FrontendLaunchAtStartupResult(FrontendSettingsSnapshot Settings, string RegistrationMessage);
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);

@@ -406,7 +406,7 @@ public sealed class FrontendNamedPipeTransportTests
             Assert.Equal(FrontendWireMessageKind.CancelRequest, cancel.Kind);
             await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, request.RequestId, request.Method, Error: new(FrontendRemoteErrorCode.Cancelled, "Operation cancelled.")), writeGate, CancellationToken.None);
             var next = await FrontendWireCodec.ReadAsync(server, CancellationToken.None);
-            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, next.RequestId, next.Method, Payload: FrontendWireCodec.Payload(new FrontendBootstrapSnapshot(new(true, FrontendLogLevel.Debug, true, false, Oem1MappingSettings.Default), "Registered", new(false), @"C:\Logs"))), writeGate, CancellationToken.None);
+            await FrontendWireCodec.WriteAsync(server, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Response, next.RequestId, next.Method, Payload: FrontendWireCodec.Payload(new FrontendBootstrapSnapshot(new(true, FrontendLogLevel.Debug, true, false, Oem1MappingSettings.Default), "Registered", new(false), @"C:\Logs", true))), writeGate, CancellationToken.None);
         });
 
         await using var client = new NamedPipeAddonFrontendClient(pipeName);
@@ -786,9 +786,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":3,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":3,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":3,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":4,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":4,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":4,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -959,7 +959,7 @@ public sealed class FrontendNamedPipeTransportTests
     private sealed class RecordingFrontendControl : IAddonFrontendControl
     {
         public event EventHandler? StateInvalidated;
-        public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, "Registered", new(false), @"C:\Logs");
+        public FrontendBootstrapSnapshot Bootstrap { get; } = new(Settings, "Registered", new(false), @"C:\Logs", true);
         public FrontendLaunchAtStartupResult LaunchResult { get; } = new(Settings, "Updated");
         public FrontendPrerequisiteSetupResult SetupResult { get; } = new(FrontendPrerequisiteSetupResultKind.Installed, Status);
         public FrontendEnvironmentReportResult EnvironmentResult { get; } = new(true, null);

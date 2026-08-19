@@ -22,10 +22,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private string _registrationMessage;
     private readonly IFrontendPrerequisiteSetupExecutor _setupExecutor;
     private readonly Func<string?> _processPath;
+    private readonly bool _oem1MappingAvailable;
     private int _shutdownStarted;
 
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null)
+    /// <param name="oem1MappingAvailable">The startup hardware-support result
+    /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
+    /// UI gates the Center M Button feature on the SAME fact the routing composition's OEM1 action
+    /// path gates on. Defaults to false so any construction path that never established hardware
+    /// support reports the feature unavailable rather than offering it.</param>
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false)
     {
+        _oem1MappingAvailable = oem1MappingAvailable;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -43,7 +50,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public event EventHandler? StateInvalidated;
 
-    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), _registrationMessage, new(_developer.IsEnabled), AppLog.DirectoryPath));
+    public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), _registrationMessage, new(_developer.IsEnabled), AppLog.DirectoryPath, _oem1MappingAvailable));
 
     public async Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken cancellationToken = default)
     {

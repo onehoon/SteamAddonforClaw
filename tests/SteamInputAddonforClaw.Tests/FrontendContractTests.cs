@@ -61,7 +61,8 @@ public sealed class FrontendContractTests
             new(false, FrontendLogLevel.Info, true, false, Oem1MappingSettings.Default),
             "Registered at startup.",
             new(false),
-            @"C:\Logs");
+            @"C:\Logs",
+            Oem1MappingAvailable: true);
         var restored = JsonSerializer.Deserialize<FrontendBootstrapSnapshot>(JsonSerializer.Serialize(value));
         Assert.Equal(value, restored);
     }

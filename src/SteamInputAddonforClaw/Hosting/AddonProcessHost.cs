@@ -100,7 +100,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startupComposition.AddonOwnedVirtualDeviceTracker,
             startupComposition.RuntimeRecoveryManager,
             startupComposition.StockCenterMBaseline,
-            startupResult.RecoverySafe);
+            startupResult.RecoverySafe,
+            startupResult.HardwareSupported);
 
         // Review fix (BLOCKER): the OEM1 coordinator and the routing guard share the SAME underlying
         // helper ownership, but only their exact-handle Start() call itself serializes between them.
@@ -120,7 +121,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         _runtimeHost = composition.RuntimeHost;
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
-            composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage);
+            composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
+            // Same single startup hardware-support result the routing composition's OEM1 gate above
+            // received -- the UI and the runtime can never disagree about whether OEM1 mapping exists.
+            oem1MappingAvailable: startupResult.HardwareSupported);
         _frontendServer = new NamedPipeAddonFrontendServer(
             FrontendPipeEndpoint.CreateForCurrentUser(),
             _frontendControl);

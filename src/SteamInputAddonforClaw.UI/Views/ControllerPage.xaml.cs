@@ -15,6 +15,13 @@ public sealed partial class ControllerPage : UserControl
     /// the feature off must never erase what the user configured.</summary>
     private Oem1MappingSettings _oem1Mapping = Oem1MappingSettings.Default;
 
+    /// <summary>Whether the Center M Button feature exists on this hardware at all, taken verbatim
+    /// from the runtime's single startup hardware-support result
+    /// (<see cref="FrontendBootstrapSnapshot.Oem1MappingAvailable"/>). Never derived from routing,
+    /// Steam, BPM, or the persisted remapping switch. False until Initialize runs, so the card can
+    /// never briefly offer a feature this machine does not have.</summary>
+    private bool _oem1MappingAvailable;
+
     public ControllerPage()
     {
         InitializeComponent();
@@ -37,8 +44,24 @@ public sealed partial class ControllerPage : UserControl
         _isLoading = true;
         SteamInputRoutingToggleSwitch.IsOn = bootstrap.Settings.SteamInputRoutingEnabled;
         _lastKnownSteamInputRoutingEnabled = bootstrap.Settings.SteamInputRoutingEnabled;
+        _oem1MappingAvailable = bootstrap.Oem1MappingAvailable;
+        ApplyOem1MappingAvailability();
         ApplyOem1Mapping(bootstrap.Settings.Oem1Mapping);
         _isLoading = false;
+    }
+
+    /// <summary>
+    /// Unsupported-hardware presentation, composed from the patterns already in this app: the card
+    /// stays visible, its toggle is disabled and replaced by the plain "Unavailable" text badge, and
+    /// the navigation chevron/click is removed so the detail page is unreachable. Nothing about the
+    /// persisted mapping is changed -- this is presentation only.
+    /// </summary>
+    private void ApplyOem1MappingAvailability()
+    {
+        CenterMRemappingToggleSwitch.IsEnabled = _oem1MappingAvailable;
+        CenterMRemappingToggleSwitch.Visibility = _oem1MappingAvailable ? Visibility.Visible : Visibility.Collapsed;
+        CenterMUnavailableText.Visibility = _oem1MappingAvailable ? Visibility.Collapsed : Visibility.Visible;
+        CenterMButtonCard.IsClickEnabled = _oem1MappingAvailable;
     }
 
     /// <summary>Lets the host push back a mapping saved on the detail page, so returning to this
@@ -52,8 +75,14 @@ public sealed partial class ControllerPage : UserControl
         _isLoading = wasLoading;
     }
 
-    private void CenterMButtonCard_Click(object sender, RoutedEventArgs args) =>
+    /// <summary>IsClickEnabled is already false when the feature is unavailable; the guard is the
+    /// authoritative one, so navigation stays impossible even if a future edit re-enables the
+    /// chevron.</summary>
+    private void CenterMButtonCard_Click(object sender, RoutedEventArgs args)
+    {
+        if (!_oem1MappingAvailable) return;
         CenterMButtonRequested?.Invoke(this, EventArgs.Empty);
+    }
 
     private async void CenterMRemappingToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {

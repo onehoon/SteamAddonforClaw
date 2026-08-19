@@ -404,7 +404,8 @@ public sealed class AddonRuntimeHostTests
         new RecoveryManager(new MemoryJournalStore()),
         powerGate,
         recoverySafetyState,
-        new DefaultOem1MappingPreference());
+        new DefaultOem1MappingPreference(),
+        hardwareSupported: true);
 
     private sealed class FakeSteamInputRoutingPreference : ISteamInputRoutingPreference
     {

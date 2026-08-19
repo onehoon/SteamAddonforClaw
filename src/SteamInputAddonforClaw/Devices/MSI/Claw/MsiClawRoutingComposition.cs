@@ -76,6 +76,18 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private readonly IReadOnlyList<IRoutingPipelineStage> _stages;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
     private readonly bool _startCenterMOem1LifecycleRuntime;
+
+    /// <summary>The startup hardware-support result (<see cref="Startup.StartupResult.HardwareSupported"/>),
+    /// forwarded by <see cref="HandheldRoutingCompositionFactory"/>. It is a HARDWARE gate only --
+    /// never a routing/Steam/BPM condition -- and its single effect is that
+    /// <see cref="ConfigureOem1ActionPath"/> wires nothing at all on unrecognized hardware: no Event41
+    /// WMI observation, no <see cref="CenterMOem1Coordinator"/> enable, no gesture bridge, and no
+    /// subscription to the persisted mapping. Persisted OEM1 settings are never read for a decision
+    /// nor written here, so a machine with <c>RemappingEnabled = true</c> saved keeps it saved.
+    /// Defaults to true because the only production construction site (the factory above) always
+    /// passes it explicitly; direct test constructions opt out by passing false.</summary>
+    private readonly bool _hardwareSupported;
+
     private Func<string, ValueTask>? _runtimeFaultHandler;
 
     // PR3: development-only OEM1 production E2E POC action path -- Event41 observation, gesture
@@ -137,6 +149,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         RecoveryManager recovery,
         PowerMutationGate powerGate,
         RecoverySafetyState recoverySafety,
+        bool hardwareSupported = true,
         Func<IMsiClawRumbleEndpointResolver>? rumbleEndpointResolverFactory = null,
         CenterMHelperOwnership? centerMHelperOwnership = null,
         CenterMMainUiRoutingGuard? centerMGuard = null,
@@ -148,6 +161,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         IOem1GestureClock? testOnlyOem1GestureClock = null,
         Action? testOnlyOem1LaunchBigPicture = null)
     {
+        _hardwareSupported = hardwareSupported;
         _testOnlyOem1EventSource = testOnlyOem1EventSource;
         _testOnlyOem1GestureDelay = testOnlyOem1GestureDelay;
         _testOnlyOem1GestureClock = testOnlyOem1GestureClock;
@@ -287,6 +301,18 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         ArgumentNullException.ThrowIfNull(mappingPreference);
         if (_oem1ActionPathConfigured) return Task.CompletedTask;
         _oem1ActionPathConfigured = true;
+
+        // Hardware availability gate: OEM1 mapping only exists on hardware startup already recognized
+        // as a supported MSI Claw. Returning here -- before anything is constructed -- is what makes
+        // "unsupported hardware never reaches Event41 observation / coordinator enable / suppression
+        // arming" structural rather than a condition each step below has to remember. The persisted
+        // Oem1MappingSettings is deliberately neither read nor written on this path.
+        if (!_hardwareSupported)
+        {
+            AppLog.Info("CenterM.Oem1", "OEM1 mapping is unavailable on this hardware; the OEM1 action path is not wired.",
+                ("Reason", "HardwareNotSupported"), ("Action", "Passive"));
+            return Task.CompletedTask;
+        }
 
         var eventSource = _testOnlyOem1EventSource ?? new WmiMsiEventSource();
         var recognizer = new Oem1GestureRecognizer(doubleClickEnabled: true, doubleClickWindow: TimeSpan.FromMilliseconds(400),

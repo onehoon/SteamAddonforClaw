@@ -31,7 +31,22 @@
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="Setting" />
                 </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch x:Name="CenterMRemappingToggleSwitch" OffContent="" OnContent="" Toggled="CenterMRemappingToggleSwitch_Toggled" />
+                <!--
+                    Exactly one of these two is ever visible. On hardware the Addon does not
+                    recognize as a supported MSI Claw the feature does not exist at all, so the
+                    toggle is disabled AND replaced by the same plain "Unavailable" text badge the
+                    Status page uses for an unavailable controller path, never shown as merely Off.
+                -->
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock
+                        x:Name="CenterMUnavailableText"
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Text="Unavailable"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed" />
+                    <ToggleSwitch x:Name="CenterMRemappingToggleSwitch" OffContent="" OnContent="" Toggled="CenterMRemappingToggleSwitch_Toggled" />
+                </StackPanel>
             </ctcontrols:SettingsCard>
         </StackPanel>
     </ScrollViewer>

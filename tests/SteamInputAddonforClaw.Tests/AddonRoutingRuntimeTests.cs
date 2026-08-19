@@ -25,7 +25,8 @@ public sealed class AddonRoutingRuntimeTests
             new RecoveryManager(new MemoryJournalStore()),
             new PowerMutationGate(initiallyOpen: true),
             new RecoverySafetyState(RecoverySafety.Safe),
-        new DefaultOem1MappingPreference());
+        new DefaultOem1MappingPreference(),
+            hardwareSupported: true);
 
         Assert.Null(runtime);
         if (runtime is not null) await runtime.DisposeAsync();
@@ -192,7 +193,8 @@ public sealed class AddonRoutingRuntimeTests
         new RecoveryManager(new MemoryJournalStore()),
         new PowerMutationGate(initiallyOpen: true),
         new RecoverySafetyState(RecoverySafety.Safe),
-        new DefaultOem1MappingPreference());
+        new DefaultOem1MappingPreference(),
+        hardwareSupported: true);
 
     private static SystemStatusSnapshot Snapshot(RoutingDecision decision) =>
         new(new("Test", "Test", "Test", []), null!, [], null!, null!, null!, decision, null!, true, false);

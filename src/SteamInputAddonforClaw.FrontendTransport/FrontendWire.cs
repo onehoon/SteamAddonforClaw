@@ -17,7 +17,10 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Oem1Mapping member on FrontendSettingsSnapshot. A v2 peer would connect, then fail every settings
 // response deserialization on the new required member -- failing the handshake up front is the
 // honest outcome.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 3; }
+//
+// Version 4: the OEM1 hardware-availability gate adds a required Oem1MappingAvailable member on
+// FrontendBootstrapSnapshot, for the same reason.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 4; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
