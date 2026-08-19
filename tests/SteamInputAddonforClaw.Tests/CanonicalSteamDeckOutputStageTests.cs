@@ -6,6 +6,7 @@ using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Feedback;
+using SteamInputAddonforClaw.Routing;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -426,31 +427,90 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.Single(sink.Values);
     }
 
-    [Fact]
-    public async Task FinalStopFailureBlocksClearAndRemovalUntilRetry()
+    [Theory]
+    [InlineData("Failed")]
+    [InlineData("Unavailable")]
+    [InlineData("Disposed")]
+    public async Task FinalStopFailureIsDegradedAndDoesNotBlockStructuralTeardown(string stopStatusName)
     {
+        var stopStatus = Enum.Parse<PhysicalRumbleWriteStatus>(stopStatusName);
+        // Regression for the fail-close hang: the final motor STOP is best-effort. A failure to
+        // deliver it must not make Steam Deck / VIIPER ownership uncertain, so it must not stop
+        // callback clear, canonical device removal, or (transitively, via the pipeline's rollback
+        // barrier) PhysicalInput/NativeMode rollback and PID1901 restoration from running.
         var session = new FakeCanonicalSession();
         var sink = new RecordingRumbleSink();
         sink.Results.Enqueue(new(PhysicalRumbleWriteStatus.Succeeded, "preflight"));
-        sink.Results.Enqueue(new(PhysicalRumbleWriteStatus.Failed, "test"));
+        sink.Results.Enqueue(new(stopStatus, "test"));
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
-        var first = await stage.RollbackMutationAsync(CancellationToken.None);
+        var result = await stage.RollbackMutationAsync(CancellationToken.None);
 
-        Assert.False(first.Succeeded);
-        Assert.Equal("PhysicalRumbleFinalStopFailed", first.Reason);
-        Assert.Equal(0, session.ClearOutputCallbackCalls);
-        Assert.Equal(0, session.RemoveCalls);
-
-        sink.Results.Enqueue(new(PhysicalRumbleWriteStatus.Succeeded, "retry"));
-        var second = await stage.RollbackMutationAsync(CancellationToken.None);
-
-        Assert.True(second.Succeeded, second.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal([TwoMotorRumble.Stopped, TwoMotorRumble.Stopped, TwoMotorRumble.Stopped], sink.Values);
+        Assert.Equal([TwoMotorRumble.Stopped, TwoMotorRumble.Stopped], sink.Values);
+        AppLog.DrainForTests();
+        Assert.Contains("Steam Deck final physical STOP could not be confirmed", LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath));
+    }
+
+    [Fact]
+    public async Task FinalStopFailure_AllowsPipelineToReachPhysicalAndNativeRollback()
+    {
+        // Locks the actual bug: this real CanonicalSteamDeckOutputStage, driven through the real
+        // RoutingPipelineExecutor (not a FakeStage), must return Success from its own rollback after
+        // a final-STOP failure so the pipeline's SteamOutput rollback barrier does not stop PhysicalInput
+        // and NativeMode rollback -- the path that restores stock XInput/PID1901 -- from running.
+        var session = new FakeCanonicalSession();
+        var sink = new RecordingRumbleSink();
+        sink.Results.Enqueue(new(PhysicalRumbleWriteStatus.Succeeded, "preflight"));
+        sink.Results.Enqueue(new(PhysicalRumbleWriteStatus.Failed, "device-lost"));
+
+        var steam = Create(
+            session,
+            new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]),
+            new FakeHidHide(),
+            sink: sink);
+
+        Assert.True((await steam.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await steam.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var trace = new List<RoutingStageKind>();
+        var physical = new RollbackProbeStage(RoutingStageKind.PhysicalInput, trace);
+        var native = new RollbackProbeStage(RoutingStageKind.NativeMode, trace);
+
+        var executor = new RoutingPipelineExecutor([native, physical, steam]);
+        var plan = RoutingPipelinePlan.AllDisabled with
+        {
+            NativeMode = RoutingStageMode.Enabled,
+            PhysicalInput = RoutingStageMode.Enabled,
+            SteamOutput = RoutingStageMode.Enabled
+        };
+
+        var result = await executor.RollbackAsync(plan, CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal([RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode], trace);
+        Assert.Equal(1, session.ClearOutputCallbackCalls);
+        Assert.Equal(1, session.RemoveCalls);
+    }
+
+    private sealed class RollbackProbeStage(RoutingStageKind kind, List<RoutingStageKind> trace) : IRoutingPipelineStage
+    {
+        public RoutingStageKind Kind => kind;
+        public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult(RoutingStageOperationResult.Success());
+        public ValueTask<RoutingStageOperationResult> PrepareMutationAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult(RoutingStageOperationResult.Success());
+        public ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult(RoutingStageOperationResult.Success());
+        public ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
+        {
+            trace.Add(kind);
+            return ValueTask.FromResult(RoutingStageOperationResult.Success());
+        }
     }
 
     [Fact]

@@ -303,10 +303,16 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             var stop = _physicalRumbleSink.SetRumble(TwoMotorRumble.Stopped);
             if (stop.Status != PhysicalRumbleWriteStatus.Succeeded)
             {
-                AppLog.Warn("Rumble", "Steam Deck final physical STOP failed.", null, ("Status", stop.Status), ("Reason", stop.Reason));
-                return RollbackFailure("PhysicalRumbleFinalStopFailed");
+                // Best-effort only: failure to deliver the final motor STOP does not make Steam
+                // Deck / VIIPER ownership uncertain, so it must not block structural SteamOutput
+                // teardown (callback clear, canonical device removal, NativeMode/PhysicalInput
+                // rollback and PID1901 restoration further down the pipeline).
+                AppLog.Warn("Rumble", "Steam Deck final physical STOP could not be confirmed; continuing structural routing teardown.", null, ("Status", stop.Status), ("Reason", stop.Reason));
             }
-            AppLog.Debug("Rumble", "Steam Deck final physical STOP accepted.", ("Source", "SteamDeck"));
+            else
+            {
+                AppLog.Debug("Rumble", "Steam Deck final physical STOP accepted.", ("Source", "SteamDeck"));
+            }
         }
         if (_feedbackCallbackRegistered)
         {
