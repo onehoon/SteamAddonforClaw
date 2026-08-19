@@ -58,6 +58,10 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
             }
             if (endpoint.IsAvailable)
             {
+                if (!_cachedEndpoint.Equals(endpoint))
+                {
+                    AppLog.Info("Rumble", "Rumble endpoint selected", ("PID", 1902), ("OutputReportLength", endpoint.OutputReportLength));
+                }
                 _cachedEndpoint = endpoint;
                 _endpointGeneration = generationEndpoint;
             }
@@ -74,7 +78,7 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
             var small8 = MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.SmallMotor);
             try
             {
-                var result = _transport.Write(endpoint.DevicePath!, MsiClawRumblePacketBuilder.Build(rumble));
+                var result = _transport.Write(endpoint.DevicePath!, MsiClawRumblePacketBuilder.Build(rumble), endpoint.OutputReportLength);
                 if (result.Succeeded)
             {
                 AppLog.Debug("Rumble", "Rumble TX", ("Device", "MSIClaw"), ("PID", 1902), ("Large16", rumble.LargeMotor), ("Small16", rumble.SmallMotor), ("Large8", large8), ("Small8", small8), ("Result", "OK"), ("WriteMs", result.WriteMs));
