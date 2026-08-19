@@ -146,17 +146,15 @@
 
     while (stack.length > 0 && budget > 0) {
       const node = stack.pop();
-      if (node == null) continue;
+      if (node == null || typeof node !== "object") continue;
+      if (visited.has(node)) continue;
+      visited.add(node);
+      budget--;
 
       if (Array.isArray(node)) {
         for (const child of node) stack.push(child);
         continue;
       }
-
-      if (typeof node !== "object") continue;
-      if (visited.has(node)) continue;
-      visited.add(node);
-      budget--;
 
       if (predicate(node)) return node;
 
@@ -188,11 +186,11 @@
   }
 
   function patchTabsProducer(outerResult, React) {
-    // Discovery signal: the QAM lifecycle prop. Component shape (function vs. object wrapper) is
-    // handled separately below -- it is not part of discovery.
+    // Discovery signal: presence of the QAM lifecycle prop, nothing else. Component shape
+    // (function vs. object wrapper) is handled separately below -- it is not part of discovery.
     const node = findReactNode(
       outerResult,
-      (candidate) => candidate.props && typeof candidate.props.onFocusNavDeactivated === "function"
+      (candidate) => candidate.props?.onFocusNavDeactivated != null
     );
     if (!node) {
       // Review fix: distinguishes "outer renderer invoked, but the live tree did not contain the

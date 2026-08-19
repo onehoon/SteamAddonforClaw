@@ -49,15 +49,32 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        // Discovery predicate: only the lifecycle prop gates matching, not typeof candidate.type.
+        // Discovery predicate: only presence of the lifecycle prop gates matching -- not
+        // typeof candidate.type, and not typeof candidate.props.onFocusNavDeactivated either.
         var patchTabsProducerIndex = source.IndexOf("function patchTabsProducer", StringComparison.Ordinal);
         Assert.True(patchTabsProducerIndex >= 0);
         var findReactNodeCallIndex = source.IndexOf("findReactNode(", patchTabsProducerIndex, StringComparison.Ordinal);
         var predicateEndIndex = source.IndexOf(");", findReactNodeCallIndex, StringComparison.Ordinal);
         var predicateSlice = source[findReactNodeCallIndex..predicateEndIndex];
 
-        Assert.Contains("candidate.props && typeof candidate.props.onFocusNavDeactivated === \"function\"", predicateSlice);
+        Assert.Contains("candidate.props?.onFocusNavDeactivated != null", predicateSlice);
         Assert.DoesNotContain("typeof candidate.type === \"function\"", predicateSlice);
+        Assert.DoesNotContain("typeof candidate.props.onFocusNavDeactivated === \"function\"", predicateSlice);
+    }
+
+    [Fact]
+    public void Nested_react_walker_is_cycle_safe_for_arrays()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        // The visited/budget gate must run before an array node is expanded, otherwise a
+        // self-referential children array bypasses the bound entirely.
+        var findReactNodeIndex = source.IndexOf("function findReactNode(", StringComparison.Ordinal);
+        Assert.True(findReactNodeIndex >= 0);
+        var arrayCheckIndex = source.IndexOf("Array.isArray(node)", findReactNodeIndex, StringComparison.Ordinal);
+        var visitedAddIndex = source.IndexOf("visited.add(node)", findReactNodeIndex, StringComparison.Ordinal);
+        Assert.True(visitedAddIndex >= 0 && arrayCheckIndex >= 0);
+        Assert.True(visitedAddIndex < arrayCheckIndex, "visited/budget bookkeeping must happen before array expansion.");
     }
 
     [Fact]
