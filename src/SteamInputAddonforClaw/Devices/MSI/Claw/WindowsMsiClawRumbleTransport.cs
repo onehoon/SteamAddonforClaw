@@ -40,7 +40,7 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             var openStarted = Stopwatch.GetTimestamp();
             if (_handle is null)
             {
-                _handle = _api.Open(devicePath, 0x80000000 | 0x40000000, 0x00000001 | 0x00000002, 3);
+                _handle = _api.OpenOverlapped(devicePath, 0x80000000 | 0x40000000, 0x00000001 | 0x00000002, 3);
                 if (_handle.IsInvalid)
                 {
                     var error = _api.LastError;
@@ -53,7 +53,7 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             var bytes = new byte[64];
             semanticPacket.CopyTo(bytes);
             var writeStarted = Stopwatch.GetTimestamp();
-            if (!_api.Write(_handle, bytes, out var written))
+            if (!_api.WriteOverlapped(_handle, bytes, out var written))
             {
                 var error = _api.LastError;
                 CloseHandleLocked();

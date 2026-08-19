@@ -58,6 +58,8 @@ public sealed class MsiClawRumbleTests
         Assert.True(transport.Write("path-a", packet).Succeeded);
         Assert.True(transport.Write("path-a", packet).Succeeded);
         Assert.Equal(1, native.OpenCount);
+        Assert.Equal(1, native.OverlappedOpenCount);
+        Assert.True(native.OverlappedWriteCalls >= 2);
         Assert.True(transport.Write("path-b", packet).Succeeded);
         Assert.Equal(2, native.OpenCount);
         native.WriteResult = false;
@@ -437,6 +439,8 @@ public sealed class MsiClawRumbleTests
     {
         public int LastError { get; private set; }
         public int OpenCount { get; private set; }
+        public int OverlappedOpenCount { get; private set; }
+        public int OverlappedWriteCalls { get; private set; }
         public bool WriteResult { get; set; } = true;
         public bool PartialWrite { get; set; }
         public bool BlockFirstWrite { get; init; }
@@ -446,6 +450,8 @@ public sealed class MsiClawRumbleTests
         public List<byte[]> Writes { get; } = [];
         public SafeFileHandle Open(string path, uint desiredAccess, uint shareMode, uint creationDisposition)
         { OpenCount++; return new SafeFileHandle(new IntPtr(OpenCount), ownsHandle: false); }
+        public SafeFileHandle OpenOverlapped(string path, uint desiredAccess, uint shareMode, uint creationDisposition)
+        { OverlappedOpenCount++; return Open(path, desiredAccess, shareMode, creationDisposition); }
         public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
         {
             WriteCalls++;
@@ -459,6 +465,8 @@ public sealed class MsiClawRumbleTests
             LastError = WriteResult ? 0 : 5;
             return WriteResult;
         }
+        public bool WriteOverlapped(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
+        { OverlappedWriteCalls++; return Write(handle, buffer, out bytesWritten); }
         public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
         {
             inputReportLength = 0;

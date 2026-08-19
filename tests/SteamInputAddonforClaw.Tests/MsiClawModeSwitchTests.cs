@@ -160,6 +160,10 @@ public sealed class MsiClawModeSwitchTests
 
         fake.BytesWritten = 64;
         Assert.True(await transport.WriteAsync("hid-path", new byte[64], CancellationToken.None));
+        Assert.Equal(2, fake.OpenCallCount);
+        Assert.Equal(0, fake.OverlappedOpenCallCount);
+        Assert.Equal(2, fake.WriteCallCount);
+        Assert.Equal(0, fake.OverlappedWriteCallCount);
 
         var writesBeforeCancellation = fake.WriteCallCount;
         var cancelled = new CancellationTokenSource();
@@ -419,7 +423,9 @@ public sealed class MsiClawModeSwitchTests
         public bool OpenSucceeds { get; set; } = true;
         public uint BytesWritten { get; set; }
         public int OpenCallCount { get; private set; }
+        public int OverlappedOpenCallCount { get; private set; }
         public int WriteCallCount { get; private set; }
+        public int OverlappedWriteCallCount { get; private set; }
         public Action? OnOpen { get; set; }
         public int LastError => 123;
         public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
@@ -428,12 +434,16 @@ public sealed class MsiClawModeSwitchTests
             OnOpen?.Invoke();
             return new SafeFileHandle(new IntPtr(OpenSucceeds ? 1 : -1), ownsHandle: false);
         }
+        public SafeFileHandle OpenOverlapped(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
+        { OverlappedOpenCallCount++; return Open(devicePath, desiredAccess, shareMode, creationDisposition); }
         public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
         {
             WriteCallCount++;
             bytesWritten = BytesWritten;
             return WriteResult;
         }
+        public bool WriteOverlapped(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
+        { OverlappedWriteCallCount++; return Write(handle, buffer, out bytesWritten); }
         public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
         {
             inputReportLength = 0;

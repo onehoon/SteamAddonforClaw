@@ -65,6 +65,11 @@ internal interface IMsiClawNativeHidApi
     SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition);
     bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten);
 
+    SafeFileHandle OpenOverlapped(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition) =>
+        Open(devicePath, desiredAccess, shareMode, creationDisposition);
+    bool WriteOverlapped(SafeFileHandle handle, byte[] buffer, out uint bytesWritten) =>
+        Write(handle, buffer, out bytesWritten);
+
     /// <summary>
     /// Reads the true input/output report byte lengths for an opened HID interface via
     /// HidD_GetPreparsedData + HidP_GetCaps. This is the authoritative source for report
@@ -81,12 +86,26 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
 
     public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
     {
-        var handle = CreateFileW(devicePath, desiredAccess, shareMode, IntPtr.Zero, creationDisposition, FileFlagOverlapped, IntPtr.Zero);
+        var handle = CreateFileW(devicePath, desiredAccess, shareMode, IntPtr.Zero, creationDisposition, 0, IntPtr.Zero);
         LastError = handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
         return handle;
     }
 
     public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
+    {
+        var result = WriteFile(handle, buffer, (uint)buffer.Length, out bytesWritten, IntPtr.Zero);
+        LastError = result ? 0 : Marshal.GetLastWin32Error();
+        return result;
+    }
+
+    public SafeFileHandle OpenOverlapped(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
+    {
+        var handle = CreateFileW(devicePath, desiredAccess, shareMode, IntPtr.Zero, creationDisposition, FileFlagOverlapped, IntPtr.Zero);
+        LastError = handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
+        return handle;
+    }
+
+    public bool WriteOverlapped(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
     {
         bytesWritten = 0;
         var overlapped = Marshal.AllocHGlobal(Marshal.SizeOf<NativeOverlapped>());
@@ -177,6 +196,9 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CancelIoEx(SafeFileHandle file, IntPtr overlapped);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WriteFile(SafeFileHandle file, byte[] buffer, uint numberOfBytesToWrite, out uint numberOfBytesWritten, IntPtr overlapped);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WriteFile(SafeFileHandle file, IntPtr buffer, uint numberOfBytesToWrite, IntPtr numberOfBytesWritten, IntPtr overlapped);
