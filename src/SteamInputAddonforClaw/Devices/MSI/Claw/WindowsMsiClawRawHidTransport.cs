@@ -76,6 +76,7 @@ internal interface IMsiClawNativeHidApi
 internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
 {
     private const uint FileFlagOverlapped = 0x40000000;
+    private const uint WriteTimeoutMs = 1000;
     public int LastError { get; private set; }
 
     public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
@@ -101,9 +102,18 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
                 LastError = Marshal.GetLastWin32Error();
                 if (LastError != ErrorIoPending)
                     return false;
+
+                var wait = WaitForSingleObject(eventHandle, WriteTimeoutMs);
+                if (wait != WaitObject0)
+                {
+                    var terminalError = wait == WaitTimeout ? ErrorTimeout : Marshal.GetLastWin32Error();
+                    CancelAndDrain(handle, overlapped);
+                    LastError = terminalError;
+                    return false;
+                }
             }
 
-            result = GetOverlappedResult(handle, overlapped, out bytesWritten, true);
+            result = GetOverlappedResult(handle, overlapped, out bytesWritten, false);
             LastError = result ? 0 : Marshal.GetLastWin32Error();
             return result;
         }
@@ -113,6 +123,12 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
             if (eventHandle != IntPtr.Zero) CloseHandle(eventHandle);
             Marshal.FreeHGlobal(overlapped);
         }
+    }
+
+    private static void CancelAndDrain(SafeFileHandle handle, IntPtr overlapped)
+    {
+        _ = CancelIoEx(handle, overlapped);
+        _ = GetOverlappedResult(handle, overlapped, out _, true);
     }
 
     public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
@@ -145,6 +161,9 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
 
     private const int HidpStatusSuccess = 0x00110000;
     private const int ErrorIoPending = 997;
+    private const int ErrorTimeout = 1460;
+    private const uint WaitObject0 = 0;
+    private const uint WaitTimeout = 258;
 
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess, uint shareMode, IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
@@ -153,6 +172,11 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CancelIoEx(SafeFileHandle file, IntPtr overlapped);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WriteFile(SafeFileHandle file, IntPtr buffer, uint numberOfBytesToWrite, IntPtr numberOfBytesWritten, IntPtr overlapped);
