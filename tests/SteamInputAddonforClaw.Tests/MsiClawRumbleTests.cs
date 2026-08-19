@@ -169,6 +169,53 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Catalog_reads_report_lengths_from_real_hid_capabilities_not_device_information_properties()
+    {
+        var hidApi = new FakeCapabilityHidApi { InputReportLength = 64, OutputReportLength = 64 };
+        var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
+
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out var writable, out var win32Error, out var hidStatus);
+
+        Assert.True(succeeded);
+        Assert.Equal(64, input);
+        Assert.Equal(64, output);
+        Assert.True(writable);
+        Assert.Equal(0, win32Error);
+        Assert.Equal(0x00110000, hidStatus);
+        Assert.Equal(1, hidApi.OpenCalls);
+        Assert.Equal(1, hidApi.CapabilityCalls);
+    }
+
+    [Fact]
+    public void Catalog_capability_lookup_fails_when_the_hid_interface_cannot_be_opened()
+    {
+        var hidApi = new FakeCapabilityHidApi { OpenSucceeds = false };
+        var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
+
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out _, out _, out var writable, out var win32Error, out _);
+
+        Assert.False(succeeded);
+        Assert.False(writable);
+        Assert.NotEqual(0, win32Error);
+        Assert.Equal(0, hidApi.CapabilityCalls);
+    }
+
+    [Fact]
+    public void Catalog_capability_lookup_fails_when_HidP_GetCaps_fails_after_a_successful_open()
+    {
+        var hidApi = new FakeCapabilityHidApi { CapabilitiesSucceed = false };
+        var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
+
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out _, out var win32Error, out var hidStatus);
+
+        Assert.False(succeeded);
+        Assert.Equal(0, input);
+        Assert.Equal(0, output);
+        Assert.Equal(0, win32Error);
+        Assert.NotEqual(0, hidStatus);
+    }
+
+    [Fact]
     public void Endpoint_resolver_requires_one_exact_writable_64_byte_pid1902_candidate()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
@@ -179,33 +226,54 @@ public sealed class MsiClawRumbleTests
         Assert.Equal("AmbiguousEndpoints", new MsiClawRumbleEndpointResolver(_ => [Candidate("a"), Candidate("b")]).Resolve(identity).Reason);
         Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", pid: 0x1901)]).Resolve(identity).Reason);
         Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", length: 11)]).Resolve(identity).Reason);
+        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", writable: false)]).Resolve(identity).Reason);
+        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", physical: "ROOT-WRONG")]).Resolve(identity).Reason);
         Assert.Equal("a", new MsiClawRumbleEndpointResolver(_ => [Candidate("a")]).Resolve(identity).DevicePath);
     }
 
     [Fact]
-    public void Endpoint_resolver_retries_once_after_transient_com_exception_then_succeeds()
+    public void Endpoint_resolver_rejects_a_candidate_whose_input_report_length_is_not_64_bytes()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
-        MsiClawRumbleEndpointCandidate Candidate(string path) => new(path, "PNP-A", "ROOT-A", 0x0DB0, 0x1902, 64, 64, true);
+        var wrongInputLength = new MsiClawRumbleEndpointCandidate("a", "PNP-A", "ROOT-A", 0x0DB0, 0x1902, InputReportLength: 32, OutputReportLength: 64, Writable: true);
 
-        var calls = 0;
-        var delays = new List<TimeSpan>();
-        var resolver = new MsiClawRumbleEndpointResolver(_ =>
-        {
-            calls++;
-            if (calls == 1) throw new COMException("transient");
-            return [Candidate("a")];
-        }, delays.Add);
+        var result = new MsiClawRumbleEndpointResolver(_ => [wrongInputLength]).Resolve(identity);
 
-        var result = resolver.Resolve(identity);
-
-        Assert.Equal("a", result.DevicePath);
-        Assert.Equal(2, calls);
-        Assert.Single(delays);
+        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Null(result.DevicePath);
     }
 
     [Fact]
-    public void Endpoint_resolver_stops_retrying_after_max_attempts_and_rethrows()
+    public void Endpoint_resolver_treats_a_capability_lookup_failure_as_no_candidates_without_throwing()
+    {
+        // WindowsMsiClawRumbleEndpointCatalog.Find skips any candidate whose HID capability
+        // query fails, so the resolver simply sees an empty candidate list -- this must not fail
+        // main Steam Deck routing, and must not be conflated with a retryable transient error.
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+
+        var result = new MsiClawRumbleEndpointResolver(_ => []).Resolve(identity);
+
+        Assert.False(result.IsAvailable);
+        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_does_not_retry_a_com_exception_without_authoritative_transient_hresult()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        var calls = 0;
+        var resolver = new MsiClawRumbleEndpointResolver(_ =>
+        {
+            calls++;
+            throw new COMException("deterministic", unchecked((int)0x80070057));
+        });
+
+        Assert.Throws<COMException>(() => resolver.Resolve(identity));
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_rethrows_a_catalog_com_exception_without_retrying()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
         var calls = 0;
@@ -213,12 +281,12 @@ public sealed class MsiClawRumbleTests
         {
             calls++;
             throw new COMException($"attempt-{calls}");
-        }, _ => { });
+        });
 
         var exception = Assert.Throws<COMException>(() => resolver.Resolve(identity));
 
-        Assert.Equal("attempt-2", exception.Message);
-        Assert.Equal(2, calls);
+        Assert.Equal("attempt-1", exception.Message);
+        Assert.Equal(1, calls);
     }
 
     [Fact]
@@ -226,17 +294,15 @@ public sealed class MsiClawRumbleTests
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
         var calls = 0;
-        var delayed = false;
         var resolver = new MsiClawRumbleEndpointResolver(_ =>
         {
             calls++;
             throw new InvalidOperationException("deterministic");
-        }, _ => delayed = true);
+        });
 
         Assert.Throws<InvalidOperationException>(() => resolver.Resolve(identity));
 
         Assert.Equal(1, calls);
-        Assert.False(delayed);
     }
 
     [Fact]
@@ -392,6 +458,56 @@ public sealed class MsiClawRumbleTests
             bytesWritten = WriteResult ? (uint)(PartialWrite ? buffer.Length - 1 : buffer.Length) : 0;
             LastError = WriteResult ? 0 : 5;
             return WriteResult;
+        }
+        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
+        {
+            inputReportLength = 0;
+            outputReportLength = 0;
+            hidStatus = 0;
+            return false;
+        }
+    }
+
+    private sealed class FakeCapabilityHidApi : IMsiClawNativeHidApi
+    {
+        public bool OpenSucceeds { get; set; } = true;
+        public bool CapabilitiesSucceed { get; set; } = true;
+        public int InputReportLength { get; set; } = 64;
+        public int OutputReportLength { get; set; } = 64;
+        public int LastError { get; private set; }
+        public int OpenCalls { get; private set; }
+        public int CapabilityCalls { get; private set; }
+
+        public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
+        {
+            OpenCalls++;
+            if (!OpenSucceeds)
+            {
+                LastError = 2;
+                return new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
+            }
+            return new SafeFileHandle(new IntPtr(1), ownsHandle: false);
+        }
+
+        public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
+        {
+            bytesWritten = (uint)buffer.Length;
+            return true;
+        }
+
+        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
+        {
+            CapabilityCalls++;
+            hidStatus = CapabilitiesSucceed ? 0x00110000 : unchecked((int)0xC0110001);
+            if (!CapabilitiesSucceed)
+            {
+                inputReportLength = 0;
+                outputReportLength = 0;
+                return false;
+            }
+            inputReportLength = InputReportLength;
+            outputReportLength = OutputReportLength;
+            return true;
         }
     }
 }
