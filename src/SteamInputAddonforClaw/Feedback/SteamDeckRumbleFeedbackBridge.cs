@@ -26,13 +26,32 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     {
         try
         {
-            if (length > MaximumCallbackLength || (data == 0 && length != 0)) return;
+            // Diagnostics only: every classification path is logged before its return so a
+            // hardware Ping can be matched to exactly what Steam sent, without changing behavior.
+            if (length > MaximumCallbackLength || (data == 0 && length != 0))
+            {
+                AppLog.Debug("Rumble", "SteamDeck feedback RX invalid callback.", ("Length", length));
+                return;
+            }
             var report = new byte[(int)length];
             if (length != 0) Marshal.Copy(data, report, 0, report.Length);
+
+            var opcode = report.Length > 0 ? report[0] : (byte?)null;
+            AppLog.Debug("Rumble", "SteamDeck feedback RX", ("Opcode", opcode is null ? "None" : $"0x{opcode:X2}"), ("Length", length));
+
             var decoded = SteamDeckRumbleDecoder.Decode(report);
+            if (decoded.Command == SteamDeckFeedbackCommand.Rumble)
+                AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("Left", decoded.Rumble.LargeMotor), ("Right", decoded.Rumble.SmallMotor));
+            else
+                AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command));
+
             if (!decoded.IsSupported) return;
             BeforeLease?.Invoke();
-            if (!_authority.TryAcquireLease(_token, out var lease) || lease is null) return;
+            if (!_authority.TryAcquireLease(_token, out var lease) || lease is null)
+            {
+                AppLog.Debug("Rumble", "SteamDeck feedback DROP", ("Reason", "AuthorityRejected"));
+                return;
+            }
             using (lease)
             {
                 _sink.SetRumble(decoded.Rumble);
