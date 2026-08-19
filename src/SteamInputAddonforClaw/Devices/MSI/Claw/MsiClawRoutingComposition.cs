@@ -241,12 +241,21 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// and <paramref name="requestQuickAccessPulse"/> are the only two routing/output-layer facts this
     /// composition ever receives; it never learns anything else about Steam Deck output/VIIPER
     /// ownership. Idempotent no-op on a second call.
+    ///
+    /// Review fix (BLOCKER): the returned task is the SAME task retained as
+    /// <see cref="_oem1ActivationTask"/> -- the OEM1 coordinator and the routing guard share the SAME
+    /// <see cref="CenterMHelperOwnership"/>, but only <see cref="CenterMHelperOwnership.Start"/> itself
+    /// serializes the final creation call between them, so the production startup boundary
+    /// (<see cref="Hosting.AddonProcessHost.InitializeRuntimeAsync"/>) must await this before routing's
+    /// own initial reconcile can enter and possibly start the shared helper first. No Task.Run: this
+    /// composition seam is already synchronous only up to its first await, so returning the async
+    /// method's task directly is enough.
     /// </summary>
-    void IHandheldRoutingComposition.ConfigureOem1ActionPath(
+    Task IHandheldRoutingComposition.ConfigureOem1ActionPath(
         Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
         Action requestQuickAccessPulse)
     {
-        if (_oem1ActionPathConfigured) return;
+        if (_oem1ActionPathConfigured) return Task.CompletedTask;
         _oem1ActionPathConfigured = true;
 
         var eventSource = _testOnlyOem1EventSource ?? new WmiMsiEventSource();
@@ -271,36 +280,36 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         _oem1Bridge = bridge;
 
         if (!_startCenterMOem1LifecycleRuntime)
-            return;
+            return Task.CompletedTask;
 
         // Scope 8: WMI startup failure must remain feature-local -- never arm custom suppression,
         // leave native Center M available, continue the Addon runtime otherwise unaffected.
         if (!eventSource.Start())
         {
             AppLog.Warn("CenterM.Oem1", "OEM1 WMI observation failed to start; custom OEM1 suppression will not be armed, native Center M remains available.", null);
-            return;
+            return Task.CompletedTask;
         }
 
         // Scope 7: request lifecycle enable only after WMI observation has actually started and the
-        // gesture/action wiring above is already subscribed. Fire-and-forget from this synchronous
-        // composition seam's point of view, but explicitly OWNED (see _oem1TaskSync) so DisposeAsync
-        // can join it before the coordinator it calls into is disposed -- the coordinator performs its
-        // own fresh safety checks and this composition only learns readiness back through
-        // RefreshOem1BridgeAuthority (driven by CenterMOem1Runtime's onReconciled seam), never by
-        // assuming this call itself reached Armed.
+        // gesture/action wiring above is already subscribed. Explicitly OWNED (see _oem1TaskSync) so
+        // DisposeAsync can join it before the coordinator it calls into is disposed, AND now also
+        // returned to the caller so the production startup boundary can await the SAME task before
+        // routing/power observation begins.
         lock (_oem1TaskSync)
-            _oem1ActivationTask = Task.Run(async () =>
-            {
-                try
-                {
-                    await CenterMOem1Coordinator.SetDesiredEnabledAsync(true).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    AppLog.Error("CenterM.Oem1", "Requesting OEM1 lifecycle enable failed.", exception);
-                }
-                RefreshOem1BridgeAuthority();
-            });
+            return _oem1ActivationTask = EnableOem1Async();
+    }
+
+    private async Task EnableOem1Async()
+    {
+        try
+        {
+            await CenterMOem1Coordinator.SetDesiredEnabledAsync(true).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("CenterM.Oem1", "Requesting OEM1 lifecycle enable failed.", exception);
+        }
+        RefreshOem1BridgeAuthority();
     }
 
     /// <summary>Test-only observability: awaits the fire-and-forget startup activation
@@ -424,31 +433,20 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     public async ValueTask DisposeAsync()
     {
-        PhysicalInputSource.TestCompleted -= OnPhysicalInputCompleted;
-        PhysicalInputStage.PhysicalSessionRetired -= PhysicalRumbleSink.InvalidatePhysicalSession;
-        PhysicalInputStage.PhysicalSessionRetiring -= PhysicalRumbleSink.BeginPhysicalSessionRetirement;
-        PhysicalInputStage.PhysicalSessionStarted -= PhysicalRumbleSink.BeginPhysicalSession;
-        PhysicalRumbleSink.Dispose();
-
-        // Normal routing rollback already disarms the guard (last in
-        // RoutingPipelineStageOrder.Rollback, after native/physical restoration) long before
-        // disposal is ever reached -- this composition is only disposed after routing has already
-        // been shut down. This is a last-resort fallback for whatever normal rollback did NOT
-        // resolve, so it preserves the same ordering invariant: never release Center M launch
-        // protection before native-mode/physical restoration has at least been attempted.
-        await NativeModeSession.DisposeAsync().ConfigureAwait(false);
-        await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
-
-        // PR3 shutdown ordering (Scope 15): stop custom OEM1 gesture admission, then dispose the
-        // event/gesture/action path, BEFORE the coordinator/driver's own teardown below -- a drained
-        // WMI callback or gesture continuation must never be able to reach a disposed dispatcher/
-        // coordinator.
+        // Review fix (MAJOR): close custom OEM1 gesture admission and dispose the event/gesture/
+        // bridge path as the VERY FIRST step of composition disposal -- before any other awaited
+        // teardown below. The bridge race fix (Oem1EventGestureBridge.OnGestureRecognized) only
+        // guarantees no policy delivery can begin AFTER SetCustomAuthority(false)/Dispose() returns;
+        // it does nothing to stop a physical OEM1 press from starting a NEW BPM/QAM action while an
+        // earlier awaited step (e.g. NativeModeSession/PhysicalInputSource teardown) is still in
+        // flight. The stated shutdown contract is "close custom gesture admission first, then tear
+        // down the rest" -- so this boundary must not wait behind any of that unrelated teardown.
         _oem1Bridge?.SetCustomAuthority(false);
 
         // Review fix (BLOCKER): close admission to new fail-open scheduling and capture whatever
         // activation/fail-open work is currently owned/in-flight BEFORE disposing the bridge/event
-        // source -- both background operations call into the coordinator this method is about to
-        // dispose below, so neither may still be capable of entering it once DisposeAsync returns.
+        // source -- both background operations call into the coordinator this method eventually
+        // disposes below, so neither may still be capable of entering it once DisposeAsync returns.
         Task oem1ActivationTask, oem1FailOpenTask;
         lock (_oem1TaskSync)
         {
@@ -460,6 +458,22 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         _oem1Bridge?.Dispose();
         _oem1EventSource?.Dispose();
         _oem1GestureRecognizer?.Dispose();
+
+        PhysicalInputSource.TestCompleted -= OnPhysicalInputCompleted;
+        PhysicalInputStage.PhysicalSessionRetired -= PhysicalRumbleSink.InvalidatePhysicalSession;
+        PhysicalInputStage.PhysicalSessionRetiring -= PhysicalRumbleSink.BeginPhysicalSessionRetirement;
+        PhysicalInputStage.PhysicalSessionStarted -= PhysicalRumbleSink.BeginPhysicalSession;
+        PhysicalRumbleSink.Dispose();
+
+        // Normal routing rollback already disarms the guard (last in
+        // RoutingPipelineStageOrder.Rollback, after native/physical restoration) long before
+        // disposal is ever reached -- this composition is only disposed after routing has already
+        // been shut down. This is a last-resort fallback for whatever normal rollback did NOT
+        // resolve, so it preserves the same ordering invariant (relative to each other): never
+        // release Center M launch protection before native-mode/physical restoration has at least
+        // been attempted. OEM1 admission above is closed first regardless, per the shutdown contract.
+        await NativeModeSession.DisposeAsync().ConfigureAwait(false);
+        await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
 
         try { await oem1ActivationTask.ConfigureAwait(false); }
         catch (Exception exception) { AppLog.Error("CenterM.Oem1", "OEM1 startup activation did not complete cleanly during shutdown.", exception); }

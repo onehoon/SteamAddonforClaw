@@ -133,12 +133,17 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
 
     public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
     {
-        // Work order Scope 14: custom OEM1 admission goes OFF as the very first step of suspend,
-        // before the existing OEM1 suspend barrier below -- invoked synchronously here (not deferred
-        // to a poll tick) so a production owner can revoke gesture-bridge authority immediately,
-        // without adding a second suspend participant/power coordinator.
+        // Review fix (BLOCKER): the coordinator's own QuiesceForSuspendAsync establishes its
+        // request-time suspend barrier synchronously, before its first await -- so starting that
+        // call (without yet awaiting it) is itself the linearization point at which the barrier
+        // becomes authoritative. Starting it BEFORE _onSuspending closes the small window where a
+        // racing driver tick could otherwise finish (and republish SuppressionReady == true) between
+        // the bridge revocation and the barrier actually taking effect. The task is only awaited
+        // after _onSuspending runs, matching this method's original ordering guarantee (bridge OFF
+        // completes synchronously before suspend quiesce is reported done).
+        var quiesce = _coordinator.QuiesceForSuspendAsync(deadline, cycle, epoch, cancellationToken);
         _onSuspending?.Invoke();
-        return await _coordinator.QuiesceForSuspendAsync(deadline, cycle, epoch, cancellationToken).ConfigureAwait(false);
+        return await quiesce.ConfigureAwait(false);
     }
 
     /// <summary>Runs the coordinator's existing fresh resume reconciliation exactly once. Never

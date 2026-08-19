@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.CenterM;
+using SteamInputAddonforClaw.Power;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -1142,6 +1143,78 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
         Assert.Equal(1, h.HelperApi.StartCallCount);
         Assert.False(coordinator.GetSnapshot().NativeBehaviorGuaranteed); // still owned
+    }
+
+    [Fact]
+    public async Task Suspend_ReportsSuppressionNotReady_EvenThoughStateStaysArmed()
+    {
+        // Review fix (BLOCKER): QuiesceForSuspendAsync deliberately keeps an already-armed helper
+        // alive and does not leave the Armed state, so a caller deriving custom-action admission
+        // from State == Armed alone (as the OEM1 action-path composition does via SuppressionReady)
+        // could wrongly treat suspend as still ready. SuppressionReady must go false as soon as the
+        // suspend barrier is active, independent of State.
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(coordinator.GetSnapshot().SuppressionReady);
+
+        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        var snapshot = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.Armed, snapshot.State);
+        Assert.False(snapshot.SuppressionReady);
+
+        await coordinator.ReconcileAfterResumeAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
+        Assert.True(coordinator.GetSnapshot().SuppressionReady);
+    }
+
+    [Fact]
+    public async Task Runtime_never_republishes_suppression_ready_via_onReconciled_during_a_driven_tick_while_suspended()
+    {
+        // Review fix (BLOCKER): before the SuppressionReady/suspend-barrier fix, a driver tick
+        // running while QuiesceForSuspendAsync had already revoked bridge authority could still
+        // observe State == Armed and re-report SuppressionReady == true via onReconciled, which a
+        // production OEM1 action-path owner uses to re-enable the custom gesture bridge -- reviving
+        // custom OEM1 admission mid-suspend. This drives a real tick through the real runtime+
+        // coordinator while suspended and proves onReconciled never observes SuppressionReady == true
+        // until AFTER ReconcileAfterResumeAsync completes.
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        Assert.True(coordinator.GetSnapshot().SuppressionReady);
+
+        var released = new SemaphoreSlim(0);
+        var reconciledSignal = new SemaphoreSlim(0);
+        var observedReadyDuringSuspend = false;
+
+        var runtime = new CenterMOem1LifecycleRuntime(
+            coordinator,
+            routingGuardIsArmed: () => false,
+            delay: (_, token) => released.WaitAsync(token),
+            onReconciled: () =>
+            {
+                if (coordinator.GetSnapshot().SuppressionReady)
+                    observedReadyDuringSuspend = true;
+                reconciledSignal.Release();
+            });
+
+        runtime.Start();
+
+        IPowerSuspendParticipant suspendParticipant = runtime;
+        await suspendParticipant.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+
+        released.Release(); // let one driven tick run while the suspend barrier is active
+        await reconciledSignal.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(observedReadyDuringSuspend);
+
+        IRuntimeResumeParticipant resumeParticipant = runtime;
+        await resumeParticipant.ReconcileAfterResumeAsync(CancellationToken.None);
+        Assert.True(coordinator.GetSnapshot().SuppressionReady);
+
+        await runtime.DisposeAsync();
     }
 
     [Fact]

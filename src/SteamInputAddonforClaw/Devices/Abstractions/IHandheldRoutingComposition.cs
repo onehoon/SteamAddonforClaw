@@ -74,6 +74,15 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
     /// wire its dispatcher without the routing/output layer ever learning it is MSI/CenterM specific.
     /// A backend with no OEM1 feature never overrides this (the default is a no-op). Never called more
     /// than once per composition instance in production.
+    ///
+    /// <para>
+    /// Returns the (possibly still in-flight) OEM1 lifecycle-enable activation as a single owned
+    /// task, so the production startup boundary can await it before routing/power observation is
+    /// allowed to begin -- see <see cref="Devices.MSI.Claw.MsiClawRoutingComposition"/>'s
+    /// implementation for why: the OEM1 coordinator and the routing guard share the SAME underlying
+    /// helper ownership, so the OEM1 activation decision must be settled before the routing guard's
+    /// own arm transaction can start.
+    /// </para>
     /// </summary>
-    void ConfigureOem1ActionPath(Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus, Action requestQuickAccessPulse) { }
+    Task ConfigureOem1ActionPath(Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus, Action requestQuickAccessPulse) => Task.CompletedTask;
 }

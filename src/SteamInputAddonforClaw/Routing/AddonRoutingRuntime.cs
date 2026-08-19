@@ -50,6 +50,16 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         _coordinator = coordinator;
     }
 
+    /// <summary>Review fix (BLOCKER): the OEM1 action path's startup activation
+    /// (<see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>) and the routing guard
+    /// share the SAME underlying helper ownership, but only their exact-handle Start() call itself
+    /// serializes between them -- so the production startup boundary
+    /// (<see cref="Hosting.AddonProcessHost.InitializeRuntimeAsync"/>) must await this task before
+    /// routing/power observation is allowed to begin, ensuring the long-lived OEM1 owner's activation
+    /// decision is settled first. <see cref="Task.CompletedTask"/> for a backend with no OEM1 feature
+    /// (the interface default).</summary>
+    internal Task Oem1ActivationTask { get; private set; } = Task.CompletedTask;
+
     internal static AddonRoutingRuntime? Create(
         IHandheldDeviceAdapter handheldDeviceAdapter,
         ISystemStatusProvider statusProvider,
@@ -106,7 +116,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         // canonical routing is ACTUALLY active right now, exactly the fact OEM1 dispatch requires.
         // Reuses the same CaptureStatus() the rest of the runtime already uses, rather than
         // duplicating its field construction here, so the two can never drift apart.
-        handheldRoutingComposition.ConfigureOem1ActionPath(
+        runtime.Oem1ActivationTask = handheldRoutingComposition.ConfigureOem1ActionPath(
             captureRoutingStatus: runtime.CaptureStatus,
             requestQuickAccessPulse: deckStage.RequestQuickAccessPulse);
 

@@ -75,7 +75,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         var (composition, _) = BuildArmable(wmiStartSucceeds: true);
         IHandheldRoutingComposition handheld = composition;
 
-        handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
         await composition.TestOnly_Oem1ActivationTask;
 
         Assert.Equal(CenterMOem1LifecycleState.Armed, composition.CenterMOem1Coordinator.GetSnapshot().State);
@@ -90,7 +90,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         var (composition, _) = BuildArmable(wmiStartSucceeds: false);
         IHandheldRoutingComposition handheld = composition;
 
-        handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
         await composition.TestOnly_Oem1ActivationTask;
 
         Assert.NotEqual(CenterMOem1LifecycleState.Armed, composition.CenterMOem1Coordinator.GetSnapshot().State);
@@ -107,7 +107,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         var (composition, _) = BuildArmable();
         IHandheldRoutingComposition handheld = composition;
 
-        handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
         await composition.TestOnly_Oem1ActivationTask;
 
         Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
@@ -126,7 +126,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var (composition, eventSource) = BuildArmable(launchBigPicture: () => launched.TrySetResult());
         IHandheldRoutingComposition handheld = composition;
-        handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
         await composition.TestOnly_Oem1ActivationTask;
         Assert.NotNull(composition.TestOnly_Oem1Bridge);
 
@@ -147,7 +147,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         var (composition, eventSource) = BuildArmable();
         IHandheldRoutingComposition handheld = composition;
         var dispatchedGestures = new List<Oem1GesturePolicyRequest>();
-        handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
         await composition.TestOnly_Oem1ActivationTask;
         composition.TestOnly_Oem1Bridge!.PolicyRequested += dispatchedGestures.Add;
 
@@ -166,7 +166,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     {
         var (composition, _) = BuildArmable();
         IHandheldRoutingComposition handheld = composition;
-        handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
         await composition.TestOnly_Oem1ActivationTask;
         var bridge = composition.TestOnly_Oem1Bridge!;
 
@@ -194,7 +194,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
             throw new InvalidOperationException("simulated Big Picture launch failure");
         });
         IHandheldRoutingComposition handheld = composition;
-        handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
         await composition.TestOnly_Oem1ActivationTask;
 
         eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
@@ -203,6 +203,33 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         var exception = await Record.ExceptionAsync(async () => await ((IAsyncDisposable)composition).DisposeAsync());
 
         Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task Event41_cannot_dispatch_once_disposal_has_started()
+    {
+        // Review fix (MAJOR): the stated shutdown contract is "close custom gesture admission first,
+        // then tear down the rest" -- SetCustomAuthority(false) and disposing the bridge/event source
+        // must happen as the very first synchronous step of DisposeAsync, before the awaited
+        // NativeModeSession/PhysicalInputSource teardown that used to precede it. An async method
+        // runs synchronously up to its first await regardless of whether the caller awaits the
+        // returned ValueTask, so admission is already closed by the time this test's call to
+        // DisposeAsync() returns control -- a press emitted right after starting (not yet awaiting)
+        // disposal must never reach the dispatcher.
+        var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (composition, eventSource) = BuildArmable(launchBigPicture: () => launched.TrySetResult());
+        IHandheldRoutingComposition handheld = composition;
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await composition.TestOnly_Oem1ActivationTask;
+
+        var disposeTask = ((IAsyncDisposable)composition).DisposeAsync().AsTask();
+
+        eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+
+        await disposeTask;
+        var launchedAfterAll = await Task.WhenAny(launched.Task, Task.Delay(200)) == launched.Task;
+
+        Assert.False(launchedAfterAll);
     }
 
     private sealed class FakeMsiEventSource(bool startSucceeds) : IMsiEventSource
