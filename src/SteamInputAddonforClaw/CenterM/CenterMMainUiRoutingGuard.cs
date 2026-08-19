@@ -168,6 +168,12 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
             }
 
             var startResult = _helperOwnership.Start(stagedPath);
+            // PartialCleanupUnconfirmed still retained the exact process handle (a suspended
+            // helper that failed post-creation setup, cleaned up best-effort but unconfirmed) --
+            // this arm is responsible for that retained ownership exactly as it would be for a
+            // successful Start, so UnwindAsync/DisposeAsync must still be allowed to retry/register
+            // it rather than treating it as borrowed/unowned.
+            _helperStartedByCurrentArm = startResult is HelperStartResult.Started or HelperStartResult.PartialCleanupUnconfirmed;
             if (startResult != HelperStartResult.Started)
             {
                 AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: helper did not start.", null, ("Result", startResult));
@@ -175,7 +181,6 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
                 return CenterMMainUiRoutingGuardResult.HelperFailure;
             }
 
-            _helperStartedByCurrentArm = true;
             AppLog.Info("CenterM.RoutingGuard", "Helper started.", ("HelperProcessId", _helperOwnership.ProcessId));
         }
 
@@ -256,7 +261,13 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     /// (<see cref="_helperStartedByCurrentArm"/> false) is never stopped here -- it stays
     /// operational for its external owner regardless of whether this attempt failed partway through
     /// or a later <see cref="DisarmAsync"/> ends a successful arm. The mutex is always released
-    /// since it is exclusively owned by this guard's own routing-time arm.</summary>
+    /// since it is exclusively owned by this guard's own routing-time arm.
+    ///
+    /// <see cref="_helperStartedByCurrentArm"/> is cleared only once the exact helper ownership is
+    /// actually resolved (stopped and confirmed, or already not owned) -- an unconfirmed
+    /// <see cref="CenterMHelperOwnership.Stop"/> leaves it true so this arm remains the responsible
+    /// party for terminal <see cref="DisposeAsync"/>'s bounded retry / orphan-registration path,
+    /// exactly as it would be for a helper this arm is still mid-cleanup on.</summary>
     private Task<bool> UnwindAsync()
     {
         var helperStopped = true;
@@ -264,9 +275,13 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         {
             helperStopped = _helperOwnership.Stop(_helperStopTimeout);
             AppLog.Info("CenterM.RoutingGuard", "Helper stop attempted.", ("Confirmed", helperStopped), ("HelperProcessId", _helperOwnership.ProcessId));
+            _helperStartedByCurrentArm = !helperStopped;
+        }
+        else
+        {
+            _helperStartedByCurrentArm = false;
         }
 
-        _helperStartedByCurrentArm = false;
         _mutexOwnership.Release();
         AppLog.Info("CenterM.RoutingGuard", "MainUI mutex released.");
         return Task.FromResult(helperStopped);

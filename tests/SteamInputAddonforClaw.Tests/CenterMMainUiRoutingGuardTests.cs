@@ -420,6 +420,85 @@ public sealed class CenterMMainUiRoutingGuardTests
     }
 
     [Fact]
+    public async Task PartialCleanupUnconfirmed_start_keeps_this_arm_responsible_for_cleanup()
+    {
+        // Review fix: Start() returning PartialCleanupUnconfirmed still retained the exact process
+        // handle -- this arm must remain responsible for it exactly as it would for a successful
+        // Start, not be treated as if it never started anything. Before the fix,
+        // _helperStartedByCurrentArm stayed false here, so UnwindAsync never even attempted a Stop
+        // and a later DisposeAsync would skip retry/registration entirely.
+        CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        try
+        {
+            var snapshots = new FakeSnapshotSource([[]]);
+            var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+            var helperApi = new RecordingHelperApi { ResumeSucceeds = false, WaitForExitSucceeds = false };
+            var helperOwnership = new CenterMHelperOwnership(helperApi);
+            var guard = new CenterMMainUiRoutingGuard(
+                publishRootProvider: () => "C:\\fake\\publish",
+                processSnapshotSource: snapshots,
+                helperOwnership: helperOwnership,
+                mutexOwnership: new CenterMMainUiMutexOwnership(new FakeMutexFactory()),
+                stager: stager.Stage,
+                helperStopTimeout: TimeSpan.Zero);
+
+            var result = await guard.ArmAsync();
+
+            Assert.Equal(CenterMMainUiRoutingGuardResult.HelperFailure, result);
+            // UnwindAsync (run by the failed arm itself) must already have attempted a Stop and,
+            // since it could not be confirmed, kept the retained ownership rather than discarding it.
+            Assert.True(helperOwnership.IsOwned);
+
+            await guard.DisposeAsync();
+
+            Assert.True(CenterMOrphanedHelperRegistry.Contains(helperOwnership));
+        }
+        finally
+        {
+            CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        }
+    }
+
+    [Fact]
+    public async Task Disarm_with_unconfirmed_stop_still_lets_a_later_dispose_finish_cleanup_and_register_orphan()
+    {
+        // Review fix: an unconfirmed Stop() during DisarmAsync must leave _helperStartedByCurrentArm
+        // true so a later terminal DisposeAsync still performs its bounded retries and orphan
+        // registration. Before the fix, UnwindAsync unconditionally cleared the flag regardless of
+        // whether Stop() actually confirmed termination, so DisposeAsync would see it already false
+        // and return early -- silently abandoning the still-retained exact handle.
+        CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        try
+        {
+            var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
+            var stager = new FakeStager("C:\\fake\\MSI Center M.exe");
+            var helperApi = new RecordingHelperApi { WaitForExitSucceeds = false };
+            var helperOwnership = new CenterMHelperOwnership(helperApi);
+            var guard = new CenterMMainUiRoutingGuard(
+                publishRootProvider: () => "C:\\fake\\publish",
+                processSnapshotSource: snapshots,
+                helperOwnership: helperOwnership,
+                mutexOwnership: new CenterMMainUiMutexOwnership(new FakeMutexFactory()),
+                stager: stager.Stage,
+                helperStopTimeout: TimeSpan.Zero);
+            Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ArmAsync());
+
+            var disarmed = await guard.DisarmAsync();
+
+            Assert.False(disarmed);
+            Assert.True(helperOwnership.IsOwned);
+
+            await guard.DisposeAsync();
+
+            Assert.True(CenterMOrphanedHelperRegistry.Contains(helperOwnership));
+        }
+        finally
+        {
+            CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        }
+    }
+
+    [Fact]
     public async Task DisposeAsync_does_not_register_a_helper_whose_termination_is_confirmed()
     {
         CenterMOrphanedHelperRegistry.TestOnly_Clear();

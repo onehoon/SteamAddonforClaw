@@ -42,14 +42,22 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     /// <summary>The single authoritative <see cref="CenterM.CenterMHelperOwnership"/> for this MSI
     /// Claw runtime composition (PR1 ownership convergence). Created here (unless caller-injected,
-    /// e.g. by tests) and passed to <see cref="CenterMGuard"/> via constructor injection so routing
-    /// never constructs a second, competing production ownership object for the same same-name
-    /// helper identity. A future OEM1 production composition seam can receive this SAME instance.
-    /// This composition is the sole final disposer -- <see cref="DisposeAsync"/> disposes it after
-    /// <see cref="CenterMGuard"/> has already released its own routing-time resources.</summary>
+    /// e.g. by tests, or by a future OEM1 production composition seam) and passed to
+    /// <see cref="CenterMGuard"/> via constructor injection so routing never constructs a second,
+    /// competing production ownership object for the same same-name helper identity. Disposal
+    /// ownership follows creation: this composition disposes it only when it created it itself
+    /// (see <see cref="_ownsCenterMHelperOwnership"/>) -- a caller-injected instance is the
+    /// caller's terminal responsibility, so two owners never race to dispose the same object.</summary>
     internal CenterMHelperOwnership CenterMHelperOwnership { get; }
     internal CenterMMainUiRoutingGuard CenterMGuard { get; }
     internal CenterMMainUiRoutingGuardStage CenterMGuardStage { get; }
+
+    /// <summary>True only when this composition itself constructed <see cref="CenterMHelperOwnership"/>
+    /// (no caller-injected instance was supplied) -- the sole condition under which
+    /// <see cref="DisposeAsync"/> disposes it. A caller-injected instance (e.g. a future OEM1
+    /// composition seam sharing one instance across both consumers) is never disposed here; the
+    /// caller that created it remains its one terminal owner.</summary>
+    private readonly bool _ownsCenterMHelperOwnership;
 
     private readonly IReadOnlyList<IRoutingPipelineStage> _stages;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
@@ -96,6 +104,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // guard, is the shared authority a future OEM1 production composition seam can also receive
         // the SAME instance of. Only used as the guard's default when no guard is caller-injected;
         // a caller-injected guard (tests today) already carries its own ownership instance.
+        _ownsCenterMHelperOwnership = centerMHelperOwnership is null;
         CenterMHelperOwnership = centerMHelperOwnership ?? new CenterMHelperOwnership();
         CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard(helperOwnership: CenterMHelperOwnership);
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
@@ -189,9 +198,13 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // untouched for its external owner (PR1 ownership convergence).
         await CenterMGuard.DisposeAsync().ConfigureAwait(false);
 
-        // Sole final disposer of the shared authority this composition created (PR1 ownership
-        // convergence, requirement 8): a no-op if nothing is owned (never started, already stopped
-        // by the guard above, or still borrowed by an external owner in a future PR).
-        CenterMHelperOwnership.Dispose();
+        // Sole final disposer of the shared authority, but only when THIS composition created it
+        // (PR1 ownership convergence, requirement 8): a caller-injected instance (a future OEM1
+        // composition seam sharing one instance across both consumers) is never disposed here --
+        // its creator remains the one terminal owner, so two terminal-cleanup paths never race the
+        // same exact-handle ownership. When this composition IS the owner, disposing is a no-op if
+        // nothing is owned (never started, already stopped by the guard above).
+        if (_ownsCenterMHelperOwnership)
+            CenterMHelperOwnership.Dispose();
     }
 }

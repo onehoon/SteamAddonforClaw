@@ -98,6 +98,29 @@ public sealed class MsiClawRoutingCompositionTests
     }
 
     [Fact]
+    public async Task DisposeAsync_does_not_dispose_a_caller_injected_shared_helper_ownership()
+    {
+        // Review fix: a caller-injected CenterMHelperOwnership (the future OEM1 sharing seam) must
+        // remain the injecting caller's terminal responsibility. CenterMHelperOwnership.Dispose()
+        // actively terminates an owned helper, so if composition disposal called it unconditionally,
+        // it could terminate a helper a second terminal owner (e.g. a future
+        // CenterMOem1LifecycleCoordinator sharing this same instance) still needs operational.
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        var helperApi = new BlockingTerminateHelperApi(new ManualResetEventSlim(true));
+        var helperOwnership = new CenterMHelperOwnership(helperApi);
+        Assert.Equal(HelperStartResult.Started, helperOwnership.Start(@"C:\fake\MSI Center M.exe"));
+        var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), centerMHelperOwnership: helperOwnership);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+
+        // The composition's own default guard never armed, so it never touched the shared instance
+        // either -- this proves composition disposal itself skips CenterMHelperOwnership.Dispose()
+        // for an instance it did not create.
+        Assert.True(helperOwnership.IsOwned);
+    }
+
+    [Fact]
     public async Task DisposeAsync_disarms_the_guard_even_when_arm_never_ran()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
