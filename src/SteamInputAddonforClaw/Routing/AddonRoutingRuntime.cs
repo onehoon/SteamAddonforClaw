@@ -60,6 +60,11 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     /// (the interface default).</summary>
     internal Task Oem1ActivationTask { get; private set; } = Task.CompletedTask;
 
+    /// <summary>Test-only seam: lets a test hold OEM1 activation deliberately incomplete and prove
+    /// <see cref="ReconcileSafelyAsync"/> cannot enter the routing coordinator until it resolves.
+    /// Never touched by production code.</summary>
+    internal void TestOnly_SetOem1ActivationTask(Task task) => Oem1ActivationTask = task;
+
     internal static AddonRoutingRuntime? Create(
         IHandheldDeviceAdapter handheldDeviceAdapter,
         ISystemStatusProvider statusProvider,
@@ -171,6 +176,18 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         {
             try
             {
+                // Review fix (BLOCKER): InitializeRuntimeAsync's own await of Oem1ActivationTask only
+                // orders the CALLER-driven StartPowerObservation()/initial ReconcileAsync() -- it does
+                // nothing to stop AddonRuntimeHost's SteamSessionRuntime.StateChanged subscription
+                // (wired earlier in AddonRuntimeCompositionFactory.Create, before that await) from
+                // firing a real event-driven reconcile while OEM1 activation is still in flight. Since
+                // the OEM1 coordinator and the routing guard (CenterMGuard, the first enabled stage on
+                // entry) share the SAME CenterMHelperOwnership, every normal reconcile entry point --
+                // not just the startup one -- must wait behind the same one-shot activation task before
+                // the routing coordinator/pipeline can run, or the two owners can still race the shared
+                // helper's creation.
+                await Oem1ActivationTask.ConfigureAwait(false);
+
                 var result = await _coordinator.ReconcileAsync(cancellationToken).ConfigureAwait(false);
                 if (!result.Succeeded)
                     AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,
