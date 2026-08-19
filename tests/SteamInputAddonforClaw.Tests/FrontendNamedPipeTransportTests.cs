@@ -39,8 +39,8 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
         Assert.Equal(fake.LaunchResult, await client.SetLaunchAtWindowsStartupAsync(false));
         Assert.False(fake.LastLaunchAtStartupEnabled);
-        Assert.Equal(Settings, await client.SetRouteInSteamBigPictureAsync(false));
-        Assert.False(fake.LastRouteInBigPictureEnabled);
+        Assert.Equal(Settings, await client.SetSteamInputRoutingEnabledAsync(false));
+        Assert.False(fake.LastSteamInputRoutingEnabled);
         Assert.Equal(Settings, await client.SetLogLevelAsync(FrontendLogLevel.Info));
         Assert.Equal(FrontendLogLevel.Info, fake.LastLogLevel);
         Assert.Equal(Settings, await client.SuppressDeveloperMenuWarningAsync());
@@ -60,6 +60,24 @@ public sealed class FrontendNamedPipeTransportTests
         var (server, pipeName) = await StartServerAsync(fake);
         await using var serverLifetime = server;
         await using var client = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion + 1);
+
+        await Assert.ThrowsAsync<FrontendProtocolException>(() => client.ConnectAsync());
+        Assert.Equal(0, fake.TotalCalls);
+    }
+
+    [Fact]
+    public async Task Previous_protocol_version_is_rejected_at_handshake()
+    {
+        // Review fix (MAJOR): the Steam Input Routing master-switch PR renamed
+        // FrontendRpcMethod.SetRouteInSteamBigPicture -> SetSteamInputRoutingEnabled (and the
+        // matching request record / FrontendSettingsSnapshot property), which
+        // FrontendRpcMethodJsonConverter serializes by exact string name. A stale v1 peer must be
+        // rejected up front at the protocol-version handshake gate, not allowed to connect and only
+        // fail later as UnsupportedMethod/payload-deserialization errors once it tries the renamed RPC.
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = new NamedPipeAddonFrontendClient(pipeName, FrontendTransportProtocol.CurrentVersion - 1);
 
         await Assert.ThrowsAsync<FrontendProtocolException>(() => client.ConnectAsync());
         Assert.Equal(0, fake.TotalCalls);
@@ -730,7 +748,7 @@ public sealed class FrontendNamedPipeTransportTests
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
         Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
 
-        await WriteRawFrameAsync(pipe, "{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"FutureMethod\"}");
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"FutureMethod\"}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
         Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
@@ -754,7 +772,7 @@ public sealed class FrontendNamedPipeTransportTests
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
         Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
 
-        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\"}}");
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\"}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
         Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
@@ -762,10 +780,14 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(0, fake.TotalCalls);
     }
 
+    // Attribute arguments must be compile-time constants, so these literal ProtocolVersion values
+    // cannot reference FrontendTransportProtocol.CurrentVersion directly -- keep them in sync with it
+    // by hand. A stale value here would make the frame rejected at the version check instead of
+    // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":2,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":2,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":2,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -800,15 +822,15 @@ public sealed class FrontendNamedPipeTransportTests
 
     [Theory]
     [InlineData("SetLaunchAtWindowsStartup", "{}")]
-    [InlineData("SetRouteInSteamBigPicture", "{}")]
+    [InlineData("SetSteamInputRoutingEnabled", "{}")]
     [InlineData("SetDeveloperTestMode", "{}")]
     [InlineData("SetLogLevel", "{}")]
     [InlineData("SetLaunchAtWindowsStartup", "null")]
-    [InlineData("SetRouteInSteamBigPicture", "null")]
+    [InlineData("SetSteamInputRoutingEnabled", "null")]
     [InlineData("SetDeveloperTestMode", "null")]
     [InlineData("SetLogLevel", "null")]
     [InlineData("SetLaunchAtWindowsStartup", "{\"Enabled\":\"false\"}")]
-    [InlineData("SetRouteInSteamBigPicture", "{\"Enabled\":\"false\"}")]
+    [InlineData("SetSteamInputRoutingEnabled", "{\"Enabled\":\"false\"}")]
     [InlineData("SetDeveloperTestMode", "{\"Enabled\":\"false\"}")]
     [InlineData("SetLogLevel", "{\"Level\":123}")]
     public async Task Malformed_mutation_payload_is_rejected_without_invoking_frontend(string method, string payload)
@@ -822,7 +844,7 @@ public sealed class FrontendNamedPipeTransportTests
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
         Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
 
-        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\",\"Payload\":{payload}}}");
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"{method}\",\"Payload\":{payload}}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
         Assert.Equal(FrontendWireMessageKind.Response, response.Kind);
@@ -842,7 +864,7 @@ public sealed class FrontendNamedPipeTransportTests
         await FrontendWireCodec.WriteAsync(pipe, new(FrontendTransportProtocol.CurrentVersion, FrontendWireMessageKind.Handshake), writeGate, CancellationToken.None);
         Assert.Equal(FrontendWireMessageKind.HandshakeAccepted, (await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None)).Kind);
 
-        await WriteRawFrameAsync(pipe, "{\"ProtocolVersion\":1,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"GetBootstrap\",\"Payload\":{}}");
+        await WriteRawFrameAsync(pipe, $"{{\"ProtocolVersion\":{FrontendTransportProtocol.CurrentVersion},\"Kind\":\"Request\",\"RequestId\":1,\"Method\":\"GetBootstrap\",\"Payload\":{{}}}}");
         var response = await FrontendWireCodec.ReadAsync(pipe, CancellationToken.None);
 
         Assert.Equal(FrontendRemoteErrorCode.InvalidMessage, response.Error?.Code);
@@ -942,7 +964,7 @@ public sealed class FrontendNamedPipeTransportTests
         public FrontendEnvironmentReportResult EnvironmentResult { get; } = new(true, null);
         public int TotalCalls { get; private set; }
         public bool LastLaunchAtStartupEnabled { get; private set; }
-        public bool LastRouteInBigPictureEnabled { get; private set; }
+        public bool LastSteamInputRoutingEnabled { get; private set; }
         public FrontendLogLevel LastLogLevel { get; private set; }
         public bool LastDeveloperTestModeEnabled { get; private set; }
         public int SuppressDeveloperWarningCount { get; private set; }
@@ -954,7 +976,7 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) { TotalCalls++; if (ThrowOperationCanceledWithoutToken) throw new OperationCanceledException(); return Task.FromResult(Bootstrap); }
         public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(Status); }
         public Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastLaunchAtStartupEnabled = enabled; return Task.FromResult(LaunchResult); }
-        public Task<FrontendSettingsSnapshot> SetRouteInSteamBigPictureAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastRouteInBigPictureEnabled = enabled; return Task.FromResult(Settings); }
+        public Task<FrontendSettingsSnapshot> SetSteamInputRoutingEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastSteamInputRoutingEnabled = enabled; return Task.FromResult(Settings); }
         public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken t = default) { TotalCalls++; LastLogLevel = level; return Task.FromResult(Settings); }
         public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken t = default) { TotalCalls++; SuppressDeveloperWarningCount++; return Task.FromResult(Settings); }
         public Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastDeveloperTestModeEnabled = enabled; return Task.FromResult(new FrontendDeveloperSnapshot(enabled)); }

@@ -19,7 +19,9 @@ internal static class ElevatedSteamSafetyGate
         try { settings = settingsReader(); }
         catch { return (false, "SettingsUnreliable"); }
         if (!settings.IsReliable) return (false, "SettingsUnreliable");
-        if (!settings.Settings.RouteInSteamBigPicture) return (true, "Allowed");
+        // With the Steam Input routing master switch off, an active Big Picture session is not an
+        // Addon routing session, so it cannot be disturbed by prerequisite mutation.
+        if (!settings.Settings.SteamInputRoutingEnabled) return (true, "Allowed");
 
         SteamBigPictureProbeResult probe;
         try { probe = bigPictureProbe(); }

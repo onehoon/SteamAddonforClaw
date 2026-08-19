@@ -9,7 +9,7 @@ public sealed class SteamSessionRuntimeTests
     [Fact]
     public void DeveloperTestModeState_transition_is_published_through_the_owned_state_graph()
     {
-        using var runtime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var runtime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         SteamSessionStateChangedEventArgs? observed = null;
         runtime.StateChanged += (_, args) => observed = args;
 
@@ -25,15 +25,15 @@ public sealed class SteamSessionRuntimeTests
     [Fact]
     public void Dispose_is_idempotent()
     {
-        var runtime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var runtime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
 
         runtime.Dispose();
         runtime.Dispose();
     }
 
-    private sealed class FakeBigPicturePreference : ISteamBigPictureRoutingPreference
+    private sealed class FakeSteamInputRoutingPreference : ISteamInputRoutingPreference
     {
-        public bool RouteInSteamBigPicture => false;
-        public event EventHandler? RouteInSteamBigPictureChanged { add { } remove { } }
+        public bool SteamInputRoutingEnabled => true;
+        public event EventHandler? SteamInputRoutingEnabledChanged { add { } remove { } }
     }
 }

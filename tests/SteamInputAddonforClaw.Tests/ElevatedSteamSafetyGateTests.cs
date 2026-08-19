@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ElevatedSteamSafetyGateTests
 {
     [Fact]
-    public void BigPictureEnabledAndActive_BlocksMutation()
+    public void RoutingEnabledAndBigPictureActive_BlocksMutation()
     {
         var result = Evaluate(0, true, new(true, true, "Active"));
         Assert.False(result.Allowed);
@@ -16,10 +16,18 @@ public sealed class ElevatedSteamSafetyGateTests
     }
 
     [Fact]
-    public void BigPictureDisabled_DoesNotProbeOrBlock()
+    public void RoutingDisabled_DoesNotProbeOrBlock()
     {
         var result = Evaluate(0, false, new(true, true, "Active"));
         Assert.True(result.Allowed);
+    }
+
+    [Fact]
+    public void RoutingEnabledAndUnreliableBigPictureProbe_BlocksMutation()
+    {
+        var result = Evaluate(0, true, new(false, false, "Unreliable"));
+        Assert.False(result.Allowed);
+        Assert.Equal("BigPictureProbeFailed", result.Reason);
     }
 
     [Fact]
@@ -48,6 +56,6 @@ public sealed class ElevatedSteamSafetyGateTests
     private static (bool Allowed, string Reason) Evaluate(uint appId, bool enabled, SteamBigPictureProbeResult probe) =>
         ElevatedSteamSafetyGate.Evaluate(
             () => appId,
-            () => new(new AppSettings(RouteInSteamBigPicture: enabled), true, "Loaded"),
+            () => new(new AppSettings(SteamInputRoutingEnabled: enabled), true, "Loaded"),
             () => probe);
 }

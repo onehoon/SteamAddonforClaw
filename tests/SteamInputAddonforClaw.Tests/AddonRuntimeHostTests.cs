@@ -23,7 +23,7 @@ public sealed class AddonRuntimeHostTests
     [InlineData("Success", true)]
     public async Task Host_shutdown_disposes_routing_backend_only_after_canonical_success(string failureClass, bool shutdownSucceeded)
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var disposed = 0;
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
             new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), true,
@@ -38,7 +38,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task Host_with_unavailable_routing_remains_valid_and_passive()
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
             new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
             hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false));
@@ -55,7 +55,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task Host_republishes_Steam_state_transitions_to_subscribers()
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
             new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), recoverySafe: true,
             hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false));
@@ -73,7 +73,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task Steam_state_transition_drives_exactly_one_normal_reconcile_and_exactly_one_status_refresh()
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
         var powerGate = new PowerMutationGate(initiallyOpen: true);
         var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
@@ -112,7 +112,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task ReconcileFreshAfterResumeAsync_reconciles_exactly_once_refreshes_status_exactly_once_and_does_not_leave_suppression_stuck()
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
         var powerGate = new PowerMutationGate(initiallyOpen: true);
         var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
@@ -167,7 +167,7 @@ public sealed class AddonRuntimeHostTests
         // ResumeFreshReconcileSuppression.Begin() and Complete() must be deferred (not fired
         // immediately, not dropped), then replayed as exactly one normal reconcile once the fresh
         // reconcile finishes -- never two independent/overlapping reconciles.
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var powerGate = new PowerMutationGate(initiallyOpen: true);
         var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
         var statusProvider = new BlockingStatusProvider(Snapshot(WaitingForSteam()));
@@ -223,7 +223,7 @@ public sealed class AddonRuntimeHostTests
         // CenterMOem1LifecycleCoordinator, real CenterMOem1LifecycleRuntime) through a real suspend/
         // resume pair, exactly like the existing resume tests above, but with a status provider that
         // throws during routing's own fresh reconcile.
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var statusProvider = new ThrowingStatusProvider();
         var powerGate = new PowerMutationGate(initiallyOpen: true);
         var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
@@ -269,7 +269,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task StartPowerObservation_opens_the_gate_when_registration_succeeds_and_recovery_is_safe()
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var source = new FakeSource(succeeds: true);
         var powerGate = new PowerMutationGate();
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
@@ -287,7 +287,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task StartPowerObservation_leaves_the_gate_closed_when_registration_fails()
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var source = new FakeSource(succeeds: false);
         var powerGate = new PowerMutationGate();
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
@@ -304,7 +304,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task StartPowerObservation_leaves_the_gate_closed_when_recovery_is_unsafe_even_if_registration_succeeds()
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var source = new FakeSource(succeeds: true);
         var powerGate = new PowerMutationGate();
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
@@ -321,7 +321,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task EvaluateUserTermination_blocks_on_owned_live_recovery_mutation()
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
         var host = new AddonRuntimeHost(steamRuntime, routingRuntime: null,
             new PowerMutationGate(initiallyOpen: true), recoverySafetyState, recoverySafe: true,
@@ -340,7 +340,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task DisposeAsync_is_idempotent_and_a_post_disposal_notification_does_not_reenter_runtime_work()
     {
-        using var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
         var powerGate = new PowerMutationGate(initiallyOpen: true);
         var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
@@ -367,7 +367,7 @@ public sealed class AddonRuntimeHostTests
     [Fact]
     public async Task Resume_notification_processed_after_PrepareForShutdown_does_not_touch_the_disposed_Steam_runtime()
     {
-        var steamRuntime = new SteamSessionRuntime(new FakeBigPicturePreference());
+        var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
         var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
         var powerGate = new PowerMutationGate(initiallyOpen: true);
         var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
@@ -405,10 +405,10 @@ public sealed class AddonRuntimeHostTests
         powerGate,
         recoverySafetyState);
 
-    private sealed class FakeBigPicturePreference : ISteamBigPictureRoutingPreference
+    private sealed class FakeSteamInputRoutingPreference : ISteamInputRoutingPreference
     {
-        public bool RouteInSteamBigPicture => false;
-        public event EventHandler? RouteInSteamBigPictureChanged { add { } remove { } }
+        public bool SteamInputRoutingEnabled => true;
+        public event EventHandler? SteamInputRoutingEnabledChanged { add { } remove { } }
     }
 
     private sealed class EmptyDeviceEnumerator : IControllerDeviceEnumerator

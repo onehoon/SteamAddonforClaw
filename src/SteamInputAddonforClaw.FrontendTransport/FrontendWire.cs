@@ -6,7 +6,13 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.FrontendTransport;
 
-public static class FrontendTransportProtocol { public const int CurrentVersion = 1; }
+// Review fix (MAJOR): the Steam Input Routing master-switch PR renamed FrontendRpcMethod.
+// SetRouteInSteamBigPicture -> SetSteamInputRoutingEnabled (and the matching request record /
+// FrontendSettingsSnapshot property), which FrontendRpcMethodJsonConverter serializes by exact
+// string name. Bumping the version here makes an old v1 peer fail the handshake up front instead
+// of connecting successfully and only failing later as UnsupportedMethod/payload-deserialization
+// errors once it tries the renamed RPC.
+public static class FrontendTransportProtocol { public const int CurrentVersion = 2; }
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -26,13 +32,13 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetRouteInSteamBigPicture, SetLogLevel, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport }
 internal enum FrontendNotificationKind { StateInvalidated }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
 internal sealed record FrontendWireEnvelope(int ProtocolVersion, FrontendWireMessageKind Kind, long? RequestId = null, FrontendRpcMethod? Method = null, FrontendNotificationKind? Notification = null, JsonElement? Payload = null, FrontendWireError? Error = null);
 internal sealed record SetLaunchAtWindowsStartupRequest(bool Enabled);
-internal sealed record SetRouteInSteamBigPictureRequest(bool Enabled);
+internal sealed record SetSteamInputRoutingEnabledRequest(bool Enabled);
 internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetDeveloperTestModeRequest(bool Enabled);
 

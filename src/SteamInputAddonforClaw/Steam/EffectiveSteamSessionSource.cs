@@ -10,7 +10,7 @@ public sealed class EffectiveSteamSessionSource : IDisposable
     private readonly SteamSessionWatcher _watcher;
     private readonly DeveloperTestModeState _testMode;
     private readonly SteamBigPictureWatcher _bigPictureWatcher;
-    private readonly ISteamBigPictureRoutingPreference _settings;
+    private readonly ISteamInputRoutingPreference _settings;
     private readonly Lock _sync = new();
     private readonly Lock _publicationGate = new();
     private readonly Queue<SteamSessionStateChangedEventArgs> _pendingTransitions = new();
@@ -18,7 +18,7 @@ public sealed class EffectiveSteamSessionSource : IDisposable
     private bool _disposed;
     private SteamSessionState _state;
 
-    internal EffectiveSteamSessionSource(SteamSessionWatcher watcher, SteamBigPictureWatcher bigPictureWatcher, DeveloperTestModeState testMode, ISteamBigPictureRoutingPreference settings)
+    internal EffectiveSteamSessionSource(SteamSessionWatcher watcher, SteamBigPictureWatcher bigPictureWatcher, DeveloperTestModeState testMode, ISteamInputRoutingPreference settings)
     {
         _watcher = watcher ?? throw new ArgumentNullException(nameof(watcher));
         _testMode = testMode ?? throw new ArgumentNullException(nameof(testMode));
@@ -27,12 +27,12 @@ public sealed class EffectiveSteamSessionSource : IDisposable
         _state = ComputeState();
         _watcher.StateChanged += OnInputChanged;
         _bigPictureWatcher.StateChanged += OnInputChanged;
-        _settings.RouteInSteamBigPictureChanged += OnInputChanged;
+        _settings.SteamInputRoutingEnabledChanged += OnInputChanged;
         _testMode.Changed += OnInputChanged;
     }
 
     public EffectiveSteamSessionSource(SteamSessionWatcher watcher, DeveloperTestModeState testMode)
-        : this(watcher, new SteamBigPictureWatcher(new InactiveSteamBigPictureProbe()), testMode, new StaticSteamBigPicturePreference())
+        : this(watcher, new SteamBigPictureWatcher(new InactiveSteamBigPictureProbe()), testMode, new StaticSteamInputRoutingPreference())
     {
     }
 
@@ -59,9 +59,13 @@ public sealed class EffectiveSteamSessionSource : IDisposable
 
     private SteamSessionState ComputeState()
     {
+        // Steam Input routing is a single master eligibility gate: while it is off, no session source
+        // (actual game, Big Picture, developer test) may produce an effective routing session. The
+        // preference itself stays stored; it just cannot make routing eligible.
+        if (!_settings.SteamInputRoutingEnabled) return SteamSessionState.FromRunningAppId(0);
         var actual = _watcher.State;
         if (actual.IsActive) return actual;
-        if (_settings.RouteInSteamBigPicture && _bigPictureWatcher.IsActive) return SteamSessionState.CreateBigPicture();
+        if (_bigPictureWatcher.IsActive) return SteamSessionState.CreateBigPicture();
         return _testMode.IsEnabled ? SteamSessionState.CreateDeveloperTest() : actual;
     }
 
@@ -113,16 +117,18 @@ public sealed class EffectiveSteamSessionSource : IDisposable
         }
         _watcher.StateChanged -= OnInputChanged;
         _bigPictureWatcher.StateChanged -= OnInputChanged;
-        _settings.RouteInSteamBigPictureChanged -= OnInputChanged;
+        _settings.SteamInputRoutingEnabledChanged -= OnInputChanged;
         _testMode.Changed -= OnInputChanged;
         GC.SuppressFinalize(this);
     }
 }
 
-internal sealed class StaticSteamBigPicturePreference : ISteamBigPictureRoutingPreference
+// Used by the settings-less convenience constructor, which pairs an always-inactive Big Picture probe
+// with the product default (routing enabled) so actual-game and developer-test sources behave normally.
+internal sealed class StaticSteamInputRoutingPreference : ISteamInputRoutingPreference
 {
-    public bool RouteInSteamBigPicture => false;
-    public event EventHandler? RouteInSteamBigPictureChanged { add { } remove { } }
+    public bool SteamInputRoutingEnabled => true;
+    public event EventHandler? SteamInputRoutingEnabledChanged { add { } remove { } }
 }
 
 internal sealed class InactiveSteamBigPictureProbe : ISteamBigPictureWindowProbe
