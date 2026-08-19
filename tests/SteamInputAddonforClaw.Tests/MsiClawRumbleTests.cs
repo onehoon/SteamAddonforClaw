@@ -108,6 +108,21 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Transport_falls_back_to_write_only_open_when_read_write_open_is_denied()
+    {
+        var native = new FakeNativeHid { DenyReadWriteOpen = true };
+        using var transport = new WindowsMsiClawRumbleTransport(native);
+
+        var result = transport.Write("path-a", new byte[11], 32);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, native.OpenCount);
+        Assert.Equal(2, native.OpenAccessRequests.Count);
+        Assert.Equal(0x80000000u | 0x40000000u, native.OpenAccessRequests[0]); // first attempt: read+write
+        Assert.Equal(0x40000000u, native.OpenAccessRequests[1]); // fallback: write-only
+    }
+
+    [Fact]
     public void Transport_builds_the_output_buffer_at_the_endpoints_real_report_length()
     {
         var native = new FakeNativeHid();
@@ -229,6 +244,27 @@ public sealed class MsiClawRumbleTests
         Assert.Equal(0x00110000, hidStatus);
         Assert.Equal(1, hidApi.OpenCalls);
         Assert.Equal(1, hidApi.CapabilityCalls);
+    }
+
+    [Fact]
+    public void Catalog_capability_lookup_falls_back_to_write_only_when_read_write_open_is_denied()
+    {
+        // Some MSI HID collections deny GENERIC_READ while still allowing output writes -- the
+        // exact behavior ClawTweaks' ClawButtonMonitor.SharedHidWrite already retries for. A valid
+        // PID1902 gamepad collection must not be rejected here just because the read/write open
+        // failed; the write-only fallback must let capability discovery still succeed.
+        var hidApi = new FakeCapabilityHidApi { DenyReadWriteOpen = true };
+        var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
+
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out _, out _, out var openSucceeded, out _, out _);
+
+        Assert.True(succeeded);
+        Assert.True(openSucceeded);
+        Assert.Equal(64, input);
+        Assert.Equal(32, output);
+        Assert.Equal(2, hidApi.OpenAccessRequests.Count);
+        Assert.Equal(0x80000000u | 0x40000000u, hidApi.OpenAccessRequests[0]); // first attempt: read+write
+        Assert.Equal(0x40000000u, hidApi.OpenAccessRequests[1]); // fallback: write-only
     }
 
     [Fact]
@@ -576,12 +612,24 @@ public sealed class MsiClawRumbleTests
         public bool WriteResult { get; set; } = true;
         public bool PartialWrite { get; set; }
         public bool BlockFirstWrite { get; init; }
+        public bool DenyReadWriteOpen { get; set; }
+        public List<uint> OpenAccessRequests { get; } = [];
         public int WriteCalls { get; private set; }
         public TaskCompletionSource FirstWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim ReleaseFirstWrite { get; } = new(false);
         public List<byte[]> Writes { get; } = [];
         public SafeFileHandle Open(string path, uint desiredAccess, uint shareMode, uint creationDisposition)
-        { OpenCount++; return new SafeFileHandle(new IntPtr(OpenCount), ownsHandle: false); }
+        {
+            OpenAccessRequests.Add(desiredAccess);
+            const uint GenericRead = 0x80000000;
+            if (DenyReadWriteOpen && (desiredAccess & GenericRead) != 0)
+            {
+                LastError = 5;
+                return new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
+            }
+            OpenCount++;
+            return new SafeFileHandle(new IntPtr(OpenCount), ownsHandle: false);
+        }
         public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
         {
             WriteCalls++;
@@ -614,14 +662,18 @@ public sealed class MsiClawRumbleTests
         public int OutputReportLength { get; set; } = 32;
         public ushort UsagePage { get; set; } = MsiClawHardware.DirectInputUsagePage;
         public ushort Usage { get; set; } = MsiClawHardware.DirectInputUsage;
+        public bool DenyReadWriteOpen { get; set; }
         public int LastError { get; private set; }
         public int OpenCalls { get; private set; }
         public int CapabilityCalls { get; private set; }
+        public List<uint> OpenAccessRequests { get; } = [];
 
         public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
         {
             OpenCalls++;
-            if (!OpenSucceeds)
+            OpenAccessRequests.Add(desiredAccess);
+            const uint GenericRead = 0x80000000;
+            if (!OpenSucceeds || (DenyReadWriteOpen && (desiredAccess & GenericRead) != 0))
             {
                 LastError = 2;
                 return new SafeFileHandle(new IntPtr(-1), ownsHandle: false);

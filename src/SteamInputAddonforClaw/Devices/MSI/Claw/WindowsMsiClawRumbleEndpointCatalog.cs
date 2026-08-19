@@ -9,7 +9,9 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
     // GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING -- matches
     // the access mode WindowsMsiClawRumbleTransport ultimately opens the same interface with, so
     // a candidate that fails to open here would also fail to open for the real rumble write.
-    private const uint GenericReadWrite = 0x80000000 | 0x40000000;
+    private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
+    private const uint GenericReadWrite = GenericRead | GenericWrite;
     private const uint ShareReadWrite = 0x00000001 | 0x00000002;
     private const uint OpenExisting = 3;
 
@@ -80,7 +82,17 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
         openSucceeded = false;
         win32Error = 0;
         hidStatus = 0;
-        using var handle = _hidApi.Open(devicePath, GenericReadWrite, ShareReadWrite, OpenExisting);
+        // Some MSI HID collections deny GENERIC_READ while still allowing output writes -- proven
+        // by ClawTweaks' ClawButtonMonitor.SharedHidWrite, which retries with GENERIC_WRITE only
+        // after a read/write open fails. Without this fallback, a valid PID1902 gamepad collection
+        // can be rejected here before the transport ever gets a chance to write it.
+        var handle = _hidApi.Open(devicePath, GenericReadWrite, ShareReadWrite, OpenExisting);
+        if (handle.IsInvalid)
+        {
+            handle.Dispose();
+            handle = _hidApi.Open(devicePath, GenericWrite, ShareReadWrite, OpenExisting);
+        }
+        using var _ = handle;
         if (handle.IsInvalid)
         {
             win32Error = _hidApi.LastError;

@@ -17,6 +17,11 @@ internal interface IMsiClawRumbleTransport : IDisposable
 
 internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
 {
+    private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
+    private const uint ShareReadWrite = 0x00000001 | 0x00000002;
+    private const uint OpenExisting = 3;
+
     private readonly IMsiClawNativeHidApi _api;
     private readonly Lock _sync = new();
     private SafeFileHandle? _handle;
@@ -45,8 +50,16 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             if (_handle is null)
             {
                 // Normal synchronous HID Open/Write, matching the ClawTweaks-proven behavior --
-                // no overlapped I/O, no event/wait/cancel machinery.
-                _handle = _api.Open(devicePath, 0x80000000 | 0x40000000, 0x00000001 | 0x00000002, 3);
+                // no overlapped I/O, no event/wait/cancel machinery. Some MSI HID collections deny
+                // GENERIC_READ while still allowing output writes (ClawButtonMonitor.SharedHidWrite
+                // retries write-only for exactly this reason), so fall back to GENERIC_WRITE only
+                // before giving up.
+                _handle = _api.Open(devicePath, GenericRead | GenericWrite, ShareReadWrite, OpenExisting);
+                if (_handle.IsInvalid)
+                {
+                    _handle.Dispose();
+                    _handle = _api.Open(devicePath, GenericWrite, ShareReadWrite, OpenExisting);
+                }
                 if (_handle.IsInvalid)
                 {
                     var error = _api.LastError;
