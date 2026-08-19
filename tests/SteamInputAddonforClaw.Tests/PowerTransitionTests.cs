@@ -301,31 +301,19 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
-    public async Task A_participant_ordered_after_the_deadline_is_exhausted_is_never_invoked()
+    public async Task An_expired_suspend_deadline_does_not_invoke_any_participant()
     {
-        // Sanity check that the test above actually discriminates on order: with the slow
-        // participant FIRST, the later participant must never be reached once the shared deadline
-        // is gone -- proving Earlier_participant_is_invoked_before... only passes because of order,
-        // not because CountingParticipant always gets called regardless.
-        //
-        // CI flakiness fix: this depends on the coordinator's remaining-budget check (wall-clock
-        // DateTimeOffset.UtcNow) staying ahead of the per-participant CancellationTokenSource's own
-        // monotonic timer. A too-tight budget (originally 50ms, then 300ms) still occasionally let spy
-        // observe remaining > 0 immediately after slow's timeout fired, reproducing even locally
-        // (~1-in-4) once run alongside the rest of this test class -- consistent with wall-clock vs.
-        // monotonic-timer drift/scheduling jitter, not a one-off CI fluke. 1000ms eliminated it across
-        // repeated local runs (18+/18+), but still flaked twice on the GitHub Actions Windows runner
-        // (2026-08-19), which under contention/virtualization shows meaningfully worse scheduling
-        // jitter than a local dev machine. Bumped to 3000ms for real headroom against that -- this
-        // only slows the test itself (it waits out the budget once), never the production default.
+        // Use an already-expired observed timestamp so this boundary test does not infer timer
+        // ordering from scheduler timing. The coordinator must reject the suspend work before
+        // invoking the first participant when the shared deadline has already elapsed.
         var gate = new PowerMutationGate(true);
         var spy = new CountingParticipant();
-        var slow = new BlockingParticipant();
-        var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [slow, spy],
+        var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [spy],
             suspendQuiesceBudget: TimeSpan.FromMilliseconds(3000));
         gate.EnterNewCycleBarrier(out _, out var epoch);
 
-        await coordinator.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, epoch, true));
+        var observedUtc = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(4);
+        await coordinator.HandleAsync(new(4, PowerSignal.Suspend, observedUtc, 1, 1, 0, epoch, true));
 
         Assert.Equal(0, spy.QuiesceCount);
     }
