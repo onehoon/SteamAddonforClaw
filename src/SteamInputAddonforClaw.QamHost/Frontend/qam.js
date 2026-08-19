@@ -153,10 +153,6 @@
     if (node.type === originalType) {
       node.type = patchedType;
     }
-    if (!state.nestedPatches) state.nestedPatches = [];
-    if (!state.nestedPatches.some((patch) => patch.node === node)) {
-      state.nestedPatches.push({ node, originalType, patchedType });
-    }
     return true;
   }
 
@@ -228,7 +224,6 @@
       installed: true,
       patches,
       nestedTypes: new Map(),
-      nestedPatches: [],
       install,
       uninstall,
     });
@@ -250,17 +245,12 @@
       }
     }
 
-    for (const patch of state.nestedPatches || []) {
-      if (patch.node.type === patch.patchedType) {
-        patch.node.type = patch.originalType;
-      }
-    }
+    state.nestedTypes?.clear();
 
     Object.assign(state, {
       installed: false,
       patches: null,
       nestedTypes: null,
-      nestedPatches: null,
       install,
       uninstall,
     });
