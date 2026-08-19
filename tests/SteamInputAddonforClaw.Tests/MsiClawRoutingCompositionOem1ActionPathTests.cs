@@ -206,6 +206,56 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     }
 
     [Fact]
+    public async Task Action_failure_revocation_is_never_undone_by_a_racing_stale_authority_refresh()
+    {
+        // Review fix (BLOCKER): RefreshOem1BridgeAuthority (the production driver's onReconciled
+        // callback) and OnOem1ActionFailed used to run fully independently. A refresh that had
+        // already read a stale SuppressionReady == true snapshot could still call
+        // bridge.SetCustomAuthority(true) AFTER an action failure's own SetCustomAuthority(false),
+        // undoing the fail-open admission boundary while the owned disable was still in flight. Both
+        // paths now share the _oem1TaskSync lock; this test pauses a refresh mid-publish (via
+        // TestOnly_BeforeOem1BridgeAuthorityPublish, inside that same locked region) and proves a
+        // concurrent action-failure revocation cannot interleave with it -- the revocation must wait
+        // for the stale refresh's publish to finish, and its own false write must win afterward.
+        var launchCount = 0;
+        var (composition, eventSource) = BuildArmable(launchBigPicture: () => Interlocked.Increment(ref launchCount));
+        IHandheldRoutingComposition handheld = composition;
+        await handheld.ConfigureOem1ActionPath(() => Status(false), () => { });
+        await composition.TestOnly_Oem1ActivationTask;
+        Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+
+        var refreshEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        composition.TestOnly_BeforeOem1BridgeAuthorityPublish = () =>
+        {
+            refreshEntered.TrySetResult();
+            releaseRefresh.Task.GetAwaiter().GetResult();
+        };
+
+        // Simulate a lifecycle tick's stale refresh that already read ready == true and is about to
+        // publish it, but is paused right before doing so.
+        var refreshTask = Task.Run(() => composition.TestOnly_RefreshOem1BridgeAuthority());
+        await refreshEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // A concurrent action-failure revocation must be serialized behind the same lock -- it must
+        // not be able to complete while the stale refresh's publish is still paused.
+        var failTask = Task.Run(composition.TestOnly_InvokeOnOem1ActionFailed);
+        await Task.Delay(50);
+        Assert.False(failTask.IsCompleted);
+
+        releaseRefresh.TrySetResult();
+        await Task.WhenAll(refreshTask, failTask).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // The revocation ran strictly after the stale refresh's publish (never interleaved), so its
+        // false write is the final word -- a subsequent physical press must be ignored.
+        eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+        await Task.Delay(100);
+        Assert.Equal(0, launchCount);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
     public async Task Event41_cannot_dispatch_once_disposal_has_started()
     {
         // Review fix (MAJOR): the stated shutdown contract is "close custom gesture admission first,

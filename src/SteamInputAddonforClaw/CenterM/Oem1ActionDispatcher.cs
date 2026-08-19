@@ -36,12 +36,13 @@ internal sealed class Oem1ActionDispatcher
     }
 
     /// <summary>
-    /// Dispatches the resolved action. Returns <see langword="false"/> only when a bound,
-    /// non-<see cref="Oem1Action.None"/> action was actually invoked and its execution threw --
-    /// routing being unavailable/inactive is never a failure, it is the normal-mapping case. The
-    /// caller (production composition) treats a false return as an OEM1 replacement-backend failure:
-    /// custom gesture authority must be revoked and native Center M restored, per the work order's
-    /// fail-open contract.
+    /// Dispatches the resolved action. Returns <see langword="false"/> when a bound,
+    /// non-<see cref="Oem1Action.None"/> action was actually invoked and its execution threw, OR when
+    /// the routing-status capture itself threw before an action could even be resolved -- routing
+    /// being unavailable/inactive is never a failure, it is the normal-mapping case. The caller
+    /// (production composition) treats a false return as an OEM1 replacement-backend failure: custom
+    /// gesture authority must be revoked and native Center M restored, per the work order's fail-open
+    /// contract.
     /// </summary>
     internal bool Dispatch(Oem1GesturePolicyRequest request)
     {
