@@ -273,7 +273,7 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public void Endpoint_resolver_stops_retrying_after_max_attempts_and_rethrows()
+    public void Endpoint_resolver_rethrows_a_catalog_com_exception_without_retrying()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
         var calls = 0;
@@ -281,7 +281,7 @@ public sealed class MsiClawRumbleTests
         {
             calls++;
             throw new COMException($"attempt-{calls}");
-        }, _ => { });
+        });
 
         var exception = Assert.Throws<COMException>(() => resolver.Resolve(identity));
 
@@ -294,17 +294,15 @@ public sealed class MsiClawRumbleTests
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
         var calls = 0;
-        var delayed = false;
         var resolver = new MsiClawRumbleEndpointResolver(_ =>
         {
             calls++;
             throw new InvalidOperationException("deterministic");
-        }, _ => delayed = true);
+        });
 
         Assert.Throws<InvalidOperationException>(() => resolver.Resolve(identity));
 
         Assert.Equal(1, calls);
-        Assert.False(delayed);
     }
 
     [Fact]

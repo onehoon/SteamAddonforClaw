@@ -1,5 +1,3 @@
-using SteamInputAddonforClaw.Diagnostics;
-
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal sealed record MsiClawRumbleEndpointCandidate(
@@ -28,8 +26,7 @@ internal sealed class MsiClawRumbleEndpointResolver : IMsiClawRumbleEndpointReso
     private readonly Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>> _catalog;
 
     internal MsiClawRumbleEndpointResolver(
-        Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>>? catalog = null,
-        Action<TimeSpan>? delay = null)
+        Func<MsiClawPhysicalInputIdentity, IReadOnlyList<MsiClawRumbleEndpointCandidate>>? catalog = null)
     {
         _catalog = catalog ?? (identity => new WindowsMsiClawRumbleEndpointCatalog().Find(identity));
     }

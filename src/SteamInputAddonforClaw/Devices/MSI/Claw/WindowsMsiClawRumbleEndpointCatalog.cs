@@ -1,5 +1,4 @@
 using Windows.Devices.Enumeration;
-using Windows.Devices.HumanInterfaceDevice;
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Diagnostics;
 
@@ -27,24 +26,17 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
     {
         if (string.IsNullOrWhiteSpace(identity.PnpInstanceId)) return [];
         const string hidInterfaceClassGuid = "{4D1E55B2-F16F-11CF-88CB-001111000030}";
-        // Only request DeviceInformation properties that are valid metadata keys for HID
-        // device interfaces. "System.Devices.Hid.InputReportByteLength" /
-        // "...OutputReportByteLength" are NOT valid DeviceInformation.Properties keys and cause
-        // DeviceInformation.FindAllAsync to throw a COMException("Property key syntax error").
-        // Report lengths are instead read from the HID interface itself below via
-        // HidD_GetPreparsedData + HidP_GetCaps, which is the authoritative source anyway.
-        var devices = DeviceInformation.FindAllAsync($"System.Devices.InterfaceClassGuid:=\"{hidInterfaceClassGuid}\"", ["System.Devices.DeviceInstanceId", "System.Devices.HardwareIds"])
+        // Interface identity comes from the interface property bag. VID/PID authority remains
+        // the existing SetupAPI-backed topology enumerator below; HardwareIds is a Device
+        // property and is not requested from DeviceInterface objects.
+        var devices = DeviceInformation.FindAllAsync($"System.Devices.InterfaceClassGuid:=\"{hidInterfaceClassGuid}\"", ["System.Devices.DeviceInstanceId"])
             .AsTask().GetAwaiter().GetResult();
         var pnpDevices = _devices.EnumeratePresentDevices();
         var candidates = new List<MsiClawRumbleEndpointCandidate>();
         foreach (var device in devices)
         {
             var pnp = device.Properties.TryGetValue("System.Devices.DeviceInstanceId", out var value) ? value as string : null;
-            if (!HasHardwareId(device))
-            {
-                AppLog.Debug("Rumble", "Rumble endpoint candidate rejected: no matching hardware id.", ("PnpInstanceId", pnp));
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(pnp)) continue;
             var topology = pnpDevices.Where(candidate =>
                 string.Equals(candidate.InstanceId, pnp, StringComparison.OrdinalIgnoreCase) &&
                 candidate.VendorId == MsiClawHardware.VendorId && candidate.ProductId == MsiClawHardware.DirectInputProductId).ToArray();
@@ -102,7 +94,4 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
     internal static bool MatchesPhysicalRoot(string candidateRoot, string expectedRoot) =>
         string.Equals(candidateRoot, expectedRoot, StringComparison.OrdinalIgnoreCase);
 
-    private static bool HasHardwareId(DeviceInformation device) =>
-        device.Properties.TryGetValue("System.Devices.HardwareIds", out var value) &&
-        value is string[] ids && ids.Any(id => id.Contains("VID_0DB0&PID_1902", StringComparison.OrdinalIgnoreCase));
 }
