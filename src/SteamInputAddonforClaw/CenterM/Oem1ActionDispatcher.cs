@@ -1,42 +1,81 @@
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Routing;
 
 namespace SteamInputAddonforClaw.CenterM;
 
 /// <summary>
 /// Resolves an <see cref="Oem1GesturePolicyRequest"/> to its configured <see cref="Oem1Action"/> and
-/// dispatches it. Routing state alone never redefines OEM1 -- the bound action is resolved first,
-/// and only <see cref="Oem1Action.SteamQuickAccess"/> then checks whether the Steam output stage is
-/// actually active. Routing status is captured fresh at dispatch time, never cached.
+/// dispatches it. Normal OEM1 mapping and Steam routing are independent features (see the OEM1
+/// production E2E POC work order): the mapping DOMAIN is selected first by capturing whether
+/// canonical Steam Deck routing is actually active right now -- never whether routing is merely
+/// enabled/available/eligible -- and only then is the gesture resolved within that domain. Routing
+/// status is captured fresh at every dispatch, never cached, and <see cref="RoutingRuntimeStatusSnapshot.Available"/>
+/// is never consulted here: an unavailable/disabled/idle routing runtime is simply "not currently
+/// routing", which selects the normal mapping exactly like every other non-active case.
 /// </summary>
 internal sealed class Oem1ActionDispatcher
 {
-    private readonly Oem1ActionBindings _bindings;
+    private readonly Oem1ActionBindings _normalBindings;
+    private readonly Oem1ActionBindings _routingActiveBindings;
     private readonly Func<RoutingRuntimeStatusSnapshot> _captureRoutingStatus;
     private readonly Action _requestQuickAccessPulse;
+    private readonly Action _launchBigPicture;
 
     internal Oem1ActionDispatcher(
-        Oem1ActionBindings bindings,
+        Oem1ActionBindings normalBindings,
+        Oem1ActionBindings routingActiveBindings,
         Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
-        Action requestQuickAccessPulse)
+        Action requestQuickAccessPulse,
+        Action launchBigPicture)
     {
-        _bindings = bindings;
+        _normalBindings = normalBindings;
+        _routingActiveBindings = routingActiveBindings;
         _captureRoutingStatus = captureRoutingStatus ?? throw new ArgumentNullException(nameof(captureRoutingStatus));
         _requestQuickAccessPulse = requestQuickAccessPulse ?? throw new ArgumentNullException(nameof(requestQuickAccessPulse));
+        _launchBigPicture = launchBigPicture ?? throw new ArgumentNullException(nameof(launchBigPicture));
     }
 
-    internal void Dispatch(Oem1GesturePolicyRequest request)
+    /// <summary>
+    /// Dispatches the resolved action. Returns <see langword="false"/> only when a bound,
+    /// non-<see cref="Oem1Action.None"/> action was actually invoked and its execution threw --
+    /// routing being unavailable/inactive is never a failure, it is the normal-mapping case. The
+    /// caller (production composition) treats a false return as an OEM1 replacement-backend failure:
+    /// custom gesture authority must be revoked and native Center M restored, per the work order's
+    /// fail-open contract.
+    /// </summary>
+    internal bool Dispatch(Oem1GesturePolicyRequest request)
     {
-        switch (_bindings.Resolve(request.Gesture))
+        // The ONLY question that matters for domain selection: is canonical Steam Deck routing
+        // actually active right now? Never Available, never routing-enabled, never eligibility.
+        var routingActuallyActive = _captureRoutingStatus().SteamOutputActive;
+
+        var action = routingActuallyActive
+            ? _routingActiveBindings.Resolve(request.Gesture)
+            : _normalBindings.Resolve(request.Gesture);
+
+        try
         {
-            case Oem1Action.None:
-                return;
+            switch (action)
+            {
+                case Oem1Action.None:
+                    return true;
 
-            case Oem1Action.SteamQuickAccess:
-                if (!_captureRoutingStatus().SteamOutputActive)
-                    return;
+                case Oem1Action.SteamQuickAccess:
+                    _requestQuickAccessPulse();
+                    return true;
 
-                _requestQuickAccessPulse();
-                return;
+                case Oem1Action.SteamBigPicture:
+                    _launchBigPicture();
+                    return true;
+
+                default:
+                    return true;
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("CenterM.Oem1", "OEM1 replacement action failed to execute.", exception, ("Action", action));
+            return false;
         }
     }
 }

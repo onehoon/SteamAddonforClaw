@@ -7,5 +7,6 @@ namespace SteamInputAddonforClaw.CenterM;
 internal enum Oem1Action
 {
     None,
-    SteamQuickAccess
+    SteamQuickAccess,
+    SteamBigPicture
 }

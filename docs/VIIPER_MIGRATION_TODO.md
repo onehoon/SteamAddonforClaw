@@ -195,6 +195,32 @@ false and no helper is ever staged/started merely because the Addon launched.
 lifecycle/composition wiring only. This does not advance SD5 completion, and
 no hardware validation is claimed.
 
+A development-only E2E POC PR has since wired the full production path and
+enabled real suppression: `WmiMsiEventSource -> Oem1EventGestureBridge ->
+Oem1ActionDispatcher` are now production-composed (via a new
+`IHandheldRoutingComposition.ConfigureOem1ActionPath` seam called from
+`AddonRoutingRuntime.Create`), and `MsiClawRoutingComposition` requests
+`CenterMOem1LifecycleCoordinator.SetDesiredEnabledAsync(true)` once WMI
+observation actually starts. Normal OEM1 mapping (POC: `Single ->
+SteamBigPicture`) is fully independent of Steam routing -- it works whether
+routing is enabled, disabled, unavailable, or merely idle. Routing being
+disabled does not disable OEM1 mapping or suppression. Only while canonical
+Steam Deck routing is *actually active right now*
+(`RoutingRuntimeStatusSnapshot.SteamOutputActive`, captured fresh, never
+`Available`) does the routing-side POC action (`Single -> SteamQuickAccess`
+via the existing `RequestQuickAccessPulse()`) take precedence; routing
+becoming inactive returns the very next OEM1 press to normal mapping (Big
+Picture) with no explicit re-arm step. `Oem1ActionBindings` now exposes two
+independent binding domains (`NormalDefault`, `RoutingActiveDefault`) instead
+of one combined default. Settings, persistence, and a final configurable
+mapping framework are still not implemented -- both POC mappings remain
+hard-coded. **This PR does not mark SD5 complete: no real-hardware
+validation has been performed in this session** (no MSI Claw hardware was
+available); all coverage is deterministic automated tests with fake
+WMI/process/launch dependencies. Hardware validation (does OEM1 actually
+suppress native Center M and launch Big Picture / pulse QAM on a physical MSI
+Claw) remains pending before SD5 can be considered complete.
+
 ### SD6 — gyro and accelerometer
 
 Status: **SEPARATE FEATURE TRACK**

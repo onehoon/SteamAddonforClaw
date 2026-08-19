@@ -74,7 +74,18 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     private readonly IReadOnlyList<IRoutingPipelineStage> _stages;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
+    private readonly bool _startCenterMOem1LifecycleRuntime;
     private Func<string, ValueTask>? _runtimeFaultHandler;
+
+    // PR3: development-only OEM1 production E2E POC action path -- Event41 observation, gesture
+    // recognition/bridge, and dispatch. Never constructed until ConfigureOem1ActionPath is called
+    // (only the real production composition seam, AddonRoutingRuntime.Create, calls it), so every
+    // existing test that constructs this composition directly and never calls it is unaffected.
+    private IMsiEventSource? _oem1EventSource;
+    private Oem1GestureRecognizer? _oem1GestureRecognizer;
+    private Oem1EventGestureBridge? _oem1Bridge;
+    private bool _oem1ActionPathConfigured;
+    private readonly IMsiEventSource? _testOnlyOem1EventSource;
 
     internal MsiClawRoutingComposition(
         MsiClawNativeStateManager nativeState,
@@ -86,8 +97,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         CenterMMainUiRoutingGuard? centerMGuard = null,
         CenterMOem1LifecycleCoordinator? centerMOem1Coordinator = null,
         CenterMOem1LifecycleRuntime? centerMOem1Runtime = null,
-        bool startCenterMOem1LifecycleRuntime = true)
+        bool startCenterMOem1LifecycleRuntime = true,
+        IMsiEventSource? testOnlyOem1EventSource = null)
     {
+        _testOnlyOem1EventSource = testOnlyOem1EventSource;
         NativeModeSession = new MsiClawNativeModeSessionCoordinator(
             nativeState,
             recovery,
@@ -155,13 +168,23 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             processSnapshotSource: centerMProcesses,
             helperOwnership: CenterMHelperOwnership,
             environmentEligibility: () => true);
+        // PR3: the two narrow callbacks below let the OEM1 action path (wired later, only by
+        // ConfigureOem1ActionPath) refresh custom gesture-bridge authority from the coordinator's own
+        // freshly reconciled SuppressionReady snapshot after every tick/resume -- see
+        // RefreshOem1BridgeAuthority. Suspend revokes authority immediately (work order Scope 14).
         CenterMOem1Runtime = centerMOem1Runtime ?? new CenterMOem1LifecycleRuntime(
             CenterMOem1Coordinator,
-            routingGuardIsArmed: () => CenterMGuard.IsArmed);
+            routingGuardIsArmed: () => CenterMGuard.IsArmed,
+            onReconciled: RefreshOem1BridgeAuthority,
+            onSuspending: () => _oem1Bridge?.SetCustomAuthority(false));
+
+        _startCenterMOem1LifecycleRuntime = startCenterMOem1LifecycleRuntime;
 
         // Requirement 3/8: the driver is started as part of normal MSI runtime composition (it is
         // part of the real runtime object lifetime now), but `DesiredEnabled` is never set to true
         // here -- normal production startup never stages/starts the helper via this coordinator.
+        // Only the real production OEM1 action path (ConfigureOem1ActionPath) ever calls
+        // SetDesiredEnabledAsync(true), and only after WMI observation has actually started.
         if (startCenterMOem1LifecycleRuntime)
             CenterMOem1Runtime.Start();
 
@@ -186,6 +209,132 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, ValueTask> handler) =>
         _runtimeFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+
+    /// <summary>
+    /// PR3: development-only OEM1 production E2E POC. Production-composes the already-existing
+    /// Event41 chain (<see cref="WmiMsiEventSource"/> -&gt; <see cref="Oem1EventGestureBridge"/> -&gt;
+    /// <see cref="Oem1ActionDispatcher"/>) and requests OEM1 lifecycle enable -- independent of any
+    /// routing setting (work order's central architectural rule). <paramref name="captureRoutingStatus"/>
+    /// and <paramref name="requestQuickAccessPulse"/> are the only two routing/output-layer facts this
+    /// composition ever receives; it never learns anything else about Steam Deck output/VIIPER
+    /// ownership. Idempotent no-op on a second call.
+    /// </summary>
+    void IHandheldRoutingComposition.ConfigureOem1ActionPath(
+        Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
+        Action requestQuickAccessPulse)
+    {
+        if (_oem1ActionPathConfigured) return;
+        _oem1ActionPathConfigured = true;
+
+        var eventSource = _testOnlyOem1EventSource ?? new WmiMsiEventSource();
+        var recognizer = new Oem1GestureRecognizer(doubleClickEnabled: true, doubleClickWindow: TimeSpan.FromMilliseconds(400));
+        var bridge = new Oem1EventGestureBridge(eventSource, recognizer);
+        var dispatcher = new Oem1ActionDispatcher(
+            normalBindings: Oem1ActionBindings.NormalDefault,
+            routingActiveBindings: Oem1ActionBindings.RoutingActiveDefault,
+            captureRoutingStatus: captureRoutingStatus,
+            requestQuickAccessPulse: requestQuickAccessPulse,
+            launchBigPicture: Oem1BigPictureLauncher.Launch);
+
+        bridge.PolicyRequested += request =>
+        {
+            if (!dispatcher.Dispatch(request))
+                OnOem1ActionFailed();
+        };
+
+        _oem1EventSource = eventSource;
+        _oem1GestureRecognizer = recognizer;
+        _oem1Bridge = bridge;
+
+        if (!_startCenterMOem1LifecycleRuntime)
+            return;
+
+        // Scope 8: WMI startup failure must remain feature-local -- never arm custom suppression,
+        // leave native Center M available, continue the Addon runtime otherwise unaffected.
+        if (!eventSource.Start())
+        {
+            AppLog.Warn("CenterM.Oem1", "OEM1 WMI observation failed to start; custom OEM1 suppression will not be armed, native Center M remains available.", null);
+            return;
+        }
+
+        // Scope 7: request lifecycle enable only after WMI observation has actually started and the
+        // gesture/action wiring above is already subscribed. Fire-and-forget: the coordinator performs
+        // its own fresh safety checks and this composition only learns readiness back through
+        // RefreshOem1BridgeAuthority (driven by CenterMOem1Runtime's onReconciled seam), never by
+        // assuming this call itself reached Armed.
+        _oem1ActivationTask = Task.Run(async () =>
+        {
+            try
+            {
+                await CenterMOem1Coordinator.SetDesiredEnabledAsync(true).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("CenterM.Oem1", "Requesting OEM1 lifecycle enable failed.", exception);
+            }
+            RefreshOem1BridgeAuthority();
+        });
+    }
+
+    private Task? _oem1ActivationTask;
+
+    /// <summary>Test-only observability: awaits the fire-and-forget startup activation
+    /// (<c>SetDesiredEnabledAsync(true)</c> + the resulting bridge-authority refresh) triggered by
+    /// <see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>, so a test can deterministically
+    /// observe the outcome instead of racing a background task. Null until that method has run and
+    /// actually started WMI successfully. Never touched by production code.</summary>
+    internal Task TestOnly_Oem1ActivationTask => _oem1ActivationTask ?? Task.CompletedTask;
+
+    /// <summary>Test-only observability seam onto the wired OEM1 gesture bridge -- lets a test assert
+    /// custom authority state directly without a real WMI/hardware event. Never touched by production
+    /// code.</summary>
+    internal Oem1EventGestureBridge? TestOnly_Oem1Bridge => _oem1Bridge;
+
+    /// <summary>
+    /// Scope 10/13: the existing <see cref="CenterMOem1LifecycleCoordinator"/> remains the single
+    /// authority for whether OEM1 suppression is currently trusted -- this only mirrors its own
+    /// <see cref="CenterMOem1LifecycleSnapshot.SuppressionReady"/> onto the gesture bridge's custom
+    /// authority, called after every coordinator reconcile tick/resume (never on a timer of its own).
+    /// Bridge authority never depends on routing.
+    /// </summary>
+    private void RefreshOem1BridgeAuthority()
+    {
+        if (_oem1Bridge is not { } bridge)
+            return;
+
+        bool ready;
+        try
+        {
+            ready = CenterMOem1Coordinator.GetSnapshot().SuppressionReady;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        bridge.SetCustomAuthority(ready);
+    }
+
+    /// <summary>
+    /// Scope 9: an actual replacement-action execution failure (e.g. the Big Picture launch backend
+    /// throwing) is different from routing simply being unavailable/inactive -- revoke custom gesture
+    /// authority and request the existing coordinator disable/fail-open, restoring native Center M.
+    /// </summary>
+    private void OnOem1ActionFailed()
+    {
+        _oem1Bridge?.SetCustomAuthority(false);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await CenterMOem1Coordinator.SetDesiredEnabledAsync(false).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("CenterM.Oem1", "Disabling OEM1 lifecycle after a replacement-action failure did not complete.", exception);
+            }
+        });
+    }
 
     /// <summary>
     /// Forwards the physical-input source's completion summary to the registered runtime-fault
@@ -252,12 +401,21 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
 
+        // PR3 shutdown ordering (Scope 15): stop custom OEM1 gesture admission, then dispose the
+        // event/gesture/action path, BEFORE the coordinator/driver's own teardown below -- a drained
+        // WMI callback or gesture continuation must never be able to reach a disposed dispatcher/
+        // coordinator.
+        _oem1Bridge?.SetCustomAuthority(false);
+        _oem1Bridge?.Dispose();
+        _oem1EventSource?.Dispose();
+        _oem1GestureRecognizer?.Dispose();
+
         // Shutdown ordering (work order requirement 14): stop the OEM1 periodic driver and dispose
         // the coordinator BEFORE the routing guard's own terminal cleanup below -- a timer callback
         // must never still be capable of entering coordinator methods once this composition starts
         // tearing down the shared helper authority. Safe even though DesiredEnabled has always been
-        // false in this PR: the coordinator's own DisposeAsync is a no-op stop when it never owned
-        // anything.
+        // false outside the PR3 production action path: the coordinator's own DisposeAsync is a no-op
+        // stop when it never owned anything.
         await CenterMOem1Runtime.DisposeAsync().ConfigureAwait(false);
 
         // Terminal cleanup, not the normal Disarm path: bounded final Stop retries, and -- if the

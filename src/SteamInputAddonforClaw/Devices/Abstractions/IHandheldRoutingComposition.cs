@@ -65,4 +65,15 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
     /// extra to reconcile after resume.
     /// </summary>
     IRuntimeResumeParticipant? AuxiliaryResumeParticipant => null;
+
+    /// <summary>
+    /// Optional OEM1 production action-path wiring hook (PR3 development E2E POC). The generic
+    /// routing/output layer is the only place that owns the canonical Steam Deck output stage's QAM
+    /// pulse primitive and the fresh routing-status capture -- this passes just those two narrow
+    /// callbacks down to a composition that has its own OEM1 feature (e.g. MSI Center M), so it can
+    /// wire its dispatcher without the routing/output layer ever learning it is MSI/CenterM specific.
+    /// A backend with no OEM1 feature never overrides this (the default is a no-op). Never called more
+    /// than once per composition instance in production.
+    /// </summary>
+    void ConfigureOem1ActionPath(Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus, Action requestQuickAccessPulse) { }
 }

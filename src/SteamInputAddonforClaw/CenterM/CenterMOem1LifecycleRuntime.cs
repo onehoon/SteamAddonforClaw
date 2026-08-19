@@ -43,6 +43,8 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
     private readonly ICenterMOem1LifecycleDriverTarget _coordinator;
     private readonly Func<bool> _routingGuardIsArmed;
     private readonly Func<CancellationToken, Task> _waitForNextTick;
+    private readonly Action? _onReconciled;
+    private readonly Action? _onSuspending;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _startSync = new();
     private Task? _loop;
@@ -51,10 +53,19 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
         ICenterMOem1LifecycleDriverTarget coordinator,
         Func<bool> routingGuardIsArmed,
         TimeSpan? pollInterval = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        Action? onReconciled = null,
+        Action? onSuspending = null)
     {
         _coordinator = coordinator;
         _routingGuardIsArmed = routingGuardIsArmed;
+        // PR3: a single narrow, optional observability seam (work order requirement/Scope 10) --
+        // invoked after every tick (and after resume reconciliation) so a production OEM1 action-path
+        // owner can refresh custom gesture-bridge authority from the coordinator's own freshly
+        // reconciled SuppressionReady snapshot, without this runtime adding a second poller/state
+        // machine of its own. Never touched unless a caller supplies it.
+        _onReconciled = onReconciled;
+        _onSuspending = onSuspending;
         // One simple low-rate constant, per the work order -- no configurable polling setting, no
         // scheduler/timer-service abstraction. The delay function is injectable purely so tests can
         // drive the loop deterministically (same seam style as the coordinator's own `_delay`),
@@ -101,6 +112,8 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
                 // every tick throughout routing and must not become continuous per-tick noise.
                 if (!_routingGuardIsArmed())
                     await _coordinator.PollTickAsync(token).ConfigureAwait(false);
+
+                _onReconciled?.Invoke();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -118,8 +131,15 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
         }
     }
 
-    public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken) =>
-        _coordinator.QuiesceForSuspendAsync(deadline, cycle, epoch, cancellationToken);
+    public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
+    {
+        // Work order Scope 14: custom OEM1 admission goes OFF as the very first step of suspend,
+        // before the existing OEM1 suspend barrier below -- invoked synchronously here (not deferred
+        // to a poll tick) so a production owner can revoke gesture-bridge authority immediately,
+        // without adding a second suspend participant/power coordinator.
+        _onSuspending?.Invoke();
+        return await _coordinator.QuiesceForSuspendAsync(deadline, cycle, epoch, cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>Runs the coordinator's existing fresh resume reconciliation exactly once. Never
     /// gated on Steam/VIIPER routing's own resume outcome -- <see cref="Runtime.AddonRuntimeHost"/>
@@ -128,6 +148,7 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
     {
         await _coordinator.ReconcileAfterResumeAsync(cancellationToken).ConfigureAwait(false);
         AppLog.Info("CenterM.Oem1", "OEM1 lifecycle resume reconcile completed.");
+        _onReconciled?.Invoke();
     }
 
     /// <summary>Shutdown ordering (work order requirement 14): stops the periodic loop first --

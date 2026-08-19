@@ -96,7 +96,21 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
         });
 
-        return new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator);
+        var runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator);
+
+        // PR3: development-only OEM1 production E2E POC. The only two facts a device-specific OEM1
+        // feature needs from this generic routing/output layer -- fresh routing status and the
+        // canonical Steam Deck output stage's QAM pulse primitive -- passed down through the generic
+        // IHandheldRoutingComposition seam (default no-op for a backend without an OEM1 feature). This
+        // never gates on any routing "enabled" setting: SteamOutputActive reflects only whether
+        // canonical routing is ACTUALLY active right now, exactly the fact OEM1 dispatch requires.
+        // Reuses the same CaptureStatus() the rest of the runtime already uses, rather than
+        // duplicating its field construction here, so the two can never drift apart.
+        handheldRoutingComposition.ConfigureOem1ActionPath(
+            captureRoutingStatus: runtime.CaptureStatus,
+            requestQuickAccessPulse: deckStage.RequestQuickAccessPulse);
+
+        return runtime;
     }
 
     /// <summary>PR2: optional additional power/resume participant the owned composition supplies
