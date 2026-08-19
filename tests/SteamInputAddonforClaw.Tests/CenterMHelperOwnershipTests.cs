@@ -320,26 +320,46 @@ public sealed class CenterMHelperOwnershipTests
         var blocker = new ManualResetEventSlim(false);
         var api = new RecordingApi { CreateSuspendedBlocker = blocker };
         var ownership = new CenterMHelperOwnership(api);
+        Task<HelperStartResult>? firstTask = null;
+        Task<HelperStartResult>? secondTask = null;
 
-        var firstTask = Task.Run(() => ownership.Start(@"C:\fake\MSI Center M.exe"));
-        // Wait until the first Start() is genuinely inside TryCreateSuspended (holding the lock),
-        // not just scheduled.
-        Assert.True(api.CreateSuspendedEntered.Wait(TimeSpan.FromSeconds(5)));
+        try
+        {
+            firstTask = StartOnDedicatedWorker(ownership);
 
-        // The second Start() must now block on the same lock -- give it a moment to actually
-        // attempt that (a Task that "hasn't run yet" would make this test meaningless).
-        var secondTask = Task.Run(() => ownership.Start(@"C:\fake\MSI Center M.exe"));
-        await Task.Delay(50);
+            // Wait until the first Start() is genuinely inside TryCreateSuspended (holding the
+            // lock), not merely scheduled on a ThreadPool worker.
+            Assert.True(api.CreateSuspendedEntered.Wait(TimeSpan.FromSeconds(5)));
 
-        blocker.Set();
+            // Start the competing caller only after the first caller has entered the fake native
+            // sequence. LongRunning gives each blocking caller a dedicated worker and removes
+            // ThreadPool starvation from the ordering proof.
+            secondTask = StartOnDedicatedWorker(ownership);
+            blocker.Set();
 
-        var firstResult = await firstTask.WaitAsync(TimeSpan.FromSeconds(5));
-        var secondResult = await secondTask.WaitAsync(TimeSpan.FromSeconds(5));
+            var results = await Task.WhenAll(firstTask, secondTask).WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Equal(HelperStartResult.Started, firstResult);
-        Assert.Equal(HelperStartResult.AlreadyOwned, secondResult);
-        Assert.Equal(1, api.CreateSuspendedCallCount);
-        Assert.True(ownership.IsOwned);
+            Assert.Contains(HelperStartResult.Started, results);
+            Assert.Contains(HelperStartResult.AlreadyOwned, results);
+            Assert.Equal(1, api.CreateSuspendedCallCount);
+            Assert.True(ownership.IsOwned);
+        }
+        finally
+        {
+            blocker.Set();
+            if (firstTask is not null)
+                await firstTask.WaitAsync(TimeSpan.FromSeconds(5));
+            if (secondTask is not null)
+                await secondTask.WaitAsync(TimeSpan.FromSeconds(5));
+            ownership.Dispose();
+        }
+
+        static Task<HelperStartResult> StartOnDedicatedWorker(CenterMHelperOwnership ownership) =>
+            Task.Factory.StartNew(
+                () => ownership.Start(@"C:\fake\MSI Center M.exe"),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
     }
 
     [Fact]

@@ -19,13 +19,10 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
 
     public void Dispose()
     {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
         AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
-        AppLog.MinimumLevelOverride = AppLogLevel.Info;
-        // Best-effort cleanup: a concurrently-running test in a different, non-serialized
-        // collection can transiently hold this directory's log file open. That does not
-        // invalidate this test's already-passed assertions.
-        try { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); } catch (IOException) { }
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 
     [Fact]

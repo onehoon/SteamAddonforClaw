@@ -28,9 +28,9 @@ public sealed class SteamOutputCompositionTests : IDisposable
 
     public void Dispose()
     {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
         AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
-        AppLog.MinimumLevelOverride = AppLogLevel.Info;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 }
