@@ -81,6 +81,11 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
 
         var powerParticipants = new List<IPowerSuspendParticipant>();
         if (_routingRuntime is not null) powerParticipants.Add(_routingRuntime);
+        // PR2: an optional generic auxiliary power participant the routing composition supplies
+        // (e.g. the MSI Center M OEM1 lifecycle driver) -- this host never learns it is MSI/CenterM
+        // specific, only that the capability may be present (work order requirement 13).
+        if (_routingRuntime?.AuxiliaryPowerParticipant is { } auxiliaryPowerParticipant)
+            powerParticipants.Add(auxiliaryPowerParticipant);
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants,
             token => ReconcileFreshAfterResumeAsync(token),
             recoveryEnabled: recoverySafe,
@@ -148,12 +153,29 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
                 if (!_steamStopped) _steamRuntime.Refresh();
             }
         });
-        return await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
+        var result = await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
             freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
             completeSuppression: _resumeFreshReconcileSuppression.Complete,
             deferredReconcile: () => ReconcileAsync(),
             requestStatusRefresh: RequestStatusRefresh,
             cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        // PR2 (work order requirement 12): the OEM1 lifecycle's own fresh resume reconciliation
+        // must run exactly once on every resume, independent of whether the routing runtime's own
+        // resume reconciliation above succeeded -- never nested inside its result.
+        if (routingRuntime.AuxiliaryResumeParticipant is { } auxiliaryResumeParticipant)
+        {
+            try
+            {
+                await auxiliaryResumeParticipant.ReconcileAfterResumeAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

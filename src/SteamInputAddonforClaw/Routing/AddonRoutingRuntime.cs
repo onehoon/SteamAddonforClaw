@@ -99,6 +99,13 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator);
     }
 
+    /// <summary>PR2: optional additional power/resume participant the owned composition supplies
+    /// (e.g. the MSI Center M OEM1 lifecycle driver). Null for a composition with nothing extra to
+    /// quiesce/reconcile. Kept generic here -- this runtime never learns any device-specific
+    /// detail, only that a capability may or may not be present.</summary>
+    internal IPowerSuspendParticipant? AuxiliaryPowerParticipant => _composition.AuxiliaryPowerParticipant;
+    internal IRuntimeResumeParticipant? AuxiliaryResumeParticipant => _composition.AuxiliaryResumeParticipant;
+
     internal bool HasResidualSessionState => _coordinator.HasResidualSessionState;
     internal bool IsSafetySessionActive => _safetySession?.IsActive == true;
     internal bool HasOwnedRecoveryBoundary => _safetySession?.HasOwnedRecoveryBoundary == true;

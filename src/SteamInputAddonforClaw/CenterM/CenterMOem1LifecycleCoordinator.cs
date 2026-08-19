@@ -59,7 +59,7 @@ internal readonly record struct CenterMOem1LifecycleSnapshot(
 /// public methods below. Normal production Runtime composition must not construct or call into this
 /// type in this PR.
 /// </summary>
-internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant, IAsyncDisposable
+internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant, IAsyncDisposable, ICenterMOem1LifecycleDriverTarget
 {
     private readonly Func<string> _publishRootProvider;
     private readonly CenterMBackendProbe _backendProbe;
@@ -263,6 +263,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     }
 
     public string Name => "CenterMOem1LifecycleCoordinator";
+
+    // Explicit ICenterMOem1LifecycleDriverTarget forwarding: the coordinator's own methods stay
+    // `internal` (unchanged -- this is not a rewrite of the coordinator), this just gives
+    // CenterMOem1LifecycleRuntime a narrow, fakeable seam onto them.
+    Task ICenterMOem1LifecycleDriverTarget.PollHelperLivenessAsync(CancellationToken cancellationToken) => PollHelperLivenessAsync(cancellationToken);
+    Task ICenterMOem1LifecycleDriverTarget.PollTickAsync(CancellationToken cancellationToken) => PollTickAsync(cancellationToken);
+    Task ICenterMOem1LifecycleDriverTarget.ReconcileAfterResumeAsync(CancellationToken cancellationToken) => ReconcileAfterResumeAsync(cancellationToken);
 
     /// <summary>Finding #5: wraps the injected (or absent) eligibility predicate so neither an
     /// omitted predicate nor an exception thrown by one can ever be conflated with "supported" --

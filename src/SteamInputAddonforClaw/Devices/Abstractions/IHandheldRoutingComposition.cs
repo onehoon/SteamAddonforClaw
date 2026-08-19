@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Feedback;
 
@@ -49,4 +50,19 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
     /// user-facing message. A backend with nothing to report may simply never invoke it.
     /// </summary>
     void SetRuntimeFaultHandler(Func<string, ValueTask> handler);
+
+    /// <summary>
+    /// Optional additional power-suspend participant this composition owns, beyond the routing
+    /// pipeline's own safety session -- e.g. an MSI-specific OEM1/Center M lifecycle driver. Null
+    /// (the default) for a backend with nothing extra to quiesce. Deliberately generic: the
+    /// device-specific detail stays entirely inside the composition that supplies it.
+    /// </summary>
+    IPowerSuspendParticipant? AuxiliaryPowerParticipant => null;
+
+    /// <summary>
+    /// Optional additional resume-reconcile participant this composition owns (see
+    /// <see cref="IRuntimeResumeParticipant"/>). Null (the default) for a backend with nothing
+    /// extra to reconcile after resume.
+    /// </summary>
+    IRuntimeResumeParticipant? AuxiliaryResumeParticipant => null;
 }

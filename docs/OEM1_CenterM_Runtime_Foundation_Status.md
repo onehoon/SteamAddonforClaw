@@ -245,8 +245,66 @@ PID1902 mutation) and disarms last (after native/physical restoration), and
 it still starts and stops its own helper exactly as before when nothing else
 has already armed the shared ownership.
 
-## PR3+ (not started) — settings / UI / production composition
+## PR2 (lifecycle production composition) — this PR
 
-Controller settings "Center M Button" action selector, status presentation,
-named-pipe settings transport/persistence, localization, production
-composition wiring OEM1 suppression on real user machines.
+Production-composes the already-implemented `CenterMOem1LifecycleCoordinator`
+into the real MSI Claw runtime object lifetime -- lifecycle/composition wiring
+only, not feature activation.
+
+- `MsiClawRoutingComposition` now constructs `CenterMOem1LifecycleCoordinator`
+  with the SAME shared `CenterMHelperOwnership` instance it already hands to
+  `CenterMMainUiRoutingGuard` (the ownership-convergence PR above) -- there is
+  still exactly one production same-name helper authority, never two
+  independent owners. An explicit MSI Claw environment-eligibility predicate
+  is supplied (the coordinator's own default stays fail-open/false for any
+  caller that omits one).
+- A new, small production driver, `CenterM/CenterMOem1LifecycleRuntime`, is
+  the coordinator's one lifetime owner: a single low-rate periodic loop calls
+  the coordinator's already-documented `PollHelperLivenessAsync()` on every
+  tick (regardless of routing-guard state, since the shared helper's exact
+  liveness is still part of the protection invariant either way) and
+  `PollTickAsync()` only while `CenterMMainUiRoutingGuard.IsArmed` is false --
+  so the driver's normal MainUI-yield polling never fights the guard's
+  transient `Local\MSI Center M.exe` launch-protection authority during
+  Steam routing. The driver duplicates no coordinator state; the coordinator
+  remains the sole authoritative state machine.
+- Suspend/resume: `CenterMOem1LifecycleRuntime` forwards
+  `IPowerSuspendParticipant.QuiesceForSuspendAsync` directly to the
+  coordinator's existing suspend participant implementation, and implements a
+  new narrow `Power.IRuntimeResumeParticipant` capability
+  (`ReconcileAfterResumeAsync`) that `AddonRuntimeHost` now calls once per
+  resume, independent of whether Steam/VIIPER routing's own resume
+  reconciliation succeeded. `AddonRuntimeHost`/`IHandheldRoutingComposition`
+  learn nothing MSI/CenterM-specific from this -- both capabilities are
+  exposed only as optional, generic, nullable seams a composition may or may
+  not supply.
+- Shutdown ordering: `MsiClawRoutingComposition.DisposeAsync()` stops the
+  periodic driver (cancel + join, so a timer callback can never still enter
+  coordinator methods afterward) and disposes the coordinator before the
+  routing guard's own terminal cleanup and the composition's final
+  `CenterMHelperOwnership` disposal -- unchanged ownership-boundary rules
+  from the convergence PR (a caller-injected shared instance is still never
+  disposed here, and a borrowed helper is still never stopped by the guard).
+
+**Production activation remains explicitly OFF in this PR.** Normal MSI
+runtime composition constructs and starts the driver, but never calls
+`SetDesiredEnabledAsync(true)` -- `DesiredEnabled` and `SuppressionReady` stay
+false on ordinary startup, no helper is staged/started merely because the
+Addon launched, and native OEM1/Center M behavior is unchanged for real
+users. `WmiMsiEventSource`, `Oem1EventGestureBridge`, `Oem1ActionDispatcher`,
+and `CanonicalSteamDeckOutputStage.RequestQuickAccessPulse()` all remain
+completely dormant; Event41/Event88 production wiring is untouched. Tests
+exercise the coordinator's explicit test-only activation seam
+(`SetDesiredEnabledAsync`) to prove the full production composition graph
+without ever enabling suppression in a real Addon process. No hardware
+validation is claimed by this PR -- all coverage is deterministic automated
+tests with fake dependencies.
+
+## PR3+ (not started) — action wiring, settings / UI / production activation
+
+The next PR wires WMI Event41 -> gesture -> action dispatch -> Quick Access
+into production and then enables custom OEM1 authority (`DesiredEnabled =
+true`) atomically, so native Center M suppression and the replacement action
+never go live independently of each other. Controller settings "Center M
+Button" action selector, status presentation, named-pipe settings
+transport/persistence, and localization remain unstarted.

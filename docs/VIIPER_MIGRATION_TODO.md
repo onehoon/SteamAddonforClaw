@@ -179,6 +179,22 @@ same-name helper. This is ownership/refactoring only -- it does not compose
 `CenterMOem1LifecycleCoordinator` into production and does not advance SD5
 completion.
 
+A lifecycle/composition PR (`CenterM/CenterMOem1LifecycleRuntime`,
+`Devices/MSI/Claw/MsiClawRoutingComposition`) has since production-composed
+`CenterMOem1LifecycleCoordinator` into the real MSI Claw runtime object
+lifetime, sharing the SAME `CenterMHelperOwnership` as the routing guard, with
+a single low-rate `PeriodicTimer`-style driver for the coordinator's
+documented poll contract, suspend/resume wiring
+(`IPowerSuspendParticipant`/a narrow new `IRuntimeResumeParticipant` seam on
+`AddonRuntimeHost`), and orderly shutdown ordering. Production activation
+remains explicitly OFF: normal Addon startup never calls
+`SetDesiredEnabledAsync(true)`, so `DesiredEnabled`/`SuppressionReady` stay
+false and no helper is ever staged/started merely because the Addon launched.
+`WmiMsiEventSource`, `Oem1EventGestureBridge`, `Oem1ActionDispatcher`, and
+`RequestQuickAccessPulse()` remain completely dormant -- this PR is
+lifecycle/composition wiring only. This does not advance SD5 completion, and
+no hardware validation is claimed.
+
 ### SD6 — gyro and accelerometer
 
 Status: **SEPARATE FEATURE TRACK**
