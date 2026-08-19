@@ -55,19 +55,42 @@
     return null;
   }
 
+  function collectSearchableModules(webpackRequire) {
+    const modules = [];
+    const seen = new Set();
+
+    const add = (moduleExports) => {
+      if (!moduleExports || typeof moduleExports !== "object" || seen.has(moduleExports)) return;
+      seen.add(moduleExports);
+      modules.push(moduleExports);
+      if (moduleExports.default && typeof moduleExports.default === "object" && !seen.has(moduleExports.default)) {
+        seen.add(moduleExports.default);
+        modules.push(moduleExports.default);
+      }
+    };
+
+    for (const moduleRecord of Object.values(webpackRequire.c || {})) {
+      add(moduleRecord && moduleRecord.exports);
+    }
+
+    for (const id of Object.keys(webpackRequire.m || {})) {
+      try {
+        add(webpackRequire(id));
+      } catch (err) {
+        // Some Steam modules have side effects or unmet prerequisites; skip only that module.
+      }
+    }
+
+    return modules;
+  }
+
   // Finds every React element whose `.type` render function is one of Steam's QAM renderer
   // variants (QuickAccessMenuBrowserView / QuickAccessMenuEmbedded), by matching the signature
   // strings against the function's own source (not the module's export names). Both variants are
   // patched because enumeration order does not tell us which one the current Steam build renders.
   function findQamRenderers(webpackRequire) {
-    const cache = webpackRequire.c;
-    if (!cache) return [];
-
     const matches = [];
-    for (const moduleRecord of Object.values(cache)) {
-      const moduleExports = moduleRecord && moduleRecord.exports;
-      if (!moduleExports) continue;
-
+    for (const moduleExports of collectSearchableModules(webpackRequire)) {
       for (const candidate of Object.values(moduleExports)) {
         const render = candidate && typeof candidate.type === "function" ? candidate.type : null;
         if (!render) continue;
@@ -89,10 +112,7 @@
   }
 
   function findReact(webpackRequire) {
-    const cache = webpackRequire.c;
-    if (!cache) return null;
-    for (const moduleRecord of Object.values(cache)) {
-      const mod = moduleRecord && moduleRecord.exports;
+    for (const mod of collectSearchableModules(webpackRequire)) {
       if (mod && mod.createElement && mod.Component) {
         return mod;
       }
