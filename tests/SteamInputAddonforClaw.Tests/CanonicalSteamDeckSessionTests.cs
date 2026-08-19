@@ -343,5 +343,16 @@ public sealed class CanonicalSteamDeckSessionTests
         public bool RemoveSteamDeckDevice(nuint deviceHandle) { Calls.Add("RemoveSteamDeckDevice"); return true; }
         public SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle)
         { Calls.Add("RemoveSteamDeckDeviceEx"); return RemoveDeviceResults.Count == 0 ? SteamDeckDeviceRemoveResult.Success : RemoveDeviceResults.Dequeue(); }
+
+        public USBDeviceAttachResult AttachUSBDeviceEx(nuint deviceHandle) { Calls.Add("AttachUSBDeviceEx"); return USBDeviceAttachResult.Success; }
+        public USBDeviceDetachResult DetachUSBDeviceEx(nuint deviceHandle) { Calls.Add("DetachUSBDeviceEx"); return USBDeviceDetachResult.Success; }
+        public bool GetUSBDeviceAttachmentState(nuint deviceHandle, out USBDeviceAttachmentState state)
+        { Calls.Add("GetUSBDeviceAttachmentState"); state = USBDeviceAttachmentState.Attached; return true; }
+
+        public bool CreateXbox360Device(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct, byte xinputSubType)
+        { Calls.Add("CreateXbox360Device"); deviceHandle = 30; return true; }
+        public bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state) { Calls.Add("SetXbox360DeviceState"); return true; }
+        public bool RemoveXbox360Device(nuint deviceHandle) { Calls.Add("RemoveXbox360Device"); return true; }
+        public Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint deviceHandle) { Calls.Add("RemoveXbox360DeviceEx"); return Xbox360DeviceRemoveResult.Success; }
     }
 }

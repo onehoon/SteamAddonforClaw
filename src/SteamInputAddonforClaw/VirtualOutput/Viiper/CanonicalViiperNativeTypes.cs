@@ -19,6 +19,35 @@ internal delegate void ViiperLogCallback(ViiperLogLevel level, nint message);
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate void SteamDeckOutputCallback(nuint handle, nint data, uint length);
 
+// Mirrors the generated dist/libVIIPER/libVIIPER.h classified USB attachment enums exactly
+// (VIIPER main@a6bb749199aa797da690c611d2f18edc5e770c1e -- see
+// src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md for the pinned commit). Distinct
+// from the bool AttachUSBDevice/DetachUSBDevice compatibility surface: these
+// values are mirrored unchanged by the managed wrapper and must never be translated into policy
+// here (no automatic retry, no PnP/Windows-side inference -- see docs/VIIPER_INTEGRATION.md).
+internal enum USBDeviceAttachResult : int
+{
+    Success = 0,
+    RetryableFailure = 1,
+    UnsafeOutcomeUnknown = 2,
+    Invalid = 3
+}
+
+internal enum USBDeviceDetachResult : int
+{
+    Success = 0,
+    RetryableFailure = 1,
+    UnsafeOutcomeUnknown = 2,
+    Invalid = 3
+}
+
+internal enum USBDeviceAttachmentState : int
+{
+    Detached = 0,
+    Attached = 1,
+    OutcomeUnknown = 2
+}
+
 [StructLayout(LayoutKind.Sequential)]
 internal struct USBServerConfig
 {

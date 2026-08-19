@@ -12,6 +12,17 @@ internal enum SteamDeckDeviceRemoveResult : int
     Invalid = 3
 }
 
+// Mirrors VIIPER's Xbox360DeviceRemoveResult enum (dist/libVIIPER/libVIIPER.h, VIIPER
+// main@a6bb749199aa797da690c611d2f18edc5e770c1e -- see
+// src/SteamInputAddonforClaw/Dependencies/Viiper/PROVENANCE.md for the pinned commit).
+internal enum Xbox360DeviceRemoveResult : int
+{
+    Success = 0,
+    RetryableFailure = 1,
+    UnsafeOutcomeUnknown = 2,
+    Invalid = 3
+}
+
 internal interface ICanonicalViiperNativeApi
 {
     bool NewUSBServer(ref USBServerConfig config, out nuint serverHandle, ViiperLogCallback? logCallback = null);
@@ -22,12 +33,30 @@ internal interface ICanonicalViiperNativeApi
     bool AttachUSBDevice(nuint deviceHandle);
     bool DetachUSBDevice(nuint deviceHandle);
 
+    // Classified attachment surface: mirrors the native classification unchanged (never
+    // translated into policy, never automatically retried -- see docs/VIIPER_INTEGRATION.md). The
+    // Addon's production runtime still uses the bool AttachUSBDevice/DetachUSBDevice surface above;
+    // consumption of these classified/query APIs is deferred to later lifecycle/recovery work.
+    USBDeviceAttachResult AttachUSBDeviceEx(nuint deviceHandle);
+    USBDeviceDetachResult DetachUSBDeviceEx(nuint deviceHandle);
+    bool GetUSBDeviceAttachmentState(nuint deviceHandle, out USBDeviceAttachmentState state);
+
     // Canonical typed Steam Deck surface consumed by the Addon.
     bool CreateSteamDeckDevice(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct);
     bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state);
     bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback);
     bool RemoveSteamDeckDevice(nuint deviceHandle);
     SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle);
+
+    // Canonical typed Xbox360 surface. ABI/foundation only in this PR -- no Xbox360 logical device
+    // is created, attached, published, or production-composed here (see
+    // docs/VIIPER_MIGRATION_TODO.md SD7, still PLANNED). Buttons/D-pad/sticks/triggers only: no
+    // rumble callback is bound in this PR -- see Xbox360DeviceState/Xbox360DeviceStateMapper for
+    // the state this typed API accepts, which already carries no rumble/feedback fields.
+    bool CreateXbox360Device(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct, byte xinputSubType);
+    bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state);
+    bool RemoveXbox360Device(nuint deviceHandle);
+    Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint deviceHandle);
 }
 
 internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
@@ -41,11 +70,18 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         "GetUSBDeviceIdentity",
         "AttachUSBDevice",
         "DetachUSBDevice",
+        "AttachUSBDeviceEx",
+        "DetachUSBDeviceEx",
+        "GetUSBDeviceAttachmentState",
         "CreateSteamDeckDevice",
         "SetSteamDeckDeviceState",
         "SetSteamDeckOutputCallback",
         "RemoveSteamDeckDevice",
-        "RemoveSteamDeckDeviceEx"
+        "RemoveSteamDeckDeviceEx",
+        "CreateXbox360Device",
+        "SetXbox360DeviceState",
+        "RemoveXbox360Device",
+        "RemoveXbox360DeviceEx"
     ];
 
     private readonly NewUsbServerDelegate _newUsbServer;
@@ -55,15 +91,27 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     private readonly GetUsbDeviceIdentityDelegate _getUsbDeviceIdentity;
     private readonly AttachUsbDeviceDelegate _attachUsbDevice;
     private readonly DetachUsbDeviceDelegate _detachUsbDevice;
+    private readonly AttachUsbDeviceExDelegate _attachUsbDeviceEx;
+    private readonly DetachUsbDeviceExDelegate _detachUsbDeviceEx;
+    private readonly GetUsbDeviceAttachmentStateDelegate _getUsbDeviceAttachmentState;
     private readonly CreateSteamDeckDeviceDelegate _createSteamDeckDevice;
     private readonly SetSteamDeckDeviceStateDelegate _setSteamDeckDeviceState;
     private readonly SetSteamDeckOutputCallbackDelegate _setSteamDeckOutputCallback;
     private readonly RemoveSteamDeckDeviceDelegate _removeSteamDeckDevice;
     private readonly RemoveSteamDeckDeviceExDelegate _removeSteamDeckDeviceEx;
+    private readonly CreateXbox360DeviceDelegate _createXbox360Device;
+    private readonly SetXbox360DeviceStateDelegate _setXbox360DeviceState;
+    private readonly RemoveXbox360DeviceDelegate _removeXbox360Device;
+    private readonly RemoveXbox360DeviceExDelegate _removeXbox360DeviceEx;
     private readonly object _callbackGate = new();
     private readonly Dictionary<nuint, SteamDeckOutputCallback> _steamDeckOutputCallbacks = [];
     private readonly Dictionary<nuint, ViiperLogCallback> _logCallbacks = [];
     private readonly Dictionary<nuint, (nuint ServerHandle, uint BusId)> _deviceOwnership = [];
+    // Xbox360 logical-device ownership only -- no callback root exists for Xbox360 in this PR (no
+    // rumble callback is bound). Deliberately a separate collection from _deviceOwnership rather
+    // than a shared/keyed map, so a Deck handle and an Xbox360 handle can never collide or be
+    // mistaken for each other regardless of how VIIPER allocates its typed handle values.
+    private readonly Dictionary<nuint, (nuint ServerHandle, uint BusId)> _xbox360DeviceOwnership = [];
 
     internal CanonicalViiperNativeApi(nint library, Func<nint, string, nint>? exportResolver = null)
     {
@@ -75,11 +123,18 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         _getUsbDeviceIdentity = Bind<GetUsbDeviceIdentityDelegate>(library, resolve, "GetUSBDeviceIdentity");
         _attachUsbDevice = Bind<AttachUsbDeviceDelegate>(library, resolve, "AttachUSBDevice");
         _detachUsbDevice = Bind<DetachUsbDeviceDelegate>(library, resolve, "DetachUSBDevice");
+        _attachUsbDeviceEx = Bind<AttachUsbDeviceExDelegate>(library, resolve, "AttachUSBDeviceEx");
+        _detachUsbDeviceEx = Bind<DetachUsbDeviceExDelegate>(library, resolve, "DetachUSBDeviceEx");
+        _getUsbDeviceAttachmentState = Bind<GetUsbDeviceAttachmentStateDelegate>(library, resolve, "GetUSBDeviceAttachmentState");
         _createSteamDeckDevice = Bind<CreateSteamDeckDeviceDelegate>(library, resolve, "CreateSteamDeckDevice");
         _setSteamDeckDeviceState = Bind<SetSteamDeckDeviceStateDelegate>(library, resolve, "SetSteamDeckDeviceState");
         _setSteamDeckOutputCallback = Bind<SetSteamDeckOutputCallbackDelegate>(library, resolve, "SetSteamDeckOutputCallback");
         _removeSteamDeckDevice = Bind<RemoveSteamDeckDeviceDelegate>(library, resolve, "RemoveSteamDeckDevice");
         _removeSteamDeckDeviceEx = Bind<RemoveSteamDeckDeviceExDelegate>(library, resolve, "RemoveSteamDeckDeviceEx");
+        _createXbox360Device = Bind<CreateXbox360DeviceDelegate>(library, resolve, "CreateXbox360Device");
+        _setXbox360DeviceState = Bind<SetXbox360DeviceStateDelegate>(library, resolve, "SetXbox360DeviceState");
+        _removeXbox360Device = Bind<RemoveXbox360DeviceDelegate>(library, resolve, "RemoveXbox360Device");
+        _removeXbox360DeviceEx = Bind<RemoveXbox360DeviceExDelegate>(library, resolve, "RemoveXbox360DeviceEx");
     }
 
     internal static CanonicalViiperNativeApi Load(string absolutePath)
@@ -103,6 +158,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
             lock (_callbackGate)
             {
                 ReleaseOutputCallbacksLocked(ownership => ownership.ServerHandle == serverHandle);
+                ReleaseXbox360OwnershipLocked(ownership => ownership.ServerHandle == serverHandle);
                 _logCallbacks.Remove(serverHandle);
             }
         }
@@ -118,7 +174,10 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         if (succeeded)
         {
             lock (_callbackGate)
+            {
                 ReleaseOutputCallbacksLocked(ownership => ownership.ServerHandle == serverHandle && ownership.BusId == busId);
+                ReleaseXbox360OwnershipLocked(ownership => ownership.ServerHandle == serverHandle && ownership.BusId == busId);
+            }
         }
         return succeeded;
     }
@@ -131,6 +190,18 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     public bool DetachUSBDevice(nuint deviceHandle)
         => Succeeded(_detachUsbDevice(deviceHandle));
+
+    // Classified attachment surface: the native classification is returned unchanged. No policy
+    // translation, no automatic retry, no inference about PnP/Windows-side state belongs here --
+    // see docs/VIIPER_INTEGRATION.md.
+    public USBDeviceAttachResult AttachUSBDeviceEx(nuint deviceHandle)
+        => _attachUsbDeviceEx(deviceHandle);
+
+    public USBDeviceDetachResult DetachUSBDeviceEx(nuint deviceHandle)
+        => _detachUsbDeviceEx(deviceHandle);
+
+    public bool GetUSBDeviceAttachmentState(nuint deviceHandle, out USBDeviceAttachmentState state)
+        => Succeeded(_getUsbDeviceAttachmentState(deviceHandle, out state));
 
     public bool CreateSteamDeckDevice(
         nuint serverHandle,
@@ -214,6 +285,66 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         }
     }
 
+    // ---- Canonical typed Xbox360 surface (ABI/foundation only -- see
+    // docs/VIIPER_MIGRATION_TODO.md SD7, still PLANNED). No Xbox360 logical device is created,
+    // attached, published, or production-composed by anything in this file's callers today. Only
+    // logical-device ownership is tracked here -- no rumble callback is bound in this PR. ----
+
+    public bool CreateXbox360Device(
+        nuint serverHandle,
+        out nuint deviceHandle,
+        uint busId,
+        bool autoAttachLocalhost,
+        ushort idVendor,
+        ushort idProduct,
+        byte xinputSubType)
+    {
+        var succeeded = Succeeded(_createXbox360Device(
+            serverHandle,
+            out deviceHandle,
+            busId,
+            autoAttachLocalhost ? (byte)1 : (byte)0,
+            idVendor,
+            idProduct,
+            xinputSubType));
+        if (succeeded)
+        {
+            lock (_callbackGate) _xbox360DeviceOwnership[deviceHandle] = (serverHandle, busId);
+        }
+        return succeeded;
+    }
+
+    public bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state)
+        => Succeeded(_setXbox360DeviceState(deviceHandle, state));
+
+    public bool RemoveXbox360Device(nuint deviceHandle)
+    {
+        var succeeded = Succeeded(_removeXbox360Device(deviceHandle));
+        if (succeeded) ReleaseXbox360DeviceOwnership(deviceHandle);
+        return succeeded;
+    }
+
+    public Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint deviceHandle)
+    {
+        var result = _removeXbox360DeviceEx(deviceHandle);
+        if (result == Xbox360DeviceRemoveResult.Success)
+            ReleaseXbox360DeviceOwnership(deviceHandle);
+        return result;
+    }
+
+    private void ReleaseXbox360DeviceOwnership(nuint deviceHandle)
+    {
+        lock (_callbackGate) _xbox360DeviceOwnership.Remove(deviceHandle);
+    }
+
+    private void ReleaseXbox360OwnershipLocked(Func<(nuint ServerHandle, uint BusId), bool> predicate)
+    {
+        foreach (var (deviceHandle, ownership) in _xbox360DeviceOwnership.ToArray())
+        {
+            if (predicate(ownership)) _xbox360DeviceOwnership.Remove(deviceHandle);
+        }
+    }
+
     private static T Bind<T>(nint library, Func<nint, string, nint> resolver, string export) where T : Delegate
         => Marshal.GetDelegateForFunctionPointer<T>(resolver(library, export));
 
@@ -241,6 +372,15 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
     internal delegate byte DetachUsbDeviceDelegate(nuint handle);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate USBDeviceAttachResult AttachUsbDeviceExDelegate(nuint handle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate USBDeviceDetachResult DetachUsbDeviceExDelegate(nuint handle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte GetUsbDeviceAttachmentStateDelegate(nuint handle, out USBDeviceAttachmentState state);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate byte CreateSteamDeckDeviceDelegate(
         nuint serverHandle,
         out nuint outDeviceHandle,
@@ -260,4 +400,23 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceExDelegate(nuint handle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte CreateXbox360DeviceDelegate(
+        nuint serverHandle,
+        out nuint outDeviceHandle,
+        uint busId,
+        byte autoAttachLocalhost,
+        ushort idVendor,
+        ushort idProduct,
+        byte xinputSubType);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte SetXbox360DeviceStateDelegate(nuint handle, Xbox360DeviceState state);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate byte RemoveXbox360DeviceDelegate(nuint handle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate Xbox360DeviceRemoveResult RemoveXbox360DeviceExDelegate(nuint handle);
 }
