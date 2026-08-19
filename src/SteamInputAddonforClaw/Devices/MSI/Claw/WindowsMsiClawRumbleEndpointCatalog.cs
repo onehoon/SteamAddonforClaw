@@ -27,7 +27,7 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
     {
         if (string.IsNullOrWhiteSpace(identity.PnpInstanceId)) return [];
         const string hidInterfaceClassGuid = "{4D1E55B2-F16F-11CF-88CB-001111000030}";
-        // Only request DeviceInformation properties that are real WinRT property keys for HID
+        // Only request DeviceInformation properties that are valid metadata keys for HID
         // device interfaces. "System.Devices.Hid.InputReportByteLength" /
         // "...OutputReportByteLength" are NOT valid DeviceInformation.Properties keys and cause
         // DeviceInformation.FindAllAsync to throw a COMException("Property key syntax error").
