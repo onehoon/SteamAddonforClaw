@@ -118,6 +118,8 @@ internal interface ICenterMRetainedProcessScopeInspector
 internal sealed class Win32CenterMRetainedProcessScopeInspector : ICenterMRetainedProcessScopeInspector
 {
     private const uint TOKEN_QUERY = 0x0008;
+    private const uint WAIT_OBJECT_0 = 0;
+    private const uint WAIT_TIMEOUT = 0x102;
 
     private readonly uint? _currentSessionId;
     private readonly string? _currentUserSid;
@@ -133,8 +135,17 @@ internal sealed class Win32CenterMRetainedProcessScopeInspector : ICenterMRetain
         if (_currentSessionId is null || _currentUserSid is null) return ProcessScopeProbeStatus.Uncertain;
         if (processHandle is null || processHandle.IsInvalid) return ProcessScopeProbeStatus.Uncertain;
 
-        if (!GetProcessId(processHandle.DangerousGetHandle(), out var processId) || processId == 0)
-            return ProcessScopeProbeStatus.Uncertain;
+        // Check exact-handle liveness first -- a real MainUI can exit naturally between the earlier
+        // identity inspection and this scope check, and that must be classified as the already-
+        // supported benign natural-exit race (Exited), never conflated with an unrelated scope
+        // lookup failure (Uncertain).
+        var waitResult = WaitForSingleObject(processHandle, 0);
+        if (waitResult == WAIT_OBJECT_0) return ProcessScopeProbeStatus.Exited;
+        if (waitResult != WAIT_TIMEOUT) return ProcessScopeProbeStatus.Uncertain;
+
+        // GetProcessId returns the PID directly (DWORD) -- it has no BOOL success/out-param ABI.
+        var processId = GetProcessId(processHandle);
+        if (processId == 0) return ProcessScopeProbeStatus.Uncertain;
 
         var sessionId = TryGetSessionId(processId);
         if (sessionId is null) return ProcessScopeProbeStatus.Uncertain;
@@ -175,7 +186,10 @@ internal sealed class Win32CenterMRetainedProcessScopeInspector : ICenterMRetain
     private static extern bool ProcessIdToSessionId(uint dwProcessId, out uint pSessionId);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GetProcessId(IntPtr process, out uint processId);
+    private static extern uint WaitForSingleObject(SafeProcessHandle processHandle, uint milliseconds);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint GetProcessId(SafeProcessHandle processHandle);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out SafeAccessTokenHandle tokenHandle);

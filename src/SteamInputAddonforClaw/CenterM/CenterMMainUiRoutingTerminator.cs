@@ -145,6 +145,9 @@ internal sealed class CenterMMainUiRoutingTerminator(
         if (!SafeMainUiTerminator.PathMatchesExpectedPackage(evidence.CurrentExecutablePath))
             return CenterMRoutingTerminationResult.IdentityMismatch;
 
+        if (evidence.ProcessScope == ProcessScopeProbeStatus.Exited)
+            return CenterMRoutingTerminationResult.AlreadyExited;
+
         if (evidence.ProcessScope == ProcessScopeProbeStatus.Foreign)
             return CenterMRoutingTerminationResult.IdentityMismatch;
 

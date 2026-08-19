@@ -86,6 +86,15 @@ public sealed class CenterMMainUiRoutingTerminatorTests
                 ValidEvidence() with { ProcessScope = ProcessScopeProbeStatus.Uncertain }));
 
     [Fact]
+    public void Evaluate_ExitedRetainedHandleScope_IsAlreadyExited() =>
+        // The exact retained handle exiting naturally at the scope-check boundary is the
+        // already-supported benign natural-exit race, never conflated with an unrelated scope
+        // lookup failure -- must classify as AlreadyExited, not IdentityUncertain.
+        Assert.Equal(CenterMRoutingTerminationResult.AlreadyExited,
+            CenterMMainUiRoutingTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, true),
+                ValidEvidence() with { ProcessScope = ProcessScopeProbeStatus.Exited }));
+
+    [Fact]
     public void Evaluate_NoTerminateRights_IsAccessDenied() =>
         Assert.Equal(CenterMRoutingTerminationResult.AccessDenied,
             CenterMMainUiRoutingTerminator.Evaluate(TrackedCenterMMainUi.CreateForTesting(TrackedPid, ExpectedPath, false), ValidEvidence()));

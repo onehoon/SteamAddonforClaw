@@ -313,6 +313,28 @@ public sealed class CenterMMainUiRoutingRetirementTests
     }
 
     [Fact]
+    public async Task Retained_scope_reports_exited_then_fresh_absence_allows_retirement()
+    {
+        // The real MainUI exits naturally exactly at the retained-scope-check boundary -- this must
+        // be classified as the already-supported benign natural-exit race (fresh global absence
+        // confirmed, then Retired), never as an unrelated scope-lookup failure that refuses routing.
+        var snapshots = new QueueProcessSnapshotSource(
+        [
+            [new ProcessSnapshotEntry(Pid, "MSI Center M", ExpectedPath)], // discovery
+            [] // fresh absence after the natural exit
+        ]);
+        var identity = new QueueIdentityInspector([new LiveProcessIdentity(LiveProcessProbeStatus.Alive, Pid, "MSI Center M", ExpectedPath)]);
+        var (retirement, invoker, windowController) = Create(snapshots, identityInspector: identity,
+            retainedScopeInspector: new FixedRetainedScopeInspector(ProcessScopeProbeStatus.Exited));
+
+        var result = await retirement.PrepareExistingMainUiForRoutingAsync(CancellationToken.None);
+
+        Assert.Equal(CenterMMainUiRoutingRetirementResult.Retired, result);
+        Assert.Equal(0, windowController.CallCount);
+        Assert.Equal(0, invoker.TerminateCallCount);
+    }
+
+    [Fact]
     public async Task Scope_drift_between_discovery_and_termination_yields_zero_terminate_calls()
     {
         // Scope was Match at the initial retirement-level check, but drifts to Foreign by the time

@@ -103,6 +103,24 @@ public sealed class CenterMProcessScopeTests
         Assert.Equal(0, scope.CallCount);
     }
 
+    [Fact]
+    public void Retained_scope_inspector_classifies_current_process_as_match()
+    {
+        // Exercises the REAL Win32CenterMRetainedProcessScopeInspector (not a fake) against a real
+        // handle to this test process itself -- the current process trivially matches its own
+        // session/user, so this deterministically catches P/Invoke ABI regressions (e.g. an
+        // incorrect GetProcessId signature) that a fake-based test cannot.
+        const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+        const uint SYNCHRONIZE = 0x00100000;
+        using var handle = new Win32ProcessHandleOpener().Open(Environment.ProcessId, PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE);
+        Assert.False(handle.IsInvalid);
+
+        var inspector = new Win32CenterMRetainedProcessScopeInspector();
+        var result = inspector.Inspect(handle);
+
+        Assert.Equal(ProcessScopeProbeStatus.Match, result);
+    }
+
     private sealed class FakeProcessSnapshotSource(IReadOnlyList<ProcessSnapshotEntry>? entries) : IProcessSnapshotSource
     {
         public IReadOnlyList<ProcessSnapshotEntry>? GetProcessesByName(string processName) => entries;

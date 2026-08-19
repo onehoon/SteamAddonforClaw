@@ -168,13 +168,21 @@ internal sealed class CenterMMainUiRoutingRetirement
         // retained handle could point at a different process object than the one whose scope was
         // verified. Re-checked again immediately before termination in the terminator itself.
         var scope = _retainedScopeInspector.Inspect(tracked.Handle);
-        if (scope != ProcessScopeProbeStatus.Match)
+        switch (scope)
         {
-            var reason = scope == ProcessScopeProbeStatus.Foreign ? "ForeignProcessScope" : "ProcessScopeUncertain";
-            LogFailed(tracked.ProcessId, reason);
-            return scope == ProcessScopeProbeStatus.Foreign
-                ? CenterMMainUiRoutingRetirementResult.IdentityMismatch
-                : CenterMMainUiRoutingRetirementResult.IdentityUncertain;
+            case ProcessScopeProbeStatus.Match:
+                break;
+            case ProcessScopeProbeStatus.Exited:
+                // The already-supported benign natural-exit race, not an unrelated scope-lookup
+                // failure -- confirm fresh global absence and continue, exactly like every other
+                // "the MainUI is now gone" observation point.
+                return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
+            case ProcessScopeProbeStatus.Foreign:
+                LogFailed(tracked.ProcessId, "ForeignProcessScope");
+                return CenterMMainUiRoutingRetirementResult.IdentityMismatch;
+            default:
+                LogFailed(tracked.ProcessId, "ProcessScopeUncertain");
+                return CenterMMainUiRoutingRetirementResult.IdentityUncertain;
         }
 
         // Fail before ever mutating the user's Center M window/controller lifecycle if we already
