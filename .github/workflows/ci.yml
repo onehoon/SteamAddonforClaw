@@ -67,6 +67,7 @@ jobs:
           foreach ($testProject in $testProjects) {
             dotnet test $testProject.FullName -c Release --no-restore `
               --blame-hang-timeout 3m --blame-hang-dump-type full `
+              --blame-crash --blame-crash-dump-type mini `
               --results-directory artifacts/TestResults
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE

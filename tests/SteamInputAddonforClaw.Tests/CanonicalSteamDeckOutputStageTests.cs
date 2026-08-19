@@ -566,11 +566,13 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task LivePublisherFaultRequestsOneFailClosedNotification()
     {
         var session = new FakeCanonicalSession { InputAccepted = false };
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
         var fault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         stage.SetOutputFaultHandler(() => { fault.TrySetResult(); return ValueTask.CompletedTask; });
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        ticks.Tick();
         await fault.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
@@ -579,11 +581,13 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task LivePublisherFaultHandlerFailureIsObservedWithoutRetrying()
     {
         var session = new FakeCanonicalSession { InputAccepted = false };
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
         var calls = 0;
         stage.SetOutputFaultHandler(() => { Interlocked.Increment(ref calls); throw new InvalidOperationException("fail-close failed"); });
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        ticks.Tick();
         Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref calls) == 1, TimeSpan.FromSeconds(5)));
         await Task.Delay(100);
         Assert.Equal(1, calls);
@@ -806,7 +810,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var recovery = new RecoveryManager(storeWriteFailsAfterSeed ? new FailingReplaceStore(store) : store);
         var journal = new RecoveryJournal(RecoveryManager.CurrentSchemaVersion, _session, DateTimeOffset.UtcNow, null, new());
         File.WriteAllText(Path.Combine(_directory, "recovery.json"), System.Text.Json.JsonSerializer.Serialize(journal));
-        return new(() => session, enumerator, new(new SteamDeckVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks, authority ?? new FeedbackAuthority(), sink);
+        return new(() => session, enumerator, new(new SteamDeckVirtualDeviceIdentityPolicy()), new(), recovery, () => _session, hid, snapshot ?? new FakeSnapshot(), timeout, TimeSpan.FromMilliseconds(1), reportTicks ?? new ManualTicks(), authority ?? new FeedbackAuthority(), sink);
     }
 
     private CanonicalSteamDeckOutputStage CreateFactoryFailure(IControllerDeviceEnumerator enumerator, FakeHidHide hid)
@@ -833,9 +837,9 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
     public void Dispose()
     {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
         AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
-        AppLog.MinimumLevelOverride = AppLogLevel.Info;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 
