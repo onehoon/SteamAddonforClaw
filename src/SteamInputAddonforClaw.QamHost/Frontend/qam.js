@@ -100,20 +100,64 @@
     return null;
   }
 
-  function findTabsPropOwner(element, depth) {
-    if (!element || typeof element !== "object" || depth > 12) return null;
+  function findReactNode(node, predicate, depth) {
+    if (node == null || depth > 16) return null;
 
-    if (element.props && Array.isArray(element.props.tabs)) {
-      return element;
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const found = findReactNode(child, predicate, depth + 1);
+        if (found) return found;
+      }
+      return null;
     }
 
-    const children = element.props && element.props.children;
-    const candidates = Array.isArray(children) ? children : [children];
-    for (const child of candidates) {
-      const found = findTabsPropOwner(child, depth + 1);
-      if (found) return found;
+    if (typeof node !== "object") return null;
+    if (predicate(node)) return node;
+
+    const children = node.props && node.props.children;
+    return children == null ? null : findReactNode(children, predicate, depth + 1);
+  }
+
+  function findTabsPropOwner(node, depth) {
+    return findReactNode(node, (candidate) =>
+      candidate.props && Array.isArray(candidate.props.tabs), depth);
+  }
+
+  function patchTabsProducer(outerResult, React) {
+    const node = findReactNode(
+      outerResult,
+      (candidate) =>
+        candidate.props &&
+        typeof candidate.props.onFocusNavDeactivated === "function" &&
+        typeof candidate.type === "function",
+      0
+    );
+    if (!node) return false;
+
+    const originalType = node.type;
+    let patchedType = state.nestedTypes && state.nestedTypes.get(originalType);
+    if (!patchedType) {
+      patchedType = function patchedTabsProducer(...args) {
+        const result = originalType.apply(this, args);
+        const owner = findTabsPropOwner(result, 0);
+        if (owner && !owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
+          owner.props.tabs.push(buildAddonTab(React));
+        }
+        return result;
+      };
+
+      if (!state.nestedTypes) state.nestedTypes = new Map();
+      state.nestedTypes.set(originalType, patchedType);
     }
-    return null;
+
+    if (node.type === originalType) {
+      node.type = patchedType;
+    }
+    if (!state.nestedPatches) state.nestedPatches = [];
+    if (!state.nestedPatches.some((patch) => patch.node === node)) {
+      state.nestedPatches.push({ node, originalType, patchedType });
+    }
+    return true;
   }
 
   function buildAddonTab(React) {
@@ -172,10 +216,7 @@
 
       function patchedType(...args) {
         const result = originalType.apply(this, args);
-        const owner = findTabsPropOwner(result, 0);
-        if (owner && !owner.props.tabs.some((t) => t && t[TAB_MARKER])) {
-          owner.props.tabs.push(buildAddonTab(React));
-        }
+        patchTabsProducer(result, React);
         return result;
       }
 
@@ -186,6 +227,8 @@
     Object.assign(state, {
       installed: true,
       patches,
+      nestedTypes: new Map(),
+      nestedPatches: [],
       install,
       uninstall,
     });
@@ -207,9 +250,17 @@
       }
     }
 
+    for (const patch of state.nestedPatches || []) {
+      if (patch.node.type === patch.patchedType) {
+        patch.node.type = patch.originalType;
+      }
+    }
+
     Object.assign(state, {
       installed: false,
       patches: null,
+      nestedTypes: null,
+      nestedPatches: null,
       install,
       uninstall,
     });
