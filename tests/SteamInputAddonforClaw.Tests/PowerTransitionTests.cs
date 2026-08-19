@@ -292,7 +292,7 @@ public sealed class PowerTransitionTests
         var spy = new CountingParticipant();
         var slow = new BlockingParticipant();
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [spy, slow],
-            suspendQuiesceBudget: TimeSpan.FromMilliseconds(50));
+            suspendQuiesceBudget: TimeSpan.FromMilliseconds(1000));
         gate.EnterNewCycleBarrier(out _, out var epoch);
 
         await coordinator.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, epoch, true));
@@ -307,11 +307,19 @@ public sealed class PowerTransitionTests
         // participant FIRST, the later participant must never be reached once the shared deadline
         // is gone -- proving Earlier_participant_is_invoked_before... only passes because of order,
         // not because CountingParticipant always gets called regardless.
+        //
+        // CI flakiness fix: this depends on the coordinator's remaining-budget check (wall-clock
+        // DateTimeOffset.UtcNow) staying ahead of the per-participant CancellationTokenSource's own
+        // monotonic timer. A too-tight budget (originally 50ms, then 300ms) still occasionally let spy
+        // observe remaining > 0 immediately after slow's timeout fired, reproducing even locally
+        // (~1-in-4) once run alongside the rest of this test class -- consistent with wall-clock vs.
+        // monotonic-timer drift/scheduling jitter, not a one-off CI fluke. 1000ms eliminated it across
+        // repeated local runs (10/10) while keeping the test well under a couple of seconds.
         var gate = new PowerMutationGate(true);
         var spy = new CountingParticipant();
         var slow = new BlockingParticipant();
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [slow, spy],
-            suspendQuiesceBudget: TimeSpan.FromMilliseconds(50));
+            suspendQuiesceBudget: TimeSpan.FromMilliseconds(1000));
         gate.EnterNewCycleBarrier(out _, out var epoch);
 
         await coordinator.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, epoch, true));
