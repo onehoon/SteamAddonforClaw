@@ -5,6 +5,13 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class GameBarForegroundWatcherTests
 {
+    [Theory]
+    [InlineData("Microsoft.XboxGamingOverlay_8wekyb3d8bbwe", true)]
+    [InlineData("Microsoft.XboxGamingOverlay_wrong", false)]
+    [InlineData(null, false)]
+    public void PackageFamilyIdentity_IsExact(string? familyName, bool expected) =>
+        Assert.Equal(expected, GameBarForegroundProbe.IsExpectedPackageFamily(familyName));
+
     [Fact]
     public void Start_InstallsHookAndInspectsStartupForeground()
     {

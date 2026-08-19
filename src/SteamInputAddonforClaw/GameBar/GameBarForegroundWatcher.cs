@@ -28,8 +28,8 @@ internal sealed class GameBarForegroundProbe : IGameBarForegroundProbe
             using var process = Process.GetProcessById((int)pid);
             var executable = Path.GetFileName(process.MainModule?.FileName);
             if (!string.Equals(executable, ExecutableName, StringComparison.OrdinalIgnoreCase)) return new(false);
-            if (!GetApplicationUserModelId(process.Handle, out var familyName)) return new(false);
-            return new(string.Equals(familyName, PackageFamilyName, StringComparison.OrdinalIgnoreCase));
+            if (!TryGetPackageFamilyName(process.Handle, out var familyName)) return new(false);
+            return new(IsExpectedPackageFamily(familyName));
         }
         catch
         {
@@ -37,28 +37,24 @@ internal sealed class GameBarForegroundProbe : IGameBarForegroundProbe
         }
     }
 
-    private static bool GetApplicationUserModelId(IntPtr process, out string? familyName)
+    internal static bool IsExpectedPackageFamily(string? familyName) =>
+        string.Equals(familyName, PackageFamilyName, StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryGetPackageFamilyName(IntPtr process, out string? familyName)
     {
         familyName = null;
         uint length = 0;
-        var result = GetApplicationUserModelId(process, ref length, null);
+        var result = GetPackageFamilyName(process, ref length, null);
         if (result != ErrorInsufficientBuffer || length == 0) return false;
         var buffer = new char[length];
-        if (GetApplicationUserModelId(process, ref length, buffer) != 0) return false;
-        var appModelId = new string(buffer, 0, checked((int)length - 1));
-        uint familyLength = 0;
-        result = PackageFamilyNameFromId(appModelId, ref familyLength, null);
-        if (result != ErrorInsufficientBuffer || familyLength == 0) return false;
-        var familyBuffer = new char[familyLength];
-        if (PackageFamilyNameFromId(appModelId, ref familyLength, familyBuffer) != 0) return false;
-        familyName = new string(familyBuffer, 0, checked((int)familyLength - 1));
+        if (GetPackageFamilyName(process, ref length, buffer) != 0) return false;
+        familyName = new string(buffer, 0, checked((int)length - 1));
         return true;
     }
 
     private const uint ErrorInsufficientBuffer = 122;
     [DllImport("user32.dll", SetLastError = true)] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern uint GetApplicationUserModelId(IntPtr process, ref uint applicationUserModelIdLength, char[]? applicationUserModelId);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern uint PackageFamilyNameFromId(string applicationUserModelId, ref uint packageFamilyNameLength, char[]? packageFamilyName);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern uint GetPackageFamilyName(IntPtr process, ref uint packageFamilyNameLength, char[]? packageFamilyName);
 }
 
 internal sealed class GameBarForegroundWatcher : IDisposable

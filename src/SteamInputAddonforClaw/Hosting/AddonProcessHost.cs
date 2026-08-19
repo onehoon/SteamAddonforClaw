@@ -143,7 +143,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             FrontendPipeEndpoint.CreateForCurrentUser(),
             _frontendControl);
         await _frontendServer.StartAsync().ConfigureAwait(false);
-        _gameBarForegroundWatcher.Start();
         _frontendLauncher.MarkRuntimeReady();
         _startupComposition = null;
     }
@@ -151,6 +150,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal void RequestFrontendOpen(FrontendOpenReason reason) => _frontendLauncher.RequestOpen(reason);
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
+
+    internal void StartRuntimeEventWatchers() => _gameBarForegroundWatcher.Start();
 
     internal Task ReconcileAsync(CancellationToken cancellationToken = default) => GetRuntimeHost().ReconcileAsync(cancellationToken);
 
