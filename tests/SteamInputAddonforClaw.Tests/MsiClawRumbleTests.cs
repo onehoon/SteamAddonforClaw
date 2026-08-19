@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Feedback;
@@ -179,6 +180,63 @@ public sealed class MsiClawRumbleTests
         Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", pid: 0x1901)]).Resolve(identity).Reason);
         Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", length: 11)]).Resolve(identity).Reason);
         Assert.Equal("a", new MsiClawRumbleEndpointResolver(_ => [Candidate("a")]).Resolve(identity).DevicePath);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_retries_once_after_transient_com_exception_then_succeeds()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        MsiClawRumbleEndpointCandidate Candidate(string path) => new(path, "PNP-A", "ROOT-A", 0x0DB0, 0x1902, 64, 64, true);
+
+        var calls = 0;
+        var delays = new List<TimeSpan>();
+        var resolver = new MsiClawRumbleEndpointResolver(_ =>
+        {
+            calls++;
+            if (calls == 1) throw new COMException("transient");
+            return [Candidate("a")];
+        }, delays.Add);
+
+        var result = resolver.Resolve(identity);
+
+        Assert.Equal("a", result.DevicePath);
+        Assert.Equal(2, calls);
+        Assert.Single(delays);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_stops_retrying_after_max_attempts_and_rethrows()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        var calls = 0;
+        var resolver = new MsiClawRumbleEndpointResolver(_ =>
+        {
+            calls++;
+            throw new COMException($"attempt-{calls}");
+        }, _ => { });
+
+        var exception = Assert.Throws<COMException>(() => resolver.Resolve(identity));
+
+        Assert.Equal("attempt-2", exception.Message);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_does_not_retry_non_com_exceptions()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        var calls = 0;
+        var delayed = false;
+        var resolver = new MsiClawRumbleEndpointResolver(_ =>
+        {
+            calls++;
+            throw new InvalidOperationException("deterministic");
+        }, _ => delayed = true);
+
+        Assert.Throws<InvalidOperationException>(() => resolver.Resolve(identity));
+
+        Assert.Equal(1, calls);
+        Assert.False(delayed);
     }
 
     [Fact]
