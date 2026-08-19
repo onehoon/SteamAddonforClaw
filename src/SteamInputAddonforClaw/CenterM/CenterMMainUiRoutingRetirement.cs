@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Linq;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.CenterM;
@@ -115,7 +116,13 @@ internal sealed class CenterMMainUiRoutingRetirement
     /// abandoned via <see cref="OperationCanceledException"/> WITHOUT terminating it) or the
     /// resolution itself is reported as a definite failure (never guessed).
     /// </summary>
-    internal async Task<CenterMMainUiRoutingRetirementResult> PrepareExistingMainUiForRoutingAsync(CancellationToken cancellationToken)
+    /// <param name="ignoredSameNameProcessId">The Addon's own already-operationally-owned helper
+    /// PID (if any) -- shares the same executable name ("MSI Center M.exe") as the real MainUI, so
+    /// it must never itself be treated as a routing-retirement candidate or as an "additional
+    /// MainUI" blocking arm/absence. Matches the exact same exclusion
+    /// <see cref="CenterMMainUiRoutingGuard"/> already applies to its own same-name snapshot.</param>
+    internal async Task<CenterMMainUiRoutingRetirementResult> PrepareExistingMainUiForRoutingAsync(
+        CancellationToken cancellationToken, int? ignoredSameNameProcessId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -125,14 +132,15 @@ internal sealed class CenterMMainUiRoutingRetirement
             LogFailed(null, "ProcessEnumerationUncertain");
             return CenterMMainUiRoutingRetirementResult.IdentityUncertain;
         }
-        if (snapshot.Count == 0) return CenterMMainUiRoutingRetirementResult.NoMainUiPresent;
-        if (snapshot.Count > 1)
+        var candidates = snapshot.Where(p => p.ProcessId != ignoredSameNameProcessId).ToList();
+        if (candidates.Count == 0) return CenterMMainUiRoutingRetirementResult.NoMainUiPresent;
+        if (candidates.Count > 1)
         {
             LogFailed(null, "MultipleCandidates");
             return CenterMMainUiRoutingRetirementResult.MultipleCandidates;
         }
 
-        var candidate = snapshot[0];
+        var candidate = candidates[0];
         using var tracked = TrackedCenterMMainUi.Create(candidate.ProcessId, candidate.ExecutablePath, _handleOpener);
         if (!tracked.HasRetainedHandle)
         {
@@ -145,7 +153,7 @@ internal sealed class CenterMMainUiRoutingRetirement
         // that may not even be the real MainUI.
         var identity = _identityInspector.Inspect(tracked.Handle);
         if (identity.Status == LiveProcessProbeStatus.Exited)
-            return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
+            return await FinishExitedMainUiAsync(cancellationToken, ignoredSameNameProcessId).ConfigureAwait(false);
         if (identity.Status == LiveProcessProbeStatus.Uncertain)
         {
             LogFailed(tracked.ProcessId, "IdentityUncertain");
@@ -175,7 +183,7 @@ internal sealed class CenterMMainUiRoutingRetirement
             return CenterMMainUiRoutingRetirementResult.WindowStateUncertain;
         }
         if (!windowSnapshot.Value.ProcessAlive)
-            return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
+            return await FinishExitedMainUiAsync(cancellationToken, ignoredSameNameProcessId).ConfigureAwait(false);
 
         AppLog.Info("CenterM.RoutingGuard", "Existing real MainUI detected for routing retirement.",
             ("ProcessId", tracked.ProcessId), ("WindowState", windowSnapshot.Value.VisibleMainWindowCount > 0 ? "Visible" : "Hidden"));
@@ -207,7 +215,7 @@ internal sealed class CenterMMainUiRoutingRetirement
                     LogFailed(tracked.ProcessId, "MinimizeTimedOut");
                     return CenterMMainUiRoutingRetirementResult.MinimizeTimedOut;
                 case MainUiHideWaitStatus.Exited:
-                    return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
+                    return await FinishExitedMainUiAsync(cancellationToken, ignoredSameNameProcessId).ConfigureAwait(false);
             }
 
             AppLog.Info("CenterM.RoutingGuard", "MainUI hidden confirmed.", ("ProcessId", tracked.ProcessId));
@@ -265,12 +273,12 @@ internal sealed class CenterMMainUiRoutingRetirement
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        var terminationResult = _terminator.TryTerminate(tracked, _terminateWaitTimeout);
+        var terminationResult = _terminator.TryTerminate(tracked, _terminateWaitTimeout, ignoredSameNameProcessId);
         switch (terminationResult)
         {
             case CenterMRoutingTerminationResult.Terminated:
             case CenterMRoutingTerminationResult.AlreadyExited:
-                return await FinishExitedMainUiAsync(cancellationToken).ConfigureAwait(false);
+                return await FinishExitedMainUiAsync(cancellationToken, ignoredSameNameProcessId).ConfigureAwait(false);
 
             case CenterMRoutingTerminationResult.WaitTimedOut:
                 LogFailed(tracked.ProcessId, "TerminationTimedOut");
@@ -306,15 +314,15 @@ internal sealed class CenterMMainUiRoutingRetirement
     /// cancellation honored, immediately before returning to <see cref="CenterMMainUiRoutingGuard"/>
     /// -- so a cancelled routing request never proceeds into Phase-1 helper staging (a filesystem
     /// mutation, not a pure read) on the strength of a retirement result it never actually wanted.</summary>
-    private async Task<CenterMMainUiRoutingRetirementResult> FinishExitedMainUiAsync(CancellationToken cancellationToken)
+    private async Task<CenterMMainUiRoutingRetirementResult> FinishExitedMainUiAsync(CancellationToken cancellationToken, int? ignoredSameNameProcessId)
     {
-        var absence = await VerifyFreshAbsenceAsync().ConfigureAwait(false);
+        var absence = await VerifyFreshAbsenceAsync(ignoredSameNameProcessId).ConfigureAwait(false);
         if (absence == CenterMMainUiRoutingRetirementResult.Retired)
             cancellationToken.ThrowIfCancellationRequested();
         return absence;
     }
 
-    private async Task<CenterMMainUiRoutingRetirementResult> VerifyFreshAbsenceAsync()
+    private async Task<CenterMMainUiRoutingRetirementResult> VerifyFreshAbsenceAsync(int? ignoredSameNameProcessId)
     {
         var fresh = _processSnapshotSource.GetProcessesByName(CenterMProcessNames.MainUi);
         if (fresh is null)
@@ -322,7 +330,7 @@ internal sealed class CenterMMainUiRoutingRetirement
             LogFailed(null, "AbsenceCheckUncertain");
             return CenterMMainUiRoutingRetirementResult.AbsenceCheckFailed;
         }
-        if (fresh.Count > 0)
+        if (fresh.Any(p => p.ProcessId != ignoredSameNameProcessId))
         {
             // Do not assume retiring/observing the exit of the prior candidate proves global
             // absence -- another real MainUI may have appeared concurrently. This attempt is not

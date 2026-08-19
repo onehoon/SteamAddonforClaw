@@ -51,12 +51,12 @@ internal sealed class CenterMMainUiRoutingTerminator(
     private readonly IMainUiWindowSnapshotProvider _windowProvider = windowProvider ?? new Win32MainUiWindowSnapshotProvider();
     private readonly IProcessSnapshotSource _processSnapshotSource = processSnapshotSource ?? new Win32ProcessSnapshotSource();
 
-    internal CenterMRoutingTerminationResult TryTerminate(TrackedCenterMMainUi tracked, TimeSpan waitTimeout)
+    internal CenterMRoutingTerminationResult TryTerminate(TrackedCenterMMainUi tracked, TimeSpan waitTimeout, int? ignoredSameNameProcessId = null)
     {
         CenterMRoutingTerminationResult result;
         try
         {
-            var evidence = CaptureFreshEvidence(tracked);
+            var evidence = CaptureFreshEvidence(tracked, ignoredSameNameProcessId);
             result = Evaluate(tracked, evidence);
         }
         catch (Exception ex)
@@ -95,7 +95,7 @@ internal sealed class CenterMMainUiRoutingTerminator(
         return CenterMRoutingTerminationResult.WaitTimedOut;
     }
 
-    private CenterMRoutingTerminationEvidence CaptureFreshEvidence(TrackedCenterMMainUi tracked)
+    private CenterMRoutingTerminationEvidence CaptureFreshEvidence(TrackedCenterMMainUi tracked, int? ignoredSameNameProcessId)
     {
         var identity = _identityInspector.Inspect(tracked.Handle);
 
@@ -115,7 +115,7 @@ internal sealed class CenterMMainUiRoutingTerminator(
             CurrentProcessName: identity.ProcessName,
             CurrentExecutablePath: identity.ExecutablePath,
             FreshWindowSnapshot: windowSnapshot,
-            AdditionalForeignMainUiExists: sameNameProcesses?.Any(p => p.ProcessId != tracked.ProcessId) ?? false,
+            AdditionalForeignMainUiExists: sameNameProcesses?.Any(p => p.ProcessId != tracked.ProcessId && p.ProcessId != ignoredSameNameProcessId) ?? false,
             SameNameEnumerationUncertain: sameNameProcesses is null);
     }
 

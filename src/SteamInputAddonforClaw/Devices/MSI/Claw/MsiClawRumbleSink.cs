@@ -53,7 +53,7 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
             }
             catch (Exception exception)
             {
-                AppLog.Debug("Rumble", "MSI rumble endpoint resolution failed.", ("PID", 1902), ("PhysicalGeneration", generationEndpoint), ("Reason", "EndpointResolutionException"), ("Exception", exception.GetType().Name));
+                AppLog.Debug("Rumble", "MSI rumble endpoint resolution failed.", ("PID", 1902), ("PhysicalGeneration", generationEndpoint), ("Reason", "EndpointResolutionException"), ("Exception", exception.GetType().Name), ("HResult", exception.HResult), ("Message", exception.Message));
                 return new(PhysicalRumbleWriteStatus.Failed, "EndpointResolutionException");
             }
             if (endpoint.IsAvailable)

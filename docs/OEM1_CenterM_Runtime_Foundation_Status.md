@@ -145,9 +145,11 @@ never commits Armed.
 
 This is a separate, narrower composition than `CenterMOem1LifecycleCoordinator`
 (still fully dormant in production, unrelated to this PR) -- no OEM1
-gesture/action/UI behavior is touched. The routing guard owns its own
-dedicated `CenterMHelperOwnership` instance; a future production OEM1
-composition must not create a second same-name helper alongside it.
+gesture/action/UI behavior is touched. **Helper ownership convergence (see the
+PR below) has since made the routing guard's `CenterMHelperOwnership` a
+composition-owned shared instance rather than a private one; a future
+production OEM1 composition must still never create a second same-name
+helper alongside it.**
 
 ## Routing-time MainUI existing-instance retirement, Phase 2 (this PR)
 
@@ -194,6 +196,54 @@ guesses, and Test Mode and normal Steam routing share this exact behavior
 
 **Hardware validation is required and has not been performed.** See
 `docs/VIIPER_MIGRATION_TODO.md` SD3 for the required hardware test checklist.
+
+## Center M helper ownership convergence (this PR)
+
+Converges the two independent same-name `CenterMHelperOwnership` consumers
+(`CenterMOem1LifecycleCoordinator`, still dormant, and the production-active
+`CenterMMainUiRoutingGuard` above) onto a single shared authority, so a future
+OEM1 production composition can eventually run both without ever creating two
+competing same-name helpers. This PR is ownership/refactoring only -- it does
+**not** enable OEM1 production behavior.
+
+- `MsiClawRoutingComposition` now constructs exactly one `CenterMHelperOwnership`
+  and passes that same instance into its default `CenterMMainUiRoutingGuard`
+  via constructor injection (an externally supplied `CenterMHelperOwnership` is
+  also accepted, for a future OEM1 production composition seam). This
+  composition is the sole final disposer of that shared instance.
+- `CenterMMainUiRoutingGuard.ArmAsync()` now makes a borrow-or-start decision:
+  if the shared ownership is already `IsOperationallyOwned` (e.g. a future
+  long-lived OEM1 owner already armed it), the guard borrows it -- it does not
+  call `Start()` again -- and validates using the existing owned PID.
+  Otherwise it stages and starts the helper itself, exactly as before. A
+  retained-but-not-operational ownership (`IsOwned` true,
+  `IsOperationallyOwned` false -- e.g. an unresolved `PartialCleanupUnconfirmed`
+  residue) fails closed with a new `HelperOwnershipUnresolved` result: no
+  replacement helper is started, and nothing is discarded or silently
+  replaced.
+- A per-arm `_helperStartedByCurrentArm` flag records whether that specific
+  arm attempt started the helper. `DisarmAsync()` and terminal
+  `DisposeAsync()` only stop/register the helper when this guard itself
+  started it -- a borrowed helper always survives routing disarm and
+  disposal, left operational for its external owner.
+- Fresh post-acquisition same-name process snapshot and
+  `CenterMHelperInvariant` verification remain mandatory in both the borrow
+  and start paths before `Armed` is ever published.
+
+**Production OEM1 composition is still not enabled by this PR.**
+`CenterMOem1LifecycleCoordinator` is still not constructed or started by any
+production composition root, and it does not yet receive the shared
+`CenterMHelperOwnership` this PR introduces at the MSI Claw routing
+composition level -- wiring the coordinator to that shared authority is left
+to a later PR. WMI/gesture/action-dispatch/Quick Access production wiring
+remains completely dormant, unchanged from PR3-B. No new hardware validation
+is claimed: this is a software-only ownership/refactoring change, verified
+with deterministic fake-backed unit tests only. Ordinary Steam routing
+behavior when no long-lived OEM1 owner exists is unchanged --
+`CenterMMainUiRoutingGuardStage` still arms first (before native-mode/
+PID1902 mutation) and disarms last (after native/physical restoration), and
+it still starts and stops its own helper exactly as before when nothing else
+has already armed the shared ownership.
 
 ## PR3+ (not started) — settings / UI / production composition
 
