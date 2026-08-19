@@ -49,27 +49,33 @@ public sealed class SteamDeckFeedbackRxDiagnosticsTests : IDisposable
     }
 
     [Fact]
-    public void HapticCommandCallback_LogsRxAndUnsupported()
+    public void HapticCommandCallback_LogsHhcFields()
     {
         var bridge = Create(out _, out _);
 
-        Invoke(bridge.Callback, [0xEA]);
+        Invoke(bridge.Callback, [0xEA, 0, 0, 0, 100, 2]);
 
         var log = Drain();
         Assert.Contains("Opcode=0xEA", log);
-        Assert.Contains("Command=Unsupported", log);
+        Assert.Contains("Command=Haptic", log);
+        Assert.Contains("Intensity=100", log);
+        Assert.Contains("Gain=2", log);
+        Assert.Contains("Strength8=116", log);
     }
 
     [Fact]
-    public void HapticPulseCallback_LogsRxAndUnsupported()
+    public void HapticPulseCallback_LogsHhcFields()
     {
         var bridge = Create(out _, out _);
 
-        Invoke(bridge.Callback, [0x8F]);
+        Invoke(bridge.Callback, [0x8F, 0, 0, 0, 0, 10, 0, 2, 0, 4]);
 
         var log = Drain();
         Assert.Contains("Opcode=0x8F", log);
-        Assert.Contains("Command=Unsupported", log);
+        Assert.Contains("Command=HapticPulse", log);
+        Assert.Contains("Period=10", log);
+        Assert.Contains("Count=2", log);
+        Assert.Contains("Gain=4", log);
     }
 
     [Fact]
