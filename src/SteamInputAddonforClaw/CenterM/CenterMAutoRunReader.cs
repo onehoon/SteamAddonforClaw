@@ -54,7 +54,7 @@ internal static class CenterMAutoRunReader
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(store);
-        if (!settings.CenterMAutoRunMutationPending || !settings.Oem1Mapping.RemappingEnabled)
+        if (!settings.CenterMAutoRunMutationPending)
             return settings;
 
         var current = Read();

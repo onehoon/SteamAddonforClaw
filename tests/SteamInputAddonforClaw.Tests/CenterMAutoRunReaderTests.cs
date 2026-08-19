@@ -45,4 +45,23 @@ public sealed class CenterMAutoRunReaderTests
         Assert.Equal(expectedPending, result.CenterMAutoRunMutationPending);
         Assert.Equal(expectedOwned, result.CenterMAutoRunOwnedByAddon);
     }
+
+    [Theory]
+    [InlineData((int)CenterMAutoRunState.Disabled, false, true)]
+    [InlineData((int)CenterMAutoRunState.Enabled, false, false)]
+    public void PendingAutoRunRecovery_IsIndependentOfCurrentRemappingPreference(int observed, bool expectedPending, bool expectedOwned)
+    {
+        var initial = new AppSettings
+        {
+            Oem1Mapping = Oem1MappingSettings.Default with { RemappingEnabled = false },
+            CenterMAutoRunMutationPending = true,
+            OriginalAutoRun = 1,
+            AppliedAutoRun = 0
+        };
+
+        var result = CenterMAutoRunReader.ReconcilePendingState(initial, (CenterMAutoRunState)observed);
+
+        Assert.Equal(expectedPending, result.CenterMAutoRunMutationPending);
+        Assert.Equal(expectedOwned, result.CenterMAutoRunOwnedByAddon);
+    }
 }

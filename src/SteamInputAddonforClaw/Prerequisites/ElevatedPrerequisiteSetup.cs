@@ -68,7 +68,8 @@ internal static class ElevatedPrerequisiteSetup
             var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
             var settings = settingsStore.Load();
             var autoRunBefore = CenterMAutoRunReader.Read();
-            if (settings.Oem1Mapping.RemappingEnabled && settings.CenterMAutoRunMutationPending)
+            var oem1AutoRunFailed = false;
+            if (settings.CenterMAutoRunMutationPending)
             {
                 if (autoRunBefore == CenterMAutoRunState.Disabled)
                 {
@@ -85,7 +86,7 @@ internal static class ElevatedPrerequisiteSetup
                 else
                 {
                     AppLog.Warn("PrerequisiteSetup", "Pending AutoRun mutation remains unresolved because the registry state is unknown.", null, ("Reason", "AutoRunUnknown"));
-                    return 1;
+                    oem1AutoRunFailed = true;
                 }
             }
             if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Enabled)
@@ -99,7 +100,7 @@ internal static class ElevatedPrerequisiteSetup
                 {
                     AppLog.Warn("PrerequisiteSetup", "AutoRun setup could not be confirmed by read-back; preserving pending intent for reconciliation.", null,
                         ("OriginalAutoRun", originalAutoRun), ("ConfirmedAutoRun", confirmedAutoRun));
-                    return 1;
+                    oem1AutoRunFailed = true;
                 }
                 AppLog.Info("PrerequisiteSetup", "AutoRun setup confirmed by read-back.", ("OriginalAutoRun", originalAutoRun), ("AppliedAutoRun", 0));
                 settingsStore.Save(settings with { CenterMAutoRunMutationPending = false, CenterMAutoRunOwnedByAddon = true, OriginalAutoRun = originalAutoRun, AppliedAutoRun = 0 });
@@ -107,7 +108,7 @@ internal static class ElevatedPrerequisiteSetup
             else if (settings.Oem1Mapping.RemappingEnabled && autoRunBefore == CenterMAutoRunState.Unknown)
             {
                 AppLog.Warn("PrerequisiteSetup", "AutoRun state is unknown; refusing registry mutation.", null, ("Reason", "AutoRunUnknown"));
-                return 1;
+                oem1AutoRunFailed = true;
             }
             var restartRequired = false;
             var hidHide = new WindowsHidHidePackageProbe().Inspect();
@@ -192,7 +193,7 @@ internal static class ElevatedPrerequisiteSetup
                 if (!outcome.IsProvisioned && !outcome.RequiresRestart) return 1;
                 restartRequired |= code == 3010;
             }
-            var result = restartRequired ? 3010 : 0;
+            var result = restartRequired ? 3010 : oem1AutoRunFailed ? 1 : 0;
             AppLog.Info("PrerequisiteSetup", "Elevated prerequisite setup completed.", ("ExitCode", result), ("RestartRequired", restartRequired));
             return result;
         }
