@@ -90,6 +90,12 @@ try
         return 0;
     }
 
+    if (lifetimeToken.IsCancellationRequested)
+    {
+        await BestEffortUninstallAsync(client, log);
+        return 0;
+    }
+
     log.Info("Frontend evaluation succeeded. QAM hook installed.");
 
     if (managed)
@@ -122,6 +128,7 @@ catch (Exception ex)
 {
     if (lifetimeToken.IsCancellationRequested)
     {
+        await BestEffortUninstallAsync(client, log);
         log.Info("QamHost stop requested before installation completed.");
         return 0;
     }
@@ -130,3 +137,18 @@ catch (Exception ex)
 }
 
 return 0;
+
+static async Task BestEffortUninstallAsync(SteamGamepadUiCdpClient client, QamHostLogger log)
+{
+    try
+    {
+        var raw = await client.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.uninstall?.() ?? true", CancellationToken.None).ConfigureAwait(false);
+        var result = CdpEvaluateResult.Parse(raw);
+        if (!result.Succeeded || result.BooleanValue != true)
+            log.Warn($"Defensive uninstall did not confirm success: {result.ErrorText ?? "returned false"}");
+    }
+    catch (Exception exception)
+    {
+        log.Warn($"Defensive uninstall failed: {exception.GetType().Name}: {exception.Message}");
+    }
+}

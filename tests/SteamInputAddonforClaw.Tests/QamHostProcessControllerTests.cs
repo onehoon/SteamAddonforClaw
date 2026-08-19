@@ -60,4 +60,54 @@ public sealed class QamHostProcessControllerTests
             Directory.Delete(runtime, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task Already_exited_child_is_cleared_on_stop()
+    {
+        using var scope = new QamHostTestScope();
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ => StartCommand("/c", "exit 0"));
+        controller.OnBigPictureStateChanged(true);
+        await Task.Delay(100);
+        await controller.StopAsync();
+        Assert.False(controller.HasTrackedProcess);
+    }
+
+    [Fact]
+    public async Task Failed_stdin_stop_falls_back_to_termination_and_clears_child()
+    {
+        using var scope = new QamHostTestScope();
+        var controller = new QamHostProcessController(scope.Runtime, @"C:\logs", _ =>
+        {
+            var process = StartCommand("/c", "ping 127.0.0.1 -n 30 > nul");
+            process.StandardInput.Close();
+            return process;
+        });
+        controller.OnBigPictureStateChanged(true);
+        await Task.Delay(100);
+        await controller.StopAsync();
+        Assert.False(controller.HasTrackedProcess);
+    }
+
+    private static Process StartCommand(params string[] arguments)
+    {
+        var info = new ProcessStartInfo("cmd.exe")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            CreateNoWindow = true
+        };
+        foreach (var argument in arguments) info.ArgumentList.Add(argument);
+        return Process.Start(info)!;
+    }
+
+    private sealed class QamHostTestScope : IDisposable
+    {
+        internal string Runtime { get; } = Path.Combine(Path.GetTempPath(), "qam-test-" + Guid.NewGuid().ToString("N"));
+        public QamHostTestScope()
+        {
+            Directory.CreateDirectory(Path.Combine(Runtime, "qam"));
+            File.WriteAllText(Path.Combine(Runtime, "qam", "SteamInputAddonforClaw.QamHost.exe"), string.Empty);
+        }
+        public void Dispose() => Directory.Delete(Runtime, true);
+    }
 }

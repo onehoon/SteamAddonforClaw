@@ -22,6 +22,7 @@ internal sealed class QamHostProcessController : IAsyncDisposable
     }
 
     internal string ExecutablePath => _executablePath;
+    internal bool HasTrackedProcess { get { lock (_sync) return _process is not null; } }
 
     internal void OnBigPictureStateChanged(bool active) => _ = TransitionAsync(active);
 

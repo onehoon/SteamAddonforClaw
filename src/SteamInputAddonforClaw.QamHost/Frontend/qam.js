@@ -175,15 +175,19 @@
       record.patchedType = function patchedTabsProducer(...args) {
         const result = originalType.apply(this, args);
         if (!state.installed) return result;
-        const owner = findTabsPropOwner(result, 0);
-        if (!owner) return result;
-        record.tabs = owner.props.tabs;
-        logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
-        if (!owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
-          owner.props.tabs.push(buildAddonTab(React));
-          logOnce("tabInserted", "Steam Input Addon tab inserted.");
-        } else {
-          logOnce("duplicateTab", "Duplicate tab already present; insertion skipped.");
+        try {
+          const owner = findTabsPropOwner(result, 0);
+          if (!owner) return result;
+          record.tabs = owner.props.tabs;
+          logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
+          if (!owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
+            owner.props.tabs.push(buildAddonTab(React));
+            logOnce("tabInserted", "Steam Input Addon tab inserted.");
+          } else {
+            logOnce("duplicateTab", "Duplicate tab already present; insertion skipped.");
+          }
+        } catch (err) {
+          logOnce("nestedAugmentationFailed", `QAM nested augmentation failed: ${String(err)}`);
         }
         return result;
       };
@@ -276,7 +280,11 @@
 
       function patchedType(...args) {
         const result = originalType.apply(this, args);
-        patchTabsProducer(result, React);
+        try {
+          patchTabsProducer(result, React);
+        } catch (err) {
+          logOnce("outerAugmentationFailed", `QAM outer augmentation failed: ${String(err)}`);
+        }
         return result;
       }
 
