@@ -24,13 +24,170 @@ public sealed class EffectiveSteamSessionSourceTests
     }
 
     [Fact]
-    public void BigPicturePreference_EnablesAndDisablesTheEffectiveSessionImmediately()
+    public void RoutingEnabled_WithActualGame_ReportsActualSession()
+    {
+        var actual = new FakeRunningAppIdSource(123);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), new FakeSteamInputRoutingPreference(true));
+        watcher.Start(); bigPicture.Start(); effective.Refresh();
+
+        Assert.True(effective.State.IsActive);
+        Assert.Equal(SteamSessionSource.Actual, effective.State.Source);
+    }
+
+    [Fact]
+    public void RoutingEnabled_WithBigPictureOnly_ReportsBigPictureSession()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(true), new FakeBigPictureEventHook());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), new FakeSteamInputRoutingPreference(true));
+        watcher.Start(); bigPicture.Start();
+
+        Assert.True(effective.State.IsActive);
+        Assert.Equal(SteamSessionSource.BigPicture, effective.State.Source);
+    }
+
+    [Fact]
+    public void RoutingEnabled_WithNeitherGameNorBigPicture_ReportsInactive()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), new FakeSteamInputRoutingPreference(true));
+        watcher.Start(); bigPicture.Start();
+
+        Assert.False(effective.State.IsActive);
+    }
+
+    [Fact]
+    public void RoutingDisabled_WithActualGame_ReportsInactive()
+    {
+        var actual = new FakeRunningAppIdSource(123);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), new FakeSteamInputRoutingPreference(false));
+        watcher.Start(); bigPicture.Start(); effective.Refresh();
+
+        Assert.False(effective.State.IsActive);
+        Assert.Equal(0u, effective.State.RunningAppId);
+    }
+
+    [Fact]
+    public void RoutingDisabled_WithBigPicture_ReportsInactive()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(true), new FakeBigPictureEventHook());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), new FakeSteamInputRoutingPreference(false));
+        watcher.Start(); bigPicture.Start();
+
+        Assert.False(effective.State.IsActive);
+    }
+
+    [Fact]
+    public void RoutingDisabled_WithDeveloperTestMode_ReportsInactive()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
+        var testMode = new DeveloperTestModeState();
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, testMode, new FakeSteamInputRoutingPreference(false));
+        watcher.Start(); bigPicture.Start();
+
+        testMode.SetEnabled(true);
+
+        Assert.False(effective.State.IsActive);
+    }
+
+    [Fact]
+    public void ActualSessionActive_RoutingTurnedOff_PublishesActiveToInactiveTransition()
+    {
+        var actual = new FakeRunningAppIdSource(123);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
+        var preference = new FakeSteamInputRoutingPreference(true);
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
+        watcher.Start(); bigPicture.Start(); effective.Refresh();
+        var transitions = new List<SteamSessionStateChangedEventArgs>();
+        effective.StateChanged += (_, args) => transitions.Add(args);
+
+        preference.Set(false);
+
+        var transition = Assert.Single(transitions);
+        Assert.True(transition.Previous.IsActive);
+        Assert.Equal(SteamSessionSource.Actual, transition.Previous.Source);
+        Assert.False(transition.Current.IsActive);
+    }
+
+    [Fact]
+    public void BigPictureSessionActive_RoutingTurnedOff_PublishesActiveToInactiveTransition()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(true), new FakeBigPictureEventHook());
+        var preference = new FakeSteamInputRoutingPreference(true);
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
+        watcher.Start(); bigPicture.Start();
+        var transitions = new List<SteamSessionStateChangedEventArgs>();
+        effective.StateChanged += (_, args) => transitions.Add(args);
+
+        preference.Set(false);
+
+        var transition = Assert.Single(transitions);
+        Assert.Equal(SteamSessionSource.BigPicture, transition.Previous.Source);
+        Assert.False(transition.Current.IsActive);
+    }
+
+    [Fact]
+    public void ActualGameAlreadyRunning_RoutingTurnedOn_PublishesInactiveToActualTransition()
+    {
+        var actual = new FakeRunningAppIdSource(123);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
+        var preference = new FakeSteamInputRoutingPreference(false);
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
+        watcher.Start(); bigPicture.Start();
+        var transitions = new List<SteamSessionStateChangedEventArgs>();
+        effective.StateChanged += (_, args) => transitions.Add(args);
+
+        preference.Set(true);
+
+        var transition = Assert.Single(transitions);
+        Assert.False(transition.Previous.IsActive);
+        Assert.True(transition.Current.IsActive);
+        Assert.Equal(SteamSessionSource.Actual, transition.Current.Source);
+        Assert.Equal(123u, transition.Current.RunningAppId);
+    }
+
+    [Fact]
+    public void BigPictureAlreadyActive_RoutingTurnedOn_PublishesInactiveToBigPictureTransition()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(true), new FakeBigPictureEventHook());
+        var preference = new FakeSteamInputRoutingPreference(false);
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
+        watcher.Start(); bigPicture.Start();
+        var transitions = new List<SteamSessionStateChangedEventArgs>();
+        effective.StateChanged += (_, args) => transitions.Add(args);
+
+        preference.Set(true);
+
+        var transition = Assert.Single(transitions);
+        Assert.False(transition.Previous.IsActive);
+        Assert.Equal(SteamSessionSource.BigPicture, transition.Current.Source);
+    }
+
+    [Fact]
+    public void RoutingPreference_EnablesAndDisablesTheEffectiveSessionImmediately()
     {
         var actual = new FakeRunningAppIdSource(0);
         using var watcher = new SteamSessionWatcher(actual);
         var bigPictureProbe = new FakeBigPictureProbe(false);
         using var bigPicture = new SteamBigPictureWatcher(bigPictureProbe, new FakeBigPictureEventHook());
-        var preference = new FakeBigPicturePreference();
+        var preference = new FakeSteamInputRoutingPreference();
         var testMode = new DeveloperTestModeState();
         using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, testMode, preference);
         watcher.Start(); bigPicture.Start();
@@ -47,12 +204,12 @@ public sealed class EffectiveSteamSessionSourceTests
     }
 
     [Fact]
-    public void ActualGame_HasPriorityRegardlessOfBigPicturePreference()
+    public void ActualGame_HasPriorityOverBigPicture()
     {
         var actual = new FakeRunningAppIdSource(123);
         using var watcher = new SteamSessionWatcher(actual);
         using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(true), new FakeBigPictureEventHook());
-        var preference = new FakeBigPicturePreference();
+        var preference = new FakeSteamInputRoutingPreference();
         using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
         watcher.Start(); bigPicture.Start(); preference.Set(true);
 
@@ -61,20 +218,20 @@ public sealed class EffectiveSteamSessionSourceTests
     }
 
     [Fact]
-    public void SameBigPicturePreference_DoesNotPublishDuplicateTransition()
+    public void SameRoutingPreference_DoesNotPublishDuplicateTransition()
     {
         var actual = new FakeRunningAppIdSource(0);
         using var watcher = new SteamSessionWatcher(actual);
         var probe = new FakeBigPictureProbe(true);
         using var bigPicture = new SteamBigPictureWatcher(probe, new FakeBigPictureEventHook());
-        var preference = new FakeBigPicturePreference();
+        var preference = new FakeSteamInputRoutingPreference(true);
         using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
         watcher.Start(); bigPicture.Start();
         var publications = 0;
         effective.StateChanged += (_, _) => publications++;
 
-        preference.Set(true);
-        preference.Set(true);
+        preference.Set(false);
+        preference.Set(false);
 
         Assert.Equal(1, publications);
     }
@@ -86,7 +243,7 @@ public sealed class EffectiveSteamSessionSourceTests
         using var watcher = new SteamSessionWatcher(actual);
         var probe = new FakeBigPictureProbe(true);
         using var bigPicture = new SteamBigPictureWatcher(probe, new FakeBigPictureEventHook());
-        var preference = new FakeBigPicturePreference();
+        var preference = new FakeSteamInputRoutingPreference();
         using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), preference);
         watcher.Start(); bigPicture.Start(); preference.Set(true);
         var sources = new List<SteamSessionSource>();
@@ -287,15 +444,15 @@ public sealed class EffectiveSteamSessionSourceTests
         public void SetRunningAppId(uint appId) { _appId = appId; Changed?.Invoke(this, EventArgs.Empty); }
     }
 
-    private sealed class FakeBigPicturePreference : ISteamBigPictureRoutingPreference
+    private sealed class FakeSteamInputRoutingPreference(bool enabled = true) : ISteamInputRoutingPreference
     {
-        public bool RouteInSteamBigPicture { get; private set; }
-        public event EventHandler? RouteInSteamBigPictureChanged;
+        public bool SteamInputRoutingEnabled { get; private set; } = enabled;
+        public event EventHandler? SteamInputRoutingEnabledChanged;
         public void Set(bool value)
         {
-            if (RouteInSteamBigPicture == value) return;
-            RouteInSteamBigPicture = value;
-            RouteInSteamBigPictureChanged?.Invoke(this, EventArgs.Empty);
+            if (SteamInputRoutingEnabled == value) return;
+            SteamInputRoutingEnabled = value;
+            SteamInputRoutingEnabledChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 

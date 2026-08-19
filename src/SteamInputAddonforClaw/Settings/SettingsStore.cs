@@ -29,9 +29,9 @@ public sealed class SettingsStore
             var startup = root.TryGetProperty("LaunchAtWindowsStartup", out var startupProperty) && startupProperty.ValueKind is JsonValueKind.False or JsonValueKind.True
                 ? startupProperty.GetBoolean() : true;
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty) && levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : null);
-            var routeInSteamBigPicture = !root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty) || routeProperty.ValueKind == JsonValueKind.True;
+            var steamInputRoutingEnabled = !root.TryGetProperty("SteamInputRoutingEnabled", out var routeProperty) || routeProperty.ValueKind == JsonValueKind.True;
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
-            var settings = new AppSettings(startup, logLevel, routeInSteamBigPicture, suppressDeveloperMenuWarning);
+            var settings = new AppSettings(startup, logLevel, steamInputRoutingEnabled, suppressDeveloperMenuWarning);
             AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
             return settings;
         }
@@ -60,8 +60,8 @@ public sealed class SettingsStore
             var logLevel = AppSettingsPolicy.Normalize(root.TryGetProperty("LogLevel", out var levelProperty)
                 ? levelProperty.ValueKind == JsonValueKind.String ? levelProperty.GetString() : throw new JsonException("LogLevel must be string.")
                 : null);
-            var route = root.TryGetProperty("RouteInSteamBigPicture", out var routeProperty)
-                ? routeProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? routeProperty.GetBoolean() : throw new JsonException("RouteInSteamBigPicture must be boolean.")
+            var route = root.TryGetProperty("SteamInputRoutingEnabled", out var routeProperty)
+                ? routeProperty.ValueKind is JsonValueKind.True or JsonValueKind.False ? routeProperty.GetBoolean() : throw new JsonException("SteamInputRoutingEnabled must be boolean.")
                 : true;
             // Developer-menu warning suppression is UI preference data, not a safety-gate input.
             // Keep malformed values from affecting the prerequisite mutation decision.
@@ -77,12 +77,12 @@ public sealed class SettingsStore
     public void Save(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        AppLog.Debug("Settings", "Settings save started.", ("Path", _settingsPath), ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel), ("RouteInSteamBigPicture", settings.RouteInSteamBigPicture));
+        AppLog.Debug("Settings", "Settings save started.", ("Path", _settingsPath), ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel), ("SteamInputRoutingEnabled", settings.SteamInputRoutingEnabled));
 
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.RouteInSteamBigPicture, settings.SuppressDeveloperMenuWarning };
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

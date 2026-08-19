@@ -28,7 +28,7 @@ internal sealed class SteamSessionRuntime : IDisposable
     private readonly DiagnosticSessionTracker _diagnosticSessions = new();
     private bool _disposed;
 
-    internal SteamSessionRuntime(ISteamBigPictureRoutingPreference routingPreference)
+    internal SteamSessionRuntime(ISteamInputRoutingPreference routingPreference)
     {
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
         _sessionWatcher = new SteamSessionWatcher(_runningAppIdSource);

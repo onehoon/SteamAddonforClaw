@@ -7,13 +7,13 @@
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
-                <TextBlock Opacity="0.7" Text="Configure how Steam Input routing behaves outside a running game." TextWrapping="Wrap" />
+                <TextBlock Opacity="0.7" Text="Configure Steam Input controller routing." TextWrapping="Wrap" />
             </StackPanel>
-            <ctcontrols:SettingsCard Header="Steam Big Picture Mode" Description="Keep Steam Controller routing active in Big Picture, even when no game is running.">
+            <ctcontrols:SettingsCard Header="Steam Input Routing" Description="Automatically route the built-in controller through Steam Input for Steam games and Big Picture Mode.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="Repair" />
                 </ctcontrols:SettingsCard.HeaderIcon>
-                <ToggleSwitch x:Name="RouteInSteamBigPictureToggleSwitch" OffContent="" OnContent="" Toggled="RouteInSteamBigPictureToggleSwitch_Toggled" />
+                <ToggleSwitch x:Name="SteamInputRoutingToggleSwitch" OffContent="" OnContent="" Toggled="SteamInputRoutingToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
         </StackPanel>
     </ScrollViewer>

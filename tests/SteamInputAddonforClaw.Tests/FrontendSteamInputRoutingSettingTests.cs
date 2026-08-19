@@ -1,0 +1,87 @@
+using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Developer;
+using SteamInputAddonforClaw.Frontend;
+using SteamInputAddonforClaw.Install;
+using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Settings;
+using SteamInputAddonforClaw.Status;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+/// <summary>
+/// Covers the frontend boundary for the single Steam Input routing master preference: the bootstrap
+/// must report it, the setter must persist it and return the authoritative stored value, and the
+/// obsolete Big-Picture-only contract must be gone from the production interface entirely.
+/// </summary>
+public sealed class FrontendSteamInputRoutingSettingTests : IDisposable
+{
+    private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
+
+    [Fact]
+    public async Task Bootstrap_reports_the_stored_steam_input_routing_setting()
+    {
+        var control = CreateControl(new AppSettings(SteamInputRoutingEnabled: false), out _);
+
+        var bootstrap = await control.GetBootstrapAsync();
+
+        Assert.False(bootstrap.Settings.SteamInputRoutingEnabled);
+    }
+
+    [Fact]
+    public async Task Setter_persists_the_setting_and_returns_the_authoritative_value()
+    {
+        var control = CreateControl(new AppSettings(SteamInputRoutingEnabled: true), out var store);
+
+        var result = await control.SetSteamInputRoutingEnabledAsync(false);
+
+        Assert.False(result.SteamInputRoutingEnabled);
+        Assert.False(store.Load().SteamInputRoutingEnabled);
+        Assert.False((await control.GetBootstrapAsync()).Settings.SteamInputRoutingEnabled);
+    }
+
+    [Fact]
+    public void Production_contract_has_no_big_picture_only_routing_member()
+    {
+        var names = typeof(IAddonFrontendControl).GetMembers().Select(member => member.Name)
+            .Concat(typeof(FrontendSettingsSnapshot).GetMembers().Select(member => member.Name))
+            .ToList();
+
+        Assert.DoesNotContain(names, name => name.Contains("RouteInSteamBigPicture", StringComparison.Ordinal));
+        Assert.Contains(names, name => name == nameof(IAddonFrontendControl.SetSteamInputRoutingEnabledAsync));
+        Assert.Contains(names, name => name == nameof(FrontendSettingsSnapshot.SteamInputRoutingEnabled));
+    }
+
+    private InProcessAddonFrontendControl CreateControl(AppSettings settings, out SettingsStore store)
+    {
+        // The bootstrap snapshot reports the log directory, which otherwise resolves through the
+        // Velopack locator that only exists in an installed app.
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
+        store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(settings, store, new FakeStartupManager());
+        return new InProcessAddonFrontendControl(
+            coordinator,
+            new ThrowingSystemStatusProvider(),
+            null,
+            new DeveloperTestModeState(),
+            "",
+            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false));
+    }
+
+    public void Dispose()
+    {
+        SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = null;
+        if (Directory.Exists(_testDirectory)) Directory.Delete(_testDirectory, recursive: true);
+    }
+
+    private sealed class FakeStartupManager : IWindowsStartupManager
+    {
+        public StartupRegistrationResult Synchronize(bool enabled) => StartupRegistrationResult.Enabled();
+    }
+
+    private sealed class ThrowingSystemStatusProvider : ISystemStatusProvider
+    {
+        public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Status capture is not part of these tests.");
+    }
+}

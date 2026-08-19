@@ -86,7 +86,7 @@ public sealed class FrontendPrerequisiteSetupBridgeTests
 
         control.BeginProcessShutdown();
 
-        var exception = await Assert.ThrowsAsync<FrontendProtocolException>(() => control.SetRouteInSteamBigPictureAsync(true));
+        var exception = await Assert.ThrowsAsync<FrontendProtocolException>(() => control.SetSteamInputRoutingEnabledAsync(true));
         Assert.Contains("shutting down", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 

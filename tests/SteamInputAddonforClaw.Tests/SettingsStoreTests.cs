@@ -19,17 +19,17 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void Load_WhenSettingsDoNotExist_EnablesBigPictureRoutingByDefault()
+    public void Load_WhenSettingsDoNotExist_EnablesSteamInputRoutingByDefault()
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
 
         var settings = store.Load();
 
-        Assert.True(settings.RouteInSteamBigPicture);
+        Assert.True(settings.SteamInputRoutingEnabled);
     }
 
     [Fact]
-    public void Load_LegacySettingsWithoutBigPictureProperty_EnablesBigPictureRouting()
+    public void Load_SettingsWithoutRoutingProperty_EnablesSteamInputRouting()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         Directory.CreateDirectory(_testDirectory);
@@ -37,7 +37,7 @@ public sealed class SettingsStoreTests : IDisposable
 
         var settings = new SettingsStore(path).Load();
 
-        Assert.True(settings.RouteInSteamBigPicture);
+        Assert.True(settings.SteamInputRoutingEnabled);
     }
 
     [Fact]
@@ -51,11 +51,36 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void SaveAndLoad_PreservesBigPictureSetting()
+    public void SaveAndLoad_PreservesSteamInputRoutingSetting()
     {
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
-        store.Save(new AppSettings(RouteInSteamBigPicture: true));
-        Assert.True(store.Load().RouteInSteamBigPicture);
+        store.Save(new AppSettings(SteamInputRoutingEnabled: true));
+        Assert.True(store.Load().SteamInputRoutingEnabled);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Load_ReadsSteamInputRoutingEnabledKey(bool enabled)
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, $"{{\"SteamInputRoutingEnabled\":{(enabled ? "true" : "false")}}}");
+
+        Assert.Equal(enabled, new SettingsStore(path).Load().SteamInputRoutingEnabled);
+    }
+
+    [Fact]
+    public void Save_WritesSteamInputRoutingEnabledKeyOnly()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        var store = new SettingsStore(path);
+
+        store.Save(new AppSettings(SteamInputRoutingEnabled: false));
+
+        var json = File.ReadAllText(path);
+        Assert.Contains("\"SteamInputRoutingEnabled\": false", json);
+        Assert.DoesNotContain("RouteInSteamBigPicture", json);
     }
 
     [Fact]
@@ -92,11 +117,11 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void ReliableLoad_InvalidBigPictureType_BlocksSafetyMutation()
+    public void ReliableLoad_InvalidSteamInputRoutingType_BlocksSafetyMutation()
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         Directory.CreateDirectory(_testDirectory);
-        File.WriteAllText(path, "{\"RouteInSteamBigPicture\":\"true\"}");
+        File.WriteAllText(path, "{\"SteamInputRoutingEnabled\":\"true\"}");
         var result = new SettingsStore(path).LoadForSafetyGate();
         Assert.False(result.IsReliable);
         Assert.Equal("SettingsUnreliable", result.Reason);
@@ -107,13 +132,13 @@ public sealed class SettingsStoreTests : IDisposable
     {
         var path = Path.Combine(_testDirectory, "settings.json");
         Directory.CreateDirectory(_testDirectory);
-        File.WriteAllText(path, "{\"RouteInSteamBigPicture\":false,\"SuppressDeveloperMenuWarning\":\"false\"}");
+        File.WriteAllText(path, "{\"SteamInputRoutingEnabled\":false,\"SuppressDeveloperMenuWarning\":\"false\"}");
 
         var result = new SettingsStore(path).LoadForSafetyGate();
 
         Assert.True(result.IsReliable);
         Assert.Equal("Loaded", result.Reason);
-        Assert.False(result.Settings.RouteInSteamBigPicture);
+        Assert.False(result.Settings.SteamInputRoutingEnabled);
     }
 
     [Fact]
@@ -201,15 +226,15 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void ChangeBigPictureSetting_SaveFailureKeepsMemoryAndEmitsNoChange()
+    public void ChangeSteamInputRoutingSetting_SaveFailureKeepsMemoryAndEmitsNoChange()
     {
         Directory.CreateDirectory(_testDirectory);
-        var coordinator = new StartupSettingsCoordinator(new AppSettings(RouteInSteamBigPicture: false), new SettingsStore(_testDirectory), new FakeStartupManager());
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(SteamInputRoutingEnabled: false), new SettingsStore(_testDirectory), new FakeStartupManager());
         var changes = 0;
-        coordinator.RouteInSteamBigPictureChanged += (_, _) => changes++;
+        coordinator.SteamInputRoutingEnabledChanged += (_, _) => changes++;
 
-        Assert.ThrowsAny<Exception>(() => coordinator.ChangeRouteInSteamBigPicture(true));
-        Assert.False(coordinator.RouteInSteamBigPicture);
+        Assert.ThrowsAny<Exception>(() => coordinator.ChangeSteamInputRoutingEnabled(true));
+        Assert.False(coordinator.SteamInputRoutingEnabled);
         Assert.Equal(0, changes);
     }
 

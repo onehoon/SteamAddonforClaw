@@ -26,13 +26,13 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetRouteInSteamBigPicture, SetLogLevel, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport }
 internal enum FrontendNotificationKind { StateInvalidated }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
 internal sealed record FrontendWireEnvelope(int ProtocolVersion, FrontendWireMessageKind Kind, long? RequestId = null, FrontendRpcMethod? Method = null, FrontendNotificationKind? Notification = null, JsonElement? Payload = null, FrontendWireError? Error = null);
 internal sealed record SetLaunchAtWindowsStartupRequest(bool Enabled);
-internal sealed record SetRouteInSteamBigPictureRequest(bool Enabled);
+internal sealed record SetSteamInputRoutingEnabledRequest(bool Enabled);
 internal sealed record SetLogLevelRequest(FrontendLogLevel Level);
 internal sealed record SetDeveloperTestModeRequest(bool Enabled);
 

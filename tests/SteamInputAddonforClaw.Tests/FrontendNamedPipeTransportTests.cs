@@ -39,8 +39,8 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equivalent(Status, await client.CaptureStatusAsync(), strict: true);
         Assert.Equal(fake.LaunchResult, await client.SetLaunchAtWindowsStartupAsync(false));
         Assert.False(fake.LastLaunchAtStartupEnabled);
-        Assert.Equal(Settings, await client.SetRouteInSteamBigPictureAsync(false));
-        Assert.False(fake.LastRouteInBigPictureEnabled);
+        Assert.Equal(Settings, await client.SetSteamInputRoutingEnabledAsync(false));
+        Assert.False(fake.LastSteamInputRoutingEnabled);
         Assert.Equal(Settings, await client.SetLogLevelAsync(FrontendLogLevel.Info));
         Assert.Equal(FrontendLogLevel.Info, fake.LastLogLevel);
         Assert.Equal(Settings, await client.SuppressDeveloperMenuWarningAsync());
@@ -800,15 +800,15 @@ public sealed class FrontendNamedPipeTransportTests
 
     [Theory]
     [InlineData("SetLaunchAtWindowsStartup", "{}")]
-    [InlineData("SetRouteInSteamBigPicture", "{}")]
+    [InlineData("SetSteamInputRoutingEnabled", "{}")]
     [InlineData("SetDeveloperTestMode", "{}")]
     [InlineData("SetLogLevel", "{}")]
     [InlineData("SetLaunchAtWindowsStartup", "null")]
-    [InlineData("SetRouteInSteamBigPicture", "null")]
+    [InlineData("SetSteamInputRoutingEnabled", "null")]
     [InlineData("SetDeveloperTestMode", "null")]
     [InlineData("SetLogLevel", "null")]
     [InlineData("SetLaunchAtWindowsStartup", "{\"Enabled\":\"false\"}")]
-    [InlineData("SetRouteInSteamBigPicture", "{\"Enabled\":\"false\"}")]
+    [InlineData("SetSteamInputRoutingEnabled", "{\"Enabled\":\"false\"}")]
     [InlineData("SetDeveloperTestMode", "{\"Enabled\":\"false\"}")]
     [InlineData("SetLogLevel", "{\"Level\":123}")]
     public async Task Malformed_mutation_payload_is_rejected_without_invoking_frontend(string method, string payload)
@@ -942,7 +942,7 @@ public sealed class FrontendNamedPipeTransportTests
         public FrontendEnvironmentReportResult EnvironmentResult { get; } = new(true, null);
         public int TotalCalls { get; private set; }
         public bool LastLaunchAtStartupEnabled { get; private set; }
-        public bool LastRouteInBigPictureEnabled { get; private set; }
+        public bool LastSteamInputRoutingEnabled { get; private set; }
         public FrontendLogLevel LastLogLevel { get; private set; }
         public bool LastDeveloperTestModeEnabled { get; private set; }
         public int SuppressDeveloperWarningCount { get; private set; }
@@ -954,7 +954,7 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken t = default) { TotalCalls++; if (ThrowOperationCanceledWithoutToken) throw new OperationCanceledException(); return Task.FromResult(Bootstrap); }
         public Task<FrontendStatusSnapshot> CaptureStatusAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(Status); }
         public Task<FrontendLaunchAtStartupResult> SetLaunchAtWindowsStartupAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastLaunchAtStartupEnabled = enabled; return Task.FromResult(LaunchResult); }
-        public Task<FrontendSettingsSnapshot> SetRouteInSteamBigPictureAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastRouteInBigPictureEnabled = enabled; return Task.FromResult(Settings); }
+        public Task<FrontendSettingsSnapshot> SetSteamInputRoutingEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastSteamInputRoutingEnabled = enabled; return Task.FromResult(Settings); }
         public Task<FrontendSettingsSnapshot> SetLogLevelAsync(FrontendLogLevel level, CancellationToken t = default) { TotalCalls++; LastLogLevel = level; return Task.FromResult(Settings); }
         public Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken t = default) { TotalCalls++; SuppressDeveloperWarningCount++; return Task.FromResult(Settings); }
         public Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastDeveloperTestModeEnabled = enabled; return Task.FromResult(new FrontendDeveloperSnapshot(enabled)); }
