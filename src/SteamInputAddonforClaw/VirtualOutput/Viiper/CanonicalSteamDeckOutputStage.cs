@@ -292,6 +292,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             _publisher = null;
         }
         _systemButtonOverlay.Clear();
+        _feedbackBridge?.Dispose();
         if (_feedbackAuthority is not null && _feedbackToken is not null && !_feedbackRevoked)
         {
             _feedbackAuthority.RevokeAndDrain();

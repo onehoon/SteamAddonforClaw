@@ -23,6 +23,8 @@ feedback; only an actually armed feedback session requires final STOP and
 callback-clear teardown. Hardware validation remains pending and no specific
 model success is claimed.
 
-Steam Haptic 0xEA, Haptic Pulse 0x8F, audio/jingle commands, and unknown output
-commands remain unsupported in Rumble v1. Gyro/IMU remain separate. The
+Steam Haptic 0xEA and Haptic Pulse 0x8F now use the existing two-motor physical
+sink with HHC-compatible amplitude mapping and stale-safe pulse STOP ownership.
+Audio/jingle commands and unknown output commands remain unsupported in Rumble
+v1. Gyro/IMU remain separate. The
 VIIPER native ABI, generated header, DLL, and pinned dependency are unchanged.

@@ -10,6 +10,10 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     private readonly FeedbackAuthority _authority;
     private readonly FeedbackAuthorityToken _token;
     private readonly IPhysicalRumbleSink _sink;
+    private readonly object _gate = new();
+    private CancellationTokenSource? _pendingStop;
+    private long _sequence;
+    private bool _disposed;
 
     internal SteamDeckRumbleFeedbackBridge(FeedbackAuthority authority, FeedbackAuthorityToken token, IPhysicalRumbleSink sink)
     {
@@ -21,6 +25,18 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
     internal SteamDeckOutputCallback Callback { get; }
     internal Action? BeforeLease { get; set; }
+
+    internal void Dispose()
+    {
+        lock (_gate)
+        {
+            _disposed = true;
+            _sequence++;
+            _pendingStop?.Cancel();
+            _pendingStop?.Dispose();
+            _pendingStop = null;
+        }
+    }
 
     private void OnNativeOutput(nuint handle, nint data, uint length)
     {
@@ -42,25 +58,69 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             var decoded = SteamDeckRumbleDecoder.Decode(report);
             if (decoded.Command == SteamDeckFeedbackCommand.Rumble)
                 AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("Left", decoded.Rumble.LargeMotor), ("Right", decoded.Rumble.SmallMotor));
+            else if (decoded.Command == SteamDeckFeedbackCommand.Haptic)
+                AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("Intensity", decoded.Intensity), ("Gain", decoded.Gain), ("Strength8", decoded.Strength8));
+            else if (decoded.Command == SteamDeckFeedbackCommand.HapticPulse)
+                AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("Period", decoded.PulsePeriod), ("Count", decoded.PulseCount), ("Gain", decoded.Gain), ("Strength8", decoded.Strength8), ("DurationMs", decoded.PulseDurationMilliseconds));
             else
                 AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command));
 
             if (!decoded.IsSupported) return;
+            var sequence = BeginFeedback(decoded.Command == SteamDeckFeedbackCommand.HapticPulse ? decoded.PulseDurationMilliseconds : null);
             BeforeLease?.Invoke();
-            if (!_authority.TryAcquireLease(_token, out var lease) || lease is null)
+            if (!TryWrite(sequence, decoded.Rumble, out var lease) || lease is null)
             {
                 AppLog.Debug("Rumble", "SteamDeck feedback DROP", ("Reason", "AuthorityRejected"));
                 return;
             }
-            using (lease)
-            {
-                _sink.SetRumble(decoded.Rumble);
-            }
+            using (lease) _sink.SetRumble(decoded.Rumble);
         }
         catch (Exception exception)
         {
             try { AppLog.Debug("Rumble", "Steam Deck feedback callback was contained.", ("Reason", exception.GetType().Name)); }
             catch { /* Never allow diagnostics to cross the unmanaged callback boundary. */ }
         }
+    }
+
+    private long BeginFeedback(int? duration)
+    {
+        lock (_gate)
+        {
+            _sequence++;
+            _pendingStop?.Cancel();
+            _pendingStop?.Dispose();
+            _pendingStop = null;
+            var sequence = _sequence;
+            if (duration is { } delay)
+            {
+                var cts = new CancellationTokenSource();
+                _pendingStop = cts;
+                _ = StopAfterAsync(sequence, delay, cts);
+            }
+            return sequence;
+        }
+    }
+
+    private bool TryWrite(long sequence, TwoMotorRumble rumble, out FeedbackAuthority.FeedbackAuthorityLease? lease)
+    {
+        lease = null;
+        lock (_gate)
+        {
+            if (_disposed || sequence != _sequence || !_authority.TryAcquireLease(_token, out lease) || lease is null) return false;
+            return true;
+        }
+    }
+
+    private async Task StopAfterAsync(long sequence, int duration, CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(duration, cts.Token).ConfigureAwait(false);
+            if (!TryWrite(sequence, TwoMotorRumble.Stopped, out var lease) || lease is null) return;
+            using (lease) _sink.SetRumble(TwoMotorRumble.Stopped);
+            lock (_gate) if (ReferenceEquals(_pendingStop, cts)) _pendingStop = null;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
+        finally { cts.Dispose(); }
     }
 }
