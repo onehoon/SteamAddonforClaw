@@ -13,6 +13,7 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.FrontendTransport;
+using SteamInputAddonforClaw.GameBar;
 
 namespace SteamInputAddonforClaw.Hosting;
 
@@ -39,6 +40,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private NamedPipeAddonFrontendServer? _frontendServer;
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly QamHostProcessController _qamHostController;
+    private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
 
@@ -47,6 +49,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _updateRestartArguments = updateRestartArguments;
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
+        _gameBarForegroundWatcher = new GameBarForegroundWatcher();
     }
 
     internal bool IsTrayAvailable => _systemTrayIcon?.IsAvailable == true;
@@ -140,6 +143,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             FrontendPipeEndpoint.CreateForCurrentUser(),
             _frontendControl);
         await _frontendServer.StartAsync().ConfigureAwait(false);
+        _gameBarForegroundWatcher.Start();
         _frontendLauncher.MarkRuntimeReady();
         _startupComposition = null;
     }
@@ -176,6 +180,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
         _frontendLauncher.StopAcceptingRequests();
+        _gameBarForegroundWatcher.Dispose();
         _qamHostController.BeginShutdown();
         _startupCancellationTokenSource.Cancel();
         PrepareRuntimeForShutdown();
