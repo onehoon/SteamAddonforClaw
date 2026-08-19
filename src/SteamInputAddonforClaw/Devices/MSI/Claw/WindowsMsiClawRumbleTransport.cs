@@ -8,12 +8,20 @@ internal readonly record struct MsiClawRumbleTransportResult(bool Succeeded, str
 
 internal interface IMsiClawRumbleTransport : IDisposable
 {
-    MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket);
+    /// <param name="outputReportLength">The resolved endpoint's real HID OutputReportLength --
+    /// the native write buffer is sized to exactly this, never a fixed constant (proven hardware
+    /// reports 32 bytes for the real PID1902 gamepad collection, not 64).</param>
+    MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket, int outputReportLength);
     void InvalidatePhysicalSession();
 }
 
 internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
 {
+    private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
+    private const uint ShareReadWrite = 0x00000001 | 0x00000002;
+    private const uint OpenExisting = 3;
+
     private readonly IMsiClawNativeHidApi _api;
     private readonly Lock _sync = new();
     private SafeFileHandle? _handle;
@@ -25,7 +33,7 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
 
     internal WindowsMsiClawRumbleTransport(IMsiClawNativeHidApi? api = null) => _api = api ?? new WindowsMsiClawNativeHidApi();
 
-    public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket)
+    public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket, int outputReportLength)
     {
         WriteRequested?.Invoke();
         lock (_sync)
@@ -33,6 +41,7 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             if (_disposed) return new(false, "Disposed");
             if (string.IsNullOrWhiteSpace(devicePath)) return new(false, "EmptyDevicePath");
             if (semanticPacket.Length != 11) return new(false, "InvalidSemanticLength");
+            if (outputReportLength <= 0 || outputReportLength < semanticPacket.Length) return new(false, "InvalidOutputReportLength");
 
             if (!string.Equals(_devicePath, devicePath, StringComparison.OrdinalIgnoreCase))
                 CloseHandleLocked();
@@ -40,7 +49,17 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             var openStarted = Stopwatch.GetTimestamp();
             if (_handle is null)
             {
-                _handle = _api.OpenOverlapped(devicePath, 0x80000000 | 0x40000000, 0x00000001 | 0x00000002, 3);
+                // Normal synchronous HID Open/Write, matching the ClawTweaks-proven behavior --
+                // no overlapped I/O, no event/wait/cancel machinery. Some MSI HID collections deny
+                // GENERIC_READ while still allowing output writes (ClawButtonMonitor.SharedHidWrite
+                // retries write-only for exactly this reason), so fall back to GENERIC_WRITE only
+                // before giving up.
+                _handle = _api.Open(devicePath, GenericRead | GenericWrite, ShareReadWrite, OpenExisting);
+                if (_handle.IsInvalid)
+                {
+                    _handle.Dispose();
+                    _handle = _api.Open(devicePath, GenericWrite, ShareReadWrite, OpenExisting);
+                }
                 if (_handle.IsInvalid)
                 {
                     var error = _api.LastError;
@@ -50,10 +69,11 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
                 _devicePath = devicePath;
             }
 
-            var bytes = new byte[64];
+            // Buffer sized to the endpoint's actual OutputReportLength -- never a fixed constant.
+            var bytes = new byte[outputReportLength];
             semanticPacket.CopyTo(bytes);
             var writeStarted = Stopwatch.GetTimestamp();
-            if (!_api.WriteOverlapped(_handle, bytes, out var written))
+            if (!_api.Write(_handle, bytes, out var written))
             {
                 var error = _api.LastError;
                 CloseHandleLocked();

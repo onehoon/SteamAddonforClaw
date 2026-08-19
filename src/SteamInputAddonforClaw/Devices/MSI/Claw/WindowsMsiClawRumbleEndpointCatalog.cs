@@ -9,7 +9,9 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
     // GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING -- matches
     // the access mode WindowsMsiClawRumbleTransport ultimately opens the same interface with, so
     // a candidate that fails to open here would also fail to open for the real rumble write.
-    private const uint GenericReadWrite = 0x80000000 | 0x40000000;
+    private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
+    private const uint GenericReadWrite = GenericRead | GenericWrite;
     private const uint ShareReadWrite = 0x00000001 | 0x00000002;
     private const uint OpenExisting = 3;
 
@@ -51,15 +53,17 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
                 AppLog.Debug("Rumble", "Rumble endpoint candidate rejected: no physical root.", ("PnpInstanceId", pnp));
                 continue;
             }
-            if (!TryReadHidCapabilities(device.Id, out var inputLength, out var outputLength, out var openSucceeded, out var win32Error, out var hidStatus))
+            if (!TryReadHidCapabilities(device.Id, out var inputLength, out var outputLength, out var usagePage, out var usage, out var openSucceeded, out var win32Error, out var hidStatus))
             {
                 AppLog.Debug("Rumble", "Rumble endpoint candidate rejected: HID capability query failed.", ("PnpInstanceId", pnp), ("PhysicalRoot", physicalRoot), ("Win32Error", win32Error), ("HidStatus", hidStatus));
                 continue;
             }
             var physicalRootMatch = MatchesPhysicalRoot(physicalRoot, identity.PhysicalIdentity);
-            AppLog.Debug("Rumble", "Rumble endpoint candidate", ("DevicePath", device.Id), ("PnpInstanceId", pnp), ("PhysicalRoot", physicalRoot), ("VID", MsiClawHardware.VendorId), ("PID", MsiClawHardware.DirectInputProductId), ("InputReportLength", inputLength), ("OutputReportLength", outputLength), ("OutputReportContractMatch", outputLength == 64), ("PhysicalRootMatch", physicalRootMatch), ("OpenSucceeded", openSucceeded));
+            var isGamepadUsage = usagePage == MsiClawHardware.DirectInputUsagePage &&
+                usage is MsiClawHardware.DirectInputUsage or MsiClawHardware.DirectInputJoystickUsage;
+            AppLog.Debug("Rumble", "Rumble endpoint candidate", ("DevicePath", device.Id), ("PnpInstanceId", pnp), ("PhysicalRoot", physicalRoot), ("VID", MsiClawHardware.VendorId), ("PID", MsiClawHardware.DirectInputProductId), ("InputReportLength", inputLength), ("OutputReportLength", outputLength), ("UsagePage", usagePage), ("Usage", usage), ("IsGamepadUsage", isGamepadUsage), ("PhysicalRootMatch", physicalRootMatch), ("OpenSucceeded", openSucceeded));
             candidates.Add(new(device.Id, pnp!, physicalRoot, MsiClawHardware.VendorId,
-                MsiClawHardware.DirectInputProductId, inputLength, outputLength, openSucceeded));
+                MsiClawHardware.DirectInputProductId, inputLength, outputLength, usagePage, usage, openSucceeded));
         }
         return candidates;
     }
@@ -69,21 +73,33 @@ internal sealed class WindowsMsiClawRumbleEndpointCatalog
     /// HidD_GetPreparsedData + HidP_GetCaps. Internal (not private) so the narrow HID-capability
     /// seam is directly testable with a fake IMsiClawNativeHidApi.
     /// </summary>
-    internal bool TryReadHidCapabilities(string devicePath, out int inputLength, out int outputLength, out bool openSucceeded, out int win32Error, out int hidStatus)
+    internal bool TryReadHidCapabilities(string devicePath, out int inputLength, out int outputLength, out ushort usagePage, out ushort usage, out bool openSucceeded, out int win32Error, out int hidStatus)
     {
         inputLength = 0;
         outputLength = 0;
+        usagePage = 0;
+        usage = 0;
         openSucceeded = false;
         win32Error = 0;
         hidStatus = 0;
-        using var handle = _hidApi.Open(devicePath, GenericReadWrite, ShareReadWrite, OpenExisting);
+        // Some MSI HID collections deny GENERIC_READ while still allowing output writes -- proven
+        // by ClawTweaks' ClawButtonMonitor.SharedHidWrite, which retries with GENERIC_WRITE only
+        // after a read/write open fails. Without this fallback, a valid PID1902 gamepad collection
+        // can be rejected here before the transport ever gets a chance to write it.
+        var handle = _hidApi.Open(devicePath, GenericReadWrite, ShareReadWrite, OpenExisting);
+        if (handle.IsInvalid)
+        {
+            handle.Dispose();
+            handle = _hidApi.Open(devicePath, GenericWrite, ShareReadWrite, OpenExisting);
+        }
+        using var _ = handle;
         if (handle.IsInvalid)
         {
             win32Error = _hidApi.LastError;
             return false;
         }
         openSucceeded = true;
-        if (!_hidApi.TryGetReportLengths(handle, out inputLength, out outputLength, out hidStatus))
+        if (!_hidApi.TryGetReportLengths(handle, out inputLength, out outputLength, out usagePage, out usage, out hidStatus))
         {
             win32Error = _hidApi.LastError;
             return false;

@@ -12,6 +12,7 @@ internal static class MsiClawHardware
     public const int M2DirectInputButtonIndex = 16;
     public const ushort DirectInputUsagePage = 0x0001;
     public const ushort DirectInputUsage = 0x0005;
+    public const ushort DirectInputJoystickUsage = 0x0004;
     public const string DirectInputHidCollectionPrefix = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\";
 
     public const int RequiredDirectInputButtonCount = M2DirectInputButtonIndex + 1;

@@ -55,17 +55,16 @@ public sealed class MsiClawRumbleTests
         var native = new FakeNativeHid();
         using var transport = new WindowsMsiClawRumbleTransport(native);
         var packet = new byte[11];
-        Assert.True(transport.Write("path-a", packet).Succeeded);
-        Assert.True(transport.Write("path-a", packet).Succeeded);
+        Assert.True(transport.Write("path-a", packet, 32).Succeeded);
+        Assert.True(transport.Write("path-a", packet, 32).Succeeded);
         Assert.Equal(1, native.OpenCount);
-        Assert.Equal(1, native.OverlappedOpenCount);
-        Assert.True(native.OverlappedWriteCalls >= 2);
-        Assert.True(transport.Write("path-b", packet).Succeeded);
+        Assert.True(native.WriteCalls >= 2);
+        Assert.True(transport.Write("path-b", packet, 32).Succeeded);
         Assert.Equal(2, native.OpenCount);
         native.WriteResult = false;
-        Assert.False(transport.Write("path-b", packet).Succeeded);
+        Assert.False(transport.Write("path-b", packet, 32).Succeeded);
         native.WriteResult = true;
-        Assert.True(transport.Write("path-b", packet).Succeeded);
+        Assert.True(transport.Write("path-b", packet, 32).Succeeded);
         Assert.Equal(3, native.OpenCount);
     }
 
@@ -75,9 +74,9 @@ public sealed class MsiClawRumbleTests
         var native = new FakeNativeHid();
         using var transport = new WindowsMsiClawRumbleTransport(native);
         var packet = new byte[11];
-        Assert.True(transport.Write("path-a", packet).Succeeded);
+        Assert.True(transport.Write("path-a", packet, 32).Succeeded);
         transport.InvalidatePhysicalSession();
-        Assert.True(transport.Write("path-a", packet).Succeeded);
+        Assert.True(transport.Write("path-a", packet, 32).Succeeded);
         Assert.Equal(2, native.OpenCount);
     }
 
@@ -86,14 +85,60 @@ public sealed class MsiClawRumbleTests
     {
         var native = new FakeNativeHid();
         using var transport = new WindowsMsiClawRumbleTransport(native);
-        Assert.False(transport.Write("path-a", new byte[10]).Succeeded);
+        Assert.False(transport.Write("path-a", new byte[10], 32).Succeeded);
         Assert.Equal(0, native.OpenCount);
-        Assert.True(transport.Write("path-a", new byte[11]).Succeeded);
+        Assert.True(transport.Write("path-a", new byte[11], 32).Succeeded);
         native.PartialWrite = true;
-        Assert.Equal("PartialWrite", transport.Write("path-a", new byte[11]).Reason);
+        Assert.Equal("PartialWrite", transport.Write("path-a", new byte[11], 32).Reason);
         native.PartialWrite = false;
-        Assert.True(transport.Write("path-a", new byte[11]).Succeeded);
+        Assert.True(transport.Write("path-a", new byte[11], 32).Succeeded);
         Assert.Equal(2, native.OpenCount);
+    }
+
+    [Fact]
+    public void Transport_rejects_invalid_output_report_length_before_native_io()
+    {
+        var native = new FakeNativeHid();
+        using var transport = new WindowsMsiClawRumbleTransport(native);
+        Assert.Equal("InvalidOutputReportLength", transport.Write("path-a", new byte[11], 0).Reason);
+        Assert.Equal("InvalidOutputReportLength", transport.Write("path-a", new byte[11], -1).Reason);
+        // Shorter than the 11-byte semantic packet -- must never truncate the report.
+        Assert.Equal("InvalidOutputReportLength", transport.Write("path-a", new byte[11], 10).Reason);
+        Assert.Equal(0, native.OpenCount);
+    }
+
+    [Fact]
+    public void Transport_falls_back_to_write_only_open_when_read_write_open_is_denied()
+    {
+        var native = new FakeNativeHid { DenyReadWriteOpen = true };
+        using var transport = new WindowsMsiClawRumbleTransport(native);
+
+        var result = transport.Write("path-a", new byte[11], 32);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, native.OpenCount);
+        Assert.Equal(2, native.OpenAccessRequests.Count);
+        Assert.Equal(0x80000000u | 0x40000000u, native.OpenAccessRequests[0]); // first attempt: read+write
+        Assert.Equal(0x40000000u, native.OpenAccessRequests[1]); // fallback: write-only
+    }
+
+    [Fact]
+    public void Transport_builds_the_output_buffer_at_the_endpoints_real_report_length()
+    {
+        var native = new FakeNativeHid();
+        using var transport = new WindowsMsiClawRumbleTransport(native);
+        var semantic = MsiClawRumblePacketBuilder.Build(new(LargeMotor: 0xFF00, SmallMotor: 0x8000));
+
+        Assert.True(transport.Write("path-a", semantic, 32).Succeeded);
+
+        var written = Assert.Single(native.Writes);
+        // Buffer length equals the endpoint's OutputReportLength, not a fixed 64-byte constant.
+        Assert.Equal(32, written.Length);
+        Assert.Equal(0x05, written[0]);
+        Assert.Equal(0x01, written[1]);
+        Assert.Equal(0x80, written[4]); // Small (0x8000 >> 8)
+        Assert.Equal(0xFF, written[5]); // Large (0xFF00 >> 8)
+        Assert.All(written[11..], value => Assert.Equal(0, value));
     }
 
     [Fact]
@@ -111,13 +156,13 @@ public sealed class MsiClawRumbleTests
     {
         var native = new FakeNativeHid { BlockFirstWrite = true };
         using var transport = new WindowsMsiClawRumbleTransport(native);
-        var first = Task.Run(() => transport.Write("path-a", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        var first = Task.Run(() => transport.Write("path-a", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 32));
         await native.FirstWriteEntered.Task;
         var secondRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         transport.WriteRequested = () => secondRequested.TrySetResult();
         // The request signal is installed before a second request so the test positively observes
         // that B reached the transport boundary while A is still inside native Write.
-        var second = Task.Run(() => transport.Write("path-a", [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        var second = Task.Run(() => transport.Write("path-a", [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 32));
         await secondRequested.Task;
         Assert.Equal(1, native.WriteCalls);
         native.ReleaseFirstWrite.Set();
@@ -126,7 +171,7 @@ public sealed class MsiClawRumbleTests
         Assert.Equal(2, native.Writes.Count);
         Assert.Equal(1, native.Writes[0][0]);
         Assert.Equal(2, native.Writes[1][0]);
-        Assert.All(native.Writes, write => { Assert.Equal(64, write.Length); Assert.All(write[11..], value => Assert.Equal(0, value)); });
+        Assert.All(native.Writes, write => { Assert.Equal(32, write.Length); Assert.All(write[11..], value => Assert.Equal(0, value)); });
     }
 
     [Fact]
@@ -134,7 +179,7 @@ public sealed class MsiClawRumbleTests
     {
         var native = new FakeNativeHid { BlockFirstWrite = true };
         using var transport = new WindowsMsiClawRumbleTransport(native);
-        var first = Task.Run(() => transport.Write("path-a", new byte[11]));
+        var first = Task.Run(() => transport.Write("path-a", new byte[11], 32));
         await native.FirstWriteEntered.Task;
         var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         transport.InvalidationRequested = () => requested.TrySetResult();
@@ -144,7 +189,7 @@ public sealed class MsiClawRumbleTests
         native.ReleaseFirstWrite.Set();
         Assert.True((await first).Succeeded);
         await invalidation;
-        Assert.True(transport.Write("path-a", new byte[11]).Succeeded);
+        Assert.True(transport.Write("path-a", new byte[11], 32).Succeeded);
         Assert.Equal(2, native.OpenCount);
     }
 
@@ -171,16 +216,29 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public void Catalog_reads_report_lengths_from_real_hid_capabilities_not_device_information_properties()
+    public void Sink_passes_the_resolved_endpoints_output_report_length_to_the_transport()
     {
-        var hidApi = new FakeCapabilityHidApi { InputReportLength = 64, OutputReportLength = 64 };
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "USB\\VID_0DB0&PID_1902"));
+        var transport = new FakeTransport();
+        var resolver = new SequenceResolver(new MsiClawRumbleEndpointResolution("path-a", "VerifiedTestEndpoint", 32));
+        using var sink = new MsiClawRumbleSink(identity, transport, resolver);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Equal(32, transport.LastOutputReportLength);
+    }
+
+    [Fact]
+    public void Catalog_reads_report_lengths_and_usage_from_real_hid_capabilities_not_device_information_properties()
+    {
+        var hidApi = new FakeCapabilityHidApi { InputReportLength = 64, OutputReportLength = 32, UsagePage = MsiClawHardware.DirectInputUsagePage, Usage = MsiClawHardware.DirectInputUsage };
         var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
 
-        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out var openSucceeded, out var win32Error, out var hidStatus);
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out var usagePage, out var usage, out var openSucceeded, out var win32Error, out var hidStatus);
 
         Assert.True(succeeded);
         Assert.Equal(64, input);
-        Assert.Equal(64, output);
+        Assert.Equal(32, output);
+        Assert.Equal(MsiClawHardware.DirectInputUsagePage, usagePage);
+        Assert.Equal(MsiClawHardware.DirectInputUsage, usage);
         Assert.True(openSucceeded);
         Assert.Equal(0, win32Error);
         Assert.Equal(0x00110000, hidStatus);
@@ -189,12 +247,33 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Catalog_capability_lookup_falls_back_to_write_only_when_read_write_open_is_denied()
+    {
+        // Some MSI HID collections deny GENERIC_READ while still allowing output writes -- the
+        // exact behavior ClawTweaks' ClawButtonMonitor.SharedHidWrite already retries for. A valid
+        // PID1902 gamepad collection must not be rejected here just because the read/write open
+        // failed; the write-only fallback must let capability discovery still succeed.
+        var hidApi = new FakeCapabilityHidApi { DenyReadWriteOpen = true };
+        var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
+
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out _, out _, out var openSucceeded, out _, out _);
+
+        Assert.True(succeeded);
+        Assert.True(openSucceeded);
+        Assert.Equal(64, input);
+        Assert.Equal(32, output);
+        Assert.Equal(2, hidApi.OpenAccessRequests.Count);
+        Assert.Equal(0x80000000u | 0x40000000u, hidApi.OpenAccessRequests[0]); // first attempt: read+write
+        Assert.Equal(0x40000000u, hidApi.OpenAccessRequests[1]); // fallback: write-only
+    }
+
+    [Fact]
     public void Catalog_capability_lookup_fails_when_the_hid_interface_cannot_be_opened()
     {
         var hidApi = new FakeCapabilityHidApi { OpenSucceeds = false };
         var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
 
-        var succeeded = catalog.TryReadHidCapabilities("path-a", out _, out _, out var openSucceeded, out var win32Error, out _);
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out _, out _, out _, out _, out var openSucceeded, out var win32Error, out _);
 
         Assert.False(succeeded);
         Assert.False(openSucceeded);
@@ -208,7 +287,7 @@ public sealed class MsiClawRumbleTests
         var hidApi = new FakeCapabilityHidApi { CapabilitiesSucceed = false };
         var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
 
-        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out _, out var win32Error, out var hidStatus);
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out _, out _, out _, out var win32Error, out var hidStatus);
 
         Assert.False(succeeded);
         Assert.Equal(0, input);
@@ -217,32 +296,121 @@ public sealed class MsiClawRumbleTests
         Assert.NotEqual(0, hidStatus);
     }
 
+    private static MsiClawRumbleEndpointCandidate Candidate(
+        string path, ushort pid = 0x1902, int inputLength = 64, int outputLength = 32,
+        ushort usagePage = MsiClawHardware.DirectInputUsagePage, ushort usage = MsiClawHardware.DirectInputUsage,
+        bool openSucceeded = true, string pnp = "PNP-A", string physical = "ROOT-A") =>
+        new(path, pnp, physical, 0x0DB0, pid, inputLength, outputLength, usagePage, usage, openSucceeded);
+
     [Fact]
-    public void Endpoint_resolver_requires_one_exact_opened_64_byte_pid1902_candidate()
+    public void Endpoint_resolver_accepts_the_real_32_byte_pid1902_gamepad_endpoint()
+    {
+        // The hardware-proven contract: 64-byte InputReportLength, 32-byte OutputReportLength,
+        // Generic Desktop / Game Pad usage -- this must be accepted, not rejected.
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+
+        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", inputLength: 64, outputLength: 32)]).Resolve(identity);
+
+        Assert.Equal("a", result.DevicePath);
+        Assert.Equal(32, result.OutputReportLength);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_rejects_a_64_64_non_gamepad_collection_despite_its_output_length()
+    {
+        // The exact hardware failure mode this fix targets: a 64/64 collection must never be
+        // selected merely because its OutputReportLength happens to be non-zero/64 -- only its
+        // HID Usage decides gamepad-collection membership.
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+        var nonGamepad = Candidate("wrong-collection", inputLength: 64, outputLength: 64, usagePage: 0x000C, usage: 0x0001);
+
+        var result = new MsiClawRumbleEndpointResolver(_ => [nonGamepad]).Resolve(identity);
+
+        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Null(result.DevicePath);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_accepts_joystick_usage_as_well_as_game_pad()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
-        MsiClawRumbleEndpointCandidate Candidate(string path, ushort pid = 0x1902, int length = 64, bool openSucceeded = true, string pnp = "PNP-A", string physical = "ROOT-A") =>
-            new(path, pnp, physical, 0x0DB0, pid, 64, length, openSucceeded);
 
-        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => []).Resolve(identity).Reason);
-        Assert.Equal("AmbiguousEndpoints", new MsiClawRumbleEndpointResolver(_ => [Candidate("a"), Candidate("b")]).Resolve(identity).Reason);
-        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", pid: 0x1901)]).Resolve(identity).Reason);
-        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", length: 11)]).Resolve(identity).Reason);
-        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", openSucceeded: false)]).Resolve(identity).Reason);
-        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", physical: "ROOT-WRONG")]).Resolve(identity).Reason);
-        Assert.Equal("a", new MsiClawRumbleEndpointResolver(_ => [Candidate("a")]).Resolve(identity).DevicePath);
+        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", usage: MsiClawHardware.DirectInputJoystickUsage)]).Resolve(identity);
+
+        Assert.Equal("a", result.DevicePath);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_rejects_wrong_physical_root()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+
+        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", physical: "ROOT-WRONG")]).Resolve(identity);
+
+        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Null(result.DevicePath);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_rejects_wrong_pid()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+
+        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", pid: 0x1901)]).Resolve(identity);
+
+        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+        Assert.Null(result.DevicePath);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_rejects_zero_output_report_length()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+
+        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", outputLength: 0)]).Resolve(identity);
+
+        Assert.Equal("NoVerifiedEndpoint", result.Reason);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_rejects_a_candidate_that_failed_to_open()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+
+        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", openSucceeded: false)]).Resolve(identity);
+
+        Assert.Equal("NoVerifiedEndpoint", result.Reason);
     }
 
     [Fact]
     public void Endpoint_resolver_rejects_a_candidate_whose_input_report_length_is_not_64_bytes()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
-        var wrongInputLength = new MsiClawRumbleEndpointCandidate("a", "PNP-A", "ROOT-A", 0x0DB0, 0x1902, InputReportLength: 32, OutputReportLength: 64, OpenSucceeded: true);
 
-        var result = new MsiClawRumbleEndpointResolver(_ => [wrongInputLength]).Resolve(identity);
+        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a", inputLength: 32)]).Resolve(identity);
 
         Assert.Equal("NoVerifiedEndpoint", result.Reason);
         Assert.Null(result.DevicePath);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_fails_closed_on_multiple_valid_gamepad_candidates()
+    {
+        // Ambiguous valid gamepad endpoints must never be guessed at.
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+
+        var result = new MsiClawRumbleEndpointResolver(_ => [Candidate("a"), Candidate("b")]).Resolve(identity);
+
+        Assert.Equal("AmbiguousEndpoints", result.Reason);
+        Assert.Null(result.DevicePath);
+    }
+
+    [Fact]
+    public void Endpoint_resolver_reports_no_verified_endpoint_when_the_catalog_is_empty()
+    {
+        var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
+
+        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => []).Resolve(identity).Reason);
     }
 
     [Fact]
@@ -383,7 +551,7 @@ public sealed class MsiClawRumbleTests
     private sealed class VerifiedEndpointResolver : IMsiClawRumbleEndpointResolver
     {
         public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity) =>
-            string.IsNullOrWhiteSpace(identity.DevicePath) ? new(null, "NoVerifiedEndpoint") : new(identity.DevicePath, "VerifiedTestEndpoint");
+            string.IsNullOrWhiteSpace(identity.DevicePath) ? new(null, "NoVerifiedEndpoint") : new(identity.DevicePath, "VerifiedTestEndpoint", 32);
     }
 
     private sealed class MutatingResolver(FakeIdentity identity) : IMsiClawRumbleEndpointResolver
@@ -392,7 +560,7 @@ public sealed class MsiClawRumbleTests
         {
             identity.Current = null;
             identity.Generation++;
-            return new(value.DevicePath, "VerifiedTestEndpoint");
+            return new(value.DevicePath, "VerifiedTestEndpoint", 32);
         }
     }
 
@@ -402,7 +570,7 @@ public sealed class MsiClawRumbleTests
         public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity)
         {
             Calls++;
-            return new(identity.DevicePath, "VerifiedTestEndpoint");
+            return new(identity.DevicePath, "VerifiedTestEndpoint", 32);
         }
     }
 
@@ -428,9 +596,11 @@ public sealed class MsiClawRumbleTests
         public MsiClawRumbleTransportResult Result { get; set; } = new(true, "OK");
         public Exception? Exception { get; set; }
         public bool BlockWrites { get; set; }
+        public int? LastOutputReportLength { get; private set; }
         public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim ReleaseWrite { get; } = new(false);
-        public MsiClawRumbleTransportResult Write(string _, ReadOnlySpan<byte> packet) { if (Exception is not null) throw Exception; if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Wait(); } Packets.Add(packet.ToArray()); return Result; }
+        public MsiClawRumbleTransportResult Write(string _, ReadOnlySpan<byte> packet, int outputReportLength)
+        { LastOutputReportLength = outputReportLength; if (Exception is not null) throw Exception; if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Wait(); } Packets.Add(packet.ToArray()); return Result; }
         public void Dispose() { }
         public void InvalidatePhysicalSession() { }
     }
@@ -439,19 +609,27 @@ public sealed class MsiClawRumbleTests
     {
         public int LastError { get; private set; }
         public int OpenCount { get; private set; }
-        public int OverlappedOpenCount { get; private set; }
-        public int OverlappedWriteCalls { get; private set; }
         public bool WriteResult { get; set; } = true;
         public bool PartialWrite { get; set; }
         public bool BlockFirstWrite { get; init; }
+        public bool DenyReadWriteOpen { get; set; }
+        public List<uint> OpenAccessRequests { get; } = [];
         public int WriteCalls { get; private set; }
         public TaskCompletionSource FirstWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim ReleaseFirstWrite { get; } = new(false);
         public List<byte[]> Writes { get; } = [];
         public SafeFileHandle Open(string path, uint desiredAccess, uint shareMode, uint creationDisposition)
-        { OpenCount++; return new SafeFileHandle(new IntPtr(OpenCount), ownsHandle: false); }
-        public SafeFileHandle OpenOverlapped(string path, uint desiredAccess, uint shareMode, uint creationDisposition)
-        { OverlappedOpenCount++; return Open(path, desiredAccess, shareMode, creationDisposition); }
+        {
+            OpenAccessRequests.Add(desiredAccess);
+            const uint GenericRead = 0x80000000;
+            if (DenyReadWriteOpen && (desiredAccess & GenericRead) != 0)
+            {
+                LastError = 5;
+                return new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
+            }
+            OpenCount++;
+            return new SafeFileHandle(new IntPtr(OpenCount), ownsHandle: false);
+        }
         public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
         {
             WriteCalls++;
@@ -465,12 +643,12 @@ public sealed class MsiClawRumbleTests
             LastError = WriteResult ? 0 : 5;
             return WriteResult;
         }
-        public bool WriteOverlapped(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
-        { OverlappedWriteCalls++; return Write(handle, buffer, out bytesWritten); }
-        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
+        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
         {
             inputReportLength = 0;
             outputReportLength = 0;
+            usagePage = 0;
+            usage = 0;
             hidStatus = 0;
             return false;
         }
@@ -481,15 +659,21 @@ public sealed class MsiClawRumbleTests
         public bool OpenSucceeds { get; set; } = true;
         public bool CapabilitiesSucceed { get; set; } = true;
         public int InputReportLength { get; set; } = 64;
-        public int OutputReportLength { get; set; } = 64;
+        public int OutputReportLength { get; set; } = 32;
+        public ushort UsagePage { get; set; } = MsiClawHardware.DirectInputUsagePage;
+        public ushort Usage { get; set; } = MsiClawHardware.DirectInputUsage;
+        public bool DenyReadWriteOpen { get; set; }
         public int LastError { get; private set; }
         public int OpenCalls { get; private set; }
         public int CapabilityCalls { get; private set; }
+        public List<uint> OpenAccessRequests { get; } = [];
 
         public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
         {
             OpenCalls++;
-            if (!OpenSucceeds)
+            OpenAccessRequests.Add(desiredAccess);
+            const uint GenericRead = 0x80000000;
+            if (!OpenSucceeds || (DenyReadWriteOpen && (desiredAccess & GenericRead) != 0))
             {
                 LastError = 2;
                 return new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
@@ -503,7 +687,7 @@ public sealed class MsiClawRumbleTests
             return true;
         }
 
-        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
+        public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
         {
             CapabilityCalls++;
             hidStatus = CapabilitiesSucceed ? 0x00110000 : unchecked((int)0xC0110001);
@@ -511,10 +695,14 @@ public sealed class MsiClawRumbleTests
             {
                 inputReportLength = 0;
                 outputReportLength = 0;
+                usagePage = 0;
+                usage = 0;
                 return false;
             }
             inputReportLength = InputReportLength;
             outputReportLength = OutputReportLength;
+            usagePage = UsagePage;
+            usage = Usage;
             return true;
         }
     }

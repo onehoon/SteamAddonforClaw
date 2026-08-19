@@ -169,7 +169,7 @@ public sealed class MsiClawPhysicalInputStageTests
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim Release { get; } = new(false);
         public int InvalidateCount { get; private set; }
-        public MsiClawRumbleTransportResult Write(string path, ReadOnlySpan<byte> packet)
+        public MsiClawRumbleTransportResult Write(string path, ReadOnlySpan<byte> packet, int outputReportLength)
         {
             Entered.TrySetResult();
             Release.Wait();
