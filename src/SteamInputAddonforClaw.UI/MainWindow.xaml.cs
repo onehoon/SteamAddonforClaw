@@ -51,9 +51,13 @@ public sealed partial class MainWindow : Window
         CenterMButtonContent.Initialize(_frontend, _bootstrap, () => WindowNative.GetWindowHandle(this));
         ControllerContent.CenterMButtonRequested += (_, _) => OpenCenterMButton();
         CenterMButtonContent.BackRequested += (_, _) => ReturnToController("BackButton");
-        // Keep the Controller page's own remapping toggle in step with an edit made on the detail
-        // page, without re-fetching bootstrap (which is captured once at startup).
+        // Review fix (BLOCKER): both pages are initialized once from the same startup bootstrap and
+        // otherwise drift apart -- without the reverse wire, toggling remapping on the Controller
+        // page left the detail page holding the stale startup snapshot, so its next slot edit sent
+        // that whole stale record back and could resurrect the value the Controller toggle just
+        // changed. Keep both pages in step with whichever surface last saved successfully.
         CenterMButtonContent.MappingChanged += (_, mapping) => ControllerContent.ApplyOem1Mapping(mapping);
+        ControllerContent.MappingChanged += (_, mapping) => CenterMButtonContent.Apply(mapping);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");

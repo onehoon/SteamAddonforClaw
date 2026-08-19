@@ -60,29 +60,45 @@ public sealed class SettingsStore
     }
 
     /// <summary>
-    /// Reads the persisted OEM1 mapping, falling back to the locked first-install defaults whenever
-    /// no value has ever been saved or the stored value cannot be understood.
+    /// Reads the persisted OEM1 mapping. Missing entirely (no value has ever been saved / first
+    /// install) uses the locked first-install defaults, including remapping ON. A present but
+    /// corrupt/unreadable value is a DIFFERENT case and must not silently turn suppression back on.
     /// </summary>
     /// <remarks>
-    /// Lenient by the same policy as every other member here -- a malformed mapping must never stop
-    /// the app from starting -- but note what "fall back" means for this particular setting: the
-    /// defaults are remapping ON with Big Picture / Quick Access bound. That is only ever reached
-    /// when the stored value is unusable, which is not the same as the user having turned remapping
-    /// off; an explicit <c>false</c> round-trips normally.
+    /// Review fix (MAJOR): the previous fallback was unconditionally <see cref="Oem1MappingSettings.Default"/>
+    /// (remapping <c>true</c>) for both "never saved" and "saved but unparseable" -- but an existing
+    /// settings file with a corrupt <c>Oem1Mapping</c> object can still legitimately record
+    /// <c>RemappingEnabled: false</c> at the top level of that same object. Falling back to the ON
+    /// default in that case would silently re-enable OEM1 suppression against an explicit persisted
+    /// Off, which is exactly the kind of behind-the-user's-back reactivation this setting exists to
+    /// prevent. The salvage below reads only the top-level <c>RemappingEnabled</c> boolean directly
+    /// (itself defaulting to <see langword="false"/> -- fail-OPEN to native Center M, never fail
+    /// toward suppression -- if even that cannot be read) and otherwise falls back to the default
+    /// bindings; bindings are not safety-relevant the way the switch is.
     /// </remarks>
     private static Oem1MappingSettings ReadOem1Mapping(JsonElement root)
     {
         if (!root.TryGetProperty("Oem1Mapping", out var mappingProperty) || mappingProperty.ValueKind != JsonValueKind.Object)
-            return Oem1MappingSettings.Default;
+            return Oem1MappingSettings.Default; // genuinely absent -- first install, locked defaults apply
+
+        var salvagedEnabled = mappingProperty.TryGetProperty("RemappingEnabled", out var enabledProperty)
+            && enabledProperty.ValueKind is JsonValueKind.True or JsonValueKind.False
+            && enabledProperty.GetBoolean();
 
         try
         {
-            return mappingProperty.Deserialize<Oem1MappingSettings>(SerializerOptions) ?? Oem1MappingSettings.Default;
+            var parsed = mappingProperty.Deserialize<Oem1MappingSettings>(SerializerOptions)
+                ?? throw new JsonException("OEM1 mapping was null.");
+
+            if (parsed.NormalSingle is null || parsed.NormalDouble is null || parsed.RoutingSingle is null || parsed.RoutingDouble is null)
+                throw new JsonException("OEM1 mapping contains a null slot binding.");
+
+            return parsed;
         }
         catch (JsonException exception)
         {
-            AppLog.Warn("Settings", "OEM1 mapping settings could not be parsed. Using defaults.", exception, ("Action", "Defaults"));
-            return Oem1MappingSettings.Default;
+            AppLog.Warn("Settings", "OEM1 mapping settings could not be parsed; preserving the persisted remapping switch and falling back to default bindings.", exception, ("SalvagedRemappingEnabled", salvagedEnabled));
+            return Oem1MappingSettings.Default with { RemappingEnabled = salvagedEnabled };
         }
     }
 

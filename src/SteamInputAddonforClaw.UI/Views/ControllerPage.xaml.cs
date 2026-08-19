@@ -24,6 +24,13 @@ public sealed partial class ControllerPage : UserControl
     /// as it does for the Settings page's Developer Menu card.</summary>
     internal event EventHandler? CenterMButtonRequested;
 
+    /// <summary>Raised after a successful save so the host can push the authoritative mapping into
+    /// the detail page too. Both pages were initialized once from the same startup bootstrap and
+    /// otherwise drift: without this, opening the detail page after toggling remapping here would
+    /// edit against a stale whole-record snapshot and could resurrect the value this toggle just
+    /// changed.</summary>
+    internal event EventHandler<Oem1MappingSettings>? MappingChanged;
+
     internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap)
     {
         _frontend = frontend;
@@ -55,6 +62,7 @@ public sealed partial class ControllerPage : UserControl
         {
             var result = await _frontend.SetOem1MappingAsync(_oem1Mapping with { RemappingEnabled = CenterMRemappingToggleSwitch.IsOn });
             ApplyOem1Mapping(result.Oem1Mapping);
+            MappingChanged?.Invoke(this, result.Oem1Mapping);
         }
         catch (Exception exception)
         {

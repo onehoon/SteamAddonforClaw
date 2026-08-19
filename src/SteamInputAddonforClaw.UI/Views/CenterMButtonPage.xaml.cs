@@ -32,6 +32,17 @@ public sealed partial class CenterMButtonPage : UserControl
     /// the controls, so restoring the UI never looks like a user edit and re-saves.</summary>
     private bool _isLoading;
 
+    // Review fix (BLOCKER): every edit used to fire its own independent fire-and-forget SaveAsync,
+    // all reading _mapping as it stood BEFORE any of them completed. Two edits issued back-to-back
+    // (easy to trigger from the hotkey modifier checkboxes) both derived from the same stale
+    // snapshot, so the second request could silently drop the first edit, and whichever RPC response
+    // landed last could overwrite the controls with an older whole-record snapshot. _saveChain
+    // orders every save behind its predecessor; _editVersion lets a completing save recognize it is
+    // no longer the newest edit and skip re-applying a stale result to the controls.
+    private Task _saveChain = Task.CompletedTask;
+    private long _editVersion;
+    private Oem1MappingSettings _lastPersistedMapping = Oem1MappingSettings.Default;
+
     public CenterMButtonPage()
     {
         InitializeComponent();
@@ -67,6 +78,7 @@ public sealed partial class CenterMButtonPage : UserControl
         try
         {
             _mapping = mapping;
+            _lastPersistedMapping = mapping;
             RemappingToggleSwitch.IsOn = mapping.RemappingEnabled;
             foreach (var slot in _slots) slot.Load(mapping.Resolve(slot.Slot));
             ApplyRemappingEnabledState(mapping.RemappingEnabled);
@@ -90,7 +102,7 @@ public sealed partial class CenterMButtonPage : UserControl
     private void RemappingToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {
         if (_isLoading) return;
-        _ = SaveAsync(_mapping with { RemappingEnabled = RemappingToggleSwitch.IsOn });
+        QueueSave(_mapping with { RemappingEnabled = RemappingToggleSwitch.IsOn });
     }
 
     private void ActionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
@@ -100,7 +112,7 @@ public sealed partial class CenterMButtonPage : UserControl
         {
             if (!ReferenceEquals(slot.ActionComboBox, sender)) continue;
             slot.ShowConfigurationFor(slot.SelectedAction);
-            _ = SaveAsync(_mapping.With(slot.Slot, slot.Capture()));
+            QueueSave(_mapping.With(slot.Slot, slot.Capture()));
             return;
         }
     }
@@ -109,15 +121,38 @@ public sealed partial class CenterMButtonPage : UserControl
     private void OnSlotConfigurationChanged(SlotEditor slot)
     {
         if (_isLoading) return;
-        _ = SaveAsync(_mapping.With(slot.Slot, slot.Capture()));
+        QueueSave(_mapping.With(slot.Slot, slot.Capture()));
     }
 
-    private async Task SaveAsync(Oem1MappingSettings next)
+    /// <summary>Advances the page's local mapping synchronously (so the very next edit -- even one
+    /// issued before this save's RPC returns -- is built on top of it) and chains the actual save
+    /// behind whatever is already in flight.</summary>
+    private void QueueSave(Oem1MappingSettings next)
     {
+        _mapping = next;
+        var version = ++_editVersion;
+        _saveChain = SaveAfterAsync(_saveChain, next, version);
+    }
+
+    private async Task SaveAfterAsync(Task previous, Oem1MappingSettings next, long version)
+    {
+        // The predecessor's own failure (if any) was already handled where it happened; this chain
+        // only needs it to have FINISHED before this save starts, so a faulted predecessor must not
+        // abort the newly queued one.
+        try { await previous; }
+        catch { /* observed above */ }
+
         if (_frontend is null) return;
         try
         {
             var result = await _frontend.SetOem1MappingAsync(next);
+            _lastPersistedMapping = result.Oem1Mapping;
+
+            // A newer edit was queued while this request was in flight -- its own save is already
+            // chained behind this one and will apply the true final state; applying this now-stale
+            // response to the controls would visibly revert what the user just typed.
+            if (version != _editVersion) return;
+
             Apply(result.Oem1Mapping);
             MappingChanged?.Invoke(this, result.Oem1Mapping);
         }
@@ -125,8 +160,10 @@ public sealed partial class CenterMButtonPage : UserControl
         {
             AppLog.Warn("CenterMButton", "Center M mapping save failed.", exception);
             // Put the controls back to what is actually persisted rather than leaving the page
-            // showing an edit that never landed.
-            Apply(_mapping);
+            // showing an edit that never landed -- but only if nothing newer is already queued to
+            // resolve this itself.
+            if (version == _editVersion)
+                Apply(_lastPersistedMapping);
         }
     }
 
