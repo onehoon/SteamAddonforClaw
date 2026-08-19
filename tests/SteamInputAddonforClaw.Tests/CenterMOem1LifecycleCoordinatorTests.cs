@@ -298,6 +298,22 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
+    public async Task DormantCoordinator_DoesNotPollOrMutateSharedRoutingGuardOwnership()
+    {
+        var h = NewHarness();
+        Assert.Equal(HelperStartResult.Started, h.HelperOwnership.Start("routing-guard-helper.exe"));
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Uncertain;
+        var coordinator = h.Build();
+
+        await coordinator.PollHelperLivenessAsync();
+
+        Assert.Equal(0, h.HelperApi.PollLivenessCallCount);
+        Assert.True(h.HelperOwnership.IsOperationallyOwned);
+        Assert.Equal(9000, h.HelperOwnership.ProcessId);
+        Assert.Equal(CenterMOem1LifecycleState.Disabled, coordinator.GetSnapshot().State);
+    }
+
+    [Fact]
     public async Task AutoRunEnabled_NeedsSetup_NoHelperCreated()
     {
         var h = NewHarness();

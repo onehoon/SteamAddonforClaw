@@ -110,7 +110,14 @@ public sealed class MsiClawRoutingCompositionTests
         var helperApi = new BlockingTerminateHelperApi(new ManualResetEventSlim(true));
         var helperOwnership = new CenterMHelperOwnership(helperApi);
         Assert.Equal(HelperStartResult.Started, helperOwnership.Start(@"C:\fake\MSI Center M.exe"));
-        var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), centerMHelperOwnership: helperOwnership);
+        // PR2: the composition's own default OEM1 coordinator would otherwise share this SAME
+        // instance and (correctly, as part of its own pre-existing/unmodified terminal cleanup)
+        // attempt to Stop it during composition disposal -- unrelated to this test's actual point
+        // (that composition itself never calls CenterMHelperOwnership.Dispose() on a caller-injected
+        // instance). Inject an OEM1 coordinator with its own unshared ownership so this test keeps
+        // isolating the one behavior it targets.
+        var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe), centerMHelperOwnership: helperOwnership,
+            centerMOem1Coordinator: new CenterMOem1LifecycleCoordinator(() => AppContext.BaseDirectory), startCenterMOem1LifecycleRuntime: false);
 
         await ((IAsyncDisposable)composition).DisposeAsync();
 

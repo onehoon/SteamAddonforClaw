@@ -27,6 +27,39 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public async Task EstablishBaseline_runs_entirely_before_the_power_gate_opens_and_afterRecovery_runs_only_once_open()
+    {
+        // PR2 review fix (BLOCKER): PowerTransitionCoordinator opens PowerMutationGate as soon as
+        // establishBaseline succeeds -- strictly BEFORE afterRecovery ever runs. AddonRuntimeHost's
+        // OEM1 auxiliary resume reconcile therefore has to run INSIDE establishBaseline (while the
+        // gate is still closed to normal routing re-entry), not inside afterRecovery (where it could
+        // already be racing an already-open gate). This test proves the exact mechanism that
+        // ordering choice depends on, directly against PowerTransitionCoordinator.
+        var gate = new PowerMutationGate(false);
+        var recovery = new RecoverySafetyState(RecoverySafety.Unsafe);
+        var gateOpenDuringBaseline = true;
+        var gateOpenDuringAfterRecovery = false;
+        var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
+            hasIncompleteRecovery: () => false,
+            establishBaseline: _ =>
+            {
+                gateOpenDuringBaseline = gate.IsOpen;
+                return Task.FromResult(true);
+            },
+            afterRecovery: _ =>
+            {
+                gateOpenDuringAfterRecovery = gate.IsOpen;
+                return Task.FromResult(true);
+            });
+
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+
+        Assert.False(gateOpenDuringBaseline);
+        Assert.True(gateOpenDuringAfterRecovery);
+        Assert.True(gate.IsOpen);
+    }
+
+    [Fact]
     public async Task JournalRemainsAfterCanonicalCleanup_FailsClosedWithoutReplayOrBaseline()
     {
         var gate = new PowerMutationGate(false);
@@ -245,6 +278,45 @@ public sealed class PowerTransitionTests
         Assert.Equal(PowerTransitionState.Unsafe, failure.State);
         Assert.False(failureGate.IsOpen);
         Assert.False(failureGate.TryAcquireCleanup(out _));
+    }
+
+    [Fact]
+    public async Task Earlier_participant_is_invoked_before_a_later_one_can_exhaust_the_shared_deadline()
+    {
+        // PR2 review fix (BLOCKER): every suspend participant shares ONE deadline, and the
+        // coordinator stops calling further participants once no time remains. AddonRuntimeHost
+        // relies on this exact mechanism to guarantee its OEM1 auxiliary lifecycle participant is
+        // invoked before a slow/timed-out routing quiesce could consume the whole budget --
+        // reproduced directly here without needing the full routing/VIIPER stack.
+        var gate = new PowerMutationGate(true);
+        var spy = new CountingParticipant();
+        var slow = new BlockingParticipant();
+        var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [spy, slow],
+            suspendQuiesceBudget: TimeSpan.FromMilliseconds(50));
+        gate.EnterNewCycleBarrier(out _, out var epoch);
+
+        await coordinator.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, epoch, true));
+
+        Assert.Equal(1, spy.QuiesceCount);
+    }
+
+    [Fact]
+    public async Task A_participant_ordered_after_the_deadline_is_exhausted_is_never_invoked()
+    {
+        // Sanity check that the test above actually discriminates on order: with the slow
+        // participant FIRST, the later participant must never be reached once the shared deadline
+        // is gone -- proving Earlier_participant_is_invoked_before... only passes because of order,
+        // not because CountingParticipant always gets called regardless.
+        var gate = new PowerMutationGate(true);
+        var spy = new CountingParticipant();
+        var slow = new BlockingParticipant();
+        var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [slow, spy],
+            suspendQuiesceBudget: TimeSpan.FromMilliseconds(50));
+        gate.EnterNewCycleBarrier(out _, out var epoch);
+
+        await coordinator.HandleAsync(new(4, PowerSignal.Suspend, DateTimeOffset.UtcNow, 1, 1, 0, epoch, true));
+
+        Assert.Equal(0, spy.QuiesceCount);
     }
 
     [Fact]

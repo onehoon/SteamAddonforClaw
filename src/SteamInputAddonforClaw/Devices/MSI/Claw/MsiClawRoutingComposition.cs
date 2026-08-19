@@ -52,6 +52,19 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     internal CenterMMainUiRoutingGuard CenterMGuard { get; }
     internal CenterMMainUiRoutingGuardStage CenterMGuardStage { get; }
 
+    /// <summary>PR2: production-composed OEM1/Center M lifecycle coordinator, sharing the SAME
+    /// <see cref="CenterMHelperOwnership"/> as <see cref="CenterMGuard"/> -- never a second,
+    /// competing production helper owner. Production activation stays off: normal composition never
+    /// calls <see cref="CenterMOem1LifecycleCoordinator.SetDesiredEnabledAsync"/> with true. Tests
+    /// may do so explicitly through this property to exercise the full production composition
+    /// seam.</summary>
+    internal CenterMOem1LifecycleCoordinator CenterMOem1Coordinator { get; }
+
+    /// <summary>PR2: the one small production driver/lifetime owner around
+    /// <see cref="CenterMOem1Coordinator"/> -- drives its documented low-rate poll contract, and
+    /// participates in suspend/resume/shutdown. See <see cref="CenterMOem1LifecycleRuntime"/>.</summary>
+    internal CenterMOem1LifecycleRuntime CenterMOem1Runtime { get; }
+
     /// <summary>True only when this composition itself constructed <see cref="CenterMHelperOwnership"/>
     /// (no caller-injected instance was supplied) -- the sole condition under which
     /// <see cref="DisposeAsync"/> disposes it. A caller-injected instance (e.g. a future OEM1
@@ -70,7 +83,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         RecoverySafetyState recoverySafety,
         Func<IMsiClawRumbleEndpointResolver>? rumbleEndpointResolverFactory = null,
         CenterMHelperOwnership? centerMHelperOwnership = null,
-        CenterMMainUiRoutingGuard? centerMGuard = null)
+        CenterMMainUiRoutingGuard? centerMGuard = null,
+        CenterMOem1LifecycleCoordinator? centerMOem1Coordinator = null,
+        CenterMOem1LifecycleRuntime? centerMOem1Runtime = null,
+        bool startCenterMOem1LifecycleRuntime = true)
     {
         NativeModeSession = new MsiClawNativeModeSessionCoordinator(
             nativeState,
@@ -123,6 +139,32 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
                 processSnapshotSource: centerMProcesses));
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
+        // PR2: production-compose the already-implemented CenterMOem1LifecycleCoordinator into
+        // this same shared CenterMHelperOwnership authority (work order requirement 1) -- never a
+        // second, independent production helper owner. Review correction: the supported product
+        // model is one Windows user / one interactive session (no Fast User Switching/RDP/multi-
+        // session), so this reuses the SAME simple centerMProcesses source the routing guard/
+        // retirement path above already uses on that model, rather than adding a session-scoping
+        // wrapper that would only protect against an explicitly unsupported scenario. This
+        // composition only ever exists for an MSI Claw adapter (HandheldRoutingCompositionFactory),
+        // so `() => true` here IS the required explicit MSI Claw environment-eligibility predicate
+        // (requirement 9) -- distinct from, and never widening, the coordinator's own fail-open
+        // default of false for any caller that omits one.
+        CenterMOem1Coordinator = centerMOem1Coordinator ?? new CenterMOem1LifecycleCoordinator(
+            publishRootProvider: () => AppContext.BaseDirectory,
+            processSnapshotSource: centerMProcesses,
+            helperOwnership: CenterMHelperOwnership,
+            environmentEligibility: () => true);
+        CenterMOem1Runtime = centerMOem1Runtime ?? new CenterMOem1LifecycleRuntime(
+            CenterMOem1Coordinator,
+            routingGuardIsArmed: () => CenterMGuard.IsArmed);
+
+        // Requirement 3/8: the driver is started as part of normal MSI runtime composition (it is
+        // part of the real runtime object lifetime now), but `DesiredEnabled` is never set to true
+        // here -- normal production startup never stages/starts the helper via this coordinator.
+        if (startCenterMOem1LifecycleRuntime)
+            CenterMOem1Runtime.Start();
+
         _stages = [NativeModeStage, PhysicalInputStage, PhysicalIsolationStage, CenterMGuardStage];
         _sessionBoundaryParticipants = [NativeModeSession];
     }
@@ -135,6 +177,12 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     IRoutingSafetySession? IHandheldRoutingComposition.SafetySession => NativeModeSession;
     IPhysicalRumbleSink? IHandheldRoutingComposition.PhysicalRumbleSink => PhysicalRumbleSink;
+
+    // PR2: the OEM1 lifecycle driver is the composition's only auxiliary power/resume
+    // participant -- exposed generically so AddonRuntimeHost never needs to know it is MSI/CenterM
+    // specific (work order requirement 13).
+    IPowerSuspendParticipant? IHandheldRoutingComposition.AuxiliaryPowerParticipant => CenterMOem1Runtime;
+    IRuntimeResumeParticipant? IHandheldRoutingComposition.AuxiliaryResumeParticipant => CenterMOem1Runtime;
 
     void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, ValueTask> handler) =>
         _runtimeFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
@@ -203,6 +251,14 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // protection before native-mode/physical restoration has at least been attempted.
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
+
+        // Shutdown ordering (work order requirement 14): stop the OEM1 periodic driver and dispose
+        // the coordinator BEFORE the routing guard's own terminal cleanup below -- a timer callback
+        // must never still be capable of entering coordinator methods once this composition starts
+        // tearing down the shared helper authority. Safe even though DesiredEnabled has always been
+        // false in this PR: the coordinator's own DisposeAsync is a no-op stop when it never owned
+        // anything.
+        await CenterMOem1Runtime.DisposeAsync().ConfigureAwait(false);
 
         // Terminal cleanup, not the normal Disarm path: bounded final Stop retries, and -- if the
         // exact helper handle is still unresolved after those -- hands it to the process-level

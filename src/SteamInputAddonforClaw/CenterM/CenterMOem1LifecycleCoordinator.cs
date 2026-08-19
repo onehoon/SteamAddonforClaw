@@ -55,11 +55,15 @@ internal readonly record struct CenterMOem1LifecycleSnapshot(
 ///
 /// Dormant by design: nothing in this type starts a timer, touches the registry, stages a helper, or
 /// terminates any process merely by being constructed. Every transition is driven by an explicit
-/// caller (test, or -- in a later PR -- a small production composition seam) calling one of the
-/// public methods below. Normal production Runtime composition must not construct or call into this
-/// type in this PR.
+/// caller (test, or the production composition seam) calling one of the public methods below. A
+/// lifecycle/composition PR production-composes this type into the real MSI Claw runtime lifetime
+/// (see <see cref="Devices.MSI.Claw.MsiClawRoutingComposition"/> and
+/// <see cref="CenterMOem1LifecycleRuntime"/>) and drives its poll contract, but normal production
+/// startup never calls <see cref="SetDesiredEnabledAsync"/> with true -- construction and polling
+/// alone still start no helper and change no native OEM1 behavior; only an explicit enable (still
+/// dormant, left to a future PR) does.
 /// </summary>
-internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant, IAsyncDisposable
+internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant, IAsyncDisposable, ICenterMOem1LifecycleDriverTarget
 {
     private readonly Func<string> _publishRootProvider;
     private readonly CenterMBackendProbe _backendProbe;
@@ -264,6 +268,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     public string Name => "CenterMOem1LifecycleCoordinator";
 
+    // Explicit ICenterMOem1LifecycleDriverTarget forwarding: the coordinator's own methods stay
+    // `internal` (unchanged -- this is not a rewrite of the coordinator), this just gives
+    // CenterMOem1LifecycleRuntime a narrow, fakeable seam onto them.
+    Task ICenterMOem1LifecycleDriverTarget.PollHelperLivenessAsync(CancellationToken cancellationToken) => PollHelperLivenessAsync(cancellationToken);
+    Task ICenterMOem1LifecycleDriverTarget.PollTickAsync(CancellationToken cancellationToken) => PollTickAsync(cancellationToken);
+    Task ICenterMOem1LifecycleDriverTarget.ReconcileAfterResumeAsync(CancellationToken cancellationToken) => ReconcileAfterResumeAsync(cancellationToken);
+
     /// <summary>Finding #5: wraps the injected (or absent) eligibility predicate so neither an
     /// omitted predicate nor an exception thrown by one can ever be conflated with "supported" --
     /// both must be treated as unsupported/fail-open while any already-owned helper remains subject
@@ -368,13 +379,15 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     }
 
     /// <summary>Polls the exact retained helper handle for unexpected death while Armed. A no-op
-    /// (returns immediately) when no helper is owned.</summary>
+    /// (returns immediately) when shutdown is active or this coordinator is cleanly dormant;
+    /// the latter prevents it from applying OEM1 policy to a helper borrowed by the routing guard.</summary>
     internal async Task PollHelperLivenessAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_shutdown) return;
+            if (!_desiredEnabled && _state == CenterMOem1LifecycleState.Disabled) return;
             var liveness = _helperOwnership.PollLiveness();
             switch (liveness)
             {
@@ -425,8 +438,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     /// <summary>Polls for a foreign same-name "MSI Center M" process while Armed, and for the
     /// tracked real MainUI's visibility/exit while a real identity is being tracked. This is the
-    /// single low-rate reconciliation tick a future PR's timer would call; it is never invoked by
-    /// production in this PR.</summary>
+    /// single low-rate reconciliation tick <see cref="CenterMOem1LifecycleRuntime"/> drives whenever
+    /// the routing guard is not Armed.</summary>
     internal async Task PollTickAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

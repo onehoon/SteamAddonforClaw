@@ -80,12 +80,32 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         _routingDisposeOverride = routingDisposeOverride;
 
         var powerParticipants = new List<IPowerSuspendParticipant>();
+        // PR2: an optional generic auxiliary power participant the routing composition supplies
+        // (e.g. the MSI Center M OEM1 lifecycle driver) -- this host never learns it is MSI/CenterM
+        // specific, only that the capability may be present (work order requirement 13).
+        //
+        // Review fix (BLOCKER): PowerTransitionCoordinator gives every participant one SHARED
+        // suspend deadline and stops once no time remains, so this must run BEFORE the routing
+        // participant, not after -- a slow/timed-out routing quiesce must never be able to consume
+        // the whole budget and starve the auxiliary lifecycle's own (intentionally lightweight)
+        // suspend mutation barrier of ever being established.
+        if (_routingRuntime?.AuxiliaryPowerParticipant is { } auxiliaryPowerParticipant)
+            powerParticipants.Add(auxiliaryPowerParticipant);
         if (_routingRuntime is not null) powerParticipants.Add(_routingRuntime);
         _powerCoordinator = new PowerTransitionCoordinator(powerGate, recoverySafetyState, powerParticipants,
             token => ReconcileFreshAfterResumeAsync(token),
             recoveryEnabled: recoverySafe,
             hasIncompleteRecovery: hasIncompleteRecovery,
-            establishBaseline: establishBaseline,
+            // Review fix (BLOCKER): PowerTransitionCoordinator opens PowerMutationGate as soon as
+            // establishBaseline succeeds -- BEFORE the afterRecovery callback (ReconcileFreshAfterResumeAsync)
+            // ever runs. Normal routing (e.g. a Steam state-change callback on another thread) could
+            // therefore race through the already-open gate and have the routing guard start the
+            // shared helper before the OEM1 auxiliary resume reconcile has even begun, which could
+            // then misclassify that guard-owned helper as its own stale ownership to clean up. Run
+            // the auxiliary resume reconcile here, inside establishBaseline, while the gate is still
+            // closed -- after the stock baseline succeeds, before PowerTransitionCoordinator can ever
+            // open the gate for this resume.
+            establishBaseline: token => EstablishResumeBaselineAsync(establishBaseline, token),
             hasResidualRoutingCleanup: () => _routingRuntime?.HasResidualSessionState == true,
             retryResidualRoutingCleanup: async token =>
                 _routingRuntime is null || await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false));
@@ -148,12 +168,51 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
                 if (!_steamStopped) _steamRuntime.Refresh();
             }
         });
+        // The OEM1 auxiliary resume reconcile now runs earlier, inside EstablishResumeBaselineAsync
+        // (before PowerTransitionCoordinator ever opens PowerMutationGate for this resume) -- see the
+        // review-fix comment there. This callback owns only Steam refresh/suppression plus routing's
+        // own fresh reconcile.
         return await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
             freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
             completeSuppression: _resumeFreshReconcileSuppression.Complete,
             deferredReconcile: () => ReconcileAsync(),
             requestStatusRefresh: RequestStatusRefresh,
             cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Review fix (BLOCKER): runs after residual-cleanup/incomplete-recovery checks have
+    /// already passed, while <see cref="PowerMutationGate"/> is still closed for this resume. Calls
+    /// the caller-supplied stock-mode baseline first; if that fails, returns false immediately
+    /// (matching the previous <paramref name="establishBaseline"/> contract exactly) without ever
+    /// touching the OEM1 auxiliary participant. Only once the baseline itself succeeds does this run
+    /// the OEM1 lifecycle's own fresh resume reconciliation -- still before
+    /// <see cref="PowerTransitionCoordinator"/> can commit recovery and open the gate -- so normal
+    /// routing can never race through an already-open gate and start the shared helper before OEM1
+    /// has restored/validated its own long-lived ownership of it. OEM1 failure here remains
+    /// feature-local/fail-open (matches the coordinator's own fail-open design): it is logged but
+    /// never turns an otherwise-successful baseline into a failed one.</summary>
+    private async Task<bool> EstablishResumeBaselineAsync(Func<CancellationToken, Task<bool>> establishBaseline, CancellationToken cancellationToken)
+    {
+        if (!await establishBaseline(cancellationToken).ConfigureAwait(false))
+            return false;
+
+        if (_routingRuntime?.AuxiliaryResumeParticipant is { } auxiliaryResumeParticipant)
+        {
+            try
+            {
+                await auxiliaryResumeParticipant.ReconcileAfterResumeAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception);
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
