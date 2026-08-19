@@ -10,13 +10,15 @@ internal sealed class QamHostProcessController : IAsyncDisposable
     private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly string _executablePath;
     private readonly string _logDirectory;
+    private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private Process? _process;
     private bool _stopping;
 
-    internal QamHostProcessController(string runtimeBaseDirectory, string logDirectory)
+    internal QamHostProcessController(string runtimeBaseDirectory, string logDirectory, Func<ProcessStartInfo, Process?>? startProcess = null)
     {
         _executablePath = Path.Combine(runtimeBaseDirectory, "qam", "SteamInputAddonforClaw.QamHost.exe");
         _logDirectory = logDirectory;
+        _startProcess = startProcess ?? Process.Start;
     }
 
     internal string ExecutablePath => _executablePath;
@@ -66,7 +68,7 @@ internal sealed class QamHostProcessController : IAsyncDisposable
             startInfo.ArgumentList.Add("--managed");
             startInfo.ArgumentList.Add("--log-directory");
             startInfo.ArgumentList.Add(_logDirectory);
-            var process = Process.Start(startInfo);
+            var process = _startProcess(startInfo);
             if (process is null) { AppLog.Warn("QAM.Host", "QamHost process launch returned no process."); return; }
             lock (_sync) _process = process;
             AppLog.Info("QAM.Host", "QamHost process started.", ("PID", process.Id));

@@ -168,12 +168,16 @@
     if (!node) return false;
 
     const originalType = node.type;
-    let patchedType = state.nestedTypes && state.nestedTypes.get(originalType);
-    if (!patchedType) {
-      patchedType = function patchedTabsProducer(...args) {
+    state.nestedPatches ??= new Map();
+    let record = state.nestedPatches.get(originalType);
+    if (!record) {
+      record = { node: null, originalType, patchedType: null, tabs: null };
+      record.patchedType = function patchedTabsProducer(...args) {
         const result = originalType.apply(this, args);
+        if (!state.installed) return result;
         const owner = findTabsPropOwner(result, 0);
         if (!owner) return result;
+        record.tabs = owner.props.tabs;
         logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
         if (!owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
           owner.props.tabs.push(buildAddonTab(React));
@@ -183,16 +187,34 @@
         }
         return result;
       };
-
-      if (!state.nestedTypes) state.nestedTypes = new Map();
-      state.nestedTypes.set(originalType, patchedType);
+      state.nestedPatches.set(originalType, record);
     }
 
+    record.node = node;
     if (node.type === originalType) {
-      node.type = patchedType;
+      node.type = record.patchedType;
       logOnce("nestedPatch", "Nested tabs producer patched.");
     }
     return true;
+  }
+
+  /*
+   * The nested producer can remain mounted in an already-created React tree after
+   * the outer renderer is restored. Keep the wrapper inert and remove only our tab
+   * before releasing the records.
+   */
+  function restoreNestedPatches() {
+    for (const record of state.nestedPatches?.values() ?? []) {
+      if (record.node?.type === record.patchedType) {
+        record.node.type = record.originalType;
+      }
+
+      if (Array.isArray(record.tabs)) {
+        for (let index = record.tabs.length - 1; index >= 0; index--) {
+          if (record.tabs[index]?.[TAB_MARKER]) record.tabs.splice(index, 1);
+        }
+      }
+    }
   }
 
   function buildAddonTab(React) {
@@ -227,6 +249,8 @@
       log("install() called but already installed; no-op.");
       return true;
     }
+
+    state.diagnostics = {};
 
     const webpackRequire = findWebpackRequire();
     if (!webpackRequire) {
@@ -264,7 +288,7 @@
     Object.assign(state, {
       installed: true,
       patches,
-      nestedTypes: new Map(),
+      nestedPatches: new Map(),
       install,
       uninstall,
     });
@@ -279,6 +303,9 @@
       return true;
     }
 
+    state.installed = false;
+    restoreNestedPatches();
+
     for (const patch of state.patches) {
       // Only restore if nothing else re-patched the renderer after us.
       if (patch.renderer.type === patch.patchedType) {
@@ -287,12 +314,9 @@
       }
     }
 
-    state.nestedTypes?.clear();
-
     Object.assign(state, {
-      installed: false,
       patches: null,
-      nestedTypes: null,
+      nestedPatches: null,
       install,
       uninstall,
     });
