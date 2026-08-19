@@ -58,6 +58,8 @@ public sealed class MsiClawRumbleTests
         Assert.True(transport.Write("path-a", packet).Succeeded);
         Assert.True(transport.Write("path-a", packet).Succeeded);
         Assert.Equal(1, native.OpenCount);
+        Assert.Equal(1, native.OverlappedOpenCount);
+        Assert.True(native.OverlappedWriteCalls >= 2);
         Assert.True(transport.Write("path-b", packet).Succeeded);
         Assert.Equal(2, native.OpenCount);
         native.WriteResult = false;
@@ -174,12 +176,12 @@ public sealed class MsiClawRumbleTests
         var hidApi = new FakeCapabilityHidApi { InputReportLength = 64, OutputReportLength = 64 };
         var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
 
-        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out var writable, out var win32Error, out var hidStatus);
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out var input, out var output, out var openSucceeded, out var win32Error, out var hidStatus);
 
         Assert.True(succeeded);
         Assert.Equal(64, input);
         Assert.Equal(64, output);
-        Assert.True(writable);
+        Assert.True(openSucceeded);
         Assert.Equal(0, win32Error);
         Assert.Equal(0x00110000, hidStatus);
         Assert.Equal(1, hidApi.OpenCalls);
@@ -192,10 +194,10 @@ public sealed class MsiClawRumbleTests
         var hidApi = new FakeCapabilityHidApi { OpenSucceeds = false };
         var catalog = new WindowsMsiClawRumbleEndpointCatalog(hidApi: hidApi);
 
-        var succeeded = catalog.TryReadHidCapabilities("path-a", out _, out _, out var writable, out var win32Error, out _);
+        var succeeded = catalog.TryReadHidCapabilities("path-a", out _, out _, out var openSucceeded, out var win32Error, out _);
 
         Assert.False(succeeded);
-        Assert.False(writable);
+        Assert.False(openSucceeded);
         Assert.NotEqual(0, win32Error);
         Assert.Equal(0, hidApi.CapabilityCalls);
     }
@@ -216,17 +218,17 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public void Endpoint_resolver_requires_one_exact_writable_64_byte_pid1902_candidate()
+    public void Endpoint_resolver_requires_one_exact_opened_64_byte_pid1902_candidate()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
-        MsiClawRumbleEndpointCandidate Candidate(string path, ushort pid = 0x1902, int length = 64, bool writable = true, string pnp = "PNP-A", string physical = "ROOT-A") =>
-            new(path, pnp, physical, 0x0DB0, pid, 64, length, writable);
+        MsiClawRumbleEndpointCandidate Candidate(string path, ushort pid = 0x1902, int length = 64, bool openSucceeded = true, string pnp = "PNP-A", string physical = "ROOT-A") =>
+            new(path, pnp, physical, 0x0DB0, pid, 64, length, openSucceeded);
 
         Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => []).Resolve(identity).Reason);
         Assert.Equal("AmbiguousEndpoints", new MsiClawRumbleEndpointResolver(_ => [Candidate("a"), Candidate("b")]).Resolve(identity).Reason);
         Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", pid: 0x1901)]).Resolve(identity).Reason);
         Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", length: 11)]).Resolve(identity).Reason);
-        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", writable: false)]).Resolve(identity).Reason);
+        Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", openSucceeded: false)]).Resolve(identity).Reason);
         Assert.Equal("NoVerifiedEndpoint", new MsiClawRumbleEndpointResolver(_ => [Candidate("a", physical: "ROOT-WRONG")]).Resolve(identity).Reason);
         Assert.Equal("a", new MsiClawRumbleEndpointResolver(_ => [Candidate("a")]).Resolve(identity).DevicePath);
     }
@@ -235,7 +237,7 @@ public sealed class MsiClawRumbleTests
     public void Endpoint_resolver_rejects_a_candidate_whose_input_report_length_is_not_64_bytes()
     {
         var identity = new MsiClawPhysicalInputIdentity(Guid.NewGuid(), "dinput", "PNP-A", "ROOT-A");
-        var wrongInputLength = new MsiClawRumbleEndpointCandidate("a", "PNP-A", "ROOT-A", 0x0DB0, 0x1902, InputReportLength: 32, OutputReportLength: 64, Writable: true);
+        var wrongInputLength = new MsiClawRumbleEndpointCandidate("a", "PNP-A", "ROOT-A", 0x0DB0, 0x1902, InputReportLength: 32, OutputReportLength: 64, OpenSucceeded: true);
 
         var result = new MsiClawRumbleEndpointResolver(_ => [wrongInputLength]).Resolve(identity);
 
@@ -437,6 +439,8 @@ public sealed class MsiClawRumbleTests
     {
         public int LastError { get; private set; }
         public int OpenCount { get; private set; }
+        public int OverlappedOpenCount { get; private set; }
+        public int OverlappedWriteCalls { get; private set; }
         public bool WriteResult { get; set; } = true;
         public bool PartialWrite { get; set; }
         public bool BlockFirstWrite { get; init; }
@@ -446,6 +450,8 @@ public sealed class MsiClawRumbleTests
         public List<byte[]> Writes { get; } = [];
         public SafeFileHandle Open(string path, uint desiredAccess, uint shareMode, uint creationDisposition)
         { OpenCount++; return new SafeFileHandle(new IntPtr(OpenCount), ownsHandle: false); }
+        public SafeFileHandle OpenOverlapped(string path, uint desiredAccess, uint shareMode, uint creationDisposition)
+        { OverlappedOpenCount++; return Open(path, desiredAccess, shareMode, creationDisposition); }
         public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
         {
             WriteCalls++;
@@ -459,6 +465,8 @@ public sealed class MsiClawRumbleTests
             LastError = WriteResult ? 0 : 5;
             return WriteResult;
         }
+        public bool WriteOverlapped(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
+        { OverlappedWriteCalls++; return Write(handle, buffer, out bytesWritten); }
         public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out int hidStatus)
         {
             inputReportLength = 0;
