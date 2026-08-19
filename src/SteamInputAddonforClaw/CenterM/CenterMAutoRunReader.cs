@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using System.Security;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Settings;
 
 namespace SteamInputAddonforClaw.CenterM;
 
@@ -47,6 +48,46 @@ internal static class CenterMAutoRunReader
             AppLog.Warn("CenterM.AutoRun", "Explicit AutoRun setup failed.", ex);
             return false;
         }
+    }
+
+    internal static AppSettings ReconcilePendingStartup(AppSettings settings, SettingsStore store)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(store);
+        if (!settings.CenterMAutoRunMutationPending || !settings.Oem1Mapping.RemappingEnabled)
+            return settings;
+
+        var current = Read();
+        var reconciled = current switch
+        {
+            CenterMAutoRunState.Disabled => settings with
+            {
+                CenterMAutoRunMutationPending = false,
+                CenterMAutoRunOwnedByAddon = true,
+                OriginalAutoRun = settings.OriginalAutoRun ?? 1,
+                AppliedAutoRun = 0
+            },
+            CenterMAutoRunState.Enabled => settings with
+            {
+                CenterMAutoRunMutationPending = false,
+                CenterMAutoRunOwnedByAddon = false,
+                OriginalAutoRun = null,
+                AppliedAutoRun = null
+            },
+            _ => settings
+        };
+
+        if (!ReferenceEquals(reconciled, settings))
+        {
+            store.Save(reconciled);
+            AppLog.Info("CenterM.AutoRun", "Pending AutoRun mutation reconciled during normal startup.", ("ObservedState", current), ("OwnedByAddon", reconciled.CenterMAutoRunOwnedByAddon));
+        }
+        else
+        {
+            AppLog.Warn("CenterM.AutoRun", "Pending AutoRun mutation remains unresolved during normal startup; OEM1 must remain fail-open.", null, ("ObservedState", current));
+        }
+
+        return reconciled;
     }
 
     /// <summary>Pure classification, tested directly: only an exact int 0 or 1 is a confident

@@ -13,6 +13,7 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.CenterM;
 
 namespace SteamInputAddonforClaw.Runtime;
 
@@ -40,7 +41,7 @@ internal static class AddonRuntimeCompositionFactory
         bool hardwareSupported)
     {
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
-        var settings = settingsStore.Load();
+        var settings = CenterMAutoRunReader.ReconcilePendingStartup(settingsStore.Load(), settingsStore);
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
         var startupRegistration = new WindowsTaskSchedulerStartupManager();
         var startupSettings = new StartupSettingsCoordinator(settings, settingsStore, startupRegistration);
