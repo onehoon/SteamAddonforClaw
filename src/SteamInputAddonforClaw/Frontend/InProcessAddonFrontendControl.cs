@@ -45,6 +45,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         public string BaseBoard { get; } = baseBoard;
         public string ResolvedModel { get; } = resolvedModel;
         public string? ErrorMessage { get; set; }
+        public required string HardwareStatus { get; init; }
+        public required string HardwareFamily { get; init; }
+        public required string HardwareModel { get; init; }
+        public required string HardwareReason { get; init; }
     }
     // Device/Profile CPU Boost -- a sibling capability, not a member of Routing/OEM1 (work order
     // PR277 section 1): this projection deliberately has NO dependency on _runtime/routing status
@@ -360,9 +364,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var resolvedModel = hardware.DeviceModel?.Value ?? "Unknown / unresolved";
         var coordinator = new ClawSensorProbeCoordinator();
         coordinator.Prepare();
-        coordinator.SetDeviceIdentity(status.Device.Manufacturer, status.Device.Model, status.Device.BaseBoardProduct, resolvedModel);
-        coordinator.SetHardwareCompatibility(hardware.Status.ToString(), hardware.DeviceFamily?.Value ?? "Unavailable", hardware.DeviceModel?.Value ?? "Unavailable", hardware.Reason);
-        var session = new ClawSensorProbeSession(coordinator, status.Device.Manufacturer, status.Device.Model, status.Device.BaseBoardProduct, resolvedModel);
+        // Identity/compatibility are captured now but NOT written yet: ClawSensorProbeCoordinator's
+        // SetDeviceIdentity/SetHardwareCompatibility write through the session writer, which Start()
+        // does not create until StartClawSensorProbeAsync() runs. Writing here would silently no-op
+        // and drop this metadata from the finalized report (review finding #1 on PR #290).
+        var session = new ClawSensorProbeSession(coordinator, status.Device.Manufacturer, status.Device.Model, status.Device.BaseBoardProduct, resolvedModel)
+        {
+            HardwareStatus = hardware.Status.ToString(),
+            HardwareFamily = hardware.DeviceFamily?.Value ?? "Unavailable",
+            HardwareModel = hardware.DeviceModel?.Value ?? "Unavailable",
+            HardwareReason = hardware.Reason,
+        };
         lock (_clawSensorProbeGate) _clawSensorProbe = session;
         return MapClawSensorProbeSnapshot(session);
     }
@@ -375,8 +387,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         try
         {
             session.Coordinator.Start();
-            await session.Coordinator.StartCaptureAsync(cancellationToken).ConfigureAwait(false);
-            await session.Coordinator.CountdownAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, cancellationToken).ConfigureAwait(false);
+            session.Coordinator.SetDeviceIdentity(session.Manufacturer, session.Model, session.BaseBoard, session.ResolvedModel);
+            session.Coordinator.SetHardwareCompatibility(session.HardwareStatus, session.HardwareFamily, session.HardwareModel, session.HardwareReason);
+
+            // Link the RPC's own token with the coordinator's lifecycle token so a Runtime shutdown
+            // (BeginProcessShutdown -> coordinator disposal) promptly cancels an in-flight countdown
+            // instead of letting it run to BeginRecording() against an already-disposed coordinator
+            // (review finding #2 on PR #290).
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.Coordinator.LifecycleCancellation);
+            await session.Coordinator.StartCaptureAsync(linked.Token).ConfigureAwait(false);
+            await session.Coordinator.CountdownAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, linked.Token).ConfigureAwait(false);
+            linked.Token.ThrowIfCancellationRequested();
             session.Coordinator.BeginRecording();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -406,10 +427,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
         try
         {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.Coordinator.LifecycleCancellation);
             if (forward)
-                await session.Coordinator.AdvancePhaseAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, () => { }, cancellationToken).ConfigureAwait(false);
+                await session.Coordinator.AdvancePhaseAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, () => { }, linked.Token).ConfigureAwait(false);
             else
-                await session.Coordinator.RevisitPreviousPhaseAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, () => { }, cancellationToken).ConfigureAwait(false);
+                await session.Coordinator.RevisitPreviousPhaseAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, () => { }, linked.Token).ConfigureAwait(false);
+            linked.Token.ThrowIfCancellationRequested();
             if (session.Coordinator.State == ClawSensorProbeState.Completed)
                 await session.Coordinator.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }

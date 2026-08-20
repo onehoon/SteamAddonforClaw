@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
+using System.Text.Json;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests.ClawSensorProbe;
@@ -102,6 +103,52 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
 
         Assert.Equal(FrontendClawSensorProbeState.Failed, snapshot.State);
         Assert.NotNull(snapshot.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Start_writes_device_identity_and_hardware_compatibility_into_the_finalized_report()
+    {
+        // Review finding #1 on PR #290: SetDeviceIdentity/SetHardwareCompatibility write through the
+        // coordinator's session writer, which Start() does not create until StartClawSensorProbeAsync
+        // runs -- calling them at Open time (before Start) silently no-ops and drops this metadata.
+        // Assert the metadata actually lands in claw-sensor-report.json, not just that Start reaches
+        // Failed in this hardware-less test environment.
+        var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
+        await control.OpenClawSensorProbeAsync();
+
+        var started = await control.StartClawSensorProbeAsync();
+
+        Assert.Equal(FrontendClawSensorProbeState.Failed, started.State);
+        Assert.NotNull(started.OutputDirectory);
+        var reportPath = Path.Combine(started.OutputDirectory!, "claw-sensor-report.json");
+        Assert.True(File.Exists(reportPath));
+        using var report = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath));
+        var device = report.RootElement.GetProperty("Device");
+        Assert.Equal("MSI", device.GetProperty("Manufacturer").GetString());
+        Assert.Equal("Claw A1M", device.GetProperty("ProductName").GetString());
+        Assert.Equal("Claw A1M board", device.GetProperty("BaseBoardProduct").GetString());
+        var hardware = report.RootElement.GetProperty("ResolvedHardware");
+        Assert.Equal("Supported", hardware.GetProperty("Status").GetString());
+        Assert.Equal("msi.claw", hardware.GetProperty("DeviceFamily").GetString());
+    }
+
+    [Fact]
+    public async Task Concurrent_process_shutdown_during_start_never_lets_an_unexpected_exception_escape()
+    {
+        // Review finding #2 on PR #290: StartClawSensorProbeAsync now links the RPC token with the
+        // coordinator's LifecycleCancellation, so a concurrent BeginProcessShutdown (which disposes
+        // the active coordinator, cancelling that token) must surface as, at most, an
+        // OperationCanceledException at the RPC boundary -- never an unrelated/unhandled exception
+        // type, and the shutdown call itself must not throw or deadlock against Start.
+        var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
+        await control.OpenClawSensorProbeAsync();
+
+        var startTask = control.StartClawSensorProbeAsync();
+        control.BeginProcessShutdown();
+        var exception = await Record.ExceptionAsync(() => startTask);
+
+        Assert.True(exception is null or OperationCanceledException,
+            $"Expected null or OperationCanceledException, got {exception?.GetType()}: {exception?.Message}");
     }
 
     [Fact]

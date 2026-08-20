@@ -12,6 +12,8 @@ public sealed partial class ClawSensorProbePage : UserControl
     private bool _active;
     private DispatcherQueueTimer? _pollTimer;
     private FrontendClawSensorProbeSnapshot? _latest;
+    private CancellationTokenSource? _pageCancellation;
+    private bool _pollInFlight;
 
     public event EventHandler? BackRequested;
     public ClawSensorProbePage() => InitializeComponent();
@@ -23,6 +25,8 @@ public sealed partial class ClawSensorProbePage : UserControl
     /// rate.</summary>
     internal void Activate()
     {
+        _pageCancellation?.Dispose();
+        _pageCancellation = new CancellationTokenSource();
         _active = true;
         ResetUi();
         _ = OpenAsync();
@@ -34,9 +38,11 @@ public sealed partial class ClawSensorProbePage : UserControl
         if (_frontend is null) return;
         try
         {
-            var snapshot = await _frontend.OpenClawSensorProbeAsync();
+            var token = _pageCancellation?.Token ?? CancellationToken.None;
+            var snapshot = await _frontend.OpenClawSensorProbeAsync(token);
             if (_active) Render(snapshot);
         }
+        catch (OperationCanceledException) { /* page left before Open returned */ }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe session open failed.", exception, ("Reason", exception.GetType().Name));
@@ -54,6 +60,10 @@ public sealed partial class ClawSensorProbePage : UserControl
         if (!_active) return;
         _active = false;
         _pollTimer?.Stop();
+        // Cancel any in-flight Start/Next/Previous/Open request BEFORE awaiting Close -- the
+        // named-pipe server serializes RPCs through one operation gate, so without this, Close would
+        // queue behind a long-running countdown/phase request (review finding #2 on PR #290).
+        _pageCancellation?.Cancel();
         if (_frontend is null) return;
         try { await _frontend.CloseClawSensorProbeAsync().ConfigureAwait(true); }
         catch (Exception exception) { AppLog.Warn("ClawSensorProbe", "Probe session close failed.", exception, ("Reason", exception.GetType().Name)); }
@@ -72,16 +82,23 @@ public sealed partial class ClawSensorProbePage : UserControl
 
     private async Task PollAsync()
     {
-        if (!_active || _frontend is null) return;
+        // Single-flight guard: never let a second ~200ms poll queue up behind one that's still
+        // in-flight (e.g. stuck behind a long Start/phase RPC on the shared operation gate) (review
+        // finding #2 on PR #290).
+        if (!_active || _frontend is null || _pollInFlight) return;
+        _pollInFlight = true;
         try
         {
-            var snapshot = await _frontend.CaptureClawSensorProbeAsync();
+            var token = _pageCancellation?.Token ?? CancellationToken.None;
+            var snapshot = await _frontend.CaptureClawSensorProbeAsync(token);
             if (_active) Render(snapshot);
         }
+        catch (OperationCanceledException) { /* page left while this poll was in flight */ }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe snapshot poll failed.", exception, ("Reason", exception.GetType().Name));
         }
+        finally { _pollInFlight = false; }
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
@@ -93,14 +110,15 @@ public sealed partial class ClawSensorProbePage : UserControl
             if (_frontend is null) return;
             StartButton.IsEnabled = false;
             StatusText.Text = "Discovering Windows motion sensors...";
-            var snapshot = await _frontend.StartClawSensorProbeAsync();
-            Render(snapshot);
+            var token = _pageCancellation?.Token ?? CancellationToken.None;
+            var snapshot = await _frontend.StartClawSensorProbeAsync(token);
+            if (_active) Render(snapshot);
         }
+        catch (OperationCanceledException) { /* page left during Start */ }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe start failed.", exception, ("Reason", exception.GetType().Name));
-            ErrorText.Text = $"Test failed to start: {exception.Message}";
-            StartButton.IsEnabled = true;
+            if (_active) { ErrorText.Text = $"Test failed to start: {exception.Message}"; StartButton.IsEnabled = true; }
         }
     }
 
@@ -111,12 +129,15 @@ public sealed partial class ClawSensorProbePage : UserControl
             if (_frontend is null) return;
             NextPhaseButton.IsEnabled = false;
             BackPhaseButton.IsEnabled = false;
-            Render(await _frontend.NextClawSensorProbePhaseAsync());
+            var token = _pageCancellation?.Token ?? CancellationToken.None;
+            var snapshot = await _frontend.NextClawSensorProbePhaseAsync(token);
+            if (_active) Render(snapshot);
         }
+        catch (OperationCanceledException) { /* page left during phase advance */ }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe next-phase failed.", exception, ("Reason", exception.GetType().Name));
-            ErrorText.Text = $"Test failed: {exception.Message}";
+            if (_active) ErrorText.Text = $"Test failed: {exception.Message}";
         }
     }
 
@@ -127,12 +148,15 @@ public sealed partial class ClawSensorProbePage : UserControl
             if (_frontend is null) return;
             NextPhaseButton.IsEnabled = false;
             BackPhaseButton.IsEnabled = false;
-            Render(await _frontend.PreviousClawSensorProbePhaseAsync());
+            var token = _pageCancellation?.Token ?? CancellationToken.None;
+            var snapshot = await _frontend.PreviousClawSensorProbePhaseAsync(token);
+            if (_active) Render(snapshot);
         }
+        catch (OperationCanceledException) { /* page left during phase revisit */ }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe previous-phase failed.", exception, ("Reason", exception.GetType().Name));
-            ErrorText.Text = $"Test failed: {exception.Message}";
+            if (_active) ErrorText.Text = $"Test failed: {exception.Message}";
         }
     }
 
