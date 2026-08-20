@@ -1,0 +1,359 @@
+using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
+using Xunit;
+
+namespace SteamInputAddonforClaw.Tests;
+
+/// <summary>Fake CPU Boost backend -- never touches the real machine's power scheme. Mirrors the
+/// AC/DC-independent, no-implicit-normalization semantics <see cref="ICpuBoostPowerPolicy"/>
+/// documents.</summary>
+internal sealed class FakeCpuBoostPowerPolicy : ICpuBoostPowerPolicy
+{
+    public CpuBoostSideReading Ac { get; set; } = CpuBoostSideReading.Unavailable;
+    public CpuBoostSideReading Dc { get; set; } = CpuBoostSideReading.Unavailable;
+    public int AcWriteCount { get; private set; }
+    public int DcWriteCount { get; private set; }
+    public bool FailNextApply { get; set; }
+    public bool FailRead { get; set; }
+
+    public CpuBoostSystemState Read() =>
+        FailRead ? CpuBoostSystemState.Failure("simulated read failure") : new CpuBoostSystemState(true, Ac, Dc, null);
+
+    public CpuBoostApplyResult Apply(CpuBoostMode? ac, CpuBoostMode? dc)
+    {
+        if (FailNextApply)
+        {
+            FailNextApply = false;
+            return new CpuBoostApplyResult(ac is null, dc is null, "simulated apply failure");
+        }
+
+        if (ac is { } acMode)
+        {
+            AcWriteCount++;
+            Ac = CpuBoostSideReading.Known(acMode);
+        }
+
+        if (dc is { } dcMode)
+        {
+            DcWriteCount++;
+            Dc = CpuBoostSideReading.Known(dcMode);
+        }
+
+        return new CpuBoostApplyResult(true, true, null);
+    }
+}
+
+public sealed class CpuBoostRuntimeTests : IDisposable
+{
+    private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
+
+    private string ProfilesPath => Path.Combine(_testDirectory, "profiles.json");
+
+    // ---- Unmanaged: existing Windows values are never touched ----
+
+    [Fact]
+    public void StartupReconcile_BothSidesUnmanaged_ReadsWindowsAndWritesNothing()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.EfficientEnabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcCurrent.Mode);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, runtime.Snapshot.DcCurrent.Mode);
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Null(runtime.Snapshot.DcDesired);
+        Assert.False(File.Exists(ProfilesPath));
+    }
+
+    // ---- AC-only managed startup ----
+
+    [Fact]
+    public void StartupReconcile_AcOnlyManaged_WritesAcOnly()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = CpuBoostMode.EfficientAggressive } } }
+        });
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(1, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        Assert.Equal(CpuBoostMode.EfficientAggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    // ---- DC-only managed startup ----
+
+    [Fact]
+    public void StartupReconcile_DcOnlyManaged_WritesDcOnly()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Dc = CpuBoostMode.Disabled } } }
+        });
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Aggressive) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(1, backend.DcWriteCount);
+        Assert.Equal(CpuBoostMode.Enabled, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    // ---- Both sides managed ----
+
+    [Fact]
+    public void StartupReconcile_BothManaged_WritesBothIndependently()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Disabled } } }
+        });
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(1, backend.AcWriteCount);
+        Assert.Equal(1, backend.DcWriteCount);
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    // ---- Explicit Disabled is not confused with unmanaged/null ----
+
+    [Fact]
+    public void StartupReconcile_ExplicitDisabled_IsAppliedAsManagedNotUnmanaged()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = CpuBoostMode.Disabled } } }
+        });
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(1, backend.AcWriteCount);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, runtime.Snapshot.AcDesired);
+    }
+
+    // ---- All seven modes round-trip through persistence ----
+
+    [Theory]
+    [InlineData(CpuBoostMode.Disabled)]
+    [InlineData(CpuBoostMode.Enabled)]
+    [InlineData(CpuBoostMode.Aggressive)]
+    [InlineData(CpuBoostMode.EfficientEnabled)]
+    [InlineData(CpuBoostMode.EfficientAggressive)]
+    [InlineData(CpuBoostMode.AggressiveAtGuaranteed)]
+    [InlineData(CpuBoostMode.EfficientAggressiveAtGuaranteed)]
+    public void SaveAndLoad_RoundTripsEachCpuBoostMode(CpuBoostMode mode)
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = mode, Dc = mode } } }
+        });
+
+        var loaded = store.Load();
+
+        Assert.Equal(ProfileLoadStatus.Loaded, loaded.Status);
+        Assert.Equal(mode, loaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(mode, loaded.Document.Device.Performance.CpuBoost?.Dc);
+    }
+
+    // ---- Profile load safety: NotFound ----
+
+    [Fact]
+    public void StartupReconcile_NotFound_ReadOnlyNoWrites()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Enabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        Assert.False(File.Exists(ProfilesPath));
+    }
+
+    // ---- Profile load safety: Malformed ----
+
+    [Fact]
+    public void StartupReconcile_MalformedProfile_NoCpuBoostWritesAndFilePreserved()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, "{ not valid json");
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        Assert.Equal("{ not valid json", File.ReadAllText(ProfilesPath));
+    }
+
+    // ---- Profile load safety: unsupported schema ----
+
+    [Fact]
+    public void StartupReconcile_UnsupportedSchema_NoCpuBoostWrites()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var original = "{\"schemaVersion\":" + (ProfileDocument.CurrentSchemaVersion + 1) + ",\"device\":{},\"games\":{}}";
+        File.WriteAllText(ProfilesPath, original);
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(original, File.ReadAllText(ProfilesPath));
+    }
+
+    // ---- Profile load safety: read failure ----
+
+    [Fact]
+    public void StartupReconcile_ProfileReadFailure_NoCpuBoostWrites()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, """{"schemaVersion":1,"device":{},"games":{}}""");
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        using var handle = new FileStream(ProfilesPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        runtime.StartupReconcile();
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+    }
+
+    // ---- AC mutation ----
+
+    [Fact]
+    public void SetDeviceCpuBoostAc_PersistsAndAppliesAcOnly()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.Aggressive);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        var loaded = store.Load();
+        Assert.Equal(CpuBoostMode.Aggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Null(loaded.Document.Device.Performance.CpuBoost?.Dc);
+    }
+
+    // ---- DC mutation ----
+
+    [Fact]
+    public void SetDeviceCpuBoostDc_PersistsAndAppliesDcOnly()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        var result = runtime.SetDeviceCpuBoostDc(CpuBoostMode.EfficientEnabled);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(1, backend.DcWriteCount);
+        var loaded = store.Load();
+        Assert.Equal(CpuBoostMode.EfficientEnabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
+        Assert.Null(loaded.Document.Device.Performance.CpuBoost?.Ac);
+    }
+
+    // ---- Persistence failure before hardware apply ----
+
+    [Fact]
+    public void Mutation_PersistenceFailure_NeverAppliesToWindowsAndKeepsPreviousDesiredState()
+    {
+        // A directory in place of the profiles.json path makes File.Move/File.WriteAllText fail
+        // reliably without relying on OS-specific permission APIs.
+        Directory.CreateDirectory(ProfilesPath);
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.Aggressive);
+
+        Assert.Equal(CpuBoostMutationOutcome.PersistenceFailed, result.Outcome);
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+    }
+
+    // ---- Hardware apply failure after persistence succeeds ----
+
+    [Fact]
+    public void Mutation_ApplyFailure_KeepsPersistedDesiredStateAndReportsFailure_AndRetriesOnNewRuntime()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { FailNextApply = true };
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.EfficientAggressive);
+
+        Assert.Equal(CpuBoostMutationOutcome.ApplyFailed, result.Outcome);
+        var loaded = store.Load();
+        Assert.Equal(CpuBoostMode.EfficientAggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(0, backend.AcWriteCount); // the failed attempt did not count as a successful write
+
+        // A newly created Runtime instance (as at a later process start) can attempt the persisted
+        // desired value again.
+        var secondBackend = new FakeCpuBoostPowerPolicy();
+        var secondRuntime = new CpuBoostRuntime(store, secondBackend);
+        secondRuntime.StartupReconcile();
+
+        Assert.Equal(1, secondBackend.AcWriteCount);
+        Assert.Equal(CpuBoostMode.EfficientAggressive, secondBackend.Ac.Mode);
+    }
+
+    // ---- Unexpected current Windows value must not be silently normalized ----
+
+    [Fact]
+    public void StartupReconcile_UnexpectedCurrentWindowsValue_IsNotNormalizedOrWrittenWhenUnmanaged()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.UnknownValue(), Dc = CpuBoostSideReading.Known(CpuBoostMode.Enabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(CpuBoostReadStatus.Unknown, runtime.Snapshot.AcCurrent.Status);
+        Assert.Null(runtime.Snapshot.AcCurrent.Mode);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_testDirectory))
+        {
+            Directory.Delete(_testDirectory, recursive: true);
+        }
+    }
+}

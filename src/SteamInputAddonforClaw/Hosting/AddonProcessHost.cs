@@ -3,7 +3,10 @@ using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Developer;
+using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
+using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Runtime;
@@ -41,6 +44,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly QamHostProcessController _qamHostController;
     private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
+
+    // Device/Profile Runtime -- a sibling capability of the routing/OEM1 composition above, not a
+    // member of it (work order PR276 sections 0/2/12): CPU Boost must remain fully usable even with
+    // Routing/OEM1/Steam/the frontend absent, so it is constructed and reconciled independently
+    // here rather than inside AddonRuntimeCompositionFactory/AddonRoutingRuntime.
+    private readonly CpuBoostRuntime _cpuBoostRuntime = new(new ProfileStore(AddonDataPaths.ProfilesPath));
+
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
 
@@ -106,6 +116,19 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var startupComposition = _startupComposition ?? throw new InvalidOperationException("Startup composition is unavailable.");
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
         AppLog.Info($"Starting runtime. Environment={startupResult.EnvironmentMode}; Readiness={startupResult.EnvironmentReadiness}.");
+
+        // CPU Boost Device/Profile Runtime startup reconcile -- a sibling capability, deliberately
+        // independent of Routing/OEM1/Steam and run unconditionally here rather than gated on any
+        // of the routing-specific state below (work order PR276 sections 0/2/12/14). A failure here
+        // must never fail Addon Runtime startup or affect Routing/OEM1/VIIPER/HidHide.
+        try
+        {
+            _cpuBoostRuntime.StartupReconcile();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.CpuBoost", "CPU Boost startup reconcile failed.", exception);
+        }
         var composition = AddonRuntimeCompositionFactory.Create(
             startupComposition.HandheldDeviceAdapter,
             startupComposition.DeviceRegistry,
