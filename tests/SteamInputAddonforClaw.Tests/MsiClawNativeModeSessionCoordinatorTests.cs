@@ -237,6 +237,7 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
         await coordinator.FailClosedAsync("PipelineFailure");
 
+        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
         var blocked = await coordinator.EnterForPipelineAsync(CancellationToken.None);
         Assert.False(blocked.Succeeded);
         Assert.Equal("RoutingFaultLatched", blocked.Reason);
@@ -286,6 +287,31 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
 
         Assert.True(recovery.HasIncompleteRecovery);
         Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
+    }
+
+    [Fact]
+    public async Task Convergence_accepts_newer_safe_recovery_commit_for_owned_stale_claim()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        var recovery = new RecoveryManager(new MemoryJournalStore());
+        var native = new MsiClawNativeStateManager(devices, modeController);
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(
+            native, recovery, new PowerMutationGate(initiallyOpen: true), recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        var sessionId = coordinator.CurrentRecoverySessionId!.Value;
+        Assert.Equal(RecoveryStatus.Success, recovery.RecordHidHideWhitelistAddition(sessionId, "C:\\Addon.exe").Status);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.FailClosedAsync("PipelineFailure"));
+        modeController.FailRestore = false;
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.Equal(RecoverySafety.Unsafe, recoverySafety.Current);
+
+        Assert.Equal(RecoveryStatus.Success, recovery.CompleteHidHideWhitelistAddition(sessionId, "C:\\Addon.exe").Status);
+        recoverySafety.Set(RecoverySafety.Safe);
+        Assert.True(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
