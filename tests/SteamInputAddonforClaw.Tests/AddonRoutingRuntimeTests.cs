@@ -15,22 +15,15 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class AddonRoutingRuntimeTests
 {
     [Fact]
-    public async Task GameBar_foreground_active_route_requests_enter_once()
+    public async Task GameBar_foreground_true_always_requests_enter()
     {
+        // The policy seam no longer pre-checks SteamOutputActive/ownership itself -- that snapshot
+        // could go stale behind a concurrent presentation mutation. Enter alone decides
+        // applicability, fresh, once it holds _presentationGate.
         var enters = 0;
         var exits = 0;
         await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
             isForeground: true,
-            steamOutputActive: true,
-            xbox360PresentationOwned: false,
-            enter: _ => { enters++; return Task.FromResult(true); },
-            exit: _ => { exits++; return Task.FromResult(true); },
-            CancellationToken.None);
-
-        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
-            isForeground: true,
-            steamOutputActive: true,
-            xbox360PresentationOwned: true,
             enter: _ => { enters++; return Task.FromResult(true); },
             exit: _ => { exits++; return Task.FromResult(true); },
             CancellationToken.None);
@@ -40,41 +33,14 @@ public sealed class AddonRoutingRuntimeTests
     }
 
     [Fact]
-    public async Task GameBar_foreground_inactive_route_is_a_no_op()
+    public async Task GameBar_foreground_false_always_requests_exit()
     {
         var enters = 0;
         var exits = 0;
         await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
-            true,
-            steamOutputActive: false,
-            xbox360PresentationOwned: false,
-            _ => { enters++; return Task.FromResult(true); },
-            _ => { exits++; return Task.FromResult(true); },
-            CancellationToken.None);
-
-        Assert.Equal(0, enters);
-        Assert.Equal(0, exits);
-    }
-
-    [Fact]
-    public async Task GameBar_leaving_with_owned_xbox360_requests_exit_once()
-    {
-        var enters = 0;
-        var exits = 0;
-        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
-            false,
-            steamOutputActive: true,
-            xbox360PresentationOwned: true,
-            _ => { enters++; return Task.FromResult(true); },
-            _ => { exits++; return Task.FromResult(true); },
-            CancellationToken.None);
-
-        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
-            false,
-            steamOutputActive: true,
-            xbox360PresentationOwned: false,
-            _ => { enters++; return Task.FromResult(true); },
-            _ => { exits++; return Task.FromResult(true); },
+            isForeground: false,
+            enter: _ => { enters++; return Task.FromResult(true); },
+            exit: _ => { exits++; return Task.FromResult(true); },
             CancellationToken.None);
 
         Assert.Equal(0, enters);
@@ -88,8 +54,6 @@ public sealed class AddonRoutingRuntimeTests
         var observed = CancellationToken.None;
         await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
             true,
-            steamOutputActive: true,
-            xbox360PresentationOwned: false,
             token => { observed = token; return Task.FromResult(true); },
             _ => Task.FromResult(true),
             cancellation.Token);
@@ -1056,5 +1020,71 @@ public sealed class AddonRoutingRuntimePresentationGateTests
 
         releaseHolder.TrySetResult();
         await holder;
+    }
+
+    [Fact]
+    public async Task GameBarForegroundFalseArrivingBeforeEnterCommitsStillWaitsThenExits()
+    {
+        // Review regression: HandleGameBarForegroundChangedAsync must not decide applicability
+        // from a pre-gate ownership snapshot. Here `enter`/`exit` are wired through
+        // HandleGameBarForegroundChangedCoreAsync exactly as the production instance method wires
+        // the real EnterXbox360PresentationAsync/ExitXbox360PresentationAsync -- both share one
+        // real SemaphoreSlim and only commit/read `owned` once they actually hold it. A
+        // foreground=false delivered while Enter is still in flight (i.e. before it has committed
+        // ownership) must still result in Exit observing the committed publisher and running,
+        // never being silently skipped because of a stale snapshot taken up front.
+        var gate = new SemaphoreSlim(1, 1);
+        var events = new List<string>();
+        var owned = false;
+        var enterStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseEnter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Func<CancellationToken, Task<bool>> enter = token => AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            async () =>
+            {
+                events.Add("EnterBegin");
+                enterStarted.TrySetResult();
+                await releaseEnter.Task;
+                owned = true;
+                events.Add("EnterCommit");
+                return (true, (string?)null);
+            },
+            failClosed: null,
+            token);
+
+        Func<CancellationToken, Task<bool>> exit = token => AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () =>
+            {
+                // Same fresh-inside-the-gate rule EnterXbox360PresentationAsync/
+                // ExitXbox360PresentationAsync apply for real: only decide here, never before.
+                if (!owned)
+                {
+                    events.Add("ExitSkipped_NotOwned");
+                    return Task.FromResult((false, (string?)null));
+                }
+                events.Add("ExitBegin");
+                owned = false;
+                events.Add("ExitEnd");
+                return Task.FromResult((true, (string?)null));
+            },
+            failClosed: null,
+            token);
+
+        var enterCall = AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            isForeground: true, enter, exit, CancellationToken.None);
+        await enterStarted.Task;
+
+        // foreground=false arrives while Enter is still mid-flight, before it has committed
+        // ownership -- issued (not awaited) here, exactly like a second Game Bar event racing in.
+        var exitCall = AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            isForeground: false, enter, exit, CancellationToken.None);
+
+        releaseEnter.TrySetResult();
+        await Task.WhenAll(enterCall, exitCall);
+
+        Assert.Equal(["EnterBegin", "EnterCommit", "ExitBegin", "ExitEnd"], events);
+        Assert.False(owned);
     }
 }

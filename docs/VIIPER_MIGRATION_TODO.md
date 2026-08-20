@@ -447,6 +447,13 @@ only wraps its mutation in the gate and never itself awaits fail-close, and
 the gate before invoking `FailClosedForXbox360PresentationAsync` on failure,
 so fail-close (and the routing-transition-owned retirement callback it can
 in turn invoke) is never awaited while the presentation gate is still held.
+The `HandleGameBarForegroundChangedAsync` policy seam forwards directly to
+Enter/Exit (`isForeground ? Enter : Exit`) with no ownership pre-check of its
+own -- a snapshot taken before the gate is acquired could go stale behind an
+in-flight mutation (e.g. a queued foreground=false arriving before an
+in-progress Enter commits `_xbox360Publisher`) and wrongly skip the call it
+should make; Enter/Exit are the sole ownership authority, evaluated fresh
+once each actually holds the gate.
 `GameBarForegroundWatcher` remains unsubscribed in production; this PR adds
 mutual exclusion only. Explicitly NOT implemented by this step: automatic
 Game Bar switching, latest-foreground-state-wins / event coalescing, ordered

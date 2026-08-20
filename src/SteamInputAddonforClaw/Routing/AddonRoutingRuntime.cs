@@ -348,36 +348,29 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     /// Selects the existing presentation primitive for a Game Bar foreground change. This is a
     /// policy seam only; the Game Bar watcher is deliberately not subscribed here, so normal
     /// Runtime behavior remains unchanged until a later production-wiring step.
+    ///
+    /// Deliberately does not pre-check <c>SteamOutputActive</c>/<c>_xbox360Publisher</c> here: a
+    /// snapshot taken before <see cref="EnterXbox360PresentationAsync"/>/
+    /// <see cref="ExitXbox360PresentationAsync"/> acquire <c>_presentationGate</c> can go stale
+    /// while a prior call is still in flight (e.g. a queued foreground=false arriving before an
+    /// in-progress Enter has committed <c>_xbox360Publisher</c>), which could otherwise cause this
+    /// policy to skip the call it should make. Enter/Exit already re-evaluate readiness/ownership
+    /// fresh, inside the gate, so they are the sole ownership authority.
     /// </summary>
-    internal Task HandleGameBarForegroundChangedAsync(bool isForeground, CancellationToken cancellationToken = default) =>
-        HandleGameBarForegroundChangedCoreAsync(
-            isForeground,
-            CaptureStatus().SteamOutputActive,
-            _xbox360Publisher is not null,
-            EnterXbox360PresentationAsync,
-            ExitXbox360PresentationAsync,
-            cancellationToken);
+    internal Task<bool> HandleGameBarForegroundChangedAsync(bool isForeground, CancellationToken cancellationToken = default) =>
+        HandleGameBarForegroundChangedCoreAsync(isForeground, EnterXbox360PresentationAsync, ExitXbox360PresentationAsync, cancellationToken);
 
     // Test seam for the boolean policy only. It owns no presentation state and does not add a
-    // second transition authority; the instance method supplies the existing Enter/Exit methods.
-    internal static async Task HandleGameBarForegroundChangedCoreAsync(
+    // second transition authority; the instance method supplies the real Enter/Exit primitives,
+    // which make the authoritative ownership decision fresh inside _presentationGate.
+    internal static Task<bool> HandleGameBarForegroundChangedCoreAsync(
         bool isForeground,
-        bool steamOutputActive,
-        bool xbox360PresentationOwned,
         Func<CancellationToken, Task<bool>> enter,
         Func<CancellationToken, Task<bool>> exit,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (isForeground)
-        {
-            if (steamOutputActive && !xbox360PresentationOwned)
-                await enter(cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        if (xbox360PresentationOwned)
-            await exit(cancellationToken).ConfigureAwait(false);
+        return isForeground ? enter(cancellationToken) : exit(cancellationToken);
     }
 
     private async Task HandleXbox360PublisherFaultAsync(Exception exception)
