@@ -106,6 +106,35 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
     }
 
     [Fact]
+    public async Task Capture_reconciles_reader_faults_via_FailOnReaderFaultAsync_without_throwing_when_already_failed()
+    {
+        // PR #290 re-review finding #1: CaptureClawSensorProbeAsync must call the coordinator's
+        // FailOnReaderFaultAsync() so a reader fault surfaced between polls is promoted to Failed the
+        // same way the old page's 200ms UI timer did, instead of leaving the diagnostic stuck in
+        // RecordingPhase until the user happens to press a button.
+        //
+        // This test environment has no real Windows Sensor API, so StartClawSensorProbeAsync's
+        // underlying StartCaptureAsync() always fails before any reader is ever created -- there is
+        // no way to construct a genuine ClawSensorProbeReaders fault from this test project without
+        // real hardware or a test-only seam on the (intentionally unmodified) Runtime coordinator.
+        // What IS verifiable here is that Capture calls into the fault-reconciliation path safely once
+        // a session has already reached Failed by the normal Start-failure route -- FailOnReaderFaultAsync
+        // no-ops once State == Failed, so this proves the new call does not throw, does not regress the
+        // already-covered Start-failure/finalization behavior, and repeated polling after Failed stays
+        // stable rather than looping or re-throwing.
+        var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
+        await control.OpenClawSensorProbeAsync();
+        var failed = await control.StartClawSensorProbeAsync();
+        Assert.Equal(FrontendClawSensorProbeState.Failed, failed.State);
+
+        var polled = await control.CaptureClawSensorProbeAsync();
+        var polledAgain = await control.CaptureClawSensorProbeAsync();
+
+        Assert.Equal(FrontendClawSensorProbeState.Failed, polled.State);
+        Assert.Equal(FrontendClawSensorProbeState.Failed, polledAgain.State);
+    }
+
+    [Fact]
     public async Task Start_writes_device_identity_and_hardware_compatibility_into_the_finalized_report()
     {
         // Review finding #1 on PR #290: SetDeviceIdentity/SetHardwareCompatibility write through the

@@ -212,7 +212,17 @@ public sealed partial class ClawSensorProbePage : UserControl
             NextPhaseButton.IsEnabled = false;
             BackPhaseButton.IsEnabled = false;
             StatusText.Text = "Stopping sensor capture...";
-            Render(await _frontend.StopClawSensorProbeAsync());
+            var snapshot = await _frontend.StopClawSensorProbeAsync();
+            Render(snapshot);
+            // Coordinator.Workflow.Stop() intentionally transitions to Completed regardless of
+            // whether all phases actually ran, so Render() alone would report a manual/aborted Stop
+            // as "Test completed" -- override the presentation to keep that distinction visible, as
+            // the old page did (PR #290 re-review finding #2).
+            if (_active && snapshot.State == FrontendClawSensorProbeState.Completed)
+            {
+                StatusText.Text = "Test stopped. Output: " + (snapshot.OutputDirectory ?? "Unavailable");
+                UpdateSummary(snapshot, "Test stopped");
+            }
         }
         catch (Exception exception)
         {
@@ -287,13 +297,19 @@ public sealed partial class ClawSensorProbePage : UserControl
         ModelText.Text = $"Model: {snapshot.ResolvedModel}";
         BoardText.Text = $"Base board: {snapshot.BaseBoard}";
 
-        var discovery = snapshot.Discovery;
-        GyroDiscoveryText.Text = discovery?.Gyroscope is { } gyro
-            ? $"Gyroscope: {gyro.FriendlyName} | ID: {gyro.SensorId} | Type: {gyro.TypeGuid} | Category: {gyro.CategoryGuid} | Manufacturer: {gyro.Manufacturer} | Model: {gyro.Model} | Persistent ID: {gyro.PersistentUniqueId} | Min interval: {gyro.MinimumReportInterval} ms | HID usage: {gyro.CustomUsage}"
-            : "Gyroscope: Not discovered";
-        AccelDiscoveryText.Text = discovery?.Accelerometer is { } accel
-            ? $"Accelerometer: {accel.FriendlyName} | ID: {accel.SensorId} | Type: {accel.TypeGuid} | Category: {accel.CategoryGuid} | Manufacturer: {accel.Manufacturer} | Model: {accel.Model} | Persistent ID: {accel.PersistentUniqueId} | Min interval: {accel.MinimumReportInterval} ms | HID usage: {accel.CustomUsage}"
-            : "Accelerometer: Not discovered";
+        // Coordinator.Discovery becomes null once ShutdownReadersAndApiAsync() releases the readers
+        // (Stop/Complete/Failed) -- only replace the discovery text when the Runtime still reports a
+        // concrete discovery snapshot, so a successful discovery stays visible through the final
+        // result instead of being overwritten back to "Not discovered" (PR #290 re-review finding #2).
+        if (snapshot.Discovery is { } discovery)
+        {
+            GyroDiscoveryText.Text = discovery.Gyroscope is { } gyro
+                ? $"Gyroscope: {gyro.FriendlyName} | ID: {gyro.SensorId} | Type: {gyro.TypeGuid} | Category: {gyro.CategoryGuid} | Manufacturer: {gyro.Manufacturer} | Model: {gyro.Model} | Persistent ID: {gyro.PersistentUniqueId} | Min interval: {gyro.MinimumReportInterval} ms | HID usage: {gyro.CustomUsage}"
+                : "Gyroscope: Not discovered";
+            AccelDiscoveryText.Text = discovery.Accelerometer is { } accel
+                ? $"Accelerometer: {accel.FriendlyName} | ID: {accel.SensorId} | Type: {accel.TypeGuid} | Category: {accel.CategoryGuid} | Manufacturer: {accel.Manufacturer} | Model: {accel.Model} | Persistent ID: {accel.PersistentUniqueId} | Min interval: {accel.MinimumReportInterval} ms | HID usage: {accel.CustomUsage}"
+                : "Accelerometer: Not discovered";
+        }
 
         PhaseText.Text = snapshot.PhaseIndex >= 0
             ? $"Step: {snapshot.PhaseIndex + 1} of {snapshot.PhaseCount} - {PhaseLabel(snapshot.Phase)}"

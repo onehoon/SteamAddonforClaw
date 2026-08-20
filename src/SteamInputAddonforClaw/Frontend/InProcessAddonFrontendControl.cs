@@ -408,10 +408,20 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return MapClawSensorProbeSnapshot(session);
     }
 
-    public Task<FrontendClawSensorProbeSnapshot> CaptureClawSensorProbeAsync(CancellationToken cancellationToken = default)
+    public async Task<FrontendClawSensorProbeSnapshot> CaptureClawSensorProbeAsync(CancellationToken cancellationToken = default)
     {
         var session = CurrentClawSensorProbeSession();
-        return Task.FromResult(session is null ? FrontendClawSensorProbeSnapshot.Unavailable : MapClawSensorProbeSnapshot(session));
+        if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
+
+        // The old page's 200ms UI timer explicitly promoted a dead sensor reader to a finalized
+        // Failed diagnostic (ClawSensorProbeUiTimer_Tick -> FailOnReaderFaultAsync). The restored
+        // page polls this method at the same ~200ms cadence, so run the same reconciliation here --
+        // FailOnReaderFaultAsync no-ops when there is no fault, so this preserves the old behavior
+        // without introducing a second health authority (PR #290 re-review finding #1).
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.Coordinator.LifecycleCancellation);
+        await session.Coordinator.FailOnReaderFaultAsync(linked.Token).ConfigureAwait(false);
+
+        return MapClawSensorProbeSnapshot(session);
     }
 
     public Task<FrontendClawSensorProbeSnapshot> NextClawSensorProbePhaseAsync(CancellationToken cancellationToken = default) =>
