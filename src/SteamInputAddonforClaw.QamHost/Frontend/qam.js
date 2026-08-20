@@ -233,7 +233,7 @@
     state.nestedPatches ??= new Map();
     let record = state.nestedPatches.get(originalTarget);
     if (!record) {
-      record = { nodes: new Set(), originalType: null, patchedType: null, tabs: new Set() };
+      record = { node: null, originalType: null, patchedType: null, tabs: null };
       const patchedTarget = preservePatchedFunctionShape(function patchedTabsProducer(...args) {
         const result = originalTarget.apply(this, args);
         if (!state.installed) return result;
@@ -247,7 +247,7 @@
             logOnce("tabsOwnerMissing", `props.tabs owner not found. Visited=${ownerSearch.visited} BudgetExhausted=${ownerSearch.budgetExhausted}`);
             return result;
           }
-          record.tabs.add(owner.props.tabs);
+          record.tabs = owner.props.tabs;
           logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
           if (!owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
             owner.props.tabs.push(buildAddonTab(React));
@@ -277,7 +277,7 @@
       state.nestedPatches.set(originalTarget, record);
     }
 
-    record.nodes.add(node);
+    record.node = node;
     if (node.type === record.originalType) {
       node.type = record.patchedType;
       logOnce("nestedPatch", "Nested tabs producer patched.");
@@ -344,19 +344,17 @@
    */
   function restoreNestedPatches() {
     for (const record of state.nestedPatches?.values() ?? []) {
-      for (const node of record.nodes) {
-        if (node.type === record.patchedType) {
-          node.type = record.originalType;
-        }
+      if (record.node?.type === record.patchedType) {
+        record.node.type = record.originalType;
       }
 
-      for (const tabs of record.tabs) {
-        for (let index = tabs.length - 1; index >= 0; index--) {
-          if (tabs[index]?.[TAB_MARKER]) tabs.splice(index, 1);
+      if (Array.isArray(record.tabs)) {
+        for (let index = record.tabs.length - 1; index >= 0; index--) {
+          if (record.tabs[index]?.[TAB_MARKER]) record.tabs.splice(index, 1);
         }
       }
-      record.nodes.clear();
-      record.tabs.clear();
+      record.node = null;
+      record.tabs = null;
     }
   }
 

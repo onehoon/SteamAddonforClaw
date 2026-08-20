@@ -115,13 +115,15 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         Assert.Contains("if (node.type === record.originalType) {", source);
-        Assert.Contains("record = { nodes: new Set()", source);
-        Assert.Contains("for (const node of record.nodes)", source);
-        Assert.Contains("if (node.type === record.patchedType)", source);
-        Assert.Contains("node.type = record.originalType;", source);
-        Assert.Contains("record.nodes.add(node);", source);
-        Assert.Contains("record.nodes.clear();", source);
-        Assert.Contains("record.tabs.clear();", source);
+        Assert.Contains("record = { node: null, originalType: null, patchedType: null, tabs: null }", source);
+        Assert.Contains("record.node = node;", source);
+        Assert.Contains("if (record.node?.type === record.patchedType)", source);
+        Assert.Contains("record.node.type = record.originalType;", source);
+        Assert.Contains("record.tabs = owner.props.tabs;", source);
+        Assert.Contains("record.node = null;", source);
+        Assert.Contains("record.tabs = null;", source);
+        Assert.DoesNotContain("record.nodes", source);
+        Assert.DoesNotContain("record.tabs.add", source);
         Assert.Contains("state.nestedPatches ??= new Map();", source);
     }
 
