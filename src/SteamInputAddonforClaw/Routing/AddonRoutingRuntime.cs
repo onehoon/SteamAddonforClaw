@@ -184,7 +184,9 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() => _coordinator.CaptureTerminationSnapshot();
 
     internal Task<bool> ReconcileFreshAfterResumeAsync(CancellationToken cancellationToken) =>
-        _coordinator.ReconcileFreshAfterResumeAsync(cancellationToken).AsTask();
+        ShouldSkipNewForwardRouting
+            ? Task.FromResult(true)
+            : _coordinator.ReconcileFreshAfterResumeAsync(cancellationToken).AsTask();
 
     internal Task<bool> RetryResidualCleanupForResumeAsync(CancellationToken cancellationToken) =>
         _coordinator.RetryResidualCleanupForResumeAsync(cancellationToken).AsTask();
@@ -219,6 +221,9 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 // helper's creation.
                 await Oem1ActivationTask.ConfigureAwait(false);
 
+                if (ShouldSkipNewForwardRouting)
+                    return;
+
                 var result = await _coordinator.ReconcileAsync(cancellationToken).ConfigureAwait(false);
                 if (!result.Succeeded)
                     AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,
@@ -242,6 +247,9 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 }
             }
         }, requestStatusRefresh);
+
+    private bool SteamOutputReady => _viiperRuntime is { State: CanonicalViiperRuntimeState.Ready };
+    private bool ShouldSkipNewForwardRouting => !SteamOutputReady && !_coordinator.HasResidualSessionState;
 
     /// <summary>
     /// Stops routing through the canonical coordinator. An unsuccessful result or exception is

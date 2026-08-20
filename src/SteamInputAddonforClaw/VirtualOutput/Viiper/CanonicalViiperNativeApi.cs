@@ -35,8 +35,8 @@ internal interface ICanonicalViiperNativeApi
 
     // Classified attachment surface: mirrors the native classification unchanged (never
     // translated into policy, never automatically retried -- see docs/VIIPER_INTEGRATION.md). The
-    // Addon's production runtime still uses the bool AttachUSBDevice/DetachUSBDevice surface above;
-    // consumption of these classified/query APIs is deferred to later lifecycle/recovery work.
+    // Production uses this classified surface for persistent Steam Deck route attach/detach;
+    // retryable results are retried only at explicit route lifecycle boundaries.
     USBDeviceAttachResult AttachUSBDeviceEx(nuint deviceHandle);
     USBDeviceDetachResult DetachUSBDeviceEx(nuint deviceHandle);
     bool GetUSBDeviceAttachmentState(nuint deviceHandle, out USBDeviceAttachmentState state);
@@ -48,8 +48,8 @@ internal interface ICanonicalViiperNativeApi
     bool RemoveSteamDeckDevice(nuint deviceHandle);
     SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle);
 
-    // Canonical typed Xbox360 surface. ABI/foundation only in this PR -- no Xbox360 logical device
-    // is created, attached, published, or production-composed here (see
+    // Canonical typed Xbox360 surface. The persistent runtime creates one detached-ready logical
+    // handle, but PR2b does not attach, publish, or bind rumble/Game Bar behavior (see
     // docs/VIIPER_MIGRATION_TODO.md SD7, still PLANNED). Buttons/D-pad/sticks/triggers only: no
     // rumble callback is bound in this PR -- see Xbox360DeviceState/Xbox360DeviceStateMapper for
     // the state this typed API accepts, which already carries no rumble/feedback fields.
@@ -284,7 +284,7 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
 
     // ---- Canonical typed Xbox360 surface (ABI/foundation only -- see
     // docs/VIIPER_MIGRATION_TODO.md SD7, still PLANNED). No Xbox360 logical device is created,
-    // attached, published, or production-composed by anything in this file's callers today.
+    // attached, published, or production-composed by this file's callers.
     // Ownership is tracked in the shared _deviceOwnership map (see its declaration above) -- no
     // rumble callback is bound in this PR, so there is nothing Xbox360-specific to root/release
     // beyond that shared ownership record. RemoveUSBBus/CloseUSBServer already release it via the

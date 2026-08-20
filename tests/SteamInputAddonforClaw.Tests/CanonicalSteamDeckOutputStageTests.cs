@@ -88,7 +88,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.Contains("CanonicalSessionStartFailed", result.Reason);
-        Assert.Equal(RecoveryStatus.NoRecoveryNeeded, new RecoveryManager(new RecoveryJournalStore(Path.Combine(_directory, "unavailable-recovery.json"))).LoadJournal().Status);
+        Assert.Equal(RecoveryStatus.NoRecoveryNeeded, new RecoveryManager(new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"))).LoadJournal().Status);
     }
 
     [Fact]

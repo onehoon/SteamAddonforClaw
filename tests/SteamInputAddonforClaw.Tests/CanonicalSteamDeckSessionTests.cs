@@ -82,6 +82,54 @@ public sealed class CanonicalSteamDeckSessionTests
         Assert.False(session.RetryPendingCleanup());
     }
 
+    [Fact]
+    public void Retryable_route_detach_preserves_handle_and_retries_explicitly()
+    {
+        var native = new FakeNative { DetachResults = new Queue<USBDeviceDetachResult>([USBDeviceDetachResult.RetryableFailure, USBDeviceDetachResult.Success]) };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242")!;
+        var handle = runtime.DeckDeviceHandle;
+        using var session = new CanonicalSteamDeckSession(runtime);
+        Assert.True(session.Start());
+        Assert.False(session.RemoveDevice());
+        Assert.Equal(CanonicalPendingCleanupPhase.AttachmentDetach, session.PendingCleanupPhase);
+        Assert.Equal(handle, runtime.DeckDeviceHandle);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.True(session.RetryPendingCleanup());
+        Assert.Equal(handle, runtime.DeckDeviceHandle);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Unsafe_or_invalid_route_detach_poisons_persistent_owner(int resultValue)
+    {
+        var result = (USBDeviceDetachResult)resultValue;
+        var native = new FakeNative { DetachResults = new Queue<USBDeviceDetachResult>([result]) };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242")!;
+        using var session = new CanonicalSteamDeckSession(runtime);
+        Assert.True(session.Start());
+        Assert.False(session.RemoveDevice());
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
+        Assert.Equal(CanonicalSteamDeckSessionState.Unsafe, session.State);
+        Assert.False(session.RetryPendingCleanup());
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+    }
+
+    [Fact]
+    public void Neutral_write_failure_blocks_native_detach_until_explicit_retry()
+    {
+        var native = new FakeNative { StateResults = new Queue<bool>([false, true]) };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242")!;
+        using var session = new CanonicalSteamDeckSession(runtime);
+        Assert.True(session.Start());
+        Assert.False(session.RemoveDevice());
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.True(session.RetryPendingCleanup());
+        Assert.Single(native.Calls, call => call == "DetachUSBDeviceEx");
+    }
+
     private sealed class FakeNative : ICanonicalViiperNativeApi
     {
         internal readonly List<string> Calls = [];
@@ -89,6 +137,8 @@ public sealed class CanonicalSteamDeckSessionTests
         internal Queue<USBDeviceAttachmentState> AttachmentStates { get; } = [];
         internal Queue<bool> AttachmentQueryResults { get; } = [];
         internal Queue<USBDeviceAttachResult> AttachResults { get; } = [];
+        internal Queue<USBDeviceDetachResult> DetachResults { get; init; } = new([USBDeviceDetachResult.Success]);
+        internal Queue<bool> StateResults { get; init; } = new([true]);
         public bool NewUSBServer(ref USBServerConfig config, out nuint handle, ViiperLogCallback? callback = null) { Calls.Add("NewUSBServer"); handle = 10; return true; }
         public bool CloseUSBServer(nuint handle) { Calls.Add("CloseUSBServer"); return true; }
         public bool CreateUSBBus(nuint handle, ref uint bus) { Calls.Add("CreateUSBBus"); bus = 42; return true; }
@@ -97,10 +147,10 @@ public sealed class CanonicalSteamDeckSessionTests
         public bool AttachUSBDevice(nuint handle) => throw new NotSupportedException();
         public bool DetachUSBDevice(nuint handle) => throw new NotSupportedException();
         public USBDeviceAttachResult AttachUSBDeviceEx(nuint handle) { Calls.Add("AttachUSBDeviceEx"); return AttachResults.Count > 0 ? AttachResults.Dequeue() : USBDeviceAttachResult.Success; }
-        public USBDeviceDetachResult DetachUSBDeviceEx(nuint handle) { Calls.Add("DetachUSBDeviceEx"); return USBDeviceDetachResult.Success; }
+        public USBDeviceDetachResult DetachUSBDeviceEx(nuint handle) { Calls.Add("DetachUSBDeviceEx"); return DetachResults.Count > 0 ? DetachResults.Dequeue() : USBDeviceDetachResult.Success; }
         public bool GetUSBDeviceAttachmentState(nuint handle, out USBDeviceAttachmentState state) { Calls.Add("GetUSBDeviceAttachmentState"); state = AttachmentStates.Count > 0 ? AttachmentStates.Dequeue() : AttachmentState; return AttachmentQueryResults.Count == 0 || AttachmentQueryResults.Dequeue(); }
         public bool CreateSteamDeckDevice(nuint server, out nuint handle, uint bus, bool autoAttach, ushort vid, ushort pid) { Calls.Add("CreateSteamDeckDevice"); handle = 20; return true; }
-        public bool SetSteamDeckDeviceState(nuint handle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); return true; }
+        public bool SetSteamDeckDeviceState(nuint handle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); return StateResults.Count == 0 || StateResults.Dequeue(); }
         public bool SetSteamDeckOutputCallback(nuint handle, SteamDeckOutputCallback? callback) { Calls.Add("SetSteamDeckOutputCallback"); return true; }
         public bool RemoveSteamDeckDevice(nuint handle) => throw new NotSupportedException();
         public SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint handle) { Calls.Add("RemoveSteamDeckDeviceEx"); return SteamDeckDeviceRemoveResult.Success; }

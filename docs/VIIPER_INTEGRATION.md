@@ -102,12 +102,12 @@ The pinned VIIPER ABI includes classified `AttachUSBDeviceEx` /
 the canonical typed Xbox360 surface (`CreateXbox360Device`,
 `SetXbox360DeviceState`, `RemoveXbox360Device`, `RemoveXbox360DeviceEx`). The
 managed ABI binding for all of these now exists in
-`ICanonicalViiperNativeApi`/`CanonicalViiperNativeApi`. The current Addon
-production runtime continues to use the bool `AttachUSBDevice` /
-`DetachUSBDevice` compatibility surface; classified attachment-state
-consumption is not yet production-composed. Likewise, no Xbox360 logical
-device is created, attached, published, or production-composed by anything
-in the Addon today -- the typed binding is ABI/foundation only (see
+`ICanonicalViiperNativeApi`/`CanonicalViiperNativeApi`. The compatibility
+bool `AttachUSBDevice` /
+`DetachUSBDevice` compatibility surface; production Deck routing now uses
+the classified attachment/query surface. The persistent runtime creates one
+detached-ready Xbox360 logical handle, but it is not attached, published, or
+used for Game Bar behavior (see
 `docs/VIIPER_MIGRATION_TODO.md` SD7, still PLANNED). The attachment state
 query is VIIPER ownership evidence only, not Windows PnP, HID, XInput, or
 Steam readiness. Consumption of the classified/query APIs is deferred to
