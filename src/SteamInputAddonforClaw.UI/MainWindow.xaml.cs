@@ -87,6 +87,11 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args) => _frontend.StateInvalidated -= OnFrontendStateInvalidated;
 
+    internal Task CloseVibrationTestForUiShutdownAsync() =>
+        VibrationTestContent.Visibility == Visibility.Visible
+            ? VibrationTestContent.DeactivateAsync()
+            : Task.CompletedTask;
+
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
         if (args.WindowActivationState == WindowActivationState.Deactivated) return;

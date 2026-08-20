@@ -38,15 +38,16 @@ public sealed partial class VibrationTestPage : UserControl
     /// STOP so leaving the page never leaves the motors running or a stale STOP armed).</summary>
     internal void Deactivate()
     {
-        _active = false;
-        if (_frontend is not null) _frontend.StateInvalidated -= OnStateInvalidated;
-        _ = CloseSessionAsync();
+        _ = DeactivateAsync();
     }
 
-    private async Task CloseSessionAsync()
+    internal async Task DeactivateAsync()
     {
+        if (!_active) return;
+        _active = false;
+        if (_frontend is not null) _frontend.StateInvalidated -= OnStateInvalidated;
         if (_frontend is null) return;
-        try { await _frontend.CloseVibrationTestSessionAsync(); }
+        try { await _frontend.CloseVibrationTestSessionAsync().ConfigureAwait(true); }
         catch (Exception exception) { AppLog.Warn("Window", "Vibration test session close failed.", exception, ("Reason", exception.GetType().Name)); }
     }
 
