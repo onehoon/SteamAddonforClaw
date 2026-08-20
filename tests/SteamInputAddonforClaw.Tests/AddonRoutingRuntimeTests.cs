@@ -7,12 +7,174 @@ using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Input;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class AddonRoutingRuntimeTests
 {
+    [Fact]
+    public async Task Xbox360_entry_orders_deck_pause_query_attach_and_first_live_publish()
+    {
+        var trace = new List<string>();
+        var ticks = new ManualTicks();
+        var snapshot = new FakeSnapshot();
+        var stateWrites = new List<Xbox360DeviceState>();
+
+        var result = await AddonRoutingRuntime.EnterXbox360PresentationCoreAsync(
+            snapshot,
+            () => { trace.Add("DeckPause"); return Task.FromResult(true); },
+            (out USBDeviceAttachmentState state) => { trace.Add("Query"); state = USBDeviceAttachmentState.Detached; return true; },
+            () => { trace.Add("Attach"); return USBDeviceAttachResult.Success; },
+            () => { trace.Add("Detach"); return USBDeviceDetachResult.Success; },
+            state => { trace.Add("X360State"); stateWrites.Add(state); return true; },
+            ticks,
+            _ => trace.Add("Fault"),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Publisher);
+        ticks.Tick();
+        await WaitForAsync(() => stateWrites.Count == 1);
+        Assert.Equal(["DeckPause", "Query", "Attach"], trace.Take(3));
+        Assert.Single(stateWrites);
+        await result.Publisher!.StopAsync();
+    }
+
+    [Fact]
+    public async Task Xbox360_entry_does_not_attach_when_deck_pause_fails()
+    {
+        var attachCalls = 0;
+        var stateCalls = 0;
+        var result = await AddonRoutingRuntime.EnterXbox360PresentationCoreAsync(
+            new FakeSnapshot(),
+            () => Task.FromResult(false),
+            (out USBDeviceAttachmentState state) => { state = USBDeviceAttachmentState.Detached; return true; },
+            () => { attachCalls++; return USBDeviceAttachResult.Success; },
+            () => USBDeviceDetachResult.Success,
+            _ => { stateCalls++; return true; },
+            null,
+            _ => { },
+            CancellationToken.None);
+
+        Assert.Null(result.Publisher);
+        Assert.Null(result.FailureReason);
+        Assert.Equal(0, attachCalls);
+        Assert.Equal(0, stateCalls);
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    public async Task Xbox360_entry_requires_a_successful_detached_attachment_query(bool queryResult, int stateValue)
+    {
+        var attachCalls = 0;
+        var result = await AddonRoutingRuntime.EnterXbox360PresentationCoreAsync(
+            new FakeSnapshot(),
+            () => Task.FromResult(true),
+            (out USBDeviceAttachmentState state) => { state = (USBDeviceAttachmentState)stateValue; return queryResult; },
+            () => { attachCalls++; return USBDeviceAttachResult.Success; },
+            () => USBDeviceDetachResult.Success,
+            _ => true,
+            null,
+            _ => { },
+            CancellationToken.None);
+
+        Assert.Null(result.Publisher);
+        Assert.NotNull(result.FailureReason);
+        Assert.Equal(0, attachCalls);
+    }
+
+    [Theory]
+    [InlineData((int)USBDeviceAttachResult.RetryableFailure)]
+    [InlineData((int)USBDeviceAttachResult.UnsafeOutcomeUnknown)]
+    [InlineData((int)USBDeviceAttachResult.Invalid)]
+    public async Task Xbox360_entry_does_not_start_publisher_after_attach_failure(int attachResultValue)
+    {
+        var attachResult = (USBDeviceAttachResult)attachResultValue;
+        var starts = 0;
+        var result = await AddonRoutingRuntime.EnterXbox360PresentationCoreAsync(
+            new FakeSnapshot(),
+            () => Task.FromResult(true),
+            (out USBDeviceAttachmentState state) => { state = USBDeviceAttachmentState.Detached; return true; },
+            () => { starts++; return attachResult; },
+            () => USBDeviceDetachResult.Success,
+            _ => true,
+            null,
+            _ => { },
+            CancellationToken.None);
+
+        Assert.Null(result.Publisher);
+        Assert.Contains($"Xbox360Attach{attachResult}", result.FailureReason);
+        Assert.Equal(1, starts);
+    }
+
+    [Theory]
+    [InlineData((int)USBDeviceDetachResult.Success)]
+    [InlineData((int)USBDeviceDetachResult.RetryableFailure)]
+    public async Task Xbox360_publisher_start_failure_detaches_only_xbox360_and_preserves_cleanup_result(int detachResultValue)
+    {
+        var trace = new List<string>();
+        var snapshot = new FakeSnapshot();
+        var detachResult = (USBDeviceDetachResult)detachResultValue;
+        var result = await AddonRoutingRuntime.EnterXbox360PresentationCoreAsync(
+            snapshot,
+            () => { trace.Add("DeckPause"); return Task.FromResult(true); },
+            (out USBDeviceAttachmentState state) => { trace.Add("Query"); state = USBDeviceAttachmentState.Detached; return true; },
+            () => { trace.Add("Attach"); return USBDeviceAttachResult.Success; },
+            () => { trace.Add("Detach"); return detachResult; },
+            _ => true,
+            null,
+            _ => trace.Add("UnexpectedFault"),
+            CancellationToken.None,
+            createPublisher: () =>
+            {
+                var publisher = new CanonicalXbox360InputPublisher(snapshot, _ => true, fault: _ => { });
+                publisher.WorkerThreadStartOverrideForTests = _ =>
+                    throw new InvalidOperationException("publisher start failed");
+                return publisher;
+            });
+
+        Assert.Null(result.Publisher);
+        Assert.Contains("Xbox360PublisherStartFailed:InvalidOperationException", result.FailureReason);
+        Assert.Contains($"Detach={detachResult}", result.FailureReason);
+        Assert.Equal(["DeckPause", "Query", "Attach", "Detach"], trace);
+        Assert.DoesNotContain("UnexpectedFault", trace);
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline) throw new TimeoutException();
+            await Task.Yield();
+        }
+    }
+
+    private sealed class FakeSnapshot : IControllerStateSnapshotSource
+    {
+        public ControllerState LatestState => new(new AuxiliaryButtonState([false, false]));
+    }
+
+    private sealed class ManualTicks : IInputReportTickSource
+    {
+        private readonly Queue<TaskCompletionSource<bool>> _waiters = new();
+        public ValueTask<bool> WaitForTickAsync(CancellationToken token)
+        {
+            var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _waiters.Enqueue(waiter);
+            token.Register(() => waiter.TrySetCanceled(token));
+            return new(waiter.Task);
+        }
+        public void Tick()
+        {
+            if (_waiters.Count == 0) throw new InvalidOperationException("No pending tick.");
+            _waiters.Dequeue().TrySetResult(true);
+        }
+    }
+
     [Theory]
     [InlineData(false, 0, false)]
     [InlineData(true, 1, false)]

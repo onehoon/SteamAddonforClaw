@@ -326,11 +326,24 @@ the existing output-fault path without writing neutral, detaching, or
 restarting. Covered by `CanonicalSteamDeckOutputStageTests` (pause-before-
 neutral ordering, no publication while paused, resume, repeated pause/resume,
 rollback-from-paused, precondition failures, neutral-rejection fail-closed).
-There is still **no production caller**: it is not invoked from
-`AddonRoutingRuntime`, `AddonProcessHost`, `GameBarForegroundWatcher`, OEM1,
-or anywhere else, so normal Runtime behavior and `RoutingRuntimeStatusSnapshot
+There is still **no normal Runtime caller**: it is not invoked by
+`AddonProcessHost`, `GameBarForegroundWatcher`, OEM1,
+or any automatic routing path, so normal Runtime behavior and `RoutingRuntimeStatusSnapshot
 .SteamOutputActive` semantics are unchanged. No Xbox360 attach, no Xbox360
 publisher start, and no Deck/Xbox360 switching are implemented here. SD7
+remains PLANNED and no hardware validation is claimed.
+
+One-way Xbox360 presentation-entry foundation step: `AddonRoutingRuntime` now
+has an internal `EnterXbox360PresentationAsync` seam that, when invoked
+manually during an active outer Steam route, pauses the Deck publisher and
+accepts Deck neutral while the Deck remains attached, requires a classified
+detached Xbox360 attachment state, attaches Xbox360, and starts the existing
+Xbox360 publisher. Publisher-start failure performs only the required local
+Xbox360 neutral/detach cleanup and fails closed; Deck is never resumed by this
+forward primitive. There is still **no Game Bar production consumer, no
+automatic invocation, no reverse Xbox360-to-Deck transition, no Game Bar leave
+handling, and no Xbox360 PnP/XInput readiness claim**. Normal Runtime behavior
+and `RoutingRuntimeStatusSnapshot.SteamOutputActive` remain unchanged. SD7
 remains PLANNED and no hardware validation is claimed.
 
 ## Separate feature tracks
