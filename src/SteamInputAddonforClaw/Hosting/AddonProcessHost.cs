@@ -56,6 +56,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly CpuBoostRuntime _cpuBoostRuntime;
     private TdpRuntime? _tdpRuntime;
     private TdpPowerLifecycleWatcher? _tdpPowerLifecycleWatcher;
+    private TdpCenterMRegistryWatcher? _tdpCenterMRegistryWatcher;
 
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
@@ -156,11 +157,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         _runtimeHost = composition.RuntimeHost;
         if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
-            && startupResult.HardwareDeviceModel is { } tdpModel)
+            && startupResult.HardwareDeviceModel is { } tdpModel
+            && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
         {
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel,
                 new MsiClawTdpHardware(new MsiClawWmiTdpTransport()));
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
+            _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
         }
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
@@ -215,6 +218,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             if (_tdpRuntime is not null && _tdpPowerLifecycleWatcher is not null)
             {
                 _tdpPowerLifecycleWatcher.Start();
+                _tdpCenterMRegistryWatcher?.Start();
                 _tdpPowerLifecycleWatcher.ScheduleStartup();
             }
         }
@@ -255,6 +259,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _gameBarForegroundWatcher.Dispose();
         _qamHostController.BeginShutdown();
         _tdpRuntime?.BeginShutdown();
+        _tdpCenterMRegistryWatcher?.Dispose();
+        _tdpCenterMRegistryWatcher = null;
         _tdpPowerLifecycleWatcher?.Dispose();
         _tdpPowerLifecycleWatcher = null;
         _startupCancellationTokenSource.Cancel();
