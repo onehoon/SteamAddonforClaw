@@ -463,6 +463,16 @@ state machine, coordinator, or interface was added. X360 PnP/XInput
 readiness is not claimed, and no hardware validation is claimed. SD7 remains
 PLANNED.
 
+Interactive Game Bar presentation mutations are now denied while the
+authoritative outer routing coordinator has an in-flight/queued routing
+transition. This closes the post-retirement/pre-outer-rollback re-entry
+window without adding another routing/presentation authority. `QuiesceForSuspendAsync`
+now participates in the coordinator's existing transition-operation
+accounting. `GameBarForegroundWatcher` production subscription, latest-state
+delivery/coalescing, routing-completion foreground re-evaluation, and shutdown
+watcher/event drain remain NOT implemented. PnP/XInput readiness and hardware
+validation are NOT claimed. SD7 remains PLANNED.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains

@@ -239,7 +239,10 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 // Ownership/readiness is evaluated fresh here, inside the gate, not before it was
                 // acquired -- a queued Enter must never act on a pre-wait snapshot that a
                 // concurrent Exit/retirement has since invalidated.
-                if (!CaptureStatus().SteamOutputActive || _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } || _xbox360Publisher is not null)
+                if (!_coordinator.CanApplyInteractivePresentation ||
+                    !CaptureStatus().SteamOutputActive ||
+                    _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } ||
+                    _xbox360Publisher is not null)
                     return (false, null);
 
                 var entered = await EnterXbox360PresentationCoreAsync(
@@ -276,7 +279,10 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             {
                 // Same fresh-inside-the-gate rule as Enter: a queued Exit must observe whatever
                 // ownership state the previous gated mutation actually committed.
-                if (!CaptureStatus().SteamOutputActive || _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } || _xbox360Publisher is not { } publisher)
+                if (!_coordinator.CanApplyInteractivePresentation ||
+                    !CaptureStatus().SteamOutputActive ||
+                    _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } ||
+                    _xbox360Publisher is not { } publisher)
                     return (false, null);
 
                 var exited = await ExitXbox360PresentationCoreAsync(

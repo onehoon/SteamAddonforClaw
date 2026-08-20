@@ -814,6 +814,40 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task InteractivePresentationPermissionTracksRoutingTransition()
+    {
+        var executor = new FakeExecutor();
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software())) { BlockNextCapture = true };
+        var bridge = Create(provider, executor);
+        var reconcile = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await provider.CaptureStarted.Task;
+
+        Assert.False(bridge.Bridge.CanApplyInteractivePresentation);
+        provider.ReleaseCapture.TrySetResult();
+        await reconcile;
+        Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
+    }
+
+    [Fact]
+    public async Task SuspendQuiesceCountsAsInteractivePresentationTransition()
+    {
+        var executor = new FakeExecutor { BlockNextRollback = true };
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        var quiesce = bridge.Bridge.QuiesceForSuspendAsync(
+            DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
+        await executor.RollbackStarted.Task;
+
+        Assert.False(bridge.Bridge.CanApplyInteractivePresentation);
+        Assert.True(bridge.Bridge.CaptureTerminationSnapshot().TransitionInProgress);
+        executor.ReleaseRollback.TrySetResult();
+        Assert.True(await quiesce);
+        Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
+    }
+
+    [Fact]
     public async Task CancelledQueuedReconcileDoesNotLeakTransitionSnapshot()
     {
         var executor = new FakeExecutor();

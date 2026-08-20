@@ -209,6 +209,10 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     internal bool ActiveSessionHasSteamOutputEnabled =>
         _sessionCoordinator.ActiveSession?.Plan.SteamOutput == RoutingStageMode.Enabled;
 
+    /// <summary>True when an independent interactive presentation mutation may begin.</summary>
+    internal bool CanApplyInteractivePresentation =>
+        !IsShutdownRequested && Volatile.Read(ref _transitionOperationCount) == 0;
+
     internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() =>
         new(
             Volatile.Read(ref _transitionOperationCount) > 0,
@@ -234,13 +238,16 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         CancellationToken cancellationToken)
     {
         CancelInFlightTransition();
+        Interlocked.Increment(ref _transitionOperationCount);
         AppLog.Info("Routing.Power", "Routing suspend teardown started.",
             ("Action", "SuspendTeardown"), ("ActiveSession", _sessionCoordinator.ActiveSession is not null),
             ("PendingCleanup", _sessionCoordinator.PendingCleanup is not null), ("Epoch", epoch));
 
-        await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var acquired = false;
         try
         {
+            await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquired = true;
             if ((_sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null) &&
                 _beforeActiveSessionExit is not null)
             {
@@ -283,7 +290,11 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
                 ("Action", "SuspendTeardown"), ("Epoch", epoch));
             return false;
         }
-        finally { _transitionGate.Release(); }
+        finally
+        {
+            if (acquired) _transitionGate.Release();
+            Interlocked.Decrement(ref _transitionOperationCount);
+        }
     }
 
     private CancellationTokenSource CreateTransitionCancellation(CancellationToken cancellationToken)
