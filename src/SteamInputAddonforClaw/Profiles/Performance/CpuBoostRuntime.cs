@@ -74,15 +74,21 @@ internal sealed class CpuBoostRuntime
     internal CpuBoostRuntimeSnapshot Snapshot { get { lock (_sync) return _snapshot; } }
 
     /// <summary>
-    /// Runs once during headless Runtime startup (work order section 12): loads the profile
-    /// document, reads the current Windows AC/DC values, and -- only when the load was
-    /// <see cref="ProfileLoadStatus.Loaded"/> -- applies the non-null managed side(s). A
-    /// <see cref="ProfileLoadStatus.NotFound"/>/<see cref="ProfileLoadStatus.Malformed"/>/
-    /// <see cref="ProfileLoadStatus.UnsupportedSchemaVersion"/>/<see cref="ProfileLoadStatus.ReadFailure"/>
-    /// result never writes Windows: the freshly-constructed default document those statuses carry
-    /// has no desired CPU Boost state to apply, and this method never treats "unreliable" the same
-    /// as "no preference" by writing anything on their behalf (work order section 13). One
-    /// reconciliation attempt only -- no retry loop (section 14).
+    /// Runs once during headless Runtime startup (work order PR277 addendum "CPU Boost First-Run
+    /// Baseline Policy"): loads the profile document, then either bootstraps or reconciles.
+    ///
+    /// If no CPU Boost value has ever been persisted (<see cref="DeviceCpuBoostSettings"/> is
+    /// <see langword="null"/>) and persistence is safe to write to, this is first-run: the current
+    /// Windows AC/DC values are read once and adopted as-is as the initial persisted Device values
+    /// (see <see cref="TryBootstrapFromWindows"/>). Once a CPU Boost value exists, it is simply
+    /// this app's saved value -- a later startup never re-adopts whatever Windows currently reads,
+    /// even if another application changed it in the meantime; it only (re-)applies the persisted
+    /// value, exactly as before.
+    ///
+    /// A <see cref="ProfileLoadStatus.Malformed"/>/<see cref="ProfileLoadStatus.UnsupportedSchemaVersion"/>/
+    /// <see cref="ProfileLoadStatus.ReadFailure"/> result never bootstraps and never writes Windows:
+    /// this method never treats "unreliable" the same as "no preference yet" by writing anything on
+    /// that state's behalf. One reconciliation attempt only -- no retry loop.
     ///
     /// Holds the same <see cref="_mutationSync"/> gate as <see cref="Mutate"/> for its entire
     /// duration: without this, a mutation that starts (and finishes) while startup reconcile is
@@ -104,12 +110,69 @@ internal sealed class CpuBoostRuntime
 
             AppLog.Debug("Profiles.CpuBoost", "CPU Boost startup reconcile started.", ("ProfileStatus", loadResult.Status));
 
-            var desired = loadResult.Status == ProfileLoadStatus.Loaded
-                ? loadResult.Document.Device.Performance.CpuBoost
-                : null;
+            if (!loadResult.CanSafelyReplace)
+            {
+                // Malformed/UnsupportedSchemaVersion/ReadFailure: never bootstrap, never write
+                // Windows on this state's behalf -- just report the current unmanaged read.
+                UpdateSnapshot(_powerPolicy.Read(), null, null);
+                return;
+            }
 
-            ReconcileWindows(desired?.Ac, desired?.Dc, contextLabel: "startup reconcile");
+            var cpuBoost = loadResult.Document.Device.Performance.CpuBoost;
+            if (cpuBoost is null)
+            {
+                TryBootstrapFromWindows(loadResult.Document);
+                return;
+            }
+
+            ReconcileWindows(cpuBoost.Ac, cpuBoost.Dc, contextLabel: "startup reconcile");
         }
+    }
+
+    /// <summary>First-run only: reads the current Windows AC/DC CPU Boost values and, only if BOTH
+    /// map to a known/supported <see cref="CpuBoostMode"/>, adopts and persists them as the initial
+    /// Device values in one shot. If either side cannot be read or does not map to a supported mode,
+    /// this does not invent a fallback, does not persist anything, and does not normalize the
+    /// value -- CPU Boost is simply left uninitialized (null) for a later startup to try again.
+    /// Called only while already holding <see cref="_mutationSync"/>.</summary>
+    private void TryBootstrapFromWindows(ProfileDocument document)
+    {
+        var current = _powerPolicy.Read();
+        if (!current.Succeeded || current.Ac.Status != CpuBoostReadStatus.Known || current.Dc.Status != CpuBoostReadStatus.Known)
+        {
+            AppLog.Warn("Profiles.CpuBoost", "CPU Boost first-run bootstrap could not read a known Windows AC/DC value; CPU Boost remains uninitialized.", null,
+                ("AcStatus", current.Ac.Status), ("DcStatus", current.Dc.Status));
+            UpdateSnapshot(current, null, null, current.Succeeded ? null : current.FailureMessage);
+            return;
+        }
+
+        var bootstrapped = new DeviceCpuBoostSettings { Ac = current.Ac.Mode, Dc = current.Dc.Mode };
+        var updatedDocument = document with
+        {
+            Device = document.Device with
+            {
+                Performance = document.Device.Performance with { CpuBoost = bootstrapped }
+            }
+        };
+
+        try
+        {
+            _profileStore.Save(updatedDocument);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.CpuBoost", "CPU Boost first-run bootstrap persistence failed; CPU Boost remains uninitialized.", exception);
+            UpdateSnapshot(current, null, null, exception.Message);
+            return;
+        }
+
+        lock (_sync)
+        {
+            _document = updatedDocument;
+            _persistenceWritable = true;
+        }
+        AppLog.Info("Profiles.CpuBoost", "CPU Boost first-run bootstrap adopted the current Windows values.", ("Ac", current.Ac.Mode), ("Dc", current.Dc.Mode));
+        UpdateSnapshot(current, current.Ac.Mode, current.Dc.Mode);
     }
 
     /// <summary>Sets the persisted/desired AC CPU Boost mode and applies it to Windows. DC is left

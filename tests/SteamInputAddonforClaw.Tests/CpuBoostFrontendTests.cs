@@ -26,6 +26,9 @@ public sealed class CpuBoostFrontendTests : IDisposable
     [Fact]
     public async Task Capture_preserves_an_unmanaged_known_current_state_exactly()
     {
+        // CreateReconciledRuntime's StartupReconcile() bootstraps this Known current as the initial
+        // Desired value too (PR277 addendum "CPU Boost First-Run Baseline Policy") -- current and
+        // desired are the same value immediately after a fresh first-run bootstrap.
         var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
         var runtime = CreateReconciledRuntime(policy);
         var control = CreateControl(runtime);
@@ -34,27 +37,31 @@ public sealed class CpuBoostFrontendTests : IDisposable
 
         Assert.Equal(FrontendCpuBoostReadStatus.Known, snapshot.Ac.CurrentStatus);
         Assert.Equal(CpuBoostMode.Aggressive, snapshot.Ac.Current);
-        Assert.Null(snapshot.Ac.Desired);
+        Assert.Equal(CpuBoostMode.Aggressive, snapshot.Ac.Desired);
         Assert.Equal(FrontendCpuBoostReadStatus.Known, snapshot.Dc.CurrentStatus);
         Assert.Equal(CpuBoostMode.Disabled, snapshot.Dc.Current);
-        Assert.Null(snapshot.Dc.Desired);
+        Assert.Equal(CpuBoostMode.Disabled, snapshot.Dc.Desired);
     }
 
     [Fact]
     public async Task Capture_never_mutates_anything()
     {
-        // Opening the Device page and capturing the snapshot must cause zero writes (work order
-        // section 8/21) -- proven here by a policy that would record any write attempt.
+        // Opening the Device page and capturing the snapshot must cause zero ADDITIONAL writes
+        // beyond CreateReconciledRuntime's own one-time first-run bootstrap (work order section
+        // 8/21) -- proven here by a policy that would record any write attempt, and by the
+        // persisted file's content being unchanged by Capture.
         var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
         var runtime = CreateReconciledRuntime(policy);
         var control = CreateControl(runtime);
+        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
+        var contentsAfterBootstrap = File.ReadAllText(profilesPath);
 
         await control.CaptureCpuBoostAsync();
         await control.CaptureCpuBoostAsync();
 
         Assert.Equal(0, policy.AcWriteCount);
         Assert.Equal(0, policy.DcWriteCount);
-        Assert.False(File.Exists(Path.Combine(_testDirectory, "profiles.json")));
+        Assert.Equal(contentsAfterBootstrap, File.ReadAllText(profilesPath));
     }
 
     [Fact]

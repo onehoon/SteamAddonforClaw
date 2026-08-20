@@ -69,21 +69,82 @@ public sealed class CpuBoostRuntimeTests : IDisposable
     // ---- Unmanaged: existing Windows values are never touched ----
 
     [Fact]
-    public void StartupReconcile_BothSidesUnmanaged_ReadsWindowsAndWritesNothing()
+    public void StartupReconcile_FirstRun_AdoptsCurrentWindowsValuesAsInitialDeviceValues()
     {
+        // PR277 addendum "CPU Boost First-Run Baseline Policy": with no persisted CPU Boost value
+        // yet, the current Windows AC/DC values are read once and adopted as-is as the initial
+        // persisted Device values -- not left "unmanaged forever" as PR276 originally modeled it.
         var store = new ProfileStore(ProfilesPath);
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.EfficientEnabled) };
         var runtime = new CpuBoostRuntime(store, backend);
 
         runtime.StartupReconcile();
 
+        // Adopting the exact current values requires no additional Windows write -- they already
+        // match.
         Assert.Equal(0, backend.AcWriteCount);
         Assert.Equal(0, backend.DcWriteCount);
         Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcCurrent.Mode);
         Assert.Equal(CpuBoostMode.EfficientEnabled, runtime.Snapshot.DcCurrent.Mode);
+        Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcDesired);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, runtime.Snapshot.DcDesired);
+        Assert.True(File.Exists(ProfilesPath));
+        var loaded = store.Load();
+        Assert.Equal(CpuBoostMode.Aggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
+    }
+
+    [Fact]
+    public void StartupReconcile_FirstRun_WindowsReadFailure_DoesNotPersistOrInventAFallback()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { FailRead = true };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.False(File.Exists(ProfilesPath));
         Assert.Null(runtime.Snapshot.AcDesired);
         Assert.Null(runtime.Snapshot.DcDesired);
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+    }
+
+    [Fact]
+    public void StartupReconcile_FirstRun_UnknownWindowsValue_DoesNotPersistOrNormalize()
+    {
+        // Neither side maps to the supported 0..6 mode set -- must not invent a value, must not
+        // normalize, must not persist a partial/guessed result.
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.UnknownValue(), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
         Assert.False(File.Exists(ProfilesPath));
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Null(runtime.Snapshot.DcDesired);
+    }
+
+    [Fact]
+    public void StartupReconcile_AfterFirstRun_DoesNotReplacePersistedValuesFromAFreshWindowsRead()
+    {
+        // Once a CPU Boost value is persisted, a later startup must keep using it -- Windows having
+        // since been changed by another application must never become the new app default again.
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile(); // first run: adopts Aggressive/Disabled
+
+        // Another application changes Windows in between.
+        backend.Ac = CpuBoostSideReading.Known(CpuBoostMode.EfficientEnabled);
+        backend.Dc = CpuBoostSideReading.Known(CpuBoostMode.Enabled);
+        var secondRuntime = new CpuBoostRuntime(store, backend);
+
+        secondRuntime.StartupReconcile();
+
+        Assert.Equal(CpuBoostMode.Aggressive, secondRuntime.Snapshot.AcDesired);
+        Assert.Equal(CpuBoostMode.Disabled, secondRuntime.Snapshot.DcDesired);
     }
 
     // ---- AC-only managed startup ----
@@ -197,8 +258,11 @@ public sealed class CpuBoostRuntimeTests : IDisposable
     // ---- Profile load safety: NotFound ----
 
     [Fact]
-    public void StartupReconcile_NotFound_ReadOnlyNoWrites()
+    public void StartupReconcile_NotFound_BootstrapsFromWindowsAndPersists()
     {
+        // A missing profiles.json (NotFound) is CanSafelyReplace=true, so it is a legitimate
+        // first-run case just like an existing-but-empty CpuBoost value -- it must bootstrap, not
+        // stay read-only forever.
         var store = new ProfileStore(ProfilesPath);
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Enabled) };
         var runtime = new CpuBoostRuntime(store, backend);
@@ -207,7 +271,9 @@ public sealed class CpuBoostRuntimeTests : IDisposable
 
         Assert.Equal(0, backend.AcWriteCount);
         Assert.Equal(0, backend.DcWriteCount);
-        Assert.False(File.Exists(ProfilesPath));
+        Assert.True(File.Exists(ProfilesPath));
+        Assert.Equal(CpuBoostMode.Enabled, runtime.Snapshot.AcDesired);
+        Assert.Equal(CpuBoostMode.Enabled, runtime.Snapshot.DcDesired);
     }
 
     // ---- Profile load safety: Malformed ----
