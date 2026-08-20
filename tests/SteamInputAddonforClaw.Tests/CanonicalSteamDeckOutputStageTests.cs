@@ -884,6 +884,158 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
+    // --- Deck presentation pause/resume (SD7 foundation; no Game Bar/Xbox360 caller) -------------
+
+    [Fact]
+    public async Task PauseStopsLiveWritesBeforeWritingNeutral()
+    {
+        var session = new FakeCanonicalSession { BlockInput = true };
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        ticks.Tick();
+        await session.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // A live SetState is now blocked inside the fake session (BlockInput). PausePresentationAsync
+        // must not proceed to write neutral while that in-flight call is still blocked.
+        var pause = stage.PausePresentationAsync();
+        await Task.Delay(50);
+        Assert.Equal(1, session.Trace.Count(t => t == "Neutral"));
+
+        session.ReleaseInput.TrySetResult();
+        Assert.True(await pause);
+        Assert.Equal(2, session.Trace.Count(t => t == "Neutral"));
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task NoPublicationWhilePaused()
+    {
+        var session = new FakeCanonicalSession();
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.True(await stage.PausePresentationAsync());
+        var quickAccessCountAfterPause = session.QuickAccessValues.Count;
+
+        // The publisher's tick loop is stopped, so no live waiter remains to consume a tick: driving
+        // one must not be observed as another live SetState.
+        Assert.Throws<InvalidOperationException>(() => ticks.Tick());
+        await Task.Delay(50);
+        Assert.Equal(quickAccessCountAfterPause, session.QuickAccessValues.Count);
+        Assert.Equal(CanonicalSteamDeckSessionState.Active, session.State);
+
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task ResumeRestartsSamePublisherAndSessionWithoutRecreation()
+    {
+        var session = new FakeCanonicalSession();
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.True(await stage.PausePresentationAsync());
+        Assert.True(await stage.ResumePresentationAsync());
+        Assert.Equal(1, session.Trace.Count(t => t == "Start"));
+
+        ticks.Tick();
+        await session.WaitForSetStateCountAsync(1);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task RepeatedPauseResumeDoesNotDetachOrRecreateSession()
+    {
+        var session = new FakeCanonicalSession();
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.True(await stage.PausePresentationAsync());
+        Assert.True(await stage.ResumePresentationAsync());
+        Assert.True(await stage.PausePresentationAsync());
+        Assert.True(await stage.ResumePresentationAsync());
+
+        Assert.Equal(0, session.RemoveCalls);
+        Assert.Equal(1, session.Trace.Count(t => t == "Start"));
+        Assert.DoesNotContain("Dispose", session.Trace);
+        Assert.Equal(CanonicalSteamDeckSessionState.Active, session.State);
+
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task RollbackFromPausedStillUsesFullTeardownPath()
+    {
+        var session = new FakeCanonicalSession();
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.True(await stage.PausePresentationAsync());
+
+        var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.True(rollback.Succeeded, rollback.Reason);
+        Assert.Equal(1, session.RemoveCalls);
+        Assert.Contains("Remove", session.Trace);
+        Assert.Contains("Dispose", session.Trace);
+    }
+
+    [Fact]
+    public async Task PauseFailsWhenNotActive()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[]]), new FakeHidHide());
+        Assert.False(await stage.PausePresentationAsync());
+    }
+
+    [Fact]
+    public async Task ResumeFailsWhenNotPreviouslyPaused()
+    {
+        var session = new FakeCanonicalSession();
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.False(await stage.ResumePresentationAsync());
+
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task NeutralRejectionDuringPauseFailsClosedWithoutRestartingPublisher()
+    {
+        var session = new FakeCanonicalSession();
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var fault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stage.SetOutputFaultHandler(() => { fault.TrySetResult(); return ValueTask.CompletedTask; });
+        session.NeutralAccepted = false;
+
+        var paused = await stage.PausePresentationAsync();
+
+        Assert.False(paused);
+        await fault.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // Publisher was proven stopped and must not be silently restarted on this failure path.
+        Assert.False(await stage.ResumePresentationAsync());
+
+        session.NeutralAccepted = true;
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
     private CanonicalSteamDeckOutputStage Create(ICanonicalSteamDeckSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null, IPhysicalRumbleSink? sink = null, FeedbackAuthority? authority = null)
     {
         Directory.CreateDirectory(_directory);
@@ -945,7 +1097,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public List<string> Trace { get; } = [];
         public CanonicalPendingCleanupPhase? CleanupFailure { get; init; }
         public bool BusRemoved { get; init; } = true;
-        public bool NeutralAccepted { get; init; } = true;
+        public bool NeutralAccepted { get; set; } = true;
         public bool InputAccepted { get; init; } = true;
         public bool RemoveResult { get; set; } = true;
         public bool StartResult { get; init; } = true;
@@ -1081,7 +1233,20 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         private readonly Queue<TaskCompletionSource<bool>> _waiters = new();
         public ValueTask<bool> WaitForTickAsync(CancellationToken token)
         { var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously); _waiters.Enqueue(waiter); token.Register(() => waiter.TrySetCanceled(token)); return new(waiter.Task); }
-        public void Tick() { Assert.NotEmpty(_waiters); _waiters.Dequeue().TrySetResult(true); }
+        // Skips any already-completed (e.g. cancelled by a prior publisher StopAsync) waiter still
+        // sitting in the queue, so a Tick() issued after a pause/resume cycle reaches the *current*
+        // live await rather than silently no-op'ing on a stale one. Throws if no live waiter remains
+        // at all -- e.g. immediately after a pause, before any resume -- which is itself the proof
+        // that no publisher tick loop is currently awaiting a tick.
+        public void Tick()
+        {
+            while (_waiters.Count > 0)
+            {
+                var waiter = _waiters.Dequeue();
+                if (waiter.TrySetResult(true)) return;
+            }
+            throw new InvalidOperationException("No live tick waiter is currently pending.");
+        }
     }
 
     private sealed class FakeHidHide : IHidHideClient
