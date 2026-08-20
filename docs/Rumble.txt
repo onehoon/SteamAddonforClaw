@@ -1,4 +1,4 @@
-Rumble v1 planning status
+Rumble / haptic feedback status
 
 The former four-PR rumble sequence is historical planning context and is
 superseded by the current three-PR plan wherever they differ.
@@ -15,7 +15,7 @@ SmallMotor. Source decoding and physical sinks remain separate, with one
 feedback authority controlling accepted generations. PR2 represents the MSI
 command as an 11-byte semantic packet, then zero-pads it to a serialized
 64-byte HID write behind the optional physical sink capability. Production
-Deck-to-MSI production wiring is implemented. Before callback registration,
+Deck-to-MSI wiring is implemented. Before callback registration,
 the physical sink performs an explicit STOP preflight through endpoint
 resolution, retained-handle open, and the physical 64-byte write path. If that
 optional preflight is unavailable, Steam Deck input routing continues without
