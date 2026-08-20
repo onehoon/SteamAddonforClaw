@@ -186,8 +186,11 @@ internal sealed class CpuBoostRuntime
             }
         }
         // Device CPU Boost Toggle addendum section 3: an uninitialized baseline defaults to ON, so
-        // completion never changes the effective setting on first initialization.
-        baseline = new DeviceCpuBoostSettings { Enabled = previous?.Enabled ?? true, Ac = ac, Dc = dc };
+        // completion never changes the effective setting on first initialization. Rebuild from the
+        // existing record (rather than a fresh DeviceCpuBoostSettings) so Enabled and any unknown
+        // ExtensionData PR275's additive persistence contract preserves survive baseline completion.
+        var source = previous ?? new DeviceCpuBoostSettings { Enabled = true };
+        baseline = source with { Ac = ac, Dc = dc };
         return true;
     }
 
@@ -231,6 +234,19 @@ internal sealed class CpuBoostRuntime
             _persistenceWritable = true;
         }
         AppLog.Info("Profiles.CpuBoost", "CPU Boost bootstrap adopted the current Windows values.", ("Ac", baseline.Ac), ("Dc", baseline.Dc));
+
+        if (baseline.Enabled && previousCpuBoost is not null)
+        {
+            // Completing an incomplete legacy/partial baseline (as opposed to a fresh first-run
+            // adoption, where both sides were just read from Windows and are already in effect):
+            // the side that was already persisted may differ from the current Windows value, so an
+            // enabled Device policy must still reconcile Windows to the now-complete persisted
+            // baseline rather than leaving a stale effective value in place for the whole session.
+            ReconcileWindows(baseline.Ac!.Value, baseline.Dc!.Value, contextLabel: "startup baseline completion");
+            return;
+        }
+
+        // Fresh first-run adoption already matches Windows; no write needed.
         UpdateSnapshot(_powerPolicy.Read(), baseline.Ac, baseline.Dc, baseline.Enabled);
     }
 

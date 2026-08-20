@@ -347,6 +347,30 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var loaded = store.Load();
         Assert.Equal(CpuBoostMode.EfficientAggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
         Assert.Equal(CpuBoostMode.Disabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
+
+        // The persisted AC (EfficientAggressive) differs from the current Windows AC (Enabled): an
+        // enabled Device policy must reconcile Windows to the now-complete persisted baseline, not
+        // leave the stale effective Windows value in place for the whole session.
+        Assert.Equal(1, backend.AcWriteCount);
+        Assert.Equal(CpuBoostSideReading.Known(CpuBoostMode.EfficientAggressive), backend.Ac);
+    }
+
+    [Fact]
+    public void StartupReconcile_IncompleteBaseline_PreservesUnknownExtensionDataAcrossCompletion()
+    {
+        // An incomplete legacy document with an unknown/future field must survive baseline
+        // completion -- TryCompleteBaseline must rebuild from the existing record, not construct a
+        // fresh DeviceCpuBoostSettings that silently drops PR275's additive ExtensionData contract.
+        var path = ProfilesPath;
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, """{"schemaVersion":1,"device":{"performance":{"cpuBoost":{"enabled":true,"ac":"efficientAggressive","futureCpuBoostField":42}},"display":{}},"games":{}}""");
+        var store = new ProfileStore(path);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Contains("futureCpuBoostField", File.ReadAllText(path));
     }
 
     [Fact]
@@ -367,6 +391,10 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var loaded = store.Load();
         Assert.Equal(CpuBoostMode.Enabled, loaded.Document.Device.Performance.CpuBoost?.Ac);
         Assert.Equal(CpuBoostMode.Disabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
+
+        // The persisted DC (Disabled) differs from the current Windows DC (Aggressive): reconcile.
+        Assert.Equal(1, backend.DcWriteCount);
+        Assert.Equal(CpuBoostSideReading.Known(CpuBoostMode.Disabled), backend.Dc);
     }
 
     [Fact]
