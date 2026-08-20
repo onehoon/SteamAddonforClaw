@@ -23,14 +23,9 @@
                     <SymbolIcon Symbol="Home" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Device" Tag="Device">
+            <NavigationViewItem Content="How to Use" Tag="HowToUse">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="AllApps" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
-            <NavigationViewItem Content="Profile" Tag="Profile">
-                <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Contact" />
+                    <SymbolIcon Symbol="Help" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="Controller" Tag="Controller">
@@ -38,9 +33,14 @@
                     <SymbolIcon Symbol="Repair" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="How to Use" Tag="HowToUse">
+            <NavigationViewItem Content="Profile" Tag="Profile">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Help" />
+                    <SymbolIcon Symbol="Contact" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem Content="Device" Tag="Device">
+                <NavigationViewItem.Icon>
+                    <SymbolIcon Symbol="AllApps" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
         </NavigationView.MenuItems>

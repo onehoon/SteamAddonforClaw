@@ -30,6 +30,9 @@
             </ctcontrols:SettingsCard>
 
             <ctcontrols:SettingsCard Header="Vibration Test" Description="Test Steam Deck rumble and haptic feedback through the physical MSI Claw motors. Requires Developer Test Mode.">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE1D9;" />
+                </ctcontrols:SettingsCard.HeaderIcon>
                 <Button Content="Open" Click="OpenVibrationTestButton_Click" />
             </ctcontrols:SettingsCard>
 
