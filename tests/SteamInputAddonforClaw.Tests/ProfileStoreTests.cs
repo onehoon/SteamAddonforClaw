@@ -41,6 +41,79 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveAndLoad_RoundTripsGlobalTdpWithoutChangingSchema()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings
+                {
+                    Tdp = new DeviceTdpSettings
+                    {
+                        Enabled = false,
+                        Ac = new() { Pl1Watts = 25, Pl2Watts = 37 },
+                        Dc = new() { Pl1Watts = 17, Pl2Watts = 25 }
+                    }
+                }
+            }
+        });
+
+        var result = store.Load();
+        var tdp = result.Document.Device.Performance.Tdp;
+
+        Assert.Equal(ProfileDocument.CurrentSchemaVersion, result.Document.SchemaVersion);
+        Assert.NotNull(tdp);
+        Assert.False(tdp.Enabled);
+        Assert.Equal(new TdpPowerPair { Pl1Watts = 25, Pl2Watts = 37 }, tdp.Ac);
+        Assert.Equal(new TdpPowerPair { Pl1Watts = 17, Pl2Watts = 25 }, tdp.Dc);
+    }
+
+    [Fact]
+    public void Load_WithoutTdpLeavesTdpNullAndDoesNotRewriteFile()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var json = "{\"schemaVersion\":1,\"device\":{\"performance\":{}},\"games\":{}}";
+        File.WriteAllText(ProfilesPath, json);
+
+        var result = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Null(result.Document.Device.Performance.Tdp);
+        Assert.Equal(json, File.ReadAllText(ProfilesPath));
+    }
+
+    [Fact]
+    public void SaveAndLoad_PreservesUnknownTdpProperties()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, """{"schemaVersion":1,"device":{"performance":{"tdp":{"enabled":true,"ac":{"pl1Watts":25,"pl2Watts":37,"futureAc":42},"dc":{"pl1Watts":17,"pl2Watts":25},"futureTdp":true}}},"games":{}}""");
+        var store = new ProfileStore(ProfilesPath);
+
+        var loaded = store.Load();
+        store.Save(loaded.Document);
+
+        var saved = File.ReadAllText(ProfilesPath);
+        Assert.Contains("futureAc", saved);
+        Assert.Contains("futureTdp", saved);
+    }
+
+    [Theory]
+    [InlineData("{\"schemaVersion\":1,\"device\":{\"performance\":{\"tdp\":{\"enabled\":true,\"dc\":{\"pl1Watts\":17,\"pl2Watts\":25}}}},\"games\":{}}")]
+    [InlineData("{\"schemaVersion\":1,\"device\":{\"performance\":{\"tdp\":{\"enabled\":true,\"ac\":null,\"dc\":{\"pl1Watts\":17,\"pl2Watts\":25}}}},\"games\":{}}")]
+    public void Load_IncompleteOrNullTdpPair_ReturnsMalformedAndPreservesFile(string json)
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, json);
+
+        var result = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Equal(ProfileLoadStatus.Malformed, result.Status);
+        Assert.False(result.CanSafelyReplace);
+        Assert.Equal(json, File.ReadAllText(ProfilesPath));
+    }
+
+    [Fact]
     public void SaveAndLoad_RoundTripsMultipleGamesIndependently()
     {
         var store = new ProfileStore(ProfilesPath);

@@ -163,6 +163,8 @@ public sealed class ProfileStore
         && document.Device is not null
         && document.Device.Performance is not null
         && document.Device.Display is not null
+        && (document.Device.Performance.Tdp is not { } tdp
+            || (tdp.Ac is not null && tdp.Dc is not null))
         && document.Games is not null
         && document.Games.Values.All(game =>
             game is not null
