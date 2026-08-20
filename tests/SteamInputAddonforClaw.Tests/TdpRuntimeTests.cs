@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
+using System.Text.Json;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -134,6 +135,56 @@ public sealed class TdpRuntimeTests : IDisposable
 
         Assert.DoesNotContain("SetData(81,31)", transport.Operations);
         Assert.DoesNotContain("SetData(81,0)", transport.Operations);
+    }
+
+    [Fact]
+    public async Task FailedDisableLeavesCommittedPendingWorkValid()
+    {
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4], BlockFirstApply = true };
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC);
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) }).Succeeded);
+        await transport.FirstApplyStarted.Task;
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(21, 31), Dc = Pair(10, 20) }).Succeeded);
+
+        File.Delete(PathName);
+        Directory.CreateDirectory(PathName);
+        Assert.Equal(TdpCommitOutcome.PersistenceFailed,
+            runtime.CommitGlobalTdp(new() { Enabled = false, Ac = Pair(21, 31), Dc = Pair(10, 20) }).Outcome);
+        transport.ReleaseFirstApply.Set();
+        await runtime.DrainAsync();
+
+        Assert.Contains("SetData(81,31)", transport.Operations);
+    }
+
+    [Fact]
+    public async Task CommitPreservesTdpExtensionDataAtAllLevels()
+    {
+        Directory.CreateDirectory(_directory);
+        var unknown = JsonDocument.Parse("{\"future\":true}").RootElement.Clone();
+        new ProfileStore(PathName).Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings
+                {
+                    Tdp = new DeviceTdpSettings
+                    {
+                        Enabled = false,
+                        ExtensionData = new() { ["futureTdp"] = unknown },
+                        Ac = new TdpPowerPair { Pl1Watts = 20, Pl2Watts = 30, ExtensionData = new() { ["futureAc"] = unknown } },
+                        Dc = new TdpPowerPair { Pl1Watts = 10, Pl2Watts = 20, ExtensionData = new() { ["futureDc"] = unknown } }
+                    }
+                }
+            }
+        });
+
+        await using var runtime = Create(new ProfileStore(PathName), new FakeTransport(), TdpPowerSource.AC);
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(21, 31), Dc = Pair(11, 21) }).Succeeded);
+        var persisted = new ProfileStore(PathName).Load().Document.Device.Performance.Tdp!;
+
+        Assert.True(persisted.ExtensionData!.ContainsKey("futureTdp"));
+        Assert.True(persisted.Ac.ExtensionData!.ContainsKey("futureAc"));
+        Assert.True(persisted.Dc.ExtensionData!.ContainsKey("futureDc"));
     }
 
     [Fact]

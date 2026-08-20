@@ -51,22 +51,9 @@ internal sealed class TdpRuntime : IAsyncDisposable
     internal TdpCommitResult CommitGlobalTdp(DeviceTdpSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        lock (_sync)
-        {
-            if (!_accepting)
-                return new(TdpCommitOutcome.Unavailable, "TDP runtime is shutting down.");
-        }
         if (_modelId is not { } modelId || !MsiClawTdpPolicy.TryResolve(modelId, out var policy)
             || !policy.IsValid(settings.Ac) || !policy.IsValid(settings.Dc))
             return new(TdpCommitOutcome.InvalidTarget, "TDP target is unsupported or outside the model ranges.");
-
-        long revokedVersion = -1;
-        if (!settings.Enabled)
-        {
-            // Revoke before persistence so a queued continuation cannot pass its authority check
-            // in the interval between the disabled save and the version increment.
-            lock (_sync) revokedVersion = ++_authorityVersion;
-        }
 
         lock (_mutationGate.Sync)
         {
@@ -74,28 +61,40 @@ internal sealed class TdpRuntime : IAsyncDisposable
             if (!loaded.CanSafelyReplace)
                 return new(TdpCommitOutcome.PersistenceFailed, "Profile state is not safe to replace.");
 
+            var previous = loaded.Document.Device.Performance.Tdp;
             var updated = loaded.Document with
             {
                 Device = loaded.Document.Device with
                 {
-                    Performance = loaded.Document.Device.Performance with { Tdp = settings }
+                    Performance = loaded.Document.Device.Performance with
+                    {
+                        Tdp = BuildPersistedTdp(previous, settings)
+                    }
                 }
             };
-            try { _profileStore.Save(updated); }
-            catch (Exception exception)
+
+            lock (_sync)
             {
-                if (revokedVersion >= 0)
-                    lock (_sync) if (_authorityVersion == revokedVersion) _authorityVersion--;
-                AppLog.Error("Profiles.Tdp", "Global TDP persistence failed; hardware was not touched.", exception);
-                return new(TdpCommitOutcome.PersistenceFailed, exception.Message);
+                if (!_accepting)
+                    return new(TdpCommitOutcome.Unavailable, "TDP runtime is shutting down.");
+
+                try { _profileStore.Save(updated); }
+                catch (Exception exception)
+                {
+                    AppLog.Error("Profiles.Tdp", "Global TDP persistence failed; authority was not changed.", exception);
+                    return new(TdpCommitOutcome.PersistenceFailed, exception.Message);
+                }
+
+                if (!settings.Enabled)
+                {
+                    _authorityVersion++;
+                    return new(TdpCommitOutcome.Succeeded, null);
+                }
+
+                EnqueueCurrentUnderLock(settings);
+                return new(TdpCommitOutcome.Succeeded, null);
             }
         }
-
-        if (!settings.Enabled)
-            return new(TdpCommitOutcome.Succeeded, null);
-
-        EnqueueCurrent(settings);
-        return new(TdpCommitOutcome.Succeeded, null);
     }
 
     internal void BeginShutdown()
@@ -130,11 +129,39 @@ internal sealed class TdpRuntime : IAsyncDisposable
         var pair = currentSource == TdpPowerSource.AC ? settings.Ac : settings.Dc;
         lock (_sync)
         {
-            if (!_accepting) return;
-            var snapshot = new TdpApplySnapshot(_authorityVersion, currentSource, pair.Pl1Watts, pair.Pl2Watts);
-            _tail = _tail.ContinueWith(_ => ExecuteAsync(snapshot), CancellationToken.None,
-                TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+            EnqueueSnapshotUnderLock(new TdpApplySnapshot(_authorityVersion, currentSource, pair.Pl1Watts, pair.Pl2Watts));
         }
+    }
+
+    private void EnqueueCurrentUnderLock(DeviceTdpSettings settings)
+    {
+        var source = _powerSource();
+        if (source is not { } currentSource)
+        {
+            AppLog.Warn("Profiles.Tdp", "Current power source is unknown; TDP apply was not queued.");
+            return;
+        }
+
+        var pair = currentSource == TdpPowerSource.AC ? settings.Ac : settings.Dc;
+        EnqueueSnapshotUnderLock(new TdpApplySnapshot(_authorityVersion, currentSource, pair.Pl1Watts, pair.Pl2Watts));
+    }
+
+    private void EnqueueSnapshotUnderLock(TdpApplySnapshot snapshot)
+    {
+        if (!_accepting) return;
+        _tail = _tail.ContinueWith(_ => ExecuteAsync(snapshot), CancellationToken.None,
+            TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+    }
+
+    private static DeviceTdpSettings BuildPersistedTdp(DeviceTdpSettings? previous, DeviceTdpSettings requested)
+    {
+        if (previous is null) return requested;
+        return previous with
+        {
+            Enabled = requested.Enabled,
+            Ac = previous.Ac with { Pl1Watts = requested.Ac.Pl1Watts, Pl2Watts = requested.Ac.Pl2Watts },
+            Dc = previous.Dc with { Pl1Watts = requested.Dc.Pl1Watts, Pl2Watts = requested.Dc.Pl2Watts }
+        };
     }
 
     private async Task ExecuteAsync(TdpApplySnapshot snapshot)

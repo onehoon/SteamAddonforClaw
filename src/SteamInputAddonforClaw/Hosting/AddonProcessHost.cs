@@ -154,8 +154,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
 
         _runtimeHost = composition.RuntimeHost;
-        _tdpRuntime = new(_profileStore, _profileMutationGate, startupResult.HardwareDeviceModel,
-            new MsiClawTdpHardware(new MsiClawWmiTdpTransport()));
+        if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
+            && startupResult.HardwareDeviceModel is { } tdpModel)
+        {
+            _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel,
+                new MsiClawTdpHardware(new MsiClawWmiTdpTransport()));
+        }
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
             // Same single startup hardware-support result the routing composition's OEM1 gate above
