@@ -375,7 +375,26 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             HardwareModel = hardware.DeviceModel?.Value ?? "Unavailable",
             HardwareReason = hardware.Reason,
         };
-        lock (_clawSensorProbeGate) _clawSensorProbe = session;
+
+        // The initial ThrowIfShuttingDown() above only covers the time before the awaited
+        // _status.CaptureAsync() call: BeginProcessShutdown() can run its one-time session
+        // detach/dispose pass while this request is suspended there, and the named-pipe server isn't
+        // torn down until later in process disposal, so a request already past that first check could
+        // otherwise resume and commit a brand-new coordinator after shutdown began. Re-check the flag
+        // atomically with the commit under the same gate used by BeginProcessShutdown/Close, and
+        // dispose a rejected candidate outside the lock (PR #290 re-review).
+        bool rejectForShutdown;
+        lock (_clawSensorProbeGate)
+        {
+            rejectForShutdown = Volatile.Read(ref _shutdownStarted) != 0;
+            if (!rejectForShutdown) _clawSensorProbe = session;
+        }
+        if (rejectForShutdown)
+        {
+            await coordinator.DisposeAsync().ConfigureAwait(false);
+            throw new FrontendProtocolException("Runtime is shutting down.");
+        }
+
         return MapClawSensorProbeSnapshot(session);
     }
 

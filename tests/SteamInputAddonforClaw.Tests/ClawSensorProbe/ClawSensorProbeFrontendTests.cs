@@ -221,6 +221,27 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
     }
 
     [Fact]
+    public async Task Open_rejects_a_session_commit_that_resumes_after_shutdown_has_begun()
+    {
+        // PR #290 re-review: ThrowIfShuttingDown() at the top of OpenClawSensorProbeAsync only
+        // covers the time before the awaited _status.CaptureAsync() call. If BeginProcessShutdown()
+        // runs its one-time detach/dispose pass while an Open request is suspended there, that
+        // request must NOT be allowed to resume and commit a brand-new coordinator -- the shutdown
+        // recheck and the session commit have to be atomic under the same gate BeginProcessShutdown
+        // uses, or BeginProcessShutdown() is not a real mutation barrier.
+        var statusProvider = new BlockableSystemStatusProvider(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
+        var control = CreateControl(statusProvider);
+
+        var open = control.OpenClawSensorProbeAsync();
+        await statusProvider.CaptureEntered;
+        control.BeginProcessShutdown();
+        statusProvider.ReleaseCapture();
+
+        await Assert.ThrowsAsync<FrontendProtocolException>(() => open);
+        Assert.False((await control.CaptureClawSensorProbeAsync()).Available);
+    }
+
+    [Fact]
     public async Task Shutdown_barrier_rejects_further_operations()
     {
         var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
@@ -257,6 +278,20 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
             captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false));
     }
 
+    private InProcessAddonFrontendControl CreateControl(ISystemStatusProvider statusProvider)
+    {
+        AppLog.DirectoryOverride = _testDirectory;
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings(), store, new FakeStartupManager());
+        return new InProcessAddonFrontendControl(
+            coordinator,
+            statusProvider,
+            null,
+            new DeveloperTestModeState(),
+            "",
+            captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false));
+    }
+
     private static SystemStatusSnapshot ClawFamilySnapshot(HardwareCompatibilityStatus status) => new(
         new("MSI", "Claw A1M", "Claw A1M board", []),
         new HardwareCompatibilityAssessment(status, new HandheldDeviceId("msi.claw"), null, "test"),
@@ -281,5 +316,23 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
     private sealed class FixedSystemStatusProvider(SystemStatusSnapshot snapshot) : ISystemStatusProvider
     {
         public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) => Task.FromResult(snapshot);
+    }
+
+    /// <summary>Lets a test suspend an in-flight OpenClawSensorProbeAsync() exactly at its
+    /// _status.CaptureAsync() await point, so BeginProcessShutdown() can be driven while that request
+    /// is still resumable -- reproducing the shutdown/Open commit race from PR #290 re-review.</summary>
+    private sealed class BlockableSystemStatusProvider(SystemStatusSnapshot snapshot) : ISystemStatusProvider
+    {
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task CaptureEntered => _entered.Task;
+        public void ReleaseCapture() => _release.TrySetResult();
+
+        public async Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default)
+        {
+            _entered.TrySetResult();
+            await _release.Task.ConfigureAwait(false);
+            return snapshot;
+        }
     }
 }
