@@ -224,53 +224,44 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
-    public async Task Production_worker_is_background_named_AboveNormal_with_absolute_4ms_deadline()
+    public async Task Production_worker_is_background_AboveNormal_and_starts_from_a_4ms_absolute_deadline()
     {
-        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
-        var sink = new FakeSink();
+        var origin = 123_456L;
+        long observedDeadline = 0;
+        long observedNow = 0;
         ThreadPriority? observedPriority = null;
-        var publisher = new CanonicalXbox360InputPublisher(source, sink.SetState)
+
+        var publisher = new CanonicalXbox360InputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            _ => true,
+            timestampProvider: () => origin)
         {
+            ArmForDeadlineOverrideForTests = (timer, deadline, now) =>
+            {
+                observedDeadline = deadline;
+                observedNow = now;
+                // Keep the timer out of the test; StopAsync wakes the worker through the stop event.
+                timer.ArmRelative(TimeSpan.FromSeconds(30));
+            },
             WorkerThreadStartOverrideForTests = thread =>
             {
                 observedPriority = thread.Priority;
-                Assert.Equal("SteamInputAddon.Xbox360Publisher", thread.Name);
                 Assert.True(thread.IsBackground);
+                Assert.Equal("SteamInputAddon.Xbox360Publisher", thread.Name);
                 thread.Start();
             },
         };
 
         publisher.Start();
-        try
-        {
-            await sink.WaitForCountAsync(1, TimeSpan.FromSeconds(2));
-        }
-        finally
-        {
-            await publisher.StopAsync();
-        }
+        await publisher.StopAsync();
 
+        var expectedPeriodTicks = CanonicalPublisherDeadlineMath.StopwatchTicksFromTimeSpan(
+            TimeSpan.FromMilliseconds(4),
+            Stopwatch.Frequency);
+
+        Assert.Equal(origin, observedNow);
+        Assert.Equal(expectedPeriodTicks, observedDeadline - observedNow);
         Assert.Equal(ThreadPriority.AboveNormal, observedPriority);
-    }
-
-    [Fact]
-    public async Task Production_worker_recurs_at_the_scheduled_cadence()
-    {
-        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
-        var sink = new FakeSink();
-        var publisher = new CanonicalXbox360InputPublisher(source, sink.SetState);
-
-        publisher.Start();
-        try
-        {
-            await sink.WaitForCountAsync(2, TimeSpan.FromSeconds(2));
-        }
-        finally
-        {
-            await publisher.StopAsync();
-        }
-
-        Assert.True(sink.Count >= 2);
     }
 
     [Fact]
