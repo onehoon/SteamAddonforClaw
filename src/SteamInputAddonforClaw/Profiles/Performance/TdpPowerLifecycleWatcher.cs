@@ -49,7 +49,7 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
         return false;
     }
 
-    internal void ScheduleStartup() => Schedule(false, false, "Startup");
+    internal void ScheduleStartup() => Schedule(true, false, "Startup");
 
     internal Task DrainPendingAsync()
     {

@@ -29,7 +29,6 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         await Task.Yield();
         delay.Release();
         await watcher.DrainPendingAsync();
-        runtime.ReconcileCurrent(true, false, "TestStartup");
         await runtime.DrainAsync();
 
         Assert.Equal(1, transport.Operations.Count(x => x == "GetAp(0)"));
@@ -48,7 +47,6 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         await Task.Yield();
         delay.Release();
         await watcher.DrainPendingAsync(); await runtime.DrainAsync();
-        runtime.ReconcileCurrent(true, true, "TestStartup"); await runtime.DrainAsync();
         var before = File.ReadAllText(ProfilePath);
         transport.Operations.Clear();
         source.Current = TdpPowerSource.DC;
@@ -67,8 +65,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
         await using var runtime = CreateRuntime(transport, () => source.Current);
         using var watcher = CreateWatcher(runtime, source, delay);
-        watcher.ScheduleStartup(); await Task.Yield(); delay.Release(); await watcher.DrainPendingAsync();
-        runtime.ReconcileCurrent(true, true, "TestStartup"); await runtime.DrainAsync();
+        watcher.ScheduleStartup(); await Task.Yield(); delay.Release(); await watcher.DrainPendingAsync(); await runtime.DrainAsync();
         transport.Operations.Clear(); source.Current = TdpPowerSource.DC;
 
         delay.Reset(); watcher.Observe(TdpPowerNotification.PowerSourceChanged); delay.Release();
@@ -86,7 +83,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
         await using var runtime = CreateRuntime(transport, () => source.Current);
         using var watcher = CreateWatcher(runtime, source, delay);
-        watcher.ScheduleStartup(); await Task.Yield(); delay.Release(); await watcher.DrainPendingAsync(); runtime.ReconcileCurrent(true, false, "TestStartup"); await runtime.DrainAsync();
+        watcher.ScheduleStartup(); await Task.Yield(); delay.Release(); await watcher.DrainPendingAsync(); await runtime.DrainAsync();
         transport.Operations.Clear();
 
         delay.Reset(); watcher.Observe(TdpPowerNotification.PowerSourceChanged); source.Current = TdpPowerSource.DC;
@@ -148,7 +145,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         using var watcher = CreateWatcher(runtime, source, delay);
 
         Assert.False(watcher.Start());
-        watcher.ScheduleStartup(); await Task.Yield(); delay.Release(); await watcher.DrainPendingAsync(); runtime.ReconcileCurrent(true, false, "TestStartup"); await runtime.DrainAsync();
+        watcher.ScheduleStartup(); await Task.Yield(); delay.Release(); await watcher.DrainPendingAsync(); await runtime.DrainAsync();
         Assert.Contains("GetAp(0)", transport.Operations);
     }
 
