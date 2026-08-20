@@ -290,6 +290,26 @@ detach, and state-write primitives over the already persistent
 detached-ready Xbox360 handle. No production caller exists yet; Xbox360
 remains detached/unpublished and Game Bar switching remains PLANNED.
 
+Publisher foundation step: the persistent Xbox360 logical handle, the
+classified runtime primitives (`TryGetXbox360AttachmentState`,
+`AttachXbox360`, `DetachXbox360`, `SetXbox360State`), and
+`Xbox360DeviceStateMapper` (`ControllerState` -> `Xbox360DeviceState`) all
+already existed; this step adds `CanonicalXbox360InputPublisher`
+(`src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalXbox360InputPublisher.cs`),
+which publishes `IControllerStateSnapshotSource.LatestState`, mapped through
+`Xbox360DeviceStateMapper`, to a caller-supplied state sink on the same
+~250 Hz absolute-deadline schedule already proven by
+`CanonicalSteamDeckInputPublisher`. It owns publication only -- not
+attachment, detachment, VIIPER logical-device lifetime, Game Bar policy, or
+Deck neutral/live policy. There is still **no production caller**: it is not
+instantiated or started from `AddonRoutingRuntime`, `AddonProcessHost`,
+`CanonicalSteamDeckOutputStage`, `RoutingPipelineRuntimeCoordinator`,
+`GameBarForegroundWatcher`, power/resume logic, or OEM1, and it makes zero
+calls to `TryGetXbox360AttachmentState`/`AttachXbox360`/`DetachXbox360`.
+Xbox360 remains detached/unpublished during normal Runtime behavior, and
+Game Bar presentation switching remains PLANNED. SD7 is not complete and no
+hardware validation of this publisher has been performed.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains

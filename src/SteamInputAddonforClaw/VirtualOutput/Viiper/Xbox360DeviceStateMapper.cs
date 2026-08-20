@@ -7,9 +7,10 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// <see cref="Xbox360DeviceState"/> (VIIPER main@e10b5f02945b1322f33c33468e583546600ba000).
 /// </summary>
 /// <remarks>
-/// Preparation-only primitive: nothing in the Addon consumes this mapper's output yet. No
-/// Xbox360 device is created, attached, or driven by this change -- see
-/// docs/VIIPER_MIGRATION_TODO.md for the deferred session/publisher/output-stage work.
+/// The mapper is consumed by the Xbox360 publisher foundation (<see cref="CanonicalXbox360InputPublisher"/>),
+/// but no production composition starts that publisher yet. Xbox360 remains detached/unpublished
+/// during normal Runtime behavior -- see docs/VIIPER_MIGRATION_TODO.md for the still-deferred
+/// session/output-stage/Game-Bar-switching work.
 ///
 /// <para>
 /// <see cref="ControllerState"/> is already normalized into the XInput semantic convention (up =
