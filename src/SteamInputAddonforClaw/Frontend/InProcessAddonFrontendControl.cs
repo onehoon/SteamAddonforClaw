@@ -131,14 +131,52 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (!steamOutputActive) return new FrontendVibrationTestResult(false, "Steam Deck output is not active.", null);
 
         var session = GetOrOpenVibrationSession();
-        session.Write($"Command={command} Opcode={VibrationTestOpcode(command)} TestModeEnabled={testModeEnabled} SteamOutputActive={steamOutputActive}");
+        WriteVibrationSessionIfCurrent(session, $"Command={command} Opcode={VibrationTestOpcode(command)} TestModeEnabled={testModeEnabled} SteamOutputActive={steamOutputActive}");
         var outcome = await (_runtime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(new Feedback.DeveloperVibrationTestOutcome(false, null, null))).ConfigureAwait(false);
         // Accepted (authority/sequence) and physically-successful are different questions: a real MSI
         // HID write failure must be visible here even when the write was accepted, so PhysicalStatus/
         // PhysicalReason are logged separately from Succeeded rather than folded into one boolean.
-        session.Write($"Result Command={command} Succeeded={outcome.Succeeded} PhysicalStatus={outcome.CommandResult?.Status} PhysicalReason={outcome.CommandResult?.Reason} StopPhysicalStatus={outcome.StopResult?.Status} StopPhysicalReason={outcome.StopResult?.Reason}");
+        WriteVibrationSessionIfCurrent(session, $"Result Command={command} Succeeded={outcome.Succeeded} PhysicalStatus={outcome.CommandResult?.Status} PhysicalReason={outcome.CommandResult?.Reason} StopPhysicalStatus={outcome.StopResult?.Status} StopPhysicalReason={outcome.StopResult?.Reason}");
 
-        return new FrontendVibrationTestResult(outcome.Succeeded, outcome.Succeeded ? "Succeeded" : "Feedback bridge is unavailable or the test was cancelled.", session.FilePath);
+        var (succeeded, reason) = MapVibrationTestOutcome(outcome);
+        return new FrontendVibrationTestResult(succeeded, reason, session.FilePath);
+    }
+
+    /// <summary>Pure mapping, factored out for direct unit testing: <see cref="Feedback.DeveloperVibrationTestOutcome.Succeeded"/>
+    /// only means the write was ACCEPTED (authority/sequence), not that the physical MSI HID write
+    /// succeeded -- a truthful diagnostic result must require the actual write(s) to have succeeded
+    /// too, or a real hardware failure would be reported to the page as "Succeeded".</summary>
+    internal static (bool Succeeded, string Reason) MapVibrationTestOutcome(Feedback.DeveloperVibrationTestOutcome outcome)
+    {
+        var commandPhysicalOk = outcome.CommandResult is { } commandResult && commandResult.Succeeded;
+        var stopPhysicalOk = outcome.StopResult is null || outcome.StopResult.Value.Succeeded;
+        var succeeded = outcome.Succeeded && commandPhysicalOk && stopPhysicalOk;
+        var reason = !outcome.Succeeded
+            ? "Feedback bridge is unavailable, superseded, or the test was cancelled."
+            : !commandPhysicalOk
+                ? $"Physical write failed: {outcome.CommandResult?.Reason ?? "Unknown"}"
+                : !stopPhysicalOk
+                    ? $"Physical STOP failed: {outcome.StopResult?.Reason ?? "Unknown"}"
+                    : "Succeeded";
+        return (succeeded, reason);
+    }
+
+    /// <summary>Test-only seam so the disposed-writer race fix can be exercised directly without
+    /// reproducing the exact 250ms async interleaving through a real runtime.</summary>
+    internal Feedback.VibrationTestSessionWriter? TestOnly_CurrentVibrationSession { get { lock (_vibrationSessionGate) return _vibrationSession; } }
+
+    /// <summary>Writes to the session only if it is still the currently open one: a page exit can
+    /// close (detach + dispose) the session while an in-flight EB/EA developer command is still
+    /// awaiting its 250ms delayed STOP, and writing to an already-disposed <c>StreamWriter</c> would
+    /// throw from an <c>async void</c> UI click handler. Serializes against the same
+    /// <see cref="_vibrationSessionGate"/> <see cref="CloseVibrationTestSessionAsync"/> detaches
+    /// under, so a write either completes before detach or observes the session is stale and no-ops.</summary>
+    internal void WriteVibrationSessionIfCurrent(Feedback.VibrationTestSessionWriter session, string message)
+    {
+        lock (_vibrationSessionGate)
+        {
+            if (ReferenceEquals(_vibrationSession, session)) session.Write(message);
+        }
     }
 
     /// <summary>Called when the Vibration Test detail page is left, regardless of how: cancels any

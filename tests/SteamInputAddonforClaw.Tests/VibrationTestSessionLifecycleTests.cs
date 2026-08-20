@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Developer;
+using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.Frontend;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Routing;
@@ -63,6 +64,79 @@ public sealed class VibrationTestSessionLifecycleTests : IDisposable
         var contents = File.ReadAllText(closed.LogFilePath!);
         Assert.Contains("SessionStarted", contents);
         Assert.Contains("SessionClosed", contents);
+    }
+
+    [Fact]
+    public async Task A_write_after_the_session_closes_is_a_silent_no_op_not_an_exception_on_the_disposed_writer()
+    {
+        // Regression for PR #269 review: RunVibrationTestAsync captures the current session, writes
+        // a pre-command line, awaits the runtime test (up to the developer 250ms window), then writes
+        // a result line. If CloseVibrationTestSessionAsync() detaches+disposes that same session while
+        // the await is still in flight, the resumed post-await write used to hit a disposed
+        // StreamWriter. WriteVibrationSessionIfCurrent must instead observe that the session is no
+        // longer current and silently skip the write.
+        var control = CreateControl();
+        var opened = await control.OpenVibrationTestSessionAsync();
+        var staleSession = control.TestOnly_CurrentVibrationSession!;
+
+        var closed = await control.CloseVibrationTestSessionAsync();
+        Assert.True(closed.Succeeded);
+
+        var exception = Record.Exception(() => control.WriteVibrationSessionIfCurrent(staleSession, "post-close result"));
+
+        Assert.Null(exception);
+        var contents = File.ReadAllText(opened.LogFilePath!);
+        Assert.DoesNotContain("post-close result", contents);
+    }
+
+    [Fact]
+    public void MapVibrationTestOutcome_reports_full_success_when_accepted_and_physically_confirmed()
+    {
+        var outcome = new DeveloperVibrationTestOutcome(true, new PhysicalRumbleWriteResult(PhysicalRumbleWriteStatus.Succeeded, "OK"), null);
+
+        var (succeeded, reason) = InProcessAddonFrontendControl.MapVibrationTestOutcome(outcome);
+
+        Assert.True(succeeded);
+        Assert.Equal("Succeeded", reason);
+    }
+
+    [Fact]
+    public void MapVibrationTestOutcome_reports_rejection_when_not_accepted()
+    {
+        var outcome = new DeveloperVibrationTestOutcome(false, null, null);
+
+        var (succeeded, reason) = InProcessAddonFrontendControl.MapVibrationTestOutcome(outcome);
+
+        Assert.False(succeeded);
+        Assert.Equal("Feedback bridge is unavailable, superseded, or the test was cancelled.", reason);
+    }
+
+    [Fact]
+    public void MapVibrationTestOutcome_reports_a_physical_command_write_failure_as_not_successful()
+    {
+        // Regression for PR #269 review: accepted (authority/sequence) is not the same question as
+        // "did the real MSI HID write succeed" -- a FailingSink result must never be reported to the
+        // Vibration Test page as Succeeded.
+        var outcome = new DeveloperVibrationTestOutcome(true, new PhysicalRumbleWriteResult(PhysicalRumbleWriteStatus.Failed, "WriteFailed"), null);
+
+        var (succeeded, reason) = InProcessAddonFrontendControl.MapVibrationTestOutcome(outcome);
+
+        Assert.False(succeeded);
+        Assert.Contains("WriteFailed", reason);
+    }
+
+    [Fact]
+    public void MapVibrationTestOutcome_reports_a_physical_STOP_write_failure_as_not_successful()
+    {
+        var outcome = new DeveloperVibrationTestOutcome(
+            true,
+            new PhysicalRumbleWriteResult(PhysicalRumbleWriteStatus.Succeeded, "OK"),
+            new PhysicalRumbleWriteResult(PhysicalRumbleWriteStatus.Unavailable, "NoVerifiedEndpoint"));
+
+        var (succeeded, reason) = InProcessAddonFrontendControl.MapVibrationTestOutcome(outcome);
+
+        Assert.False(succeeded);
+        Assert.Contains("NoVerifiedEndpoint", reason);
     }
 
     private InProcessAddonFrontendControl CreateControl()
