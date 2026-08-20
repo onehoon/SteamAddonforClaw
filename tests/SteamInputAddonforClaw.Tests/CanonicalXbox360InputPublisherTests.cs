@@ -118,8 +118,10 @@ public sealed class CanonicalXbox360InputPublisherTests
         await publisher.StopAsync();
 
         var countAtStop = sink.Count;
-        await ticks.TickAsync();
-        await Task.Delay(50);
+        // TickAsync() would wait forever here: the only queued waiter is the stopped run's
+        // cancelled one, which it skips, and no new waiter can ever be enqueued once stopped.
+        // TryTick() is the non-blocking equivalent -- it must report there was nothing to tick.
+        Assert.False(ticks.TryTick());
 
         Assert.Equal(countAtStop, sink.Count);
         Assert.False(publisher.IsRunning);
@@ -394,6 +396,23 @@ public sealed class CanonicalXbox360InputPublisherTests
                 waiter.TrySetResult(true);
                 return;
             }
+        }
+
+        /// <summary>Non-blocking equivalent of <see cref="TickAsync"/>: resolves the next
+        /// not-yet-completed waiter if one is queued and returns true, or returns false immediately
+        /// if there is nothing to tick (e.g. after the publisher has stopped and no new waiter can
+        /// ever be enqueued) -- unlike <see cref="TickAsync"/>, this never waits.</summary>
+        public bool TryTick()
+        {
+            while (_waiters.Count > 0)
+            {
+                var waiter = _waiters.Dequeue();
+                if (waiter.Task.IsCompleted) continue;
+                waiter.TrySetResult(true);
+                return true;
+            }
+
+            return false;
         }
     }
 
