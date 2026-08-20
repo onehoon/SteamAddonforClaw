@@ -67,6 +67,50 @@ public sealed class DeveloperVibrationTestTests
     }
 
     [Fact]
+    public async Task Newer_real_Steam_feedback_during_the_developer_delay_is_not_stopped_by_the_stale_developer_STOP()
+    {
+        // Regression for PR #269 review: a developer EB/EA test's delayed zero write used to route
+        // back through ProcessNormalizedReport (BeginFeedback() again), so if real Steam feedback
+        // arrived during the 250ms window it became a NEWER developer STOP write and clobbered the
+        // real feedback. The fix writes against the ORIGINAL developer sequence, so a newer arrival
+        // makes the delayed STOP a silent no-op.
+        var sink = new RecordingSink();
+        var authority = new FeedbackAuthority();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+
+        var developerTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), addDeveloperStop: true, CancellationToken.None);
+        await Task.Delay(20);
+        Assert.True(bridge.ProcessNormalizedReport(Report(FrontendVibrationTestCommand.Haptic), "Steam"));
+
+        // The developer test's own return value reports its delayed STOP as a no-op (stale sequence),
+        // not a failure of the original command -- exactly the intended behavior being verified here.
+        Assert.False(await developerTest);
+        await Task.Delay(300);
+
+        // Two writes only: the developer Rumble command, then the newer real Steam Haptic command.
+        // The developer test's delayed STOP must NOT appear as a third write.
+        Assert.Equal([new TwoMotorRumble(32768, 32768), new TwoMotorRumble(32896, 32896)], sink.Values);
+    }
+
+    [Fact]
+    public async Task Cancel_developer_test_and_stop_cancels_the_pending_delay_and_writes_a_fresh_stop()
+    {
+        var sink = new RecordingSink();
+        var authority = new FeedbackAuthority();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        var developerTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), addDeveloperStop: true, CancellationToken.None);
+        await Task.Delay(20);
+
+        bridge.CancelDeveloperTestAndStop();
+
+        Assert.False(await developerTest);
+        await Task.Delay(300);
+        // Only the developer Rumble command and the CancelDeveloperTestAndStop() zero write --
+        // the cancelled pending 250ms delayed STOP must never also fire.
+        Assert.Equal([new TwoMotorRumble(32768, 32768), TwoMotorRumble.Stopped], sink.Values);
+    }
+
+    [Fact]
     public void Revoked_feedback_authority_rejects_developer_injection_without_a_write()
     {
         var sink = new RecordingSink();

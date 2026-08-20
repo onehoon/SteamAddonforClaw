@@ -26,11 +26,14 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
     internal SteamDeckOutputCallback Callback { get; }
     internal Action? BeforeLease { get; set; }
-    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam")
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam") => ProcessNormalizedReport(report, origin, out _);
+
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence)
     {
+        sequence = 0;
         var decoded = SteamDeckRumbleDecoder.Decode(report);
         if (!decoded.IsSupported) return false;
-        var sequence = BeginFeedback();
+        sequence = BeginFeedback();
         BeforeLease?.Invoke();
         if (!TryWrite(sequence, decoded.Rumble))
         {
@@ -70,11 +73,14 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
         try
         {
-            if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest")) return false;
+            if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence)) return false;
             if (!addDeveloperStop) return true;
             await Task.Delay(250, linked.Token).ConfigureAwait(false);
-            var stop = new byte[64]; stop[0] = 0xEB; stop[1] = 9;
-            return ProcessNormalizedReport(stop, "DeveloperVibrationTest");
+            // Write directly against the original sequence instead of routing back through
+            // ProcessNormalizedReport (which would call BeginFeedback() again): if real Steam
+            // feedback arrived during the 250ms delay it is now the newest sequence, and this
+            // stale developer STOP must be a silent no-op rather than stopping that newer feedback.
+            return TryWrite(sequence, TwoMotorRumble.Stopped);
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { return false; }
         finally
@@ -82,6 +88,21 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             lock (_gate) if (ReferenceEquals(_developerTest, linked)) _developerTest = null;
             linked.Dispose();
         }
+    }
+
+    /// <summary>Called when the Vibration Test detail page is left: cancels any pending
+    /// developer-owned delayed STOP (so it can no longer fire and stop newer real feedback) and
+    /// issues a best-effort production-path zero write to leave the motors physically stopped.</summary>
+    internal void CancelDeveloperTestAndStop()
+    {
+        lock (_gate)
+        {
+            _developerTest?.Cancel();
+            _developerTest?.Dispose();
+            _developerTest = null;
+        }
+        var stop = new byte[64]; stop[0] = 0xEB; stop[1] = 9;
+        ProcessNormalizedReport(stop, "DeveloperVibrationTestClose");
     }
 
     private void OnNativeOutput(nuint handle, nint data, uint length)

@@ -92,6 +92,11 @@ public interface IAddonFrontendControl
     Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendVibrationTestResult(false, "Vibration test is unavailable.", null));
+    /// <summary>Closes the dedicated Vibration Test diagnostic session, if one is open: cancels any
+    /// pending developer-owned delayed STOP, issues a best-effort production-path STOP, and flushes/
+    /// closes the session log. Call when the Vibration Test detail page is left, regardless of how.</summary>
+    Task<FrontendVibrationTestResult> CloseVibrationTestSessionAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendVibrationTestResult(true, "NoSessionActive", null));
     Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default);
     Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default);
 }

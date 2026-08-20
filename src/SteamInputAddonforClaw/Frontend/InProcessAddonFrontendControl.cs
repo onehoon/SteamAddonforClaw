@@ -24,6 +24,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<string?> _processPath;
     private readonly bool _oem1MappingAvailable;
     private int _shutdownStarted;
+    private readonly object _vibrationSessionGate = new();
+    private Feedback.VibrationTestSessionWriter? _vibrationSession;
 
     /// <param name="oem1MappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -112,11 +114,55 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public async Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        if (!_developer.IsEnabled) return new FrontendVibrationTestResult(false, "Enable Test Mode from Developer Menu.", null);
-        if (!_captureRoutingStatus().SteamOutputActive) return new FrontendVibrationTestResult(false, "Steam Deck output is not active.", null);
+        var testModeEnabled = _developer.IsEnabled;
+        var steamOutputActive = _captureRoutingStatus().SteamOutputActive;
+        if (!testModeEnabled) return new FrontendVibrationTestResult(false, "Enable Test Mode from Developer Menu.", null);
+        if (!steamOutputActive) return new FrontendVibrationTestResult(false, "Steam Deck output is not active.", null);
+
+        var session = GetOrOpenVibrationSession();
+        session.Write($"Command={command} Opcode={VibrationTestOpcode(command)} TestModeEnabled={testModeEnabled} SteamOutputActive={steamOutputActive}");
         var success = await (_runtime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(false)).ConfigureAwait(false);
-        return new FrontendVibrationTestResult(success, success ? "Succeeded" : "Feedback bridge is unavailable or the test was cancelled.", null);
+        session.Write($"Result Command={command} Succeeded={success}");
+
+        return new FrontendVibrationTestResult(success, success ? "Succeeded" : "Feedback bridge is unavailable or the test was cancelled.", session.FilePath);
     }
+
+    /// <summary>Called when the Vibration Test detail page is left, regardless of how: cancels any
+    /// pending developer-owned delayed STOP so it cannot later stop newer real Steam feedback, issues
+    /// a best-effort production-path STOP, and flushes/closes the dedicated session log.</summary>
+    public async Task<FrontendVibrationTestResult> CloseVibrationTestSessionAsync(CancellationToken cancellationToken = default)
+    {
+        Feedback.VibrationTestSessionWriter? session;
+        lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
+        if (session is null) return new FrontendVibrationTestResult(true, "NoSessionActive", null);
+
+        _runtime?.CancelDeveloperVibrationTest();
+        session.Write("SessionClosed CancelledPendingDeveloperStop=True BestEffortStopIssued=True");
+        var path = session.FilePath;
+        await session.DisposeAsync().ConfigureAwait(false);
+        return new FrontendVibrationTestResult(true, "SessionClosed", path);
+    }
+
+    private Feedback.VibrationTestSessionWriter GetOrOpenVibrationSession()
+    {
+        lock (_vibrationSessionGate)
+        {
+            if (_vibrationSession is { } existing) return existing;
+            var session = new Feedback.VibrationTestSessionWriter(AppLog.DirectoryPath);
+            session.Write("SessionStarted");
+            _vibrationSession = session;
+            return session;
+        }
+    }
+
+    private static string VibrationTestOpcode(FrontendVibrationTestCommand command) => command switch
+    {
+        FrontendVibrationTestCommand.Rumble => "0xEB",
+        FrontendVibrationTestCommand.Haptic => "0xEA",
+        FrontendVibrationTestCommand.HapticPulse => "0x8F",
+        FrontendVibrationTestCommand.Stop => "0xEB(zero)",
+        _ => "Unknown"
+    };
 
     public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default)
     {

@@ -175,6 +175,7 @@ public sealed partial class MainWindow : Window
 
     private void ShowPage(MainNavigationPage page)
     {
+        var wasVibrationTest = VibrationTestContent.Visibility == Visibility.Visible;
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
         ControllerContent.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
@@ -183,6 +184,11 @@ public sealed partial class MainWindow : Window
         CenterMButtonContent.Visibility = page == MainNavigationPage.CenterMButton ? Visibility.Visible : Visibility.Collapsed;
         VibrationTestContent.Visibility = page == MainNavigationPage.VibrationTest ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
+        // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
+        // other route), not just the page's own Back button -- the session must close no matter how
+        // the user leaves.
+        if (page == MainNavigationPage.VibrationTest) VibrationTestContent.Activate();
+        else if (wasVibrationTest) VibrationTestContent.Deactivate();
     }
 
     private async Task RefreshSystemStatusAsync()
@@ -344,7 +350,7 @@ public sealed partial class MainWindow : Window
                 ReturnToSettings("MouseBackButton");
                 break;
             case MainNavigationPage.DeveloperMenu:
-                ReturnToSettings("MouseBackButton");
+                ShowPage(_navigationState.ReturnToDeveloperMenu());
                 break;
             case MainNavigationPage.Controller:
                 ReturnToController("MouseBackButton");

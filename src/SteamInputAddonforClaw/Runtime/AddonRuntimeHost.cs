@@ -127,6 +127,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
 
     internal RoutingRuntimeStatusSnapshot CaptureRoutingStatus() => _routingRuntime?.CaptureStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
     internal Task<bool> RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken) => _routingRuntime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(false);
+    internal void CancelDeveloperVibrationTest() => _routingRuntime?.CancelDeveloperVibrationTest();
 
     internal UserTerminationDecision EvaluateUserTermination() => _userTerminationGuard.Evaluate();
 

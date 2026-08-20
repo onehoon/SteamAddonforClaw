@@ -106,6 +106,9 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         }
         return _feedbackBridge.ProcessDeveloperTestAsync(report, command is FrontendVibrationTestCommand.Rumble or FrontendVibrationTestCommand.Haptic, cancellationToken);
     }
+    /// <summary>Cancels any pending developer-owned delayed STOP and issues a best-effort physical
+    /// STOP. No-op if no developer test has ever run (feedback bridge unarmed).</summary>
+    internal void CancelDeveloperVibrationTest() => _feedbackBridge?.CancelDeveloperTestAndStop();
     internal Action? FeedbackBeforeLease
     {
         set { if (_feedbackBridge is not null) _feedbackBridge.BeforeLease = value; }

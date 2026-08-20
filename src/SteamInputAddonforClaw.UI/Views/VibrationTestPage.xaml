@@ -4,10 +4,10 @@
     <TextBlock Text="Vibration Test" FontSize="24" FontWeight="SemiBold" />
     <TextBlock x:Name="StatusText" Opacity="0.7" TextWrapping="Wrap" />
     <StackPanel Orientation="Horizontal" Spacing="8">
-      <Button Content="Rumble (0xEB)" Click="Rumble_Click" />
-      <Button Content="Haptic (0xEA)" Click="Haptic_Click" />
-      <Button Content="Haptic Pulse (0x8F)" Click="Pulse_Click" />
-      <Button Content="Stop" Click="Stop_Click" />
+      <Button x:Name="RumbleButton" Content="Rumble (0xEB)" Click="Rumble_Click" IsEnabled="False" />
+      <Button x:Name="HapticButton" Content="Haptic (0xEA)" Click="Haptic_Click" IsEnabled="False" />
+      <Button x:Name="PulseButton" Content="Haptic Pulse (0x8F)" Click="Pulse_Click" IsEnabled="False" />
+      <Button x:Name="StopButton" Content="Stop" Click="Stop_Click" IsEnabled="False" />
     </StackPanel>
     <TextBlock x:Name="ResultText" TextWrapping="Wrap" />
   </StackPanel></ScrollViewer>
