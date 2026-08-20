@@ -360,6 +360,19 @@ consumer, no automatic switching, no foreground event wiring, no X360
 PnP/XInput readiness claim, no power/suspend/shutdown integration, and no
 hardware validation claim**. SD7 remains PLANNED.
 
+Game Bar presentation policy seam step: `AddonRoutingRuntime` now exposes an
+internal boolean policy seam. `foreground=true` selects the existing
+`EnterXbox360PresentationAsync` only when the outer Steam route is active and
+no X360 presentation is owned; `foreground=false` selects the existing
+`ExitXbox360PresentationAsync` only when X360 presentation ownership exists.
+The seam adds no presentation state or duplicate recovery policy and forwards
+cancellation to the selected primitive. There is still **no
+`GameBarForegroundWatcher` production subscription, no automatic switching, no
+power/suspend/shutdown integration, no production lifecycle race handling, no
+X360 PnP/XInput readiness claim, and no hardware validation claim**. SD7 remains
+PLANNED; normal Runtime behavior and `SteamOutputActive` semantics are
+unchanged.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains
