@@ -54,10 +54,10 @@ public enum FrontendCpuBoostMutationOutcome { Succeeded, PersistenceFailed, Appl
 
 /// <summary>One side (AC or DC) of the CPU Boost frontend snapshot: the actual current Windows value
 /// (<see cref="CurrentStatus"/>/<see cref="Current"/>) versus the Addon's persisted desired value
-/// (<see cref="Desired"/>, <see langword="null"/> when this side is not Addon-managed). The two are
-/// deliberately kept separate -- displaying the current Windows value on an unmanaged side must never
-/// be confused with the Addon owning/persisting that value (work order section 8/"showing a value
-/// does NOT mean the Addon owns that value").</summary>
+/// (<see cref="Desired"/>, <see langword="null"/> only while Device CPU Boost is uninitialized). The
+/// two are deliberately kept separate -- displaying the current Windows value must never be confused
+/// with the Addon owning/persisting that value ("showing a value does NOT mean the Addon owns that
+/// value").</summary>
 public sealed record FrontendCpuBoostSideSnapshot(FrontendCpuBoostReadStatus CurrentStatus, CpuBoostMode? Current, CpuBoostMode? Desired);
 
 /// <summary>Narrowly CPU-Boost-specific frontend snapshot (work order section 5) -- not a

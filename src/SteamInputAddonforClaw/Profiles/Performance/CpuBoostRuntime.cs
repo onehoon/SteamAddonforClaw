@@ -25,10 +25,12 @@ public readonly record struct CpuBoostMutationResult(CpuBoostMutationOutcome Out
     public bool Succeeded => Outcome == CpuBoostMutationOutcome.Succeeded;
 }
 
-/// <summary>Minimal, narrowly CPU-Boost-specific runtime snapshot (work order section 19) -- not a
-/// general Device/Profile status framework. Distinguishes the actual current Windows AC/DC values
-/// from the Addon's persisted/managed desired values, which is required so a future UI can show the
-/// real Windows value even on an unmanaged side.
+/// <summary>Minimal, narrowly CPU-Boost-specific runtime snapshot -- not a general Device/Profile
+/// status framework. Distinguishes the actual current Windows AC/DC values from the Addon's
+/// persisted desired values. <see cref="AcDesired"/>/<see cref="DcDesired"/> are <see langword="null"/>
+/// only while Device CPU Boost is uninitialized (no complete AC/DC baseline has ever been
+/// established yet); once initialized, both are always concrete values -- there is no per-side
+/// "unmanaged" state.
 ///
 /// <see cref="Enabled"/> (Device CPU Boost Toggle addendum) reflects only whether the Device/global
 /// apply path is currently allowed to apply <see cref="AcDesired"/>/<see cref="DcDesired"/> -- it is
@@ -126,9 +128,12 @@ internal sealed class CpuBoostRuntime
             }
 
             var cpuBoost = loadResult.Document.Device.Performance.CpuBoost;
-            if (cpuBoost is null)
+            if (cpuBoost is null || cpuBoost.Ac is null || cpuBoost.Dc is null)
             {
-                TryBootstrapFromWindows(loadResult.Document);
+                // Missing entirely, or an incomplete legacy/partial baseline (one side never
+                // persisted): never apply a partial policy -- complete the baseline from Windows
+                // first (current product policy section 3.4), fail-safe if that is not possible.
+                TryBootstrapFromWindows(loadResult.Document, cpuBoost);
                 return;
             }
 
@@ -143,36 +148,69 @@ internal sealed class CpuBoostRuntime
                 return;
             }
 
-            ReconcileWindows(cpuBoost.Ac, cpuBoost.Dc, contextLabel: "startup reconcile");
+            ReconcileWindows(cpuBoost.Ac.Value, cpuBoost.Dc.Value, contextLabel: "startup reconcile");
         }
     }
 
-    /// <summary>First-run only: reads the current Windows AC/DC CPU Boost values and, only if BOTH
-    /// map to a known/supported <see cref="CpuBoostMode"/>, adopts and persists them as the initial
-    /// Device values in one shot. If either side cannot be read or does not map to a supported mode,
-    /// this does not invent a fallback, does not persist anything, and does not normalize the
-    /// value -- CPU Boost is simply left uninitialized (null) for a later startup to try again.
-    /// Called only while already holding <see cref="_mutationSync"/>.</summary>
-    private void TryBootstrapFromWindows(ProfileDocument document)
+    /// <summary>Establishes a complete (concrete AC and concrete DC) baseline from
+    /// <paramref name="previous"/>, reading Windows only for whichever side(s) are not already
+    /// known -- an already-persisted side is preserved, never silently re-adopted from Windows.
+    /// Fails (returns <see langword="false"/>) without inventing a value if a needed side cannot be
+    /// read as a known/supported <see cref="CpuBoostMode"/>: initialization is left incomplete for a
+    /// later attempt (current product policy sections 3.2/3.3).</summary>
+    private bool TryCompleteBaseline(DeviceCpuBoostSettings? previous, out DeviceCpuBoostSettings baseline, out CpuBoostSystemState current)
     {
-        var current = _powerPolicy.Read();
-        if (!current.Succeeded || current.Ac.Status != CpuBoostReadStatus.Known || current.Dc.Status != CpuBoostReadStatus.Known)
+        current = default;
+        var ac = previous?.Ac;
+        var dc = previous?.Dc;
+        if (ac is null || dc is null)
         {
-            AppLog.Warn("Profiles.CpuBoost", "CPU Boost first-run bootstrap could not read a known Windows AC/DC value; CPU Boost remains uninitialized.", null,
+            current = _powerPolicy.Read();
+            if (ac is null)
+            {
+                if (!current.Succeeded || current.Ac.Status != CpuBoostReadStatus.Known || current.Ac.Mode is not { } acMode)
+                {
+                    baseline = null!;
+                    return false;
+                }
+                ac = acMode;
+            }
+            if (dc is null)
+            {
+                if (!current.Succeeded || current.Dc.Status != CpuBoostReadStatus.Known || current.Dc.Mode is not { } dcMode)
+                {
+                    baseline = null!;
+                    return false;
+                }
+                dc = dcMode;
+            }
+        }
+        // Device CPU Boost Toggle addendum section 3: an uninitialized baseline defaults to ON, so
+        // completion never changes the effective setting on first initialization.
+        baseline = new DeviceCpuBoostSettings { Enabled = previous?.Enabled ?? true, Ac = ac, Dc = dc };
+        return true;
+    }
+
+    /// <summary>Completes and persists a baseline (missing entirely, or an incomplete legacy/partial
+    /// document) from Windows in one shot. If a needed side cannot be read as a known/supported
+    /// <see cref="CpuBoostMode"/>, this does not invent a fallback, does not persist anything, and
+    /// does not normalize the value -- CPU Boost is simply left uninitialized/incomplete for a later
+    /// startup to try again. Called only while already holding <see cref="_mutationSync"/>.</summary>
+    private void TryBootstrapFromWindows(ProfileDocument document, DeviceCpuBoostSettings? previousCpuBoost)
+    {
+        if (!TryCompleteBaseline(previousCpuBoost, out var baseline, out var current))
+        {
+            AppLog.Warn("Profiles.CpuBoost", "CPU Boost bootstrap could not read a known Windows AC/DC value; CPU Boost remains uninitialized.", null,
                 ("AcStatus", current.Ac.Status), ("DcStatus", current.Dc.Status));
-            UpdateSnapshot(current, null, null, enabled: false, current.Succeeded ? null : current.FailureMessage);
+            UpdateSnapshot(current, previousCpuBoost?.Ac, previousCpuBoost?.Dc, enabled: false, current.Succeeded ? null : current.FailureMessage);
             return;
         }
 
-        // Device CPU Boost Toggle addendum section 3: initial Enabled = ON, so the newly adopted
-        // Windows values become the Addon's initial Device configuration without changing the
-        // effective setting on first initialization.
-        var bootstrapped = new DeviceCpuBoostSettings { Enabled = true, Ac = current.Ac.Mode, Dc = current.Dc.Mode };
         var updatedDocument = document with
         {
             Device = document.Device with
             {
-                Performance = document.Device.Performance with { CpuBoost = bootstrapped }
+                Performance = document.Device.Performance with { CpuBoost = baseline }
             }
         };
 
@@ -182,8 +220,8 @@ internal sealed class CpuBoostRuntime
         }
         catch (Exception exception)
         {
-            AppLog.Error("Profiles.CpuBoost", "CPU Boost first-run bootstrap persistence failed; CPU Boost remains uninitialized.", exception);
-            UpdateSnapshot(current, null, null, enabled: false, exception.Message);
+            AppLog.Error("Profiles.CpuBoost", "CPU Boost bootstrap persistence failed; CPU Boost remains uninitialized.", exception);
+            UpdateSnapshot(current, previousCpuBoost?.Ac, previousCpuBoost?.Dc, enabled: false, exception.Message);
             return;
         }
 
@@ -192,8 +230,8 @@ internal sealed class CpuBoostRuntime
             _document = updatedDocument;
             _persistenceWritable = true;
         }
-        AppLog.Info("Profiles.CpuBoost", "CPU Boost first-run bootstrap adopted the current Windows values.", ("Ac", current.Ac.Mode), ("Dc", current.Dc.Mode));
-        UpdateSnapshot(current, current.Ac.Mode, current.Dc.Mode, enabled: true);
+        AppLog.Info("Profiles.CpuBoost", "CPU Boost bootstrap adopted the current Windows values.", ("Ac", baseline.Ac), ("Dc", baseline.Dc));
+        UpdateSnapshot(_powerPolicy.Read(), baseline.Ac, baseline.Dc, baseline.Enabled);
     }
 
     /// <summary>Sets the persisted/desired AC CPU Boost mode and applies it to Windows. DC is left
@@ -227,11 +265,19 @@ internal sealed class CpuBoostRuntime
             }
 
             // An explicit user mutation (AC/DC or the Enabled toggle itself) is itself a form of
-            // initialization: if no CpuBoost value existed yet (e.g. first-run bootstrap could not
-            // read a known Windows value), the freshly-created value defaults to Enabled=true, same
-            // as a successful bootstrap -- never a silently-inert Enabled=false the user never chose.
-            var previousCpuBoost = previousDocument.Device.Performance.CpuBoost ?? new DeviceCpuBoostSettings { Enabled = true };
-            var updatedCpuBoost = mutateAc ? previousCpuBoost with { Ac = mode } : previousCpuBoost with { Dc = mode };
+            // initialization: a missing or incomplete baseline is completed from Windows first (the
+            // single-side mutation can never construct/persist an Enabled=true document with a null
+            // other side -- current product policy section 3.2), and a freshly-created value defaults
+            // to Enabled=true, same as a successful bootstrap -- never a silently-inert Enabled=false
+            // the user never chose. If the baseline cannot be completed (a needed Windows side is not
+            // a known/supported value), nothing is persisted and no Windows write is attempted
+            // (section 3.3).
+            if (!TryCompleteBaseline(previousDocument.Device.Performance.CpuBoost, out var baseline, out _))
+            {
+                AppLog.Warn("Profiles.CpuBoost", "CPU Boost mutation could not establish a complete baseline from Windows; nothing was persisted.", null, ("Side", mutateAc ? "AC" : "DC"));
+                return new CpuBoostMutationResult(CpuBoostMutationOutcome.PersistenceFailed, "CPU Boost could not be initialized from Windows.");
+            }
+            var updatedCpuBoost = mutateAc ? baseline with { Ac = mode } : baseline with { Dc = mode };
             var updatedPerformance = previousDocument.Device.Performance with { CpuBoost = updatedCpuBoost };
             var updatedDevice = previousDocument.Device with { Performance = updatedPerformance };
             var updatedDocument = previousDocument with { Device = updatedDevice };
@@ -309,14 +355,12 @@ internal sealed class CpuBoostRuntime
 
             if (enabled && (previousCpuBoost?.Ac is null || previousCpuBoost.Dc is null))
             {
-                // Turning ON an uninitialized (or partially-initialized) Device CPU Boost must first
-                // obtain concrete AC/DC values -- never commit an Enabled=true document with a null
-                // side. If Windows cannot currently be read, leave CPU Boost exactly as uninitialized
-                // as it already was, so a later attempt (bootstrap or another Enable) can still try
-                // again -- this must never permanently bypass TryBootstrapFromWindows.
-                var current = _powerPolicy.Read();
-                if (!current.Succeeded || current.Ac.Status != CpuBoostReadStatus.Known || current.Ac.Mode is not { } acMode
-                    || current.Dc.Status != CpuBoostReadStatus.Known || current.Dc.Mode is not { } dcMode)
+                // Turning ON an uninitialized (or incomplete-baseline) Device CPU Boost must first
+                // obtain a complete AC/DC baseline -- never commit an Enabled=true document with a
+                // null side. If Windows cannot currently be read, leave CPU Boost exactly as
+                // uninitialized as it already was, so a later attempt (bootstrap or another Enable)
+                // can still try again -- this must never permanently bypass TryBootstrapFromWindows.
+                if (!TryCompleteBaseline(previousCpuBoost, out var baseline, out var current))
                 {
                     AppLog.Warn("Profiles.CpuBoost", "Device CPU Boost could not be enabled: Windows AC/DC could not be read as known values.", null,
                         ("AcStatus", current.Ac.Status), ("DcStatus", current.Dc.Status));
@@ -325,7 +369,7 @@ internal sealed class CpuBoostRuntime
                     return new CpuBoostMutationResult(CpuBoostMutationOutcome.ApplyFailed, "CPU Boost could not be initialized from Windows.");
                 }
 
-                previousCpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = acMode, Dc = dcMode };
+                previousCpuBoost = baseline;
             }
 
             var updatedCpuBoost = (previousCpuBoost ?? new DeviceCpuBoostSettings()) with { Enabled = enabled };
@@ -375,20 +419,11 @@ internal sealed class CpuBoostRuntime
         }
     }
 
-    /// <summary>Reads the current Windows state and -- only for the non-null side(s) supplied --
-    /// applies the desired mode. Never writes an unmanaged (null) side, and never turns a read of
-    /// an unmanaged side into a persisted value (work order sections 6/9/16).</summary>
-    private void ReconcileWindows(CpuBoostMode? desiredAc, CpuBoostMode? desiredDc, string contextLabel)
+    /// <summary>Applies a complete (concrete AC and DC) saved baseline to Windows and refreshes the
+    /// snapshot. Only reached with both a complete baseline and Device CPU Boost Enabled -- see the
+    /// incomplete-baseline and Enabled checks in <see cref="StartupReconcile"/> above.</summary>
+    private void ReconcileWindows(CpuBoostMode desiredAc, CpuBoostMode desiredDc, string contextLabel)
     {
-        // Only reached with Device CPU Boost Enabled -- see StartupReconcile's Enabled check above.
-        if (desiredAc is null && desiredDc is null)
-        {
-            var currentOnly = _powerPolicy.Read();
-            UpdateSnapshot(currentOnly, desiredAc, desiredDc, enabled: true);
-            AppLog.Debug("Profiles.CpuBoost", "CPU Boost is fully unmanaged; Windows left untouched.", ("Context", contextLabel));
-            return;
-        }
-
         var applyResult = _powerPolicy.Apply(desiredAc, desiredDc);
         if (!applyResult.Succeeded)
             AppLog.Warn("Profiles.CpuBoost", "CPU Boost reconcile apply failed for at least one side.", null,
