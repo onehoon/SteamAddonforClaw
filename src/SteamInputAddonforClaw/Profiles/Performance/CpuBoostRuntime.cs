@@ -82,23 +82,33 @@ internal sealed class CpuBoostRuntime
     /// has no desired CPU Boost state to apply, and this method never treats "unreliable" the same
     /// as "no preference" by writing anything on their behalf (work order section 13). One
     /// reconciliation attempt only -- no retry loop (section 14).
+    ///
+    /// Holds the same <see cref="_mutationSync"/> gate as <see cref="Mutate"/> for its entire
+    /// duration: without this, a mutation that starts (and finishes) while startup reconcile is
+    /// still applying a stale captured value could have its newer value clobbered when the slower
+    /// startup reconcile applies afterward. Serializing against the one concrete mutation gate
+    /// guarantees a mutation can only ever run strictly before or strictly after startup reconcile,
+    /// never interleaved with it.
     /// </summary>
     internal void StartupReconcile()
     {
-        var loadResult = _profileStore.Load();
-        lock (_sync)
+        lock (_mutationSync)
         {
-            _document = loadResult.Document;
-            _persistenceWritable = loadResult.CanSafelyReplace;
+            var loadResult = _profileStore.Load();
+            lock (_sync)
+            {
+                _document = loadResult.Document;
+                _persistenceWritable = loadResult.CanSafelyReplace;
+            }
+
+            AppLog.Debug("Profiles.CpuBoost", "CPU Boost startup reconcile started.", ("ProfileStatus", loadResult.Status));
+
+            var desired = loadResult.Status == ProfileLoadStatus.Loaded
+                ? loadResult.Document.Device.Performance.CpuBoost
+                : null;
+
+            ReconcileWindows(desired?.Ac, desired?.Dc, contextLabel: "startup reconcile");
         }
-
-        AppLog.Debug("Profiles.CpuBoost", "CPU Boost startup reconcile started.", ("ProfileStatus", loadResult.Status));
-
-        var desired = loadResult.Status == ProfileLoadStatus.Loaded
-            ? loadResult.Document.Device.Performance.CpuBoost
-            : null;
-
-        ReconcileWindows(desired?.Ac, desired?.Dc, contextLabel: "startup reconcile");
     }
 
     /// <summary>Sets the persisted/desired AC CPU Boost mode and applies it to Windows. DC is left

@@ -16,11 +16,27 @@ internal sealed class FakeCpuBoostPowerPolicy : ICpuBoostPowerPolicy
     public bool FailNextApply { get; set; }
     public bool FailRead { get; set; }
 
+    /// <summary>Invoked synchronously at the start of every <see cref="Apply"/> call, before any
+    /// gate wait -- lets a test know precisely when a caller has entered Apply.</summary>
+    public Action? OnApplyEntered { get; set; }
+
+    /// <summary>When set, the next <see cref="Apply"/> call blocks on this gate before doing
+    /// anything else, then clears the field so only that one call blocks.</summary>
+    public ManualResetEventSlim? ApplyGate { get; set; }
+
     public CpuBoostSystemState Read() =>
         FailRead ? CpuBoostSystemState.Failure("simulated read failure") : new CpuBoostSystemState(true, Ac, Dc, null);
 
     public CpuBoostApplyResult Apply(CpuBoostMode? ac, CpuBoostMode? dc)
     {
+        OnApplyEntered?.Invoke();
+        var gate = ApplyGate;
+        if (gate is not null)
+        {
+            ApplyGate = null;
+            gate.Wait();
+        }
+
         if (FailNextApply)
         {
             FailNextApply = false;
@@ -453,6 +469,45 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         Assert.False(result.AcSucceeded);
         Assert.False(result.DcSucceeded);
         Assert.False(result.Succeeded);
+    }
+
+    // ---- Startup reconcile must not clobber a newer mutation that lands while it is applying ----
+
+    [Fact]
+    public async Task StartupReconcile_BlockedMidApply_DoesNotOverwriteANewerConcurrentMutation()
+    {
+        // Seed a persisted managed AC value for startup reconcile to reapply.
+        var seedStore = new ProfileStore(ProfilesPath);
+        var seedRuntime = new CpuBoostRuntime(seedStore, new FakeCpuBoostPowerPolicy());
+        seedRuntime.StartupReconcile();
+        seedRuntime.SetDeviceCpuBoostAc(CpuBoostMode.Enabled);
+
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var startupEnteredApply = new ManualResetEventSlim(false);
+        var releaseStartupApply = new ManualResetEventSlim(false);
+        backend.OnApplyEntered = () => startupEnteredApply.Set();
+        backend.ApplyGate = releaseStartupApply;
+
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        var startupTask = Task.Run(() => runtime.StartupReconcile());
+        // Deterministic: StartupReconcile holds _mutationSync and is blocked inside Apply(Enabled,
+        // null) once this returns, so the mutation below is guaranteed to block acquiring the same
+        // gate rather than racing to complete first.
+        startupEnteredApply.Wait();
+
+        var mutationTask = Task.Run(() => runtime.SetDeviceCpuBoostAc(CpuBoostMode.Aggressive));
+
+        releaseStartupApply.Set();
+        await startupTask;
+        var mutationResult = await mutationTask;
+
+        Assert.True(mutationResult.Succeeded);
+
+        var loaded = store.Load();
+        Assert.Equal(CpuBoostMode.Aggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(CpuBoostSideReading.Known(CpuBoostMode.Aggressive), backend.Ac);
     }
 
     // ---- Concurrent AC/DC mutations must not lose either change ----
