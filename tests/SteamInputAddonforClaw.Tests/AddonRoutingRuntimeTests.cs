@@ -107,24 +107,37 @@ public sealed class AddonRoutingRuntimeTests
         Assert.Equal(1, starts);
     }
 
-    [Fact]
-    public async Task Xbox360_publisher_start_failure_detaches_only_xbox360_and_never_resumes_deck()
+    [Theory]
+    [InlineData((int)USBDeviceDetachResult.Success)]
+    [InlineData((int)USBDeviceDetachResult.RetryableFailure)]
+    public async Task Xbox360_publisher_start_failure_detaches_only_xbox360_and_preserves_cleanup_result(int detachResultValue)
     {
         var trace = new List<string>();
+        var snapshot = new FakeSnapshot();
+        var detachResult = (USBDeviceDetachResult)detachResultValue;
         var result = await AddonRoutingRuntime.EnterXbox360PresentationCoreAsync(
-            new FakeSnapshot(),
+            snapshot,
             () => { trace.Add("DeckPause"); return Task.FromResult(true); },
             (out USBDeviceAttachmentState state) => { trace.Add("Query"); state = USBDeviceAttachmentState.Detached; return true; },
             () => { trace.Add("Attach"); return USBDeviceAttachResult.Success; },
-            () => { trace.Add("Detach"); return USBDeviceDetachResult.Success; },
+            () => { trace.Add("Detach"); return detachResult; },
             _ => true,
             null,
-            _ => trace.Add("Fault"),
+            _ => trace.Add("UnexpectedFault"),
             CancellationToken.None,
-            createPublisher: () => throw new InvalidOperationException("publisher start failed"));
+            createPublisher: () =>
+            {
+                var publisher = new CanonicalXbox360InputPublisher(snapshot, _ => true, fault: _ => { });
+                publisher.WorkerThreadStartOverrideForTests = _ =>
+                    throw new InvalidOperationException("publisher start failed");
+                return publisher;
+            });
 
         Assert.Null(result.Publisher);
-        Assert.Equal(["DeckPause", "Query", "Attach", "Detach", "Fault"], trace);
+        Assert.Contains("Xbox360PublisherStartFailed:InvalidOperationException", result.FailureReason);
+        Assert.Contains($"Detach={detachResult}", result.FailureReason);
+        Assert.Equal(["DeckPause", "Query", "Attach", "Detach"], trace);
+        Assert.DoesNotContain("UnexpectedFault", trace);
     }
 
     private static async Task WaitForAsync(Func<bool> condition)

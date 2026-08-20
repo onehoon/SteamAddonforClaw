@@ -203,7 +203,6 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             setState: _viiperRuntime.SetXbox360State,
             ticks: null,
             publisherFault: exception => _ = HandleXbox360PublisherFaultAsync(exception),
-            createPublisher: () => new CanonicalXbox360InputPublisher(_composition.ControllerStateSource, _viiperRuntime!.SetXbox360State, fault: exception => _ = HandleXbox360PublisherFaultAsync(exception)),
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
         if (entered.Publisher is not null)
@@ -212,7 +211,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             return true;
         }
 
-        await FailClosedForXbox360PresentationAsync("Xbox360PresentationEntryFailed").ConfigureAwait(false);
+        await FailClosedForXbox360PresentationAsync(entered.FailureReason ?? "Xbox360PresentationEntryFailed").ConfigureAwait(false);
         return false;
     }
 
@@ -239,7 +238,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     }
 
     internal delegate bool Xbox360AttachmentQuery(out USBDeviceAttachmentState state);
-    internal sealed record Xbox360PresentationEntryResult(CanonicalXbox360InputPublisher? Publisher);
+    internal sealed record Xbox360PresentationEntryResult(CanonicalXbox360InputPublisher? Publisher, string? FailureReason = null);
 
     // Test seam for deterministic orchestration tests. Production supplies the real Deck pause,
     // VIIPER attachment/state operations, and publisher fault path above; this method adds no
@@ -275,9 +274,16 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         }
         catch (Exception exception)
         {
-            try { detach(); } catch { }
-            publisherFault(exception);
-            return new(null);
+            string cleanup;
+            try
+            {
+                cleanup = $"Detach={detach()}";
+            }
+            catch (Exception detachException)
+            {
+                cleanup = $"DetachThrew={detachException.GetType().Name}";
+            }
+            return new(null, $"Xbox360PublisherStartFailed:{exception.GetType().Name};{cleanup}");
         }
     }
 
