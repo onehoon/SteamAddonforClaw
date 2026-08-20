@@ -48,11 +48,11 @@ internal interface ICanonicalViiperNativeApi
     bool RemoveSteamDeckDevice(nuint deviceHandle);
     SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle);
 
-    // Canonical typed Xbox360 surface. The persistent runtime creates one detached-ready logical
-    // handle, but PR2b does not attach, publish, or bind rumble/Game Bar behavior (see
-    // docs/VIIPER_MIGRATION_TODO.md SD7, still PLANNED). Buttons/D-pad/sticks/triggers only: no
-    // rumble callback is bound in this PR -- see Xbox360DeviceState/Xbox360DeviceStateMapper for
-    // the state this typed API accepts, which already carries no rumble/feedback fields.
+    // Canonical typed Xbox360 surface. The process-lifetime runtime creates one detached-ready
+    // logical handle. The current Game Bar presentation path may classified-attach it and publish
+    // typed Xbox360 state while an eligible outer Steam route is active. This interface binds the
+    // ABI surface only; presentation policy remains in AddonRoutingRuntime. Buttons/D-pad/sticks/
+    // triggers are supported here; no Xbox360 rumble callback is currently bound by the Addon.
     bool CreateXbox360Device(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct, byte xinputSubType);
     bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state);
     bool RemoveXbox360Device(nuint deviceHandle);
