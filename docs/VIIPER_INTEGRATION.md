@@ -156,6 +156,23 @@ Public teardown waits outside the canonical native lifecycle lock. Unknown
 attachment or removal outcomes fail closed and preserve recovery evidence for a
 later explicit reconciliation.
 
+**PR2a (foundation only, not yet production-wired):** the process/runtime-
+lifetime persistent owner described in step 1-2 above is implemented as
+`CanonicalViiperRuntime` -- one server, one caller-owned bus, one persistent
+Steam Deck logical device, and one persistent Xbox360 logical device,
+created once and left detached (`autoAttachLocalhost: false`), plus
+classified final teardown of all four resources. It is fully implemented
+and unit-tested but has **no production caller yet**: `AddonRoutingRuntime`
+does not construct or invoke it, and `CanonicalSteamDeckSession` still
+performs its own per-route `NewUSBServer`/`CreateUSBBus`/`CreateSteamDeckDevice`
+and `AttachUSBDevice`/`RemoveSteamDeckDeviceEx` exactly as described in
+step 2-7 above -- production behavior is unchanged by this PR. A follow-up
+PR will migrate `CanonicalSteamDeckSession` to borrow `CanonicalViiperRuntime`'s
+persistent Deck handle (classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx`
+per route) and wire final teardown into the real shutdown chain, landing as
+one atomic change so there is never a period where two VIIPER server/bus
+owners coexist in the same process.
+
 ## 4. Steam Deck typed ABI
 
 The pinned VIIPER revision provides:

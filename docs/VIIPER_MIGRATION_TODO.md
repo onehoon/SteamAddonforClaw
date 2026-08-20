@@ -264,6 +264,30 @@ the classified attachment surface (`AttachUSBDeviceEx`, `DetachUSBDeviceEx`,
 attached, published, or production-composed yet, and OEM1 mapping/domain
 policy is unchanged by this step. Status remains PLANNED.
 
+PR2a (foundation only): `CanonicalViiperRuntime`
+(`src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalViiperRuntime.cs`)
+implements the intended process/runtime-lifetime persistent VIIPER owner --
+one server, one caller-owned bus, one persistent Steam Deck logical device,
+and one persistent Xbox360 logical device, all created once and left
+detached (`autoAttachLocalhost: false`) -- plus classified final teardown
+(`RemoveSteamDeckDeviceEx` / `RemoveXbox360DeviceEx` / `RemoveUSBBus` /
+`CloseUSBServer`, each staged with exact
+Success/RetryableFailure/UnsafeOutcomeUnknown/Invalid handling and
+resumable retry). It is fully implemented and covered by deterministic
+tests (`CanonicalViiperRuntimeTests`), but **has no production caller in
+this PR**: nothing in `AddonRoutingRuntime`/`AddonRuntimeHost`/the MSI Claw
+composition constructs or invokes it yet, and `CanonicalSteamDeckSession`
+is unchanged -- production routing still creates/removes its own
+server/bus/Deck device on every route exactly as before this PR. Wiring
+`CanonicalViiperRuntime` into production composition and migrating
+`CanonicalSteamDeckSession` to borrow its persistent Deck handle (classified
+`AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route, no second VIIPER
+server/bus owner) is deferred to a follow-up PR (PR2b), which will land as
+one atomic change so a legacy per-route ownership path and the persistent
+owner never coexist in production. SD7 (Game Bar / typed Xbox360 route)
+remains PLANNED; this PR does not advance it and performs no Xbox360
+attach, publish, or Game Bar wiring.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains
