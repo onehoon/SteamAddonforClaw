@@ -162,20 +162,24 @@ internal sealed class CanonicalViiperRuntime
             runtime.MarkUnsafe("SteamDeckAttachmentStateQueryFailed");
             return runtime;
         }
-        if (deckAttachmentState == USBDeviceAttachmentState.OutcomeUnknown)
+        switch (deckAttachmentState)
         {
-            // Hard fail-closed boundary: OutcomeUnknown must never be followed by any destructive
-            // call (no remove, no detach, no bus/server teardown).
-            LogInitFailure("SteamDeckInitialAttachmentStateOutcomeUnknown");
-            runtime.MarkUnsafe("SteamDeckInitialAttachmentStateOutcomeUnknown");
-            return runtime;
-        }
-        if (deckAttachmentState != USBDeviceAttachmentState.Detached)
-        {
-            // Known Attached: neutral-write, then classified-detach, before removal continues.
-            LogInitFailure("SteamDeckInitialAttachmentStateNotDetached");
-            if (!runtime.TryDetachDeckIfAttached(deckAttachmentState)) return runtime;
-            return UnwindDeckThenBusServer(runtime);
+            case USBDeviceAttachmentState.Detached:
+                break; // known-safe: continue initialization below.
+            case USBDeviceAttachmentState.Attached:
+                // Known Attached: neutral-write, then classified-detach, before removal continues.
+                LogInitFailure("SteamDeckInitialAttachmentStateNotDetached");
+                if (!runtime.TryDetachDeckIfAttached(deckAttachmentState)) return runtime;
+                return UnwindDeckThenBusServer(runtime);
+            case USBDeviceAttachmentState.OutcomeUnknown:
+            default:
+                // Hard fail-closed boundary: OutcomeUnknown -- and any unrecognized/out-of-range
+                // classification -- must never be followed by any destructive call (no remove, no
+                // detach, no bus/server teardown). An unrecognized value is never treated as
+                // safely detached.
+                LogInitFailure($"SteamDeckInitialAttachmentState{(int)deckAttachmentState}");
+                runtime.MarkUnsafe($"SteamDeckInitialAttachmentState{(int)deckAttachmentState}");
+                return runtime;
         }
 
         if (!native.CreateXbox360Device(serverHandle, out var xbox360Handle, busId, autoAttachLocalhost: false,
@@ -200,17 +204,19 @@ internal sealed class CanonicalViiperRuntime
             runtime.MarkUnsafe("Xbox360AttachmentStateQueryFailed");
             return runtime;
         }
-        if (xbox360AttachmentState == USBDeviceAttachmentState.OutcomeUnknown)
+        switch (xbox360AttachmentState)
         {
-            LogInitFailure("Xbox360InitialAttachmentStateOutcomeUnknown");
-            runtime.MarkUnsafe("Xbox360InitialAttachmentStateOutcomeUnknown");
-            return runtime;
-        }
-        if (xbox360AttachmentState != USBDeviceAttachmentState.Detached)
-        {
-            LogInitFailure("Xbox360InitialAttachmentStateNotDetached");
-            if (!runtime.TryDetachXbox360IfAttached(xbox360AttachmentState)) return runtime;
-            return UnwindXbox360ThenDeckThenBusServer(runtime);
+            case USBDeviceAttachmentState.Detached:
+                break;
+            case USBDeviceAttachmentState.Attached:
+                LogInitFailure("Xbox360InitialAttachmentStateNotDetached");
+                if (!runtime.TryDetachXbox360IfAttached(xbox360AttachmentState)) return runtime;
+                return UnwindXbox360ThenDeckThenBusServer(runtime);
+            case USBDeviceAttachmentState.OutcomeUnknown:
+            default:
+                LogInitFailure($"Xbox360InitialAttachmentState{(int)xbox360AttachmentState}");
+                runtime.MarkUnsafe($"Xbox360InitialAttachmentState{(int)xbox360AttachmentState}");
+                return runtime;
         }
 
         runtime.State = CanonicalViiperRuntimeState.Ready;
@@ -285,8 +291,20 @@ internal sealed class CanonicalViiperRuntime
                 if (_deckCreated)
                 {
                     if (!TryGetAttachmentState(DeckDeviceHandle, out var deckState)) return false;
-                    if (deckState == USBDeviceAttachmentState.OutcomeUnknown) { MarkUnsafe("TeardownDeckAttachmentStateOutcomeUnknown"); return false; }
-                    if (!TryDetachDeckIfAttached(deckState)) return false;
+                    switch (deckState)
+                    {
+                        case USBDeviceAttachmentState.Detached:
+                            break;
+                        case USBDeviceAttachmentState.Attached:
+                            if (!TryDetachDeckIfAttached(deckState)) return false;
+                            break;
+                        case USBDeviceAttachmentState.OutcomeUnknown:
+                        default:
+                            // Fail closed: an unrecognized/out-of-range classification is never
+                            // treated as safely detached.
+                            MarkUnsafe($"TeardownDeckAttachmentState{(int)deckState}");
+                            return false;
+                    }
                 }
                 TeardownPhase = CanonicalViiperRuntimeTeardownPhase.Xbox360Detach;
             }
@@ -296,8 +314,18 @@ internal sealed class CanonicalViiperRuntime
                 if (_xbox360Created)
                 {
                     if (!TryGetAttachmentState(Xbox360DeviceHandle, out var xboxState)) return false;
-                    if (xboxState == USBDeviceAttachmentState.OutcomeUnknown) { MarkUnsafe("TeardownXbox360AttachmentStateOutcomeUnknown"); return false; }
-                    if (!TryDetachXbox360IfAttached(xboxState)) return false;
+                    switch (xboxState)
+                    {
+                        case USBDeviceAttachmentState.Detached:
+                            break;
+                        case USBDeviceAttachmentState.Attached:
+                            if (!TryDetachXbox360IfAttached(xboxState)) return false;
+                            break;
+                        case USBDeviceAttachmentState.OutcomeUnknown:
+                        default:
+                            MarkUnsafe($"TeardownXbox360AttachmentState{(int)xboxState}");
+                            return false;
+                    }
                 }
                 TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DeckRemove;
             }
@@ -394,7 +422,16 @@ internal sealed class CanonicalViiperRuntime
     private bool TryRemoveDeck()
     {
         var result = _native.RemoveSteamDeckDeviceEx(DeckDeviceHandle);
-        if (result == SteamDeckDeviceRemoveResult.Success) { _deckCreated = false; return true; }
+        if (result == SteamDeckDeviceRemoveResult.Success)
+        {
+            // Retire the capability at the exact successful boundary -- the fork API requires
+            // callers to stop using a typed handle after successful removal, and a stale non-zero
+            // handle alongside _deckCreated == false would be two representations of ownership.
+            _deckCreated = false;
+            DeckDeviceHandle = 0;
+            DeckLogicalDeviceId = 0;
+            return true;
+        }
         if (result == SteamDeckDeviceRemoveResult.RetryableFailure)
         {
             TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DeckRemove;
@@ -408,7 +445,13 @@ internal sealed class CanonicalViiperRuntime
     private bool TryRemoveXbox360()
     {
         var result = _native.RemoveXbox360DeviceEx(Xbox360DeviceHandle);
-        if (result == Xbox360DeviceRemoveResult.Success) { _xbox360Created = false; return true; }
+        if (result == Xbox360DeviceRemoveResult.Success)
+        {
+            _xbox360Created = false;
+            Xbox360DeviceHandle = 0;
+            Xbox360LogicalDeviceId = 0;
+            return true;
+        }
         if (result == Xbox360DeviceRemoveResult.RetryableFailure)
         {
             TeardownPhase = CanonicalViiperRuntimeTeardownPhase.Xbox360Remove;
@@ -428,12 +471,14 @@ internal sealed class CanonicalViiperRuntime
                 return false;
             }
             _busCreated = false;
+            BusId = 0;
         }
         if (!_native.CloseUSBServer(ServerHandle))
         {
             TeardownPhase = CanonicalViiperRuntimeTeardownPhase.ServerClose;
             return false;
         }
+        ServerHandle = 0;
         return true;
     }
 
