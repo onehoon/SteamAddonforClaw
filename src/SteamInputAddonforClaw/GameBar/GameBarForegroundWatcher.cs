@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 using SteamInputAddonforClaw.Diagnostics;
 
@@ -43,14 +44,7 @@ internal sealed class GameBarForegroundProbe : IGameBarForegroundProbe
             try { executable = Path.GetFileName(process.MainModule?.FileName); } catch { }
 
             string? familyName;
-            try
-            {
-                if (!TryGetPackageFamilyName(process.Handle, out familyName))
-                {
-                    return new(false, hwnd, pid, executable, Reason: "PackageIdentityUnavailable");
-                }
-            }
-            catch
+            if (!TryGetPackageFamilyName(pid, out familyName))
             {
                 return new(false, hwnd, pid, executable, Reason: "PackageIdentityUnavailable");
             }
@@ -64,19 +58,25 @@ internal sealed class GameBarForegroundProbe : IGameBarForegroundProbe
     internal static bool IsExpectedPackageFamily(string? familyName) =>
         string.Equals(familyName, PackageFamilyName, StringComparison.OrdinalIgnoreCase);
 
-    private static bool TryGetPackageFamilyName(IntPtr process, out string? familyName)
+    private static bool TryGetPackageFamilyName(uint processId, out string? familyName)
     {
         familyName = null;
+        using var process = new SafeProcessHandle(OpenProcess(ProcessQueryLimitedInformation, false, processId), ownsHandle: true);
+        if (process.IsInvalid) return false;
+
         uint length = 0;
-        var result = GetPackageFamilyName(process, ref length, null);
+        var result = GetPackageFamilyName(process.DangerousGetHandle(), ref length, null);
         if (result != ErrorInsufficientBuffer || length == 0) return false;
         var buffer = new char[length];
-        if (GetPackageFamilyName(process, ref length, buffer) != 0) return false;
+        if (GetPackageFamilyName(process.DangerousGetHandle(), ref length, buffer) != 0) return false;
         familyName = new string(buffer, 0, checked((int)length - 1));
         return true;
     }
 
+    private const uint ProcessQueryLimitedInformation = 0x1000;
     private const uint ErrorInsufficientBuffer = 122;
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
     [DllImport("user32.dll", SetLastError = true)] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern uint GetPackageFamilyName(IntPtr process, ref uint packageFamilyNameLength, char[]? packageFamilyName);
 }
