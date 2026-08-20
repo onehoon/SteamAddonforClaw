@@ -58,6 +58,7 @@ public sealed class AddonRoutingRuntimeTests
             CancellationToken.None);
 
         Assert.Null(result.Publisher);
+        Assert.Null(result.FailureReason);
         Assert.Equal(0, attachCalls);
         Assert.Equal(0, stateCalls);
     }
@@ -81,6 +82,7 @@ public sealed class AddonRoutingRuntimeTests
             CancellationToken.None);
 
         Assert.Null(result.Publisher);
+        Assert.NotNull(result.FailureReason);
         Assert.Equal(0, attachCalls);
     }
 
@@ -104,6 +106,7 @@ public sealed class AddonRoutingRuntimeTests
             CancellationToken.None);
 
         Assert.Null(result.Publisher);
+        Assert.Contains($"Xbox360Attach{attachResult}", result.FailureReason);
         Assert.Equal(1, starts);
     }
 

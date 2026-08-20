@@ -211,7 +211,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             return true;
         }
 
-        await FailClosedForXbox360PresentationAsync(entered.FailureReason ?? "Xbox360PresentationEntryFailed").ConfigureAwait(false);
+        if (entered.FailureReason is { } reason)
+            await FailClosedForXbox360PresentationAsync(reason).ConfigureAwait(false);
         return false;
     }
 
@@ -259,9 +260,10 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         if (!await pauseDeck().ConfigureAwait(false)) return new(null);
 
         if (!queryAttachment(out var attachment) || attachment != USBDeviceAttachmentState.Detached)
-            return new(null);
-        if (attach() != USBDeviceAttachResult.Success)
-            return new(null);
+            return new(null, "Xbox360AttachmentStateNotDetached");
+        var attachResult = attach();
+        if (attachResult != USBDeviceAttachResult.Success)
+            return new(null, $"Xbox360Attach{attachResult}");
 
         CanonicalXbox360InputPublisher? publisher = null;
         try
