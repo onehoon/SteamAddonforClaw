@@ -254,7 +254,10 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
         var recoverySafetyCleared = false;
         if (!_recovery.HasIncompleteRecovery && _unsafeRecoveryVersion is { } unsafeVersion &&
             _powerGate.TryCommitMutation(token, () => recoverySafetyCleared = _recoverySafety.TrySet(unsafeVersion, RecoverySafety.Safe)) && recoverySafetyCleared)
-            _unsafeRecoveryVersion = null;
+        {
+            // Preserve the owned version as evidence that the routing-fault latch belongs to
+            // this recovery failure until the complete frozen plan reaches convergence.
+        }
         AppLog.Debug("NativeMode", "NativeRecoveryVerified", ("JournalRemaining", _recovery.HasIncompleteRecovery), ("RecoverySafety", _recoverySafety.Current));
         return true;
     }

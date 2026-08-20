@@ -271,6 +271,40 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task Native_only_cleanup_preserves_owned_version_until_final_convergence()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        await using var coordinator = CreateCoordinator(devices, modeController, recoverySafety: recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.FailClosedAsync("NativeFailure"));
+        modeController.FailRestore = false;
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+
+        Assert.True(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task Ordinary_safe_runtime_fault_remains_latched_until_steam_boundary()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices), recoverySafety: recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await coordinator.FailClosedAsync("RuntimeFault");
+
+        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.Equal("RoutingFaultLatched", (await coordinator.EnterForPipelineAsync(CancellationToken.None)).Reason);
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
     public async Task Convergence_refuses_while_recovery_journal_remains()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
