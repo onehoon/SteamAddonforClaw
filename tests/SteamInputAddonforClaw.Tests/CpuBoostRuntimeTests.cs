@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
 using Xunit;
@@ -68,21 +69,257 @@ public sealed class CpuBoostRuntimeTests : IDisposable
     // ---- Unmanaged: existing Windows values are never touched ----
 
     [Fact]
-    public void StartupReconcile_BothSidesUnmanaged_ReadsWindowsAndWritesNothing()
+    public void StartupReconcile_FirstRun_AdoptsCurrentWindowsValuesAsInitialDeviceValues()
     {
+        // PR277 addendum "CPU Boost First-Run Baseline Policy": with no persisted CPU Boost value
+        // yet, the current Windows AC/DC values are read once and adopted as-is as the initial
+        // persisted Device values -- not left "unmanaged forever" as PR276 originally modeled it.
         var store = new ProfileStore(ProfilesPath);
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.EfficientEnabled) };
         var runtime = new CpuBoostRuntime(store, backend);
 
         runtime.StartupReconcile();
 
+        // Adopting the exact current values requires no additional Windows write -- they already
+        // match.
         Assert.Equal(0, backend.AcWriteCount);
         Assert.Equal(0, backend.DcWriteCount);
         Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcCurrent.Mode);
         Assert.Equal(CpuBoostMode.EfficientEnabled, runtime.Snapshot.DcCurrent.Mode);
+        Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcDesired);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, runtime.Snapshot.DcDesired);
+        Assert.True(File.Exists(ProfilesPath));
+        var loaded = store.Load();
+        Assert.Equal(CpuBoostMode.Aggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
+    }
+
+    [Fact]
+    public void StartupReconcile_FirstRun_WindowsReadFailure_DoesNotPersistOrInventAFallback()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { FailRead = true };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.False(File.Exists(ProfilesPath));
         Assert.Null(runtime.Snapshot.AcDesired);
         Assert.Null(runtime.Snapshot.DcDesired);
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+    }
+
+    [Fact]
+    public void StartupReconcile_FirstRun_UnknownWindowsValue_DoesNotPersistOrNormalize()
+    {
+        // Neither side maps to the supported 0..6 mode set -- must not invent a value, must not
+        // normalize, must not persist a partial/guessed result.
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.UnknownValue(), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
         Assert.False(File.Exists(ProfilesPath));
+        Assert.Null(runtime.Snapshot.AcDesired);
+        Assert.Null(runtime.Snapshot.DcDesired);
+    }
+
+    [Fact]
+    public void StartupReconcile_AfterFirstRun_DoesNotReplacePersistedValuesFromAFreshWindowsRead()
+    {
+        // Once a CPU Boost value is persisted, a later startup must keep using it -- Windows having
+        // since been changed by another application must never become the new app default again.
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile(); // first run: adopts Aggressive/Disabled
+
+        // Another application changes Windows in between.
+        backend.Ac = CpuBoostSideReading.Known(CpuBoostMode.EfficientEnabled);
+        backend.Dc = CpuBoostSideReading.Known(CpuBoostMode.Enabled);
+        var secondRuntime = new CpuBoostRuntime(store, backend);
+
+        secondRuntime.StartupReconcile();
+
+        Assert.Equal(CpuBoostMode.Aggressive, secondRuntime.Snapshot.AcDesired);
+        Assert.Equal(CpuBoostMode.Disabled, secondRuntime.Snapshot.DcDesired);
+    }
+
+    // ---- Device CPU Boost Toggle addendum ----
+
+    [Fact]
+    public void StartupReconcile_FirstRun_EnabledDefaultsOn()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.True(runtime.Snapshot.Enabled);
+        Assert.True(store.Load().Document.Device.Performance.CpuBoost?.Enabled);
+    }
+
+    [Fact]
+    public void StartupReconcile_Disabled_PerformsZeroWrites()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = false, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Disabled } } }
+        });
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        Assert.False(runtime.Snapshot.Enabled);
+        // Saved selections remain visible even while disabled -- OFF never nulls them out.
+        Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcDesired);
+        Assert.Equal(CpuBoostMode.Disabled, runtime.Snapshot.DcDesired);
+    }
+
+    [Fact]
+    public void SetDeviceCpuBoostEnabled_Disable_PerformsNoRestorationAndLeavesWindowsUntouched()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile(); // first-run bootstrap: Enabled=true, Ac=Aggressive, Dc=Disabled
+
+        var result = runtime.SetDeviceCpuBoostEnabled(false);
+
+        Assert.True(result.Succeeded);
+        Assert.False(store.Load().Document.Device.Performance.CpuBoost?.Enabled);
+        // Zero CPU Boost restoration writes -- current Windows values remain exactly as they were.
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    [Fact]
+    public void SetDeviceCpuBoostEnabled_ReEnable_AppliesSavedValuesNotFreshWindowsRead()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile(); // Enabled=true, Ac=Aggressive, Dc=Disabled
+        runtime.SetDeviceCpuBoostEnabled(false);
+
+        // While OFF, another tool changes Windows.
+        backend.Ac = CpuBoostSideReading.Known(CpuBoostMode.EfficientEnabled);
+        backend.Dc = CpuBoostSideReading.Known(CpuBoostMode.Enabled);
+
+        var result = runtime.SetDeviceCpuBoostEnabled(true);
+
+        Assert.True(result.Succeeded);
+        Assert.True(store.Load().Document.Device.Performance.CpuBoost?.Enabled);
+        // Applies the SAVED Aggressive/Disabled, never re-bootstrapped from the current
+        // EfficientEnabled/Enabled Windows values.
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    [Fact]
+    public void Disabling_PreservesTheSavedAcDcSelections()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        runtime.SetDeviceCpuBoostEnabled(false);
+        var reloaded = store.Load();
+
+        Assert.False(reloaded.Document.Device.Performance.CpuBoost?.Enabled);
+        Assert.Equal(CpuBoostMode.Aggressive, reloaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(CpuBoostMode.Disabled, reloaded.Document.Device.Performance.CpuBoost?.Dc);
+    }
+
+    [Fact]
+    public void Mutation_WhileDisabled_PersistsSelectionButDoesNotApplyToWindows()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = false, Ac = CpuBoostMode.Aggressive } } }
+        });
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.EfficientAggressive);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(CpuBoostMode.EfficientAggressive, store.Load().Document.Device.Performance.CpuBoost?.Ac);
+    }
+
+    [Fact]
+    public void PreToggle_Pr276Document_WithNoEnabledProperty_LoadsAsEnabledTrueAndApplies()
+    {
+        // Review fix (MAJOR): a PR276-era schema-v1 document persisted ac/dc with no enabled
+        // property at all (the property didn't exist yet). The missing property must deserialize
+        // as ON -- preserving that document's previously-active behavior -- not silently become
+        // Device CPU Boost OFF merely because this PR added the property additively.
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, "{\"schemaVersion\":1,\"device\":{\"performance\":{\"cpuBoost\":{\"ac\":\"aggressive\",\"dc\":\"disabled\"}}},\"games\":{}}");
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.True(runtime.Snapshot.Enabled);
+        Assert.Equal(1, backend.AcWriteCount);
+        Assert.Equal(1, backend.DcWriteCount);
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    [Fact]
+    public void SetDeviceCpuBoostEnabled_TrueWithoutAnyPersistedBaseline_ReadsWindowsFirst()
+    {
+        // Review fix (MAJOR): enabling an uninitialized Device CPU Boost (first-run bootstrap never
+        // succeeded) must obtain concrete AC/DC values before committing Enabled=true -- never an
+        // enabled-but-null/null document.
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy(); // Ac/Dc default Unavailable -> bootstrap fails
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+        Assert.False(store.Load().Document.Device.Performance.CpuBoost is { Ac: not null, Dc: not null });
+
+        var result = runtime.SetDeviceCpuBoostEnabled(true);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(CpuBoostMutationOutcome.ApplyFailed, result.Outcome);
+        Assert.Null(store.Load().Document.Device.Performance.CpuBoost);
+    }
+
+    [Fact]
+    public void SetDeviceCpuBoostEnabled_TrueWithoutBaseline_AdoptsWindowsWhenReadable()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy(); // bootstrap fails at StartupReconcile time
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        // Windows becomes readable by the time the user tries to enable it.
+        backend.Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive);
+        backend.Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled);
+
+        var result = runtime.SetDeviceCpuBoostEnabled(true);
+
+        Assert.True(result.Succeeded);
+        var loaded = store.Load();
+        Assert.True(loaded.Document.Device.Performance.CpuBoost?.Enabled);
+        Assert.Equal(CpuBoostMode.Aggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(CpuBoostMode.Disabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
     }
 
     // ---- AC-only managed startup ----
@@ -93,7 +330,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var store = new ProfileStore(ProfilesPath);
         store.Save(new ProfileDocument
         {
-            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = CpuBoostMode.EfficientAggressive } } }
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.EfficientAggressive } } }
         });
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
         var runtime = new CpuBoostRuntime(store, backend);
@@ -114,7 +351,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var store = new ProfileStore(ProfilesPath);
         store.Save(new ProfileDocument
         {
-            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Dc = CpuBoostMode.Disabled } } }
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Dc = CpuBoostMode.Disabled } } }
         });
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Aggressive) };
         var runtime = new CpuBoostRuntime(store, backend);
@@ -135,7 +372,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var store = new ProfileStore(ProfilesPath);
         store.Save(new ProfileDocument
         {
-            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Disabled } } }
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Disabled } } }
         });
         var backend = new FakeCpuBoostPowerPolicy();
         var runtime = new CpuBoostRuntime(store, backend);
@@ -156,7 +393,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var store = new ProfileStore(ProfilesPath);
         store.Save(new ProfileDocument
         {
-            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = CpuBoostMode.Disabled } } }
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Disabled } } }
         });
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive) };
         var runtime = new CpuBoostRuntime(store, backend);
@@ -196,8 +433,11 @@ public sealed class CpuBoostRuntimeTests : IDisposable
     // ---- Profile load safety: NotFound ----
 
     [Fact]
-    public void StartupReconcile_NotFound_ReadOnlyNoWrites()
+    public void StartupReconcile_NotFound_BootstrapsFromWindowsAndPersists()
     {
+        // A missing profiles.json (NotFound) is CanSafelyReplace=true, so it is a legitimate
+        // first-run case just like an existing-but-empty CpuBoost value -- it must bootstrap, not
+        // stay read-only forever.
         var store = new ProfileStore(ProfilesPath);
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Enabled) };
         var runtime = new CpuBoostRuntime(store, backend);
@@ -206,7 +446,9 @@ public sealed class CpuBoostRuntimeTests : IDisposable
 
         Assert.Equal(0, backend.AcWriteCount);
         Assert.Equal(0, backend.DcWriteCount);
-        Assert.False(File.Exists(ProfilesPath));
+        Assert.True(File.Exists(ProfilesPath));
+        Assert.Equal(CpuBoostMode.Enabled, runtime.Snapshot.AcDesired);
+        Assert.Equal(CpuBoostMode.Enabled, runtime.Snapshot.DcDesired);
     }
 
     // ---- Profile load safety: Malformed ----
@@ -531,6 +773,25 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var loaded = store.Load();
         Assert.Equal(CpuBoostMode.Aggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
         Assert.Equal(CpuBoostMode.Disabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
+    }
+
+    [Fact]
+    public async Task CpuBoostRuntime_initializes_and_mutates_with_no_frontend_object_ever_constructed()
+    {
+        // PR277 headless regression (work order section 32): CPU Boost must not become something
+        // that requires WinUI. No IAddonFrontendControl/InProcessAddonFrontendControl/NamedPipe type
+        // appears anywhere in this test -- only the same CpuBoostRuntime -> ProfileStore ->
+        // ICpuBoostPowerPolicy chain the headless Runtime process itself uses.
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+        var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.Aggressive);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcDesired);
+        Assert.Equal(1, backend.AcWriteCount);
     }
 
     public void Dispose()

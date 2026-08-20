@@ -59,6 +59,7 @@ public sealed partial class MainWindow : Window
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
         SettingsContent.Initialize(_frontend, _bootstrap);
+        DeviceContent.Initialize(_frontend);
         ControllerContent.Initialize(_frontend, _bootstrap);
         CenterMButtonContent.Initialize(_bootstrap, () => WindowNative.GetWindowHandle(this));
         ControllerContent.CenterMButtonRequested += (_, _) => OpenCenterMButton();
@@ -182,7 +183,10 @@ public sealed partial class MainWindow : Window
     private void ShowPage(MainNavigationPage page)
     {
         var wasVibrationTest = VibrationTestContent.Visibility == Visibility.Visible;
+        var wasDevice = DeviceContent.Visibility == Visibility.Visible;
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
+        DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
+        ProfileContent.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
         ControllerContent.Visibility = page == MainNavigationPage.Controller ? Visibility.Visible : Visibility.Collapsed;
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
@@ -195,6 +199,8 @@ public sealed partial class MainWindow : Window
         // the user leaves.
         if (page == MainNavigationPage.VibrationTest) VibrationTestContent.Activate();
         else if (wasVibrationTest) VibrationTestContent.Deactivate();
+        if (page == MainNavigationPage.Device) DeviceContent.Activate();
+        else if (wasDevice) DeviceContent.Deactivate();
     }
 
     private async Task RefreshSystemStatusAsync()

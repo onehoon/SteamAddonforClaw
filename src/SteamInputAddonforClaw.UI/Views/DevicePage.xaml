@@ -1,0 +1,41 @@
+<UserControl
+    x:Class="SteamInputAddonforClaw.Views.DevicePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
+    <ScrollViewer Padding="32">
+        <StackPanel Spacing="16">
+            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Device" />
+
+            <InfoBar x:Name="CpuBoostInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
+
+            <ctcontrols:SettingsExpander
+                x:Name="CpuBoostExpander"
+                Header="CPU Boost"
+                Description="Processor performance boost mode."
+                IsExpanded="True">
+                <ToggleSwitch
+                    x:Name="CpuBoostEnabledToggleSwitch"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="CpuBoostEnabledToggleSwitch_Toggled" />
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard Header="Plugged in">
+                        <ComboBox
+                            x:Name="CpuBoostAcComboBox"
+                            MinWidth="220"
+                            DisplayMemberPath="Label"
+                            SelectionChanged="CpuBoostAcComboBox_SelectionChanged" />
+                    </ctcontrols:SettingsCard>
+                    <ctcontrols:SettingsCard Header="On battery">
+                        <ComboBox
+                            x:Name="CpuBoostDcComboBox"
+                            MinWidth="220"
+                            DisplayMemberPath="Label"
+                            SelectionChanged="CpuBoostDcComboBox_SelectionChanged" />
+                    </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

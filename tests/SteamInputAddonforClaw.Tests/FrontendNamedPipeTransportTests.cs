@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text.Json;
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.FrontendTransport;
@@ -58,6 +59,46 @@ public sealed class FrontendNamedPipeTransportTests
             Assert.Equal(fake.VibrationResult, await client.RunVibrationTestAsync(command));
         Assert.Equal(fake.VibrationResult, await client.CloseVibrationTestSessionAsync());
         Assert.Equal(Enum.GetValues<FrontendVibrationTestCommand>(), fake.VibrationCommands);
+    }
+
+    [Fact]
+    public async Task CPU_Boost_operations_round_trip_through_the_named_pipe()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        Assert.Equal(fake.CpuBoostSnapshot, await client.CaptureCpuBoostAsync());
+        Assert.Equal(fake.CpuBoostMutationResult, await client.SetDeviceCpuBoostAcAsync(CpuBoostMode.EfficientAggressive));
+        Assert.Equal(CpuBoostMode.EfficientAggressive, fake.LastAcMode);
+        Assert.Null(fake.LastDcMode);
+        Assert.Equal(fake.CpuBoostMutationResult, await client.SetDeviceCpuBoostDcAsync(CpuBoostMode.Disabled));
+        Assert.Equal(CpuBoostMode.Disabled, fake.LastDcMode);
+        Assert.Equal(fake.CpuBoostMutationResult, await client.SetDeviceCpuBoostEnabledAsync(false));
+        Assert.Equal(false, fake.LastEnabled);
+    }
+
+    [Theory]
+    [InlineData(CpuBoostMode.Disabled)]
+    [InlineData(CpuBoostMode.Enabled)]
+    [InlineData(CpuBoostMode.Aggressive)]
+    [InlineData(CpuBoostMode.EfficientEnabled)]
+    [InlineData(CpuBoostMode.EfficientAggressive)]
+    [InlineData(CpuBoostMode.AggressiveAtGuaranteed)]
+    [InlineData(CpuBoostMode.EfficientAggressiveAtGuaranteed)]
+    public async Task All_seven_CpuBoostMode_values_round_trip_through_the_named_pipe(CpuBoostMode mode)
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        await client.SetDeviceCpuBoostAcAsync(mode);
+        Assert.Equal(mode, fake.LastAcMode);
+
+        await client.SetDeviceCpuBoostDcAsync(mode);
+        Assert.Equal(mode, fake.LastDcMode);
     }
 
     [Fact]
@@ -996,6 +1037,19 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken t = default) { TotalCalls++; VibrationCommands.Add(command); return Task.FromResult(VibrationResult); }
         public Task<FrontendVibrationTestResult> OpenVibrationTestSessionAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(VibrationResult); }
         public Task<FrontendVibrationTestResult> CloseVibrationTestSessionAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(VibrationResult); }
+        public FrontendCpuBoostSnapshot CpuBoostSnapshot { get; } = new(
+            new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, null),
+            new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, null),
+            true, true, null);
+        public FrontendCpuBoostMutationResult CpuBoostMutationResult { get; }
+        public CpuBoostMode? LastAcMode { get; private set; }
+        public CpuBoostMode? LastDcMode { get; private set; }
+        public bool? LastEnabled { get; private set; }
+        public RecordingFrontendControl() => CpuBoostMutationResult = new(FrontendCpuBoostMutationOutcome.Succeeded, null, CpuBoostSnapshot);
+        public Task<FrontendCpuBoostSnapshot> CaptureCpuBoostAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(CpuBoostSnapshot); }
+        public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastAcMode = mode; return Task.FromResult(CpuBoostMutationResult); }
+        public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastDcMode = mode; return Task.FromResult(CpuBoostMutationResult); }
+        public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastEnabled = enabled; return Task.FromResult(CpuBoostMutationResult); }
     }
 
     private sealed class PartialReadStream : MemoryStream

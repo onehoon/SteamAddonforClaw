@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+
 namespace SteamInputAddonforClaw.Profiles.Performance;
 
 /// <summary>One side (AC or DC) of a Windows CPU Boost read: either a known/mapped

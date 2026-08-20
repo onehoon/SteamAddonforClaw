@@ -23,9 +23,14 @@
                     <SymbolIcon Symbol="Home" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="How to Use" Tag="HowToUse">
+            <NavigationViewItem Content="Device" Tag="Device">
                 <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Help" />
+                    <SymbolIcon Symbol="AllApps" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem Content="Profile" Tag="Profile">
+                <NavigationViewItem.Icon>
+                    <SymbolIcon Symbol="Contact" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Content="Controller" Tag="Controller">
@@ -33,10 +38,19 @@
                     <SymbolIcon Symbol="Repair" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem Content="How to Use" Tag="HowToUse">
+                <NavigationViewItem.Icon>
+                    <SymbolIcon Symbol="Help" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
         </NavigationView.MenuItems>
 
         <Grid>
             <views:StatusPage x:Name="StatusContent" />
+
+            <views:DevicePage x:Name="DeviceContent" Visibility="Collapsed" />
+
+            <views:ProfilePage x:Name="ProfileContent" Visibility="Collapsed" />
 
             <views:HowToUsePage x:Name="HowToUseContent" Visibility="Collapsed" />
 
