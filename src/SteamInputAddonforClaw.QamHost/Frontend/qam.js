@@ -134,10 +134,11 @@
   }
 
   // Purpose-built, bounded walker for the specific React node shapes Steam exposes for QAM: plain
-  // React elements (props.children) and Fiber-like nodes (child/sibling). Not a generic object
+  // React elements and Fiber-like nodes. Not a generic object
   // graph crawler -- it only descends through these four named links, with a visited set and a
   // hard node budget so it can never loop or blow up on a large/cyclic tree.
   const REACT_WALK_NODE_BUDGET = 4000;
+  const REACT_WALK_KEYS = ["props", "children", "child", "sibling"];
 
   function findReactNode(root, predicate) {
     const visited = new Set();
@@ -152,24 +153,34 @@
       budget--;
 
       if (Array.isArray(node)) {
-        for (const child of node) stack.push(child);
+        for (let index = node.length - 1; index >= 0; index--) {
+          stack.push(node[index]);
+        }
         continue;
       }
 
-      if (predicate(node)) return node;
+      if (predicate(node)) {
+        return { node, visited: visited.size, budgetExhausted: false };
+      }
 
-      const children = node.props && node.props.children;
-      if (children != null) stack.push(children);
-      if (node.child != null) stack.push(node.child);
-      if (node.sibling != null) stack.push(node.sibling);
+      for (let index = REACT_WALK_KEYS.length - 1; index >= 0; index--) {
+        const next = node[REACT_WALK_KEYS[index]];
+        if (next != null) stack.push(next);
+      }
     }
 
-    return null;
+    return { node: null, visited: visited.size, budgetExhausted: budget === 0 && stack.length > 0 };
   }
 
   function findTabsPropOwner(node) {
     return findReactNode(node, (candidate) =>
       candidate.props && Array.isArray(candidate.props.tabs));
+  }
+
+  function preservePatchedFunctionShape(patched, original) {
+    Object.assign(patched, original);
+    patched.toString = () => Function.prototype.toString.call(original);
+    return patched;
   }
 
   // Resolves the concrete function to patch/invoke for a discovered producer node's `.type`.
@@ -188,16 +199,17 @@
   function patchTabsProducer(outerResult, React) {
     // Discovery signal: presence of the QAM lifecycle prop, nothing else. Component shape
     // (function vs. object wrapper) is handled separately below -- it is not part of discovery.
-    const node = findReactNode(
+    const producerSearch = findReactNode(
       outerResult,
       (candidate) => candidate.props?.onFocusNavDeactivated != null
     );
+    const node = producerSearch.node;
     if (!node) {
       // Review fix: distinguishes "outer renderer invoked, but the live tree did not contain the
       // expected nested producer shape" from every other silent stop below -- without this, a log
       // ending at "QAM outer renderer patched." is ambiguous between "never invoked" and "invoked
       // but nested producer missing".
-      logOnce("nestedProducerMissing", "QAM outer renderer invoked, but nested tabs producer was not found.");
+      logOnce("nestedProducerMissing", `Nested tabs producer not found. Visited=${producerSearch.visited} BudgetExhausted=${producerSearch.budgetExhausted}`);
       return false;
     }
 
@@ -222,16 +234,17 @@
     let record = state.nestedPatches.get(originalTarget);
     if (!record) {
       record = { node: null, originalType: null, patchedType: null, tabs: null };
-      const patchedTarget = function patchedTabsProducer(...args) {
+      const patchedTarget = preservePatchedFunctionShape(function patchedTabsProducer(...args) {
         const result = originalTarget.apply(this, args);
         if (!state.installed) return result;
         // Review fix: proves the patched nested producer actually rendered live, separating
         // "never invoked" from "invoked but props.tabs owner missing" below.
         logOnce("nestedProducerInvoked", "Nested tabs producer invoked.");
         try {
-          const owner = findTabsPropOwner(result);
+          const ownerSearch = findTabsPropOwner(result);
+          const owner = ownerSearch.node;
           if (!owner) {
-            logOnce("tabsOwnerMissing", "Nested tabs producer rendered, but props.tabs owner was not found.");
+            logOnce("tabsOwnerMissing", `props.tabs owner not found. Visited=${ownerSearch.visited} BudgetExhausted=${ownerSearch.budgetExhausted}`);
             return result;
           }
           record.tabs = owner.props.tabs;
@@ -246,7 +259,7 @@
           logOnce("nestedAugmentationFailed", `QAM nested augmentation failed: ${String(err)}`);
         }
         return result;
-      };
+      }, originalTarget);
 
       // Rebuild the patched `.type` in the same shape the original was found in, so React keeps
       // treating it as the same kind of type (function component vs. object wrapper).
@@ -340,6 +353,8 @@
           if (record.tabs[index]?.[TAB_MARKER]) record.tabs.splice(index, 1);
         }
       }
+      record.node = null;
+      record.tabs = null;
     }
   }
 
@@ -410,7 +425,7 @@
     for (const patch of patches) {
       const originalType = patch.originalType;
 
-      function patchedType(...args) {
+      const patchedType = preservePatchedFunctionShape(function patchedType(...args) {
         const result = originalType.apply(this, args);
         if (!state.installed) return result;
         // Review fix: proves the patched outer renderer actually ran on live Steam, separating
@@ -422,7 +437,7 @@
           logOnce("outerAugmentationFailed", `QAM outer augmentation failed: ${String(err)}`);
         }
         return result;
-      }
+      }, originalType);
 
       patch.patchedType = patchedType;
       patch.renderer.type = patchedType;

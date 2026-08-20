@@ -36,12 +36,13 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        Assert.Contains("node.props && node.props.children", source);
-        Assert.Contains("if (children != null) stack.push(children);", source);
-        Assert.Contains("if (node.child != null) stack.push(node.child);", source);
-        Assert.Contains("if (node.sibling != null) stack.push(node.sibling);", source);
+        Assert.Contains("const REACT_WALK_KEYS = [\"props\", \"children\", \"child\", \"sibling\"]", source);
+        Assert.Contains("node[REACT_WALK_KEYS[index]]", source);
         Assert.Contains("const visited = new Set();", source);
         Assert.Contains("REACT_WALK_NODE_BUDGET", source);
+        Assert.Contains("budgetExhausted", source);
+        Assert.Contains("Visited=${producerSearch.visited}", source);
+        Assert.Contains("Visited=${ownerSearch.visited}", source);
     }
 
     [Fact]
@@ -78,6 +79,22 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Nested_react_walker_preserves_depth_first_structural_order()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var findReactNodeIndex = source.IndexOf("function findReactNode(", StringComparison.Ordinal);
+        Assert.True(findReactNodeIndex >= 0);
+        var walker = source[findReactNodeIndex..];
+
+        // The LIFO stack must receive both arrays and named links in reverse order so
+        // traversal visits array elements first-to-last and props -> children -> child -> sibling.
+        Assert.Contains("for (let index = node.length - 1; index >= 0; index--)", walker);
+        Assert.Contains("for (let index = REACT_WALK_KEYS.length - 1; index >= 0; index--)", walker);
+        Assert.Contains("node[REACT_WALK_KEYS[index]]", walker);
+    }
+
+    [Fact]
     public void Nested_producer_component_shape_is_resolved_and_guarded_explicitly()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
@@ -98,9 +115,31 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         Assert.Contains("if (node.type === record.originalType) {", source);
-        Assert.Contains("if (record.node?.type === record.patchedType) {", source);
+        Assert.Contains("record = { node: null, originalType: null, patchedType: null, tabs: null }", source);
+        Assert.Contains("record.node = node;", source);
+        Assert.Contains("if (record.node?.type === record.patchedType)", source);
         Assert.Contains("record.node.type = record.originalType;", source);
+        Assert.Contains("record.tabs = owner.props.tabs;", source);
+        Assert.Contains("record.node = null;", source);
+        Assert.Contains("record.tabs = null;", source);
+        Assert.DoesNotContain("record.nodes", source);
+        Assert.DoesNotContain("record.tabs.add", source);
         Assert.Contains("state.nestedPatches ??= new Map();", source);
+    }
+
+    [Fact]
+    public void Patched_function_shape_and_supported_component_paths_are_explicit()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("function preservePatchedFunctionShape(patched, original)", source);
+        Assert.Contains("Object.assign(patched, original);", source);
+        Assert.Contains("Function.prototype.toString.call(original)", source);
+        Assert.Contains("preservePatchedFunctionShape(function patchedTabsProducer", source);
+        Assert.Contains("preservePatchedFunctionShape(function patchedType", source);
+        Assert.Contains("return { kind: \"function\", target: type };", source);
+        Assert.Contains("return { kind: \"object.render\", target: type.render };", source);
+        Assert.Contains("return { kind: \"object.type\", target: type.type };", source);
     }
 
     private static string ReadSource(params string[] parts)
