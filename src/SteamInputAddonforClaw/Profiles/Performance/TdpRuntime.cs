@@ -61,6 +61,8 @@ internal sealed class TdpRuntime : IAsyncDisposable
             lock (_sync)
             {
                 if (!_accepting) return;
+                if (invalidateHardwareCache)
+                    _invalidateHardwareCacheBeforeNextApply = true;
                 var source = _powerSource();
                 if (source is not { } currentSource)
                 {
@@ -73,8 +75,6 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 if (!forceApply && !_reconcileRequired && _lastAdmittedPowerSource == currentSource)
                     return;
 
-                if (invalidateHardwareCache)
-                    _invalidateHardwareCacheBeforeNextApply = true;
                 EnqueueSnapshotUnderLock(currentSource, tdp);
             }
         }

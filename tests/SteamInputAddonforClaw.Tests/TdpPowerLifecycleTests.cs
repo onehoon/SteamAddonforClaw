@@ -202,6 +202,27 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         Assert.Empty(transport.Operations);
     }
 
+    [Fact]
+    public async Task ResumeUnknownSourceRetainsCacheInvalidationForLaterRetry()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        var source = new FakeSource { Current = TdpPowerSource.AC }; var delay = new FakeDelay();
+        var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
+        await using var runtime = CreateRuntime(transport, () => source.Current);
+        using var watcher = CreateWatcher(runtime, source, delay);
+        watcher.ScheduleStartup(); delay.Release(); await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+        transport.Operations.Clear();
+
+        watcher.Observe(TdpPowerNotification.Suspend);
+        source.Current = null; delay.Reset(); watcher.Observe(TdpPowerNotification.ResumeAutomatic); delay.Release();
+        await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+        Assert.Empty(transport.Operations);
+
+        source.Current = TdpPowerSource.AC; delay.Reset(); watcher.Observe(TdpPowerNotification.PowerSourceChanged); delay.Release();
+        await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+        Assert.Equal(["GetAp(0)", "SetData(80,8)", "SetData(81,30)", "SetData(80,20)"], transport.Operations);
+    }
+
     private TdpRuntime CreateRuntime(FakeTransport transport, TdpPowerSource source) => CreateRuntime(transport, () => source);
     private TdpRuntime CreateRuntime(FakeTransport transport, Func<TdpPowerSource?> source) =>
         new(new ProfileStore(ProfilePath), new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport), source);
