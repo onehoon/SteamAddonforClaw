@@ -142,6 +142,45 @@ public sealed class AddonRoutingRuntimeTests
     }
 
     [Fact]
+    public async Task Unavailable_viiper_does_not_suppress_existing_residual_cleanup_boundary()
+    {
+        var status = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var runtime = CreateMsiRuntime(status, hardwareSupported: false);
+        Assert.NotNull(runtime);
+        try
+        {
+            // Model the coordinator's already-owned in-flight cleanup boundary. This is a
+            // test-only state injection; the production predicate still reads the coordinator's
+            // authoritative HasResidualSessionState property.
+            var coordinatorField = typeof(AddonRoutingRuntime).GetField("_coordinator",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            var coordinator = coordinatorField.GetValue(runtime)!;
+            var operationField = coordinator.GetType().GetField("_transitionOperationCount",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            operationField.SetValue(coordinator, 1);
+
+            var refreshCount = 0;
+            await runtime.ReconcileSafelyAsync(() => refreshCount++);
+
+            // An unavailable owner may block a brand-new forward route, but must not skip the
+            // coordinator when residual process-owned cleanup is present.
+            Assert.Equal(1, status.CaptureCalls);
+            Assert.Equal(1, refreshCount);
+        }
+        finally
+        {
+            var coordinatorField = typeof(AddonRoutingRuntime).GetField("_coordinator",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            var coordinator = coordinatorField.GetValue(runtime!)!;
+            var operationField = coordinator.GetType().GetField("_transitionOperationCount",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            operationField.SetValue(coordinator, 0);
+            Assert.True(await runtime!.ShutdownAsync());
+            await runtime.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ReconcileSafelyAsync_contains_an_unexpected_exception_and_still_refreshes_status()
     {
         var runtime = CreateMsiRuntime(new FakeStatusProvider(throwOnCapture: true));
