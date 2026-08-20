@@ -429,8 +429,22 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public async Task<FrontendClawSensorProbeSnapshot> CaptureClawSensorProbeAsync(CancellationToken cancellationToken = default)
     {
-        var session = CurrentClawSensorProbeSession();
-        if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
+        // Obtain the session AND its lifecycle token together, under the same gate
+        // BeginProcessShutdown()/Close() use to detach+dispose the coordinator: reading
+        // session.Coordinator.LifecycleCancellation outside the lock (after only checking the
+        // session reference was non-null) leaves a window where shutdown can dispose the coordinator
+        // -- and therefore the CancellationTokenSource backing LifecycleCancellation -- in between,
+        // turning an ordinary in-flight poll into an unexpected ObjectDisposedException instead of a
+        // graceful Unavailable (PR #290 re-review).
+        ClawSensorProbeSession? session;
+        CancellationToken lifecycle;
+        lock (_clawSensorProbeGate)
+        {
+            if (Volatile.Read(ref _shutdownStarted) != 0) return FrontendClawSensorProbeSnapshot.Unavailable;
+            session = _clawSensorProbe;
+            if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
+            lifecycle = session.Coordinator.LifecycleCancellation;
+        }
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -442,16 +456,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         //
         // Deliberately NOT linked to Coordinator.LifecycleCancellation: FailAsync() cancels that same
         // token as part of entering terminal failure, so a linked token here would self-cancel
-        // ShutdownReadersAndApiAsync mid-teardown and skip FinalizeAsync() -- the workflow would move
-        // to Failed without the report ever being written (PR #290 re-review). Once lifecycle
-        // cancellation has already fired (Runtime shutdown/dispose in flight), skip reconciliation
-        // entirely and report the session's last known snapshot instead of racing that teardown.
-        if (!session.Coordinator.LifecycleCancellation.IsCancellationRequested)
+        // ShutdownReadersAndApiAsync mid-teardown and skip FinalizeAsync() (PR #290 re-review, fixed
+        // at the coordinator level too). Once lifecycle cancellation has already fired (Runtime
+        // shutdown/dispose in flight), skip reconciliation entirely and report the session's last
+        // known snapshot instead of racing that teardown.
+        try
         {
-            try { await session.Coordinator.FailOnReaderFaultAsync(CancellationToken.None).ConfigureAwait(false); }
-            catch (ObjectDisposedException) when (Volatile.Read(ref _shutdownStarted) != 0) { return FrontendClawSensorProbeSnapshot.Unavailable; }
+            if (!lifecycle.IsCancellationRequested)
+                await session.Coordinator.FailOnReaderFaultAsync(CancellationToken.None).ConfigureAwait(false);
         }
+        catch (ObjectDisposedException) when (Volatile.Read(ref _shutdownStarted) != 0) { return FrontendClawSensorProbeSnapshot.Unavailable; }
 
+        if (Volatile.Read(ref _shutdownStarted) != 0) return FrontendClawSensorProbeSnapshot.Unavailable;
         return MapClawSensorProbeSnapshot(session);
     }
 

@@ -251,6 +251,38 @@ public sealed class ClawSensorProbeFrontendTests : IDisposable
     }
 
     [Fact]
+    public async Task Capture_racing_process_shutdown_never_escapes_ObjectDisposedException()
+    {
+        // PR #290 re-review: CaptureClawSensorProbeAsync now captures the session AND its lifecycle
+        // token together under _clawSensorProbeGate, the same gate BeginProcessShutdown() uses to
+        // detach the session before disposing the coordinator outside the lock. The remaining window
+        // is genuine thread-level concurrency between that lock release and the subsequent
+        // FailOnReaderFaultAsync call landing on a coordinator BeginProcessShutdown has since
+        // disposed -- not reproducible deterministically from sequential test code without an
+        // injected yield point that doesn't exist on this no-op reconciliation path. Run many
+        // concurrent Capture/BeginProcessShutdown pairs on real thread-pool threads instead: given
+        // correct code this can never fail, and across enough iterations it reliably exercises the
+        // race window that regressed in prior review rounds.
+        for (var i = 0; i < 200; i++)
+        {
+            var control = CreateControl(ClawFamilySnapshot(HardwareCompatibilityStatus.Supported));
+            await control.OpenClawSensorProbeAsync();
+
+            var capture = Task.Run(() => control.CaptureClawSensorProbeAsync());
+            var shutdown = Task.Run(control.BeginProcessShutdown);
+
+            await shutdown;
+            var exception = await Record.ExceptionAsync(() => capture);
+
+            // CaptureClawSensorProbeAsync never throws FrontendProtocolException by design (unlike
+            // Open/Start/etc, it reports Unavailable instead of a shutdown barrier exception) -- the
+            // only defect this guards against is an ObjectDisposedException (or anything else)
+            // escaping the race.
+            Assert.True(exception is null, $"Iteration {i}: expected no exception, got {exception?.GetType()}: {exception?.Message}");
+        }
+    }
+
+    [Fact]
     public void Runtime_ClawSensorProbe_code_has_no_WinUI_dependency()
     {
         // Architectural invariant: the Runtime-owned diagnostic backend must stay WinUI/XAML-free so
