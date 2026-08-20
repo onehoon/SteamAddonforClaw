@@ -12,8 +12,16 @@ internal static class AddonDataPaths
 
     internal static string LogDirectory => ResolveLogDirectory(VelopackAppPaths.RootAppDirectory);
 
+    /// <summary>Path to the Device/Profile document (see SteamInputAddonforClaw.Profiles.ProfileStore) --
+    /// a separate storage domain from <see cref="SettingsPath"/>, but the same canonical
+    /// persistent <c>-Data</c> root.</summary>
+    internal static string ProfilesPath => ResolveProfilesPath(VelopackAppPaths.RootAppDirectory);
+
     internal static string ResolveSettingsPath(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "settings.json");
+
+    internal static string ResolveProfilesPath(string rootAppDirectory) =>
+        Path.Combine(ResolveDataRoot(rootAppDirectory), "profiles.json");
 
     internal static string ResolveRecoveryJournalPath(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "recovery.json");
