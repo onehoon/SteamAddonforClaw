@@ -848,6 +848,27 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task CancelledQueuedSuspendPropagatesAndDoesNotLeakTransitionPermission()
+    {
+        var executor = new FakeExecutor { BlockNextExecute = true };
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var bridge = Create(provider, executor);
+        var reconcile = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteStarted.Task;
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var quiesce = bridge.Bridge.QuiesceForSuspendAsync(
+            DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, cancellation.Token);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => quiesce);
+
+        bridge.Bridge.CancelInFlightTransition();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reconcile);
+        Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
+    }
+
+    [Fact]
     public async Task CancelledQueuedReconcileDoesNotLeakTransitionSnapshot()
     {
         var executor = new FakeExecutor();

@@ -284,6 +284,10 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
                 ("PendingCleanup", _sessionCoordinator.PendingCleanup is not null), ("Epoch", epoch));
             return retired;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception exception)
         {
             AppLog.Error("Routing.Power", "Routing suspend teardown failed.", exception,
