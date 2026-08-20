@@ -687,6 +687,57 @@ public sealed class AddonRoutingRuntimeTests
         }
     }
 
+    [Fact]
+    public async Task Fresh_resume_converges_stale_owned_fault_before_reconcile_callback()
+    {
+        var status = new FakeStatusProvider(Snapshot(new RoutingDecision(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible)));
+        var safety = new RecoverySafetyState(RecoverySafety.Safe);
+        var runtime = AddonRoutingRuntime.Create(
+            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()), status,
+            new AddonOwnedVirtualDeviceTracker(), new RecoveryManager(new MemoryJournalStore()),
+            new PowerMutationGate(initiallyOpen: true), safety, new DefaultOem1MappingPreference(),
+            hardwareSupported: true);
+        Assert.NotNull(runtime);
+        try
+        {
+            // Keep the production runtime on the fresh Eligible path without loading a native
+            // VIIPER DLL. NativeMode preflight will stop at the empty-device boundary, but only
+            // after this test has proved that stale fault convergence ran before that preflight.
+            var viiperField = typeof(AddonRoutingRuntime).GetField("_viiperRuntime", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+#pragma warning disable SYSLIB0050 // The test needs a Ready-only owner to reach NativeMode preflight without a native DLL.
+            var viiper = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(CanonicalViiperRuntime));
+#pragma warning restore SYSLIB0050
+            typeof(CanonicalViiperRuntime).GetProperty("State", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(viiper, CanonicalViiperRuntimeState.Ready);
+            viiperField.SetValue(runtime, viiper);
+
+            var unsafeVersion = safety.Set(RecoverySafety.Unsafe);
+            var safetySession = typeof(AddonRoutingRuntime)
+                .GetField("_safetySession", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(runtime)!;
+            await ((IRoutingSafetySession)safetySession).LatchRoutingFaultAsync("OldSessionFault");
+            var nativeCoordinator = safetySession.GetType();
+            nativeCoordinator.GetField("_unsafeRecoveryVersion", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(safetySession, unsafeVersion);
+
+            // Model PowerTransitionCoordinator's completed recovery boundary.
+            safety.Set(RecoverySafety.Safe);
+
+            Assert.False(await runtime.ReconcileFreshAfterResumeAsync(CancellationToken.None));
+            Assert.Equal(RecoverySafety.Safe, safety.Current);
+            var latched = (bool)nativeCoordinator.GetField("_routingFaultLatched", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(safetySession)!;
+            Assert.False(latched);
+            Assert.Equal(1, status.CaptureCalls);
+            viiperField.SetValue(runtime, null);
+        }
+        finally
+        {
+            Assert.True(await runtime.ShutdownAsync());
+            await runtime.DisposeAsync();
+        }
+    }
+
     private static AddonRoutingRuntime? CreateMsiRuntime(ISystemStatusProvider? statusProvider = null, bool hardwareSupported = true) => AddonRoutingRuntime.Create(
         new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
         statusProvider ?? new FakeStatusProvider(),

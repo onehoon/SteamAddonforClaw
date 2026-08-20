@@ -237,10 +237,140 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
         await coordinator.FailClosedAsync("PipelineFailure");
 
+        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
         var blocked = await coordinator.EnterForPipelineAsync(CancellationToken.None);
         Assert.False(blocked.Succeeded);
         Assert.Equal("RoutingFaultLatched", blocked.Reason);
         Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task Complete_cleanup_converges_owned_unsafe_state_and_fault_latch()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        var recovery = new RecoveryManager(new MemoryJournalStore());
+        var native = new MsiClawNativeStateManager(devices, modeController);
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(
+            native, recovery, new PowerMutationGate(initiallyOpen: true), recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        var recoverySessionId = coordinator.CurrentRecoverySessionId!.Value;
+        Assert.Equal(RecoveryStatus.Success, recovery.RecordHidHideWhitelistAddition(recoverySessionId, "C:\\Addon.exe").Status);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.FailClosedAsync("PipelineFailure"));
+        modeController.FailRestore = false;
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.Equal(RecoverySafety.Unsafe, recoverySafety.Current);
+
+        Assert.Equal(RecoveryStatus.Success, recovery.CompleteHidHideWhitelistAddition(recoverySessionId, "C:\\Addon.exe").Status);
+        Assert.True(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task Native_only_cleanup_preserves_owned_version_until_final_convergence()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        await using var coordinator = CreateCoordinator(devices, modeController, recoverySafety: recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.FailClosedAsync("NativeFailure"));
+        modeController.FailRestore = false;
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+
+        Assert.True(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task Ordinary_safe_runtime_fault_remains_latched_until_steam_boundary()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices), recoverySafety: recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await coordinator.FailClosedAsync("RuntimeFault");
+
+        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.Equal("RoutingFaultLatched", (await coordinator.EnterForPipelineAsync(CancellationToken.None)).Reason);
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task Convergence_refuses_while_recovery_journal_remains()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        var recovery = new RecoveryManager(new MemoryJournalStore());
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(
+            native, recovery, new PowerMutationGate(initiallyOpen: true), recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        var sessionId = coordinator.CurrentRecoverySessionId!.Value;
+        Assert.Equal(RecoveryStatus.Success, recovery.RecordHidHideWhitelistAddition(sessionId, "C:\\Addon.exe").Status);
+        await coordinator.FailClosedAsync("PipelineFailure");
+
+        Assert.True(recovery.HasIncompleteRecovery);
+        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
+    }
+
+    [Fact]
+    public async Task Steam_session_boundary_retires_old_version_evidence_before_new_fault()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        await using var coordinator = CreateCoordinator(devices, modeController,
+            new PowerMutationGate(initiallyOpen: true), recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.FailClosedAsync("OldFailure"));
+        modeController.FailRestore = false;
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await coordinator.LatchRoutingFaultAsync("NewOrdinaryFailure");
+        await coordinator.FailClosedAsync("NewOrdinaryFailure");
+
+        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.Equal("RoutingFaultLatched",
+            (await coordinator.EnterForPipelineAsync(CancellationToken.None)).Reason);
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Convergence_accepts_newer_safe_recovery_commit_for_owned_stale_claim()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        var recovery = new RecoveryManager(new MemoryJournalStore());
+        var native = new MsiClawNativeStateManager(devices, modeController);
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(
+            native, recovery, new PowerMutationGate(initiallyOpen: true), recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        var sessionId = coordinator.CurrentRecoverySessionId!.Value;
+        Assert.Equal(RecoveryStatus.Success, recovery.RecordHidHideWhitelistAddition(sessionId, "C:\\Addon.exe").Status);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.FailClosedAsync("PipelineFailure"));
+        modeController.FailRestore = false;
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.Equal(RecoverySafety.Unsafe, recoverySafety.Current);
+
+        Assert.Equal(RecoveryStatus.Success, recovery.CompleteHidHideWhitelistAddition(sessionId, "C:\\Addon.exe").Status);
+        recoverySafety.Set(RecoverySafety.Safe);
+        Assert.True(await coordinator.ConvergeAfterRoutingCleanupAsync());
         Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
     }
 

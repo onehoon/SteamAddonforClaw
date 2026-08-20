@@ -146,6 +146,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             var rollback = await coordinator.FailClosedAsync().ConfigureAwait(false);
             if (!rollback.Succeeded)
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
+            else if (runtime is not null)
+                await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault");
         });
 
         runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator, deckStage, viiperRuntime);
@@ -394,6 +396,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             var rollback = await _coordinator.FailClosedAsync().ConfigureAwait(false);
             if (!rollback.Succeeded)
                 AppLog.Error("Routing.Runtime", "Xbox360 presentation fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
+            else
+                await TryConvergeSafetyAfterCleanupAsync("Xbox360PresentationFailClosed");
         }
         catch (Exception exception)
         {
@@ -510,13 +514,30 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
     internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() => _coordinator.CaptureTerminationSnapshot();
 
-    internal Task<bool> ReconcileFreshAfterResumeAsync(CancellationToken cancellationToken) =>
-        ShouldSkipNewForwardRouting
-            ? Task.FromResult(true)
-            : _coordinator.ReconcileFreshAfterResumeAsync(cancellationToken).AsTask();
+    internal async Task<bool> ReconcileFreshAfterResumeAsync(CancellationToken cancellationToken)
+    {
+        if (ShouldSkipNewForwardRouting)
+            return true;
 
-    internal Task<bool> RetryResidualCleanupForResumeAsync(CancellationToken cancellationToken) =>
-        _coordinator.RetryResidualCleanupForResumeAsync(cancellationToken).AsTask();
+        // PowerTransitionCoordinator has already completed residual cleanup, committed Safe,
+        // and opened the mutation gate before invoking this callback. Converge the stale routing
+        // fault before fresh forward preflight can observe it.
+        if (!_coordinator.HasResidualSessionState)
+            await TryConvergeSafetyAfterCleanupAsync("FreshResumePreReconcile").ConfigureAwait(false);
+
+        var succeeded = await _coordinator.ReconcileFreshAfterResumeAsync(cancellationToken).ConfigureAwait(false);
+        if (succeeded)
+            await TryConvergeSafetyAfterCleanupAsync("FreshResumeReconcile").ConfigureAwait(false);
+        return succeeded;
+    }
+
+    internal async Task<bool> RetryResidualCleanupForResumeAsync(CancellationToken cancellationToken)
+    {
+        var succeeded = await _coordinator.RetryResidualCleanupForResumeAsync(cancellationToken).ConfigureAwait(false);
+        if (succeeded)
+            await TryConvergeSafetyAfterCleanupAsync("ResidualCleanupRetry").ConfigureAwait(false);
+        return succeeded;
+    }
 
     internal void CancelInFlightTransition() => _coordinator.CancelInFlightTransition();
 
@@ -558,6 +579,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
                 var result = await _coordinator.ReconcileAsync(cancellationToken).ConfigureAwait(false);
                 succeeded = result.Succeeded;
+                if (result.Succeeded && _coordinator.CurrentOperationalState == RoutingOperationalState.Passive && !_coordinator.HasResidualSessionState)
+                    await TryConvergeSafetyAfterCleanupAsync("Reconcile");
                 if (!result.Succeeded)
                     AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,
                         ("Action", result.Action), ("State", result.State), ("Reason", result.Reason));
@@ -573,6 +596,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                     var rollback = await _coordinator.FailClosedAsync().ConfigureAwait(false);
                     if (!rollback.Succeeded)
                         AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback did not complete.", new InvalidOperationException(rollback.Reason));
+                    else
+                        await TryConvergeSafetyAfterCleanupAsync("ReconcileException");
                 }
                 catch (Exception rollbackException)
                 {
@@ -581,6 +606,13 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             }
         }, requestStatusRefresh).ConfigureAwait(false);
         return succeeded;
+    }
+
+    private async Task<bool> TryConvergeSafetyAfterCleanupAsync(string reason)
+    {
+        if (_safetySession is null || _coordinator.HasResidualSessionState)
+            return false;
+        return await _safetySession.ConvergeAfterRoutingCleanupAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     private bool SteamOutputReady => _viiperRuntime is { State: CanonicalViiperRuntimeState.Ready };

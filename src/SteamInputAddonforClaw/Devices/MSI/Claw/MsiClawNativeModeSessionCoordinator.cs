@@ -56,7 +56,57 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
             if (_active || _recoveryBoundaryOwned || _recovery.HasIncompleteRecovery)
                 return false;
             _routingFaultLatched = false;
+            if (_recoverySafety.Current == RecoverySafety.Safe)
+                _unsafeRecoveryVersion = null;
             AppLog.Debug("NativeMode", "RoutingFaultLatchCleared", ("Reason", "SteamSessionEnded"));
+            return true;
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<bool> ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_active || _recoveryBoundaryOwned || _recovery.HasIncompleteRecovery)
+            {
+                AppLog.Debug("NativeMode", "RoutingSafetyConvergenceDeferred",
+                    ("Active", _active), ("RecoveryBoundaryOwned", _recoveryBoundaryOwned),
+                    ("JournalRemaining", _recovery.HasIncompleteRecovery),
+                    ("RecoverySafety", _recoverySafety.Current),
+                    ("RoutingFaultLatched", _routingFaultLatched));
+                return false;
+            }
+
+            if (!_powerGate.TryAcquireCleanup(out var token) || !_powerGate.IsCurrentCleanup(token))
+                return false;
+
+            var unsafeVersion = _unsafeRecoveryVersion;
+            if (unsafeVersion is null)
+                return false;
+
+            var converged = false;
+            if (_recoverySafety.IsCurrent(unsafeVersion.Value, RecoverySafety.Unsafe))
+            {
+                var changed = false;
+                converged = _powerGate.IsOpen &&
+                    _powerGate.TryCommitMutation(token, () => changed = _recoverySafety.TrySet(unsafeVersion.Value, RecoverySafety.Safe)) && changed;
+            }
+            else if (_recoverySafety.Current == RecoverySafety.Safe)
+            {
+                // A newer authoritative recovery commit, such as resume recovery, may have
+                // superseded this coordinator's old Unsafe claim already.
+                converged = true;
+            }
+
+            if (!converged)
+                return false;
+
+            _unsafeRecoveryVersion = null;
+            _routingFaultLatched = false;
+            AppLog.Debug("NativeMode", "RoutingSafetyConverged",
+                ("RecoverySafety", _recoverySafety.Current), ("RoutingFaultLatched", _routingFaultLatched));
             return true;
         }
         finally { _gate.Release(); }
@@ -206,7 +256,10 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
         var recoverySafetyCleared = false;
         if (!_recovery.HasIncompleteRecovery && _unsafeRecoveryVersion is { } unsafeVersion &&
             _powerGate.TryCommitMutation(token, () => recoverySafetyCleared = _recoverySafety.TrySet(unsafeVersion, RecoverySafety.Safe)) && recoverySafetyCleared)
-            _unsafeRecoveryVersion = null;
+        {
+            // Preserve the owned version as evidence that the routing-fault latch belongs to
+            // this recovery failure until the complete frozen plan reaches convergence.
+        }
         AppLog.Debug("NativeMode", "NativeRecoveryVerified", ("JournalRemaining", _recovery.HasIncompleteRecovery), ("RecoverySafety", _recoverySafety.Current));
         return true;
     }
@@ -230,6 +283,9 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
 
     Task IRoutingSafetySession.FailClosedAsync(string reason, CancellationToken cancellationToken)
         => FailClosedAsync(reason, cancellationToken);
+
+    Task<bool> IRoutingSafetySession.ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken)
+        => ConvergeAfterRoutingCleanupAsync(cancellationToken);
 
     private void LatchRoutingFaultCore(string reason)
     {
