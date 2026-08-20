@@ -125,6 +125,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         long generation = 0;
         CancellationToken token = default;
         var startTimeout = false;
+        var evaluateNewSequence = false;
         var now = _clock.GetTimestamp();
         bool sequencePending;
         lock (_gate)
@@ -165,8 +166,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                         CancelPendingCore();
                         immediate = Oem1Gesture.Single;
                         immediateDeliveryEpoch = _deliveryEpoch;
-                        BeginPendingPressCore(now, out generation, out token);
-                        startTimeout = true;
+                        evaluateNewSequence = true;
                     }
                 }
                 else
@@ -177,10 +177,42 @@ internal sealed class Oem1GestureRecognizer : IDisposable
 
             }
 
+            Oem1Gesture? newImmediate = null;
+            long newImmediateDeliveryEpoch = 0;
+            if (evaluateNewSequence)
+            {
+                // The expired sequence has been settled. This same physical press is now a new
+                // sequence and must use the current mapping/domain policy.
+                var enabledForNewSequence = _doubleClickEnabled();
+                lock (_gate)
+                {
+                    if (!_disposed && !_firstPressPending)
+                    {
+                        if (enabledForNewSequence)
+                        {
+                            BeginPendingPressCore(now, out generation, out token);
+                            startTimeout = true;
+                        }
+                        else
+                        {
+                            newImmediate = Oem1Gesture.Single;
+                            newImmediateDeliveryEpoch = _deliveryEpoch;
+                        }
+                    }
+                }
+
+            }
+
             if (immediate.HasValue)
             {
                 AppLog.Debug("CenterM.Oem1", "OEM1 gesture resolved", ("Gesture", immediate.Value), ("Immediate", true));
                 DeliverGesture(immediate.Value, immediateDeliveryEpoch);
+            }
+
+            if (newImmediate.HasValue)
+            {
+                AppLog.Debug("CenterM.Oem1", "OEM1 gesture resolved", ("Gesture", newImmediate.Value), ("Immediate", true));
+                DeliverGesture(newImmediate.Value, newImmediateDeliveryEpoch);
             }
         }
         finally

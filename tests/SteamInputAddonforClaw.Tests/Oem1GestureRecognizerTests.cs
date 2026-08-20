@@ -47,6 +47,28 @@ public sealed class Oem1GestureRecognizerTests
     }
 
     [Fact]
+    public void Expired_pending_press_re_evaluates_policy_for_the_new_sequence()
+    {
+        var delay = new ControlledDelay();
+        var clock = new ControlledClock();
+        var enabled = true;
+        using var recognizer = new Oem1GestureRecognizer(
+            () => enabled,
+            TimeSpan.FromMilliseconds(200),
+            delay,
+            clock);
+        var results = Collect(recognizer);
+
+        recognizer.OnPress();
+        clock.Advance(TimeSpan.FromMilliseconds(200));
+        enabled = false;
+        recognizer.OnPress();
+
+        Assert.Equal([Oem1Gesture.Single, Oem1Gesture.Single], results);
+        Assert.Empty(delay.ActivePending);
+    }
+
+    [Fact]
     public void First_press_waits_when_double_is_enabled()
     {
         var delay = new ControlledDelay();
