@@ -690,7 +690,7 @@ public sealed class AddonRoutingRuntimeTests
     [Fact]
     public async Task Fresh_resume_converges_stale_owned_fault_before_reconcile_callback()
     {
-        var status = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var status = new FakeStatusProvider(Snapshot(new RoutingDecision(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible)));
         var safety = new RecoverySafetyState(RecoverySafety.Safe);
         var runtime = AddonRoutingRuntime.Create(
             new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()), status,
@@ -700,6 +700,17 @@ public sealed class AddonRoutingRuntimeTests
         Assert.NotNull(runtime);
         try
         {
+            // Keep the production runtime on the fresh Eligible path without loading a native
+            // VIIPER DLL. NativeMode preflight will stop at the empty-device boundary, but only
+            // after this test has proved that stale fault convergence ran before that preflight.
+            var viiperField = typeof(AddonRoutingRuntime).GetField("_viiperRuntime", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+#pragma warning disable SYSLIB0050 // The test needs a Ready-only owner to reach NativeMode preflight without a native DLL.
+            var viiper = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(CanonicalViiperRuntime));
+#pragma warning restore SYSLIB0050
+            typeof(CanonicalViiperRuntime).GetProperty("State", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(viiper, CanonicalViiperRuntimeState.Ready);
+            viiperField.SetValue(runtime, viiper);
+
             var unsafeVersion = safety.Set(RecoverySafety.Unsafe);
             var safetySession = typeof(AddonRoutingRuntime)
                 .GetField("_safetySession", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -712,12 +723,13 @@ public sealed class AddonRoutingRuntimeTests
             // Model PowerTransitionCoordinator's completed recovery boundary.
             safety.Set(RecoverySafety.Safe);
 
-            Assert.True(await runtime.ReconcileFreshAfterResumeAsync(CancellationToken.None));
+            Assert.False(await runtime.ReconcileFreshAfterResumeAsync(CancellationToken.None));
             Assert.Equal(RecoverySafety.Safe, safety.Current);
             var latched = (bool)nativeCoordinator.GetField("_routingFaultLatched", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
                 .GetValue(safetySession)!;
             Assert.False(latched);
             Assert.Equal(1, status.CaptureCalls);
+            viiperField.SetValue(runtime, null);
         }
         finally
         {
