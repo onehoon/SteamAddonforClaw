@@ -290,8 +290,13 @@ internal sealed class CpuBoostRuntime
             // (section 3.3).
             if (!TryCompleteBaseline(previousDocument.Device.Performance.CpuBoost, out var baseline, out _))
             {
+                // PersistenceFailed specifically means ProfileStore.Save() failed before any Windows
+                // write was attempted; no Save() was ever attempted here, so this is a Windows-read/
+                // initialization failure -- ApplyFailed, matching the existing
+                // SetDeviceCpuBoostEnabled(true) baseline-establishment failure classification (no
+                // new outcome enum needed).
                 AppLog.Warn("Profiles.CpuBoost", "CPU Boost mutation could not establish a complete baseline from Windows; nothing was persisted.", null, ("Side", mutateAc ? "AC" : "DC"));
-                return new CpuBoostMutationResult(CpuBoostMutationOutcome.PersistenceFailed, "CPU Boost could not be initialized from Windows.");
+                return new CpuBoostMutationResult(CpuBoostMutationOutcome.ApplyFailed, "CPU Boost could not be initialized from Windows.");
             }
             var updatedCpuBoost = mutateAc ? baseline with { Ac = mode } : baseline with { Dc = mode };
             var updatedPerformance = previousDocument.Device.Performance with { CpuBoost = updatedCpuBoost };

@@ -706,7 +706,10 @@ public sealed class CpuBoostRuntimeTests : IDisposable
 
         var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.Aggressive);
 
-        Assert.Equal(CpuBoostMutationOutcome.PersistenceFailed, result.Outcome);
+        // ApplyFailed, not PersistenceFailed: no ProfileStore.Save() was ever attempted here, so
+        // PersistenceFailed's specific "persistence failed before any Windows write" contract would
+        // be untruthful for a Windows-read/initialization failure.
+        Assert.Equal(CpuBoostMutationOutcome.ApplyFailed, result.Outcome);
         Assert.Equal(0, backend.AcWriteCount);
         Assert.Equal(0, backend.DcWriteCount);
         Assert.Null(store.Load().Document.Device.Performance.CpuBoost);
