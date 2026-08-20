@@ -14,7 +14,24 @@ internal sealed class MsiClawWmiTdpTransport : IMsiClawTdpTransport
     public bool TrySetData(int block, byte value)
     {
         var package = BuildPackage(block, value);
-        return TryInvoke("Set_Data", package, out _);
+        try
+        {
+            using var managementObject = new ManagementObject(Scope, Path, null);
+            using var input = managementObject.GetMethodParameters("Set_Data");
+            if (input?["Data"] is not ManagementBaseObject data)
+                return false;
+
+            data["Bytes"] = package;
+            input["Data"] = data;
+            using var _ = managementObject.InvokeMethod("Set_Data", input, null);
+            return true;
+        }
+        catch (Exception exception) when (exception is ManagementException
+            or COMException
+            or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     internal static byte[] BuildPackage(int block, byte value)

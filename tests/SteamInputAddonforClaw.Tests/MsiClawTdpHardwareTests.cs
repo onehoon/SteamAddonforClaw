@@ -200,6 +200,17 @@ public sealed class MsiClawTdpHardwareTests
 
     private static TdpPowerPair Pair(int pl1, int pl2) => new() { Pl1Watts = pl1, Pl2Watts = pl2 };
 
+    [Fact]
+    public void WmiSetDataPackageUsesThirtyTwoBytesWithOnlyBlockAndValue()
+    {
+        var package = MsiClawWmiTdpTransport.BuildPackage(81, 37);
+
+        Assert.Equal(32, package.Length);
+        Assert.Equal(81, package[0]);
+        Assert.Equal(37, package[1]);
+        Assert.All(package[2..], value => Assert.Equal(0, value));
+    }
+
     private sealed class FakeTransport : IMsiClawTdpTransport
     {
         public List<string> Operations { get; } = [];
