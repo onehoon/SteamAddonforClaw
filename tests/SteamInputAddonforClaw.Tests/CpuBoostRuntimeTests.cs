@@ -14,6 +14,7 @@ internal sealed class FakeCpuBoostPowerPolicy : ICpuBoostPowerPolicy
     public CpuBoostSideReading Dc { get; set; } = CpuBoostSideReading.Unavailable;
     public int AcWriteCount { get; private set; }
     public int DcWriteCount { get; private set; }
+    public int ReadCount { get; private set; }
     public bool FailNextApply { get; set; }
     public bool FailRead { get; set; }
 
@@ -25,8 +26,11 @@ internal sealed class FakeCpuBoostPowerPolicy : ICpuBoostPowerPolicy
     /// anything else, then clears the field so only that one call blocks.</summary>
     public ManualResetEventSlim? ApplyGate { get; set; }
 
-    public CpuBoostSystemState Read() =>
-        FailRead ? CpuBoostSystemState.Failure("simulated read failure") : new CpuBoostSystemState(true, Ac, Dc, null);
+    public CpuBoostSystemState Read()
+    {
+        ReadCount++;
+        return FailRead ? CpuBoostSystemState.Failure("simulated read failure") : new CpuBoostSystemState(true, Ac, Dc, null);
+    }
 
     public CpuBoostApplyResult Apply(CpuBoostMode? ac, CpuBoostMode? dc)
     {
@@ -67,7 +71,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
 
     private string ProfilesPath => Path.Combine(_testDirectory, "profiles.json");
 
-    // ---- Unmanaged: existing Windows values are never touched ----
+    // ---- Uninitialized baseline: do not invent or normalize Windows values ----
 
     [Fact]
     public void StartupReconcile_FirstRun_AdoptsCurrentWindowsValuesAsInitialDeviceValues()
@@ -85,6 +89,9 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         // match.
         Assert.Equal(0, backend.AcWriteCount);
         Assert.Equal(0, backend.DcWriteCount);
+        // First-run bootstrap policy is "read AC/DC once and adopt it" -- the successful read that
+        // established the baseline must be reused for the snapshot, not re-read a second time.
+        Assert.Equal(1, backend.ReadCount);
         Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcCurrent.Mode);
         Assert.Equal(CpuBoostMode.EfficientEnabled, runtime.Snapshot.DcCurrent.Mode);
         Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcDesired);
@@ -418,7 +425,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         Assert.Null(store.Load().Document.Device.Performance.CpuBoost?.Dc);
     }
 
-    // ---- Both sides managed ----
+    // ---- Both sides initialized ----
 
     [Fact]
     public void StartupReconcile_BothManaged_WritesBothIndependently()
@@ -775,7 +782,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
     // ---- Unexpected current Windows value must not be silently normalized ----
 
     [Fact]
-    public void StartupReconcile_UnexpectedCurrentWindowsValue_IsNotNormalizedOrWrittenWhenUnmanaged()
+    public void StartupReconcile_UnexpectedCurrentWindowsValue_IsNotNormalizedOrWrittenWhenUninitialized()
     {
         var store = new ProfileStore(ProfilesPath);
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.UnknownValue(), Dc = CpuBoostSideReading.Known(CpuBoostMode.Enabled) };

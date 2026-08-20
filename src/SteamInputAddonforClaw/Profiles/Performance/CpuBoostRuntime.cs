@@ -246,8 +246,10 @@ internal sealed class CpuBoostRuntime
             return;
         }
 
-        // Fresh first-run adoption already matches Windows; no write needed.
-        UpdateSnapshot(_powerPolicy.Read(), baseline.Ac, baseline.Dc, baseline.Enabled);
+        // Fresh first-run (or disabled incomplete-baseline completion) already has the exact
+        // Windows read that established the complete baseline (TryCompleteBaseline populated
+        // `current` while completing it); no second read/write needed.
+        UpdateSnapshot(current, baseline.Ac, baseline.Dc, baseline.Enabled);
     }
 
     /// <summary>Sets the persisted/desired AC CPU Boost mode and applies it to Windows. DC is left
