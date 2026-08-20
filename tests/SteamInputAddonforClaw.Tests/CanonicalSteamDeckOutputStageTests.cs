@@ -900,7 +900,10 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         // A live SetState is now blocked inside the fake session (BlockInput). PausePresentationAsync
         // must not proceed to write neutral while that in-flight call is still blocked.
         var pause = stage.PausePresentationAsync();
-        await Task.Delay(50);
+
+        // Deterministic: the live SetState is still blocked, so publisher StopAsync cannot
+        // have completed and pause cannot have reached the second neutral write.
+        Assert.False(pause.IsCompleted);
         Assert.Equal(1, session.Trace.Count(t => t == "Neutral"));
 
         session.ReleaseInput.TrySetResult();
@@ -922,9 +925,9 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var quickAccessCountAfterPause = session.QuickAccessValues.Count;
 
         // The publisher's tick loop is stopped, so no live waiter remains to consume a tick: driving
-        // one must not be observed as another live SetState.
+        // one must not be observed as another live SetState. The Tick() failure itself is the
+        // deterministic proof -- no delay needed.
         Assert.Throws<InvalidOperationException>(() => ticks.Tick());
-        await Task.Delay(50);
         Assert.Equal(quickAccessCountAfterPause, session.QuickAccessValues.Count);
         Assert.Equal(CanonicalSteamDeckSessionState.Active, session.State);
 
