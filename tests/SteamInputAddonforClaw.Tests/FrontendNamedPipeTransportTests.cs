@@ -137,6 +137,30 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task An_unexpected_client_disconnect_retires_the_open_probe_session()
+    {
+        // PR #290 review: the Sensor Probe diagnostic keeps actively reading sensors in the headless
+        // Runtime even after the WinUI process disappears, so an ungraceful disconnect (crash/kill,
+        // not an orderly CloseClawSensorProbeAsync call) must still retire it -- otherwise it leaks
+        // for the lifetime of the Runtime process.
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        var client = await ConnectAsync(pipeName);
+
+        await client.OpenClawSensorProbeAsync();
+        Assert.Equal(1, fake.ClawSensorProbeOpenCount);
+        Assert.Equal(0, fake.ClawSensorProbeCloseCount);
+
+        // Simulate the frontend vanishing without calling Close: dispose the client's transport, not
+        // a graceful CloseClawSensorProbeAsync request.
+        await client.DisposeAsync();
+
+        await fake.ClawSensorProbeClosed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, fake.ClawSensorProbeCloseCount);
+    }
+
+    [Fact]
     public async Task Mismatched_protocol_rejects_connection_without_frontend_call()
     {
         var fake = new RecordingFrontendControl();
@@ -1106,13 +1130,14 @@ public sealed class FrontendNamedPipeTransportTests
         public int ClawSensorProbePreviousCount { get; private set; }
         public int ClawSensorProbeStopCount { get; private set; }
         public int ClawSensorProbeCloseCount { get; private set; }
+        public TaskCompletionSource ClawSensorProbeClosed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<FrontendClawSensorProbeSnapshot> OpenClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeOpenCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeStartCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> CaptureClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeCaptureCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> NextClawSensorProbePhaseAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeNextCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> PreviousClawSensorProbePhaseAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbePreviousCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
         public Task<FrontendClawSensorProbeSnapshot> StopClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeStopCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
-        public Task<FrontendClawSensorProbeSnapshot> CloseClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeCloseCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
+        public Task<FrontendClawSensorProbeSnapshot> CloseClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeCloseCount++; ClawSensorProbeClosed.TrySetResult(); return Task.FromResult(ClawSensorProbeSnapshot); }
     }
 
     private sealed class PartialReadStream : MemoryStream

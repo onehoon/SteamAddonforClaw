@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
 using System.Diagnostics;
 
 namespace SteamInputAddonforClaw.Views;
@@ -43,6 +44,11 @@ public sealed partial class ClawSensorProbePage : UserControl
             if (_active) Render(snapshot);
         }
         catch (OperationCanceledException) { /* page left before Open returned */ }
+        catch (FrontendTransportException exception)
+        {
+            AppLog.Warn("ClawSensorProbe", "Runtime connection lost during probe open.", exception, ("Reason", exception.GetType().Name));
+            OnTransportLost(exception);
+        }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe session open failed.", exception, ("Reason", exception.GetType().Name));
@@ -94,11 +100,33 @@ public sealed partial class ClawSensorProbePage : UserControl
             if (_active) Render(snapshot);
         }
         catch (OperationCanceledException) { /* page left while this poll was in flight */ }
+        catch (FrontendTransportException exception)
+        {
+            // A broken pipe/dead Runtime connection is not a transient error to retry every 200ms --
+            // stop polling and surface it, otherwise this loops indefinitely logging the same failure
+            // while showing stale telemetry (PR #290 review).
+            AppLog.Warn("ClawSensorProbe", "Runtime connection lost during probe poll.", exception, ("Reason", exception.GetType().Name));
+            OnTransportLost(exception);
+        }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe snapshot poll failed.", exception, ("Reason", exception.GetType().Name));
         }
         finally { _pollInFlight = false; }
+    }
+
+    /// <summary>Common handling for a broken Runtime connection detected from any RPC call on this
+    /// page: stop the poll timer (there is nothing left to poll) and disable all mutating controls so
+    /// the user sees the diagnostic stopped rather than a page that looks alive but silently fails.</summary>
+    private void OnTransportLost(Exception exception)
+    {
+        _pollTimer?.Stop();
+        if (!_active) return;
+        ErrorText.Text = $"Runtime connection lost: {exception.Message}";
+        StartButton.IsEnabled = false;
+        StopButton.IsEnabled = false;
+        BackPhaseButton.IsEnabled = false;
+        NextPhaseButton.IsEnabled = false;
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
@@ -115,6 +143,11 @@ public sealed partial class ClawSensorProbePage : UserControl
             if (_active) Render(snapshot);
         }
         catch (OperationCanceledException) { /* page left during Start */ }
+        catch (FrontendTransportException exception)
+        {
+            AppLog.Warn("ClawSensorProbe", "Runtime connection lost during probe start.", exception, ("Reason", exception.GetType().Name));
+            OnTransportLost(exception);
+        }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe start failed.", exception, ("Reason", exception.GetType().Name));
@@ -134,6 +167,11 @@ public sealed partial class ClawSensorProbePage : UserControl
             if (_active) Render(snapshot);
         }
         catch (OperationCanceledException) { /* page left during phase advance */ }
+        catch (FrontendTransportException exception)
+        {
+            AppLog.Warn("ClawSensorProbe", "Runtime connection lost during phase advance.", exception, ("Reason", exception.GetType().Name));
+            OnTransportLost(exception);
+        }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe next-phase failed.", exception, ("Reason", exception.GetType().Name));
@@ -153,6 +191,11 @@ public sealed partial class ClawSensorProbePage : UserControl
             if (_active) Render(snapshot);
         }
         catch (OperationCanceledException) { /* page left during phase revisit */ }
+        catch (FrontendTransportException exception)
+        {
+            AppLog.Warn("ClawSensorProbe", "Runtime connection lost during phase revisit.", exception, ("Reason", exception.GetType().Name));
+            OnTransportLost(exception);
+        }
         catch (Exception exception)
         {
             AppLog.Warn("ClawSensorProbe", "Probe previous-phase failed.", exception, ("Reason", exception.GetType().Name));
