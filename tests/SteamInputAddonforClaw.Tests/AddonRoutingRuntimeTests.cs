@@ -20,6 +20,12 @@ public sealed class AddonRoutingRuntimeTests
     [InlineData(true, 0, true)]
     public void Persistent_viiper_initialization_requires_supported_safe_startup(bool hardwareSupported, int safety, bool expected) =>
         Assert.Equal(expected, AddonRoutingRuntime.CanInitializeViiper(hardwareSupported, (RecoverySafety)safety));
+
+    [Fact]
+    public void Missing_viiper_module_makes_only_steam_output_unavailable()
+    {
+        Assert.Null(AddonRoutingRuntime.TryLoadViiper(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".dll")));
+    }
     [Fact]
     public async Task Create_returns_null_for_an_adapter_with_no_available_routing_composition()
     {

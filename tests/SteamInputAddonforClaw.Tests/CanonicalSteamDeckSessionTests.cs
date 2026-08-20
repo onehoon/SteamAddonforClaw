@@ -25,11 +25,18 @@ public sealed class CanonicalSteamDeckSessionTests
     [Fact]
     public void Unexpected_pre_attach_state_fails_closed_without_detach_or_remove()
     {
-        var native = new FakeNative { AttachmentState = USBDeviceAttachmentState.Attached };
+        var native = new FakeNative();
         var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
-        Assert.Null(runtime);
+        Assert.NotNull(runtime);
+        native.AttachmentStates.Enqueue(USBDeviceAttachmentState.Attached);
+        using var session = new CanonicalSteamDeckSession(runtime);
+        Assert.False(session.Start());
+        Assert.Equal(CanonicalSteamDeckSessionState.Unsafe, session.State);
         Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
-        Assert.Contains("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
     }
 
     [Theory]

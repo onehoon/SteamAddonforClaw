@@ -41,6 +41,16 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 {
     internal static bool CanInitializeViiper(bool hardwareSupported, RecoverySafety recoverySafety) =>
         hardwareSupported && recoverySafety == RecoverySafety.Safe;
+
+    internal static ICanonicalViiperNativeApi? TryLoadViiper(string path)
+    {
+        try { return CanonicalViiperNativeApi.Load(path); }
+        catch (Exception exception) when (exception is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
+        {
+            AppLog.Error("SteamOutput", "Canonical VIIPER module could not be loaded; Steam output is unavailable for this process lifetime.", exception);
+            return null;
+        }
+    }
     private readonly IHandheldRoutingComposition _composition;
     private readonly IRoutingSafetySession? _safetySession;
     private readonly RoutingPipelineRuntimeCoordinator _coordinator;
@@ -93,8 +103,9 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
         SteamOutputComposition.LogTargetSelected();
         CanonicalViiperRuntime? viiperRuntime = null;
-        if (CanInitializeViiper(hardwareSupported, recoverySafety.Current))
-            viiperRuntime = CanonicalViiperRuntime.TryInitialize(CanonicalViiperNativeApi.Load(canonicalViiperPath), "127.0.0.1:3242");
+        if (CanInitializeViiper(hardwareSupported, recoverySafety.Current) &&
+            TryLoadViiper(canonicalViiperPath) is { } native)
+            viiperRuntime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242");
         var deckStage = new CanonicalSteamDeckOutputStage(
             viiperRuntime is { State: CanonicalViiperRuntimeState.Ready } ? () => new CanonicalSteamDeckSession(viiperRuntime) : () => new UnavailableCanonicalSteamDeckSession(),
             new WindowsControllerDeviceEnumerator(),
