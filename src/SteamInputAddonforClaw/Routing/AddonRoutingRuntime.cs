@@ -518,6 +518,13 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     {
         if (ShouldSkipNewForwardRouting)
             return true;
+
+        // PowerTransitionCoordinator has already completed residual cleanup, committed Safe,
+        // and opened the mutation gate before invoking this callback. Converge the stale routing
+        // fault before fresh forward preflight can observe it.
+        if (!_coordinator.HasResidualSessionState)
+            await TryConvergeSafetyAfterCleanupAsync("FreshResumePreReconcile").ConfigureAwait(false);
+
         var succeeded = await _coordinator.ReconcileFreshAfterResumeAsync(cancellationToken).ConfigureAwait(false);
         if (succeeded)
             await TryConvergeSafetyAfterCleanupAsync("FreshResumeReconcile").ConfigureAwait(false);
