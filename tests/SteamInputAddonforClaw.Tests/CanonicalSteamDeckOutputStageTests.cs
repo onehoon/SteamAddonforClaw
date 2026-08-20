@@ -104,6 +104,20 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task Retryable_detach_is_retried_explicitly_without_logical_removal()
+    {
+        var session = new FakeCanonicalSession { RemoveResult = false };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        session.RemoveResult = true;
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(1, session.RemoveCalls);
+        Assert.Contains("Retry:AttachmentDetach", session.Trace);
+    }
+
+    [Fact]
     public async Task FactoryFailureLeavesNoRecoveryBoundaryOrOwnershipUncertainty()
     {
         var stage = CreateFactoryFailure(new FakeEnumerator([[]]), new FakeHidHide());
@@ -612,12 +626,12 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var result = await stage.RollbackMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Equal("VirtualDeviceRemoveFailed", result.Reason);
+        Assert.Equal("VirtualDeviceDetachFailed", result.Reason);
         AppLog.DrainForTests();
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Equal(1, log.Split("Event=SteamDeckOutputRollbackFailed", StringSplitOptions.None).Length - 1);
-        Assert.Contains("Reason=VirtualDeviceRemoveFailed", log);
-        Assert.Contains("RemoveDeviceMs=", log);
+        Assert.Contains("Reason=VirtualDeviceDetachFailed", log);
+        Assert.Contains("DetachMs=", log);
     }
 
     [Fact]
@@ -924,7 +938,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public bool BusRemoved { get; init; } = true;
         public bool NeutralAccepted { get; init; } = true;
         public bool InputAccepted { get; init; } = true;
-        public bool RemoveResult { get; init; } = true;
+        public bool RemoveResult { get; set; } = true;
         public bool StartResult { get; init; } = true;
         public bool SetOutputCallbackResult { get; init; } = true;
         public bool ClearOutputCallbackResult { get; set; } = true;
@@ -996,8 +1010,13 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
             // Active) so the stage classifies it as "VirtualDeviceRemoveFailed" rather than
             // "CanonicalSessionUnsafe" -- distinct from an actually-Unsafe session, which no test
             // fixture here needs to simulate.
-            if (!RemoveResult) return false;
-            State = CanonicalSteamDeckSessionState.DeviceRemoved;
+            if (!RemoveResult)
+            {
+                PendingCleanupPhase = CanonicalPendingCleanupPhase.AttachmentDetach;
+                State = CanonicalSteamDeckSessionState.CleanupPending;
+                return false;
+            }
+            State = CanonicalSteamDeckSessionState.Clean;
             return true;
         }
 
@@ -1005,19 +1024,6 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         {
             Trace.Add($"Retry:{PendingCleanupPhase}");
             PendingCleanupPhase = CanonicalPendingCleanupPhase.None;
-            State = CanonicalSteamDeckSessionState.Clean;
-            return true;
-        }
-
-        public bool CompleteRuntimeCleanup()
-        {
-            Trace.Add("CompleteCleanup");
-            if (!BusRemoved || CleanupFailure is { } failure)
-            {
-                PendingCleanupPhase = CleanupFailure ?? CanonicalPendingCleanupPhase.BusRemoval;
-                State = CanonicalSteamDeckSessionState.CleanupPending;
-                return false;
-            }
             State = CanonicalSteamDeckSessionState.Clean;
             return true;
         }

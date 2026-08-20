@@ -277,14 +277,11 @@ resumable retry). It is fully implemented and covered by deterministic
 tests (`CanonicalViiperRuntimeTests`). PR2b composes it once in
 `AddonRoutingRuntime`; `CanonicalSteamDeckSession` now borrows its persistent
 Deck handle and production no longer creates/removes a server/bus/device per
-route. Wiring
-PR2b now composes exactly one runtime owner in `AddonRoutingRuntime`.
-`CanonicalSteamDeckSession` borrows its persistent Deck handle and uses
-classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route. Ordinary route
-exit leaves Deck and Xbox360 logical handles alive and detached; only final
-runtime teardown removes the logical devices, bus, and server. Initialization
-failure remains fail-closed and never falls back to per-route creation. SD7
-remains PLANNED; Xbox360 has no attach, publisher, or Game Bar behavior here.
+route. Ordinary route exit leaves Deck and Xbox360 logical handles alive and
+detached; only final runtime teardown removes the logical devices, bus, and
+server. Initialization failure remains fail-closed and never falls back to
+per-route creation. SD7 remains PLANNED; Xbox360 has no attach, publisher, or
+Game Bar behavior here.
 
 ## Separate feature tracks
 

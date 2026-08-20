@@ -39,6 +39,8 @@ namespace SteamInputAddonforClaw.Routing;
 /// </remarks>
 internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParticipant
 {
+    internal static bool CanInitializeViiper(bool hardwareSupported, RecoverySafety recoverySafety) =>
+        hardwareSupported && recoverySafety == RecoverySafety.Safe;
     private readonly IHandheldRoutingComposition _composition;
     private readonly IRoutingSafetySession? _safetySession;
     private readonly RoutingPipelineRuntimeCoordinator _coordinator;
@@ -90,7 +92,9 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
         var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
         SteamOutputComposition.LogTargetSelected();
-        var viiperRuntime = CanonicalViiperRuntime.TryInitialize(CanonicalViiperNativeApi.Load(canonicalViiperPath), "127.0.0.1:3242");
+        CanonicalViiperRuntime? viiperRuntime = null;
+        if (CanInitializeViiper(hardwareSupported, recoverySafety.Current))
+            viiperRuntime = CanonicalViiperRuntime.TryInitialize(CanonicalViiperNativeApi.Load(canonicalViiperPath), "127.0.0.1:3242");
         var deckStage = new CanonicalSteamDeckOutputStage(
             viiperRuntime is { State: CanonicalViiperRuntimeState.Ready } ? () => new CanonicalSteamDeckSession(viiperRuntime) : () => new UnavailableCanonicalSteamDeckSession(),
             new WindowsControllerDeviceEnumerator(),

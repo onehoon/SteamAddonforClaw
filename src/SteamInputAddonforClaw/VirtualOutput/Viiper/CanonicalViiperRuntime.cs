@@ -86,7 +86,14 @@ internal sealed class CanonicalViiperRuntime
         {
             if (State != CanonicalViiperRuntimeState.Ready)
             { state = default; return false; }
-            return TryGetAttachmentState(DeckDeviceHandle, out state);
+            if (!_native.GetUSBDeviceAttachmentState(DeckDeviceHandle, out state))
+            {
+                MarkUnsafe("DeckAttachmentStateQueryFailed");
+                return false;
+            }
+            if (state == USBDeviceAttachmentState.OutcomeUnknown || !Enum.IsDefined(state))
+                MarkUnsafe($"DeckAttachmentState{(int)state}");
+            return true;
         }
         finally { _serial.Release(); }
     }

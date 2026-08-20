@@ -13,6 +13,13 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class AddonRoutingRuntimeTests
 {
+    [Theory]
+    [InlineData(false, 0, false)]
+    [InlineData(true, 1, false)]
+    [InlineData(true, 2, false)]
+    [InlineData(true, 0, true)]
+    public void Persistent_viiper_initialization_requires_supported_safe_startup(bool hardwareSupported, int safety, bool expected) =>
+        Assert.Equal(expected, AddonRoutingRuntime.CanInitializeViiper(hardwareSupported, (RecoverySafety)safety));
     [Fact]
     public async Task Create_returns_null_for_an_adapter_with_no_available_routing_composition()
     {

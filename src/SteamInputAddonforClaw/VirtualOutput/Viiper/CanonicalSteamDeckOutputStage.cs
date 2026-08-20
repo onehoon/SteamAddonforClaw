@@ -291,7 +291,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         long removeMs = 0, pnpAbsenceMs = 0;
         RoutingStageOperationResult RollbackFailure(string reason)
         {
-            AppLog.Debug("RoutingTrace", "Steam Deck output rollback failed.", ("Event", "SteamDeckOutputRollbackFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Failure"), ("Reason", reason));
+            AppLog.Debug("RoutingTrace", "Steam Deck output rollback failed.", ("Event", "SteamDeckOutputRollbackFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("DetachMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Failure"), ("Reason", reason));
             return RoutingStageOperationResult.Failure(reason);
         }
         if (_state == LifecycleState.Inactive) return RoutingStageOperationResult.Success("SteamOutputAlreadyInactive");
@@ -351,16 +351,16 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             return RollbackFailure("CanonicalSessionUnsafe");
         if (_canonicalSession.State is CanonicalSteamDeckSessionState.Active ||
             (_canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending &&
-             _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval))
+             _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.AttachmentDetach))
         {
             var removeStarted = Stopwatch.GetTimestamp();
             try
             {
                 var removed = _canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending &&
-                    _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval
+                    _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.AttachmentDetach
                     ? _canonicalSession.RetryPendingCleanup()
                     : _canonicalSession.RemoveDevice();
-                if (!removed) return RollbackFailure(_canonicalSession.State == CanonicalSteamDeckSessionState.Unsafe ? "CanonicalSessionUnsafe" : "VirtualDeviceRemoveFailed");
+                if (!removed) return RollbackFailure(_canonicalSession.State == CanonicalSteamDeckSessionState.Unsafe ? "CanonicalSessionUnsafe" : "VirtualDeviceDetachFailed");
             }
             finally { removeMs = Elapsed(removeStarted); }
         }
