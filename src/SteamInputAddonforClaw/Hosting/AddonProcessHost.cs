@@ -3,11 +3,11 @@ using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Profiles;
-using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Runtime;
@@ -55,6 +55,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly ProfileMutationGate _profileMutationGate = new();
     private readonly CpuBoostRuntime _cpuBoostRuntime;
     private TdpRuntime? _tdpRuntime;
+    private TdpPowerLifecycleWatcher? _tdpPowerLifecycleWatcher;
 
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
@@ -159,6 +160,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel,
                 new MsiClawTdpHardware(new MsiClawWmiTdpTransport()));
+            _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
         }
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
@@ -210,7 +212,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         try
         {
-            _tdpRuntime?.StartupReconcile();
+            if (_tdpRuntime is not null && _tdpPowerLifecycleWatcher is not null)
+            {
+                _tdpPowerLifecycleWatcher.Start();
+                _tdpPowerLifecycleWatcher.ScheduleStartup();
+            }
         }
         catch (Exception exception)
         {
@@ -248,6 +254,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Dispose();
         _qamHostController.BeginShutdown();
+        _tdpPowerLifecycleWatcher?.Dispose();
+        _tdpPowerLifecycleWatcher = null;
         _tdpRuntime?.BeginShutdown();
         _startupCancellationTokenSource.Cancel();
         PrepareRuntimeForShutdown();
