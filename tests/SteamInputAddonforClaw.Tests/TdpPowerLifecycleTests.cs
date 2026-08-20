@@ -2,6 +2,8 @@ using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -148,6 +150,20 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         runtime.ReconcileCurrent(false, false, "PowerSourceChanged"); await runtime.DrainAsync();
 
         Assert.True(transport.Operations.Count(x => x == "GetAp(0)") > firstAttemptCount);
+    }
+
+    [Fact]
+    public void NativePowerSettingImportsRemainBoundToPowrProf()
+    {
+        foreach (var methodName in new[] { "PowerSettingRegisterNotification", "PowerSettingUnregisterNotification" })
+        {
+            var method = typeof(WindowsTdpPowerNotificationSource).GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static);
+            var import = method?.GetCustomAttribute<DllImportAttribute>();
+            Assert.NotNull(method);
+            Assert.NotNull(import);
+            Assert.Equal("powrprof.dll", import!.Value);
+            Assert.Equal(typeof(uint), method!.ReturnType);
+        }
     }
 
     private TdpRuntime CreateRuntime(FakeTransport transport, TdpPowerSource source) => CreateRuntime(transport, () => source);

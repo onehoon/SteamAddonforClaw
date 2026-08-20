@@ -73,12 +73,12 @@ internal sealed class WindowsTdpPowerNotificationSource : ITdpPowerNotificationS
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate uint DeviceNotifyCallbackRoutine(nint context, uint type, nint setting);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport("powrprof.dll", SetLastError = true)]
     private static extern uint PowerSettingRegisterNotification(ref Guid settingGuid, uint flags,
         ref DeviceNotifySubscribeParameters recipient, out nint handle);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool PowerSettingUnregisterNotification(nint handle);
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern uint PowerSettingUnregisterNotification(nint handle);
 
     [DllImport("powrprof.dll", SetLastError = true)]
     private static extern uint PowerRegisterSuspendResumeNotification(uint flags,
