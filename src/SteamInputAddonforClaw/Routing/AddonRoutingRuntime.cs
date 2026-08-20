@@ -227,21 +227,18 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         if (!CaptureStatus().SteamOutputActive || _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } || _xbox360Publisher is null)
             return false;
 
-        var retired = await RetireXbox360PresentationCoreAsync(
+        var exited = await ExitXbox360PresentationCoreAsync(
             publisher: _xbox360Publisher,
             stopPublisher: _xbox360Publisher.StopAsync,
             detach: _viiperRuntime.DetachXbox360,
+            resumeDeck: () => _deckStage.ResumePresentationAsync(CancellationToken.None),
             cancellationToken).ConfigureAwait(false);
 
-        if (retired.PublisherReleased)
+        if (exited.PublisherReleased)
             _xbox360Publisher = null;
-        if (retired.FailureReason is { } reason)
+        if (exited.FailureReason is { } reason)
             await FailClosedForXbox360PresentationAsync(reason).ConfigureAwait(false);
-        if (!retired.Succeeded)
-            return false;
-
-        var resumed = await _deckStage.ResumePresentationAsync(CancellationToken.None).ConfigureAwait(false);
-        return resumed;
+        return exited.Succeeded;
     }
 
     internal static async Task<bool> ShutdownCoreAsync(
