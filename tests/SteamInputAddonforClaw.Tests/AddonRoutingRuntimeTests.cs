@@ -121,6 +121,27 @@ public sealed class AddonRoutingRuntimeTests
     }
 
     [Fact]
+    public async Task Unavailable_viiper_skips_eligible_new_forward_route_before_pipeline_entry()
+    {
+        var status = new FakeStatusProvider(Snapshot(new RoutingDecision(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible)));
+        var runtime = CreateMsiRuntime(status, hardwareSupported: false);
+        Assert.NotNull(runtime);
+        try
+        {
+            var refreshCount = 0;
+            await runtime.ReconcileSafelyAsync(() => refreshCount++);
+            Assert.Equal(0, status.CaptureCalls);
+            Assert.False(runtime.HasResidualSessionState);
+            Assert.Equal(1, refreshCount);
+        }
+        finally
+        {
+            Assert.True(await runtime.ShutdownAsync());
+            await runtime.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ReconcileSafelyAsync_contains_an_unexpected_exception_and_still_refreshes_status()
     {
         var runtime = CreateMsiRuntime(new FakeStatusProvider(throwOnCapture: true));
@@ -199,7 +220,7 @@ public sealed class AddonRoutingRuntimeTests
         }
     }
 
-    private static AddonRoutingRuntime? CreateMsiRuntime(ISystemStatusProvider? statusProvider = null) => AddonRoutingRuntime.Create(
+    private static AddonRoutingRuntime? CreateMsiRuntime(ISystemStatusProvider? statusProvider = null, bool hardwareSupported = true) => AddonRoutingRuntime.Create(
         new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
         statusProvider ?? new FakeStatusProvider(),
         new AddonOwnedVirtualDeviceTracker(),
@@ -207,7 +228,7 @@ public sealed class AddonRoutingRuntimeTests
         new PowerMutationGate(initiallyOpen: true),
         new RecoverySafetyState(RecoverySafety.Safe),
         new DefaultOem1MappingPreference(),
-        hardwareSupported: true);
+        hardwareSupported: hardwareSupported);
 
     private static SystemStatusSnapshot Snapshot(RoutingDecision decision) =>
         new(new("Test", "Test", "Test", []), null!, [], null!, null!, null!, decision, null!, true, false);
@@ -236,9 +257,16 @@ public sealed class AddonRoutingRuntimeTests
 
     private sealed class FakeStatusProvider(SystemStatusSnapshot? snapshot = null, bool throwOnCapture = false) : ISystemStatusProvider
     {
+        public int CaptureCalls { get; private set; }
         public Task<SystemStatusSnapshot> CaptureAsync(CancellationToken cancellationToken = default) => throwOnCapture
             ? throw new InvalidOperationException("Simulated status capture failure.")
-            : Task.FromResult(snapshot ?? throw new InvalidOperationException("Not exercised by construction-only tests."));
+            : Capture();
+
+        private Task<SystemStatusSnapshot> Capture()
+        {
+            CaptureCalls++;
+            return Task.FromResult(snapshot ?? throw new InvalidOperationException("Not exercised by construction-only tests."));
+        }
     }
 
     private sealed class MemoryJournalStore : IRecoveryJournalStore
