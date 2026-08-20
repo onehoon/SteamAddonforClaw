@@ -60,6 +60,7 @@ internal sealed class FakeCpuBoostPowerPolicy : ICpuBoostPowerPolicy
     }
 }
 
+[Collection("AppLog")]
 public sealed class CpuBoostRuntimeTests : IDisposable
 {
     private readonly string _testDirectory = Path.Combine(Path.GetTempPath(), $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}");
