@@ -79,6 +79,53 @@ internal sealed class CanonicalViiperRuntime
     internal nuint Xbox360DeviceHandle { get; private set; }
     internal uint Xbox360LogicalDeviceId { get; private set; }
 
+    internal bool TryGetDeckAttachmentState(out USBDeviceAttachmentState state)
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready)
+            { state = default; return false; }
+            return TryGetAttachmentState(DeckDeviceHandle, out state);
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal USBDeviceAttachResult AttachDeck()
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready) return USBDeviceAttachResult.Invalid;
+            var result = _native.AttachUSBDeviceEx(DeckDeviceHandle);
+            if (result is USBDeviceAttachResult.UnsafeOutcomeUnknown or USBDeviceAttachResult.Invalid)
+                MarkUnsafe($"DeckAttach{result}");
+            return result;
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal USBDeviceDetachResult DetachDeck()
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready) return USBDeviceDetachResult.Invalid;
+            if (!_native.SetSteamDeckDeviceState(DeckDeviceHandle, default)) return USBDeviceDetachResult.RetryableFailure;
+            var result = _native.DetachUSBDeviceEx(DeckDeviceHandle);
+            if (result is USBDeviceDetachResult.UnsafeOutcomeUnknown or USBDeviceDetachResult.Invalid)
+                MarkUnsafe($"DeckDetach{result}");
+            return result;
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal bool SetDeckState(SteamDeckDeviceState state) =>
+        State == CanonicalViiperRuntimeState.Ready && _native.SetSteamDeckDeviceState(DeckDeviceHandle, state);
+
+    internal bool SetDeckOutputCallback(SteamDeckOutputCallback? callback) =>
+        State == CanonicalViiperRuntimeState.Ready && _native.SetSteamDeckOutputCallback(DeckDeviceHandle, callback);
+
     /// <summary>
     /// Staged initialization (work order section 2/26): NewUSBServer -&gt; CreateUSBBus -&gt;
     /// CreateSteamDeckDevice(autoAttach=false) -&gt; GetUSBDeviceIdentity -&gt;

@@ -274,19 +274,17 @@ detached (`autoAttachLocalhost: false`) -- plus classified final teardown
 `CloseUSBServer`, each staged with exact
 Success/RetryableFailure/UnsafeOutcomeUnknown/Invalid handling and
 resumable retry). It is fully implemented and covered by deterministic
-tests (`CanonicalViiperRuntimeTests`), but **has no production caller in
-this PR**: nothing in `AddonRoutingRuntime`/`AddonRuntimeHost`/the MSI Claw
-composition constructs or invokes it yet, and `CanonicalSteamDeckSession`
-is unchanged -- production routing still creates/removes its own
-server/bus/Deck device on every route exactly as before this PR. Wiring
-`CanonicalViiperRuntime` into production composition and migrating
-`CanonicalSteamDeckSession` to borrow its persistent Deck handle (classified
-`AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route, no second VIIPER
-server/bus owner) is deferred to a follow-up PR (PR2b), which will land as
-one atomic change so a legacy per-route ownership path and the persistent
-owner never coexist in production. SD7 (Game Bar / typed Xbox360 route)
-remains PLANNED; this PR does not advance it and performs no Xbox360
-attach, publish, or Game Bar wiring.
+tests (`CanonicalViiperRuntimeTests`). PR2b composes it once in
+`AddonRoutingRuntime`; `CanonicalSteamDeckSession` now borrows its persistent
+Deck handle and production no longer creates/removes a server/bus/device per
+route. Wiring
+PR2b now composes exactly one runtime owner in `AddonRoutingRuntime`.
+`CanonicalSteamDeckSession` borrows its persistent Deck handle and uses
+classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route. Ordinary route
+exit leaves Deck and Xbox360 logical handles alive and detached; only final
+runtime teardown removes the logical devices, bus, and server. Initialization
+failure remains fail-closed and never falls back to per-route creation. SD7
+remains PLANNED; Xbox360 has no attach, publisher, or Game Bar behavior here.
 
 ## Separate feature tracks
 

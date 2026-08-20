@@ -156,22 +156,30 @@ Public teardown waits outside the canonical native lifecycle lock. Unknown
 attachment or removal outcomes fail closed and preserve recovery evidence for a
 later explicit reconciliation.
 
-**PR2a (foundation only, not yet production-wired):** the process/runtime-
+**PR2a foundation / PR2b production composition:** the process/runtime-
 lifetime persistent owner described in step 1-2 above is implemented as
 `CanonicalViiperRuntime` -- one server, one caller-owned bus, one persistent
 Steam Deck logical device, and one persistent Xbox360 logical device,
 created once and left detached (`autoAttachLocalhost: false`), plus
 classified final teardown of all four resources. It is fully implemented
-and unit-tested but has **no production caller yet**: `AddonRoutingRuntime`
-does not construct or invoke it, and `CanonicalSteamDeckSession` still
-performs its own per-route `NewUSBServer`/`CreateUSBBus`/`CreateSteamDeckDevice`
-and `AttachUSBDevice`/`RemoveSteamDeckDeviceEx` exactly as described in
-step 2-7 above -- production behavior is unchanged by this PR. A follow-up
-PR will migrate `CanonicalSteamDeckSession` to borrow `CanonicalViiperRuntime`'s
-persistent Deck handle (classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx`
-per route) and wire final teardown into the real shutdown chain, landing as
-one atomic change so there is never a period where two VIIPER server/bus
-owners coexist in the same process.
+and unit-tested. PR2b now composes it once in `AddonRoutingRuntime`.
+`CanonicalSteamDeckSession` borrows the persistent Deck handle and uses
+classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route. Final teardown
+is performed only by the runtime owner after routing shutdown succeeds; no
+second VIIPER server/bus owner exists in production.
+
+## PR2b production composition
+
+`AddonRoutingRuntime` owns one `CanonicalViiperRuntime` for its lifetime. It
+owns one server, one caller-owned bus, and persistent detached-ready Deck and
+Xbox360 logical handles. A Steam route creates only a short-lived session
+wrapper that borrows the Deck handle, verifies `Detached`, then uses
+classified `AttachUSBDeviceEx`. Route exit stops publisher/feedback, writes
+neutral state, and uses classified `DetachUSBDeviceEx`; it does not remove
+the logical device, bus, or server. PnP disappearance and recovery evidence
+remain authoritative. Final runtime shutdown alone invokes the existing
+staged logical-device, bus, and server teardown. Xbox360 remains detached and
+unpublished with no Game Bar behavior.
 
 ## 4. Steam Deck typed ABI
 

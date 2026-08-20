@@ -43,13 +43,15 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     private readonly IRoutingSafetySession? _safetySession;
     private readonly RoutingPipelineRuntimeCoordinator _coordinator;
     private readonly CanonicalSteamDeckOutputStage _deckStage;
+    private readonly CanonicalViiperRuntime? _viiperRuntime;
 
-    private AddonRoutingRuntime(IHandheldRoutingComposition composition, IRoutingSafetySession? safetySession, RoutingPipelineRuntimeCoordinator coordinator, CanonicalSteamDeckOutputStage deckStage)
+    private AddonRoutingRuntime(IHandheldRoutingComposition composition, IRoutingSafetySession? safetySession, RoutingPipelineRuntimeCoordinator coordinator, CanonicalSteamDeckOutputStage deckStage, CanonicalViiperRuntime? viiperRuntime)
     {
         _composition = composition;
         _safetySession = safetySession;
         _coordinator = coordinator;
         _deckStage = deckStage;
+        _viiperRuntime = viiperRuntime;
     }
 
     /// <summary>Review fix (BLOCKER): the OEM1 action path's startup activation
@@ -88,8 +90,9 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
         var canonicalViiperPath = Path.Combine(AppContext.BaseDirectory, "Dependencies", "Viiper", "libVIIPER.dll");
         SteamOutputComposition.LogTargetSelected();
+        var viiperRuntime = CanonicalViiperRuntime.TryInitialize(CanonicalViiperNativeApi.Load(canonicalViiperPath), "127.0.0.1:3242");
         var deckStage = new CanonicalSteamDeckOutputStage(
-            () => new CanonicalSteamDeckSession(CanonicalViiperNativeApi.Load(canonicalViiperPath)),
+            viiperRuntime is { State: CanonicalViiperRuntimeState.Ready } ? () => new CanonicalSteamDeckSession(viiperRuntime) : () => new UnavailableCanonicalSteamDeckSession(),
             new WindowsControllerDeviceEnumerator(),
             new SteamDeckVirtualDeviceIdentityResolver(new SteamDeckVirtualDeviceIdentityPolicy()),
             addonOwnedVirtualDeviceTracker,
@@ -118,7 +121,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
         });
 
-        var runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator, deckStage);
+        var runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator, deckStage, viiperRuntime);
 
         // PR3: development-only OEM1 production E2E POC. The only two facts a device-specific OEM1
         // feature needs from this generic routing/output layer -- fresh routing status and the
@@ -256,5 +259,10 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     /// caller must have already stopped routing (<see cref="ShutdownAsync"/>) and any external
     /// orchestration (e.g. the power coordinator) that still references this runtime.
     /// </summary>
-    public ValueTask DisposeAsync() => _composition.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await _composition.DisposeAsync().ConfigureAwait(false);
+        if (_viiperRuntime is not null && !await _viiperRuntime.TeardownAsync().ConfigureAwait(false))
+            AppLog.Error("Routing.Runtime", "Final canonical VIIPER teardown failed; owner retained.", new InvalidOperationException("CanonicalViiperRuntime.TeardownAsync returned false."));
+    }
 }

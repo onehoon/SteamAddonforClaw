@@ -36,7 +36,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
         Assert.True(rollback.Succeeded, rollback.Reason);
-        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Dispose"], session.Trace);
+        Assert.Equal(["Start", "Neutral", "Remove", "Dispose"], session.Trace);
     }
 
     [Fact]
@@ -80,29 +80,27 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     [Fact]
     public async Task BusRemovalRetryDoesNotReplayDeviceRemoval()
     {
-        var session = new FakeCanonicalSession { CleanupFailure = CanonicalPendingCleanupPhase.BusRemoval };
+        var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
-        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Retry:BusRemoval", "Dispose"], session.Trace);
+        Assert.Equal(["Start", "Neutral", "Remove", "Dispose"], session.Trace);
     }
 
     [Fact]
     public async Task ServerCloseRetryDoesNotReplayDeviceRemoval()
     {
-        var session = new FakeCanonicalSession { CleanupFailure = CanonicalPendingCleanupPhase.ServerClose };
+        var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
-        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Retry:ServerClose", "Dispose"], session.Trace);
+        Assert.Equal(["Start", "Neutral", "Remove", "Dispose"], session.Trace);
     }
 
     [Fact]
@@ -222,7 +220,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Contains("Rollback=SteamDeckRemoved", result.Reason);
+        Assert.Contains("Rollback=SteamDeckDetached", result.Reason);
         Assert.DoesNotContain("VirtualDevicePnPStillPresent", result.Reason);
         Assert.Equal(1, session.RemoveCalls);
     }
@@ -351,7 +349,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.Contains("SteamDeckFeedbackCallbackRegistrationFailed", result.Reason);
-        Assert.Equal(["Start", "Neutral", "SetOutputCallback", "Remove", "CompleteCleanup", "Dispose"], session.Trace);
+        Assert.Equal(["Start", "Neutral", "SetOutputCallback", "Remove", "Dispose"], session.Trace);
         Assert.Equal([TwoMotorRumble.Stopped], sink.Values);
     }
 
