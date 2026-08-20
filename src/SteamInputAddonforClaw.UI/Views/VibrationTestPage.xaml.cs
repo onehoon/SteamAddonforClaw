@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Views;
@@ -7,6 +8,7 @@ namespace SteamInputAddonforClaw.Views;
 public sealed partial class VibrationTestPage : UserControl
 {
     private IAddonFrontendControl? _frontend;
+    private bool _active;
     public event EventHandler? BackRequested;
     public VibrationTestPage() => InitializeComponent();
     internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap) { _frontend = frontend; }
@@ -17,6 +19,7 @@ public sealed partial class VibrationTestPage : UserControl
     /// state captured once at process startup.</summary>
     internal void Activate()
     {
+        _active = true;
         if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated;
         _ = OpenSessionAsync();
         _ = RefreshAsync();
@@ -35,6 +38,7 @@ public sealed partial class VibrationTestPage : UserControl
     /// STOP so leaving the page never leaves the motors running or a stale STOP armed).</summary>
     internal void Deactivate()
     {
+        _active = false;
         if (_frontend is not null) _frontend.StateInvalidated -= OnStateInvalidated;
         _ = CloseSessionAsync();
     }
@@ -46,7 +50,14 @@ public sealed partial class VibrationTestPage : UserControl
         catch (Exception exception) { AppLog.Warn("Window", "Vibration test session close failed.", exception, ("Reason", exception.GetType().Name)); }
     }
 
-    private void OnStateInvalidated(object? sender, EventArgs e) => _ = RefreshAsync();
+    private void OnStateInvalidated(object? sender, EventArgs e)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_active)
+                _ = RefreshAsync();
+        });
+    }
 
     internal async Task RefreshAsync()
     {

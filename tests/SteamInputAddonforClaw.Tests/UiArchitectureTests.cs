@@ -71,6 +71,16 @@ public sealed class UiArchitectureTests
         Assert.Contains("XamlControlsResources", appXaml, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Vibration_test_state_invalidations_are_marshaled_to_the_ui_queue()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/VibrationTestPage.xaml.cs"));
+
+        Assert.Contains("DispatcherQueue.TryEnqueue", page, StringComparison.Ordinal);
+        Assert.Contains("if (_active)", page, StringComparison.Ordinal);
+    }
+
     private static IReadOnlyList<string> References(string relativeProjectPath)
     {
         var projectPath = Path.Combine(FindRepositoryRoot(), relativeProjectPath.Replace('/', Path.DirectorySeparatorChar));
