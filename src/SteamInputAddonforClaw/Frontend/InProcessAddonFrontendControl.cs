@@ -339,6 +339,19 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default) =>
         Task.FromResult(MutateCpuBoost(ac: false, mode));
 
+    /// <summary>Device CPU Boost Toggle addendum: turns the Device/global apply path on or off.
+    /// Not an application-wide switch, never gates a future Game Profile CPU Boost path.</summary>
+    public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (_cpuBoostRuntime is null)
+            return Task.FromResult(new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable));
+
+        var result = _cpuBoostRuntime.SetDeviceCpuBoostEnabled(enabled);
+        var snapshot = MapCpuBoostSnapshot(_cpuBoostRuntime.Snapshot);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(new FrontendCpuBoostMutationResult(MapMutationOutcome(result.Outcome), result.FailureMessage, snapshot));
+    }
+
     private FrontendCpuBoostMutationResult MutateCpuBoost(bool ac, CpuBoostMode mode)
     {
         if (_cpuBoostRuntime is null)
@@ -350,18 +363,20 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         // authoritative (unchanged) snapshot, and ApplyFailed means the NEW desired value is now
         // authoritative -- both are real state changes the page must re-render (work order section 7).
         StateInvalidated?.Invoke(this, EventArgs.Empty);
-        var outcome = result.Outcome switch
-        {
-            CpuBoostMutationOutcome.Succeeded => FrontendCpuBoostMutationOutcome.Succeeded,
-            CpuBoostMutationOutcome.PersistenceFailed => FrontendCpuBoostMutationOutcome.PersistenceFailed,
-            _ => FrontendCpuBoostMutationOutcome.ApplyFailed
-        };
-        return new FrontendCpuBoostMutationResult(outcome, result.FailureMessage, snapshot);
+        return new FrontendCpuBoostMutationResult(MapMutationOutcome(result.Outcome), result.FailureMessage, snapshot);
     }
+
+    private static FrontendCpuBoostMutationOutcome MapMutationOutcome(CpuBoostMutationOutcome outcome) => outcome switch
+    {
+        CpuBoostMutationOutcome.Succeeded => FrontendCpuBoostMutationOutcome.Succeeded,
+        CpuBoostMutationOutcome.PersistenceFailed => FrontendCpuBoostMutationOutcome.PersistenceFailed,
+        _ => FrontendCpuBoostMutationOutcome.ApplyFailed
+    };
 
     private static FrontendCpuBoostSnapshot MapCpuBoostSnapshot(CpuBoostRuntimeSnapshot snapshot) => new(
         MapCpuBoostSide(snapshot.AcCurrent, snapshot.AcDesired),
         MapCpuBoostSide(snapshot.DcCurrent, snapshot.DcDesired),
+        snapshot.Enabled,
         snapshot.PersistenceWritable,
         snapshot.LastFailure);
 

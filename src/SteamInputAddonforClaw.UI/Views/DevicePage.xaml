@@ -12,7 +12,13 @@
             <ctcontrols:SettingsExpander
                 x:Name="CpuBoostExpander"
                 Header="CPU Boost"
-                Description="Processor performance boost mode.">
+                Description="Processor performance boost mode."
+                IsExpanded="True">
+                <ToggleSwitch
+                    x:Name="CpuBoostEnabledToggleSwitch"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="CpuBoostEnabledToggleSwitch_Toggled" />
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard Header="Plugged in">
                         <ComboBox

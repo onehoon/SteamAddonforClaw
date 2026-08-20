@@ -44,9 +44,16 @@ public sealed record DevicePerformanceSettings
 /// this side -- read/preserve the current Windows value for it, never write it." An explicit value
 /// (including <see cref="CpuBoostMode.Disabled"/>, which is mode <c>0</c>, not "unmanaged") means
 /// that side is Addon-managed. There is intentionally no separate "is managed" Boolean per side --
-/// nullability alone carries that meaning (work order section 7).</summary>
+/// nullability alone carries that meaning (work order section 7).
+///
+/// <see cref="Enabled"/> (Device CPU Boost Toggle addendum) is a SEPARATE concept from AC/DC
+/// nullability: it controls only whether the Addon's Device/global apply path is currently allowed
+/// to apply these AC/DC values -- it is not an application-wide CPU Boost master switch, and a
+/// future Game Profile CPU Boost path is not gated by it. Turning it off never clears/erases Ac/Dc:
+/// the saved selections remain so the feature can be re-enabled and immediately re-apply them.</summary>
 public sealed record DeviceCpuBoostSettings
 {
+    public bool Enabled { get; init; }
     public CpuBoostMode? Ac { get; init; }
     public CpuBoostMode? Dc { get; init; }
 

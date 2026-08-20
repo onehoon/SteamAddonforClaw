@@ -174,6 +174,40 @@ public sealed class CpuBoostFrontendTests : IDisposable
         Assert.True(result.Succeeded);
     }
 
+    [Fact]
+    public async Task Disabling_reports_Enabled_false_and_performs_no_restoration()
+    {
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = CreateReconciledRuntime(policy);
+        var control = CreateControl(runtime);
+
+        var result = await control.SetDeviceCpuBoostEnabledAsync(false);
+
+        Assert.True(result.Succeeded);
+        Assert.False(result.Snapshot.Enabled);
+        Assert.Equal(0, policy.AcWriteCount);
+        Assert.Equal(0, policy.DcWriteCount);
+        // Saved selections remain visible while disabled.
+        Assert.Equal(CpuBoostMode.Aggressive, result.Snapshot.Ac.Desired);
+        Assert.Equal(CpuBoostMode.Disabled, result.Snapshot.Dc.Desired);
+    }
+
+    [Fact]
+    public async Task Re_enabling_applies_saved_values_and_reports_Enabled_true()
+    {
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = CreateReconciledRuntime(policy);
+        var control = CreateControl(runtime);
+        await control.SetDeviceCpuBoostEnabledAsync(false);
+
+        var result = await control.SetDeviceCpuBoostEnabledAsync(true);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Snapshot.Enabled);
+        Assert.Equal(1, policy.AcWriteCount);
+        Assert.Equal(1, policy.DcWriteCount);
+    }
+
     private CpuBoostRuntime CreateReconciledRuntime(ICpuBoostPowerPolicy policy)
     {
         var runtime = new CpuBoostRuntime(new ProfileStore(Path.Combine(_testDirectory, "profiles.json")), policy);

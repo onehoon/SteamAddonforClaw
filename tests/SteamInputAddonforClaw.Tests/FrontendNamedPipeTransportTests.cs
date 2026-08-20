@@ -75,6 +75,8 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Null(fake.LastDcMode);
         Assert.Equal(fake.CpuBoostMutationResult, await client.SetDeviceCpuBoostDcAsync(CpuBoostMode.Disabled));
         Assert.Equal(CpuBoostMode.Disabled, fake.LastDcMode);
+        Assert.Equal(fake.CpuBoostMutationResult, await client.SetDeviceCpuBoostEnabledAsync(false));
+        Assert.Equal(false, fake.LastEnabled);
     }
 
     [Theory]
@@ -1038,14 +1040,16 @@ public sealed class FrontendNamedPipeTransportTests
         public FrontendCpuBoostSnapshot CpuBoostSnapshot { get; } = new(
             new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Aggressive, null),
             new(FrontendCpuBoostReadStatus.Known, CpuBoostMode.Disabled, null),
-            true, null);
+            true, true, null);
         public FrontendCpuBoostMutationResult CpuBoostMutationResult { get; }
         public CpuBoostMode? LastAcMode { get; private set; }
         public CpuBoostMode? LastDcMode { get; private set; }
+        public bool? LastEnabled { get; private set; }
         public RecordingFrontendControl() => CpuBoostMutationResult = new(FrontendCpuBoostMutationOutcome.Succeeded, null, CpuBoostSnapshot);
         public Task<FrontendCpuBoostSnapshot> CaptureCpuBoostAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(CpuBoostSnapshot); }
         public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastAcMode = mode; return Task.FromResult(CpuBoostMutationResult); }
         public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastDcMode = mode; return Task.FromResult(CpuBoostMutationResult); }
+        public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastEnabled = enabled; return Task.FromResult(CpuBoostMutationResult); }
     }
 
     private sealed class PartialReadStream : MemoryStream

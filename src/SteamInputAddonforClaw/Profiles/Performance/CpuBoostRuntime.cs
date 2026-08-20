@@ -28,17 +28,24 @@ public readonly record struct CpuBoostMutationResult(CpuBoostMutationOutcome Out
 /// <summary>Minimal, narrowly CPU-Boost-specific runtime snapshot (work order section 19) -- not a
 /// general Device/Profile status framework. Distinguishes the actual current Windows AC/DC values
 /// from the Addon's persisted/managed desired values, which is required so a future UI can show the
-/// real Windows value even on an unmanaged side.</summary>
+/// real Windows value even on an unmanaged side.
+///
+/// <see cref="Enabled"/> (Device CPU Boost Toggle addendum) reflects only whether the Device/global
+/// apply path is currently allowed to apply <see cref="AcDesired"/>/<see cref="DcDesired"/> -- it is
+/// not an application-wide CPU Boost switch. <see cref="AcDesired"/>/<see cref="DcDesired"/> remain
+/// populated even while <see cref="Enabled"/> is <see langword="false"/>, so the UI can keep showing
+/// the saved selections that will be re-applied the moment the feature is turned back on.</summary>
 public sealed record CpuBoostRuntimeSnapshot(
     CpuBoostSideReading AcCurrent,
     CpuBoostSideReading DcCurrent,
     CpuBoostMode? AcDesired,
     CpuBoostMode? DcDesired,
+    bool Enabled,
     bool PersistenceWritable,
     string? LastFailure)
 {
     public static readonly CpuBoostRuntimeSnapshot Empty = new(
-        CpuBoostSideReading.Unavailable, CpuBoostSideReading.Unavailable, null, null, PersistenceWritable: false, LastFailure: null);
+        CpuBoostSideReading.Unavailable, CpuBoostSideReading.Unavailable, null, null, Enabled: false, PersistenceWritable: false, LastFailure: null);
 }
 
 /// <summary>
@@ -114,7 +121,7 @@ internal sealed class CpuBoostRuntime
             {
                 // Malformed/UnsupportedSchemaVersion/ReadFailure: never bootstrap, never write
                 // Windows on this state's behalf -- just report the current unmanaged read.
-                UpdateSnapshot(_powerPolicy.Read(), null, null);
+                UpdateSnapshot(_powerPolicy.Read(), null, null, enabled: false);
                 return;
             }
 
@@ -122,6 +129,17 @@ internal sealed class CpuBoostRuntime
             if (cpuBoost is null)
             {
                 TryBootstrapFromWindows(loadResult.Document);
+                return;
+            }
+
+            if (!cpuBoost.Enabled)
+            {
+                // Device CPU Boost Toggle addendum: OFF means the Device/global apply path does not
+                // apply CPU Boost -- at startup or anywhere else. The saved AC/DC selections remain
+                // visible (a diagnostic Windows read only, never a write) so the UI can show what
+                // will be applied the moment the feature is turned back on.
+                UpdateSnapshot(_powerPolicy.Read(), cpuBoost.Ac, cpuBoost.Dc, enabled: false);
+                AppLog.Debug("Profiles.CpuBoost", "Device CPU Boost is disabled; Windows left untouched at startup.");
                 return;
             }
 
@@ -142,11 +160,14 @@ internal sealed class CpuBoostRuntime
         {
             AppLog.Warn("Profiles.CpuBoost", "CPU Boost first-run bootstrap could not read a known Windows AC/DC value; CPU Boost remains uninitialized.", null,
                 ("AcStatus", current.Ac.Status), ("DcStatus", current.Dc.Status));
-            UpdateSnapshot(current, null, null, current.Succeeded ? null : current.FailureMessage);
+            UpdateSnapshot(current, null, null, enabled: false, current.Succeeded ? null : current.FailureMessage);
             return;
         }
 
-        var bootstrapped = new DeviceCpuBoostSettings { Ac = current.Ac.Mode, Dc = current.Dc.Mode };
+        // Device CPU Boost Toggle addendum section 3: initial Enabled = ON, so the newly adopted
+        // Windows values become the Addon's initial Device configuration without changing the
+        // effective setting on first initialization.
+        var bootstrapped = new DeviceCpuBoostSettings { Enabled = true, Ac = current.Ac.Mode, Dc = current.Dc.Mode };
         var updatedDocument = document with
         {
             Device = document.Device with
@@ -162,7 +183,7 @@ internal sealed class CpuBoostRuntime
         catch (Exception exception)
         {
             AppLog.Error("Profiles.CpuBoost", "CPU Boost first-run bootstrap persistence failed; CPU Boost remains uninitialized.", exception);
-            UpdateSnapshot(current, null, null, exception.Message);
+            UpdateSnapshot(current, null, null, enabled: false, exception.Message);
             return;
         }
 
@@ -172,7 +193,7 @@ internal sealed class CpuBoostRuntime
             _persistenceWritable = true;
         }
         AppLog.Info("Profiles.CpuBoost", "CPU Boost first-run bootstrap adopted the current Windows values.", ("Ac", current.Ac.Mode), ("Dc", current.Dc.Mode));
-        UpdateSnapshot(current, current.Ac.Mode, current.Dc.Mode);
+        UpdateSnapshot(current, current.Ac.Mode, current.Dc.Mode, enabled: true);
     }
 
     /// <summary>Sets the persisted/desired AC CPU Boost mode and applies it to Windows. DC is left
@@ -205,7 +226,11 @@ internal sealed class CpuBoostRuntime
                 previousDocument = _document;
             }
 
-            var previousCpuBoost = previousDocument.Device.Performance.CpuBoost ?? new DeviceCpuBoostSettings();
+            // An explicit user mutation (AC/DC or the Enabled toggle itself) is itself a form of
+            // initialization: if no CpuBoost value existed yet (e.g. first-run bootstrap could not
+            // read a known Windows value), the freshly-created value defaults to Enabled=true, same
+            // as a successful bootstrap -- never a silently-inert Enabled=false the user never chose.
+            var previousCpuBoost = previousDocument.Device.Performance.CpuBoost ?? new DeviceCpuBoostSettings { Enabled = true };
             var updatedCpuBoost = mutateAc ? previousCpuBoost with { Ac = mode } : previousCpuBoost with { Dc = mode };
             var updatedPerformance = previousDocument.Device.Performance with { CpuBoost = updatedCpuBoost };
             var updatedDevice = previousDocument.Device with { Performance = updatedPerformance };
@@ -230,8 +255,19 @@ internal sealed class CpuBoostRuntime
                 _persistenceWritable = true;
             }
 
+            if (!updatedCpuBoost.Enabled)
+            {
+                // Device CPU Boost Toggle addendum: while OFF, an AC/DC selection is saved but never
+                // applied to Windows -- it becomes authoritative the moment the feature is turned
+                // back on. (The Device page itself disables these selectors while OFF, but the
+                // Runtime enforces the same invariant regardless of caller.)
+                RefreshSnapshotAfterApply(updatedCpuBoost, CpuBoostApplyResult.NoOp);
+                AppLog.Info("Profiles.CpuBoost", "CPU Boost desired value saved while Device CPU Boost is disabled; not applied.", ("Side", mutateAc ? "AC" : "DC"), ("Mode", mode));
+                return new CpuBoostMutationResult(CpuBoostMutationOutcome.Succeeded, null);
+            }
+
             var applyResult = _powerPolicy.Apply(mutateAc ? mode : null, mutateAc ? null : mode);
-            RefreshSnapshotAfterApply(updatedDocument.Device.Performance.CpuBoost, applyResult);
+            RefreshSnapshotAfterApply(updatedCpuBoost, applyResult);
 
             if (!applyResult.Succeeded)
             {
@@ -247,15 +283,90 @@ internal sealed class CpuBoostRuntime
         }
     }
 
+    /// <summary>Device CPU Boost Toggle addendum: turns the Device/global CPU Boost apply path on
+    /// or off. This controls only whether the Addon applies the Device/global AC/DC values -- it is
+    /// not an application-wide CPU Boost master switch, and it never gates a future Game Profile
+    /// CPU Boost path.
+    ///
+    /// OFF performs NO restoration whatsoever (no read-and-write-back, no undo of the last applied
+    /// value, no restore to any prior/system value): Windows is left exactly as it is, and only
+    /// future Device/global application stops. The saved AC/DC selections are never cleared, so
+    /// turning the feature back ON immediately re-applies them -- never re-bootstrapped from a
+    /// fresh Windows read, which only ever happens before first initialization.</summary>
+    internal CpuBoostMutationResult SetDeviceCpuBoostEnabled(bool enabled)
+    {
+        lock (_mutationSync)
+        {
+            ProfileDocument previousDocument;
+            lock (_sync)
+            {
+                if (!_persistenceWritable)
+                    return new CpuBoostMutationResult(CpuBoostMutationOutcome.PersistenceFailed, "Profile state is not safe to replace.");
+                previousDocument = _document;
+            }
+
+            // An explicit user mutation (AC/DC or the Enabled toggle itself) is itself a form of
+            // initialization: if no CpuBoost value existed yet (e.g. first-run bootstrap could not
+            // read a known Windows value), the freshly-created value defaults to Enabled=true, same
+            // as a successful bootstrap -- never a silently-inert Enabled=false the user never chose.
+            var previousCpuBoost = previousDocument.Device.Performance.CpuBoost ?? new DeviceCpuBoostSettings { Enabled = true };
+            var updatedCpuBoost = previousCpuBoost with { Enabled = enabled };
+            var updatedDocument = previousDocument with
+            {
+                Device = previousDocument.Device with
+                {
+                    Performance = previousDocument.Device.Performance with { CpuBoost = updatedCpuBoost }
+                }
+            };
+
+            try
+            {
+                _profileStore.Save(updatedDocument);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error("Profiles.CpuBoost", "Device CPU Boost Enabled toggle persistence failed.", exception);
+                return new CpuBoostMutationResult(CpuBoostMutationOutcome.PersistenceFailed, exception.Message);
+            }
+
+            lock (_sync)
+            {
+                _document = updatedDocument;
+                _persistenceWritable = true;
+            }
+
+            if (!enabled)
+            {
+                AppLog.Info("Profiles.CpuBoost", "Device CPU Boost disabled; no Windows write performed.");
+                RefreshSnapshotAfterApply(updatedCpuBoost, CpuBoostApplyResult.NoOp);
+                return new CpuBoostMutationResult(CpuBoostMutationOutcome.Succeeded, null);
+            }
+
+            var applyResult = _powerPolicy.Apply(updatedCpuBoost.Ac, updatedCpuBoost.Dc);
+            RefreshSnapshotAfterApply(updatedCpuBoost, applyResult);
+
+            if (!applyResult.Succeeded)
+            {
+                AppLog.Warn("Profiles.CpuBoost", "Device CPU Boost was enabled but the Windows apply failed.", null,
+                    ("AcSucceeded", applyResult.AcSucceeded), ("DcSucceeded", applyResult.DcSucceeded));
+                return new CpuBoostMutationResult(CpuBoostMutationOutcome.ApplyFailed, applyResult.FailureMessage);
+            }
+
+            AppLog.Info("Profiles.CpuBoost", "Device CPU Boost enabled; saved values applied.", ("Ac", updatedCpuBoost.Ac), ("Dc", updatedCpuBoost.Dc));
+            return new CpuBoostMutationResult(CpuBoostMutationOutcome.Succeeded, null);
+        }
+    }
+
     /// <summary>Reads the current Windows state and -- only for the non-null side(s) supplied --
     /// applies the desired mode. Never writes an unmanaged (null) side, and never turns a read of
     /// an unmanaged side into a persisted value (work order sections 6/9/16).</summary>
     private void ReconcileWindows(CpuBoostMode? desiredAc, CpuBoostMode? desiredDc, string contextLabel)
     {
+        // Only reached with Device CPU Boost Enabled -- see StartupReconcile's Enabled check above.
         if (desiredAc is null && desiredDc is null)
         {
             var currentOnly = _powerPolicy.Read();
-            UpdateSnapshot(currentOnly, desiredAc, desiredDc);
+            UpdateSnapshot(currentOnly, desiredAc, desiredDc, enabled: true);
             AppLog.Debug("Profiles.CpuBoost", "CPU Boost is fully unmanaged; Windows left untouched.", ("Context", contextLabel));
             return;
         }
@@ -266,21 +377,21 @@ internal sealed class CpuBoostRuntime
                 ("Context", contextLabel), ("AcSucceeded", applyResult.AcSucceeded), ("DcSucceeded", applyResult.DcSucceeded));
 
         var current = _powerPolicy.Read();
-        UpdateSnapshot(current, desiredAc, desiredDc, applyResult.Succeeded ? null : applyResult.FailureMessage);
+        UpdateSnapshot(current, desiredAc, desiredDc, enabled: true, applyResult.Succeeded ? null : applyResult.FailureMessage);
     }
 
     private void RefreshSnapshotAfterApply(DeviceCpuBoostSettings? cpuBoost, CpuBoostApplyResult applyResult)
     {
         var current = _powerPolicy.Read();
-        UpdateSnapshot(current, cpuBoost?.Ac, cpuBoost?.Dc, applyResult.Succeeded ? null : applyResult.FailureMessage);
+        UpdateSnapshot(current, cpuBoost?.Ac, cpuBoost?.Dc, cpuBoost?.Enabled ?? false, applyResult.Succeeded ? null : applyResult.FailureMessage);
     }
 
-    private void UpdateSnapshot(CpuBoostSystemState current, CpuBoostMode? desiredAc, CpuBoostMode? desiredDc, string? failure = null)
+    private void UpdateSnapshot(CpuBoostSystemState current, CpuBoostMode? desiredAc, CpuBoostMode? desiredDc, bool enabled, string? failure = null)
     {
         lock (_sync)
         {
             _snapshot = new CpuBoostRuntimeSnapshot(
-                current.Ac, current.Dc, desiredAc, desiredDc, _persistenceWritable,
+                current.Ac, current.Dc, desiredAc, desiredDc, enabled, _persistenceWritable,
                 failure ?? current.FailureMessage);
         }
     }

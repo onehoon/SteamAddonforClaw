@@ -63,13 +63,20 @@ public sealed record FrontendCpuBoostSideSnapshot(FrontendCpuBoostReadStatus Cur
 /// <summary>Narrowly CPU-Boost-specific frontend snapshot (work order section 5) -- not a
 /// generalized device-setting/profile framework. <see cref="PersistenceWritable"/> false means the
 /// last profile load was unsafe to replace (malformed/unsupported schema/read failure): the frontend
-/// must disable CPU Boost mutation rather than risk overwriting that file (work order section 19).</summary>
-public sealed record FrontendCpuBoostSnapshot(FrontendCpuBoostSideSnapshot Ac, FrontendCpuBoostSideSnapshot Dc, bool PersistenceWritable, string? LastFailure)
+/// must disable CPU Boost mutation rather than risk overwriting that file (work order section 19).
+///
+/// <see cref="Enabled"/> (Device CPU Boost Toggle addendum) controls only whether the Addon applies
+/// the Device/global <see cref="FrontendCpuBoostSideSnapshot.Desired"/> AC/DC values -- it is not an
+/// application-wide CPU Boost master switch, and a future Game Profile CPU Boost path is not gated
+/// by it. <see cref="FrontendCpuBoostSideSnapshot.Desired"/> remains populated while
+/// <see cref="Enabled"/> is <see langword="false"/> so the UI can keep showing (and re-enable) the
+/// saved selections.</summary>
+public sealed record FrontendCpuBoostSnapshot(FrontendCpuBoostSideSnapshot Ac, FrontendCpuBoostSideSnapshot Dc, bool Enabled, bool PersistenceWritable, string? LastFailure)
 {
     public static readonly FrontendCpuBoostSnapshot Unavailable = new(
         new(FrontendCpuBoostReadStatus.Unavailable, null, null),
         new(FrontendCpuBoostReadStatus.Unavailable, null, null),
-        PersistenceWritable: false, LastFailure: null);
+        Enabled: false, PersistenceWritable: false, LastFailure: null);
 }
 
 /// <summary>Result of a single-side CPU Boost mutation. Never discards the Runtime's
@@ -161,5 +168,12 @@ public interface IAddonFrontendControl
     /// <summary>Sets the persisted/desired DC CPU Boost mode and applies it to Windows. AC is left
     /// completely untouched (work order section 10).</summary>
     Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable));
+    /// <summary>Turns the Device/global CPU Boost apply path on or off (Device CPU Boost Toggle
+    /// addendum). Not an application-wide CPU Boost switch, and never gates a future Game Profile
+    /// CPU Boost path. Turning it off performs no restoration -- Windows is left exactly as it is,
+    /// and the saved AC/DC selections are preserved so turning it back on immediately re-applies
+    /// them.</summary>
+    Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable));
 }

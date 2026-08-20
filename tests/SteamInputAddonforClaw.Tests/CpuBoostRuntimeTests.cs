@@ -147,6 +147,119 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         Assert.Equal(CpuBoostMode.Disabled, secondRuntime.Snapshot.DcDesired);
     }
 
+    // ---- Device CPU Boost Toggle addendum ----
+
+    [Fact]
+    public void StartupReconcile_FirstRun_EnabledDefaultsOn()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.True(runtime.Snapshot.Enabled);
+        Assert.True(store.Load().Document.Device.Performance.CpuBoost?.Enabled);
+    }
+
+    [Fact]
+    public void StartupReconcile_Disabled_PerformsZeroWrites()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = false, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Disabled } } }
+        });
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        Assert.False(runtime.Snapshot.Enabled);
+        // Saved selections remain visible even while disabled -- OFF never nulls them out.
+        Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcDesired);
+        Assert.Equal(CpuBoostMode.Disabled, runtime.Snapshot.DcDesired);
+    }
+
+    [Fact]
+    public void SetDeviceCpuBoostEnabled_Disable_PerformsNoRestorationAndLeavesWindowsUntouched()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile(); // first-run bootstrap: Enabled=true, Ac=Aggressive, Dc=Disabled
+
+        var result = runtime.SetDeviceCpuBoostEnabled(false);
+
+        Assert.True(result.Succeeded);
+        Assert.False(store.Load().Document.Device.Performance.CpuBoost?.Enabled);
+        // Zero CPU Boost restoration writes -- current Windows values remain exactly as they were.
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    [Fact]
+    public void SetDeviceCpuBoostEnabled_ReEnable_AppliesSavedValuesNotFreshWindowsRead()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile(); // Enabled=true, Ac=Aggressive, Dc=Disabled
+        runtime.SetDeviceCpuBoostEnabled(false);
+
+        // While OFF, another tool changes Windows.
+        backend.Ac = CpuBoostSideReading.Known(CpuBoostMode.EfficientEnabled);
+        backend.Dc = CpuBoostSideReading.Known(CpuBoostMode.Enabled);
+
+        var result = runtime.SetDeviceCpuBoostEnabled(true);
+
+        Assert.True(result.Succeeded);
+        Assert.True(store.Load().Document.Device.Performance.CpuBoost?.Enabled);
+        // Applies the SAVED Aggressive/Disabled, never re-bootstrapped from the current
+        // EfficientEnabled/Enabled Windows values.
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    [Fact]
+    public void Disabling_PreservesTheSavedAcDcSelections()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        runtime.SetDeviceCpuBoostEnabled(false);
+        var reloaded = store.Load();
+
+        Assert.False(reloaded.Document.Device.Performance.CpuBoost?.Enabled);
+        Assert.Equal(CpuBoostMode.Aggressive, reloaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(CpuBoostMode.Disabled, reloaded.Document.Device.Performance.CpuBoost?.Dc);
+    }
+
+    [Fact]
+    public void Mutation_WhileDisabled_PersistsSelectionButDoesNotApplyToWindows()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = false, Ac = CpuBoostMode.Aggressive } } }
+        });
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.EfficientAggressive);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(CpuBoostMode.EfficientAggressive, store.Load().Document.Device.Performance.CpuBoost?.Ac);
+    }
+
     // ---- AC-only managed startup ----
 
     [Fact]
@@ -155,7 +268,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var store = new ProfileStore(ProfilesPath);
         store.Save(new ProfileDocument
         {
-            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = CpuBoostMode.EfficientAggressive } } }
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.EfficientAggressive } } }
         });
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
         var runtime = new CpuBoostRuntime(store, backend);
@@ -176,7 +289,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var store = new ProfileStore(ProfilesPath);
         store.Save(new ProfileDocument
         {
-            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Dc = CpuBoostMode.Disabled } } }
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Dc = CpuBoostMode.Disabled } } }
         });
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Aggressive) };
         var runtime = new CpuBoostRuntime(store, backend);
@@ -197,7 +310,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var store = new ProfileStore(ProfilesPath);
         store.Save(new ProfileDocument
         {
-            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Disabled } } }
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Disabled } } }
         });
         var backend = new FakeCpuBoostPowerPolicy();
         var runtime = new CpuBoostRuntime(store, backend);
@@ -218,7 +331,7 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var store = new ProfileStore(ProfilesPath);
         store.Save(new ProfileDocument
         {
-            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Ac = CpuBoostMode.Disabled } } }
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { CpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = CpuBoostMode.Disabled } } }
         });
         var backend = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive) };
         var runtime = new CpuBoostRuntime(store, backend);

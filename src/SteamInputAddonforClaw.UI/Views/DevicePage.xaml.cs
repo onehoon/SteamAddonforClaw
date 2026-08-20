@@ -1,3 +1,4 @@
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
@@ -85,12 +86,17 @@ public sealed partial class DevicePage : UserControl
             // mode for Unknown/Unavailable.
             CpuBoostAcComboBox.SelectedItem = SelectedItem(snapshot.Ac);
             CpuBoostDcComboBox.SelectedItem = SelectedItem(snapshot.Dc);
+            CpuBoostEnabledToggleSwitch.IsOn = snapshot.Enabled;
         }
         finally { _suppressSelectionEvents = false; }
 
-        var enabled = snapshot.PersistenceWritable;
-        CpuBoostAcComboBox.IsEnabled = enabled;
-        CpuBoostDcComboBox.IsEnabled = enabled;
+        // Device CPU Boost Toggle addendum sections 8/9: the saved AC/DC selections stay visible
+        // (never nulled out) and the Expander stays expanded while the feature is OFF -- only
+        // editing is disabled, so the user can see what will re-apply the moment it's turned back on.
+        CpuBoostEnabledToggleSwitch.IsEnabled = snapshot.PersistenceWritable;
+        var selectorsEditable = snapshot.PersistenceWritable && snapshot.Enabled;
+        CpuBoostAcComboBox.IsEnabled = selectorsEditable;
+        CpuBoostDcComboBox.IsEnabled = selectorsEditable;
 
         if (!snapshot.PersistenceWritable)
         {
@@ -129,6 +135,13 @@ public sealed partial class DevicePage : UserControl
         if (_suppressSelectionEvents || _frontend is null) return;
         if (CpuBoostDcComboBox.SelectedItem is not CpuBoostModeItem item) return;
         var result = await _frontend.SetDeviceCpuBoostDcAsync(item.Mode);
+        Render(result.Snapshot);
+    }
+
+    private async void CpuBoostEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSelectionEvents || _frontend is null) return;
+        var result = await _frontend.SetDeviceCpuBoostEnabledAsync(CpuBoostEnabledToggleSwitch.IsOn);
         Render(result.Snapshot);
     }
 
