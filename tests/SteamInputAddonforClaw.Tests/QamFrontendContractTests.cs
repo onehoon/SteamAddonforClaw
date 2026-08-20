@@ -37,7 +37,7 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         Assert.Contains("const REACT_WALK_KEYS = [\"props\", \"children\", \"child\", \"sibling\"]", source);
-        Assert.Contains("for (const key of REACT_WALK_KEYS)", source);
+        Assert.Contains("node[REACT_WALK_KEYS[index]]", source);
         Assert.Contains("const visited = new Set();", source);
         Assert.Contains("REACT_WALK_NODE_BUDGET", source);
         Assert.Contains("budgetExhausted", source);
@@ -76,6 +76,22 @@ public sealed class QamFrontendContractTests
         var visitedAddIndex = source.IndexOf("visited.add(node)", findReactNodeIndex, StringComparison.Ordinal);
         Assert.True(visitedAddIndex >= 0 && arrayCheckIndex >= 0);
         Assert.True(visitedAddIndex < arrayCheckIndex, "visited/budget bookkeeping must happen before array expansion.");
+    }
+
+    [Fact]
+    public void Nested_react_walker_preserves_depth_first_structural_order()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var findReactNodeIndex = source.IndexOf("function findReactNode(", StringComparison.Ordinal);
+        Assert.True(findReactNodeIndex >= 0);
+        var walker = source[findReactNodeIndex..];
+
+        // The LIFO stack must receive both arrays and named links in reverse order so
+        // traversal visits array elements first-to-last and props -> children -> child -> sibling.
+        Assert.Contains("for (let index = node.length - 1; index >= 0; index--)", walker);
+        Assert.Contains("for (let index = REACT_WALK_KEYS.length - 1; index >= 0; index--)", walker);
+        Assert.Contains("node[REACT_WALK_KEYS[index]]", walker);
     }
 
     [Fact]

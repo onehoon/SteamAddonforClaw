@@ -153,7 +153,9 @@
       budget--;
 
       if (Array.isArray(node)) {
-        for (const child of node) stack.push(child);
+        for (let index = node.length - 1; index >= 0; index--) {
+          stack.push(node[index]);
+        }
         continue;
       }
 
@@ -161,8 +163,8 @@
         return { node, visited: visited.size, budgetExhausted: false };
       }
 
-      for (const key of REACT_WALK_KEYS) {
-        const next = node[key];
+      for (let index = REACT_WALK_KEYS.length - 1; index >= 0; index--) {
+        const next = node[REACT_WALK_KEYS[index]];
         if (next != null) stack.push(next);
       }
     }
