@@ -117,18 +117,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
         AppLog.Info($"Starting runtime. Environment={startupResult.EnvironmentMode}; Readiness={startupResult.EnvironmentReadiness}.");
 
-        // CPU Boost Device/Profile Runtime startup reconcile -- a sibling capability, deliberately
-        // independent of Routing/OEM1/Steam and run unconditionally here rather than gated on any
-        // of the routing-specific state below (work order PR276 sections 0/2/12/14). A failure here
-        // must never fail Addon Runtime startup or affect Routing/OEM1/VIIPER/HidHide.
-        try
-        {
-            _cpuBoostRuntime.StartupReconcile();
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("Profiles.CpuBoost", "CPU Boost startup reconcile failed.", exception);
-        }
         var composition = AddonRuntimeCompositionFactory.Create(
             startupComposition.HandheldDeviceAdapter,
             startupComposition.DeviceRegistry,
@@ -177,6 +165,26 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal void StartRuntimeEventWatchers() => _gameBarForegroundWatcher.Start();
 
     internal Task ReconcileAsync(CancellationToken cancellationToken = default) => GetRuntimeHost().ReconcileAsync(cancellationToken);
+
+    /// <summary>
+    /// CPU Boost Device/Profile Runtime startup reconcile -- a sibling capability, deliberately
+    /// independent of Routing/OEM1/Steam. Must be called only after the controller Runtime has been
+    /// initialized and the initial routing reconcile has been issued, so a slow/local-I/O or
+    /// PowrProf call can never delay/block reaching the initial controller Routing reconcile (work
+    /// order PR276 sections 0/2/12/14). A failure here must never fail Addon Runtime startup or
+    /// affect Routing/OEM1/VIIPER/HidHide.
+    /// </summary>
+    internal void ReconcileDeviceProfileStartup()
+    {
+        try
+        {
+            _cpuBoostRuntime.StartupReconcile();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.CpuBoost", "CPU Boost startup reconcile failed.", exception);
+        }
+    }
 
     internal UserTerminationDecision EvaluateUserTermination() =>
         _runtimeHost?.EvaluateUserTermination() ?? new(true, UserTerminationBlockReason.None);

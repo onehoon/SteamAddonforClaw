@@ -333,18 +333,26 @@ public sealed class CpuBoostRuntimeTests : IDisposable
     [Fact]
     public void Mutation_PersistenceFailure_NeverAppliesToWindowsAndKeepsPreviousDesiredState()
     {
-        // A directory in place of the profiles.json path makes File.Move/File.WriteAllText fail
-        // reliably without relying on OS-specific permission APIs.
-        Directory.CreateDirectory(ProfilesPath);
         var store = new ProfileStore(ProfilesPath);
         var backend = new FakeCpuBoostPowerPolicy();
         var runtime = new CpuBoostRuntime(store, backend);
+
+        // NotFound -> safe/writable, previous desired state is null. This must happen BEFORE the
+        // path is sabotaged below, or the mutation would exit at the _persistenceWritable guard
+        // without ever reaching ProfileStore.Save() -- which would not exercise a persistence
+        // failure at all.
+        runtime.StartupReconcile();
+
+        // A directory in place of the profiles.json path makes File.Move/File.WriteAllText fail
+        // reliably without relying on OS-specific permission APIs.
+        Directory.CreateDirectory(ProfilesPath);
 
         var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.Aggressive);
 
         Assert.Equal(CpuBoostMutationOutcome.PersistenceFailed, result.Outcome);
         Assert.Equal(0, backend.AcWriteCount);
         Assert.Equal(0, backend.DcWriteCount);
+        Assert.Null(runtime.Snapshot.AcDesired);
     }
 
     // ---- Hardware apply failure after persistence succeeds ----
