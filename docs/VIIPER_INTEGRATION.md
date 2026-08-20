@@ -103,16 +103,17 @@ the canonical typed Xbox360 surface (`CreateXbox360Device`,
 `SetXbox360DeviceState`, `RemoveXbox360Device`, `RemoveXbox360DeviceEx`). The
 managed ABI binding for all of these now exists in
 `ICanonicalViiperNativeApi`/`CanonicalViiperNativeApi`. The compatibility
-bool `AttachUSBDevice` /
-`DetachUSBDevice` compatibility surface; production Deck routing now uses
+bool `AttachUSBDevice` / `DetachUSBDevice` compatibility surface remains
+available, but production Deck routing now uses
 the classified attachment/query surface. The persistent runtime creates one
 detached-ready Xbox360 logical handle, but it is not attached, published, or
 used for Game Bar behavior (see
 `docs/VIIPER_MIGRATION_TODO.md` SD7, still PLANNED). The attachment state
 query is VIIPER ownership evidence only, not Windows PnP, HID, XInput, or
-Steam readiness. Consumption of the classified/query APIs is deferred to
-SD3 lifecycle/recovery work; this PR does not claim SD3 implementation or
-hardware validation. The Xbox360 typed API in this PR covers
+Steam readiness. Software consumption of the classified/query APIs is
+implemented by PR2b; SD3 remains the lifecycle/recovery hardware-validation
+track. This PR does not claim SD3 implementation or hardware validation. The
+Xbox360 typed API in this PR covers
 buttons/D-pad/sticks/triggers only -- no rumble callback is bound.
 
 ## 1. Upstream authority
