@@ -5,6 +5,18 @@ research handoff (`MSI_CenterM_OEM1_Remapping_Research_Design_Handoff_2026-08-14
 for hardware test results, static reverse-engineering findings, and the
 production design this foundation implements.
 
+## Current main status
+
+- Production OEM1 Event41 path is composed.
+- Center M suppression lifecycle is production-composed.
+- Configurable `Oem1MappingSettings` are persisted.
+- Controller / Center M Button settings UI is implemented.
+- Routing-active SteamQuickAccess selection uses actual `SteamOutputActive`.
+- Hardware validation remains pending.
+
+The PR sections below are chronological and may describe earlier states where
+these pieces were intentionally dormant.
+
 ## PR1 — Native runtime primitives — MERGED (#234)
 
 Adds the dormant primitives a future coordinator needs, under
@@ -425,9 +437,15 @@ been exercised by the deterministic automated test suite (fakes for process
 snapshot/helper/window/identity/terminate primitives) -- validating on a
 physical MSI Claw remains a required follow-up.
 
-## PR4+ (not started) — settings / UI / production activation hardening
+## Mapping framework and settings UI — IMPLEMENTED
 
-Controller settings "Center M Button" action selector, status presentation,
-named-pipe settings transport/persistence, localization, and a final
-configurable mapping framework (replacing the two hard-coded POC binding
-defaults from PR3) remain unstarted.
+The configurable mapping framework now provides:
+
+- a global remapping switch;
+- `NormalSingle`, `NormalDouble`, `RoutingSingle`, and `RoutingDouble` slots;
+- persistence through the existing settings store;
+- capability validation shared by settings UI and dispatch;
+- Controller settings and the Center M Button detail page;
+- one existing Center M lifecycle owner, with no duplicate suppression owner.
+
+Hardware validation remains pending.

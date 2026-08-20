@@ -13,20 +13,20 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the Xbox360 publisher <b>foundation</b> only (see docs/VIIPER_MIGRATION_TODO.md, SD7).
+/// This is the Xbox360 publisher used by the production temporary Game Bar presentation
+/// (see docs/VIIPER_MIGRATION_TODO.md, SD7).
 /// It reuses the same scheduling primitives, locking-free single-worker design, and fail-closed
 /// lifecycle discipline already proven by <see cref="CanonicalSteamDeckInputPublisher"/> against real
 /// MSI Claw hardware -- see that class's remarks for the timing rationale. Nothing in this class
 /// creates, attaches, detaches, or otherwise owns the Xbox360 logical device; it is handed a plain
 /// state sink delegate (matching <c>CanonicalViiperRuntime.SetXbox360State</c>'s signature) by its
 /// caller and only ever writes mapped state through it. It also never writes neutral state on stop --
-/// the future presentation coordinator explicitly owns publisher-stop -&gt; neutral -&gt; detach
+/// the Addon routing runtime explicitly owns publisher-stop -&gt; neutral -&gt; detach
 /// ordering, not this class.
 /// </para>
 /// <para>
-/// There is intentionally no production composition wiring this publisher up yet: it is not
-/// instantiated or started from any routing/session/output-stage/Game-Bar/power file. Xbox360 remains
-/// detached and unpublished during normal Runtime behavior.
+/// Production composes this publisher only for the temporary Game Bar presentation while an outer
+/// Steam route is active. It remains detached and unpublished when that presentation is inactive.
 /// </para>
 /// </remarks>
 internal sealed class CanonicalXbox360InputPublisher

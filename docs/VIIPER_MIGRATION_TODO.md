@@ -153,7 +153,14 @@ Required properties:
 
 ### SD5 — OEM1 and Quick Access
 
-Status: **PLANNED**
+Status: **SOFTWARE IMPLEMENTED — HARDWARE VALIDATION PENDING**
+
+Current main composes the production OEM1 Event41 path and Center M suppression
+lifecycle, with configurable mappings, persistence, capability validation, and
+Controller/Center M Button settings UI. Routing-active SteamQuickAccess uses
+actual `SteamOutputActive`. Hardware validation remains pending. The historical
+PR paragraphs below intentionally describe the incremental sequence and the
+earlier states in which these pieces were dormant.
 
 Map the validated OEM1 control to the Steam Deck Quick Access field after the
 basic lifecycle gate is complete. A managed, output-only Quick Access
@@ -250,7 +257,15 @@ approved.
 
 ### SD7 — Game Bar and typed Xbox360 route
 
-Status: **PLANNED**
+Status: **SOFTWARE WIRED — HARDWARE VALIDATION PENDING**
+
+Current main production-subscribes `GameBarForegroundWatcher`, delivers
+latest-state foreground intent, re-evaluates foreground after successful
+routing/resume reconciliation, serializes Deck/Xbox360 presentation mutations,
+and drains Game Bar delivery before Runtime teardown. The remaining SD7 gate is
+hardware evidence and any readiness fix proven necessary by that evidence.
+X360 PnP/XInput readiness is not currently claimed. The historical PR
+paragraphs below intentionally describe the earlier incremental states.
 
 Define the Game Bar transition and typed Xbox360 composition without weakening
 the active Deck lifecycle or recovery invariants.
@@ -491,14 +506,19 @@ PLANNED.
 
 ## Separate feature tracks
 
-Rumble v1 production wiring is implemented, but hardware validation remains
-pending. Haptics, gyro, and accelerometer behavior are not implied by the basic
-non-gyro input validation. Each requires its own protocol, mapping, lifecycle,
-and hardware evidence.
+Rumble v1 and Steam Deck `0xEA` Haptic / `0x8F` Haptic Pulse two-motor
+translation are production wired, but hardware validation remains pending.
+Audio/jingle and unknown output commands remain unsupported. Gyro and
+accelerometer remain a separate feature track. These capabilities are not
+implied by the basic non-gyro input validation; each requires its own protocol,
+mapping, lifecycle, and hardware evidence.
 
 ## Non-negotiable rules
 
-- Steam Deck `28DE:1205` is the sole active Steam output target.
+- Steam Deck `28DE:1205` is the sole Steam routing target. The persistent
+  Xbox360 device may be attached only as the temporary Game Bar presentation of
+  an already-active Steam route; it is not an independent routing target or
+  fallback.
 - Keep the exact VIIPER source, DLL, generated header, managed ABI, hashes, and
   provenance aligned.
 - Use `lib/viiper` and the typed ABI for new integration work.

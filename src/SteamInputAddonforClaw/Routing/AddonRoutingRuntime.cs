@@ -227,8 +227,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
     /// <summary>
     /// Enters the one-way Xbox360 presentation boundary while keeping the outer Steam route
-    /// active. This is an internal foundation seam only: no Game Bar event or normal Runtime
-    /// caller invokes it yet. Deck pause remains the first and authoritative step; the X360
+    /// active. It is reached by the production Game Bar delivery path while the outer Steam
+    /// route remains authoritative. Deck pause remains the first and authoritative step; the X360
     /// attachment is not touched until the Deck publisher has stopped and neutral was accepted.
     /// </summary>
     internal Task<bool> EnterXbox360PresentationAsync(CancellationToken cancellationToken = default) =>
@@ -268,8 +268,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
     /// <summary>
     /// Exits the manually-entered Xbox360 presentation boundary while keeping the outer Steam
-    /// route active. This is an internal foundation seam only; no Game Bar or normal Runtime
-    /// caller invokes it yet. The publisher must prove stopped before VIIPER detachment, and the
+    /// route active. It is the narrow production policy primitive used by Game Bar delivery.
+    /// The publisher must prove stopped before VIIPER detachment, and the
     /// Deck stage owns any failure encountered while resuming its existing publisher.
     /// </summary>
     internal Task<bool> ExitXbox360PresentationAsync(CancellationToken cancellationToken = default) =>
@@ -352,8 +352,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
     /// <summary>
     /// Selects the existing presentation primitive for a Game Bar foreground change. This is a
-    /// policy seam only; the Game Bar watcher is deliberately not subscribed here, so normal
-    /// Runtime behavior remains unchanged until a later production-wiring step.
+    /// policy seam only; foreground observation and serialized delivery are owned by
+    /// <see cref="Hosting.AddonProcessHost"/>, not by this method.
     ///
     /// Deliberately does not pre-check <c>SteamOutputActive</c>/<c>_xbox360Publisher</c> here: a
     /// snapshot taken before <see cref="EnterXbox360PresentationAsync"/>/
