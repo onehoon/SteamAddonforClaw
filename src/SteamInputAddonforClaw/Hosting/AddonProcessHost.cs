@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Devices;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
@@ -50,7 +51,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // member of it (work order PR276 sections 0/2/12): CPU Boost must remain fully usable even with
     // Routing/OEM1/Steam/the frontend absent, so it is constructed and reconciled independently
     // here rather than inside AddonRuntimeCompositionFactory/AddonRoutingRuntime.
-    private readonly CpuBoostRuntime _cpuBoostRuntime = new(new ProfileStore(AddonDataPaths.ProfilesPath));
+    private readonly ProfileStore _profileStore = new(AddonDataPaths.ProfilesPath);
+    private readonly ProfileMutationGate _profileMutationGate = new();
+    private readonly CpuBoostRuntime _cpuBoostRuntime;
+    private TdpRuntime? _tdpRuntime;
 
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
@@ -58,6 +62,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     internal AddonProcessHost(string[]? updateRestartArguments)
     {
         _updateRestartArguments = updateRestartArguments;
+        _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
         _gameBarForegroundWatcher = new GameBarForegroundWatcher();
@@ -149,6 +154,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
 
         _runtimeHost = composition.RuntimeHost;
+        if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
+            && startupResult.HardwareDeviceModel is { } tdpModel)
+        {
+            _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel,
+                new MsiClawTdpHardware(new MsiClawWmiTdpTransport()));
+        }
         _frontendControl = new SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl(
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
             // Same single startup hardware-support result the routing composition's OEM1 gate above
@@ -196,6 +207,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Error("Profiles.CpuBoost", "CPU Boost startup reconcile failed.", exception);
         }
+
+        try
+        {
+            _tdpRuntime?.StartupReconcile();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Tdp", "TDP startup reconcile failed.", exception);
+        }
     }
 
     internal UserTerminationDecision EvaluateUserTermination() =>
@@ -228,6 +248,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Dispose();
         _qamHostController.BeginShutdown();
+        _tdpRuntime?.BeginShutdown();
         _startupCancellationTokenSource.Cancel();
         PrepareRuntimeForShutdown();
     }
@@ -252,6 +273,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             await _runtimeHost.DisposeAsync().ConfigureAwait(false);
             _runtimeHost = null;
+        }
+        if (_tdpRuntime is not null)
+        {
+            await _tdpRuntime.DisposeAsync().ConfigureAwait(false);
+            _tdpRuntime = null;
         }
         await _qamHostController.DisposeAsync().ConfigureAwait(false);
         _startupComposition = null;
