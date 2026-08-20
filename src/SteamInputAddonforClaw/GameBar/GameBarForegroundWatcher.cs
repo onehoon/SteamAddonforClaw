@@ -83,7 +83,7 @@ internal sealed class GameBarForegroundWatcher : IDisposable
         _unhook = unhook ?? (hookHandle => _ = UnhookWinEvent(hookHandle));
     }
 
-    internal bool IsForeground => _isForeground;
+    internal bool IsForeground => Volatile.Read(ref _isForeground);
     internal event EventHandler? StateChanged;
 
     internal void Start()
@@ -128,8 +128,8 @@ internal sealed class GameBarForegroundWatcher : IDisposable
     private void Publish(IntPtr authoritativeHwnd)
     {
         var value = authoritativeHwnd != IntPtr.Zero && _probe.Inspect(authoritativeHwnd).IsGameBar;
-        if (value == _isForeground || Volatile.Read(ref _disposed) != 0) return;
-        _isForeground = value;
+        if (value == Volatile.Read(ref _isForeground) || Volatile.Read(ref _disposed) != 0) return;
+        Volatile.Write(ref _isForeground, value);
         AppLog.Info("GameBar", value ? "Game Bar entered foreground." : "Game Bar left foreground.");
         try { StateChanged?.Invoke(this, EventArgs.Empty); } catch (Exception exception) { AppLog.Warn("GameBar", "Game Bar state subscriber failed.", exception); }
     }

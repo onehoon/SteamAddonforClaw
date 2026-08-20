@@ -224,8 +224,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
         _frontendLauncher.StopAcceptingRequests();
-        _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarDelivery.StopAccepting();
+        _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Dispose();
         _qamHostController.BeginShutdown();
         _startupCancellationTokenSource.Cancel();
@@ -323,8 +323,15 @@ internal sealed class GameBarForegroundPresentationDelivery
                     desired = _desired;
                 }
 
-                AppLog.Debug("GameBar", "Game Bar presentation delivery started.", ("Foreground", desired));
-                await _apply(desired).ConfigureAwait(false);
+                try
+                {
+                    AppLog.Debug("GameBar", "Game Bar presentation delivery started.", ("Foreground", desired));
+                    await _apply(desired).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("GameBar", "Game Bar presentation delivery was contained.", exception);
+                }
 
                 lock (_sync)
                 {
@@ -336,13 +343,9 @@ internal sealed class GameBarForegroundPresentationDelivery
                 }
             }
         }
-        catch (Exception exception)
-        {
-            AppLog.Warn("GameBar", "Game Bar presentation delivery was contained.", exception);
-            lock (_sync) _running = false;
-        }
         finally
         {
+            lock (_sync) _running = false;
             AppLog.Debug("GameBar", "Game Bar presentation delivery stopped.");
         }
     }

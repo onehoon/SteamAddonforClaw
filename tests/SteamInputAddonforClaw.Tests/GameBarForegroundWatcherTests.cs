@@ -109,6 +109,32 @@ public sealed class GameBarForegroundWatcherTests
 
         Assert.Equal([true, true], calls);
     }
+
+    [Fact]
+    public async Task PresentationDeliveryAppliesNewerStateAfterAnEarlierApplyFaults()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            if (foreground)
+            {
+                firstStarted.TrySetResult();
+                await firstFailure.Task;
+            }
+            return true;
+        });
+
+        delivery.Request(true);
+        await firstStarted.Task;
+        delivery.Request(false);
+        firstFailure.TrySetException(new InvalidOperationException("boom"));
+        await delivery.DrainAsync();
+
+        Assert.Equal([true, false], calls);
+    }
     [Theory]
     [InlineData("Microsoft.XboxGamingOverlay_8wekyb3d8bbwe", true)]
     [InlineData("Microsoft.XboxGamingOverlay_wrong", false)]
