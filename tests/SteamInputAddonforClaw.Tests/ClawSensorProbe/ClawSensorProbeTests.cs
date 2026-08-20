@@ -228,6 +228,36 @@ public sealed class ClawSensorProbeTests
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }
+    [Fact] public async Task Coordinator_FailFinalizesReportEvenWhenPassedATokenLinkedToItsOwnLifecycleCancellation()
+    {
+        // PR #290 re-review: FailCoreAsync cancels _lifecycleCancellation FIRST, then reuses the
+        // caller's cancellationToken for ShutdownReadersAndApiAsync's own final
+        // cancellationToken.ThrowIfCancellationRequested(). If a caller passes a token linked to
+        // LifecycleCancellation into FailAsync/FailOnReaderFaultAsync, that final check now observes
+        // the cancellation FailAsync itself just triggered and throws OperationCanceledException --
+        // skipping FinalizeAsync() and leaving the workflow Failed with no report ever written. This
+        // reproduces that trap directly against the coordinator (no reader/hardware fault needed) and
+        // proves finalization still completes.
+        var root = Path.Combine(Path.GetTempPath(), "claw-probe-fail-self-cancel-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var coordinator = new ClawSensorProbeCoordinator();
+            coordinator.Prepare(); coordinator.Start(root);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None, coordinator.LifecycleCancellation);
+
+            await coordinator.FailAsync("Reader fault.", linked.Token);
+
+            Assert.Equal(ClawSensorProbeState.Failed, coordinator.State);
+            Assert.True(coordinator.HasReport);
+            var report = await File.ReadAllTextAsync(Directory.GetFiles(root, "claw-sensor-report.json", SearchOption.AllDirectories).Single());
+            Assert.Contains("Reader fault.", report);
+            await coordinator.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
     [Fact] public void Coordinator_DoesNotStartWhenOutputDirectoryCannotBeCreated()
     {
         var root = Path.Combine(Path.GetTempPath(), "claw-probe-output-file-" + Guid.NewGuid().ToString("N"));

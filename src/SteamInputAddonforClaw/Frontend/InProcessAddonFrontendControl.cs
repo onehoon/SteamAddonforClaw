@@ -432,13 +432,25 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var session = CurrentClawSensorProbeSession();
         if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
 
+        cancellationToken.ThrowIfCancellationRequested();
+
         // The old page's 200ms UI timer explicitly promoted a dead sensor reader to a finalized
         // Failed diagnostic (ClawSensorProbeUiTimer_Tick -> FailOnReaderFaultAsync). The restored
         // page polls this method at the same ~200ms cadence, so run the same reconciliation here --
         // FailOnReaderFaultAsync no-ops when there is no fault, so this preserves the old behavior
         // without introducing a second health authority (PR #290 re-review finding #1).
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.Coordinator.LifecycleCancellation);
-        await session.Coordinator.FailOnReaderFaultAsync(linked.Token).ConfigureAwait(false);
+        //
+        // Deliberately NOT linked to Coordinator.LifecycleCancellation: FailAsync() cancels that same
+        // token as part of entering terminal failure, so a linked token here would self-cancel
+        // ShutdownReadersAndApiAsync mid-teardown and skip FinalizeAsync() -- the workflow would move
+        // to Failed without the report ever being written (PR #290 re-review). Once lifecycle
+        // cancellation has already fired (Runtime shutdown/dispose in flight), skip reconciliation
+        // entirely and report the session's last known snapshot instead of racing that teardown.
+        if (!session.Coordinator.LifecycleCancellation.IsCancellationRequested)
+        {
+            try { await session.Coordinator.FailOnReaderFaultAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch (ObjectDisposedException) when (Volatile.Read(ref _shutdownStarted) != 0) { return FrontendClawSensorProbeSnapshot.Unavailable; }
+        }
 
         return MapClawSensorProbeSnapshot(session);
     }
