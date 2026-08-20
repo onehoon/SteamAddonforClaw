@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
 using Xunit;
@@ -531,6 +532,25 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         var loaded = store.Load();
         Assert.Equal(CpuBoostMode.Aggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
         Assert.Equal(CpuBoostMode.Disabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
+    }
+
+    [Fact]
+    public async Task CpuBoostRuntime_initializes_and_mutates_with_no_frontend_object_ever_constructed()
+    {
+        // PR277 headless regression (work order section 32): CPU Boost must not become something
+        // that requires WinUI. No IAddonFrontendControl/InProcessAddonFrontendControl/NamedPipe type
+        // appears anywhere in this test -- only the same CpuBoostRuntime -> ProfileStore ->
+        // ICpuBoostPowerPolicy chain the headless Runtime process itself uses.
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+        var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.Aggressive);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(CpuBoostMode.Aggressive, runtime.Snapshot.AcDesired);
+        Assert.Equal(1, backend.AcWriteCount);
     }
 
     public void Dispose()

@@ -1,8 +1,10 @@
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Prerequisites;
+using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Settings;
@@ -27,15 +29,24 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private int _shutdownStarted;
     private readonly object _vibrationSessionGate = new();
     private Feedback.VibrationTestSessionWriter? _vibrationSession;
+    // Device/Profile CPU Boost -- a sibling capability, not a member of Routing/OEM1 (work order
+    // PR277 section 1): this projection deliberately has NO dependency on _runtime/routing status
+    // and must keep working when _runtime is null (no routing composition at all).
+    private readonly CpuBoostRuntime? _cpuBoostRuntime;
 
     /// <param name="oem1MappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
     /// UI gates the Center M Button feature on the SAME fact the routing composition's OEM1 action
     /// path gates on. Defaults to false so any construction path that never established hardware
     /// support reports the feature unavailable rather than offering it.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false)
+    /// <param name="cpuBoostRuntime">The Device/Profile CPU Boost Runtime authority (owned by
+    /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
+    /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
+    /// null-runtime fallback on this class.</param>
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
+        _cpuBoostRuntime = cpuBoostRuntime;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -314,5 +325,54 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     private FrontendSettingsSnapshot MapSettings() => new(_settings.Settings.LaunchAtWindowsStartup, _settings.Settings.LogLevel switch { AppLogPreference.Debug => FrontendLogLevel.Debug, AppLogPreference.Info => FrontendLogLevel.Info, _ => FrontendLogLevel.Off }, _settings.SteamInputRoutingEnabled, _settings.SuppressDeveloperMenuWarning, _settings.Oem1Mapping);
+
+    // ---- Device/Profile CPU Boost (work order PR277) -- deliberately independent of Routing/OEM1:
+    // none of these three methods reads _runtime, _captureRoutingStatus, or any routing/Steam/OEM1
+    // state. Read-only: CaptureCpuBoostAsync never mutates ProfileStore or Windows (section 8/21). ----
+
+    public Task<FrontendCpuBoostSnapshot> CaptureCpuBoostAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(_cpuBoostRuntime is null ? FrontendCpuBoostSnapshot.Unavailable : MapCpuBoostSnapshot(_cpuBoostRuntime.Snapshot));
+
+    public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(MutateCpuBoost(ac: true, mode));
+
+    public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(MutateCpuBoost(ac: false, mode));
+
+    private FrontendCpuBoostMutationResult MutateCpuBoost(bool ac, CpuBoostMode mode)
+    {
+        if (_cpuBoostRuntime is null)
+            return new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable);
+
+        var result = ac ? _cpuBoostRuntime.SetDeviceCpuBoostAc(mode) : _cpuBoostRuntime.SetDeviceCpuBoostDc(mode);
+        var snapshot = MapCpuBoostSnapshot(_cpuBoostRuntime.Snapshot);
+        // Fire regardless of outcome: PersistenceFailed means the page must refresh/restore to the
+        // authoritative (unchanged) snapshot, and ApplyFailed means the NEW desired value is now
+        // authoritative -- both are real state changes the page must re-render (work order section 7).
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        var outcome = result.Outcome switch
+        {
+            CpuBoostMutationOutcome.Succeeded => FrontendCpuBoostMutationOutcome.Succeeded,
+            CpuBoostMutationOutcome.PersistenceFailed => FrontendCpuBoostMutationOutcome.PersistenceFailed,
+            _ => FrontendCpuBoostMutationOutcome.ApplyFailed
+        };
+        return new FrontendCpuBoostMutationResult(outcome, result.FailureMessage, snapshot);
+    }
+
+    private static FrontendCpuBoostSnapshot MapCpuBoostSnapshot(CpuBoostRuntimeSnapshot snapshot) => new(
+        MapCpuBoostSide(snapshot.AcCurrent, snapshot.AcDesired),
+        MapCpuBoostSide(snapshot.DcCurrent, snapshot.DcDesired),
+        snapshot.PersistenceWritable,
+        snapshot.LastFailure);
+
+    private static FrontendCpuBoostSideSnapshot MapCpuBoostSide(CpuBoostSideReading current, CpuBoostMode? desired) => new(
+        current.Status switch
+        {
+            CpuBoostReadStatus.Known => FrontendCpuBoostReadStatus.Known,
+            CpuBoostReadStatus.Unknown => FrontendCpuBoostReadStatus.Unknown,
+            _ => FrontendCpuBoostReadStatus.Unavailable
+        },
+        current.Mode,
+        desired);
 
 }

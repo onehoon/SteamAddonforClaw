@@ -77,6 +77,38 @@ public sealed class MainNavigationStateTests
     }
 
     [Fact]
+    public void Device_navigation_tag_opens_device_page()
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.Device, navigation.SelectNavigationItem(false, "Device"));
+        Assert.Equal(MainNavigationPage.Device, navigation.CurrentPage);
+    }
+
+    [Fact]
+    public void Profile_navigation_tag_opens_profile_page()
+    {
+        var navigation = new MainNavigationState();
+
+        Assert.Equal(MainNavigationPage.Profile, navigation.SelectNavigationItem(false, "Profile"));
+        Assert.Equal(MainNavigationPage.Profile, navigation.CurrentPage);
+    }
+
+    [Fact]
+    public void Device_and_Profile_are_top_level_pages_with_no_mouse_back_destination()
+    {
+        // Work order PR277 section 14: Device/Profile are independent top-level pages, not child
+        // detail pages of anything -- mouse-back must not treat them as one.
+        var navigation = new MainNavigationState();
+
+        navigation.SelectNavigationItem(false, "Device");
+        Assert.Null(navigation.GetMouseBackDestination());
+
+        navigation.SelectNavigationItem(false, "Profile");
+        Assert.Null(navigation.GetMouseBackDestination());
+    }
+
+    [Fact]
     public void Full_settings_to_sensor_probe_round_trip_returns_to_settings()
     {
         var navigation = new MainNavigationState();

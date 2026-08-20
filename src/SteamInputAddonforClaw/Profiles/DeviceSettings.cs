@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using SteamInputAddonforClaw.Profiles.Performance;
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 
 namespace SteamInputAddonforClaw.Profiles;
 

@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Oem1;
 
 namespace SteamInputAddonforClaw.Contracts.Frontend;
@@ -35,6 +36,49 @@ public enum FrontendAddonOperationalStatus
     SetupRequired,
     Indeterminate,
     RecoveryRequired
+}
+
+/// <summary>Whether the current Windows CPU Boost value for one side (AC or DC) is a known/mapped
+/// <see cref="CpuBoostMode"/>, was read but did not map to any supported mode
+/// (<see cref="Unknown"/>), or could not be read at all (<see cref="Unavailable"/>). Mirrors the
+/// Runtime's own <c>CpuBoostReadStatus</c> so the frontend never has to guess/normalize a value the
+/// Runtime itself does not consider known (work order section 18).</summary>
+public enum FrontendCpuBoostReadStatus { Known, Unknown, Unavailable }
+
+/// <summary>Distinguishes persistence failing before any Windows write was attempted (the previous
+/// desired value stays authoritative -- refresh/restore to it) from the Windows apply itself failing
+/// after the new desired value was already durably persisted (that new value IS now authoritative
+/// and will be retried later -- never roll the UI back to the old value for this outcome). See work
+/// order section 7.</summary>
+public enum FrontendCpuBoostMutationOutcome { Succeeded, PersistenceFailed, ApplyFailed }
+
+/// <summary>One side (AC or DC) of the CPU Boost frontend snapshot: the actual current Windows value
+/// (<see cref="CurrentStatus"/>/<see cref="Current"/>) versus the Addon's persisted desired value
+/// (<see cref="Desired"/>, <see langword="null"/> when this side is not Addon-managed). The two are
+/// deliberately kept separate -- displaying the current Windows value on an unmanaged side must never
+/// be confused with the Addon owning/persisting that value (work order section 8/"showing a value
+/// does NOT mean the Addon owns that value").</summary>
+public sealed record FrontendCpuBoostSideSnapshot(FrontendCpuBoostReadStatus CurrentStatus, CpuBoostMode? Current, CpuBoostMode? Desired);
+
+/// <summary>Narrowly CPU-Boost-specific frontend snapshot (work order section 5) -- not a
+/// generalized device-setting/profile framework. <see cref="PersistenceWritable"/> false means the
+/// last profile load was unsafe to replace (malformed/unsupported schema/read failure): the frontend
+/// must disable CPU Boost mutation rather than risk overwriting that file (work order section 19).</summary>
+public sealed record FrontendCpuBoostSnapshot(FrontendCpuBoostSideSnapshot Ac, FrontendCpuBoostSideSnapshot Dc, bool PersistenceWritable, string? LastFailure)
+{
+    public static readonly FrontendCpuBoostSnapshot Unavailable = new(
+        new(FrontendCpuBoostReadStatus.Unavailable, null, null),
+        new(FrontendCpuBoostReadStatus.Unavailable, null, null),
+        PersistenceWritable: false, LastFailure: null);
+}
+
+/// <summary>Result of a single-side CPU Boost mutation. Never discards the Runtime's
+/// <see cref="FrontendCpuBoostMutationOutcome"/> distinction into a plain bool (work order section
+/// 6/7) -- callers must be able to tell <see cref="FrontendCpuBoostMutationOutcome.PersistenceFailed"/>
+/// apart from <see cref="FrontendCpuBoostMutationOutcome.ApplyFailed"/> to react correctly.</summary>
+public sealed record FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome Outcome, string? FailureMessage, FrontendCpuBoostSnapshot Snapshot)
+{
+    public bool Succeeded => Outcome == FrontendCpuBoostMutationOutcome.Succeeded;
 }
 
 /// <remarks><see cref="Oem1Mapping"/> is the settings-layer projection of the persisted OEM1 mapping.
@@ -105,4 +149,17 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendVibrationTestResult(true, "NoSessionActive", null));
     Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default);
     Task<FrontendEnvironmentReportResult> GenerateEnvironmentReportAsync(CancellationToken cancellationToken = default);
+    /// <summary>Captures the current CPU Boost frontend snapshot. Never mutates anything -- opening
+    /// the Device page and capturing this snapshot must cause zero ProfileStore/Windows writes
+    /// (work order section 8/21).</summary>
+    Task<FrontendCpuBoostSnapshot> CaptureCpuBoostAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendCpuBoostSnapshot.Unavailable);
+    /// <summary>Sets the persisted/desired AC CPU Boost mode and applies it to Windows. DC is left
+    /// completely untouched (work order section 10).</summary>
+    Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable));
+    /// <summary>Sets the persisted/desired DC CPU Boost mode and applies it to Windows. AC is left
+    /// completely untouched (work order section 10).</summary>
+    Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable));
 }

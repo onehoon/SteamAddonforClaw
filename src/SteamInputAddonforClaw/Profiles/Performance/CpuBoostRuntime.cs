@@ -1,3 +1,4 @@
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Profiles.Performance;

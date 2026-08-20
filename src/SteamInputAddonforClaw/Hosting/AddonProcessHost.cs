@@ -149,7 +149,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             composition.StartupSettings, composition.StatusProvider, _runtimeHost, _runtimeHost.DeveloperTestModeState, composition.StartupRegistrationMessage,
             // Same single startup hardware-support result the routing composition's OEM1 gate above
             // received -- the UI and the runtime can never disagree about whether OEM1 mapping exists.
-            oem1MappingAvailable: startupResult.HardwareSupported);
+            oem1MappingAvailable: startupResult.HardwareSupported,
+            // Device/Profile CPU Boost is a sibling capability of Routing/OEM1, not a member of the
+            // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
+            // reconciles, so the frontend and the Runtime never observe two different owners.
+            cpuBoostRuntime: _cpuBoostRuntime);
         _frontendServer = new NamedPipeAddonFrontendServer(
             FrontendPipeEndpoint.CreateForCurrentUser(),
             _frontendControl);
