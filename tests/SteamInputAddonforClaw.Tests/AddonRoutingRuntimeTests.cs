@@ -687,6 +687,45 @@ public sealed class AddonRoutingRuntimeTests
         }
     }
 
+    [Fact]
+    public async Task Fresh_resume_converges_stale_owned_fault_before_reconcile_callback()
+    {
+        var status = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var safety = new RecoverySafetyState(RecoverySafety.Safe);
+        var runtime = AddonRoutingRuntime.Create(
+            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()), status,
+            new AddonOwnedVirtualDeviceTracker(), new RecoveryManager(new MemoryJournalStore()),
+            new PowerMutationGate(initiallyOpen: true), safety, new DefaultOem1MappingPreference(),
+            hardwareSupported: true);
+        Assert.NotNull(runtime);
+        try
+        {
+            var unsafeVersion = safety.Set(RecoverySafety.Unsafe);
+            var safetySession = typeof(AddonRoutingRuntime)
+                .GetField("_safetySession", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(runtime)!;
+            await ((IRoutingSafetySession)safetySession).LatchRoutingFaultAsync("OldSessionFault");
+            var nativeCoordinator = safetySession.GetType();
+            nativeCoordinator.GetField("_unsafeRecoveryVersion", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(safetySession, unsafeVersion);
+
+            // Model PowerTransitionCoordinator's completed recovery boundary.
+            safety.Set(RecoverySafety.Safe);
+
+            Assert.True(await runtime.ReconcileFreshAfterResumeAsync(CancellationToken.None));
+            Assert.Equal(RecoverySafety.Safe, safety.Current);
+            var latched = (bool)nativeCoordinator.GetField("_routingFaultLatched", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(safetySession)!;
+            Assert.False(latched);
+            Assert.Equal(1, status.CaptureCalls);
+        }
+        finally
+        {
+            Assert.True(await runtime.ShutdownAsync());
+            await runtime.DisposeAsync();
+        }
+    }
+
     private static AddonRoutingRuntime? CreateMsiRuntime(ISystemStatusProvider? statusProvider = null, bool hardwareSupported = true) => AddonRoutingRuntime.Create(
         new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
         statusProvider ?? new FakeStatusProvider(),
