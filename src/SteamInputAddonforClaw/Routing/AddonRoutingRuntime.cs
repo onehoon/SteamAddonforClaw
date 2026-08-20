@@ -531,8 +531,10 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     /// (<see cref="ReconcileFreshAfterResumeAsync"/>) is a separate path with separate policy,
     /// owned by the caller.
     /// </summary>
-    internal Task ReconcileSafelyAsync(Action requestStatusRefresh, CancellationToken cancellationToken = default) =>
-        RoutingReconcileStatusRefresh.RunAsync(async () =>
+    internal async Task<bool> ReconcileSafelyAsync(Action requestStatusRefresh, CancellationToken cancellationToken = default)
+    {
+        var succeeded = false;
+        await RoutingReconcileStatusRefresh.RunAsync(async () =>
         {
             try
             {
@@ -549,9 +551,13 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 await Oem1ActivationTask.ConfigureAwait(false);
 
                 if (ShouldSkipNewForwardRouting)
+                {
+                    succeeded = true;
                     return;
+                }
 
                 var result = await _coordinator.ReconcileAsync(cancellationToken).ConfigureAwait(false);
+                succeeded = result.Succeeded;
                 if (!result.Succeeded)
                     AppLog.Warn("Routing.Runtime", "Canonical routing reconciliation did not complete successfully.", null,
                         ("Action", result.Action), ("State", result.State), ("Reason", result.Reason));
@@ -573,7 +579,9 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                     AppLog.Error("Routing.Runtime", "Pipeline fail-close rollback threw an exception.", rollbackException);
                 }
             }
-        }, requestStatusRefresh);
+        }, requestStatusRefresh).ConfigureAwait(false);
+        return succeeded;
+    }
 
     private bool SteamOutputReady => _viiperRuntime is { State: CanonicalViiperRuntimeState.Ready };
     private bool ShouldSkipNewForwardRouting => !SteamOutputReady && !_coordinator.HasResidualSessionState;

@@ -1,10 +1,194 @@
 using SteamInputAddonforClaw.GameBar;
+using SteamInputAddonforClaw.Hosting;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
 public sealed class GameBarForegroundWatcherTests
 {
+    [Fact]
+    public async Task PresentationDeliveryConvergesToLatestForegroundStateWithoutOverlap()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var concurrent = 0;
+        var maximumConcurrent = 0;
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            var active = Interlocked.Increment(ref concurrent);
+            Volatile.Write(ref maximumConcurrent, Math.Max(maximumConcurrent, active));
+            started.TrySetResult();
+            await release.Task;
+            Interlocked.Decrement(ref concurrent);
+            return true;
+        });
+
+        delivery.Request(true);
+        await started.Task;
+        delivery.Request(false);
+        delivery.Request(true);
+        release.TrySetResult();
+        await delivery.DrainAsync();
+
+        Assert.Equal([true], calls);
+        Assert.Equal(1, maximumConcurrent);
+    }
+
+    [Fact]
+    public async Task PresentationDeliveryAppliesStateChangedDuringMutation()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            if (foreground)
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+            }
+            return true;
+        });
+
+        delivery.Request(true);
+        await firstStarted.Task;
+        delivery.Request(false);
+        releaseFirst.TrySetResult();
+        await delivery.DrainAsync();
+
+        Assert.Equal([true, false], calls);
+    }
+
+    [Fact]
+    public async Task PresentationDeliveryStopsNewRequestsAndDrainsCurrentDispatch()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            started.TrySetResult();
+            await release.Task;
+            return true;
+        });
+
+        delivery.Request(true);
+        await started.Task;
+        delivery.StopAccepting();
+        delivery.Request(false);
+        var drain = delivery.DrainAsync();
+        Assert.False(drain.IsCompleted);
+        release.TrySetResult();
+        await drain;
+
+        Assert.Equal([true], calls);
+    }
+
+    [Fact]
+    public async Task PresentationDeliveryCanBeRequestedAgainWhenRoutingCompletesWithoutAWatcherEvent()
+    {
+        var routeActive = false;
+        var calls = new List<bool>();
+        var delivery = new GameBarForegroundPresentationDelivery(foreground =>
+        {
+            calls.Add(foreground);
+            return Task.FromResult(routeActive);
+        });
+
+        delivery.Request(true);
+        await delivery.DrainAsync();
+        Assert.Equal([true], calls);
+
+        routeActive = true;
+        delivery.Request(true);
+        await delivery.DrainAsync();
+
+        Assert.Equal([true, true], calls);
+    }
+
+    [Fact]
+    public async Task PresentationDeliveryRetriesSameForegroundAfterARejectedReconciliationRequest()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            if (calls.Count == 1)
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+                return false;
+            }
+            return true;
+        });
+
+        delivery.Request(true);
+        await firstStarted.Task;
+        delivery.Request(true);
+        releaseFirst.TrySetResult();
+        await delivery.DrainAsync();
+
+        Assert.Equal([true, true], calls);
+    }
+
+    [Fact]
+    public async Task PresentationDeliveryAppliesNewerStateAfterTheCurrentApplyFaults()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            if (foreground)
+            {
+                firstStarted.TrySetResult();
+                await firstFailure.Task;
+                throw new InvalidOperationException("test failure");
+            }
+            return true;
+        });
+
+        delivery.Request(true);
+        await firstStarted.Task;
+        delivery.Request(false);
+        firstFailure.TrySetResult();
+        await delivery.DrainAsync();
+
+        Assert.Equal([true, false], calls);
+    }
+
+    [Fact]
+    public async Task PresentationDeliveryAppliesNewerStateAfterAnEarlierApplyFaults()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            if (foreground)
+            {
+                firstStarted.TrySetResult();
+                await firstFailure.Task;
+            }
+            return true;
+        });
+
+        delivery.Request(true);
+        await firstStarted.Task;
+        delivery.Request(false);
+        firstFailure.TrySetException(new InvalidOperationException("boom"));
+        await delivery.DrainAsync();
+
+        Assert.Equal([true, false], calls);
+    }
     [Theory]
     [InlineData("Microsoft.XboxGamingOverlay_8wekyb3d8bbwe", true)]
     [InlineData("Microsoft.XboxGamingOverlay_wrong", false)]

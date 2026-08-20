@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Controllers.Detection;
+using SteamInputAddonforClaw.Hosting;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -102,6 +103,182 @@ public sealed class AddonRuntimeHostTests
 
             Assert.Equal(1, refreshCount);
             Assert.Equal(1, statusProvider.CaptureCount);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Routing_reconcile_completion_callback_runs_only_after_success()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var callbackCount = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime, powerGate, recoverySafetyState,
+            recoverySafe: true, hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false),
+            routingReconcileCompleted: () => callbackCount++);
+
+        try
+        {
+            await host.ReconcileAsync();
+            Assert.Equal(1, callbackCount);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Cancelled_routing_reconcile_does_not_request_foreground_re_evaluation()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var callbackCount = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime, powerGate, recoverySafetyState,
+            recoverySafe: true, hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false),
+            routingReconcileCompleted: () => callbackCount++);
+
+        try
+        {
+            await host.ReconcileAsync(new CancellationToken(true));
+            Assert.Equal(0, callbackCount);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Successful_fresh_resume_requests_foreground_reevaluation_once()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var source = new FakeSource(succeeds: true);
+        var callbackCount = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime, powerGate, recoverySafetyState,
+            recoverySafe: true, hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true),
+            notificationSource: source, routingReconcileCompleted: () => Interlocked.Increment(ref callbackCount));
+        host.StartPowerObservation();
+
+        try
+        {
+            await source.RaiseAsync(4);
+            await source.RaiseAsync(18);
+            Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref callbackCount) == 1, TimeSpan.FromSeconds(5)));
+            Assert.Equal(1, callbackCount);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Failed_fresh_resume_does_not_request_foreground_reevaluation()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var statusProvider = new ThrowingStatusProvider();
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var source = new FakeSource(succeeds: true);
+        var callbackCount = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime, powerGate, recoverySafetyState,
+            recoverySafe: true, hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(true),
+            notificationSource: source, routingReconcileCompleted: () => Interlocked.Increment(ref callbackCount));
+        host.StartPowerObservation();
+
+        try
+        {
+            await source.RaiseAsync(4);
+            await source.RaiseAsync(18);
+            Assert.True(SpinWait.SpinUntil(() => statusProvider.WasCalled, TimeSpan.FromSeconds(5)));
+            Assert.Equal(0, callbackCount);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Successful_routing_completion_retries_an_overlapping_same_value_delivery()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var first = true;
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            if (first)
+            {
+                first = false;
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+                return false;
+            }
+            return true;
+        });
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime, powerGate, recoverySafetyState,
+            recoverySafe: true, hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false),
+            routingReconcileCompleted: () => delivery.Request(true));
+
+        try
+        {
+            delivery.Request(true);
+            await firstStarted.Task;
+            await host.ReconcileAsync();
+            releaseFirst.TrySetResult();
+            await delivery.DrainAsync();
+            Assert.Equal([true, true], calls);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Failed_routing_reconcile_does_not_request_foreground_re_evaluation()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(new ThrowingStatusProvider(), powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var callbackCount = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime, powerGate, recoverySafetyState,
+            recoverySafe: true, hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false),
+            routingReconcileCompleted: () => callbackCount++);
+
+        try
+        {
+            await host.ReconcileAsync();
+            Assert.Equal(0, callbackCount);
         }
         finally
         {

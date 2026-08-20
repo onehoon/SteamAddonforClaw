@@ -48,6 +48,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private readonly UserTerminationGuard _userTerminationGuard;
     private readonly Func<Task<bool>>? _routingShutdownOverride;
     private readonly Func<ValueTask>? _routingDisposeOverride;
+    private readonly Action? _routingReconcileCompleted;
 
     // Guards against a resume notification that was already queued in PowerTransitionCoordinator
     // before shutdown began running ReconcileFreshAfterResumeAsync's Steam refresh concurrently
@@ -71,7 +72,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         Func<CancellationToken, Task<bool>> establishBaseline,
         IPowerSuspendResumeNotificationSource? notificationSource = null,
         Func<Task<bool>>? routingShutdownOverride = null,
-        Func<ValueTask>? routingDisposeOverride = null)
+        Func<ValueTask>? routingDisposeOverride = null,
+        Action? routingReconcileCompleted = null)
     {
         _steamRuntime = steamRuntime;
         _routingRuntime = routingRuntime;
@@ -80,6 +82,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         _steamRuntime.StateChanged += OnSteamSessionStateChanged;
         _routingShutdownOverride = routingShutdownOverride;
         _routingDisposeOverride = routingDisposeOverride;
+        _routingReconcileCompleted = routingReconcileCompleted;
 
         var powerParticipants = new List<IPowerSuspendParticipant>();
         // PR2: an optional generic auxiliary power participant the routing composition supplies
@@ -127,14 +130,20 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     internal event EventHandler? StatusRefreshRequested;
 
     internal RoutingRuntimeStatusSnapshot CaptureRoutingStatus() => _routingRuntime?.CaptureStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
+    internal Task<bool> HandleGameBarForegroundChangedAsync(bool isForeground, CancellationToken cancellationToken = default) =>
+        _routingRuntime?.HandleGameBarForegroundChangedAsync(isForeground, cancellationToken) ?? Task.FromResult(false);
     internal Task<DeveloperVibrationTestOutcome> RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken) => _routingRuntime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(new DeveloperVibrationTestOutcome(false, null, null));
     internal PhysicalRumbleWriteResult? CancelDeveloperVibrationTest() => _routingRuntime?.CancelDeveloperVibrationTest();
 
     internal UserTerminationDecision EvaluateUserTermination() => _userTerminationGuard.Evaluate();
 
     /// <summary>Normal (non-resume) reconcile, via the safe C5b1 path. No-op when routing is unavailable.</summary>
-    internal Task ReconcileAsync(CancellationToken cancellationToken = default) =>
-        _routingRuntime is null ? Task.CompletedTask : _routingRuntime.ReconcileSafelyAsync(RequestStatusRefresh, cancellationToken);
+    internal async Task ReconcileAsync(CancellationToken cancellationToken = default)
+    {
+        if (_routingRuntime is not null &&
+            await _routingRuntime.ReconcileSafelyAsync(RequestStatusRefresh, cancellationToken).ConfigureAwait(false))
+            _routingReconcileCompleted?.Invoke();
+    }
 
     /// <summary>
     /// Registers for suspend/resume notifications and opens the mutation gate if registration
@@ -176,12 +185,15 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         // (before PowerTransitionCoordinator ever opens PowerMutationGate for this resume) -- see the
         // review-fix comment there. This callback owns only Steam refresh/suppression plus routing's
         // own fresh reconcile.
-        return await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
-            freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
-            completeSuppression: _resumeFreshReconcileSuppression.Complete,
-            deferredReconcile: () => ReconcileAsync(),
-            requestStatusRefresh: RequestStatusRefresh,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+        var succeeded = await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
+                freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
+                completeSuppression: _resumeFreshReconcileSuppression.Complete,
+                deferredReconcile: () => ReconcileAsync(),
+                requestStatusRefresh: RequestStatusRefresh,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (succeeded)
+            _routingReconcileCompleted?.Invoke();
+        return succeeded;
     }
 
     /// <summary>Review fix (BLOCKER): runs after residual-cleanup/incomplete-recovery checks have
