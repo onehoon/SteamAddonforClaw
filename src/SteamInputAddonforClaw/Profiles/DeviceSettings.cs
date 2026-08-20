@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SteamInputAddonforClaw.Profiles.Performance;
 
 namespace SteamInputAddonforClaw.Profiles;
 
@@ -22,12 +23,33 @@ public sealed record DeviceSettings
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
 
-/// <summary>Device-wide performance category. Empty placeholder in PR1 -- a later PR adds real
-/// fields here (e.g. CPU Boost, TDP watts) as an additive change. <see cref="ExtensionData"/>
-/// preserves a future field an older/compatible build does not yet understand across a
-/// load-then-save round trip, so that build does not silently erase it.</summary>
+/// <summary>Device-wide performance category. <see cref="CpuBoost"/> is the first real field added
+/// here (PR276); TDP and other performance fields may follow additively later.
+/// <see cref="ExtensionData"/> preserves a future field an older/compatible build does not yet
+/// understand across a load-then-save round trip, so that build does not silently erase it.</summary>
 public sealed record DevicePerformanceSettings
 {
+    /// <summary><see langword="null"/> means the Addon does not manage CPU Boost at all (neither
+    /// AC nor DC) -- see <see cref="DeviceCpuBoostSettings"/> for the independent per-side
+    /// semantics. There is no Addon default: a non-null <see cref="DeviceCpuBoostSettings"/> only
+    /// ever appears here as a direct result of an explicit user mutation.</summary>
+    public DeviceCpuBoostSettings? CpuBoost { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+/// <summary>Persisted desired CPU Boost state. AC and DC are independently nullable and
+/// independently mutable: <see langword="null"/> on either side means "the Addon does not manage
+/// this side -- read/preserve the current Windows value for it, never write it." An explicit value
+/// (including <see cref="CpuBoostMode.Disabled"/>, which is mode <c>0</c>, not "unmanaged") means
+/// that side is Addon-managed. There is intentionally no separate "is managed" Boolean per side --
+/// nullability alone carries that meaning (work order section 7).</summary>
+public sealed record DeviceCpuBoostSettings
+{
+    public CpuBoostMode? Ac { get; init; }
+    public CpuBoostMode? Dc { get; init; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }

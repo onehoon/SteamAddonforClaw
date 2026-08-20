@@ -40,6 +40,7 @@ internal sealed class RuntimeProcessApplication
             _processHost.StartPowerObservation();
             _processHost.TryInitializeTray(RequestRestart, RequestExit);
             _ = _processHost.ReconcileAsync();
+            _processHost.ReconcileDeviceProfileStartup();
             _messageLoop.Run();
         }
         catch (Exception exception)
