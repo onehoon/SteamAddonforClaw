@@ -143,6 +143,105 @@ public sealed class AddonRoutingRuntimeTests
         Assert.DoesNotContain("UnexpectedFault", trace);
     }
 
+    [Fact]
+    public async Task Xbox360_exit_stops_before_detach_and_resumes_deck_after_detach()
+    {
+        var trace = new List<string>();
+        var writes = 0;
+        var ticks = new ManualTicks();
+        var snapshot = new FakeSnapshot();
+        var publisher = new CanonicalXbox360InputPublisher(snapshot, _ => { writes++; trace.Add("X360State"); return true; }, ticks);
+        publisher.Start();
+
+        var result = await AddonRoutingRuntime.ExitXbox360PresentationCoreAsync(
+            publisher,
+            async () => { await publisher.StopAsync(); trace.Add("Stop"); },
+            () => { trace.Add("Detach"); return USBDeviceDetachResult.Success; },
+            () => { trace.Add("DeckResume"); return Task.FromResult(true); },
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.PublisherReleased);
+        Assert.Equal(["Stop", "Detach", "DeckResume"], trace);
+        var writesAfterStop = writes;
+        Assert.Throws<InvalidOperationException>(() => ticks.Tick());
+        Assert.Equal(writesAfterStop, writes);
+    }
+
+    [Fact]
+    public async Task Xbox360_exit_stop_failure_never_detaches_resumes_or_clears_ownership()
+    {
+        var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
+        var detachCalls = 0;
+        var resumeCalls = 0;
+        var result = await AddonRoutingRuntime.ExitXbox360PresentationCoreAsync(
+            publisher,
+            () => Task.FromException(new TimeoutException("worker did not stop")),
+            () => { detachCalls++; return USBDeviceDetachResult.Success; },
+            () => { resumeCalls++; return Task.FromResult(true); },
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.PublisherReleased);
+        Assert.Contains("Xbox360PublisherStopFailed:TimeoutException", result.FailureReason);
+        Assert.Equal(0, detachCalls);
+        Assert.Equal(0, resumeCalls);
+    }
+
+    [Theory]
+    [InlineData((int)USBDeviceDetachResult.RetryableFailure)]
+    [InlineData((int)USBDeviceDetachResult.UnsafeOutcomeUnknown)]
+    [InlineData((int)USBDeviceDetachResult.Invalid)]
+    public async Task Xbox360_exit_detach_failure_preserves_ownership_and_does_not_resume(int detachResultValue)
+    {
+        var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
+        var resumeCalls = 0;
+        var detachResult = (USBDeviceDetachResult)detachResultValue;
+        var result = await AddonRoutingRuntime.ExitXbox360PresentationCoreAsync(
+            publisher,
+            () => Task.CompletedTask,
+            () => detachResult,
+            () => { resumeCalls++; return Task.FromResult(true); },
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.PublisherReleased);
+        Assert.Contains($"Xbox360Detach{detachResult}", result.FailureReason);
+        Assert.Equal(0, resumeCalls);
+    }
+
+    [Fact]
+    public async Task Xbox360_exit_deck_resume_failure_does_not_request_x360_cleanup()
+    {
+        var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
+        var detachCalls = 0;
+        var result = await AddonRoutingRuntime.ExitXbox360PresentationCoreAsync(
+            publisher,
+            () => Task.CompletedTask,
+            () => { detachCalls++; return USBDeviceDetachResult.Success; },
+            () => Task.FromResult(false),
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.True(result.PublisherReleased);
+        Assert.Null(result.FailureReason);
+        Assert.Equal(1, detachCalls);
+    }
+
+    [Fact]
+    public async Task Xbox360_exit_without_presentation_is_a_no_op_failure()
+    {
+        var result = await AddonRoutingRuntime.ExitXbox360PresentationCoreAsync(
+            null,
+            () => Task.CompletedTask,
+            () => throw new InvalidOperationException("must not detach"),
+            () => throw new InvalidOperationException("must not resume"),
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.PublisherReleased);
+    }
+
     private static async Task WaitForAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
@@ -170,8 +269,11 @@ public sealed class AddonRoutingRuntimeTests
         }
         public void Tick()
         {
-            if (_waiters.Count == 0) throw new InvalidOperationException("No pending tick.");
-            _waiters.Dequeue().TrySetResult(true);
+            while (_waiters.Count > 0)
+            {
+                if (_waiters.Dequeue().TrySetResult(true)) return;
+            }
+            throw new InvalidOperationException("No live tick waiter.");
         }
     }
 

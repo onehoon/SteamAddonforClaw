@@ -341,10 +341,24 @@ detached Xbox360 attachment state, attaches Xbox360, and starts the existing
 Xbox360 publisher. Publisher-start failure performs only the required local
 Xbox360 neutral/detach cleanup and fails closed; Deck is never resumed by this
 forward primitive. There is still **no Game Bar production consumer, no
-automatic invocation, no reverse Xbox360-to-Deck transition, no Game Bar leave
-handling, and no Xbox360 PnP/XInput readiness claim**. Normal Runtime behavior
+automatic invocation, and no Game Bar leave handling. The reverse
+Xbox360-to-Deck transition is now available only as an internal foundation
+seam; it has no production caller. There is still no Xbox360 PnP/XInput
+readiness claim**. Normal Runtime behavior
 and `RoutingRuntimeStatusSnapshot.SteamOutputActive` remain unchanged. SD7
 remains PLANNED and no hardware validation is claimed.
+
+Reverse Xbox360 presentation-exit foundation step: `AddonRoutingRuntime` now
+has an internal `ExitXbox360PresentationAsync` seam that stops and drains the
+existing Xbox360 publisher, uses the classified `DetachXbox360()` attachment
+boundary, clears X360 presentation ownership only after successful detach, and
+resumes the same Deck publisher/session/handle. Stop or classified detach
+failure preserves X360 ownership evidence and fails closed; Deck resume failure
+remains owned by the Deck stage and does not trigger a second X360 fail-close.
+Both directions remain foundation-only: there is **no Game Bar production
+consumer, no automatic switching, no foreground event wiring, no X360
+PnP/XInput readiness claim, no power/suspend/shutdown integration, and no
+hardware validation claim**. SD7 remains PLANNED.
 
 ## Separate feature tracks
 
