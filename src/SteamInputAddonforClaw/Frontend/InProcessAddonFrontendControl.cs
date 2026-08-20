@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.FrontendTransport;
+using System.Diagnostics;
 
 namespace SteamInputAddonforClaw.Frontend;
 
@@ -24,6 +25,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly Func<string?> _processPath;
     private readonly bool _oem1MappingAvailable;
     private int _shutdownStarted;
+    private readonly object _vibrationSessionGate = new();
+    private Feedback.VibrationTestSessionWriter? _vibrationSession;
 
     /// <param name="oem1MappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -109,6 +112,125 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(new FrontendDeveloperSnapshot(_developer.IsEnabled));
     }
 
+    /// <summary>Called when the Vibration Test detail page is entered: creates the dedicated session
+    /// log immediately (even if no command is ever run) so the file always has a header recording
+    /// current Test Mode/routing state at page entry. Idempotent -- a call while a session is
+    /// already open returns that same session's file rather than starting a second one.</summary>
+    public Task<FrontendVibrationTestResult> OpenVibrationTestSessionAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var session = GetOrOpenVibrationSession();
+        return Task.FromResult(new FrontendVibrationTestResult(true, "SessionOpened", session.FilePath));
+    }
+
+    public async Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var testModeEnabled = _developer.IsEnabled;
+        var steamOutputActive = _captureRoutingStatus().SteamOutputActive;
+        if (!testModeEnabled) return new FrontendVibrationTestResult(false, "Enable Test Mode from Developer Menu.", null);
+        if (!steamOutputActive) return new FrontendVibrationTestResult(false, "Steam Deck output is not active.", null);
+
+        var session = GetOrOpenVibrationSession();
+        var started = Stopwatch.GetTimestamp();
+        WriteVibrationSessionIfCurrent(session, $"Command={command} Opcode={VibrationTestOpcode(command)} TestModeEnabled={testModeEnabled} SteamOutputActive={steamOutputActive}");
+        var outcome = await (_runtime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(new Feedback.DeveloperVibrationTestOutcome(false, null, null))).ConfigureAwait(false);
+        // Accepted (authority/sequence) and physically-successful are different questions: a real MSI
+        // HID write failure must be visible here even when the write was accepted, so PhysicalStatus/
+        // PhysicalReason are logged separately from Succeeded rather than folded into one boolean.
+        WriteVibrationSessionIfCurrent(session, $"Result Command={command} Succeeded={outcome.Succeeded} DurationMs={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} {DecodeFields(outcome.Decode)} PhysicalStatus={outcome.CommandResult?.Status} PhysicalReason={outcome.CommandResult?.Reason} StopPhysicalStatus={outcome.StopResult?.Status} StopPhysicalReason={outcome.StopResult?.Reason}");
+
+        var (succeeded, reason) = MapVibrationTestOutcome(outcome);
+        return new FrontendVibrationTestResult(succeeded, reason, session.FilePath);
+    }
+
+    /// <summary>Pure mapping, factored out for direct unit testing: <see cref="Feedback.DeveloperVibrationTestOutcome.Succeeded"/>
+    /// only means the write was ACCEPTED (authority/sequence), not that the physical MSI HID write
+    /// succeeded -- a truthful diagnostic result must require the actual write(s) to have succeeded
+    /// too, or a real hardware failure would be reported to the page as "Succeeded".</summary>
+    internal static (bool Succeeded, string Reason) MapVibrationTestOutcome(Feedback.DeveloperVibrationTestOutcome outcome)
+    {
+        var commandPhysicalOk = outcome.CommandResult is { } commandResult && commandResult.Succeeded;
+        var stopRequired = outcome.Decode?.Command == Feedback.SteamDeckFeedbackCommand.HapticPulse;
+        var stopPhysicalOk = outcome.StopResult is { } stopResult
+            ? stopResult.Succeeded
+            : !stopRequired;
+        var succeeded = outcome.Succeeded && commandPhysicalOk && stopPhysicalOk;
+        var reason = !outcome.Succeeded
+            ? "Feedback bridge is unavailable, superseded, or the test was cancelled."
+            : !commandPhysicalOk
+                ? $"Physical write failed: {outcome.CommandResult?.Reason ?? "Unknown"}"
+                : !stopPhysicalOk
+                    ? $"Physical STOP failed: {outcome.StopResult?.Reason ?? "Unknown"}"
+                    : "Succeeded";
+        return (succeeded, reason);
+    }
+
+    /// <summary>Test-only seam so the disposed-writer race fix can be exercised directly without
+    /// reproducing the exact 250ms async interleaving through a real runtime.</summary>
+    internal Feedback.VibrationTestSessionWriter? TestOnly_CurrentVibrationSession { get { lock (_vibrationSessionGate) return _vibrationSession; } }
+
+    /// <summary>Writes to the session only if it is still the currently open one: a page exit can
+    /// close (detach + dispose) the session while an in-flight EB/EA developer command is still
+    /// awaiting its 250ms delayed STOP, and writing to an already-disposed <c>StreamWriter</c> would
+    /// throw from an <c>async void</c> UI click handler. Serializes against the same
+    /// <see cref="_vibrationSessionGate"/> <see cref="CloseVibrationTestSessionAsync"/> detaches
+    /// under, so a write either completes before detach or observes the session is stale and no-ops.</summary>
+    internal void WriteVibrationSessionIfCurrent(Feedback.VibrationTestSessionWriter session, string message)
+    {
+        lock (_vibrationSessionGate)
+        {
+            if (ReferenceEquals(_vibrationSession, session)) session.Write(message);
+        }
+    }
+
+    /// <summary>Called when the Vibration Test detail page is left, regardless of how: cancels any
+    /// pending developer-owned delayed STOP so it cannot later stop newer real Steam feedback, issues
+    /// a best-effort production-path STOP, and flushes/closes the dedicated session log.</summary>
+    public async Task<FrontendVibrationTestResult> CloseVibrationTestSessionAsync(CancellationToken cancellationToken = default)
+    {
+        Feedback.VibrationTestSessionWriter? session;
+        lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
+        if (session is null) return new FrontendVibrationTestResult(true, "NoSessionActive", null);
+
+        var stop = _runtime?.CancelDeveloperVibrationTest();
+        session.Write($"SessionClosed CancelledPendingDeveloperStop=True BestEffortStopRequested=True PhysicalStatus={stop?.Status} PhysicalReason={stop?.Reason}");
+        var path = session.FilePath;
+        await session.DisposeAsync().ConfigureAwait(false);
+        return new FrontendVibrationTestResult(true, "SessionClosed", path);
+    }
+
+    private Feedback.VibrationTestSessionWriter GetOrOpenVibrationSession()
+    {
+        lock (_vibrationSessionGate)
+        {
+            if (_vibrationSession is { } existing) return existing;
+            var session = new Feedback.VibrationTestSessionWriter(AppLog.DirectoryPath);
+            var routing = _captureRoutingStatus();
+            var appVersion = typeof(InProcessAddonFrontendControl).Assembly.GetName().Version?.ToString() ?? "Unknown";
+            session.Write($"SessionStarted AppVersion={appVersion} TestModeEnabled={_developer.IsEnabled} RoutingState={routing.OperationalState} SteamOutputActive={routing.SteamOutputActive} NativeDirectInputActive={routing.NativeDirectInputActive}");
+            _vibrationSession = session;
+            return session;
+        }
+    }
+
+    private static string VibrationTestOpcode(FrontendVibrationTestCommand command) => command switch
+    {
+        FrontendVibrationTestCommand.Rumble => "0xEB",
+        FrontendVibrationTestCommand.Haptic => "0xEA",
+        FrontendVibrationTestCommand.HapticPulse => "0x8F",
+        FrontendVibrationTestCommand.Stop => "0xEB(zero)",
+        _ => "Unknown"
+    };
+
+    private static string DecodeFields(Feedback.SteamDeckFeedbackDecodeResult? decoded) => decoded switch
+    {
+        { Command: Feedback.SteamDeckFeedbackCommand.Rumble, Rumble: var rumble } => $"Decode=Rumble Large16={rumble.LargeMotor} Small16={rumble.SmallMotor} Large8={rumble.LargeMotor >> 8} Small8={rumble.SmallMotor >> 8}",
+        { Command: Feedback.SteamDeckFeedbackCommand.Haptic, Rumble: var rumble, Intensity: var intensity, Gain: var gain, Strength8: var strength } => $"Decode=Haptic Intensity={intensity} Gain={gain} Strength8={strength} Strength16={rumble.LargeMotor}",
+        { Command: Feedback.SteamDeckFeedbackCommand.HapticPulse, Rumble: var rumble, PulsePeriod: var period, PulseCount: var count, Gain: var gain, Strength8: var strength, PulseDurationMilliseconds: var duration } => $"Decode=HapticPulse Period={period} Count={count} Gain={gain} Strength8={strength} Strength16={rumble.LargeMotor} PulseDurationMs={duration}",
+        _ => "Decode=Unavailable"
+    };
+
     public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -160,7 +282,16 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _ => FrontendPrerequisiteSetupResultKind.Failed
     };
 
-    internal void BeginProcessShutdown() => Interlocked.Exchange(ref _shutdownStarted, 1);
+    internal void BeginProcessShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0) return;
+        Feedback.VibrationTestSessionWriter? session;
+        lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
+        if (session is null) return;
+        var stop = _runtime?.CancelDeveloperVibrationTest();
+        session.Write($"SessionClosed Reason=RuntimeShutdown CancelledPendingDeveloperStop=True BestEffortStopRequested=True PhysicalStatus={stop?.Status} PhysicalReason={stop?.Reason}");
+        session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
 
     private void ThrowIfShuttingDown()
     {

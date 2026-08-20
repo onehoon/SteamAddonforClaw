@@ -18,6 +18,8 @@ public sealed partial class DeveloperPage : UserControl
     private string _logDirectoryPath = string.Empty;
 
     public event EventHandler? BackRequested;
+    public event EventHandler? VibrationTestRequested;
+    private void OpenVibrationTestButton_Click(object sender, RoutedEventArgs args) => VibrationTestRequested?.Invoke(this, EventArgs.Empty);
 
     public DeveloperPage()
     {

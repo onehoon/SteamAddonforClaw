@@ -6,6 +6,8 @@ using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Feedback;
+using SteamInputAddonforClaw.Contracts.Frontend;
+using System.Buffers.Binary;
 
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
@@ -91,6 +93,22 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     /// actually active; see docs/VIIPER_MIGRATION_TODO.md SD5.
     /// </summary>
     internal void RequestQuickAccessPulse() => _systemButtonOverlay.RequestQuickAccessPulse();
+    internal Task<DeveloperVibrationTestOutcome> RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken)
+    {
+        if (!_feedbackArmed || _feedbackBridge is null) return Task.FromResult(new DeveloperVibrationTestOutcome(false, null, null));
+        var report = new byte[64];
+        switch (command)
+        {
+            case FrontendVibrationTestCommand.Rumble: report[0] = 0xEB; report[1] = 9; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(5, 2), 0x8000); BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(7, 2), 0x8000); break;
+            case FrontendVibrationTestCommand.Haptic: report[0] = 0xEA; report[4] = 128; report[5] = 0; break;
+            case FrontendVibrationTestCommand.HapticPulse: report[0] = 0x8F; BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(5, 2), 25000); BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(7, 2), 10); report[9] = 0; break;
+            case FrontendVibrationTestCommand.Stop: report[0] = 0xEB; report[1] = 9; break;
+        }
+        return _feedbackBridge.ProcessDeveloperTestAsync(report, command is FrontendVibrationTestCommand.Rumble or FrontendVibrationTestCommand.Haptic, cancellationToken);
+    }
+    /// <summary>Cancels any pending developer-owned delayed STOP and issues a best-effort physical
+    /// STOP. No-op if no developer test has ever run (feedback bridge unarmed).</summary>
+    internal PhysicalRumbleWriteResult? CancelDeveloperVibrationTest() => _feedbackBridge?.CancelDeveloperTestAndStop();
     internal Action? FeedbackBeforeLease
     {
         set { if (_feedbackBridge is not null) _feedbackBridge.BeforeLease = value; }

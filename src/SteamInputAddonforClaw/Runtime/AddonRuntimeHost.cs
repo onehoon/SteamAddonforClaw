@@ -1,9 +1,11 @@
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Steam;
+using SteamInputAddonforClaw.Contracts.Frontend;
 
 namespace SteamInputAddonforClaw.Runtime;
 
@@ -125,6 +127,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     internal event EventHandler? StatusRefreshRequested;
 
     internal RoutingRuntimeStatusSnapshot CaptureRoutingStatus() => _routingRuntime?.CaptureStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
+    internal Task<DeveloperVibrationTestOutcome> RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken) => _routingRuntime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(new DeveloperVibrationTestOutcome(false, null, null));
+    internal PhysicalRumbleWriteResult? CancelDeveloperVibrationTest() => _routingRuntime?.CancelDeveloperVibrationTest();
 
     internal UserTerminationDecision EvaluateUserTermination() => _userTerminationGuard.Evaluate();
 
