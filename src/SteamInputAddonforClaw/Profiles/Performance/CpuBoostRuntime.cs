@@ -63,21 +63,22 @@ internal sealed class CpuBoostRuntime
 {
     private readonly ProfileStore _profileStore;
     private readonly ICpuBoostPowerPolicy _powerPolicy;
+    private readonly ProfileMutationGate _mutationGate;
     private readonly Lock _sync = new();
     // Serializes the full mutation transaction (derive latest document -> persist -> commit ->
     // apply) end to end, distinct from _sync (which only guards fast snapshot/field reads).
     // Without this, two concurrent AC/DC mutations can both read the same starting _document,
     // and whichever Save() finishes last silently discards the other's change.
-    private readonly Lock _mutationSync = new();
 
     private ProfileDocument _document = new();
     private bool _persistenceWritable;
     private CpuBoostRuntimeSnapshot _snapshot = CpuBoostRuntimeSnapshot.Empty;
 
-    internal CpuBoostRuntime(ProfileStore profileStore, ICpuBoostPowerPolicy? powerPolicy = null)
+    internal CpuBoostRuntime(ProfileStore profileStore, ICpuBoostPowerPolicy? powerPolicy = null, ProfileMutationGate? mutationGate = null)
     {
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _powerPolicy = powerPolicy ?? new WindowsCpuBoostPowerPolicy();
+        _mutationGate = mutationGate ?? new ProfileMutationGate();
     }
 
     internal CpuBoostRuntimeSnapshot Snapshot { get { lock (_sync) return _snapshot; } }
@@ -108,7 +109,7 @@ internal sealed class CpuBoostRuntime
     /// </summary>
     internal void StartupReconcile()
     {
-        lock (_mutationSync)
+        lock (_mutationGate.Sync)
         {
             var loadResult = _profileStore.Load();
             lock (_sync)
@@ -265,22 +266,16 @@ internal sealed class CpuBoostRuntime
         // Holds the entire derive-persist-commit-apply transaction for the lifetime of this call,
         // so a concurrent AC and DC mutation can never both derive from the same starting
         // document and have one silently overwrite the other's change (see _mutationSync doc).
-        lock (_mutationSync)
+        lock (_mutationGate.Sync)
         {
-            ProfileDocument previousDocument;
             lock (_sync)
-            {
                 if (!_persistenceWritable)
-                {
-                    // The last load was Malformed/UnsupportedSchemaVersion/ReadFailure: _document
-                    // is only the fresh default ProfileStore.Load() returns for those cases, not
-                    // the real persisted state. Saving it would overwrite the exact file PR #275
-                    // marked unsafe to replace. Fail the mutation instead -- zero Windows writes,
-                    // zero file replacement.
                     return new CpuBoostMutationResult(CpuBoostMutationOutcome.PersistenceFailed, "Profile state is not safe to replace.");
-                }
-                previousDocument = _document;
-            }
+            var currentLoad = _profileStore.Load();
+            if (!currentLoad.CanSafelyReplace)
+                return new CpuBoostMutationResult(CpuBoostMutationOutcome.PersistenceFailed, "Profile state is not safe to replace.");
+            var previousDocument = currentLoad.Document;
+            lock (_sync) { _document = previousDocument; _persistenceWritable = true; }
 
             // An explicit user mutation (AC/DC or the Enabled toggle itself) is itself a form of
             // initialization: a missing or incomplete baseline is completed from Windows first (the
@@ -364,15 +359,16 @@ internal sealed class CpuBoostRuntime
     /// fresh Windows read, which only ever happens before first initialization.</summary>
     internal CpuBoostMutationResult SetDeviceCpuBoostEnabled(bool enabled)
     {
-        lock (_mutationSync)
+        lock (_mutationGate.Sync)
         {
-            ProfileDocument previousDocument;
             lock (_sync)
-            {
                 if (!_persistenceWritable)
                     return new CpuBoostMutationResult(CpuBoostMutationOutcome.PersistenceFailed, "Profile state is not safe to replace.");
-                previousDocument = _document;
-            }
+            var currentLoad = _profileStore.Load();
+            if (!currentLoad.CanSafelyReplace)
+                return new CpuBoostMutationResult(CpuBoostMutationOutcome.PersistenceFailed, "Profile state is not safe to replace.");
+            var previousDocument = currentLoad.Document;
+            lock (_sync) { _document = previousDocument; _persistenceWritable = true; }
 
             var previousCpuBoost = previousDocument.Device.Performance.CpuBoost;
 
