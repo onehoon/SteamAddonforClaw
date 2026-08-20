@@ -60,7 +60,8 @@ registered. An armed session copies the synchronous normalized payload,
 decodes ordinary 0xEB rumble, and gates physical writes through the shared
 feedback authority. Teardown of an armed session revokes and drains feedback,
 sends an explicit physical STOP, clears the callback, and only then performs
-typed Steam Deck removal. Haptic/audio commands remain unsupported.
+classified Steam Deck attachment detach; final logical removal belongs only to
+runtime teardown. Haptic/audio commands remain unsupported.
 
 ### Automated dependency update PRs
 
@@ -145,13 +146,18 @@ unknown.
 ## 3. Process and lifetime model
 
 1. Load the pinned `libVIIPER.dll` for process lifetime.
-2. Create the typed Steam Deck session and its caller-owned USB resources.
-3. Resolve and stabilize the exact `28DE:1205` PnP identity.
-4. Verify Addon ownership and HidHide state before routing.
-5. Publish normalized input through the Steam Deck mapper.
-6. Stop publishing before logical removal.
-7. Detach and remove only resources whose ownership is known.
-8. Restore the physical MSI Claw stock state and persist recovery evidence.
+2. Initialize one `CanonicalViiperRuntime`: one server, one caller-owned bus,
+   one detached-ready Steam Deck handle, and one detached-ready Xbox360 handle.
+3. On Steam route entry, record recovery intent, classified-attach the same
+   Deck handle, then resolve/stabilize exact `28DE:1205` PnP ownership.
+4. Verify Addon ownership and HidHide state, then publish neutral and live input.
+5. On route exit, stop publisher/feedback, clear callback, neutralize, perform
+   classified Deck detach, verify exact PnP absence, and complete recovery.
+6. Keep both logical handles and the bus/server alive while the Runtime lives.
+7. Only after canonical routing shutdown succeeds, final Runtime teardown
+   removes Deck/Xbox360, removes the bus, and closes the server.
+8. Restore the physical MSI Claw stock state through the existing rollback and
+   recovery path.
 
 Public teardown waits outside the canonical native lifecycle lock. Unknown
 attachment or removal outcomes fail closed and preserve recovery evidence for a

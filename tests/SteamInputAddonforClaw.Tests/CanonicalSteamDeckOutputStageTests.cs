@@ -92,7 +92,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task BusRemovalRetryDoesNotReplayDeviceRemoval()
+    public async Task DetachRetryDoesNotReplayLogicalRemoval()
     {
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
@@ -105,7 +105,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task ServerCloseRetryDoesNotReplayDeviceRemoval()
+    public async Task RouteExitDoesNotClosePersistentRuntime()
     {
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
@@ -219,7 +219,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     {
         // The usbip-win2 host ancestor record is missing from the snapshot, so identity resolution
         // correctly fails closed (MissingUsbIpWin2Ancestor). But the 28DE:1205 node that appeared
-        // during the attempt does NOT actually disappear after RemoveDevice() in this fixture --
+        // during the attempt does NOT actually disappear after DetachDevice() in this fixture --
         // rollback's absence verification must catch that using the exact InstanceId observed at
         // failure time, not by re-running the same strict ownership predicate that already rejected
         // it (which would trivially report "no matching candidate" -> false-positive absence).
@@ -241,7 +241,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     {
         var deck = Device("USB\\VID_28DE&PID_1205\\DISAPPEARS");
         var enumerator = new DeckPresenceEnumerator(deck);
-        var session = new FakeCanonicalSession { OnRemoveDeviceCalled = () => enumerator.DeviceRemoved = true };
+        var session = new FakeCanonicalSession { OnDetachDeviceCalled = () => enumerator.DeviceRemoved = true };
         var stage = Create(session, enumerator, new FakeHidHide(), TimeSpan.FromMilliseconds(50));
         await stage.PrepareMutationAsync(CancellationToken.None);
 
@@ -330,7 +330,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task LivePublisherStartsAfterNeutralAndStopsBeforeDeviceRemoval()
+    public async Task LivePublisherStartsAfterNeutralAndStopsBeforeDetach()
     {
         var session = new FakeCanonicalSession { BlockInput = true };
         var ticks = new ManualTicks();
@@ -582,7 +582,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.Equal([TwoMotorRumble.Stopped, new TwoMotorRumble(0x1234, 0x5678), TwoMotorRumble.Stopped], sink.Values);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal(["Neutral", "Stop", "SetOutputCallback", "Nonzero", "Stop", "ClearOutputCallback", "RemoveDevice"], order);
+        Assert.Equal(["Neutral", "Stop", "SetOutputCallback", "Nonzero", "Stop", "ClearOutputCallback", "DetachDevice"], order);
     }
 
     [Fact]
@@ -625,7 +625,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoveDeviceFailureLogsRollbackTimingAndPreservesFailureResult()
+    public async Task DetachDeviceFailureLogsRollbackTimingAndPreservesFailureResult()
     {
         var session = new FakeCanonicalSession { RemoveResult = false };
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
@@ -952,7 +952,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public bool SetOutputCallbackResult { get; init; } = true;
         public bool ClearOutputCallbackResult { get; set; } = true;
         public bool BlockInput { get; init; }
-        public Action? OnRemoveDeviceCalled;
+        public Action? OnDetachDeviceCalled;
         public int RemoveCalls { get; private set; }
         public int ClearOutputCallbackCalls { get; private set; }
         public List<string>? ExternalTrace { get; set; }
@@ -1009,12 +1009,12 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public bool SetOutputCallback(SteamDeckOutputCallback callback) { Trace.Add("SetOutputCallback"); ExternalTrace?.Add("SetOutputCallback"); Callback = callback; return State == CanonicalSteamDeckSessionState.Active && SetOutputCallbackResult; }
         public bool ClearOutputCallback() { Trace.Add("ClearOutputCallback"); ExternalTrace?.Add("ClearOutputCallback"); ClearOutputCallbackCalls++; return State == CanonicalSteamDeckSessionState.Active && ClearOutputCallbackResult; }
 
-        public bool RemoveDevice()
+        public bool DetachDevice()
         {
             Trace.Add("Remove");
-            ExternalTrace?.Add("RemoveDevice");
+            ExternalTrace?.Add("DetachDevice");
             RemoveCalls++;
-            OnRemoveDeviceCalled?.Invoke();
+            OnDetachDeviceCalled?.Invoke();
             // A known/classified remove failure (RemoveResult=false) leaves State unchanged (still
             // Active) so the stage classifies it as "VirtualDeviceRemoveFailed" rather than
             // "CanonicalSessionUnsafe" -- distinct from an actually-Unsafe session, which no test

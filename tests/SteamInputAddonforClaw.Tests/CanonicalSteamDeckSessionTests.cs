@@ -13,8 +13,8 @@ public sealed class CanonicalSteamDeckSessionTests
         Assert.NotNull(runtime);
         Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime.State);
         var expected = (runtime.ServerHandle, runtime.BusId, runtime.DeckDeviceHandle, runtime.DeckLogicalDeviceId);
-        using (var first = new CanonicalSteamDeckSession(runtime)) { Assert.True(first.Start()); Assert.True(first.RemoveDevice()); }
-        using (var second = new CanonicalSteamDeckSession(runtime)) { Assert.True(second.Start()); Assert.True(second.RemoveDevice()); }
+        using (var first = new CanonicalSteamDeckSession(runtime)) { Assert.True(first.Start()); Assert.True(first.DetachDevice()); }
+        using (var second = new CanonicalSteamDeckSession(runtime)) { Assert.True(second.Start()); Assert.True(second.DetachDevice()); }
         Assert.Equal(expected, (runtime.ServerHandle, runtime.BusId, runtime.DeckDeviceHandle, runtime.DeckLogicalDeviceId));
         Assert.Equal(2, native.Calls.Count(x => x == "AttachUSBDeviceEx"));
         Assert.Equal(2, native.Calls.Count(x => x == "DetachUSBDeviceEx"));
@@ -90,7 +90,7 @@ public sealed class CanonicalSteamDeckSessionTests
         var handle = runtime.DeckDeviceHandle;
         using var session = new CanonicalSteamDeckSession(runtime);
         Assert.True(session.Start());
-        Assert.False(session.RemoveDevice());
+        Assert.False(session.DetachDevice());
         Assert.Equal(CanonicalPendingCleanupPhase.AttachmentDetach, session.PendingCleanupPhase);
         Assert.Equal(handle, runtime.DeckDeviceHandle);
         Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
@@ -108,7 +108,7 @@ public sealed class CanonicalSteamDeckSessionTests
         var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242")!;
         using var session = new CanonicalSteamDeckSession(runtime);
         Assert.True(session.Start());
-        Assert.False(session.RemoveDevice());
+        Assert.False(session.DetachDevice());
         Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
         Assert.Equal(CanonicalSteamDeckSessionState.Unsafe, session.State);
         Assert.False(session.RetryPendingCleanup());
@@ -124,7 +124,7 @@ public sealed class CanonicalSteamDeckSessionTests
         var runtime = CanonicalViiperRuntime.TryInitialize(native, "127.0.0.1:3242")!;
         using var session = new CanonicalSteamDeckSession(runtime);
         Assert.True(session.Start());
-        Assert.False(session.RemoveDevice());
+        Assert.False(session.DetachDevice());
         Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
         Assert.True(session.RetryPendingCleanup());
         Assert.Single(native.Calls, call => call == "DetachUSBDeviceEx");

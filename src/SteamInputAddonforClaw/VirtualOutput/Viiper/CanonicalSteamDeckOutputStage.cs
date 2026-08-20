@@ -359,7 +359,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 var removed = _canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending &&
                     _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.AttachmentDetach
                     ? _canonicalSession.RetryPendingCleanup()
-                    : _canonicalSession.RemoveDevice();
+                    : _canonicalSession.DetachDevice();
                 if (!removed) return RollbackFailure(_canonicalSession.State == CanonicalSteamDeckSessionState.Unsafe ? "CanonicalSessionUnsafe" : "VirtualDeviceDetachFailed");
             }
             finally { removeMs = Elapsed(removeStarted); }
