@@ -325,6 +325,71 @@ public sealed class AddonRoutingRuntimeTests
         Assert.False(result.PublisherReleased);
     }
 
+    [Fact]
+    public async Task Xbox360_retirement_stops_before_detach_without_resuming_deck()
+    {
+        var trace = new List<string>();
+        var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
+        var result = await AddonRoutingRuntime.RetireXbox360PresentationCoreAsync(
+            publisher,
+            () => { trace.Add("Stop"); return Task.CompletedTask; },
+            () => { trace.Add("Detach"); return USBDeviceDetachResult.Success; },
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.PublisherReleased);
+        Assert.Equal(["Stop", "Detach"], trace);
+    }
+
+    [Fact]
+    public async Task Xbox360_retirement_stop_failure_blocks_detach_and_release()
+    {
+        var detachCalls = 0;
+        var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
+        var result = await AddonRoutingRuntime.RetireXbox360PresentationCoreAsync(
+            publisher,
+            () => Task.FromException(new TimeoutException("worker did not stop")),
+            () => { detachCalls++; return USBDeviceDetachResult.Success; },
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.PublisherReleased);
+        Assert.Equal(0, detachCalls);
+    }
+
+    [Theory]
+    [InlineData((int)USBDeviceDetachResult.RetryableFailure)]
+    [InlineData((int)USBDeviceDetachResult.UnsafeOutcomeUnknown)]
+    [InlineData((int)USBDeviceDetachResult.Invalid)]
+    public async Task Xbox360_retirement_detach_classification_retains_publisher(int resultValue)
+    {
+        var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
+        var result = await AddonRoutingRuntime.RetireXbox360PresentationCoreAsync(
+            publisher,
+            () => Task.CompletedTask,
+            () => (USBDeviceDetachResult)resultValue,
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.PublisherReleased);
+        Assert.Contains($"Xbox360Detach{(USBDeviceDetachResult)resultValue}", result.FailureReason);
+    }
+
+    [Fact]
+    public async Task Xbox360_retirement_detach_exception_retains_publisher()
+    {
+        var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
+        var result = await AddonRoutingRuntime.RetireXbox360PresentationCoreAsync(
+            publisher,
+            () => Task.CompletedTask,
+            () => throw new InvalidOperationException("detach failed"),
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.PublisherReleased);
+        Assert.Contains("Xbox360DetachThrew=InvalidOperationException", result.FailureReason);
+    }
+
     private static async Task WaitForAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);

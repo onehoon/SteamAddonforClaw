@@ -373,6 +373,17 @@ X360 PnP/XInput readiness claim, and no hardware validation claim**. SD7 remains
 PLANNED; normal Runtime behavior and `SteamOutputActive` semantics are
 unchanged.
 
+X360 presentation retirement and shutdown integration step: the existing
+publisher owner now has a shared no-resume retirement path that proves
+publisher stop before neutral/classified Xbox360 detach and clears ownership
+only after detach succeeds. `AddonRoutingRuntime.ShutdownAsync` invokes this
+path before the outer routing coordinator shutdown; a retirement failure
+blocks that coordinator shutdown and preserves the owner. Normal Game Bar
+exit still resumes Deck after successful retirement, while shutdown never
+resumes Deck. The GameBarForegroundWatcher remains unsubscribed, normal Steam
+route exit and suspend/resume remain unchanged, no X360 readiness claim is
+added, and no hardware validation is claimed. SD7 remains PLANNED.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains
