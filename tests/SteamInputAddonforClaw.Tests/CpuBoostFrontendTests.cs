@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Frontend;
+using SteamInputAddonforClaw.FrontendTransport;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
@@ -67,7 +68,7 @@ public sealed class CpuBoostFrontendTests : IDisposable
     [Fact]
     public async Task AC_mutation_writes_only_AC()
     {
-        var policy = new FakeCpuBoostPowerPolicy();
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
         var runtime = CreateReconciledRuntime(policy);
         var control = CreateControl(runtime);
 
@@ -77,13 +78,13 @@ public sealed class CpuBoostFrontendTests : IDisposable
         Assert.Equal(1, policy.AcWriteCount);
         Assert.Equal(0, policy.DcWriteCount);
         Assert.Equal(CpuBoostMode.EfficientAggressive, result.Snapshot.Ac.Desired);
-        Assert.Null(result.Snapshot.Dc.Desired);
+        Assert.Equal(CpuBoostMode.Disabled, result.Snapshot.Dc.Desired);
     }
 
     [Fact]
     public async Task DC_mutation_writes_only_DC()
     {
-        var policy = new FakeCpuBoostPowerPolicy();
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
         var runtime = CreateReconciledRuntime(policy);
         var control = CreateControl(runtime);
 
@@ -92,16 +93,17 @@ public sealed class CpuBoostFrontendTests : IDisposable
         Assert.True(result.Succeeded);
         Assert.Equal(0, policy.AcWriteCount);
         Assert.Equal(1, policy.DcWriteCount);
-        Assert.Null(result.Snapshot.Ac.Desired);
+        Assert.Equal(CpuBoostMode.Enabled, result.Snapshot.Ac.Desired);
         Assert.Equal(CpuBoostMode.Disabled, result.Snapshot.Dc.Desired);
     }
 
     [Fact]
     public async Task Apply_failure_remains_visible_to_the_frontend_and_is_never_reported_as_success()
     {
-        var policy = new FakeCpuBoostPowerPolicy { FailNextApply = true };
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
         var runtime = CreateReconciledRuntime(policy);
         var control = CreateControl(runtime);
+        policy.FailNextApply = true;
 
         var result = await control.SetDeviceCpuBoostAcAsync(CpuBoostMode.Aggressive);
 
@@ -161,7 +163,7 @@ public sealed class CpuBoostFrontendTests : IDisposable
     {
         // Architectural invariant (work order section 1): construct the control with runtime: null
         // (no AddonRuntimeHost/routing composition whatsoever) and prove CPU Boost still works.
-        var policy = new FakeCpuBoostPowerPolicy();
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Enabled), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
         var runtime = CreateReconciledRuntime(policy);
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -206,6 +208,40 @@ public sealed class CpuBoostFrontendTests : IDisposable
         Assert.True(result.Snapshot.Enabled);
         Assert.Equal(1, policy.AcWriteCount);
         Assert.Equal(1, policy.DcWriteCount);
+    }
+
+    [Fact]
+    public async Task Shutdown_barrier_rejects_AC_mutation_with_zero_writes_and_unchanged_persistence()
+    {
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = CreateReconciledRuntime(policy);
+        var control = CreateControl(runtime);
+        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
+        var contentsBeforeShutdown = File.ReadAllText(profilesPath);
+
+        control.BeginProcessShutdown();
+
+        var exception = await Assert.ThrowsAsync<FrontendProtocolException>(() => control.SetDeviceCpuBoostAcAsync(CpuBoostMode.Enabled));
+        Assert.Contains("shutting down", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, policy.AcWriteCount);
+        Assert.Equal(0, policy.DcWriteCount);
+        Assert.Equal(contentsBeforeShutdown, File.ReadAllText(profilesPath));
+    }
+
+    [Fact]
+    public async Task Shutdown_barrier_rejects_Enabled_mutation_with_Enabled_unchanged_and_zero_writes()
+    {
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = CreateReconciledRuntime(policy);
+        var control = CreateControl(runtime);
+
+        control.BeginProcessShutdown();
+
+        var exception = await Assert.ThrowsAsync<FrontendProtocolException>(() => control.SetDeviceCpuBoostEnabledAsync(false));
+        Assert.Contains("shutting down", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(runtime.Snapshot.Enabled);
+        Assert.Equal(0, policy.AcWriteCount);
+        Assert.Equal(0, policy.DcWriteCount);
     }
 
     private CpuBoostRuntime CreateReconciledRuntime(ICpuBoostPowerPolicy policy)

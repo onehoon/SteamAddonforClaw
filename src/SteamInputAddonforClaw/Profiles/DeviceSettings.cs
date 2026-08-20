@@ -29,22 +29,23 @@ public sealed record DeviceSettings
 /// understand across a load-then-save round trip, so that build does not silently erase it.</summary>
 public sealed record DevicePerformanceSettings
 {
-    /// <summary><see langword="null"/> means the Addon does not manage CPU Boost at all (neither
-    /// AC nor DC) -- see <see cref="DeviceCpuBoostSettings"/> for the independent per-side
-    /// semantics. There is no Addon default: a non-null <see cref="DeviceCpuBoostSettings"/> only
-    /// ever appears here as a direct result of an explicit user mutation.</summary>
+    /// <summary><see langword="null"/> means Device CPU Boost is uninitialized -- no complete AC/DC
+    /// baseline has ever been established yet. There is no hardcoded Addon default: a non-null
+    /// <see cref="DeviceCpuBoostSettings"/> only ever appears here as a direct result of a startup
+    /// bootstrap or an explicit user mutation, both of which establish AC and DC together. See
+    /// <see cref="DeviceCpuBoostSettings"/> for the current initialized/uninitialized semantics.</summary>
     public DeviceCpuBoostSettings? CpuBoost { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
 
-/// <summary>Persisted desired CPU Boost state. AC and DC are independently nullable and
-/// independently mutable: <see langword="null"/> on either side means "the Addon does not manage
-/// this side -- read/preserve the current Windows value for it, never write it." An explicit value
-/// (including <see cref="CpuBoostMode.Disabled"/>, which is mode <c>0</c>, not "unmanaged") means
-/// that side is Addon-managed. There is intentionally no separate "is managed" Boolean per side --
-/// nullability alone carries that meaning (work order section 7).
+/// <summary>Persisted desired CPU Boost state. <c>Ac</c>/<c>Dc</c> stay nullable in storage only for
+/// backward compatibility with pre-initialization/legacy-partial documents; the meaning of
+/// <see langword="null"/> is "initialization incomplete", not "intentionally unmanaged side". A
+/// successfully initialized Device CPU Boost configuration always has both a concrete
+/// <see cref="Ac"/> and a concrete <see cref="Dc"/> value (including <see cref="CpuBoostMode.Disabled"/>,
+/// which is mode <c>0</c>, a real user-selectable mode). There is no per-side ownership state.
 ///
 /// <see cref="Enabled"/> (Device CPU Boost Toggle addendum) is a SEPARATE concept from AC/DC
 /// nullability: it controls only whether the Addon's Device/global apply path is currently allowed

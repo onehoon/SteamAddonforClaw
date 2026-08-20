@@ -333,16 +333,23 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendCpuBoostSnapshot> CaptureCpuBoostAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(_cpuBoostRuntime is null ? FrontendCpuBoostSnapshot.Unavailable : MapCpuBoostSnapshot(_cpuBoostRuntime.Snapshot));
 
-    public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default) =>
-        Task.FromResult(MutateCpuBoost(ac: true, mode));
+    public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return Task.FromResult(MutateCpuBoost(ac: true, mode));
+    }
 
-    public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default) =>
-        Task.FromResult(MutateCpuBoost(ac: false, mode));
+    public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return Task.FromResult(MutateCpuBoost(ac: false, mode));
+    }
 
     /// <summary>Device CPU Boost Toggle addendum: turns the Device/global apply path on or off.
     /// Not an application-wide switch, never gates a future Game Profile CPU Boost path.</summary>
     public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         if (_cpuBoostRuntime is null)
             return Task.FromResult(new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable));
 

@@ -50,7 +50,8 @@ internal interface ICpuBoostPowerPolicy
 
     /// <summary>Writes only the non-null side(s) supplied, then (if anything was written)
     /// re-activates the active scheme so Windows applies the change. A <see langword="null"/> side
-    /// is left completely untouched -- never read-then-written-back for symmetry (work order
-    /// section 16).</summary>
+    /// is left completely untouched -- never read-then-written-back for symmetry: an explicit
+    /// single-side AC/DC mutation writes only that side, even when the other side's saved value was
+    /// just completed from a Windows read for persistence purposes.</summary>
     CpuBoostApplyResult Apply(CpuBoostMode? ac, CpuBoostMode? dc);
 }
