@@ -57,6 +57,12 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     private readonly RoutingPipelineRuntimeCoordinator _coordinator;
     private readonly CanonicalSteamDeckOutputStage _deckStage;
     private readonly CanonicalViiperRuntime? _viiperRuntime;
+    // Serializes only Deck/X360 presentation mutations (Game Bar Enter/Exit and outer-route X360
+    // retirement) so they cannot race each other. It is not a state authority: ownership remains
+    // _xbox360Publisher/CanonicalSteamDeckOutputStage/CanonicalViiperRuntime, and outer routing
+    // authority remains RoutingPipelineRuntimeCoordinator. Process-lifetime; disposed in
+    // DisposeAsync, which only runs after ShutdownAsync has already retired routing.
+    private readonly SemaphoreSlim _presentationGate = new(1, 1);
     private CanonicalXbox360InputPublisher? _xbox360Publisher;
 
     private AddonRoutingRuntime(IHandheldRoutingComposition composition, IRoutingSafetySession? safetySession, RoutingPipelineRuntimeCoordinator coordinator, CanonicalSteamDeckOutputStage deckStage, CanonicalViiperRuntime? viiperRuntime)
@@ -163,26 +169,37 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return runtime;
     }
 
-    private async Task<bool> RetireXbox360BeforeOuterRouteExitAsync(CancellationToken cancellationToken)
-    {
-        var publisher = _xbox360Publisher;
-        if (publisher is null)
-            return true;
+    // Invoked as RoutingPipelineRuntimeCoordinator's beforeActiveSessionExit callback -- i.e.
+    // already running while the coordinator holds its own routing transition authority. Per the
+    // required lock order (routing transition -> presentation gate, never the reverse), this must
+    // only acquire _presentationGate around the mutation itself and must never itself await
+    // FailClosedAsync/FailClosedForXbox360PresentationAsync; the caller (coordinator or its own
+    // outer rollback) owns that decision.
+    private Task<bool> RetireXbox360BeforeOuterRouteExitAsync(CancellationToken cancellationToken) =>
+        RunGatedPresentationMutationAsync(
+            _presentationGate,
+            async () =>
+            {
+                var publisher = _xbox360Publisher;
+                if (publisher is null)
+                    return (true, null);
 
-        var result = await RetireXbox360PresentationCoreAsync(
-            publisher,
-            publisher.StopAsync,
-            _viiperRuntime is null
-                ? static () => USBDeviceDetachResult.Invalid
-                : _viiperRuntime.DetachXbox360,
-            cancellationToken).ConfigureAwait(false);
+                var result = await RetireXbox360PresentationCoreAsync(
+                    publisher,
+                    publisher.StopAsync,
+                    _viiperRuntime is null
+                        ? static () => USBDeviceDetachResult.Invalid
+                        : _viiperRuntime.DetachXbox360,
+                    cancellationToken).ConfigureAwait(false);
 
-        if (!result.Succeeded)
-            return false;
+                if (!result.Succeeded)
+                    return (false, null);
 
-        _xbox360Publisher = null;
-        return true;
-    }
+                _xbox360Publisher = null;
+                return (true, null);
+            },
+            failClosed: null,
+            cancellationToken);
 
     /// <summary>PR2: optional additional power/resume participant the owned composition supplies
     /// (e.g. the MSI Center M OEM1 lifecycle driver). Null for a composition with nothing extra to
@@ -214,32 +231,37 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     /// caller invokes it yet. Deck pause remains the first and authoritative step; the X360
     /// attachment is not touched until the Deck publisher has stopped and neutral was accepted.
     /// </summary>
-    internal async Task<bool> EnterXbox360PresentationAsync(CancellationToken cancellationToken = default)
-    {
-        if (!CaptureStatus().SteamOutputActive || _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } || _xbox360Publisher is not null)
-            return false;
+    internal Task<bool> EnterXbox360PresentationAsync(CancellationToken cancellationToken = default) =>
+        RunGatedPresentationMutationAsync(
+            _presentationGate,
+            async () =>
+            {
+                // Ownership/readiness is evaluated fresh here, inside the gate, not before it was
+                // acquired -- a queued Enter must never act on a pre-wait snapshot that a
+                // concurrent Exit/retirement has since invalidated.
+                if (!CaptureStatus().SteamOutputActive || _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } || _xbox360Publisher is not null)
+                    return (false, null);
 
-        var entered = await EnterXbox360PresentationCoreAsync(
-            source: _composition.ControllerStateSource,
-            pauseDeck: () => _deckStage.PausePresentationAsync(cancellationToken),
-            queryAttachment: _viiperRuntime.TryGetXbox360AttachmentState,
-            attach: _viiperRuntime.AttachXbox360,
-            detach: _viiperRuntime.DetachXbox360,
-            setState: _viiperRuntime.SetXbox360State,
-            ticks: null,
-            publisherFault: exception => _ = HandleXbox360PublisherFaultAsync(exception),
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+                var entered = await EnterXbox360PresentationCoreAsync(
+                    source: _composition.ControllerStateSource,
+                    pauseDeck: () => _deckStage.PausePresentationAsync(cancellationToken),
+                    queryAttachment: _viiperRuntime.TryGetXbox360AttachmentState,
+                    attach: _viiperRuntime.AttachXbox360,
+                    detach: _viiperRuntime.DetachXbox360,
+                    setState: _viiperRuntime.SetXbox360State,
+                    ticks: null,
+                    publisherFault: exception => _ = HandleXbox360PublisherFaultAsync(exception),
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        if (entered.Publisher is not null)
-        {
-            _xbox360Publisher = entered.Publisher;
-            return true;
-        }
-
-        if (entered.FailureReason is { } reason)
-            await FailClosedForXbox360PresentationAsync(reason).ConfigureAwait(false);
-        return false;
-    }
+                if (entered.Publisher is not null)
+                {
+                    _xbox360Publisher = entered.Publisher;
+                    return (true, null);
+                }
+                return (false, entered.FailureReason);
+            },
+            failClosed: FailClosedForXbox360PresentationAsync,
+            cancellationToken);
 
     /// <summary>
     /// Exits the manually-entered Xbox360 presentation boundary while keeping the outer Steam
@@ -247,24 +269,29 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     /// caller invokes it yet. The publisher must prove stopped before VIIPER detachment, and the
     /// Deck stage owns any failure encountered while resuming its existing publisher.
     /// </summary>
-    internal async Task<bool> ExitXbox360PresentationAsync(CancellationToken cancellationToken = default)
-    {
-        if (!CaptureStatus().SteamOutputActive || _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } || _xbox360Publisher is null)
-            return false;
+    internal Task<bool> ExitXbox360PresentationAsync(CancellationToken cancellationToken = default) =>
+        RunGatedPresentationMutationAsync(
+            _presentationGate,
+            async () =>
+            {
+                // Same fresh-inside-the-gate rule as Enter: a queued Exit must observe whatever
+                // ownership state the previous gated mutation actually committed.
+                if (!CaptureStatus().SteamOutputActive || _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } || _xbox360Publisher is not { } publisher)
+                    return (false, null);
 
-        var exited = await ExitXbox360PresentationCoreAsync(
-            publisher: _xbox360Publisher,
-            stopPublisher: _xbox360Publisher.StopAsync,
-            detach: _viiperRuntime.DetachXbox360,
-            resumeDeck: () => _deckStage.ResumePresentationAsync(CancellationToken.None),
-            cancellationToken).ConfigureAwait(false);
+                var exited = await ExitXbox360PresentationCoreAsync(
+                    publisher: publisher,
+                    stopPublisher: publisher.StopAsync,
+                    detach: _viiperRuntime.DetachXbox360,
+                    resumeDeck: () => _deckStage.ResumePresentationAsync(CancellationToken.None),
+                    cancellationToken).ConfigureAwait(false);
 
-        if (exited.PublisherReleased)
-            _xbox360Publisher = null;
-        if (exited.FailureReason is { } reason)
-            await FailClosedForXbox360PresentationAsync(reason).ConfigureAwait(false);
-        return exited.Succeeded;
-    }
+                if (exited.PublisherReleased)
+                    _xbox360Publisher = null;
+                return (exited.Succeeded, exited.FailureReason);
+            },
+            failClosed: FailClosedForXbox360PresentationAsync,
+            cancellationToken);
 
     internal static async Task<bool> ShutdownCoreAsync(
         CanonicalXbox360InputPublisher? publisher,
@@ -373,6 +400,41 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         {
             AppLog.Error("Routing.Runtime", "Xbox360 presentation fail-close threw an exception.", exception, ("Reason", reason));
         }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="mutate"/> under <paramref name="presentationGate"/>, then -- only after
+    /// the gate has been released -- invokes <paramref name="failClosed"/> if the mutation reported
+    /// a failure reason. Shared by <see cref="EnterXbox360PresentationAsync"/>,
+    /// <see cref="ExitXbox360PresentationAsync"/>, and
+    /// <see cref="RetireXbox360BeforeOuterRouteExitAsync"/> so the three Deck/X360 presentation
+    /// mutations cannot race each other, while guaranteeing fail-close is never awaited while the
+    /// gate is still held (see the routing-transition-then-presentation-gate lock order these three
+    /// callers depend on). This is a small real-<see cref="SemaphoreSlim"/> primitive, not a new
+    /// state authority or coordinator; ownership evaluation happens inside <paramref name="mutate"/>
+    /// itself, only once the gate is actually held.
+    /// </summary>
+    internal static async Task<bool> RunGatedPresentationMutationAsync(
+        SemaphoreSlim presentationGate,
+        Func<Task<(bool Succeeded, string? FailureReason)>> mutate,
+        Func<string, Task>? failClosed,
+        CancellationToken cancellationToken)
+    {
+        bool succeeded;
+        string? failureReason;
+        await presentationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            (succeeded, failureReason) = await mutate().ConfigureAwait(false);
+        }
+        finally
+        {
+            presentationGate.Release();
+        }
+
+        if (failureReason is not null && failClosed is not null)
+            await failClosed(failureReason).ConfigureAwait(false);
+        return succeeded;
     }
 
     internal delegate bool Xbox360AttachmentQuery(out USBDeviceAttachmentState state);
@@ -558,5 +620,6 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         await _composition.DisposeAsync().ConfigureAwait(false);
         if (_viiperRuntime is not null && !await _viiperRuntime.TeardownAsync().ConfigureAwait(false))
             AppLog.Error("Routing.Runtime", "Final canonical VIIPER teardown failed; owner retained.", new InvalidOperationException("CanonicalViiperRuntime.TeardownAsync returned false."));
+        _presentationGate.Dispose();
     }
 }
