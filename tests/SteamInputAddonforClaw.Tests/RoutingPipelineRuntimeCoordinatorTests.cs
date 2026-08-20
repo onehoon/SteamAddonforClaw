@@ -850,22 +850,82 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     [Fact]
     public async Task CancelledQueuedSuspendPropagatesAndDoesNotLeakTransitionPermission()
     {
-        var executor = new FakeExecutor { BlockNextExecute = true };
+        var executor = new FakeExecutor();
         var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
         var bridge = Create(provider, executor);
-        var reconcile = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
-        await executor.ExecuteStarted.Task;
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        executor.BlockNextRollback = true;
+        var holder = bridge.Bridge.RetryResidualCleanupForResumeAsync(CancellationToken.None).AsTask();
+        await executor.RollbackStarted.Task;
 
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
         var quiesce = bridge.Bridge.QuiesceForSuspendAsync(
             DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, cancellation.Token);
+        Assert.False(bridge.Bridge.CanApplyInteractivePresentation);
+        cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => quiesce);
-
-        bridge.Bridge.CancelInFlightTransition();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reconcile);
+        Assert.False(bridge.Bridge.CanApplyInteractivePresentation);
+        executor.ReleaseRollback.TrySetResult();
+        Assert.True(await holder);
         Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GameBarMutationIsBenignNoOpAfterRetirementWhileOuterRollbackIsStillRunning(bool foreground)
+    {
+        var executor = new FakeExecutor { BlockNextRollback = true };
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(WaitingForSteam(), Software()));
+        var bridge = CreateWithCallback(provider, executor, _ => Task.FromResult(true));
+
+        await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        var outerExit = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.RollbackStarted.Task;
+        Assert.False(bridge.Bridge.CanApplyInteractivePresentation);
+
+        using var presentationGate = new SemaphoreSlim(1, 1);
+        var mutationCalls = 0;
+        var failCloseCalls = 0;
+
+        Func<CancellationToken, Task<bool>> enter = token =>
+            AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+                presentationGate,
+                () =>
+                {
+                    if (!bridge.Bridge.CanApplyInteractivePresentation)
+                        return Task.FromResult((false, (string?)null));
+
+                    mutationCalls++;
+                    return Task.FromResult((true, (string?)null));
+                },
+                _ => { failCloseCalls++; return Task.CompletedTask; },
+                token);
+        Func<CancellationToken, Task<bool>> exit = token =>
+            AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+                presentationGate,
+                () =>
+                {
+                    if (!bridge.Bridge.CanApplyInteractivePresentation)
+                        return Task.FromResult((false, (string?)null));
+
+                    mutationCalls++;
+                    return Task.FromResult((true, (string?)null));
+                },
+                _ => { failCloseCalls++; return Task.CompletedTask; },
+                token);
+
+        Assert.False(await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            foreground, enter, exit, CancellationToken.None));
+        Assert.Equal(0, mutationCalls);
+        Assert.Equal(0, failCloseCalls);
+
+        executor.ReleaseRollback.TrySetResult();
+        Assert.True((await outerExit).Succeeded);
     }
 
     [Fact]
