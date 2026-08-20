@@ -20,6 +20,8 @@ public sealed partial class DeveloperPage : UserControl
     public event EventHandler? BackRequested;
     public event EventHandler? VibrationTestRequested;
     private void OpenVibrationTestButton_Click(object sender, RoutedEventArgs args) => VibrationTestRequested?.Invoke(this, EventArgs.Empty);
+    public event EventHandler? SensorProbeRequested;
+    private void OpenSensorProbeButton_Click(object sender, RoutedEventArgs args) => SensorProbeRequested?.Invoke(this, EventArgs.Empty);
 
     public DeveloperPage()
     {

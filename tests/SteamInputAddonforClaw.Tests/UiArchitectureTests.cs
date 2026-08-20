@@ -29,8 +29,14 @@ public sealed class UiArchitectureTests
         Assert.True(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/MainWindow.xaml.cs")));
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw/MainWindow.xaml")));
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw/MainWindow.xaml.cs")));
+        // The Claw Sensor Probe UI was restored (work order "restore-claw-sensor-probe-diagnostic")
+        // as a proper frontend-boundary page: the WinUI page lives ONLY in the UI project, and the
+        // Runtime-owned coordinator it talks to over IAddonFrontendControl lives ONLY in Runtime --
+        // never the old pre-PR213 shape where the page held the coordinator directly in-process.
         Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw/Views/ClawSensorProbePage.xaml")));
-        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ClawSensorProbePage.xaml")));
+        Assert.False(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw/Views/ClawSensorProbePage.xaml.cs")));
+        Assert.True(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ClawSensorProbePage.xaml")));
+        Assert.True(File.Exists(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/ClawSensorProbePage.xaml.cs")));
         Assert.True(Directory.Exists(Path.Combine(root, "src/SteamInputAddonforClaw/Diagnostics/ClawSensorProbe")));
     }
 

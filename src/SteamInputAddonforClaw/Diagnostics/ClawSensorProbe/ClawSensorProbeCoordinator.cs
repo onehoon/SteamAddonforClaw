@@ -215,7 +215,13 @@ internal sealed class ClawSensorProbeCoordinator : IAsyncDisposable
         }
         _workflow.Fail();
         _writer?.AddError(error);
-        await ShutdownReadersAndApiAsync(cancellationToken);
+        // Terminal-failure teardown/finalization is intentionally non-cancellable, not the caller's
+        // token: the Cancel() above fires _lifecycleCancellation as part of entering Failed, so a
+        // caller-supplied token linked to (or equal to) that same source would self-cancel this
+        // cleanup and skip FinalizeAsync() -- leaving the workflow Failed with no report ever written
+        // (PR #290 re-review). Once failure has begun, it must run to completion regardless of
+        // cancellation; the caller's token already gated *entering* FailAsync via _lifecycleGate.WaitAsync.
+        await ShutdownReadersAndApiAsync(CancellationToken.None);
         if (_writer is not null) await _writer.FinalizeAsync(CancellationToken.None);
     }
     private async Task ShutdownReadersAndApiAsync(CancellationToken cancellationToken)

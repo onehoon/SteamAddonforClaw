@@ -138,7 +138,10 @@ public partial class App : Application
     private async void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
         if (_mainWindow is not null)
+        {
             await _mainWindow.CloseVibrationTestForUiShutdownAsync().ConfigureAwait(true);
+            await _mainWindow.CloseClawSensorProbeForUiShutdownAsync().ConfigureAwait(true);
+        }
         await ShutdownAndExitAsync("WindowClosed").ConfigureAwait(true);
     }
 

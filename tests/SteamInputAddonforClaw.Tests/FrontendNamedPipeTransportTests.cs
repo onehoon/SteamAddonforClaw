@@ -102,6 +102,65 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Claw_sensor_probe_operations_round_trip_through_the_named_pipe()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var opened = await client.OpenClawSensorProbeAsync();
+        Assert.Equivalent(fake.ClawSensorProbeSnapshot, opened, strict: true);
+        Assert.Equal(1, fake.ClawSensorProbeOpenCount);
+        Assert.True(opened.Available);
+        Assert.Equal(FrontendClawSensorProbeState.RecordingPhase, opened.State);
+        Assert.Equal(FrontendClawSensorProbePhase.RollLeft, opened.Phase);
+        Assert.Equal("Physical Gyrometer", opened.Discovery?.Gyroscope?.FriendlyName);
+        Assert.Equal(1.1, opened.Gyro.X);
+        Assert.Equal(42, opened.Gyro.Count);
+        Assert.Equal(1000, opened.GyroscopeSummary?.DurationMs);
+        Assert.Equal(@"C:\Logs\ClawSensorProbe\session-1", opened.OutputDirectory);
+        Assert.Contains("reader warning", opened.ReaderErrors);
+
+        Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.StartClawSensorProbeAsync(), strict: true);
+        Assert.Equal(1, fake.ClawSensorProbeStartCount);
+        Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.CaptureClawSensorProbeAsync(), strict: true);
+        Assert.Equal(1, fake.ClawSensorProbeCaptureCount);
+        Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.NextClawSensorProbePhaseAsync(), strict: true);
+        Assert.Equal(1, fake.ClawSensorProbeNextCount);
+        Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.PreviousClawSensorProbePhaseAsync(), strict: true);
+        Assert.Equal(1, fake.ClawSensorProbePreviousCount);
+        Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.StopClawSensorProbeAsync(), strict: true);
+        Assert.Equal(1, fake.ClawSensorProbeStopCount);
+        Assert.Equivalent(fake.ClawSensorProbeSnapshot, await client.CloseClawSensorProbeAsync(), strict: true);
+        Assert.Equal(1, fake.ClawSensorProbeCloseCount);
+    }
+
+    [Fact]
+    public async Task An_unexpected_client_disconnect_retires_the_open_probe_session()
+    {
+        // PR #290 review: the Sensor Probe diagnostic keeps actively reading sensors in the headless
+        // Runtime even after the WinUI process disappears, so an ungraceful disconnect (crash/kill,
+        // not an orderly CloseClawSensorProbeAsync call) must still retire it -- otherwise it leaks
+        // for the lifetime of the Runtime process.
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        var client = await ConnectAsync(pipeName);
+
+        await client.OpenClawSensorProbeAsync();
+        Assert.Equal(1, fake.ClawSensorProbeOpenCount);
+        Assert.Equal(0, fake.ClawSensorProbeCloseCount);
+
+        // Simulate the frontend vanishing without calling Close: dispose the client's transport, not
+        // a graceful CloseClawSensorProbeAsync request.
+        await client.DisposeAsync();
+
+        await fake.ClawSensorProbeClosed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, fake.ClawSensorProbeCloseCount);
+    }
+
+    [Fact]
     public async Task Mismatched_protocol_rejects_connection_without_frontend_call()
     {
         var fake = new RecordingFrontendControl();
@@ -1050,6 +1109,35 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastAcMode = mode; return Task.FromResult(CpuBoostMutationResult); }
         public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastDcMode = mode; return Task.FromResult(CpuBoostMutationResult); }
         public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastEnabled = enabled; return Task.FromResult(CpuBoostMutationResult); }
+
+        public FrontendClawSensorProbeSnapshot ClawSensorProbeSnapshot { get; } = new(
+            true, FrontendClawSensorProbeState.RecordingPhase, FrontendClawSensorProbePhase.RollLeft, 1, 7,
+            new FrontendClawSensorProbeDiscovery(
+                [new("Physical Gyrometer", "id-1", "type-1", "cat-1", "Mfg", "Model", "puid-1", "10", "usage-1")],
+                new("Physical Gyrometer", "id-1", "type-1", "cat-1", "Mfg", "Model", "puid-1", "10", "usage-1"),
+                new("Physical Accelerometer", "id-2", "type-2", "cat-2", "Mfg", "Model", "puid-2", "10", "usage-2"),
+                [], true),
+            new(1.1, 2.2, 3.3, 100.0, 42),
+            new(4.4, 5.5, 6.6, 100.0, 43),
+            new(42, 0, 1000, 10, 8, 12, 100),
+            new(43, 1, 1000, 10, 8, 12, 100),
+            1, 0, 1, ["reader warning"], @"C:\Logs\ClawSensorProbe\session-1", true, null,
+            "MSI", "Claw A1M", "BaseBoard", "Claw A1M (resolved)");
+        public int ClawSensorProbeOpenCount { get; private set; }
+        public int ClawSensorProbeStartCount { get; private set; }
+        public int ClawSensorProbeCaptureCount { get; private set; }
+        public int ClawSensorProbeNextCount { get; private set; }
+        public int ClawSensorProbePreviousCount { get; private set; }
+        public int ClawSensorProbeStopCount { get; private set; }
+        public int ClawSensorProbeCloseCount { get; private set; }
+        public TaskCompletionSource ClawSensorProbeClosed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<FrontendClawSensorProbeSnapshot> OpenClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeOpenCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
+        public Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeStartCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
+        public Task<FrontendClawSensorProbeSnapshot> CaptureClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeCaptureCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
+        public Task<FrontendClawSensorProbeSnapshot> NextClawSensorProbePhaseAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeNextCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
+        public Task<FrontendClawSensorProbeSnapshot> PreviousClawSensorProbePhaseAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbePreviousCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
+        public Task<FrontendClawSensorProbeSnapshot> StopClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeStopCount++; return Task.FromResult(ClawSensorProbeSnapshot); }
+        public Task<FrontendClawSensorProbeSnapshot> CloseClawSensorProbeAsync(CancellationToken t = default) { TotalCalls++; ClawSensorProbeCloseCount++; ClawSensorProbeClosed.TrySetResult(); return Task.FromResult(ClawSensorProbeSnapshot); }
     }
 
     private sealed class PartialReadStream : MemoryStream

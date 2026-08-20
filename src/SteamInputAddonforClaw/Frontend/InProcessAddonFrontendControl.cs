@@ -1,7 +1,9 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Developer;
+using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Profiles.Performance;
@@ -29,6 +31,25 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private int _shutdownStarted;
     private readonly object _vibrationSessionGate = new();
     private Feedback.VibrationTestSessionWriter? _vibrationSession;
+    private readonly object _clawSensorProbeGate = new();
+    private ClawSensorProbeSession? _clawSensorProbe;
+
+    /// <summary>Wraps the Runtime-owned <see cref="ClawSensorProbeCoordinator"/> for one active
+    /// diagnostic session, plus the device identity captured at Open time (so a stale-but-still-open
+    /// session keeps reporting the identity it was opened with) and the last operation's error text.</summary>
+    private sealed class ClawSensorProbeSession(ClawSensorProbeCoordinator coordinator, string manufacturer, string model, string baseBoard, string resolvedModel)
+    {
+        public ClawSensorProbeCoordinator Coordinator { get; } = coordinator;
+        public string Manufacturer { get; } = manufacturer;
+        public string Model { get; } = model;
+        public string BaseBoard { get; } = baseBoard;
+        public string ResolvedModel { get; } = resolvedModel;
+        public string? ErrorMessage { get; set; }
+        public required string HardwareStatus { get; init; }
+        public required string HardwareFamily { get; init; }
+        public required string HardwareModel { get; init; }
+        public required string HardwareReason { get; init; }
+    }
     // Device/Profile CPU Boost -- a sibling capability, not a member of Routing/OEM1 (work order
     // PR277 section 1): this projection deliberately has NO dependency on _runtime/routing status
     // and must keep working when _runtime is null (no routing composition at all).
@@ -298,11 +319,299 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0) return;
         Feedback.VibrationTestSessionWriter? session;
         lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
-        if (session is null) return;
-        var stop = _runtime?.CancelDeveloperVibrationTest();
-        session.Write($"SessionClosed Reason=RuntimeShutdown CancelledPendingDeveloperStop=True BestEffortStopRequested=True PhysicalStatus={stop?.Status} PhysicalReason={stop?.Reason}");
-        session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        if (session is not null)
+        {
+            var stop = _runtime?.CancelDeveloperVibrationTest();
+            session.Write($"SessionClosed Reason=RuntimeShutdown CancelledPendingDeveloperStop=True BestEffortStopRequested=True PhysicalStatus={stop?.Status} PhysicalReason={stop?.Reason}");
+            session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        ClawSensorProbeSession? probe;
+        lock (_clawSensorProbeGate) { probe = _clawSensorProbe; _clawSensorProbe = null; }
+        if (probe is not null)
+        {
+            try { probe.Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+            catch (Exception exception) { AppLog.Warn("ClawSensorProbe", "Probe shutdown cleanup failed.", exception); }
+        }
     }
+
+    // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
+
+    public async Task<FrontendClawSensorProbeSnapshot> OpenClawSensorProbeAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        ClawSensorProbeSession? existing;
+        lock (_clawSensorProbeGate) existing = _clawSensorProbe;
+        if (existing is not null && existing.Coordinator.State is not (ClawSensorProbeState.Completed or ClawSensorProbeState.Failed))
+            return MapClawSensorProbeSnapshot(existing);
+
+        var status = await _status.CaptureAsync(cancellationToken).ConfigureAwait(false);
+        var hardware = status.HardwareCompatibility;
+        if (!ClawSensorProbeCoordinator.AllowsReadOnlyDiagnostic(hardware))
+            return FrontendClawSensorProbeSnapshot.Unavailable with
+            {
+                Manufacturer = status.Device.Manufacturer,
+                Model = status.Device.Model,
+                BaseBoard = status.Device.BaseBoardProduct,
+                ErrorMessage = "This diagnostic is available only on an identified MSI Claw device."
+            };
+
+        // A previous session that Completed/Failed is disposed and replaced with a fresh one -- the
+        // old report/output directory remains on disk, but the next Open starts a clean session.
+        if (existing is not null)
+            await existing.Coordinator.DisposeAsync().ConfigureAwait(false);
+
+        var resolvedModel = hardware.DeviceModel?.Value ?? "Unknown / unresolved";
+        var coordinator = new ClawSensorProbeCoordinator();
+        coordinator.Prepare();
+        // Identity/compatibility are captured now but NOT written yet: ClawSensorProbeCoordinator's
+        // SetDeviceIdentity/SetHardwareCompatibility write through the session writer, which Start()
+        // does not create until StartClawSensorProbeAsync() runs. Writing here would silently no-op
+        // and drop this metadata from the finalized report (review finding #1 on PR #290).
+        var session = new ClawSensorProbeSession(coordinator, status.Device.Manufacturer, status.Device.Model, status.Device.BaseBoardProduct, resolvedModel)
+        {
+            HardwareStatus = hardware.Status.ToString(),
+            HardwareFamily = hardware.DeviceFamily?.Value ?? "Unavailable",
+            HardwareModel = hardware.DeviceModel?.Value ?? "Unavailable",
+            HardwareReason = hardware.Reason,
+        };
+
+        // The initial ThrowIfShuttingDown() above only covers the time before the awaited
+        // _status.CaptureAsync() call: BeginProcessShutdown() can run its one-time session
+        // detach/dispose pass while this request is suspended there, and the named-pipe server isn't
+        // torn down until later in process disposal, so a request already past that first check could
+        // otherwise resume and commit a brand-new coordinator after shutdown began. Re-check the flag
+        // atomically with the commit under the same gate used by BeginProcessShutdown/Close, and
+        // dispose a rejected candidate outside the lock (PR #290 re-review).
+        bool rejectForShutdown;
+        lock (_clawSensorProbeGate)
+        {
+            rejectForShutdown = Volatile.Read(ref _shutdownStarted) != 0;
+            if (!rejectForShutdown) _clawSensorProbe = session;
+        }
+        if (rejectForShutdown)
+        {
+            await coordinator.DisposeAsync().ConfigureAwait(false);
+            throw new FrontendProtocolException("Runtime is shutting down.");
+        }
+
+        return MapClawSensorProbeSnapshot(session);
+    }
+
+    public async Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var session = CurrentClawSensorProbeSession();
+        if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
+        try
+        {
+            session.Coordinator.Start();
+            session.Coordinator.SetDeviceIdentity(session.Manufacturer, session.Model, session.BaseBoard, session.ResolvedModel);
+            session.Coordinator.SetHardwareCompatibility(session.HardwareStatus, session.HardwareFamily, session.HardwareModel, session.HardwareReason);
+
+            // Link the RPC's own token with the coordinator's lifecycle token so a Runtime shutdown
+            // (BeginProcessShutdown -> coordinator disposal) promptly cancels an in-flight countdown
+            // instead of letting it run to BeginRecording() against an already-disposed coordinator
+            // (review finding #2 on PR #290).
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.Coordinator.LifecycleCancellation);
+            await session.Coordinator.StartCaptureAsync(linked.Token).ConfigureAwait(false);
+            await session.Coordinator.CountdownAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, linked.Token).ConfigureAwait(false);
+            linked.Token.ThrowIfCancellationRequested();
+            session.Coordinator.BeginRecording();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            session.ErrorMessage = exception.Message;
+            try { await session.Coordinator.FailAsync(exception.Message, CancellationToken.None).ConfigureAwait(false); } catch { /* best-effort */ }
+        }
+        return MapClawSensorProbeSnapshot(session);
+    }
+
+    public async Task<FrontendClawSensorProbeSnapshot> CaptureClawSensorProbeAsync(CancellationToken cancellationToken = default)
+    {
+        // Obtain the session AND its lifecycle token together, under the same gate
+        // BeginProcessShutdown()/Close() use to detach+dispose the coordinator: reading
+        // session.Coordinator.LifecycleCancellation outside the lock (after only checking the
+        // session reference was non-null) leaves a window where shutdown can dispose the coordinator
+        // -- and therefore the CancellationTokenSource backing LifecycleCancellation -- in between,
+        // turning an ordinary in-flight poll into an unexpected ObjectDisposedException instead of a
+        // graceful Unavailable (PR #290 re-review).
+        ClawSensorProbeSession? session;
+        CancellationToken lifecycle;
+        lock (_clawSensorProbeGate)
+        {
+            if (Volatile.Read(ref _shutdownStarted) != 0) return FrontendClawSensorProbeSnapshot.Unavailable;
+            session = _clawSensorProbe;
+            if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
+            lifecycle = session.Coordinator.LifecycleCancellation;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // The old page's 200ms UI timer explicitly promoted a dead sensor reader to a finalized
+        // Failed diagnostic (ClawSensorProbeUiTimer_Tick -> FailOnReaderFaultAsync). The restored
+        // page polls this method at the same ~200ms cadence, so run the same reconciliation here --
+        // FailOnReaderFaultAsync no-ops when there is no fault, so this preserves the old behavior
+        // without introducing a second health authority (PR #290 re-review finding #1).
+        //
+        // Deliberately NOT linked to Coordinator.LifecycleCancellation: FailAsync() cancels that same
+        // token as part of entering terminal failure, so a linked token here would self-cancel
+        // ShutdownReadersAndApiAsync mid-teardown and skip FinalizeAsync() (PR #290 re-review, fixed
+        // at the coordinator level too). Once lifecycle cancellation has already fired (Runtime
+        // shutdown/dispose in flight), skip reconciliation entirely and report the session's last
+        // known snapshot instead of racing that teardown.
+        try
+        {
+            if (!lifecycle.IsCancellationRequested)
+                await session.Coordinator.FailOnReaderFaultAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref _shutdownStarted) != 0) { return FrontendClawSensorProbeSnapshot.Unavailable; }
+
+        if (Volatile.Read(ref _shutdownStarted) != 0) return FrontendClawSensorProbeSnapshot.Unavailable;
+        return MapClawSensorProbeSnapshot(session);
+    }
+
+    public Task<FrontendClawSensorProbeSnapshot> NextClawSensorProbePhaseAsync(CancellationToken cancellationToken = default) =>
+        AdvanceClawSensorProbeAsync(forward: true, cancellationToken);
+
+    public Task<FrontendClawSensorProbeSnapshot> PreviousClawSensorProbePhaseAsync(CancellationToken cancellationToken = default) =>
+        AdvanceClawSensorProbeAsync(forward: false, cancellationToken);
+
+    private async Task<FrontendClawSensorProbeSnapshot> AdvanceClawSensorProbeAsync(bool forward, CancellationToken cancellationToken)
+    {
+        ThrowIfShuttingDown();
+        var session = CurrentClawSensorProbeSession();
+        if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.Coordinator.LifecycleCancellation);
+            if (forward)
+                await session.Coordinator.AdvancePhaseAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, () => { }, linked.Token).ConfigureAwait(false);
+            else
+                await session.Coordinator.RevisitPreviousPhaseAsync(_ => Task.CompletedTask, ClawSensorProbePhaseLabel, () => { }, linked.Token).ConfigureAwait(false);
+            linked.Token.ThrowIfCancellationRequested();
+            if (session.Coordinator.State == ClawSensorProbeState.Completed)
+                await session.Coordinator.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            session.ErrorMessage = exception.Message;
+            try { await session.Coordinator.FailAsync(exception.Message, CancellationToken.None).ConfigureAwait(false); } catch { /* best-effort */ }
+        }
+        return MapClawSensorProbeSnapshot(session);
+    }
+
+    public async Task<FrontendClawSensorProbeSnapshot> StopClawSensorProbeAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var session = CurrentClawSensorProbeSession();
+        if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
+        try { await session.Coordinator.StopAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) { session.ErrorMessage = exception.Message; }
+        return MapClawSensorProbeSnapshot(session);
+    }
+
+    public async Task<FrontendClawSensorProbeSnapshot> CloseClawSensorProbeAsync(CancellationToken cancellationToken = default)
+    {
+        ClawSensorProbeSession? session;
+        lock (_clawSensorProbeGate) { session = _clawSensorProbe; _clawSensorProbe = null; }
+        if (session is null) return FrontendClawSensorProbeSnapshot.Unavailable;
+        try
+        {
+            if (session.Coordinator.State is ClawSensorProbeState.Starting or ClawSensorProbeState.Countdown or ClawSensorProbeState.RecordingPhase)
+                await session.Coordinator.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) { AppLog.Warn("ClawSensorProbe", "Probe stop-on-close failed.", exception); }
+        finally { await session.Coordinator.DisposeAsync().ConfigureAwait(false); }
+        return FrontendClawSensorProbeSnapshot.Unavailable;
+    }
+
+    private ClawSensorProbeSession? CurrentClawSensorProbeSession() { lock (_clawSensorProbeGate) return _clawSensorProbe; }
+
+    private static string ClawSensorProbePhaseLabel(ClawSensorProbePhase phase) => phase switch
+    {
+        ClawSensorProbePhase.REST => "Keep Still",
+        ClawSensorProbePhase.ROLL_LEFT => "Roll Left",
+        ClawSensorProbePhase.ROLL_RIGHT => "Roll Right",
+        ClawSensorProbePhase.PITCH_UP => "Pitch Up",
+        ClawSensorProbePhase.PITCH_DOWN => "Pitch Down",
+        ClawSensorProbePhase.YAW_LEFT => "Yaw Left",
+        _ => "Yaw Right"
+    };
+
+    private static FrontendClawSensorProbeSnapshot MapClawSensorProbeSnapshot(ClawSensorProbeSession session)
+    {
+        var coordinator = session.Coordinator;
+        var workflow = coordinator.Workflow;
+        var phase = workflow.CurrentIndex >= 0 ? workflow.Visits[^1].Phase : ClawSensorProbePhase.REST;
+        var gyro = coordinator.LiveSnapshot?.Gyro;
+        var accel = coordinator.LiveSnapshot?.Accel;
+        return new FrontendClawSensorProbeSnapshot(
+            Available: true,
+            State: MapClawSensorProbeState(coordinator.State),
+            Phase: MapClawSensorProbePhase(phase),
+            PhaseIndex: workflow.CurrentIndex,
+            PhaseCount: ClawSensorProbeWorkflow.Phases.Count,
+            Discovery: MapClawSensorProbeDiscovery(coordinator.Discovery),
+            Gyro: gyro is { } g ? new(g.X, g.Y, g.Z, g.Hz, g.Count) : FrontendClawSensorProbeAxisSnapshot.Empty,
+            Accel: accel is { } a ? new(a.X, a.Y, a.Z, a.Hz, a.Count) : FrontendClawSensorProbeAxisSnapshot.Empty,
+            GyroscopeSummary: MapClawSensorProbeStatistics(coordinator.GyroscopeSummary),
+            AccelerometerSummary: MapClawSensorProbeStatistics(coordinator.AccelerometerSummary),
+            DroppedSampleCount: coordinator.DroppedSampleCount,
+            DroppedGyroscopeCount: coordinator.DroppedGyroscopeCount,
+            DroppedAccelerometerCount: coordinator.DroppedAccelerometerCount,
+            ReaderErrors: coordinator.ReaderErrors,
+            OutputDirectory: coordinator.OutputDirectory,
+            HasReport: coordinator.HasReport,
+            ErrorMessage: session.ErrorMessage,
+            Manufacturer: session.Manufacturer,
+            Model: session.Model,
+            BaseBoard: session.BaseBoard,
+            ResolvedModel: session.ResolvedModel);
+    }
+
+    private static FrontendClawSensorProbeState MapClawSensorProbeState(ClawSensorProbeState state) => state switch
+    {
+        ClawSensorProbeState.Idle => FrontendClawSensorProbeState.Idle,
+        ClawSensorProbeState.Discovering => FrontendClawSensorProbeState.Discovering,
+        ClawSensorProbeState.Ready => FrontendClawSensorProbeState.Ready,
+        ClawSensorProbeState.Starting => FrontendClawSensorProbeState.Starting,
+        ClawSensorProbeState.Countdown => FrontendClawSensorProbeState.Countdown,
+        ClawSensorProbeState.RecordingPhase => FrontendClawSensorProbeState.RecordingPhase,
+        ClawSensorProbeState.Stopping => FrontendClawSensorProbeState.Stopping,
+        ClawSensorProbeState.Completed => FrontendClawSensorProbeState.Completed,
+        _ => FrontendClawSensorProbeState.Failed
+    };
+
+    private static FrontendClawSensorProbePhase MapClawSensorProbePhase(ClawSensorProbePhase phase) => phase switch
+    {
+        ClawSensorProbePhase.REST => FrontendClawSensorProbePhase.Rest,
+        ClawSensorProbePhase.ROLL_LEFT => FrontendClawSensorProbePhase.RollLeft,
+        ClawSensorProbePhase.ROLL_RIGHT => FrontendClawSensorProbePhase.RollRight,
+        ClawSensorProbePhase.PITCH_UP => FrontendClawSensorProbePhase.PitchUp,
+        ClawSensorProbePhase.PITCH_DOWN => FrontendClawSensorProbePhase.PitchDown,
+        ClawSensorProbePhase.YAW_LEFT => FrontendClawSensorProbePhase.YawLeft,
+        _ => FrontendClawSensorProbePhase.YawRight
+    };
+
+    private static FrontendClawSensorProbeDiscovery? MapClawSensorProbeDiscovery(ClawSensorDiscovery? discovery)
+    {
+        if (discovery is null) return null;
+        return new FrontendClawSensorProbeDiscovery(
+            [.. discovery.Sensors.Select(MapClawSensorProbeCandidate)],
+            discovery.Gyroscope is { } gyro ? MapClawSensorProbeCandidate(gyro) : null,
+            discovery.Accelerometer is { } accel ? MapClawSensorProbeCandidate(accel) : null,
+            discovery.Errors,
+            discovery.IsValid);
+    }
+
+    private static FrontendClawSensorProbeCandidate MapClawSensorProbeCandidate(ClawSensorProbeCandidate candidate) => new(
+        candidate.FriendlyName, candidate.SensorId, candidate.TypeGuid, candidate.CategoryGuid,
+        candidate.Manufacturer, candidate.Model, candidate.PersistentUniqueId, candidate.MinimumReportInterval, candidate.CustomUsage);
+
+    private static FrontendClawSensorProbeStatistics? MapClawSensorProbeStatistics(ClawSensorProbeStatistics? statistics) => statistics is null
+        ? null
+        : new(statistics.SampleCount, statistics.DroppedSampleCount, statistics.DurationMs, statistics.AverageIntervalMs, statistics.MinimumIntervalMs, statistics.MaximumIntervalMs, statistics.EffectiveHz);
 
     private void ThrowIfShuttingDown()
     {
