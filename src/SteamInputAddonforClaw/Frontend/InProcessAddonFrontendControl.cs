@@ -111,6 +111,17 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(new FrontendDeveloperSnapshot(_developer.IsEnabled));
     }
 
+    /// <summary>Called when the Vibration Test detail page is entered: creates the dedicated session
+    /// log immediately (even if no command is ever run) so the file always has a header recording
+    /// current Test Mode/routing state at page entry. Idempotent -- a call while a session is
+    /// already open returns that same session's file rather than starting a second one.</summary>
+    public Task<FrontendVibrationTestResult> OpenVibrationTestSessionAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var session = GetOrOpenVibrationSession();
+        return Task.FromResult(new FrontendVibrationTestResult(true, "SessionOpened", session.FilePath));
+    }
+
     public async Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -121,10 +132,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
         var session = GetOrOpenVibrationSession();
         session.Write($"Command={command} Opcode={VibrationTestOpcode(command)} TestModeEnabled={testModeEnabled} SteamOutputActive={steamOutputActive}");
-        var success = await (_runtime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(false)).ConfigureAwait(false);
-        session.Write($"Result Command={command} Succeeded={success}");
+        var outcome = await (_runtime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(new Feedback.DeveloperVibrationTestOutcome(false, null, null))).ConfigureAwait(false);
+        // Accepted (authority/sequence) and physically-successful are different questions: a real MSI
+        // HID write failure must be visible here even when the write was accepted, so PhysicalStatus/
+        // PhysicalReason are logged separately from Succeeded rather than folded into one boolean.
+        session.Write($"Result Command={command} Succeeded={outcome.Succeeded} PhysicalStatus={outcome.CommandResult?.Status} PhysicalReason={outcome.CommandResult?.Reason} StopPhysicalStatus={outcome.StopResult?.Status} StopPhysicalReason={outcome.StopResult?.Reason}");
 
-        return new FrontendVibrationTestResult(success, success ? "Succeeded" : "Feedback bridge is unavailable or the test was cancelled.", session.FilePath);
+        return new FrontendVibrationTestResult(outcome.Succeeded, outcome.Succeeded ? "Succeeded" : "Feedback bridge is unavailable or the test was cancelled.", session.FilePath);
     }
 
     /// <summary>Called when the Vibration Test detail page is left, regardless of how: cancels any
@@ -149,7 +163,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         {
             if (_vibrationSession is { } existing) return existing;
             var session = new Feedback.VibrationTestSessionWriter(AppLog.DirectoryPath);
-            session.Write("SessionStarted");
+            var routing = _captureRoutingStatus();
+            session.Write($"SessionStarted TestModeEnabled={_developer.IsEnabled} SteamOutputActive={routing.SteamOutputActive} NativeDirectInputActive={routing.NativeDirectInputActive}");
             _vibrationSession = session;
             return session;
         }

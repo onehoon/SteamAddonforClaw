@@ -11,13 +11,22 @@ public sealed partial class VibrationTestPage : UserControl
     public VibrationTestPage() => InitializeComponent();
     internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap) { _frontend = frontend; }
 
-    /// <summary>Page entry: subscribes to live state changes and pulls a fresh Test Mode /
-    /// Steam Deck output status so the buttons and status text reflect current reality rather than
-    /// the state captured once at process startup.</summary>
+    /// <summary>Page entry: opens the dedicated diagnostic session (so a file exists even if no
+    /// command is ever run), subscribes to live state changes, and pulls a fresh Test Mode / Steam
+    /// Deck output status so the buttons and status text reflect current reality rather than the
+    /// state captured once at process startup.</summary>
     internal void Activate()
     {
         if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated;
+        _ = OpenSessionAsync();
         _ = RefreshAsync();
+    }
+
+    private async Task OpenSessionAsync()
+    {
+        if (_frontend is null) return;
+        try { await _frontend.OpenVibrationTestSessionAsync(); }
+        catch (Exception exception) { AppLog.Warn("Window", "Vibration test session open failed.", exception, ("Reason", exception.GetType().Name)); }
     }
 
     /// <summary>Page exit, however it happens (Back button, mouse-back, or navigating elsewhere):

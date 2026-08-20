@@ -16,7 +16,7 @@ public sealed class DeveloperVibrationTestTests
         var sink = new RecordingSink();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
-        Assert.True(await bridge.ProcessDeveloperTestAsync(Report(command), addDeveloperStop: command is FrontendVibrationTestCommand.Rumble or FrontendVibrationTestCommand.Haptic, CancellationToken.None));
+        Assert.True((await bridge.ProcessDeveloperTestAsync(Report(command), addDeveloperStop: command is FrontendVibrationTestCommand.Rumble or FrontendVibrationTestCommand.Haptic, CancellationToken.None)).Succeeded);
         Assert.Equal(new TwoMotorRumble(large, small), sink.Values[0]);
         if (command == FrontendVibrationTestCommand.HapticPulse)
         {
@@ -32,7 +32,7 @@ public sealed class DeveloperVibrationTestTests
         var authority = new FeedbackAuthority();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
-        Assert.True(await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None));
+        Assert.True((await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None)).Succeeded);
 
         Assert.Equal([new TwoMotorRumble(32768, 32768), TwoMotorRumble.Stopped], sink.Values);
     }
@@ -62,7 +62,7 @@ public sealed class DeveloperVibrationTestTests
 
         await Task.Delay(20);
         bridge.Dispose();
-        Assert.False(await test);
+        Assert.False((await test).Succeeded);
         Assert.Single(sink.Values);
     }
 
@@ -84,7 +84,7 @@ public sealed class DeveloperVibrationTestTests
 
         // The developer test's own return value reports its delayed STOP as a no-op (stale sequence),
         // not a failure of the original command -- exactly the intended behavior being verified here.
-        Assert.False(await developerTest);
+        Assert.False((await developerTest).Succeeded);
         await Task.Delay(300);
 
         // Two writes only: the developer Rumble command, then the newer real Steam Haptic command.
@@ -103,11 +103,31 @@ public sealed class DeveloperVibrationTestTests
 
         bridge.CancelDeveloperTestAndStop();
 
-        Assert.False(await developerTest);
+        Assert.False((await developerTest).Succeeded);
         await Task.Delay(300);
         // Only the developer Rumble command and the CancelDeveloperTestAndStop() zero write --
         // the cancelled pending 250ms delayed STOP must never also fire.
         Assert.Equal([new TwoMotorRumble(32768, 32768), TwoMotorRumble.Stopped], sink.Values);
+    }
+
+    [Fact]
+    public async Task A_physical_write_failure_is_visible_in_the_outcome_even_though_authority_accepted_it()
+    {
+        // Regression for PR #269 review: TryWrite() used to discard the sink's PhysicalRumbleWriteResult
+        // entirely, so a real MSI HID write failure was indistinguishable from success anywhere a
+        // caller only looked at the accepted/rejected boolean. CommandResult must carry the real
+        // physical status separately from Succeeded (which continues to mean authority/sequence
+        // acceptance, unchanged).
+        var sink = new FailingSink();
+        var authority = new FeedbackAuthority();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+
+        var outcome = await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Haptic), addDeveloperStop: false, CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.NotNull(outcome.CommandResult);
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, outcome.CommandResult!.Value.Status);
+        Assert.Equal("WriteFailed", outcome.CommandResult!.Value.Reason);
     }
 
     [Fact]
@@ -136,5 +156,10 @@ public sealed class DeveloperVibrationTestTests
         public List<TwoMotorRumble> Values { get; } = [];
         public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
         { Values.Add(rumble); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+    }
+
+    private sealed class FailingSink : IPhysicalRumbleSink
+    {
+        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble) => new(PhysicalRumbleWriteStatus.Failed, "WriteFailed");
     }
 }

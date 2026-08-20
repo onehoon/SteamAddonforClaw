@@ -4,6 +4,13 @@ using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw.Feedback;
 
+/// <summary>Outcome of a single developer test command: <see cref="Succeeded"/> reflects the existing
+/// authority/sequence-acceptance contract (unchanged from callers' perspective), while
+/// <see cref="CommandResult"/> and <see cref="StopResult"/> carry the actual physical write status/
+/// reason for diagnostic logging -- acceptance and physical success are different questions, and a
+/// real MSI HID write failure must be visible in the dedicated log even when acceptance succeeded.</summary>
+internal readonly record struct DeveloperVibrationTestOutcome(bool Succeeded, PhysicalRumbleWriteResult? CommandResult, PhysicalRumbleWriteResult? StopResult);
+
 internal sealed class SteamDeckRumbleFeedbackBridge
 {
     private const uint MaximumCallbackLength = 64;
@@ -26,16 +33,19 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
     internal SteamDeckOutputCallback Callback { get; }
     internal Action? BeforeLease { get; set; }
-    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam") => ProcessNormalizedReport(report, origin, out _);
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam") => ProcessNormalizedReport(report, origin, out _, out _);
 
-    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence)
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence) => ProcessNormalizedReport(report, origin, out sequence, out _);
+
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence, out PhysicalRumbleWriteResult? physicalResult)
     {
         sequence = 0;
+        physicalResult = null;
         var decoded = SteamDeckRumbleDecoder.Decode(report);
         if (!decoded.IsSupported) return false;
         sequence = BeginFeedback();
         BeforeLease?.Invoke();
-        if (!TryWrite(sequence, decoded.Rumble))
+        if (!TryWrite(sequence, decoded.Rumble, out physicalResult))
         {
             AppLog.Debug("Rumble", "SteamDeck feedback DROP", ("Reason", "AuthorityRejected"), ("Origin", origin));
             return false;
@@ -61,7 +71,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
     }
 
-    internal async Task<bool> ProcessDeveloperTestAsync(ReadOnlyMemory<byte> report, bool addDeveloperStop, CancellationToken cancellationToken)
+    internal async Task<DeveloperVibrationTestOutcome> ProcessDeveloperTestAsync(ReadOnlyMemory<byte> report, bool addDeveloperStop, CancellationToken cancellationToken)
     {
         CancellationTokenSource linked;
         lock (_gate)
@@ -73,16 +83,18 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
         try
         {
-            if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence)) return false;
-            if (!addDeveloperStop) return true;
+            if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence, out var commandResult))
+                return new(false, commandResult, null);
+            if (!addDeveloperStop) return new(true, commandResult, null);
             await Task.Delay(250, linked.Token).ConfigureAwait(false);
             // Write directly against the original sequence instead of routing back through
             // ProcessNormalizedReport (which would call BeginFeedback() again): if real Steam
             // feedback arrived during the 250ms delay it is now the newest sequence, and this
             // stale developer STOP must be a silent no-op rather than stopping that newer feedback.
-            return TryWrite(sequence, TwoMotorRumble.Stopped);
+            var stopAccepted = TryWrite(sequence, TwoMotorRumble.Stopped, out var stopResult);
+            return new(stopAccepted, commandResult, stopResult);
         }
-        catch (OperationCanceledException) when (linked.IsCancellationRequested) { return false; }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested) { return new(false, null, null); }
         finally
         {
             lock (_gate) if (ReferenceEquals(_developerTest, linked)) _developerTest = null;
@@ -165,12 +177,15 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
     }
 
-    private bool TryWrite(long sequence, TwoMotorRumble rumble)
+    private bool TryWrite(long sequence, TwoMotorRumble rumble) => TryWrite(sequence, rumble, out _);
+
+    private bool TryWrite(long sequence, TwoMotorRumble rumble, out PhysicalRumbleWriteResult? physicalResult)
     {
         lock (_gate)
         {
+            physicalResult = null;
             if (_disposed || sequence != _sequence || !_authority.TryAcquireLease(_token, out var lease) || lease is null) return false;
-            using (lease) _sink.SetRumble(rumble);
+            using (lease) physicalResult = _sink.SetRumble(rumble);
             return true;
         }
     }

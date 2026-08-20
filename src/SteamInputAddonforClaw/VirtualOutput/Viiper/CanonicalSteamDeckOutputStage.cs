@@ -93,9 +93,9 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     /// actually active; see docs/VIIPER_MIGRATION_TODO.md SD5.
     /// </summary>
     internal void RequestQuickAccessPulse() => _systemButtonOverlay.RequestQuickAccessPulse();
-    internal Task<bool> RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken)
+    internal Task<DeveloperVibrationTestOutcome> RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken)
     {
-        if (!_feedbackArmed || _feedbackBridge is null) return Task.FromResult(false);
+        if (!_feedbackArmed || _feedbackBridge is null) return Task.FromResult(new DeveloperVibrationTestOutcome(false, null, null));
         var report = new byte[64];
         switch (command)
         {
