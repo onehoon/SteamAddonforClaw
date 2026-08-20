@@ -53,7 +53,12 @@ public sealed record DevicePerformanceSettings
 /// the saved selections remain so the feature can be re-enabled and immediately re-apply them.</summary>
 public sealed record DeviceCpuBoostSettings
 {
-    public bool Enabled { get; init; }
+    /// <summary>Defaults to <see langword="true"/> so a pre-toggle PR276 schema-v1 document (which
+    /// persisted <c>ac</c>/<c>dc</c> but has no <c>enabled</c> property at all) deserializes as ON,
+    /// preserving its previously-active behavior -- the property being ABSENT means "not yet
+    /// expressed, so ON" exactly like the toggle's own initial-ON policy on first-run bootstrap. Only
+    /// an explicit persisted <c>"enabled": false</c> means OFF.</summary>
+    public bool Enabled { get; init; } = true;
     public CpuBoostMode? Ac { get; init; }
     public CpuBoostMode? Dc { get; init; }
 

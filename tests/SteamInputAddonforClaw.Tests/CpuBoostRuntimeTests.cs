@@ -260,6 +260,68 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         Assert.Equal(CpuBoostMode.EfficientAggressive, store.Load().Document.Device.Performance.CpuBoost?.Ac);
     }
 
+    [Fact]
+    public void PreToggle_Pr276Document_WithNoEnabledProperty_LoadsAsEnabledTrueAndApplies()
+    {
+        // Review fix (MAJOR): a PR276-era schema-v1 document persisted ac/dc with no enabled
+        // property at all (the property didn't exist yet). The missing property must deserialize
+        // as ON -- preserving that document's previously-active behavior -- not silently become
+        // Device CPU Boost OFF merely because this PR added the property additively.
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, "{\"schemaVersion\":1,\"device\":{\"performance\":{\"cpuBoost\":{\"ac\":\"aggressive\",\"dc\":\"disabled\"}}},\"games\":{}}");
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+
+        runtime.StartupReconcile();
+
+        Assert.True(runtime.Snapshot.Enabled);
+        Assert.Equal(1, backend.AcWriteCount);
+        Assert.Equal(1, backend.DcWriteCount);
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    [Fact]
+    public void SetDeviceCpuBoostEnabled_TrueWithoutAnyPersistedBaseline_ReadsWindowsFirst()
+    {
+        // Review fix (MAJOR): enabling an uninitialized Device CPU Boost (first-run bootstrap never
+        // succeeded) must obtain concrete AC/DC values before committing Enabled=true -- never an
+        // enabled-but-null/null document.
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy(); // Ac/Dc default Unavailable -> bootstrap fails
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+        Assert.False(store.Load().Document.Device.Performance.CpuBoost is { Ac: not null, Dc: not null });
+
+        var result = runtime.SetDeviceCpuBoostEnabled(true);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(CpuBoostMutationOutcome.ApplyFailed, result.Outcome);
+        Assert.Null(store.Load().Document.Device.Performance.CpuBoost);
+    }
+
+    [Fact]
+    public void SetDeviceCpuBoostEnabled_TrueWithoutBaseline_AdoptsWindowsWhenReadable()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy(); // bootstrap fails at StartupReconcile time
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        // Windows becomes readable by the time the user tries to enable it.
+        backend.Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive);
+        backend.Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled);
+
+        var result = runtime.SetDeviceCpuBoostEnabled(true);
+
+        Assert.True(result.Succeeded);
+        var loaded = store.Load();
+        Assert.True(loaded.Document.Device.Performance.CpuBoost?.Enabled);
+        Assert.Equal(CpuBoostMode.Aggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(CpuBoostMode.Disabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
+    }
+
     // ---- AC-only managed startup ----
 
     [Fact]

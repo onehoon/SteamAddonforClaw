@@ -305,12 +305,30 @@ internal sealed class CpuBoostRuntime
                 previousDocument = _document;
             }
 
-            // An explicit user mutation (AC/DC or the Enabled toggle itself) is itself a form of
-            // initialization: if no CpuBoost value existed yet (e.g. first-run bootstrap could not
-            // read a known Windows value), the freshly-created value defaults to Enabled=true, same
-            // as a successful bootstrap -- never a silently-inert Enabled=false the user never chose.
-            var previousCpuBoost = previousDocument.Device.Performance.CpuBoost ?? new DeviceCpuBoostSettings { Enabled = true };
-            var updatedCpuBoost = previousCpuBoost with { Enabled = enabled };
+            var previousCpuBoost = previousDocument.Device.Performance.CpuBoost;
+
+            if (enabled && (previousCpuBoost?.Ac is null || previousCpuBoost.Dc is null))
+            {
+                // Turning ON an uninitialized (or partially-initialized) Device CPU Boost must first
+                // obtain concrete AC/DC values -- never commit an Enabled=true document with a null
+                // side. If Windows cannot currently be read, leave CPU Boost exactly as uninitialized
+                // as it already was, so a later attempt (bootstrap or another Enable) can still try
+                // again -- this must never permanently bypass TryBootstrapFromWindows.
+                var current = _powerPolicy.Read();
+                if (!current.Succeeded || current.Ac.Status != CpuBoostReadStatus.Known || current.Ac.Mode is not { } acMode
+                    || current.Dc.Status != CpuBoostReadStatus.Known || current.Dc.Mode is not { } dcMode)
+                {
+                    AppLog.Warn("Profiles.CpuBoost", "Device CPU Boost could not be enabled: Windows AC/DC could not be read as known values.", null,
+                        ("AcStatus", current.Ac.Status), ("DcStatus", current.Dc.Status));
+                    UpdateSnapshot(current, previousCpuBoost?.Ac, previousCpuBoost?.Dc, enabled: false,
+                        current.Succeeded ? "CPU Boost could not be initialized from Windows." : current.FailureMessage);
+                    return new CpuBoostMutationResult(CpuBoostMutationOutcome.ApplyFailed, "CPU Boost could not be initialized from Windows.");
+                }
+
+                previousCpuBoost = new DeviceCpuBoostSettings { Enabled = true, Ac = acMode, Dc = dcMode };
+            }
+
+            var updatedCpuBoost = (previousCpuBoost ?? new DeviceCpuBoostSettings()) with { Enabled = enabled };
             var updatedDocument = previousDocument with
             {
                 Device = previousDocument.Device with
