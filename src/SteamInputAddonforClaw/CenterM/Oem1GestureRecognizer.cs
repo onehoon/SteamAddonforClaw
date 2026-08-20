@@ -125,68 +125,51 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         long generation = 0;
         CancellationToken token = default;
         var startTimeout = false;
-        var evaluateNewSequence = false;
         var now = _clock.GetTimestamp();
-        bool sequencePending;
+        var needsNewSequencePolicy = false;
+        long policyGeneration;
         lock (_gate)
         {
             ThrowIfDisposed();
-            sequencePending = _firstPressPending;
-        }
-
-        // The policy is selected only for a new first-press sequence. A pending sequence already
-        // proved that Double was enabled, so a mapping edit during its short window does not alter
-        // the recognizer's interpretation midway through that sequence.
-        var doubleClickEnabled = sequencePending || _doubleClickEnabled();
-
-        try
-        {
-            lock (_gate)
+            if (_firstPressPending)
             {
-                ThrowIfDisposed();
-                if (!doubleClickEnabled)
+                if (_clock.GetElapsedTime(_firstPressTimestamp, now) < _doubleClickWindow)
                 {
-                    immediate = Oem1Gesture.Single;
+                    _firstPressPending = false;
+                    _generation++;
+                    CancelPendingCore();
+                    immediate = Oem1Gesture.Double;
                     immediateDeliveryEpoch = _deliveryEpoch;
-                }
-                else if (_firstPressPending)
-                {
-                    if (_clock.GetElapsedTime(_firstPressTimestamp, now) < _doubleClickWindow)
-                    {
-                        _firstPressPending = false;
-                        _generation++;
-                        CancelPendingCore();
-                        immediate = Oem1Gesture.Double;
-                        immediateDeliveryEpoch = _deliveryEpoch;
-                    }
-                    else
-                    {
-                        _firstPressPending = false;
-                        _generation++;
-                        CancelPendingCore();
-                        immediate = Oem1Gesture.Single;
-                        immediateDeliveryEpoch = _deliveryEpoch;
-                        evaluateNewSequence = true;
-                    }
                 }
                 else
                 {
-                    BeginPendingPressCore(now, out generation, out token);
-                    startTimeout = true;
+                    _firstPressPending = false;
+                    _generation++;
+                    CancelPendingCore();
+                    immediate = Oem1Gesture.Single;
+                    immediateDeliveryEpoch = _deliveryEpoch;
+                    needsNewSequencePolicy = true;
                 }
-
             }
+            else
+            {
+                needsNewSequencePolicy = true;
+            }
+            policyGeneration = _generation;
+        }
 
+        try
+        {
             Oem1Gesture? newImmediate = null;
             long newImmediateDeliveryEpoch = 0;
-            if (evaluateNewSequence)
+            if (needsNewSequencePolicy)
             {
-                // The expired sequence has been settled. This same physical press is now a new
-                // sequence and must use the current mapping/domain policy.
+                // Existing pending state was consumed atomically above. Only now, outside the
+                // recognizer lock, evaluate the current mapping/domain policy for this new press.
                 var enabledForNewSequence = _doubleClickEnabled();
                 lock (_gate)
                 {
-                    if (!_disposed && !_firstPressPending)
+                    if (!_disposed && _generation == policyGeneration && !_firstPressPending)
                     {
                         if (enabledForNewSequence)
                         {
@@ -200,7 +183,11 @@ internal sealed class Oem1GestureRecognizer : IDisposable
                         }
                     }
                 }
-
+            }
+            else
+            {
+                // The in-window second press already consumed the existing sequence. No new
+                // policy evaluation is allowed to change its original Double semantics.
             }
 
             if (immediate.HasValue)
