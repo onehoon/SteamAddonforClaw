@@ -245,6 +245,50 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task Complete_cleanup_converges_owned_unsafe_state_and_fault_latch()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        var recovery = new RecoveryManager(new MemoryJournalStore());
+        var native = new MsiClawNativeStateManager(devices, modeController);
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(
+            native, recovery, new PowerMutationGate(initiallyOpen: true), recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        var recoverySessionId = coordinator.CurrentRecoverySessionId!.Value;
+        Assert.Equal(RecoveryStatus.Success, recovery.RecordHidHideWhitelistAddition(recoverySessionId, "C:\\Addon.exe").Status);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.FailClosedAsync("PipelineFailure"));
+        modeController.FailRestore = false;
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.Equal(RecoverySafety.Unsafe, recoverySafety.Current);
+
+        Assert.Equal(RecoveryStatus.Success, recovery.CompleteHidHideWhitelistAddition(recoverySessionId, "C:\\Addon.exe").Status);
+        Assert.True(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task Convergence_refuses_while_recovery_journal_remains()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        var recovery = new RecoveryManager(new MemoryJournalStore());
+        var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
+        await using var coordinator = new MsiClawNativeModeSessionCoordinator(
+            native, recovery, new PowerMutationGate(initiallyOpen: true), recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        var sessionId = coordinator.CurrentRecoverySessionId!.Value;
+        Assert.Equal(RecoveryStatus.Success, recovery.RecordHidHideWhitelistAddition(sessionId, "C:\\Addon.exe").Status);
+        await coordinator.FailClosedAsync("PipelineFailure");
+
+        Assert.True(recovery.HasIncompleteRecovery);
+        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
+    }
+
+    [Fact]
     public async Task JournalCreatedBeforeEnterFailureRetainsRecoveryOwnership()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);

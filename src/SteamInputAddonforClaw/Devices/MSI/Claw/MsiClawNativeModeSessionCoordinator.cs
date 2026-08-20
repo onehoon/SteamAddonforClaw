@@ -62,6 +62,45 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
         finally { _gate.Release(); }
     }
 
+    public async Task<bool> ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_active || _recoveryBoundaryOwned || _recovery.HasIncompleteRecovery)
+            {
+                AppLog.Debug("NativeMode", "RoutingSafetyConvergenceDeferred",
+                    ("Active", _active), ("RecoveryBoundaryOwned", _recoveryBoundaryOwned),
+                    ("JournalRemaining", _recovery.HasIncompleteRecovery),
+                    ("RecoverySafety", _recoverySafety.Current),
+                    ("RoutingFaultLatched", _routingFaultLatched));
+                return false;
+            }
+
+            if (!_powerGate.TryAcquireCleanup(out var token) || !_powerGate.IsCurrentCleanup(token))
+                return false;
+
+            var converged = _recoverySafety.Current == RecoverySafety.Safe;
+            if (!converged && _unsafeRecoveryVersion is { } unsafeVersion &&
+                _recoverySafety.IsCurrent(unsafeVersion, RecoverySafety.Unsafe))
+            {
+                var changed = false;
+                converged = _powerGate.IsOpen &&
+                    _powerGate.TryCommitMutation(token, () => changed = _recoverySafety.TrySet(unsafeVersion, RecoverySafety.Safe)) && changed;
+                if (converged) _unsafeRecoveryVersion = null;
+            }
+
+            if (!converged)
+                return false;
+
+            _routingFaultLatched = false;
+            AppLog.Debug("NativeMode", "RoutingSafetyConverged",
+                ("RecoverySafety", _recoverySafety.Current), ("RoutingFaultLatched", _routingFaultLatched));
+            return true;
+        }
+        finally { _gate.Release(); }
+    }
+
     public async ValueTask<MsiClawNativeModePreflightResult> InspectForPipelineAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -230,6 +269,9 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
 
     Task IRoutingSafetySession.FailClosedAsync(string reason, CancellationToken cancellationToken)
         => FailClosedAsync(reason, cancellationToken);
+
+    Task<bool> IRoutingSafetySession.ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken)
+        => ConvergeAfterRoutingCleanupAsync(cancellationToken);
 
     private void LatchRoutingFaultCore(string reason)
     {

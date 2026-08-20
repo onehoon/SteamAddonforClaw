@@ -22,4 +22,6 @@ internal interface IRoutingSafetySession : IRoutingRecoverySessionProvider, IAsy
     Task LatchRoutingFaultAsync(string reason, CancellationToken cancellationToken = default);
 
     Task FailClosedAsync(string reason, CancellationToken cancellationToken = default);
+
+    Task<bool> ConvergeAfterRoutingCleanupAsync(CancellationToken cancellationToken = default);
 }
