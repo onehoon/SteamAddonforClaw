@@ -442,6 +442,42 @@ public sealed class AddonRoutingRuntimeTests
         Assert.Equal(1, coordinatorCalls);
     }
 
+    [Fact]
+    public async Task ShutdownCore_retires_xbox360_before_outer_shutdown()
+    {
+        var trace = new List<string>();
+        var result = await AddonRoutingRuntime.ShutdownCoreAsync(
+            () => { trace.Add("RetireX360"); return Task.FromResult(true); },
+            () => { trace.Add("OuterShutdown"); return Task.FromResult(true); });
+
+        Assert.True(result);
+        Assert.Equal(["RetireX360", "OuterShutdown"], trace);
+    }
+
+    [Fact]
+    public async Task ShutdownCore_retirement_failure_blocks_outer_shutdown()
+    {
+        var outerCalls = 0;
+        var result = await AddonRoutingRuntime.ShutdownCoreAsync(
+            () => Task.FromResult(false),
+            () => { outerCalls++; return Task.FromResult(true); });
+
+        Assert.False(result);
+        Assert.Equal(0, outerCalls);
+    }
+
+    [Fact]
+    public async Task ShutdownCore_without_xbox360_runs_outer_shutdown()
+    {
+        var outerCalls = 0;
+        var result = await AddonRoutingRuntime.ShutdownCoreAsync(
+            () => Task.FromResult(true),
+            () => { outerCalls++; return Task.FromResult(true); });
+
+        Assert.True(result);
+        Assert.Equal(1, outerCalls);
+    }
+
     private static async Task WaitForAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);

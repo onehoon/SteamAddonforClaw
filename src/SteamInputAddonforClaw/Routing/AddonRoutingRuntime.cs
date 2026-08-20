@@ -262,6 +262,15 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return await coordinatorShutdown().ConfigureAwait(false);
     }
 
+    internal static async Task<bool> ShutdownCoreAsync(
+        Func<Task<bool>> retireXbox360,
+        Func<Task<bool>> shutdownOuter)
+    {
+        if (!await retireXbox360().ConfigureAwait(false))
+            return false;
+        return await shutdownOuter().ConfigureAwait(false);
+    }
+
     /// <summary>Stops and detaches the X360 presentation without resuming Deck.</summary>
     internal static async Task<Xbox360PresentationExitResult> RetireXbox360PresentationCoreAsync(
         CanonicalXbox360InputPublisher? publisher,
@@ -505,13 +514,15 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     {
         try
         {
-            return await ShutdownAfterXbox360RetirementAsync(
-                _xbox360Publisher,
-                _xbox360Publisher is { } publisher ? publisher.StopAsync : () => Task.CompletedTask,
-                _viiperRuntime is { } viiper ? viiper.DetachXbox360 : () => USBDeviceDetachResult.Invalid,
-                () => _xbox360Publisher = null,
-                async () => (await _coordinator.ShutdownAsync().ConfigureAwait(false)).Succeeded,
-                CancellationToken.None).ConfigureAwait(false);
+            return await ShutdownCoreAsync(
+                () => ShutdownAfterXbox360RetirementAsync(
+                    _xbox360Publisher,
+                    _xbox360Publisher is { } publisher ? publisher.StopAsync : () => Task.CompletedTask,
+                    _viiperRuntime is { } viiper ? viiper.DetachXbox360 : () => USBDeviceDetachResult.Invalid,
+                    () => _xbox360Publisher = null,
+                    () => Task.FromResult(true),
+                    CancellationToken.None),
+                async () => (await _coordinator.ShutdownAsync().ConfigureAwait(false)).Succeeded).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
