@@ -188,6 +188,35 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
+    public async Task Xbox360_identity_failure_with_retryable_xbox_remove_retries_then_removes_deck_before_bus()
+    {
+        var native = new FakeNative
+        {
+            Xbox360IdentityBusId = 999,
+            RemoveXbox360Results = new Queue<Xbox360DeviceRemoveResult>(
+                [Xbox360DeviceRemoveResult.RetryableFailure,
+                 Xbox360DeviceRemoveResult.Success])
+        };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime!.State);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.Xbox360Remove, runtime.TeardownPhase);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+
+        Assert.True(await runtime.TeardownAsync());
+
+        var xboxRetry = native.Calls.LastIndexOf("RemoveXbox360DeviceEx");
+        var deckRemove = native.Calls.LastIndexOf("RemoveSteamDeckDeviceEx");
+        var busRemove = native.Calls.LastIndexOf("RemoveUSBBus");
+        Assert.True(xboxRetry < deckRemove);
+        Assert.True(deckRemove < busRemove);
+        Assert.Equal(1, native.Calls.Count(c => c == "RemoveSteamDeckDeviceEx"));
+    }
+
+    [Fact]
     public void Xbox360_initial_attachment_state_outcome_unknown_stops_with_no_destructive_calls_and_retains_owner()
     {
         var native = new FakeNative { Xbox360InitialAttachmentState = USBDeviceAttachmentState.OutcomeUnknown };

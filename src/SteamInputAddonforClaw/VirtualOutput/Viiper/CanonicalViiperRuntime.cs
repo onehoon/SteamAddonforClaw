@@ -351,6 +351,17 @@ internal sealed class CanonicalViiperRuntime
             if (TeardownPhase == CanonicalViiperRuntimeTeardownPhase.Xbox360Remove)
             {
                 if (_xbox360Created && !TryRemoveXbox360()) return false;
+
+                // Reachable directly (without going through DeckRemove first) when resuming an
+                // init-time unwind that failed at the Xbox360 stage: the Deck was created before
+                // Xbox360 in that ordering, so it can still be owned here. Remove it before
+                // advancing to the bus rather than letting bus removal silently take it with it.
+                if (_deckCreated)
+                {
+                    TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DeckRemove;
+                    if (!TryRemoveDeck()) return false;
+                }
+
                 TeardownPhase = CanonicalViiperRuntimeTeardownPhase.BusRemoval;
             }
 
