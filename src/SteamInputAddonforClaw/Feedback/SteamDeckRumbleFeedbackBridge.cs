@@ -33,14 +33,18 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
     internal SteamDeckOutputCallback Callback { get; }
     internal Action? BeforeLease { get; set; }
-    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam") => ProcessNormalizedReport(report, origin, out _, out _);
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam") => ProcessNormalizedReport(report, origin, out _, out _, out _);
 
-    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence) => ProcessNormalizedReport(report, origin, out sequence, out _);
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence) => ProcessNormalizedReport(report, origin, out sequence, out _, out _);
 
-    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence, out PhysicalRumbleWriteResult? physicalResult)
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence, out PhysicalRumbleWriteResult? physicalResult) =>
+        ProcessNormalizedReport(report, origin, out sequence, out physicalResult, out _);
+
+    private bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence, out PhysicalRumbleWriteResult? physicalResult, out Task<PhysicalRumbleWriteResult?>? scheduledStop)
     {
         sequence = 0;
         physicalResult = null;
+        scheduledStop = null;
         var decoded = SteamDeckRumbleDecoder.Decode(report);
         if (!decoded.IsSupported) return false;
         sequence = BeginFeedback();
@@ -51,7 +55,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             return false;
         }
         if (decoded.Command == SteamDeckFeedbackCommand.HapticPulse && decoded.PulseDurationMilliseconds is { } delay)
-            ArmStop(sequence, delay);
+            scheduledStop = ArmStop(sequence, delay);
         AppLog.Debug("Rumble", "Steam Deck feedback processed.", ("Origin", origin), ("Command", decoded.Command));
         return true;
     }
@@ -84,9 +88,13 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         try
         {
             var decoded = SteamDeckRumbleDecoder.Decode(report.Span);
-            if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence, out var commandResult))
+            if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence, out var commandResult, out var scheduledStop))
                 return new(false, commandResult, null, decoded);
-            if (!addDeveloperStop) return new(true, commandResult, null, decoded);
+            if (!addDeveloperStop)
+            {
+                var productionStop = scheduledStop is null ? null : await scheduledStop.ConfigureAwait(false);
+                return new(true, commandResult, productionStop, decoded);
+            }
             await Task.Delay(250, linked.Token).ConfigureAwait(false);
             // Write directly against the original sequence instead of routing back through
             // ProcessNormalizedReport (which would call BeginFeedback() again): if real Steam
@@ -168,14 +176,14 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
     }
 
-    private void ArmStop(long sequence, int duration)
+    private Task<PhysicalRumbleWriteResult?> ArmStop(long sequence, int duration)
     {
         lock (_gate)
         {
-            if (_disposed || sequence != _sequence) return;
+            if (_disposed || sequence != _sequence) return Task.FromResult<PhysicalRumbleWriteResult?>(null);
             var cts = new CancellationTokenSource();
             _pendingStop = cts;
-            _ = StopAfterAsync(sequence, duration, cts);
+            return StopAfterAsync(sequence, duration, cts);
         }
     }
 
@@ -192,15 +200,16 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
     }
 
-    private async Task StopAfterAsync(long sequence, int duration, CancellationTokenSource cts)
+    private async Task<PhysicalRumbleWriteResult?> StopAfterAsync(long sequence, int duration, CancellationTokenSource cts)
     {
         try
         {
             await Task.Delay(duration, cts.Token).ConfigureAwait(false);
-            if (!TryWrite(sequence, TwoMotorRumble.Stopped)) return;
+            if (!TryWrite(sequence, TwoMotorRumble.Stopped, out var result)) return null;
             lock (_gate) if (ReferenceEquals(_pendingStop, cts)) _pendingStop = null;
+            return result;
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { return null; }
         finally { cts.Dispose(); }
     }
 }

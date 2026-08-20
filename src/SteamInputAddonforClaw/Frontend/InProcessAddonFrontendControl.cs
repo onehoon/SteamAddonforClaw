@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Settings;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.FrontendTransport;
+using System.Diagnostics;
 
 namespace SteamInputAddonforClaw.Frontend;
 
@@ -131,12 +132,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (!steamOutputActive) return new FrontendVibrationTestResult(false, "Steam Deck output is not active.", null);
 
         var session = GetOrOpenVibrationSession();
+        var started = Stopwatch.GetTimestamp();
         WriteVibrationSessionIfCurrent(session, $"Command={command} Opcode={VibrationTestOpcode(command)} TestModeEnabled={testModeEnabled} SteamOutputActive={steamOutputActive}");
         var outcome = await (_runtime?.RunDeveloperVibrationTestAsync(command, cancellationToken) ?? Task.FromResult(new Feedback.DeveloperVibrationTestOutcome(false, null, null))).ConfigureAwait(false);
         // Accepted (authority/sequence) and physically-successful are different questions: a real MSI
         // HID write failure must be visible here even when the write was accepted, so PhysicalStatus/
         // PhysicalReason are logged separately from Succeeded rather than folded into one boolean.
-        WriteVibrationSessionIfCurrent(session, $"Result Command={command} Succeeded={outcome.Succeeded} {DecodeFields(outcome.Decode)} PhysicalStatus={outcome.CommandResult?.Status} PhysicalReason={outcome.CommandResult?.Reason} StopPhysicalStatus={outcome.StopResult?.Status} StopPhysicalReason={outcome.StopResult?.Reason}");
+        WriteVibrationSessionIfCurrent(session, $"Result Command={command} Succeeded={outcome.Succeeded} DurationMs={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} {DecodeFields(outcome.Decode)} PhysicalStatus={outcome.CommandResult?.Status} PhysicalReason={outcome.CommandResult?.Reason} StopPhysicalStatus={outcome.StopResult?.Status} StopPhysicalReason={outcome.StopResult?.Reason}");
 
         var (succeeded, reason) = MapVibrationTestOutcome(outcome);
         return new FrontendVibrationTestResult(succeeded, reason, session.FilePath);
@@ -202,7 +204,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             if (_vibrationSession is { } existing) return existing;
             var session = new Feedback.VibrationTestSessionWriter(AppLog.DirectoryPath);
             var routing = _captureRoutingStatus();
-            session.Write($"SessionStarted TestModeEnabled={_developer.IsEnabled} SteamOutputActive={routing.SteamOutputActive} NativeDirectInputActive={routing.NativeDirectInputActive}");
+            var appVersion = typeof(InProcessAddonFrontendControl).Assembly.GetName().Version?.ToString() ?? "Unknown";
+            session.Write($"SessionStarted AppVersion={appVersion} TestModeEnabled={_developer.IsEnabled} RoutingState=SteamOutputActive:{routing.SteamOutputActive},NativeDirectInputActive:{routing.NativeDirectInputActive}");
             _vibrationSession = session;
             return session;
         }
@@ -220,8 +223,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private static string DecodeFields(Feedback.SteamDeckFeedbackDecodeResult? decoded) => decoded switch
     {
         { Command: Feedback.SteamDeckFeedbackCommand.Rumble, Rumble: var rumble } => $"Decode=Rumble Large16={rumble.LargeMotor} Small16={rumble.SmallMotor} Large8={rumble.LargeMotor / 257} Small8={rumble.SmallMotor / 257}",
-        { Command: Feedback.SteamDeckFeedbackCommand.Haptic, Intensity: var intensity, Gain: var gain, Strength8: var strength } => $"Decode=Haptic Intensity={intensity} Gain={gain} Strength8={strength}",
-        { Command: Feedback.SteamDeckFeedbackCommand.HapticPulse, PulsePeriod: var period, PulseCount: var count, Gain: var gain, Strength8: var strength, PulseDurationMilliseconds: var duration } => $"Decode=HapticPulse Period={period} Count={count} Gain={gain} Strength8={strength} PulseDurationMs={duration}",
+        { Command: Feedback.SteamDeckFeedbackCommand.Haptic, Rumble: var rumble, Intensity: var intensity, Gain: var gain, Strength8: var strength } => $"Decode=Haptic Intensity={intensity} Gain={gain} Strength8={strength} Strength16={rumble.LargeMotor}",
+        { Command: Feedback.SteamDeckFeedbackCommand.HapticPulse, Rumble: var rumble, PulsePeriod: var period, PulseCount: var count, Gain: var gain, Strength8: var strength, PulseDurationMilliseconds: var duration } => $"Decode=HapticPulse Period={period} Count={count} Gain={gain} Strength8={strength} Strength16={rumble.LargeMotor} PulseDurationMs={duration}",
         _ => "Decode=Unavailable"
     };
 

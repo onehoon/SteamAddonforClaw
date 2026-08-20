@@ -131,6 +131,21 @@ public sealed class DeveloperVibrationTestTests
     }
 
     [Fact]
+    public async Task Haptic_pulse_waits_for_the_production_stop_and_reports_its_physical_result()
+    {
+        var sink = new FailingSink();
+        var authority = new FeedbackAuthority();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+
+        var outcome = await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.HapticPulse), addDeveloperStop: false, CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, outcome.CommandResult!.Value.Status);
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, outcome.StopResult!.Value.Status);
+        Assert.Equal("WriteFailed", outcome.StopResult!.Value.Reason);
+    }
+
+    [Fact]
     public void Revoked_feedback_authority_rejects_developer_injection_without_a_write()
     {
         var sink = new RecordingSink();
