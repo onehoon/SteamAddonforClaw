@@ -113,11 +113,23 @@ internal sealed class Oem1EventGestureBridge : IDisposable
                     return;
             }
 
+            AppLog.Debug("CenterM.Oem1", "OEM1 Event41 admitted", ("Event", 41), ("CustomAuthority", true));
+
             // Do not hold the bridge gate while entering the recognizer. The recognizer
             // may synchronously deliver a gesture back to this bridge.
-            _recognizer.OnPress();
+            try
+            {
+                _recognizer.OnPress();
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("CenterM.Oem1", "OEM1 gesture recognition failed; requesting fail-open.", exception);
+                RecognitionFailed?.Invoke();
+            }
         }
     }
+
+    internal event Action? RecognitionFailed;
 
     // Review fix (BLOCKER): the final authority check and the policy-request delivery must be
     // serialized against SetCustomAuthority()/Dispose() using the SAME _recognizerOperationGate those

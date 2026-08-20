@@ -31,7 +31,8 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         bool wmiStartSucceeds = true,
         Action? launchBigPicture = null,
         Oem1MappingSettings? initialMapping = null,
-        bool hardwareSupported = true)
+        bool hardwareSupported = true,
+        IOem1GestureDelay? gestureDelay = null)
     {
         var mapping = new FakeOem1MappingPreference(initialMapping ?? Oem1MappingSettings.Default);
         var devices = new FakeDeviceEnumerator();
@@ -64,11 +65,44 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
             // single-click debounce resolves as soon as it's awaited) and an observable replacement
             // action, so a test can actually prove Event41 reaches the normal mapping end-to-end
             // instead of merely asserting nothing threw.
-            testOnlyOem1GestureDelay: new ImmediateGestureDelay(),
+            testOnlyOem1GestureDelay: gestureDelay ?? new ImmediateGestureDelay(),
             testOnlyOem1GestureClock: new ZeroGestureClock(),
             testOnlyOem1LaunchBigPicture: launchBigPicture);
 
         return (composition, eventSource, mapping);
+    }
+
+    [Fact]
+    public async Task Default_normal_single_dispatches_without_scheduling_a_delay()
+    {
+        var delay = new TrackingGestureDelay();
+        var launched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (composition, eventSource, mapping) = BuildArmable(launchBigPicture: () => launched.TrySetResult(), gestureDelay: delay);
+        await ((IHandheldRoutingComposition)composition).ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+
+        eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+        await launched.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(0, delay.ScheduleCount);
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Default_routing_quick_access_dispatches_without_scheduling_a_delay()
+    {
+        var delay = new TrackingGestureDelay();
+        var requests = 0;
+        var (composition, eventSource, mapping) = BuildArmable(gestureDelay: delay);
+        await ((IHandheldRoutingComposition)composition).ConfigureOem1ActionPath(() => Status(true), () => requests++, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+
+        eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+        await Task.Delay(50);
+
+        Assert.Equal(1, requests);
+        Assert.Equal(0, delay.ScheduleCount);
+        await ((IAsyncDisposable)composition).DisposeAsync();
     }
 
     // ---- Production suppression activation (Scope 7/8) ----
@@ -473,6 +507,16 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     private sealed class ImmediateGestureDelay : IOem1GestureDelay
     {
         public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class TrackingGestureDelay : IOem1GestureDelay
+    {
+        internal int ScheduleCount { get; private set; }
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            ScheduleCount++;
+            return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
     }
 
     private sealed class ZeroGestureClock : IOem1GestureClock

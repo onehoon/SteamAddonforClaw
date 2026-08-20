@@ -31,6 +31,22 @@ public sealed class Oem1GestureRecognizerTests
     }
 
     [Fact]
+    public void Dynamic_policy_is_evaluated_for_each_new_sequence()
+    {
+        var delay = new ControlledDelay();
+        var enabled = false;
+        using var recognizer = new Oem1GestureRecognizer(() => enabled, TimeSpan.FromMilliseconds(200), delay);
+        var results = Collect(recognizer);
+
+        recognizer.OnPress();
+        enabled = true;
+        recognizer.OnPress();
+
+        Assert.Equal([Oem1Gesture.Single], results);
+        Assert.Single(delay.ActivePending);
+    }
+
+    [Fact]
     public void First_press_waits_when_double_is_enabled()
     {
         var delay = new ControlledDelay();

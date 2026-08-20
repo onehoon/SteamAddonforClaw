@@ -94,6 +94,9 @@ internal sealed class Oem1ActionDispatcher
                 return true;
             }
 
+            AppLog.Debug("CenterM.Oem1", "OEM1 action dispatch", ("Domain", routingActuallyActive ? "Routing" : "Normal"),
+                ("Slot", slot), ("Gesture", request.Gesture), ("Action", action));
+
             switch (action)
             {
                 case Oem1Action.None:

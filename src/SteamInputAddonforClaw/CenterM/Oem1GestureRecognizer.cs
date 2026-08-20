@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.CenterM;
 
 internal enum Oem1Gesture
@@ -60,7 +62,7 @@ internal sealed class Oem1TaskDelay : IOem1GestureDelay
 internal sealed class Oem1GestureRecognizer : IDisposable
 {
     private readonly object _gate = new();
-    private readonly bool _doubleClickEnabled;
+    private readonly Func<bool> _doubleClickEnabled;
     private readonly TimeSpan _doubleClickWindow;
     private readonly IOem1GestureDelay _delay;
     private readonly IOem1GestureClock _clock;
@@ -74,14 +76,15 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private bool _disposed;
 
     internal Oem1GestureRecognizer(
-        bool doubleClickEnabled,
+        Func<bool> doubleClickEnabled,
         TimeSpan doubleClickWindow,
         IOem1GestureDelay? delay = null,
         IOem1GestureClock? clock = null,
         IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null,
         Action<long>? deliveryBeforeNotification = null)
     {
-        if (doubleClickEnabled && doubleClickWindow <= TimeSpan.Zero)
+        ArgumentNullException.ThrowIfNull(doubleClickEnabled);
+        if (doubleClickWindow <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(doubleClickWindow), "The double-click window must be positive.");
 
         _doubleClickEnabled = doubleClickEnabled;
@@ -90,6 +93,17 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         _clock = clock ?? new Oem1StopwatchClock();
         _cancellationSourceFactory = cancellationSourceFactory ?? new Oem1GestureCancellationSourceFactory();
         _deliveryBeforeNotification = deliveryBeforeNotification;
+    }
+
+    internal Oem1GestureRecognizer(
+        bool doubleClickEnabled,
+        TimeSpan doubleClickWindow,
+        IOem1GestureDelay? delay = null,
+        IOem1GestureClock? clock = null,
+        IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null,
+        Action<long>? deliveryBeforeNotification = null)
+        : this(() => doubleClickEnabled, doubleClickWindow, delay, clock, cancellationSourceFactory, deliveryBeforeNotification)
+    {
     }
 
     internal event Action<Oem1Gesture>? GestureRecognized;
@@ -112,13 +126,24 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         CancellationToken token = default;
         var startTimeout = false;
         var now = _clock.GetTimestamp();
+        bool sequencePending;
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            sequencePending = _firstPressPending;
+        }
+
+        // The policy is selected only for a new first-press sequence. A pending sequence already
+        // proved that Double was enabled, so a mapping edit during its short window does not alter
+        // the recognizer's interpretation midway through that sequence.
+        var doubleClickEnabled = sequencePending || _doubleClickEnabled();
 
         try
         {
             lock (_gate)
             {
                 ThrowIfDisposed();
-                if (!_doubleClickEnabled)
+                if (!doubleClickEnabled)
                 {
                     immediate = Oem1Gesture.Single;
                     immediateDeliveryEpoch = _deliveryEpoch;
@@ -153,7 +178,10 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             }
 
             if (immediate.HasValue)
+            {
+                AppLog.Debug("CenterM.Oem1", "OEM1 gesture resolved", ("Gesture", immediate.Value), ("Immediate", true));
                 DeliverGesture(immediate.Value, immediateDeliveryEpoch);
+            }
         }
         finally
         {
@@ -221,6 +249,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             deliveryEpoch = _deliveryEpoch;
         }
 
+        AppLog.Debug("CenterM.Oem1", "OEM1 gesture resolved", ("Gesture", Oem1Gesture.Single), ("Immediate", false));
         DeliverGesture(Oem1Gesture.Single, deliveryEpoch);
     }
 

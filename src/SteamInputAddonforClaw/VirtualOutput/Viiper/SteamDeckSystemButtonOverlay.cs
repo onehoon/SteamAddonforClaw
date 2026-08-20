@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
@@ -14,6 +16,7 @@ internal sealed class SteamDeckSystemButtonOverlay
     private readonly TimeProvider _time;
     private readonly object _gate = new();
     private DateTimeOffset? _pulseExpiresAt;
+    private bool _publishedActive;
 
     internal SteamDeckSystemButtonOverlay(TimeProvider? timeProvider = null) => _time = timeProvider ?? TimeProvider.System;
 
@@ -25,6 +28,7 @@ internal sealed class SteamDeckSystemButtonOverlay
     internal void RequestQuickAccessPulse()
     {
         lock (_gate) _pulseExpiresAt = _time.GetUtcNow() + PulseDuration;
+        AppLog.Debug("SteamDeck.QuickAccess", "QuickAccess pulse requested");
     }
 
     /// <summary>Immediately clears any pending/active synthetic Quick Access pulse.</summary>
@@ -42,11 +46,17 @@ internal sealed class SteamDeckSystemButtonOverlay
     internal SteamDeckDeviceState Apply(SteamDeckDeviceState state)
     {
         bool active;
+        bool edge;
         lock (_gate)
         {
             active = _pulseExpiresAt is { } expiresAt && _time.GetUtcNow() < expiresAt;
             if (!active) _pulseExpiresAt = null;
+            edge = active != _publishedActive;
+            _publishedActive = active;
         }
+
+        if (edge)
+            AppLog.Debug("SteamDeck.QuickAccess", active ? "QuickAccess asserted into published state" : "QuickAccess cleared/expired");
 
         state.QuickAccess = active ? (byte)1 : (byte)0;
         return state;
