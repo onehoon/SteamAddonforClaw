@@ -396,7 +396,7 @@ public sealed class AddonRoutingRuntimeTests
         var trace = new List<string>();
         var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
         var cleared = false;
-        var result = await AddonRoutingRuntime.ShutdownAfterXbox360RetirementAsync(
+        var result = await AddonRoutingRuntime.ShutdownCoreAsync(
             publisher,
             () => { trace.Add("Stop"); return Task.CompletedTask; },
             () => { trace.Add("Detach"); return USBDeviceDetachResult.Success; },
@@ -414,7 +414,7 @@ public sealed class AddonRoutingRuntimeTests
     {
         var coordinatorCalls = 0;
         var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
-        var result = await AddonRoutingRuntime.ShutdownAfterXbox360RetirementAsync(
+        var result = await AddonRoutingRuntime.ShutdownCoreAsync(
             publisher,
             () => Task.FromException(new TimeoutException()),
             () => USBDeviceDetachResult.Success,
@@ -430,7 +430,7 @@ public sealed class AddonRoutingRuntimeTests
     public async Task Shutdown_without_xbox360_presentation_preserves_coordinator_behavior()
     {
         var coordinatorCalls = 0;
-        var result = await AddonRoutingRuntime.ShutdownAfterXbox360RetirementAsync(
+        var result = await AddonRoutingRuntime.ShutdownCoreAsync(
             null,
             () => throw new InvalidOperationException(),
             () => throw new InvalidOperationException(),
@@ -440,42 +440,6 @@ public sealed class AddonRoutingRuntimeTests
 
         Assert.True(result);
         Assert.Equal(1, coordinatorCalls);
-    }
-
-    [Fact]
-    public async Task ShutdownCore_retires_xbox360_before_outer_shutdown()
-    {
-        var trace = new List<string>();
-        var result = await AddonRoutingRuntime.ShutdownCoreAsync(
-            () => { trace.Add("RetireX360"); return Task.FromResult(true); },
-            () => { trace.Add("OuterShutdown"); return Task.FromResult(true); });
-
-        Assert.True(result);
-        Assert.Equal(["RetireX360", "OuterShutdown"], trace);
-    }
-
-    [Fact]
-    public async Task ShutdownCore_retirement_failure_blocks_outer_shutdown()
-    {
-        var outerCalls = 0;
-        var result = await AddonRoutingRuntime.ShutdownCoreAsync(
-            () => Task.FromResult(false),
-            () => { outerCalls++; return Task.FromResult(true); });
-
-        Assert.False(result);
-        Assert.Equal(0, outerCalls);
-    }
-
-    [Fact]
-    public async Task ShutdownCore_without_xbox360_runs_outer_shutdown()
-    {
-        var outerCalls = 0;
-        var result = await AddonRoutingRuntime.ShutdownCoreAsync(
-            () => Task.FromResult(true),
-            () => { outerCalls++; return Task.FromResult(true); });
-
-        Assert.True(result);
-        Assert.Equal(1, outerCalls);
     }
 
     private static async Task WaitForAsync(Func<bool> condition)
