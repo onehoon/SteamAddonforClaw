@@ -24,8 +24,10 @@ public sealed class CanonicalViiperNativeAbiTests
         {
             "NewUSBServer", "CloseUSBServer", "CreateUSBBus", "RemoveUSBBus",
             "GetUSBDeviceIdentity", "AttachUSBDevice", "DetachUSBDevice",
+            "AttachUSBDeviceEx", "DetachUSBDeviceEx", "GetUSBDeviceAttachmentState",
             "CreateSteamDeckDevice", "SetSteamDeckDeviceState", "SetSteamDeckOutputCallback",
-            "RemoveSteamDeckDevice", "RemoveSteamDeckDeviceEx"
+            "RemoveSteamDeckDevice", "RemoveSteamDeckDeviceEx",
+            "CreateXbox360Device", "SetXbox360DeviceState", "RemoveXbox360Device", "RemoveXbox360DeviceEx"
         };
 
         Assert.Equal(expected, CanonicalViiperNativeApi.RequiredExports);
@@ -35,6 +37,8 @@ public sealed class CanonicalViiperNativeAbiTests
         Assert.DoesNotContain("SetSteamControllerOutputCallback", CanonicalViiperNativeApi.RequiredExports);
         Assert.DoesNotContain("RemoveSteamControllerDevice", CanonicalViiperNativeApi.RequiredExports);
         Assert.DoesNotContain("RemoveSteamControllerDeviceEx", CanonicalViiperNativeApi.RequiredExports);
+        // PR1 is buttons/D-pad/sticks/triggers only -- no Xbox360 rumble callback is bound.
+        Assert.DoesNotContain("SetXbox360RumbleCallback", CanonicalViiperNativeApi.RequiredExports);
     }
 
     // Steam Deck ABI (VIIPER main@ec64282c69e5587466b950332d7983fd53a7d778, PR #16). Field order,
@@ -156,6 +160,14 @@ public sealed class CanonicalViiperNativeAbiTests
     [Fact]
     public void CanonicalFunctionDelegatesUseCdeclAndValidatedNativeReturnWidths()
     {
+        var nonByteReturnTypes = new Dictionary<string, Type>
+        {
+            ["RemoveSteamDeckDeviceExDelegate"] = typeof(SteamDeckDeviceRemoveResult),
+            ["AttachUsbDeviceExDelegate"] = typeof(USBDeviceAttachResult),
+            ["DetachUsbDeviceExDelegate"] = typeof(USBDeviceDetachResult),
+            ["RemoveXbox360DeviceExDelegate"] = typeof(Xbox360DeviceRemoveResult),
+        };
+
         var delegateTypes = typeof(CanonicalViiperNativeApi)
             .GetNestedTypes(BindingFlags.NonPublic)
             .Where(type => typeof(Delegate).IsAssignableFrom(type))
@@ -168,10 +180,7 @@ public sealed class CanonicalViiperNativeAbiTests
             Assert.NotNull(convention);
             Assert.Equal(CallingConvention.Cdecl, convention!.CallingConvention);
             var returnType = type.GetMethod("Invoke")!.ReturnType;
-            if (type.Name == "RemoveSteamDeckDeviceExDelegate")
-                Assert.Equal(typeof(SteamDeckDeviceRemoveResult), returnType);
-            else
-                Assert.Equal(typeof(byte), returnType);
+            Assert.Equal(nonByteReturnTypes.GetValueOrDefault(type.Name, typeof(byte)), returnType);
         }
 
         Assert.Equal(CallingConvention.Cdecl, typeof(ViiperLogCallback).GetCustomAttribute<UnmanagedFunctionPointerAttribute>()!.CallingConvention);
@@ -187,6 +196,278 @@ public sealed class CanonicalViiperNativeAbiTests
         AssertParameters("GetUsbDeviceIdentityDelegate", typeof(nuint), typeof(uint).MakeByRefType(), typeof(uint).MakeByRefType());
         AssertParameters("AttachUsbDeviceDelegate", typeof(nuint));
         AssertParameters("DetachUsbDeviceDelegate", typeof(nuint));
+        AssertParameters("AttachUsbDeviceExDelegate", typeof(nuint));
+        AssertParameters("DetachUsbDeviceExDelegate", typeof(nuint));
+        AssertParameters("GetUsbDeviceAttachmentStateDelegate", typeof(nuint), typeof(USBDeviceAttachmentState).MakeByRefType());
+        AssertParameters("CreateXbox360DeviceDelegate", typeof(nuint), typeof(nuint).MakeByRefType(), typeof(uint), typeof(byte), typeof(ushort), typeof(ushort), typeof(byte));
+        AssertParameters("SetXbox360DeviceStateDelegate", typeof(nuint), typeof(Xbox360DeviceState));
+        AssertParameters("RemoveXbox360DeviceDelegate", typeof(nuint));
+        AssertParameters("RemoveXbox360DeviceExDelegate", typeof(nuint));
+    }
+
+    // ---- Classified attachment ABI (USBDeviceAttachResult / USBDeviceDetachResult /
+    // USBDeviceAttachmentState) ----
+
+    [Fact]
+    public void ClassifiedAttachmentEnums_HaveTheGeneratedNumericLayout()
+    {
+        Assert.Equal(typeof(int), Enum.GetUnderlyingType(typeof(USBDeviceAttachResult)));
+        Assert.Equal(0, (int)USBDeviceAttachResult.Success);
+        Assert.Equal(1, (int)USBDeviceAttachResult.RetryableFailure);
+        Assert.Equal(2, (int)USBDeviceAttachResult.UnsafeOutcomeUnknown);
+        Assert.Equal(3, (int)USBDeviceAttachResult.Invalid);
+
+        Assert.Equal(typeof(int), Enum.GetUnderlyingType(typeof(USBDeviceDetachResult)));
+        Assert.Equal(0, (int)USBDeviceDetachResult.Success);
+        Assert.Equal(1, (int)USBDeviceDetachResult.RetryableFailure);
+        Assert.Equal(2, (int)USBDeviceDetachResult.UnsafeOutcomeUnknown);
+        Assert.Equal(3, (int)USBDeviceDetachResult.Invalid);
+
+        Assert.Equal(typeof(int), Enum.GetUnderlyingType(typeof(USBDeviceAttachmentState)));
+        Assert.Equal(0, (int)USBDeviceAttachmentState.Detached);
+        Assert.Equal(1, (int)USBDeviceAttachmentState.Attached);
+        Assert.Equal(2, (int)USBDeviceAttachmentState.OutcomeUnknown);
+    }
+
+    [Theory]
+    [InlineData((int)USBDeviceAttachResult.Success)]
+    [InlineData((int)USBDeviceAttachResult.RetryableFailure)]
+    [InlineData((int)USBDeviceAttachResult.UnsafeOutcomeUnknown)]
+    [InlineData((int)USBDeviceAttachResult.Invalid)]
+    public void AttachUSBDeviceEx_ReturnsEveryNativeClassificationUnchanged(int nativeValue)
+    {
+        var native = (USBDeviceAttachResult)nativeValue;
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        FakeExports.AttachExResult = native;
+        Assert.Equal(native, api.AttachUSBDeviceEx(1));
+    }
+
+    [Theory]
+    [InlineData((int)USBDeviceDetachResult.Success)]
+    [InlineData((int)USBDeviceDetachResult.RetryableFailure)]
+    [InlineData((int)USBDeviceDetachResult.UnsafeOutcomeUnknown)]
+    [InlineData((int)USBDeviceDetachResult.Invalid)]
+    public void DetachUSBDeviceEx_ReturnsEveryNativeClassificationUnchanged(int nativeValue)
+    {
+        var native = (USBDeviceDetachResult)nativeValue;
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        FakeExports.DetachExResult = native;
+        Assert.Equal(native, api.DetachUSBDeviceEx(1));
+    }
+
+    [Theory]
+    [InlineData((int)USBDeviceAttachmentState.Detached)]
+    [InlineData((int)USBDeviceAttachmentState.Attached)]
+    [InlineData((int)USBDeviceAttachmentState.OutcomeUnknown)]
+    public void GetUSBDeviceAttachmentState_MirrorsEveryNativeState(int nativeValue)
+    {
+        var native = (USBDeviceAttachmentState)nativeValue;
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        FakeExports.AttachmentState = native;
+        Assert.True(api.GetUSBDeviceAttachmentState(1, out var state));
+        Assert.Equal(native, state);
+    }
+
+    [Fact]
+    public void GetUSBDeviceAttachmentState_FailedQueryDoesNotClaimSuccess()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        FakeExports.FailGetAttachmentState = true;
+        try
+        {
+            Assert.False(api.GetUSBDeviceAttachmentState(1, out _));
+        }
+        finally
+        {
+            FakeExports.FailGetAttachmentState = false;
+        }
+    }
+
+    // ---- Xbox360 typed ABI (create/state/teardown -- ABI/foundation only, no rumble binding) ----
+
+    [Fact]
+    public void CreateXbox360Device_ForwardsAutoAttachVidPidSubtypeUnchanged()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, true, 0x045E, 0x028E, 1));
+
+        Assert.Equal(30u, deviceHandle);
+        Assert.True(FakeExports.LastXbox360AutoAttach);
+        Assert.Equal((ushort)0x045E, FakeExports.LastXbox360Vendor);
+        Assert.Equal((ushort)0x028E, FakeExports.LastXbox360Product);
+        Assert.Equal((byte)1, FakeExports.LastXbox360SubType);
+    }
+
+    [Fact]
+    public void CreateXbox360Device_FalseAutoAttachIsMarshalledAsZero()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out _, 7, false, 0, 0, 0));
+        Assert.False(FakeExports.LastXbox360AutoAttach);
+    }
+
+    [Fact]
+    public void CreateXbox360Device_FailureDoesNotRegisterOwnership()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        FakeExports.FailCreateXbox360 = true;
+        try
+        {
+            Assert.False(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+            Assert.Equal((nuint)0, deviceHandle);
+
+            var ownershipField = typeof(CanonicalViiperNativeApi).GetField("_deviceOwnership", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var ownership = (Dictionary<nuint, (nuint ServerHandle, uint BusId)>)ownershipField.GetValue(api)!;
+            Assert.Empty(ownership);
+        }
+        finally
+        {
+            FakeExports.FailCreateXbox360 = false;
+        }
+    }
+
+    [Fact]
+    public void SetXbox360DeviceState_ForwardsStateUnchanged()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+
+        var state = new Xbox360DeviceState { Buttons = Xbox360ButtonBits.A, LT = 10, RT = 20, LX = 100, LY = -100, RX = 200, RY = -200 };
+        Assert.True(api.SetXbox360DeviceState(deviceHandle, state));
+        Assert.Equal(state, FakeExports.LastXbox360State);
+    }
+
+    [Fact]
+    public void RemoveXbox360Device_SuccessReleasesOwnership()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+
+        Assert.True(api.RemoveXbox360Device(deviceHandle));
+        AssertXbox360OwnershipReleased(api, deviceHandle);
+    }
+
+    [Fact]
+    public void RemoveXbox360Device_FailureRetainsOwnership()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+
+        FakeExports.FailRemoveXbox360 = true;
+        try
+        {
+            Assert.False(api.RemoveXbox360Device(deviceHandle));
+            AssertXbox360OwnershipRetained(api, deviceHandle);
+        }
+        finally
+        {
+            FakeExports.FailRemoveXbox360 = false;
+        }
+    }
+
+    [Fact]
+    public void RemoveXbox360DeviceEx_SuccessReleasesOwnership()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+
+        Assert.Equal(Xbox360DeviceRemoveResult.Success, api.RemoveXbox360DeviceEx(deviceHandle));
+        AssertXbox360OwnershipReleased(api, deviceHandle);
+    }
+
+    [Theory]
+    [InlineData((int)Xbox360DeviceRemoveResult.RetryableFailure)]
+    [InlineData((int)Xbox360DeviceRemoveResult.UnsafeOutcomeUnknown)]
+    [InlineData((int)Xbox360DeviceRemoveResult.Invalid)]
+    public void RemoveXbox360DeviceEx_NonSuccessRetainsOwnership(int resultValue)
+    {
+        var result = (Xbox360DeviceRemoveResult)resultValue;
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+
+        FakeExports.RemoveXbox360ExResult = result;
+        try
+        {
+            Assert.Equal(result, api.RemoveXbox360DeviceEx(deviceHandle));
+            AssertXbox360OwnershipRetained(api, deviceHandle);
+        }
+        finally
+        {
+            FakeExports.RemoveXbox360ExResult = Xbox360DeviceRemoveResult.Success;
+        }
+    }
+
+    [Fact]
+    public void RemoveUSBBus_SuccessReleasesOwnedXbox360Devices()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+
+        Assert.True(api.RemoveUSBBus(1, 7));
+        AssertXbox360OwnershipReleased(api, deviceHandle);
+    }
+
+    [Fact]
+    public void RemoveUSBBus_FailureRetainsOwnedXbox360Devices()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+
+        FakeExports.FailRemoveBus = true;
+        try
+        {
+            Assert.False(api.RemoveUSBBus(1, 7));
+            AssertXbox360OwnershipRetained(api, deviceHandle);
+        }
+        finally
+        {
+            FakeExports.FailRemoveBus = false;
+        }
+    }
+
+    [Fact]
+    public void CloseUSBServer_SuccessReleasesOwnedXbox360Devices()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+
+        Assert.True(api.CloseUSBServer(1));
+        AssertXbox360OwnershipReleased(api, deviceHandle);
+    }
+
+    [Fact]
+    public void CloseUSBServer_FailureRetainsOwnedXbox360Devices()
+    {
+        var api = new CanonicalViiperNativeApi(1, FakeExports.Resolve);
+        Assert.True(api.CreateXbox360Device(1, out var deviceHandle, 7, false, 0, 0, 0));
+
+        FakeExports.FailCloseServer = true;
+        try
+        {
+            Assert.False(api.CloseUSBServer(1));
+            AssertXbox360OwnershipRetained(api, deviceHandle);
+        }
+        finally
+        {
+            FakeExports.FailCloseServer = false;
+        }
+    }
+
+    // A released device is no longer tracked, so removing it again reports Success (nothing to
+    // clean up) rather than acting on stale ownership evidence.
+    private static void AssertXbox360OwnershipReleased(CanonicalViiperNativeApi api, nuint deviceHandle)
+    {
+        var ownershipField = typeof(CanonicalViiperNativeApi).GetField("_deviceOwnership", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var ownership = (Dictionary<nuint, (nuint ServerHandle, uint BusId)>)ownershipField.GetValue(api)!;
+        Assert.False(ownership.ContainsKey(deviceHandle));
+    }
+
+    private static void AssertXbox360OwnershipRetained(CanonicalViiperNativeApi api, nuint deviceHandle)
+    {
+        var ownershipField = typeof(CanonicalViiperNativeApi).GetField("_deviceOwnership", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var ownership = (Dictionary<nuint, (nuint ServerHandle, uint BusId)>)ownershipField.GetValue(api)!;
+        Assert.True(ownership.ContainsKey(deviceHandle));
     }
 
     [Fact]
@@ -502,12 +783,20 @@ public sealed class CanonicalViiperNativeAbiTests
         private static readonly CanonicalViiperNativeApi.GetUsbDeviceIdentityDelegate Identity = IdentityImpl;
         private static readonly CanonicalViiperNativeApi.AttachUsbDeviceDelegate Attach = AttachImpl;
         private static readonly CanonicalViiperNativeApi.DetachUsbDeviceDelegate Detach = DetachImpl;
+        private static readonly CanonicalViiperNativeApi.AttachUsbDeviceExDelegate AttachEx = AttachExImpl;
+        private static readonly CanonicalViiperNativeApi.DetachUsbDeviceExDelegate DetachEx = DetachExImpl;
+        private static readonly CanonicalViiperNativeApi.GetUsbDeviceAttachmentStateDelegate GetAttachmentState = GetAttachmentStateImpl;
 
         private static readonly CanonicalViiperNativeApi.CreateSteamDeckDeviceDelegate CreateDeckDevice = CreateDeckDeviceImpl;
         private static readonly CanonicalViiperNativeApi.SetSteamDeckDeviceStateDelegate SetDeckState = SetDeckStateImpl;
         private static readonly CanonicalViiperNativeApi.SetSteamDeckOutputCallbackDelegate SetDeckCallback = SetDeckCallbackImpl;
         private static readonly CanonicalViiperNativeApi.RemoveSteamDeckDeviceDelegate RemoveDeckDevice = RemoveDeckDeviceImpl;
         private static readonly CanonicalViiperNativeApi.RemoveSteamDeckDeviceExDelegate RemoveDeckDeviceEx = RemoveDeckDeviceExImpl;
+
+        private static readonly CanonicalViiperNativeApi.CreateXbox360DeviceDelegate CreateXbox360 = CreateXbox360Impl;
+        private static readonly CanonicalViiperNativeApi.SetXbox360DeviceStateDelegate SetXbox360State = SetXbox360StateImpl;
+        private static readonly CanonicalViiperNativeApi.RemoveXbox360DeviceDelegate RemoveXbox360 = RemoveXbox360Impl;
+        private static readonly CanonicalViiperNativeApi.RemoveXbox360DeviceExDelegate RemoveXbox360Ex = RemoveXbox360ExImpl;
 
         [ThreadStatic]
         private static bool _failCloseServer;
@@ -561,6 +850,45 @@ public sealed class CanonicalViiperNativeAbiTests
             set => _failRemoveBus = value;
         }
 
+        [ThreadStatic]
+        private static USBDeviceAttachResult _attachExResult;
+
+        [ThreadStatic]
+        private static USBDeviceDetachResult _detachExResult;
+
+        [ThreadStatic]
+        private static USBDeviceAttachmentState _attachmentState;
+
+        [ThreadStatic]
+        private static bool _failGetAttachmentState;
+
+        [ThreadStatic]
+        private static bool _failCreateXbox360;
+
+        [ThreadStatic]
+        private static bool _failRemoveXbox360;
+
+        [ThreadStatic]
+        private static Xbox360DeviceRemoveResult _removeXbox360ExResult;
+
+        internal static USBDeviceAttachResult AttachExResult { get => _attachExResult; set => _attachExResult = value; }
+        internal static USBDeviceDetachResult DetachExResult { get => _detachExResult; set => _detachExResult = value; }
+        internal static USBDeviceAttachmentState AttachmentState { get => _attachmentState; set => _attachmentState = value; }
+        internal static bool FailGetAttachmentState { get => _failGetAttachmentState; set => _failGetAttachmentState = value; }
+        internal static bool FailCreateXbox360 { get => _failCreateXbox360; set => _failCreateXbox360 = value; }
+        internal static bool FailRemoveXbox360 { get => _failRemoveXbox360; set => _failRemoveXbox360 = value; }
+        internal static Xbox360DeviceRemoveResult RemoveXbox360ExResult
+        {
+            get => _removeXbox360ExResult;
+            set => _removeXbox360ExResult = value;
+        }
+
+        internal static bool LastXbox360AutoAttach { get; private set; }
+        internal static ushort LastXbox360Vendor { get; private set; }
+        internal static ushort LastXbox360Product { get; private set; }
+        internal static byte LastXbox360SubType { get; private set; }
+        internal static Xbox360DeviceState LastXbox360State { get; private set; }
+
         private static readonly Dictionary<string, nint> Pointers = new(StringComparer.Ordinal)
         {
             ["NewUSBServer"] = Marshal.GetFunctionPointerForDelegate(NewServer),
@@ -570,11 +898,18 @@ public sealed class CanonicalViiperNativeAbiTests
             ["GetUSBDeviceIdentity"] = Marshal.GetFunctionPointerForDelegate(Identity),
             ["AttachUSBDevice"] = Marshal.GetFunctionPointerForDelegate(Attach),
             ["DetachUSBDevice"] = Marshal.GetFunctionPointerForDelegate(Detach),
+            ["AttachUSBDeviceEx"] = Marshal.GetFunctionPointerForDelegate(AttachEx),
+            ["DetachUSBDeviceEx"] = Marshal.GetFunctionPointerForDelegate(DetachEx),
+            ["GetUSBDeviceAttachmentState"] = Marshal.GetFunctionPointerForDelegate(GetAttachmentState),
             ["CreateSteamDeckDevice"] = Marshal.GetFunctionPointerForDelegate(CreateDeckDevice),
             ["SetSteamDeckDeviceState"] = Marshal.GetFunctionPointerForDelegate(SetDeckState),
             ["SetSteamDeckOutputCallback"] = Marshal.GetFunctionPointerForDelegate(SetDeckCallback),
             ["RemoveSteamDeckDevice"] = Marshal.GetFunctionPointerForDelegate(RemoveDeckDevice),
-            ["RemoveSteamDeckDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveDeckDeviceEx)
+            ["RemoveSteamDeckDeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveDeckDeviceEx),
+            ["CreateXbox360Device"] = Marshal.GetFunctionPointerForDelegate(CreateXbox360),
+            ["SetXbox360DeviceState"] = Marshal.GetFunctionPointerForDelegate(SetXbox360State),
+            ["RemoveXbox360Device"] = Marshal.GetFunctionPointerForDelegate(RemoveXbox360),
+            ["RemoveXbox360DeviceEx"] = Marshal.GetFunctionPointerForDelegate(RemoveXbox360Ex)
         };
 
         internal static nint Resolve(nint _, string name) => Pointers[name];
@@ -635,5 +970,36 @@ public sealed class CanonicalViiperNativeAbiTests
         private static byte RemoveDeckDeviceImpl(nuint _) => 1;
 
         private static SteamDeckDeviceRemoveResult RemoveDeckDeviceExImpl(nuint _) => RemoveDeckDeviceExResult;
+
+        private static USBDeviceAttachResult AttachExImpl(nuint _) => AttachExResult;
+
+        private static USBDeviceDetachResult DetachExImpl(nuint _) => DetachExResult;
+
+        private static byte GetAttachmentStateImpl(nuint _, out USBDeviceAttachmentState state)
+        {
+            state = AttachmentState;
+            return FailGetAttachmentState ? (byte)0 : (byte)1;
+        }
+
+        private static byte CreateXbox360Impl(nuint _, out nuint handle, uint __, byte autoAttachLocalhost, ushort idVendor, ushort idProduct, byte xinputSubType)
+        {
+            if (FailCreateXbox360) { handle = 0; return 0; }
+            handle = 30;
+            LastXbox360AutoAttach = autoAttachLocalhost != 0;
+            LastXbox360Vendor = idVendor;
+            LastXbox360Product = idProduct;
+            LastXbox360SubType = xinputSubType;
+            return 1;
+        }
+
+        private static byte SetXbox360StateImpl(nuint _, Xbox360DeviceState state)
+        {
+            LastXbox360State = state;
+            return 1;
+        }
+
+        private static byte RemoveXbox360Impl(nuint _) => FailRemoveXbox360 ? (byte)0 : (byte)1;
+
+        private static Xbox360DeviceRemoveResult RemoveXbox360ExImpl(nuint _) => RemoveXbox360ExResult;
     }
 }

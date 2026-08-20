@@ -255,6 +255,15 @@ Status: **PLANNED**
 Define the Game Bar transition and typed Xbox360 composition without weakening
 the active Deck lifecycle or recovery invariants.
 
+Preparatory step: managed ABI foundation only (buttons/D-pad/sticks/triggers;
+no rumble callback bound). `ICanonicalViiperNativeApi`/`CanonicalViiperNativeApi`
+now expose the canonical typed Xbox360 surface (`CreateXbox360Device`,
+`SetXbox360DeviceState`, `RemoveXbox360Device`, `RemoveXbox360DeviceEx`) and
+the classified attachment surface (`AttachUSBDeviceEx`, `DetachUSBDeviceEx`,
+`GetUSBDeviceAttachmentState`), but no Xbox360 logical device is created,
+attached, published, or production-composed yet, and OEM1 mapping/domain
+policy is unchanged by this step. Status remains PLANNED.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains

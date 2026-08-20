@@ -98,13 +98,22 @@ network-independent of VIIPER -- only the dedicated dependency-update
 workflow fetches the external canonical artifact.
 
 The pinned VIIPER ABI includes classified `AttachUSBDeviceEx` /
-`DetachUSBDeviceEx` and the read-only `GetUSBDeviceAttachmentState` query. The
-current Addon production runtime continues to use the bool
-`AttachUSBDevice` / `DetachUSBDevice` compatibility surface. The attachment
-state query is VIIPER ownership evidence only, not Windows PnP, HID, XInput, or
-Steam readiness. Consumption of these classified/query APIs is deferred to
+`DetachUSBDeviceEx` and the read-only `GetUSBDeviceAttachmentState` query, and
+the canonical typed Xbox360 surface (`CreateXbox360Device`,
+`SetXbox360DeviceState`, `RemoveXbox360Device`, `RemoveXbox360DeviceEx`). The
+managed ABI binding for all of these now exists in
+`ICanonicalViiperNativeApi`/`CanonicalViiperNativeApi`. The current Addon
+production runtime continues to use the bool `AttachUSBDevice` /
+`DetachUSBDevice` compatibility surface; classified attachment-state
+consumption is not yet production-composed. Likewise, no Xbox360 logical
+device is created, attached, published, or production-composed by anything
+in the Addon today -- the typed binding is ABI/foundation only (see
+`docs/VIIPER_MIGRATION_TODO.md` SD7, still PLANNED). The attachment state
+query is VIIPER ownership evidence only, not Windows PnP, HID, XInput, or
+Steam readiness. Consumption of the classified/query APIs is deferred to
 SD3 lifecycle/recovery work; this PR does not claim SD3 implementation or
-hardware validation.
+hardware validation. The Xbox360 typed API in this PR covers
+buttons/D-pad/sticks/triggers only -- no rumble callback is bound.
 
 ## 1. Upstream authority
 
