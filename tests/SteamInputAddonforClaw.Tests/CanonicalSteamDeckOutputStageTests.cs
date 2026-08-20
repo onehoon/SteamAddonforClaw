@@ -78,6 +78,20 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task Unavailable_persistent_runtime_fails_route_without_residual_recovery_ownership()
+    {
+        var session = new UnavailableCanonicalSteamDeckSession();
+        var stage = Create(session, new FakeEnumerator([[]]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("CanonicalSessionStartFailed", result.Reason);
+        Assert.Equal(RecoveryStatus.NoRecoveryNeeded, new RecoveryManager(new RecoveryJournalStore(Path.Combine(_directory, "unavailable-recovery.json"))).LoadJournal().Status);
+    }
+
+    [Fact]
     public async Task BusRemovalRetryDoesNotReplayDeviceRemoval()
     {
         var session = new FakeCanonicalSession();
@@ -302,11 +316,6 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         await Assert.ThrowsAsync<OperationCanceledException>(async () => await stage.PrepareMutationAsync(cancellation.Token));
         Assert.Empty(session.Trace);
     }
-
-    // On the single canonical session path, a CompleteRuntimeCleanup() failure IS reported as a
-    // rollback failure by design (see CanonicalSteamDeckOutputStage.RollbackCoreAsync's
-    // "CanonicalSessionCleanupPending" branch) -- already covered by BusRemovalRetryDoesNotReplayDeviceRemoval
-    // and ServerCloseRetryDoesNotReplayDeviceRemoval above.
 
     [Fact]
     public async Task InactiveAndDoubleRollbackAreSuccessfulNoOps()
@@ -875,7 +884,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
-    private CanonicalSteamDeckOutputStage Create(FakeCanonicalSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null, IPhysicalRumbleSink? sink = null, FeedbackAuthority? authority = null)
+    private CanonicalSteamDeckOutputStage Create(ICanonicalSteamDeckSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null, IPhysicalRumbleSink? sink = null, FeedbackAuthority? authority = null)
     {
         Directory.CreateDirectory(_directory);
         var store = new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"));

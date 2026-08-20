@@ -50,7 +50,7 @@ internal interface ICanonicalSteamDeckSession : ICanonicalSteamDeckStateSink, ID
 
 internal sealed class UnavailableCanonicalSteamDeckSession : ICanonicalSteamDeckSession
 {
-    public CanonicalSteamDeckSessionState State => CanonicalSteamDeckSessionState.Unsafe;
+    public CanonicalSteamDeckSessionState State => CanonicalSteamDeckSessionState.Clean;
     public CanonicalPendingCleanupPhase PendingCleanupPhase => CanonicalPendingCleanupPhase.None;
     public uint? BusId => null; public uint? LogicalDeviceId => null;
     public bool Start() => false; public bool SetState(SteamDeckDeviceState state) => false; public bool SetNeutral() => false;
