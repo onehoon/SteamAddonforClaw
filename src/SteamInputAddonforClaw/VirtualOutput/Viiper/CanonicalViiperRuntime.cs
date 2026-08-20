@@ -10,7 +10,6 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// </summary>
 internal enum CanonicalViiperRuntimeState
 {
-    Uninitialized,
     Ready,
     CleanupPending,
     Unsafe,
@@ -247,46 +246,8 @@ internal sealed class CanonicalViiperRuntime
         AppLog.Error("SteamOutput", "Persistent canonical VIIPER runtime initialization failed.",
             new InvalidOperationException("CanonicalViiperRuntime.TryInitialize staged failure."), ("Reason", reason));
 
-    /// <summary>Route entry: classified attach of the persistent Deck handle (work order section 7).
-    /// Never called when <see cref="State"/> is not <see cref="CanonicalViiperRuntimeState.Ready"/>.</summary>
-    internal USBDeviceAttachResult AttachDeck()
-    {
-        if (State != CanonicalViiperRuntimeState.Ready) return USBDeviceAttachResult.Invalid;
-        var result = _native.AttachUSBDeviceEx(DeckDeviceHandle);
-        if (result is USBDeviceAttachResult.UnsafeOutcomeUnknown or USBDeviceAttachResult.Invalid)
-            MarkUnsafe($"DeckAttach{result}");
-        return result;
-    }
-
-    /// <summary>Route exit: classified detach of the persistent Deck handle (work order section 10).</summary>
-    internal USBDeviceDetachResult DetachDeck()
-    {
-        if (State != CanonicalViiperRuntimeState.Ready) return USBDeviceDetachResult.Invalid;
-        var result = _native.DetachUSBDeviceEx(DeckDeviceHandle);
-        if (result is USBDeviceDetachResult.UnsafeOutcomeUnknown or USBDeviceDetachResult.Invalid)
-            MarkUnsafe($"DeckDetach{result}");
-        return result;
-    }
-
-    internal bool TryGetDeckAttachmentState(out USBDeviceAttachmentState state)
-    {
-        if (State != CanonicalViiperRuntimeState.Ready) { state = default; return false; }
-        return _native.GetUSBDeviceAttachmentState(DeckDeviceHandle, out state);
-    }
-
-    internal bool SetDeckState(SteamDeckDeviceState value) =>
-        State == CanonicalViiperRuntimeState.Ready && _native.SetSteamDeckDeviceState(DeckDeviceHandle, value);
-
-    internal bool SetDeckOutputCallback(SteamDeckOutputCallback? callback) =>
-        State == CanonicalViiperRuntimeState.Ready && _native.SetSteamDeckOutputCallback(DeckDeviceHandle, callback);
-
     /// <summary>Marks the persistent runtime unsafe -- a hard fail-closed boundary. No further
-    /// native attach/detach/remove/bus/server call is issued by this owner again. Called both from
-    /// this owner's own classified calls above and, per work order section 7, when a
-    /// route-time attach borrowing this handle observes <see cref="USBDeviceAttachResult.UnsafeOutcomeUnknown"/>
-    /// or <see cref="USBDeviceAttachResult.Invalid"/> (and the detach/remove equivalents) -- an
-    /// uncertain or invalid native result about THIS handle poisons the one authority that owns
-    /// it, not just the calling route.</summary>
+    /// native attach/detach/remove/bus/server call is issued by this owner again.</summary>
     internal void MarkUnsafe(string reason)
     {
         if (State == CanonicalViiperRuntimeState.Unsafe || State == CanonicalViiperRuntimeState.Closed) return;
@@ -314,7 +275,6 @@ internal sealed class CanonicalViiperRuntime
         {
             if (State == CanonicalViiperRuntimeState.Closed) return true;
             if (State == CanonicalViiperRuntimeState.Unsafe) return false;
-            if (State == CanonicalViiperRuntimeState.Uninitialized) return false;
 
             if (TeardownPhase == CanonicalViiperRuntimeTeardownPhase.None)
                 TeardownPhase = CanonicalViiperRuntimeTeardownPhase.DeckDetach;

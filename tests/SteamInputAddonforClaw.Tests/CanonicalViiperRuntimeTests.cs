@@ -387,39 +387,6 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(2, native.Calls.Count(c => c == "CloseUSBServer"));
     }
 
-    [Fact]
-    public void AttachDeck_marks_runtime_unsafe_on_unsafe_outcome_unknown()
-    {
-        var native = new FakeNative { AttachDeckResult = USBDeviceAttachResult.UnsafeOutcomeUnknown };
-        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
-
-        var result = runtime.AttachDeck();
-
-        Assert.Equal(USBDeviceAttachResult.UnsafeOutcomeUnknown, result);
-        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
-
-        // Once unsafe, no further native mutation is attempted through this owner.
-        Assert.Equal(USBDeviceAttachResult.Invalid, runtime.AttachDeck());
-        var beforeCount = native.Calls.Count(c => c == "AttachUSBDeviceEx");
-        Assert.Equal(1, beforeCount);
-    }
-
-    [Fact]
-    public void AttachDeck_marks_runtime_unsafe_on_invalid()
-    {
-        var native = new FakeNative { AttachDeckResult = USBDeviceAttachResult.Invalid };
-        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
-
-        var result = runtime.AttachDeck();
-
-        Assert.Equal(USBDeviceAttachResult.Invalid, result);
-        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
-
-        // A poisoned owner refuses to act again -- no retry of the same mutation.
-        Assert.Equal(USBDeviceAttachResult.Invalid, runtime.AttachDeck());
-        Assert.Equal(1, native.Calls.Count(c => c == "AttachUSBDeviceEx"));
-    }
-
     // ---- Final teardown (work order sections 19-21, test section 32) ----
 
     [Fact]
@@ -794,7 +761,6 @@ public sealed class CanonicalViiperRuntimeTests
         internal USBDeviceAttachmentState Xbox360AttachmentStateDuringTeardown { get; init; } = USBDeviceAttachmentState.Detached;
         internal bool DeckAttachmentStateQuerySucceeds { get; init; } = true;
         internal bool Xbox360AttachmentStateQuerySucceeds { get; init; } = true;
-        internal USBDeviceAttachResult AttachDeckResult { get; init; } = USBDeviceAttachResult.Success;
         internal Queue<SteamDeckDeviceRemoveResult> RemoveDeckResults { get; init; } = new([SteamDeckDeviceRemoveResult.Success]);
         internal Queue<Xbox360DeviceRemoveResult> RemoveXbox360Results { get; init; } = new([Xbox360DeviceRemoveResult.Success]);
         internal Queue<USBDeviceDetachResult> DeckDetachResults { get; init; } = new([USBDeviceDetachResult.Success]);
@@ -837,7 +803,9 @@ public sealed class CanonicalViiperRuntimeTests
         public bool AttachUSBDevice(nuint deviceHandle) { Calls.Add("AttachUSBDevice"); return true; }
         public bool DetachUSBDevice(nuint deviceHandle) { Calls.Add("DetachUSBDevice"); return true; }
 
-        public USBDeviceAttachResult AttachUSBDeviceEx(nuint deviceHandle) { Calls.Add("AttachUSBDeviceEx"); return AttachDeckResult; }
+        // Not exercised by PR2a (route entry/AttachDeck is deferred to PR2b); present only to
+        // satisfy ICanonicalViiperNativeApi.
+        public USBDeviceAttachResult AttachUSBDeviceEx(nuint deviceHandle) { Calls.Add("AttachUSBDeviceEx"); return USBDeviceAttachResult.Success; }
 
         public USBDeviceDetachResult DetachUSBDeviceEx(nuint deviceHandle)
         {
