@@ -33,6 +33,97 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task ActiveEligibleDoesNotRetirePresentation()
+    {
+        var callbackCalls = 0;
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software())),
+            new FakeExecutor(),
+            beforeActiveSessionExit: _ => { callbackCalls++; return Task.FromResult(true); });
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var result = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("AlreadyActive", result.Reason);
+        Assert.Equal(0, callbackCalls);
+    }
+
+    [Fact]
+    public async Task ActiveNonEligibleRetiresPresentationBeforeOuterRollback()
+    {
+        var events = new List<string>();
+        var executor = new FakeExecutor(events);
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(WaitingForSteam(), Software())),
+            executor,
+            beforeActiveSessionExit: _ => { events.Add("RetireX360"); return Task.FromResult(true); });
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var result = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(RoutingActionKind.ExitOverride, result.Action);
+        Assert.Equal(["RetireX360", "PipelineRollback"], events);
+    }
+
+    [Fact]
+    public async Task ActiveSetupRequiredAlsoRetiresPresentationBeforeOuterRollback()
+    {
+        var callbackCalls = 0;
+        var executor = new FakeExecutor();
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(
+                Snapshot(Eligible(), Software()),
+                Snapshot(new(RoutingDecisionKind.SetupRequired, RoutingDecisionReason.PrerequisitesNotReady), Software())),
+            executor,
+            beforeActiveSessionExit: _ => { callbackCalls++; return Task.FromResult(true); });
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var result = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, callbackCalls);
+        Assert.Single(executor.RollbackPlans);
+    }
+
+    [Fact]
+    public async Task FailedPresentationRetirementBlocksOuterRollbackAndPreservesActiveSession()
+    {
+        var executor = new FakeExecutor();
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(WaitingForSteam(), Software())),
+            executor,
+            beforeActiveSessionExit: _ => Task.FromResult(false));
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var result = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(RoutingOperationalState.OverrideActive, result.State);
+        Assert.Equal(RoutingActionKind.ExitOverride, result.Action);
+        Assert.Equal("Xbox360PresentationRetirementFailed", result.Reason);
+        Assert.Empty(executor.RollbackPlans);
+        Assert.NotNull(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task PassiveNonEligibleDoesNotRetirePresentation()
+    {
+        var callbackCalls = 0;
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(WaitingForSteam(), Software())),
+            new FakeExecutor(),
+            beforeActiveSessionExit: _ => { callbackCalls++; return Task.FromResult(true); });
+
+        var result = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("AlreadyPassive", result.Reason);
+        Assert.Equal(0, callbackCalls);
+    }
+
+    [Fact]
     public async Task StockEligibleUsesCanonicalSnapshotAndNormalStockRoutingBaseline()
     {
         var executor = new FakeExecutor();
@@ -746,10 +837,22 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => bridge.Bridge.ReconcileFreshAfterResumeAsync(new CancellationToken(true)).AsTask());
     }
 
-    private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(FakeStatusProvider provider, FakeExecutor executor, params IRoutingRuntimeSessionBoundaryParticipant[] participants)
+    private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(
+        FakeStatusProvider provider,
+        FakeExecutor executor,
+        params IRoutingRuntimeSessionBoundaryParticipant[] participants)
     {
         var session = new RoutingPipelineSessionCoordinator(executor);
         return (new RoutingPipelineRuntimeCoordinator(provider, session, participants), session);
+    }
+
+    private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) CreateWithCallback(
+        FakeStatusProvider provider,
+        FakeExecutor executor,
+        Func<CancellationToken, Task<bool>> beforeActiveSessionExit)
+    {
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        return (new RoutingPipelineRuntimeCoordinator(provider, session, beforeActiveSessionExit: beforeActiveSessionExit), session);
     }
 
     private static IReadOnlyList<ControllerSoftwareStatus> Software() =>
@@ -820,7 +923,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         }
     }
 
-    private sealed class FakeExecutor : IRoutingPipelineExecutor
+    private sealed class FakeExecutor(List<string>? events = null) : IRoutingPipelineExecutor
     {
         internal List<RoutingPipelinePlan> ExecutedPlans { get; } = [];
         internal List<RoutingPipelinePlan> RollbackPlans { get; } = [];
@@ -858,6 +961,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         public ValueTask<RoutingPipelineRollbackResult> RollbackAsync(RoutingPipelinePlan plan, CancellationToken cancellationToken)
         {
             RollbackPlans.Add(plan);
+            events?.Add("PipelineRollback");
             LastRollbackCancellationTokenCancelled = cancellationToken.IsCancellationRequested;
             return RollbackCoreAsync(plan, cancellationToken);
         }

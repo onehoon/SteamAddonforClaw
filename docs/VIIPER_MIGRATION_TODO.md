@@ -384,6 +384,18 @@ resumes Deck. The GameBarForegroundWatcher remains unsubscribed, normal Steam
 route exit and suspend/resume remain unchanged, no X360 readiness claim is
 added, and no hardware validation is claimed. SD7 remains PLANNED.
 
+Normal active-route exit boundary step: `RoutingPipelineRuntimeCoordinator`
+now invokes the existing no-resume X360 retirement path immediately before
+normal `ExitOverride` rollback when an active route's newly captured decision
+is no longer `Eligible`. A failed retirement returns
+`Xbox360PresentationRetirementFailed`, preserves the active route and X360
+owner, and does not begin outer pipeline rollback. The callback is not used by
+shutdown, fail-close, suspend/resume cleanup, or pending cleanup paths. There
+is still no `GameBarForegroundWatcher` production subscription, no automatic
+Game Bar switching, no suspend/hibernate X360 retirement, no finalized
+publisher-fault cleanup, no X360 PnP/XInput readiness claim, and no hardware
+validation claim. SD7 remains PLANNED.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains

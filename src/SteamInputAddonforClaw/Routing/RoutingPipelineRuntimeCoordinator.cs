@@ -24,6 +24,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private readonly ISystemStatusProvider _statusProvider;
     private readonly RoutingPipelineSessionCoordinator _sessionCoordinator;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
+    private readonly Func<CancellationToken, Task<bool>>? _beforeActiveSessionExit;
     private readonly SemaphoreSlim _transitionGate = new(1, 1);
     private readonly Lock _cancellationSync = new();
     private CancellationTokenSource _transitionCancellation = new();
@@ -33,11 +34,13 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     internal RoutingPipelineRuntimeCoordinator(
         ISystemStatusProvider statusProvider,
         RoutingPipelineSessionCoordinator sessionCoordinator,
-        IEnumerable<IRoutingRuntimeSessionBoundaryParticipant>? sessionBoundaryParticipants = null)
+        IEnumerable<IRoutingRuntimeSessionBoundaryParticipant>? sessionBoundaryParticipants = null,
+        Func<CancellationToken, Task<bool>>? beforeActiveSessionExit = null)
     {
         _statusProvider = statusProvider ?? throw new ArgumentNullException(nameof(statusProvider));
         _sessionCoordinator = sessionCoordinator ?? throw new ArgumentNullException(nameof(sessionCoordinator));
         _sessionBoundaryParticipants = (sessionBoundaryParticipants ?? []).ToArray();
+        _beforeActiveSessionExit = beforeActiveSessionExit;
     }
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileAsync(CancellationToken cancellationToken)
@@ -242,6 +245,32 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     {
         var snapshot = await _statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
         var classification = Classify(snapshot.ControllerSoftware);
+        if (_sessionCoordinator.ActiveSession is not null &&
+            _sessionCoordinator.PendingCleanup is null &&
+            snapshot.RoutingDecision.Kind != RoutingDecisionKind.Eligible &&
+            _beforeActiveSessionExit is not null)
+        {
+            bool retired;
+            try
+            {
+                retired = await _beforeActiveSessionExit(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Routing.Runtime", "X360 presentation retirement blocked outer route exit.",
+                    exception, fields: [("Reason", exception.GetType().Name)]);
+                retired = false;
+            }
+
+            if (!retired)
+            {
+                AppLog.Warn("Routing.Runtime", "X360 presentation retirement blocked outer route exit.",
+                    fields: [("Reason", "Xbox360PresentationRetirementFailed")]);
+                return new(false, _sessionCoordinator.CurrentState, RoutingActionKind.ExitOverride,
+                    "Xbox360PresentationRetirementFailed");
+            }
+        }
+
         var result = await _sessionCoordinator.ReconcileAsync(
             snapshot.RoutingDecision,
             classification,

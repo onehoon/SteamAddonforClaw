@@ -120,10 +120,14 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         IRoutingPipelineStage steamOutputStage = deckStage;
         var pipelineExecutor = new RoutingPipelineExecutor([.. handheldRoutingComposition.Stages, steamOutputStage]);
         var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(pipelineExecutor);
+        AddonRoutingRuntime? runtime = null;
         var coordinator = new RoutingPipelineRuntimeCoordinator(
             statusProvider,
             pipelineSessionCoordinator,
-            handheldRoutingComposition.SessionBoundaryParticipants);
+            handheldRoutingComposition.SessionBoundaryParticipants,
+            beforeActiveSessionExit: cancellationToken => runtime is null
+                ? Task.FromResult(true)
+                : runtime.RetireXbox360BeforeOuterRouteExitAsync(cancellationToken));
         deckStage.SetOutputFaultHandler(async () => { await coordinator.FailClosedAsync().ConfigureAwait(false); });
         handheldRoutingComposition.SetRuntimeFaultHandler(async reason =>
         {
@@ -138,7 +142,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
         });
 
-        var runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator, deckStage, viiperRuntime);
+        runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator, deckStage, viiperRuntime);
 
         // PR3: development-only OEM1 production E2E POC. The only two facts a device-specific OEM1
         // feature needs from this generic routing/output layer -- fresh routing status and the
@@ -157,6 +161,27 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             mappingPreference: oem1MappingPreference);
 
         return runtime;
+    }
+
+    private async Task<bool> RetireXbox360BeforeOuterRouteExitAsync(CancellationToken cancellationToken)
+    {
+        var publisher = _xbox360Publisher;
+        if (publisher is null)
+            return true;
+
+        var result = await RetireXbox360PresentationCoreAsync(
+            publisher,
+            publisher.StopAsync,
+            _viiperRuntime is null
+                ? static () => USBDeviceDetachResult.Invalid
+                : _viiperRuntime.DetachXbox360,
+            cancellationToken).ConfigureAwait(false);
+
+        if (!result.Succeeded)
+            return false;
+
+        _xbox360Publisher = null;
+        return true;
     }
 
     /// <summary>PR2: optional additional power/resume participant the owned composition supplies
