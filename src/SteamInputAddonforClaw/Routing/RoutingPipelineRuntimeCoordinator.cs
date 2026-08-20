@@ -215,6 +215,31 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if ((_sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null) &&
+                _beforeActiveSessionExit is not null)
+            {
+                bool retiredPresentation;
+                try
+                {
+                    retiredPresentation = await _beforeActiveSessionExit(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("Routing.Power", "X360 presentation retirement blocked suspend teardown.",
+                        exception, fields: [("Action", "SuspendTeardown"),
+                            ("Reason", exception.GetType().Name)]);
+                    return false;
+                }
+
+                if (!retiredPresentation)
+                {
+                    AppLog.Warn("Routing.Power", "X360 presentation retirement blocked suspend teardown.",
+                        fields: [("Action", "SuspendTeardown"),
+                            ("Reason", "Xbox360PresentationRetirementFailed")]);
+                    return false;
+                }
+            }
+
             var result = await _sessionCoordinator.ReconcileAsync(
                 RecoveryResetDecision,
                 IndeterminateClassification,

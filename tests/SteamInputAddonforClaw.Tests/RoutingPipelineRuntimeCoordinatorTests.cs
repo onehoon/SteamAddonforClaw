@@ -124,6 +124,77 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task SuspendRetiresPresentationBeforeOuterRollback()
+    {
+        var events = new List<string>();
+        var executor = new FakeExecutor(events);
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software())),
+            executor,
+            beforeActiveSessionExit: _ => { events.Add("RetireX360"); return Task.FromResult(true); });
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var quiesced = await bridge.Bridge.QuiesceForSuspendAsync(
+            DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None);
+
+        Assert.True(quiesced);
+        Assert.Equal(["RetireX360", "PipelineRollback"], events);
+        Assert.Null(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task SuspendRetirementFailureBlocksOuterRollbackAndPreservesActiveSession()
+    {
+        var executor = new FakeExecutor();
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software())),
+            executor,
+            beforeActiveSessionExit: _ => Task.FromResult(false));
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var quiesced = await bridge.Bridge.QuiesceForSuspendAsync(
+            DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None);
+
+        Assert.False(quiesced);
+        Assert.Empty(executor.RollbackPlans);
+        Assert.NotNull(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task SuspendRetirementExceptionBlocksOuterRollback()
+    {
+        var executor = new FakeExecutor();
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software())),
+            executor,
+            beforeActiveSessionExit: _ => throw new InvalidOperationException("stop failed"));
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var quiesced = await bridge.Bridge.QuiesceForSuspendAsync(
+            DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None);
+
+        Assert.False(quiesced);
+        Assert.Empty(executor.RollbackPlans);
+        Assert.NotNull(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task PassiveSuspendDoesNotRetirePresentation()
+    {
+        var callbackCalls = 0;
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(WaitingForSteam(), Software())),
+            new FakeExecutor(),
+            beforeActiveSessionExit: _ => { callbackCalls++; return Task.FromResult(true); });
+
+        var quiesced = await bridge.Bridge.QuiesceForSuspendAsync(
+            DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None);
+
+        Assert.True(quiesced);
+        Assert.Equal(0, callbackCalls);
+    }
+
+    [Fact]
     public async Task StockEligibleUsesCanonicalSnapshotAndNormalStockRoutingBaseline()
     {
         var executor = new FakeExecutor();
