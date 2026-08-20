@@ -390,6 +390,58 @@ public sealed class AddonRoutingRuntimeTests
         Assert.Contains("Xbox360DetachThrew=InvalidOperationException", result.FailureReason);
     }
 
+    [Fact]
+    public async Task Shutdown_retires_xbox360_before_coordinator_without_deck_resume()
+    {
+        var trace = new List<string>();
+        var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
+        var cleared = false;
+        var result = await AddonRoutingRuntime.ShutdownAfterXbox360RetirementAsync(
+            publisher,
+            () => { trace.Add("Stop"); return Task.CompletedTask; },
+            () => { trace.Add("Detach"); return USBDeviceDetachResult.Success; },
+            () => { cleared = true; trace.Add("ClearOwner"); },
+            () => { trace.Add("CoordinatorShutdown"); return Task.FromResult(true); },
+            CancellationToken.None);
+
+        Assert.True(result);
+        Assert.True(cleared);
+        Assert.Equal(["Stop", "Detach", "ClearOwner", "CoordinatorShutdown"], trace);
+    }
+
+    [Fact]
+    public async Task Shutdown_does_not_enter_coordinator_when_xbox360_retirement_fails()
+    {
+        var coordinatorCalls = 0;
+        var publisher = new CanonicalXbox360InputPublisher(new FakeSnapshot(), _ => true, new ManualTicks());
+        var result = await AddonRoutingRuntime.ShutdownAfterXbox360RetirementAsync(
+            publisher,
+            () => Task.FromException(new TimeoutException()),
+            () => USBDeviceDetachResult.Success,
+            () => throw new InvalidOperationException("must retain owner"),
+            () => { coordinatorCalls++; return Task.FromResult(true); },
+            CancellationToken.None);
+
+        Assert.False(result);
+        Assert.Equal(0, coordinatorCalls);
+    }
+
+    [Fact]
+    public async Task Shutdown_without_xbox360_presentation_preserves_coordinator_behavior()
+    {
+        var coordinatorCalls = 0;
+        var result = await AddonRoutingRuntime.ShutdownAfterXbox360RetirementAsync(
+            null,
+            () => throw new InvalidOperationException(),
+            () => throw new InvalidOperationException(),
+            () => throw new InvalidOperationException(),
+            () => { coordinatorCalls++; return Task.FromResult(true); },
+            CancellationToken.None);
+
+        Assert.True(result);
+        Assert.Equal(1, coordinatorCalls);
+    }
+
     private static async Task WaitForAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);

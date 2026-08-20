@@ -244,19 +244,22 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return resumed;
     }
 
-    private async Task<bool> RetireXbox360PresentationAsync(CancellationToken cancellationToken)
+    internal static async Task<bool> ShutdownAfterXbox360RetirementAsync(
+        CanonicalXbox360InputPublisher? publisher,
+        Func<Task> stopPublisher,
+        Func<USBDeviceDetachResult> detach,
+        Action clearPublisher,
+        Func<Task<bool>> coordinatorShutdown,
+        CancellationToken cancellationToken)
     {
-        if (_xbox360Publisher is null || _viiperRuntime is null)
-            return true;
-
-        var retired = await RetireXbox360PresentationCoreAsync(
-            publisher: _xbox360Publisher,
-            stopPublisher: _xbox360Publisher.StopAsync,
-            detach: _viiperRuntime.DetachXbox360,
-            cancellationToken).ConfigureAwait(false);
-        if (retired.PublisherReleased)
-            _xbox360Publisher = null;
-        return retired.Succeeded;
+        if (publisher is not null)
+        {
+            var retired = await RetireXbox360PresentationCoreAsync(publisher, stopPublisher, detach, cancellationToken).ConfigureAwait(false);
+            if (!retired.Succeeded)
+                return false;
+            clearPublisher();
+        }
+        return await coordinatorShutdown().ConfigureAwait(false);
     }
 
     /// <summary>Stops and detaches the X360 presentation without resuming Deck.</summary>
@@ -502,11 +505,13 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     {
         try
         {
-            if (_xbox360Publisher is not null && !await RetireXbox360PresentationAsync(CancellationToken.None).ConfigureAwait(false))
-                return false;
-            var shutdown = await _coordinator.ShutdownAsync().ConfigureAwait(false);
-            if (!shutdown.Succeeded) return false;
-            return true;
+            return await ShutdownAfterXbox360RetirementAsync(
+                _xbox360Publisher,
+                _xbox360Publisher is { } publisher ? publisher.StopAsync : () => Task.CompletedTask,
+                _viiperRuntime is { } viiper ? viiper.DetachXbox360 : () => USBDeviceDetachResult.Invalid,
+                () => _xbox360Publisher = null,
+                async () => (await _coordinator.ShutdownAsync().ConfigureAwait(false)).Succeeded,
+                CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
