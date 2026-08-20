@@ -111,6 +111,22 @@ public sealed class DeveloperVibrationTestTests
     }
 
     [Fact]
+    public async Task Closing_developer_session_does_not_stop_newer_real_Steam_feedback()
+    {
+        var sink = new RecordingSink();
+        var authority = new FeedbackAuthority();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        var developerTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None);
+
+        await Task.Delay(20);
+        Assert.True(bridge.ProcessNormalizedReport(Report(FrontendVibrationTestCommand.Haptic), "Steam"));
+        bridge.CancelDeveloperTestAndStop();
+        await developerTest;
+
+        Assert.Equal([new TwoMotorRumble(32768, 32768), new TwoMotorRumble(32896, 32896)], sink.Values);
+    }
+
+    [Fact]
     public async Task A_physical_write_failure_is_visible_in_the_outcome_even_though_authority_accepted_it()
     {
         // Regression for PR #269 review: TryWrite() used to discard the sink's PhysicalRumbleWriteResult

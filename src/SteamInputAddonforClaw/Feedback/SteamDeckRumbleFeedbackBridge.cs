@@ -22,6 +22,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     private long _sequence;
     private bool _disposed;
     private CancellationTokenSource? _developerTest;
+    private long _developerSequence;
 
     internal SteamDeckRumbleFeedbackBridge(FeedbackAuthority authority, FeedbackAuthorityToken token, IPhysicalRumbleSink sink)
     {
@@ -90,6 +91,11 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             var decoded = SteamDeckRumbleDecoder.Decode(report.Span);
             if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence, out var commandResult, out var scheduledStop))
                 return new(false, commandResult, null, decoded);
+            lock (_gate)
+            {
+                if (sequence == _sequence && ReferenceEquals(_developerTest, linked))
+                    _developerSequence = sequence;
+            }
             if (!addDeveloperStop)
             {
                 var productionStop = scheduledStop is null ? null : await scheduledStop.ConfigureAwait(false);
@@ -106,7 +112,14 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { return new(false, null, null); }
         finally
         {
-            lock (_gate) if (ReferenceEquals(_developerTest, linked)) _developerTest = null;
+            lock (_gate)
+            {
+                if (ReferenceEquals(_developerTest, linked))
+                {
+                    _developerTest = null;
+                    _developerSequence = 0;
+                }
+            }
             linked.Dispose();
         }
     }
@@ -116,15 +129,27 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     /// issues a best-effort production-path zero write to leave the motors physically stopped.</summary>
     internal PhysicalRumbleWriteResult? CancelDeveloperTestAndStop()
     {
+        long developerSequence;
+        CancellationTokenSource? pendingStop = null;
         lock (_gate)
         {
+            developerSequence = _developerSequence;
+            _developerSequence = 0;
             _developerTest?.Cancel();
             _developerTest?.Dispose();
             _developerTest = null;
+            if (developerSequence != 0 && developerSequence == _sequence)
+            {
+                pendingStop = _pendingStop;
+                _pendingStop = null;
+            }
         }
-        var stop = new byte[64]; stop[0] = 0xEB; stop[1] = 9;
-        ProcessNormalizedReport(stop, "DeveloperVibrationTestClose", out _, out var physicalResult);
-        return physicalResult;
+        pendingStop?.Cancel();
+        pendingStop?.Dispose();
+        if (developerSequence == 0) return null;
+        return TryWrite(developerSequence, TwoMotorRumble.Stopped, out var physicalResult)
+            ? physicalResult
+            : null;
     }
 
     private void OnNativeOutput(nuint handle, nint data, uint length)
