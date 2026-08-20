@@ -151,7 +151,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     internal static (bool Succeeded, string Reason) MapVibrationTestOutcome(Feedback.DeveloperVibrationTestOutcome outcome)
     {
         var commandPhysicalOk = outcome.CommandResult is { } commandResult && commandResult.Succeeded;
-        var stopPhysicalOk = outcome.StopResult is null || outcome.StopResult.Value.Succeeded;
+        var stopRequired = outcome.Decode?.Command == Feedback.SteamDeckFeedbackCommand.HapticPulse;
+        var stopPhysicalOk = outcome.StopResult is { } stopResult
+            ? stopResult.Succeeded
+            : !stopRequired;
         var succeeded = outcome.Succeeded && commandPhysicalOk && stopPhysicalOk;
         var reason = !outcome.Succeeded
             ? "Feedback bridge is unavailable, superseded, or the test was cancelled."
@@ -205,7 +208,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             var session = new Feedback.VibrationTestSessionWriter(AppLog.DirectoryPath);
             var routing = _captureRoutingStatus();
             var appVersion = typeof(InProcessAddonFrontendControl).Assembly.GetName().Version?.ToString() ?? "Unknown";
-            session.Write($"SessionStarted AppVersion={appVersion} TestModeEnabled={_developer.IsEnabled} RoutingState=SteamOutputActive:{routing.SteamOutputActive},NativeDirectInputActive:{routing.NativeDirectInputActive}");
+            session.Write($"SessionStarted AppVersion={appVersion} TestModeEnabled={_developer.IsEnabled} RoutingState={routing.OperationalState} SteamOutputActive={routing.SteamOutputActive} NativeDirectInputActive={routing.NativeDirectInputActive}");
             _vibrationSession = session;
             return session;
         }
@@ -222,7 +225,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     private static string DecodeFields(Feedback.SteamDeckFeedbackDecodeResult? decoded) => decoded switch
     {
-        { Command: Feedback.SteamDeckFeedbackCommand.Rumble, Rumble: var rumble } => $"Decode=Rumble Large16={rumble.LargeMotor} Small16={rumble.SmallMotor} Large8={rumble.LargeMotor / 257} Small8={rumble.SmallMotor / 257}",
+        { Command: Feedback.SteamDeckFeedbackCommand.Rumble, Rumble: var rumble } => $"Decode=Rumble Large16={rumble.LargeMotor} Small16={rumble.SmallMotor} Large8={rumble.LargeMotor >> 8} Small8={rumble.SmallMotor >> 8}",
         { Command: Feedback.SteamDeckFeedbackCommand.Haptic, Rumble: var rumble, Intensity: var intensity, Gain: var gain, Strength8: var strength } => $"Decode=Haptic Intensity={intensity} Gain={gain} Strength8={strength} Strength16={rumble.LargeMotor}",
         { Command: Feedback.SteamDeckFeedbackCommand.HapticPulse, Rumble: var rumble, PulsePeriod: var period, PulseCount: var count, Gain: var gain, Strength8: var strength, PulseDurationMilliseconds: var duration } => $"Decode=HapticPulse Period={period} Count={count} Gain={gain} Strength8={strength} Strength16={rumble.LargeMotor} PulseDurationMs={duration}",
         _ => "Decode=Unavailable"

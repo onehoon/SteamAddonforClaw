@@ -139,6 +139,21 @@ public sealed class VibrationTestSessionLifecycleTests : IDisposable
         Assert.Contains("NoVerifiedEndpoint", reason);
     }
 
+    [Fact]
+    public void MapVibrationTestOutcome_rejects_a_pulse_without_completed_production_stop()
+    {
+        var outcome = new DeveloperVibrationTestOutcome(
+            true,
+            new PhysicalRumbleWriteResult(PhysicalRumbleWriteStatus.Succeeded, "OK"),
+            null,
+            new SteamDeckFeedbackDecodeResult(SteamDeckFeedbackCommand.HapticPulse, default, 250));
+
+        var (succeeded, reason) = InProcessAddonFrontendControl.MapVibrationTestOutcome(outcome);
+
+        Assert.False(succeeded);
+        Assert.Contains("STOP", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
     private InProcessAddonFrontendControl CreateControl()
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
