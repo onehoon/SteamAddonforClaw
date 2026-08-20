@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Profiles.Performance;
 
 internal enum TdpPowerSource { AC, DC }
 
-internal sealed record TdpApplySnapshot(long AuthorityVersion, TdpPowerSource Source, int Pl1Watts, int Pl2Watts);
+internal sealed record TdpApplySnapshot(long AuthorityVersion, long ReconcileVersion, TdpPowerSource Source, int Pl1Watts, int Pl2Watts);
 
 internal enum TdpCommitOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
 
@@ -27,6 +27,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private readonly Lock _sync = new();
     private Task _tail = Task.CompletedTask;
     private long _authorityVersion;
+    private long _reconcileVersion;
     private bool _invalidateHardwareCacheBeforeNextApply;
     private TdpPowerSource? _lastAdmittedPowerSource;
     private bool _reconcileRequired;
@@ -63,7 +64,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 var source = _powerSource();
                 if (source is not { } currentSource)
                 {
-                    _reconcileRequired = true;
+                    MarkReconcileRequiredUnderLock();
                     AppLog.Warn("Profiles.Tdp", "Current power source is unknown; lifecycle reconcile was not queued.",
                         null, ("Reason", reason));
                     return;
@@ -119,6 +120,8 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 if (!settings.Enabled)
                 {
                     _authorityVersion++;
+                    _reconcileVersion++;
+                    _reconcileRequired = false;
                     _invalidateHardwareCacheBeforeNextApply = true;
                     return new(TdpCommitOutcome.Succeeded, null);
                 }
@@ -126,7 +129,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 var source = _powerSource();
                 if (source is not { } currentSource)
                 {
-                    _reconcileRequired = true;
+                    MarkReconcileRequiredUnderLock();
                     AppLog.Warn("Profiles.Tdp", "Current power source is unknown; committed TDP apply was not queued.");
                     return new(TdpCommitOutcome.Succeeded, null);
                 }
@@ -159,8 +162,16 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private void EnqueueSnapshotUnderLock(TdpPowerSource currentSource, DeviceTdpSettings settings)
     {
         var pair = currentSource == TdpPowerSource.AC ? settings.Ac : settings.Dc;
+        var reconcileVersion = ++_reconcileVersion;
         _lastAdmittedPowerSource = currentSource;
-        EnqueueSnapshotUnderLock(new TdpApplySnapshot(_authorityVersion, currentSource, pair.Pl1Watts, pair.Pl2Watts));
+        _reconcileRequired = true;
+        EnqueueSnapshotUnderLock(new TdpApplySnapshot(_authorityVersion, reconcileVersion, currentSource, pair.Pl1Watts, pair.Pl2Watts));
+    }
+
+    private void MarkReconcileRequiredUnderLock()
+    {
+        _reconcileVersion++;
+        _reconcileRequired = true;
     }
 
     private void EnqueueSnapshotUnderLock(TdpApplySnapshot snapshot)
@@ -200,7 +211,10 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 _hardware.InvalidateCachedPowerLimits();
             var result = _hardware.Apply(modelId, new() { Pl1Watts = snapshot.Pl1Watts, Pl2Watts = snapshot.Pl2Watts });
             lock (_sync)
-                _reconcileRequired = !result.Succeeded;
+            {
+                if (snapshot.ReconcileVersion == _reconcileVersion)
+                    _reconcileRequired = !result.Succeeded;
+            }
             AppLog.Info("Profiles.Tdp", "Global TDP apply completed.",
                 ("Source", snapshot.Source), ("PL1", snapshot.Pl1Watts), ("PL2", snapshot.Pl2Watts),
                 ("Succeeded", result.Succeeded), ("FailureStage", result.FailureStage),
@@ -209,7 +223,10 @@ internal sealed class TdpRuntime : IAsyncDisposable
         catch (Exception exception)
         {
             lock (_sync)
-                _reconcileRequired = true;
+            {
+                if (snapshot.ReconcileVersion == _reconcileVersion)
+                    _reconcileRequired = true;
+            }
             AppLog.Error("Profiles.Tdp", "Global TDP queue item failed; later items continue.", exception,
                 ("Source", snapshot.Source), ("PL1", snapshot.Pl1Watts), ("PL2", snapshot.Pl2Watts));
         }

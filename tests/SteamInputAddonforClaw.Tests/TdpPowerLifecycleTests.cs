@@ -166,6 +166,42 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task OlderApplySuccessCannotClearNewerUnknownSourceDirtyState()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        TdpPowerSource? source = TdpPowerSource.AC;
+        var transport = new FakeTransport { Ap = [0, 0, 0xC4], BlockFirstApply = true };
+        await using var runtime = CreateRuntime(transport, () => source);
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) }).Succeeded);
+        await transport.FirstApplyStarted.Task;
+
+        source = null;
+        runtime.ReconcileCurrent(false, false, "PowerSourceChanged");
+        transport.ReleaseFirstApply.Set();
+        await runtime.DrainAsync();
+
+        source = TdpPowerSource.AC;
+        runtime.ReconcileCurrent(false, false, "PowerSourceChanged");
+        await runtime.DrainAsync();
+        Assert.True(transport.Operations.Count(x => x == "GetAp(0)") >= 2);
+    }
+
+    [Fact]
+    public async Task RuntimeShutdownBarrierRejectsPendingLifecycleAdmission()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        var source = new FakeSource(); var delay = new FakeDelay();
+        var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
+        await using var runtime = CreateRuntime(transport, TdpPowerSource.AC);
+        using var watcher = CreateWatcher(runtime, source, delay);
+        watcher.ScheduleStartup();
+        runtime.BeginShutdown();
+        delay.Release();
+        await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+        Assert.Empty(transport.Operations);
+    }
+
     private TdpRuntime CreateRuntime(FakeTransport transport, TdpPowerSource source) => CreateRuntime(transport, () => source);
     private TdpRuntime CreateRuntime(FakeTransport transport, Func<TdpPowerSource?> source) =>
         new(new ProfileStore(ProfilePath), new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport), source);
@@ -202,8 +238,20 @@ public sealed class TdpPowerLifecycleTests : IDisposable
     {
         public byte[] Ap { get; set; } = [0, 0, 0xC0];
         public bool FailWrites { get; set; }
+        public bool BlockFirstApply { get; set; }
+        public TaskCompletionSource FirstApplyStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim ReleaseFirstApply { get; } = new(false);
         public List<string> Operations { get; } = [];
         public bool TryGetAp(int index, out byte[] payload) { Operations.Add($"GetAp({index})"); payload = Ap; return true; }
-        public bool TrySetData(int block, byte value) { Operations.Add($"SetData({block},{value})"); return !FailWrites; }
+        public bool TrySetData(int block, byte value)
+        {
+            Operations.Add($"SetData({block},{value})");
+            if (BlockFirstApply && FirstApplyStarted.Task.Status == TaskStatus.WaitingForActivation)
+            {
+                FirstApplyStarted.TrySetResult();
+                ReleaseFirstApply.Wait(TimeSpan.FromSeconds(5));
+            }
+            return !FailWrites;
+        }
     }
 }

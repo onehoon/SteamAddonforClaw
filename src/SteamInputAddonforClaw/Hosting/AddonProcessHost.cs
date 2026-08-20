@@ -254,9 +254,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Dispose();
         _qamHostController.BeginShutdown();
+        _tdpRuntime?.BeginShutdown();
         _tdpPowerLifecycleWatcher?.Dispose();
         _tdpPowerLifecycleWatcher = null;
-        _tdpRuntime?.BeginShutdown();
         _startupCancellationTokenSource.Cancel();
         PrepareRuntimeForShutdown();
     }
