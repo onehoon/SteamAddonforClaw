@@ -45,7 +45,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
 
     internal void StartupReconcile()
     {
-        ReconcileCurrent(forceApply: false, invalidateHardwareCache: false, "Startup");
+        ReconcileCurrent(forceApply: true, invalidateHardwareCache: false, "Startup");
     }
 
     internal void ReconcileCurrent(bool forceApply, bool invalidateHardwareCache, string reason)
@@ -72,9 +72,13 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     return;
                 }
 
-                if (!forceApply && !_reconcileRequired && _lastAdmittedPowerSource == currentSource)
+                var realPowerBoundary = _lastAdmittedPowerSource is { } previousSource
+                    && previousSource != currentSource;
+                if (!forceApply && !_reconcileRequired && !realPowerBoundary)
                     return;
 
+                if (realPowerBoundary)
+                    _invalidateHardwareCacheBeforeNextApply = true;
                 EnqueueSnapshotUnderLock(currentSource, tdp);
             }
         }

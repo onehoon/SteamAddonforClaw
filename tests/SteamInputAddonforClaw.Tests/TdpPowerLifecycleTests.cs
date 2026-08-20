@@ -23,12 +23,13 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         await using var runtime = CreateRuntime(transport, TdpPowerSource.AC);
         using var watcher = CreateWatcher(runtime, source, delay);
 
-        watcher.Start();
         watcher.ScheduleStartup();
         Assert.Empty(transport.Operations);
-        source.Emit(TdpPowerNotification.PowerSourceChanged);
+        watcher.Observe(TdpPowerNotification.PowerSourceChanged);
+        await Task.Yield();
         delay.Release();
         await watcher.DrainPendingAsync();
+        runtime.ReconcileCurrent(true, false, "TestStartup");
         await runtime.DrainAsync();
 
         Assert.Equal(1, transport.Operations.Count(x => x == "GetAp(0)"));
@@ -43,19 +44,37 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
         await using var runtime = CreateRuntime(transport, () => source.Current);
         using var watcher = CreateWatcher(runtime, source, delay);
-        watcher.Start();
-
         watcher.ScheduleStartup();
+        await Task.Yield();
         delay.Release();
         await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+        runtime.ReconcileCurrent(true, true, "TestStartup"); await runtime.DrainAsync();
         var before = File.ReadAllText(ProfilePath);
         transport.Operations.Clear();
         source.Current = TdpPowerSource.DC;
-        delay.Reset(); source.Emit(TdpPowerNotification.PowerSourceChanged); delay.Release();
+        delay.Reset(); watcher.Observe(TdpPowerNotification.PowerSourceChanged); delay.Release();
         await watcher.DrainPendingAsync(); await runtime.DrainAsync();
 
         Assert.Contains("SetData(81,20)", transport.Operations);
         Assert.Equal(before, File.ReadAllText(ProfilePath));
+    }
+
+    [Fact]
+    public async Task AcDcBoundaryInvalidatesCacheEvenWhenThePairIsUnchanged()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(20, 30) });
+        var source = new FakeSource { Current = TdpPowerSource.AC }; var delay = new FakeDelay();
+        var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
+        await using var runtime = CreateRuntime(transport, () => source.Current);
+        using var watcher = CreateWatcher(runtime, source, delay);
+        watcher.ScheduleStartup(); await Task.Yield(); delay.Release(); await watcher.DrainPendingAsync();
+        runtime.ReconcileCurrent(true, true, "TestStartup"); await runtime.DrainAsync();
+        transport.Operations.Clear(); source.Current = TdpPowerSource.DC;
+
+        delay.Reset(); watcher.Observe(TdpPowerNotification.PowerSourceChanged); delay.Release();
+        await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+
+        Assert.Equal(["GetAp(0)", "SetData(80,8)", "SetData(81,30)", "SetData(80,20)"], transport.Operations);
     }
 
     [Fact]
@@ -67,12 +86,11 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
         await using var runtime = CreateRuntime(transport, () => source.Current);
         using var watcher = CreateWatcher(runtime, source, delay);
-        watcher.Start();
-        watcher.ScheduleStartup(); delay.Release(); await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+        watcher.ScheduleStartup(); await Task.Yield(); delay.Release(); await watcher.DrainPendingAsync(); runtime.ReconcileCurrent(true, false, "TestStartup"); await runtime.DrainAsync();
         transport.Operations.Clear();
 
-        delay.Reset(); source.Emit(TdpPowerNotification.PowerSourceChanged); source.Current = TdpPowerSource.DC;
-        source.Emit(TdpPowerNotification.PowerSourceChanged); source.Current = TdpPowerSource.AC;
+        delay.Reset(); watcher.Observe(TdpPowerNotification.PowerSourceChanged); source.Current = TdpPowerSource.DC;
+        watcher.Observe(TdpPowerNotification.PowerSourceChanged); source.Current = TdpPowerSource.AC;
         delay.Release(); await watcher.DrainPendingAsync(); await runtime.DrainAsync();
 
         Assert.Empty(transport.Operations);
@@ -130,7 +148,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         using var watcher = CreateWatcher(runtime, source, delay);
 
         Assert.False(watcher.Start());
-        watcher.ScheduleStartup(); delay.Release(); await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+        watcher.ScheduleStartup(); await Task.Yield(); delay.Release(); await watcher.DrainPendingAsync(); runtime.ReconcileCurrent(true, false, "TestStartup"); await runtime.DrainAsync();
         Assert.Contains("GetAp(0)", transport.Operations);
     }
 
@@ -142,7 +160,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
         await using var runtime = CreateRuntime(transport, () => source.Current);
         using var watcher = CreateWatcher(runtime, source, delay);
-        watcher.Start(); watcher.ScheduleStartup(); delay.Release(); await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+        watcher.ScheduleStartup(); delay.Release(); await watcher.DrainPendingAsync(); await runtime.DrainAsync();
         transport.Operations.Clear(); transport.FailWrites = true;
         runtime.ReconcileCurrent(true, true, "ForcedLifecycle"); await runtime.DrainAsync();
         var firstAttemptCount = transport.Operations.Count(x => x == "GetAp(0)");
@@ -249,7 +267,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
     private sealed class FakeDelay
     {
         private TaskCompletionSource _release = NewSource();
-        public Task WaitAsync(TimeSpan _, CancellationToken cancellationToken) => Task.WhenAny(_release.Task, Task.Delay(Timeout.Infinite, cancellationToken));
+        public Task WaitAsync(TimeSpan _, CancellationToken cancellationToken) => _release.Task.WaitAsync(cancellationToken);
         public void Release() => _release.TrySetResult();
         public void Reset() => _release = NewSource();
         private static TaskCompletionSource NewSource() => new(TaskCreationOptions.RunContinuationsAsynchronously);
