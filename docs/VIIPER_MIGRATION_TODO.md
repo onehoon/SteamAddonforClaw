@@ -284,6 +284,12 @@ server. Initialization failure remains fail-closed and never falls back to
 per-route creation. SD7 remains PLANNED; Xbox360 has no attach, publisher, or
 Game Bar behavior here.
 
+Preparatory runtime primitive step (PR2c): `CanonicalViiperRuntime` now
+exposes classified Xbox360 attachment-state query, attach, neutral-before-
+detach, and state-write primitives over the already persistent
+detached-ready Xbox360 handle. No production caller exists yet; Xbox360
+remains detached/unpublished and Game Bar switching remains PLANNED.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains
