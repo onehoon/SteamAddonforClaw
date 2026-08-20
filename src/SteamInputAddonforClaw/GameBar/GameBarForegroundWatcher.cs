@@ -1,11 +1,18 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.GameBar;
 
-internal readonly record struct GameBarIdentityInspection(bool IsGameBar);
+internal readonly record struct GameBarIdentityInspection(
+    bool IsGameBar,
+    IntPtr Hwnd = default,
+    uint ProcessId = 0,
+    string? ExecutableName = null,
+    string? PackageFamilyName = null,
+    string Reason = "InspectionFailed");
 
 internal interface IGameBarForegroundProbe
 {
@@ -15,44 +22,61 @@ internal interface IGameBarForegroundProbe
 internal sealed class GameBarForegroundProbe : IGameBarForegroundProbe
 {
     internal const string PackageFamilyName = "Microsoft.XboxGamingOverlay_8wekyb3d8bbwe";
-    private const string ExecutableName = "GameBar.exe";
-
     public GameBarIdentityInspection Inspect(IntPtr hwnd)
     {
-        if (hwnd == IntPtr.Zero) return new(false);
+        if (hwnd == IntPtr.Zero) return new(false, hwnd, Reason: "InvalidHwnd");
         GetWindowThreadProcessId(hwnd, out var pid);
-        if (pid == 0) return new(false);
+        if (pid == 0) return new(false, hwnd, Reason: "ProcessIdUnavailable");
 
+        Process process;
         try
         {
-            using var process = Process.GetProcessById((int)pid);
-            var executable = Path.GetFileName(process.MainModule?.FileName);
-            if (!string.Equals(executable, ExecutableName, StringComparison.OrdinalIgnoreCase)) return new(false);
-            if (!TryGetPackageFamilyName(process.Handle, out var familyName)) return new(false);
-            return new(IsExpectedPackageFamily(familyName));
+            process = Process.GetProcessById((int)pid);
         }
         catch
         {
-            return new(false);
+            return new(false, hwnd, pid, Reason: "ProcessOpenFailed");
+        }
+
+        using (process)
+        {
+            string? executable = null;
+            try { executable = Path.GetFileName(process.MainModule?.FileName); } catch { }
+
+            string? familyName;
+            if (!TryGetPackageFamilyName(pid, out familyName))
+            {
+                return new(false, hwnd, pid, executable, Reason: "PackageIdentityUnavailable");
+            }
+
+            var matched = IsExpectedPackageFamily(familyName);
+            return new(matched, hwnd, pid, executable, familyName,
+                matched ? "AcceptedPackageFamily" : "PackageFamilyMismatch");
         }
     }
 
     internal static bool IsExpectedPackageFamily(string? familyName) =>
         string.Equals(familyName, PackageFamilyName, StringComparison.OrdinalIgnoreCase);
 
-    private static bool TryGetPackageFamilyName(IntPtr process, out string? familyName)
+    private static bool TryGetPackageFamilyName(uint processId, out string? familyName)
     {
         familyName = null;
+        using var process = new SafeProcessHandle(OpenProcess(ProcessQueryLimitedInformation, false, processId), ownsHandle: true);
+        if (process.IsInvalid) return false;
+
         uint length = 0;
-        var result = GetPackageFamilyName(process, ref length, null);
+        var result = GetPackageFamilyName(process.DangerousGetHandle(), ref length, null);
         if (result != ErrorInsufficientBuffer || length == 0) return false;
         var buffer = new char[length];
-        if (GetPackageFamilyName(process, ref length, buffer) != 0) return false;
+        if (GetPackageFamilyName(process.DangerousGetHandle(), ref length, buffer) != 0) return false;
         familyName = new string(buffer, 0, checked((int)length - 1));
         return true;
     }
 
+    private const uint ProcessQueryLimitedInformation = 0x1000;
     private const uint ErrorInsufficientBuffer = 122;
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
     [DllImport("user32.dll", SetLastError = true)] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern uint GetPackageFamilyName(IntPtr process, ref uint packageFamilyNameLength, char[]? packageFamilyName);
 }
@@ -127,7 +151,9 @@ internal sealed class GameBarForegroundWatcher : IDisposable
 
     private void Publish(IntPtr authoritativeHwnd)
     {
-        var value = authoritativeHwnd != IntPtr.Zero && _probe.Inspect(authoritativeHwnd).IsGameBar;
+        var inspection = _probe.Inspect(authoritativeHwnd);
+        AppLog.Info("GameBar", $"Foreground identity inspected. Hwnd=0x{inspection.Hwnd.ToInt64():X} Pid={inspection.ProcessId} Executable={inspection.ExecutableName ?? "<unavailable>"} PackageFamily={inspection.PackageFamilyName ?? "<unavailable>"} Matched={inspection.IsGameBar} Reason={inspection.Reason}");
+        var value = inspection.IsGameBar;
         if (value == Volatile.Read(ref _isForeground) || Volatile.Read(ref _disposed) != 0) return;
         Volatile.Write(ref _isForeground, value);
         AppLog.Info("GameBar", value ? "Game Bar entered foreground." : "Game Bar left foreground.");
