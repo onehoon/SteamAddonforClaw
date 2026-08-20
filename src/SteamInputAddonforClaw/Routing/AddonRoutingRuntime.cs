@@ -216,6 +216,31 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return false;
     }
 
+    /// <summary>
+    /// Exits the manually-entered Xbox360 presentation boundary while keeping the outer Steam
+    /// route active. This is an internal foundation seam only; no Game Bar or normal Runtime
+    /// caller invokes it yet. The publisher must prove stopped before VIIPER detachment, and the
+    /// Deck stage owns any failure encountered while resuming its existing publisher.
+    /// </summary>
+    internal async Task<bool> ExitXbox360PresentationAsync(CancellationToken cancellationToken = default)
+    {
+        if (!CaptureStatus().SteamOutputActive || _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } || _xbox360Publisher is null)
+            return false;
+
+        var exited = await ExitXbox360PresentationCoreAsync(
+            publisher: _xbox360Publisher,
+            stopPublisher: _xbox360Publisher.StopAsync,
+            detach: _viiperRuntime.DetachXbox360,
+            resumeDeck: () => _deckStage.ResumePresentationAsync(CancellationToken.None),
+            cancellationToken).ConfigureAwait(false);
+
+        if (exited.PublisherReleased)
+            _xbox360Publisher = null;
+        if (exited.FailureReason is { } reason)
+            await FailClosedForXbox360PresentationAsync(reason).ConfigureAwait(false);
+        return exited.Succeeded;
+    }
+
     private async Task HandleXbox360PublisherFaultAsync(Exception exception)
     {
         AppLog.Error("SteamOutput", "Canonical Xbox360 presentation publishing failed.", exception);
@@ -240,6 +265,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
     internal delegate bool Xbox360AttachmentQuery(out USBDeviceAttachmentState state);
     internal sealed record Xbox360PresentationEntryResult(CanonicalXbox360InputPublisher? Publisher, string? FailureReason = null);
+    internal sealed record Xbox360PresentationExitResult(bool Succeeded, bool PublisherReleased, string? FailureReason = null);
 
     // Test seam for deterministic orchestration tests. Production supplies the real Deck pause,
     // VIIPER attachment/state operations, and publisher fault path above; this method adds no
@@ -287,6 +313,49 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             }
             return new(null, $"Xbox360PublisherStartFailed:{exception.GetType().Name};{cleanup}");
         }
+    }
+
+    // Test seam for deterministic reverse-orchestration tests. The production method supplies
+    // the existing publisher/runtime/stage operations directly; this does not add a production
+    // ownership abstraction or a second transition authority.
+    internal static async Task<Xbox360PresentationExitResult> ExitXbox360PresentationCoreAsync(
+        CanonicalXbox360InputPublisher? publisher,
+        Func<Task> stopPublisher,
+        Func<USBDeviceDetachResult> detach,
+        Func<Task<bool>> resumeDeck,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (publisher is null)
+            return new(false, false);
+
+        try
+        {
+            await stopPublisher().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            return new(false, false, $"Xbox360PublisherStopFailed:{exception.GetType().Name}");
+        }
+
+        USBDeviceDetachResult detachResult;
+        try
+        {
+            detachResult = detach();
+        }
+        catch (Exception exception)
+        {
+            return new(false, false, $"Xbox360DetachThrew={exception.GetType().Name}");
+        }
+        if (detachResult != USBDeviceDetachResult.Success)
+            return new(false, false, $"Xbox360Detach{detachResult}");
+
+        // X360 is now proven stopped and detached. Deck resume is the final completion step;
+        // cancellation is deliberately not rechecked here so cleanup cannot be stranded.
+        var resumed = await resumeDeck().ConfigureAwait(false);
+        return resumed
+            ? new(true, true)
+            : new(false, true);
     }
 
     internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() => _coordinator.CaptureTerminationSnapshot();
