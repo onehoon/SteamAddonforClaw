@@ -42,10 +42,18 @@ internal sealed class TdpRuntime : IAsyncDisposable
     internal void StartupReconcile()
     {
         if (_modelId is null) return;
-        var loaded = _profileStore.Load();
-        if (!loaded.CanSafelyReplace || loaded.Document.Device.Performance.Tdp is not { Enabled: true } tdp)
-            return;
-        EnqueueCurrent(tdp);
+
+        lock (_mutationGate.Sync)
+        {
+            var loaded = _profileStore.Load();
+            if (!loaded.CanSafelyReplace || loaded.Document.Device.Performance.Tdp is not { Enabled: true } tdp)
+                return;
+
+            lock (_sync)
+            {
+                EnqueueCurrentUnderLock(tdp);
+            }
+        }
     }
 
     internal TdpCommitResult CommitGlobalTdp(DeviceTdpSettings settings)
