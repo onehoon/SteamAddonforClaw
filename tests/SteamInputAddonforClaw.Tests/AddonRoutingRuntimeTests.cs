@@ -15,22 +15,15 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class AddonRoutingRuntimeTests
 {
     [Fact]
-    public async Task GameBar_foreground_active_route_requests_enter_once()
+    public async Task GameBar_foreground_true_always_requests_enter()
     {
+        // The policy seam no longer pre-checks SteamOutputActive/ownership itself -- that snapshot
+        // could go stale behind a concurrent presentation mutation. Enter alone decides
+        // applicability, fresh, once it holds _presentationGate.
         var enters = 0;
         var exits = 0;
         await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
             isForeground: true,
-            steamOutputActive: true,
-            xbox360PresentationOwned: false,
-            enter: _ => { enters++; return Task.FromResult(true); },
-            exit: _ => { exits++; return Task.FromResult(true); },
-            CancellationToken.None);
-
-        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
-            isForeground: true,
-            steamOutputActive: true,
-            xbox360PresentationOwned: true,
             enter: _ => { enters++; return Task.FromResult(true); },
             exit: _ => { exits++; return Task.FromResult(true); },
             CancellationToken.None);
@@ -40,41 +33,14 @@ public sealed class AddonRoutingRuntimeTests
     }
 
     [Fact]
-    public async Task GameBar_foreground_inactive_route_is_a_no_op()
+    public async Task GameBar_foreground_false_always_requests_exit()
     {
         var enters = 0;
         var exits = 0;
         await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
-            true,
-            steamOutputActive: false,
-            xbox360PresentationOwned: false,
-            _ => { enters++; return Task.FromResult(true); },
-            _ => { exits++; return Task.FromResult(true); },
-            CancellationToken.None);
-
-        Assert.Equal(0, enters);
-        Assert.Equal(0, exits);
-    }
-
-    [Fact]
-    public async Task GameBar_leaving_with_owned_xbox360_requests_exit_once()
-    {
-        var enters = 0;
-        var exits = 0;
-        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
-            false,
-            steamOutputActive: true,
-            xbox360PresentationOwned: true,
-            _ => { enters++; return Task.FromResult(true); },
-            _ => { exits++; return Task.FromResult(true); },
-            CancellationToken.None);
-
-        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
-            false,
-            steamOutputActive: true,
-            xbox360PresentationOwned: false,
-            _ => { enters++; return Task.FromResult(true); },
-            _ => { exits++; return Task.FromResult(true); },
+            isForeground: false,
+            enter: _ => { enters++; return Task.FromResult(true); },
+            exit: _ => { exits++; return Task.FromResult(true); },
             CancellationToken.None);
 
         Assert.Equal(0, enters);
@@ -88,8 +54,6 @@ public sealed class AddonRoutingRuntimeTests
         var observed = CancellationToken.None;
         await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
             true,
-            steamOutputActive: true,
-            xbox360PresentationOwned: false,
             token => { observed = token; return Task.FromResult(true); },
             _ => Task.FromResult(true),
             cancellation.Token);
@@ -788,5 +752,339 @@ public sealed class AddonRoutingRuntimeTests
     {
         public SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Oem1Mapping => SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings.Default;
         public event EventHandler? Oem1MappingChanged { add { } remove { } }
+    }
+}
+
+/// <summary>
+/// Exercises <see cref="AddonRoutingRuntime.RunGatedPresentationMutationAsync"/> directly -- the
+/// exact primitive <c>EnterXbox360PresentationAsync</c>, <c>ExitXbox360PresentationAsync</c>, and
+/// the outer-route X360 retirement callback all share -- against a real <see cref="SemaphoreSlim"/>
+/// and deterministic TaskCompletionSource-controlled delegates. These tests prove only the
+/// concurrency contract this primitive adds (mutual exclusion between presentation mutations, and
+/// that a failure's fail-close callback never runs while the gate is still held); the existing
+/// Enter/Exit/retirement lifecycle behavior is already covered elsewhere and is not duplicated
+/// here. No <c>Task.Delay</c>/timing-based assertions.
+/// </summary>
+public sealed class AddonRoutingRuntimePresentationGateTests
+{
+    [Fact]
+    public async Task ConcurrentMutationsDoNotOverlap()
+    {
+        var gate = new SemaphoreSlim(1, 1);
+        var events = new List<string>();
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var first = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            async () =>
+            {
+                events.Add("FirstBegin");
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+                events.Add("FirstEnd");
+                return (true, (string?)null);
+            },
+            failClosed: null,
+            CancellationToken.None);
+
+        await firstStarted.Task;
+
+        // Issued while the gate is still held by `first`; its mutate delegate must not run until
+        // `first` releases -- proven by event order below, not by elapsed time.
+        var second = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () => { events.Add("SecondBegin"); return Task.FromResult((true, (string?)null)); },
+            failClosed: null,
+            CancellationToken.None);
+
+        releaseFirst.TrySetResult();
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(["FirstBegin", "FirstEnd", "SecondBegin"], events);
+    }
+
+    [Fact]
+    public async Task InteractiveEnterFollowedByExitDoesNotOverlap()
+    {
+        // Same mechanism as ConcurrentMutationsDoNotOverlap, labeled to match the actual production
+        // callers: an interactive Enter-shaped mutation held open, followed by an Exit-shaped one.
+        var gate = new SemaphoreSlim(1, 1);
+        var events = new List<string>();
+        var enterStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseEnter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var enter = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            async () =>
+            {
+                events.Add("EnterBegin");
+                enterStarted.TrySetResult();
+                await releaseEnter.Task;
+                events.Add("EnterEnd");
+                return (true, (string?)null);
+            },
+            failClosed: null,
+            CancellationToken.None);
+
+        await enterStarted.Task;
+
+        var exit = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () => { events.Add("ExitBegin"); events.Add("ExitEnd"); return Task.FromResult((true, (string?)null)); },
+            failClosed: null,
+            CancellationToken.None);
+
+        releaseEnter.TrySetResult();
+        await Task.WhenAll(enter, exit);
+
+        Assert.Equal(["EnterBegin", "EnterEnd", "ExitBegin", "ExitEnd"], events);
+    }
+
+    [Fact]
+    public async Task OuterRetirementWaitsForAnInProgressInteractiveMutation()
+    {
+        var gate = new SemaphoreSlim(1, 1);
+        var events = new List<string>();
+        var interactiveStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseInteractive = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var interactive = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            async () =>
+            {
+                events.Add("InteractiveBegin");
+                interactiveStarted.TrySetResult();
+                await releaseInteractive.Task;
+                events.Add("InteractiveEnd");
+                return (true, (string?)null);
+            },
+            failClosed: null,
+            CancellationToken.None);
+
+        await interactiveStarted.Task;
+
+        var outerRetirement = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () => { events.Add("OuterRetireStopDetach"); return Task.FromResult((true, (string?)null)); },
+            failClosed: null,
+            CancellationToken.None);
+
+        releaseInteractive.TrySetResult();
+        await Task.WhenAll(interactive, outerRetirement);
+
+        Assert.Equal(["InteractiveBegin", "InteractiveEnd", "OuterRetireStopDetach"], events);
+    }
+
+    [Fact]
+    public async Task InteractiveMutationWaitsForAnInProgressOuterRetirement()
+    {
+        var gate = new SemaphoreSlim(1, 1);
+        var events = new List<string>();
+        var retirementStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRetirement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var outerRetirement = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            async () =>
+            {
+                events.Add("OuterRetireBegin");
+                retirementStarted.TrySetResult();
+                await releaseRetirement.Task;
+                events.Add("OuterRetireEnd");
+                return (true, (string?)null);
+            },
+            failClosed: null,
+            CancellationToken.None);
+
+        await retirementStarted.Task;
+
+        var interactive = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () => { events.Add("InteractiveMutate"); return Task.FromResult((true, (string?)null)); },
+            failClosed: null,
+            CancellationToken.None);
+
+        releaseRetirement.TrySetResult();
+        await Task.WhenAll(outerRetirement, interactive);
+
+        Assert.Equal(["OuterRetireBegin", "OuterRetireEnd", "InteractiveMutate"], events);
+    }
+
+    [Fact]
+    public async Task FailedMutationReleasesTheGateBeforeInvokingFailClose()
+    {
+        // The critical deadlock regression: fail-close (and the outer-route retirement it drives
+        // through RoutingPipelineRuntimeCoordinator.FailClosedAsync's beforeActiveSessionExit
+        // callback, which itself needs this same gate) must never be awaited while the gate is
+        // still held by the failed mutation.
+        var gate = new SemaphoreSlim(1, 1);
+        var events = new List<string>();
+
+        var succeeded = await AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () => { events.Add("PresentationFailure"); return Task.FromResult((false, (string?)"SimulatedFailure")); },
+            failClosed: reason =>
+            {
+                // Not timing-based: a synchronous zero-timeout acquire either succeeds immediately
+                // (gate free) or fails immediately (gate still held) -- no race window either way.
+                Assert.True(gate.Wait(0));
+                gate.Release();
+                events.Add($"FailClosed:{reason}");
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        Assert.False(succeeded);
+        Assert.Equal(["PresentationFailure", "FailClosed:SimulatedFailure"], events);
+    }
+
+    [Fact]
+    public async Task SuccessfulMutationNeverInvokesFailClose()
+    {
+        var gate = new SemaphoreSlim(1, 1);
+        var failCloseCalls = 0;
+
+        var succeeded = await AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () => Task.FromResult((true, (string?)null)),
+            failClosed: _ => { failCloseCalls++; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        Assert.True(succeeded);
+        Assert.Equal(0, failCloseCalls);
+    }
+
+    [Fact]
+    public async Task QueuedMutationObservesStateCommittedByThePreviousMutationRatherThanAPreWaitSnapshot()
+    {
+        var gate = new SemaphoreSlim(1, 1);
+        var owned = false;
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var first = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            async () =>
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+                owned = true; // commits ownership only just before releasing the gate
+                return (true, (string?)null);
+            },
+            failClosed: null,
+            CancellationToken.None);
+
+        await firstStarted.Task;
+
+        // Queued (and thus constructed) before the commit above -- if the mutate delegate captured
+        // a snapshot instead of reading `owned` only once actually invoked (i.e. once it holds the
+        // gate), this would observe the stale `false`.
+        bool observedBySecond = false;
+        var second = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () => { observedBySecond = owned; return Task.FromResult((true, (string?)null)); },
+            failClosed: null,
+            CancellationToken.None);
+
+        releaseFirst.TrySetResult();
+        await Task.WhenAll(first, second);
+
+        Assert.True(observedBySecond);
+    }
+
+    [Fact]
+    public async Task GateWaitRespectsCancellation()
+    {
+        var gate = new SemaphoreSlim(1, 1);
+        var holderStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHolder = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var holder = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            async () => { holderStarted.TrySetResult(); await releaseHolder.Task; return (true, (string?)null); },
+            failClosed: null,
+            CancellationToken.None);
+
+        await holderStarted.Task;
+
+        using var cancellation = new CancellationTokenSource();
+        var queued = AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () => Task.FromResult((true, (string?)null)),
+            failClosed: null,
+            cancellation.Token);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued);
+
+        releaseHolder.TrySetResult();
+        await holder;
+    }
+
+    [Fact]
+    public async Task GameBarForegroundFalseArrivingBeforeEnterCommitsStillWaitsThenExits()
+    {
+        // Review regression: HandleGameBarForegroundChangedAsync must not decide applicability
+        // from a pre-gate ownership snapshot. Here `enter`/`exit` are wired through
+        // HandleGameBarForegroundChangedCoreAsync exactly as the production instance method wires
+        // the real EnterXbox360PresentationAsync/ExitXbox360PresentationAsync -- both share one
+        // real SemaphoreSlim and only commit/read `owned` once they actually hold it. A
+        // foreground=false delivered while Enter is still in flight (i.e. before it has committed
+        // ownership) must still result in Exit observing the committed publisher and running,
+        // never being silently skipped because of a stale snapshot taken up front.
+        var gate = new SemaphoreSlim(1, 1);
+        var events = new List<string>();
+        var owned = false;
+        var enterStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseEnter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Func<CancellationToken, Task<bool>> enter = token => AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            async () =>
+            {
+                events.Add("EnterBegin");
+                enterStarted.TrySetResult();
+                await releaseEnter.Task;
+                owned = true;
+                events.Add("EnterCommit");
+                return (true, (string?)null);
+            },
+            failClosed: null,
+            token);
+
+        Func<CancellationToken, Task<bool>> exit = token => AddonRoutingRuntime.RunGatedPresentationMutationAsync(
+            gate,
+            () =>
+            {
+                // Same fresh-inside-the-gate rule EnterXbox360PresentationAsync/
+                // ExitXbox360PresentationAsync apply for real: only decide here, never before.
+                if (!owned)
+                {
+                    events.Add("ExitSkipped_NotOwned");
+                    return Task.FromResult((false, (string?)null));
+                }
+                events.Add("ExitBegin");
+                owned = false;
+                events.Add("ExitEnd");
+                return Task.FromResult((true, (string?)null));
+            },
+            failClosed: null,
+            token);
+
+        var enterCall = AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            isForeground: true, enter, exit, CancellationToken.None);
+        await enterStarted.Task;
+
+        // foreground=false arrives while Enter is still mid-flight, before it has committed
+        // ownership -- issued (not awaited) here, exactly like a second Game Bar event racing in.
+        var exitCall = AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            isForeground: false, enter, exit, CancellationToken.None);
+
+        releaseEnter.TrySetResult();
+        await Task.WhenAll(enterCall, exitCall);
+
+        Assert.Equal(["EnterBegin", "EnterCommit", "ExitBegin", "ExitEnd"], events);
+        Assert.False(owned);
     }
 }

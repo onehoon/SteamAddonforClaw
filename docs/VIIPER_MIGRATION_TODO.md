@@ -428,6 +428,41 @@ remain unimplemented, presentation event serialization is not
 implemented/finalized, X360 PnP/XInput readiness is not claimed, and no
 hardware validation is claimed. SD7 remains PLANNED.
 
+Presentation mutation serialization step: `AddonRoutingRuntime` now owns one
+`SemaphoreSlim(1, 1)` (`_presentationGate`) that serializes only Deck/X360
+presentation mutations -- `EnterXbox360PresentationAsync`,
+`ExitXbox360PresentationAsync`, and the outer-route X360 retirement callback
+(`RetireXbox360BeforeOuterRouteExitAsync`) -- through a shared
+`RunGatedPresentationMutationAsync` primitive, so they cannot mutate Deck
+pause/resume, X360 publisher ownership, or X360 attach/detach concurrently.
+Ownership/readiness (`_xbox360Publisher`, `CaptureStatus().SteamOutputActive`,
+VIIPER attachment state, Deck pause state) is evaluated fresh inside the
+gate, never from a pre-wait snapshot. The gate is not a new state authority:
+X360 ownership remains `_xbox360Publisher`, outer routing authority remains
+`RoutingPipelineRuntimeCoordinator`, and VIIPER attachment ownership remains
+`CanonicalViiperRuntime`. Lock order is fixed at routing-transition-then-
+presentation-gate, never the reverse: the outer-route retirement callback
+only wraps its mutation in the gate and never itself awaits fail-close, and
+`EnterXbox360PresentationAsync`/`ExitXbox360PresentationAsync` always release
+the gate before invoking `FailClosedForXbox360PresentationAsync` on failure,
+so fail-close (and the routing-transition-owned retirement callback it can
+in turn invoke) is never awaited while the presentation gate is still held.
+The `HandleGameBarForegroundChangedAsync` policy seam forwards directly to
+Enter/Exit (`isForeground ? Enter : Exit`) with no ownership pre-check of its
+own -- a snapshot taken before the gate is acquired could go stale behind an
+in-flight mutation (e.g. a queued foreground=false arriving before an
+in-progress Enter commits `_xbox360Publisher`) and wrongly skip the call it
+should make; Enter/Exit are the sole ownership authority, evaluated fresh
+once each actually holds the gate.
+`GameBarForegroundWatcher` remains unsubscribed in production; this PR adds
+mutual exclusion only. Explicitly NOT implemented by this step: automatic
+Game Bar switching, latest-foreground-state-wins / event coalescing, ordered
+asynchronous event dispatch, and shutdown event-drain integration -- those
+belong to the later watcher production-wiring step. No new presentation
+state machine, coordinator, or interface was added. X360 PnP/XInput
+readiness is not claimed, and no hardware validation is claimed. SD7 remains
+PLANNED.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains
