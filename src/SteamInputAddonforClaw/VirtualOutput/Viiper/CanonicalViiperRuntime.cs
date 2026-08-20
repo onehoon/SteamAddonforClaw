@@ -133,6 +133,62 @@ internal sealed class CanonicalViiperRuntime
     internal bool SetDeckOutputCallback(SteamDeckOutputCallback? callback) =>
         State == CanonicalViiperRuntimeState.Ready && _native.SetSteamDeckOutputCallback(DeckDeviceHandle, callback);
 
+    // ---- Xbox360 route primitives (PR2c): equivalents of the Deck primitives above, over the
+    // already-persistent detached-ready Xbox360 handle. No production caller exists yet -- see
+    // docs/VIIPER_MIGRATION_TODO.md SD7. These primitives invent no presentation policy of their
+    // own (e.g. whether Attached is expected); that remains for a future coordinator to decide. ----
+
+    internal bool TryGetXbox360AttachmentState(out USBDeviceAttachmentState state)
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready)
+            { state = default; return false; }
+            if (!_native.GetUSBDeviceAttachmentState(Xbox360DeviceHandle, out state))
+            {
+                MarkUnsafe("Xbox360AttachmentStateQueryFailed");
+                return false;
+            }
+            if (state == USBDeviceAttachmentState.OutcomeUnknown || !Enum.IsDefined(state))
+                MarkUnsafe($"Xbox360AttachmentState{(int)state}");
+            return true;
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal USBDeviceAttachResult AttachXbox360()
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready) return USBDeviceAttachResult.Invalid;
+            var result = _native.AttachUSBDeviceEx(Xbox360DeviceHandle);
+            if (result is USBDeviceAttachResult.UnsafeOutcomeUnknown or USBDeviceAttachResult.Invalid)
+                MarkUnsafe($"Xbox360Attach{result}");
+            return result;
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal USBDeviceDetachResult DetachXbox360()
+    {
+        _serial.Wait();
+        try
+        {
+            if (State != CanonicalViiperRuntimeState.Ready) return USBDeviceDetachResult.Invalid;
+            if (!_native.SetXbox360DeviceState(Xbox360DeviceHandle, default)) return USBDeviceDetachResult.RetryableFailure;
+            var result = _native.DetachUSBDeviceEx(Xbox360DeviceHandle);
+            if (result is USBDeviceDetachResult.UnsafeOutcomeUnknown or USBDeviceDetachResult.Invalid)
+                MarkUnsafe($"Xbox360Detach{result}");
+            return result;
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal bool SetXbox360State(Xbox360DeviceState state) =>
+        State == CanonicalViiperRuntimeState.Ready && _native.SetXbox360DeviceState(Xbox360DeviceHandle, state);
+
     /// <summary>
     /// Staged initialization (work order section 2/26): NewUSBServer -&gt; CreateUSBBus -&gt;
     /// CreateSteamDeckDevice(autoAttach=false) -&gt; GetUSBDeviceIdentity -&gt;
