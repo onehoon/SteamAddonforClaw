@@ -29,13 +29,6 @@
                 <ToggleSwitch x:Name="TestModeToggleSwitch" OffContent="" OnContent="" Toggled="TestModeToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsCard Header="Vibration Test" Description="Test Steam Deck rumble and haptic feedback through the physical MSI Claw motors. Requires Developer Test Mode.">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE1D9;" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <Button Content="Open" Click="OpenVibrationTestButton_Click" />
-            </ctcontrols:SettingsCard>
-
             <Border Padding="18,16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
                 <Grid ColumnSpacing="16">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -51,6 +44,20 @@
                 </Grid>
             </Border>
 
+            <ctcontrols:SettingsCard Header="Vibration Test" Description="Test Steam Deck rumble and haptic feedback through the physical MSI Claw motors. Requires Developer Test Mode.">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE1D9;" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <Button Content="Open" Click="OpenVibrationTestButton_Click" />
+            </ctcontrols:SettingsCard>
+
+            <ctcontrols:SettingsCard Header="Gyro / Sensor Test" Description="Read-only diagnostic for MSI Claw gyroscope and accelerometer discovery and motion capture.">
+                <ctcontrols:SettingsCard.HeaderIcon>
+                    <SymbolIcon Symbol="Rotate" />
+                </ctcontrols:SettingsCard.HeaderIcon>
+                <Button Content="Open" Click="OpenSensorProbeButton_Click" />
+            </ctcontrols:SettingsCard>
+
             <ctcontrols:SettingsCard Header="Logging" Description="Off by default. Info enables runtime diagnostics; Debug is verbose and for developer use only.">
                 <ctcontrols:SettingsCard.HeaderIcon>
                     <SymbolIcon Symbol="List" />
@@ -62,9 +69,6 @@
                 </ComboBox>
             </ctcontrols:SettingsCard>
 
-            <ctcontrols:SettingsCard Header="Gyro / Sensor Test" Description="Read-only diagnostic for MSI Claw gyroscope and accelerometer discovery and motion capture.">
-                <Button Content="Open" Click="OpenSensorProbeButton_Click" />
-            </ctcontrols:SettingsCard>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

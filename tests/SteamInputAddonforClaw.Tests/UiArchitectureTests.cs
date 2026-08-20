@@ -87,6 +87,19 @@ public sealed class UiArchitectureTests
         Assert.Contains("if (_active)", page, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Developer_cards_have_unique_gyro_icon_and_requested_order()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DeveloperPage.xaml"));
+
+        Assert.Equal(1, page.Split("Symbol=\"Rotate\"", StringSplitOptions.None).Length - 1);
+        Assert.True(page.IndexOf("Header=\"Test Mode\"", StringComparison.Ordinal) < page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal));
+        Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
+        Assert.True(page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
+        Assert.True(page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Logging\"", StringComparison.Ordinal));
+    }
+
     private static IReadOnlyList<string> References(string relativeProjectPath)
     {
         var projectPath = Path.Combine(FindRepositoryRoot(), relativeProjectPath.Replace('/', Path.DirectorySeparatorChar));
