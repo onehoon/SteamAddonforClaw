@@ -110,6 +110,56 @@ public sealed record FrontendSteamSnapshot(bool Active, uint AppId, FrontendStea
 public sealed record FrontendSoftwareSnapshot(string Kind, string DisplayName, FrontendSoftwareInstallationStatus Installation, FrontendSoftwareRuntimeStatus Runtime, string Reason);
 public sealed record FrontendPrerequisiteSnapshot(FrontendPrerequisiteStatus HidHideStatus, string HidHideReason, FrontendPrerequisiteStatus UsbIpStatus, string UsbIpReason, FrontendPrerequisiteStatus ViiperStatus, string ViiperReason);
 public sealed record FrontendRoutingSnapshot(FrontendRoutingEligibilityReason EligibilityReason, FrontendRoutingOperationalState OperationalState, bool Available, bool SteamOutputActive, bool NativeDirectInputActive);
+public enum FrontendClawSensorProbeState { Idle, Discovering, Ready, Starting, Countdown, RecordingPhase, Stopping, Completed, Failed }
+public enum FrontendClawSensorProbePhase { Rest, RollLeft, RollRight, PitchUp, PitchDown, YawLeft, YawRight }
+
+public sealed record FrontendClawSensorProbeCandidate(string FriendlyName, string SensorId, string TypeGuid, string CategoryGuid, string Manufacturer, string Model, string PersistentUniqueId, string MinimumReportInterval, string CustomUsage);
+public sealed record FrontendClawSensorProbeDiscovery(IReadOnlyList<FrontendClawSensorProbeCandidate> Sensors, FrontendClawSensorProbeCandidate? Gyroscope, FrontendClawSensorProbeCandidate? Accelerometer, IReadOnlyList<string> Errors, bool IsValid);
+public sealed record FrontendClawSensorProbeAxisSnapshot(double X, double Y, double Z, double Hz, long Count)
+{
+    public static readonly FrontendClawSensorProbeAxisSnapshot Empty = new(0, 0, 0, 0, 0);
+}
+public sealed record FrontendClawSensorProbeStatistics(long SampleCount, long DroppedSampleCount, double DurationMs, double AverageIntervalMs, double MinimumIntervalMs, double MaximumIntervalMs, double EffectiveHz)
+{
+    public static readonly FrontendClawSensorProbeStatistics Empty = new(0, 0, 0, 0, 0, 0, 0);
+}
+
+/// <remarks>A read-only diagnostic session snapshot for the developer-only Claw Sensor Probe
+/// (gyro/accelerometer discovery and phase-by-phase motion capture). <see cref="Available"/> is
+/// gated purely on the MSI Claw device family (see <c>ClawSensorProbeCoordinator.AllowsReadOnlyDiagnostic</c>
+/// on the Runtime side) -- NOT on production hardware-compatibility status, Developer Test Mode, or
+/// any Steam/routing state, so an MSI Claw with Indeterminate/Unsupported model compatibility can
+/// still run this diagnostic.</remarks>
+public sealed record FrontendClawSensorProbeSnapshot(
+    bool Available,
+    FrontendClawSensorProbeState State,
+    FrontendClawSensorProbePhase Phase,
+    int PhaseIndex,
+    int PhaseCount,
+    FrontendClawSensorProbeDiscovery? Discovery,
+    FrontendClawSensorProbeAxisSnapshot Gyro,
+    FrontendClawSensorProbeAxisSnapshot Accel,
+    FrontendClawSensorProbeStatistics? GyroscopeSummary,
+    FrontendClawSensorProbeStatistics? AccelerometerSummary,
+    long DroppedSampleCount,
+    long DroppedGyroscopeCount,
+    long DroppedAccelerometerCount,
+    IReadOnlyList<string> ReaderErrors,
+    string? OutputDirectory,
+    bool HasReport,
+    string? ErrorMessage,
+    string Manufacturer,
+    string Model,
+    string BaseBoard,
+    string ResolvedModel)
+{
+    public static readonly FrontendClawSensorProbeSnapshot Unavailable = new(
+        false, FrontendClawSensorProbeState.Idle, FrontendClawSensorProbePhase.Rest, -1, 0,
+        null, FrontendClawSensorProbeAxisSnapshot.Empty, FrontendClawSensorProbeAxisSnapshot.Empty,
+        null, null, 0, 0, 0, [], null, false, "The Claw Sensor Probe diagnostic is unavailable.",
+        "Unavailable", "Unavailable", "Unavailable", "Unknown / unresolved");
+}
+
 public sealed record FrontendStatusSnapshot(
     FrontendDeviceSnapshot Device,
     FrontendHardwareSnapshot Hardware,
@@ -176,4 +226,29 @@ public interface IAddonFrontendControl
     /// them.</summary>
     Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable));
+
+    // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
+    /// <summary>Opens (or re-opens, if the previous session Completed/Failed) the diagnostic session:
+    /// evaluates eligibility, and if eligible prepares the Runtime-owned coordinator and records
+    /// device identity/hardware compatibility. Idempotent while a session is already open/running.</summary>
+    Task<FrontendClawSensorProbeSnapshot> OpenClawSensorProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
+    /// <summary>Starts sensor discovery and capture for the currently open session.</summary>
+    Task<FrontendClawSensorProbeSnapshot> StartClawSensorProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
+    /// <summary>Returns the current snapshot without mutating anything -- used for UI polling.</summary>
+    Task<FrontendClawSensorProbeSnapshot> CaptureClawSensorProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
+    Task<FrontendClawSensorProbeSnapshot> NextClawSensorProbePhaseAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
+    Task<FrontendClawSensorProbeSnapshot> PreviousClawSensorProbePhaseAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
+    /// <summary>Stops capture, keeping the session open so the final Completed/Failed report stays
+    /// visible until the page is closed.</summary>
+    Task<FrontendClawSensorProbeSnapshot> StopClawSensorProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
+    /// <summary>Closes the diagnostic session, if one is open: stops any in-progress capture and
+    /// disposes the Runtime-owned coordinator. Call when the page is left, regardless of how.</summary>
+    Task<FrontendClawSensorProbeSnapshot> CloseClawSensorProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
 }

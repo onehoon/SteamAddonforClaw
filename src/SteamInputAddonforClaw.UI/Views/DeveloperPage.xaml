@@ -62,7 +62,9 @@
                 </ComboBox>
             </ctcontrols:SettingsCard>
 
-            <!-- TODO: Re-expose the developer sensor diagnostic through a Runtime-owned diagnostic frontend boundary. -->
+            <ctcontrols:SettingsCard Header="Gyro / Sensor Test" Description="Read-only diagnostic for MSI Claw gyroscope and accelerometer discovery and motion capture.">
+                <Button Content="Open" Click="OpenSensorProbeButton_Click" />
+            </ctcontrols:SettingsCard>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

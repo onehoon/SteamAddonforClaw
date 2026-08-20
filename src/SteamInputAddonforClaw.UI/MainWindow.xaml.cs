@@ -78,6 +78,9 @@ public sealed partial class MainWindow : Window
         DeveloperMenuContent.VibrationTestRequested += (_, _) => ShowPage(_navigationState.OpenVibrationTest());
         VibrationTestContent.Initialize(_frontend, _bootstrap);
         VibrationTestContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
+        DeveloperMenuContent.SensorProbeRequested += (_, _) => ShowPage(_navigationState.OpenClawSensorProbe());
+        ClawSensorProbeContent.Initialize(_frontend);
+        ClawSensorProbeContent.BackRequested += (_, _) => ShowPage(_navigationState.ReturnToDeveloperMenu());
         _frontend.StateInvalidated += OnFrontendStateInvalidated;
         StatusContent.RefreshRequested += (_, _) => _ = RefreshSystemStatusAsync();
         MainNavigationView.SelectedItem = StatusNavigationItem;
@@ -92,6 +95,12 @@ public sealed partial class MainWindow : Window
     {
         await VibrationTestContent.DeactivateAsync().ConfigureAwait(true);
         await _frontend.CloseVibrationTestSessionAsync().ConfigureAwait(true);
+    }
+
+    internal async Task CloseClawSensorProbeForUiShutdownAsync()
+    {
+        await ClawSensorProbeContent.DeactivateAsync().ConfigureAwait(true);
+        await _frontend.CloseClawSensorProbeAsync().ConfigureAwait(true);
     }
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
@@ -184,6 +193,7 @@ public sealed partial class MainWindow : Window
     {
         var wasVibrationTest = VibrationTestContent.Visibility == Visibility.Visible;
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
+        var wasClawSensorProbe = ClawSensorProbeContent.Visibility == Visibility.Visible;
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
         ProfileContent.Visibility = page == MainNavigationPage.Profile ? Visibility.Visible : Visibility.Collapsed;
@@ -193,6 +203,7 @@ public sealed partial class MainWindow : Window
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
         CenterMButtonContent.Visibility = page == MainNavigationPage.CenterMButton ? Visibility.Visible : Visibility.Collapsed;
         VibrationTestContent.Visibility = page == MainNavigationPage.VibrationTest ? Visibility.Visible : Visibility.Collapsed;
+        ClawSensorProbeContent.Visibility = page == MainNavigationPage.ClawSensorProbe ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
         // other route), not just the page's own Back button -- the session must close no matter how
@@ -201,6 +212,8 @@ public sealed partial class MainWindow : Window
         else if (wasVibrationTest) VibrationTestContent.Deactivate();
         if (page == MainNavigationPage.Device) DeviceContent.Activate();
         else if (wasDevice) DeviceContent.Deactivate();
+        if (page == MainNavigationPage.ClawSensorProbe) ClawSensorProbeContent.Activate();
+        else if (wasClawSensorProbe) ClawSensorProbeContent.Deactivate();
     }
 
     private async Task RefreshSystemStatusAsync()
