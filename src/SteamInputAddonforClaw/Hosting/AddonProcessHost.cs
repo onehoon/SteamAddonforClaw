@@ -44,6 +44,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly QamHostProcessController _qamHostController;
     private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
+    private readonly GameBarForegroundPresentationDelivery _gameBarDelivery;
 
     // Device/Profile Runtime -- a sibling capability of the routing/OEM1 composition above, not a
     // member of it (work order PR276 sections 0/2/12): CPU Boost must remain fully usable even with
@@ -60,6 +61,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
         _gameBarForegroundWatcher = new GameBarForegroundWatcher();
+        _gameBarDelivery = new GameBarForegroundPresentationDelivery(
+            foreground => _runtimeHost?.HandleGameBarForegroundChangedAsync(foreground) ?? Task.FromResult(false));
     }
 
     internal bool IsTrayAvailable => _systemTrayIcon?.IsAvailable == true;
@@ -126,7 +129,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startupComposition.StockCenterMBaseline,
             startupResult.RecoverySafe,
             startupResult.HardwareSupported,
-            _qamHostController.OnBigPictureStateChanged);
+            _qamHostController.OnBigPictureStateChanged,
+            RequestGameBarPresentationReconcile);
 
         // Review fix (BLOCKER): the OEM1 coordinator and the routing guard share the SAME underlying
         // helper ownership, but only their exact-handle Start() call itself serializes between them.
@@ -166,7 +170,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
 
-    internal void StartRuntimeEventWatchers() => _gameBarForegroundWatcher.Start();
+    internal void StartRuntimeEventWatchers()
+    {
+        _gameBarForegroundWatcher.StateChanged += OnGameBarForegroundChanged;
+        _gameBarForegroundWatcher.Start();
+    }
 
     internal Task ReconcileAsync(CancellationToken cancellationToken = default) => GetRuntimeHost().ReconcileAsync(cancellationToken);
 
@@ -216,6 +224,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _processShutdownStarted, 1) != 0) return;
         _frontendLauncher.StopAcceptingRequests();
+        _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
+        _gameBarDelivery.StopAccepting();
         _gameBarForegroundWatcher.Dispose();
         _qamHostController.BeginShutdown();
         _startupCancellationTokenSource.Cancel();
@@ -227,6 +237,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
         BeginProcessShutdown();
+        await _gameBarDelivery.DrainAsync().ConfigureAwait(false);
         if (_frontendServer is not null)
         {
             await _frontendServer.DisposeAsync().ConfigureAwait(false);
@@ -254,5 +265,85 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.BeginProcessShutdown();
         _runtimeHost?.PrepareForShutdown();
+    }
+
+    private void OnGameBarForegroundChanged(object? sender, EventArgs args) =>
+        _gameBarDelivery.Request(_gameBarForegroundWatcher.IsForeground);
+
+    private void RequestGameBarPresentationReconcile() =>
+        _gameBarDelivery.Request(_gameBarForegroundWatcher.IsForeground);
+}
+
+internal sealed class GameBarForegroundPresentationDelivery
+{
+    private readonly Lock _sync = new();
+    private readonly Func<bool, Task<bool>> _apply;
+    private bool _desired;
+    private bool _running;
+    private bool _accepting = true;
+    private Task? _dispatch;
+
+    internal GameBarForegroundPresentationDelivery(Func<bool, Task<bool>> apply) =>
+        _apply = apply ?? throw new ArgumentNullException(nameof(apply));
+
+    internal void Request(bool foreground)
+    {
+        lock (_sync)
+        {
+            if (!_accepting) return;
+            _desired = foreground;
+            if (_running) return;
+            _running = true;
+            _dispatch = Task.Run(DispatchAsync);
+        }
+    }
+
+    internal void StopAccepting()
+    {
+        lock (_sync) _accepting = false;
+    }
+
+    internal async Task DrainAsync()
+    {
+        Task? dispatch;
+        lock (_sync) dispatch = _dispatch;
+        if (dispatch is not null) await dispatch.ConfigureAwait(false);
+    }
+
+    private async Task DispatchAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                bool desired;
+                lock (_sync)
+                {
+                    if (!_accepting) return;
+                    desired = _desired;
+                }
+
+                AppLog.Debug("GameBar", "Game Bar presentation delivery started.", ("Foreground", desired));
+                await _apply(desired).ConfigureAwait(false);
+
+                lock (_sync)
+                {
+                    if (!_accepting || _desired == desired)
+                    {
+                        _running = false;
+                        return;
+                    }
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("GameBar", "Game Bar presentation delivery was contained.", exception);
+            lock (_sync) _running = false;
+        }
+        finally
+        {
+            AppLog.Debug("GameBar", "Game Bar presentation delivery stopped.");
+        }
     }
 }

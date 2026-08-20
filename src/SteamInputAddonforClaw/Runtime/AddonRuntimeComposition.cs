@@ -38,7 +38,8 @@ internal static class AddonRuntimeCompositionFactory
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
         bool hardwareSupported,
-        Action<bool>? bigPictureStateChanged = null)
+        Action<bool>? bigPictureStateChanged = null,
+        Action? routingReconcileCompleted = null)
     {
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
@@ -93,7 +94,8 @@ internal static class AddonRuntimeCompositionFactory
             recoverySafetyState,
             recoverySafe,
             () => recoveryManager.HasIncompleteRecovery,
-            establishBaseline);
+            establishBaseline,
+            routingReconcileCompleted: routingReconcileCompleted);
 
         if (bigPictureStateChanged is not null && steamRuntime.IsBigPictureActive)
             bigPictureStateChanged(true);

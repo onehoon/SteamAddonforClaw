@@ -473,6 +473,22 @@ delivery/coalescing, routing-completion foreground re-evaluation, and shutdown
 watcher/event drain remain NOT implemented. PnP/XInput readiness and hardware
 validation are NOT claimed. SD7 remains PLANNED.
 
+Game Bar production wiring step: `AddonProcessHost` now subscribes the existing
+`GameBarForegroundWatcher` to a serialized latest-state delivery path that
+invokes `AddonRoutingRuntime.HandleGameBarForegroundChangedAsync`. At most one
+delivery runs at a time; rapid foreground changes converge on the newest
+desired state. Normal routing completion and fresh resume reconciliation
+request a current `IsForeground` re-evaluation, covering startup when Game Bar
+is already foreground and foreground changes that occur during an outer
+routing transition. Shutdown stops new delivery, unsubscribes and disposes the
+watcher, then drains only the dispatch already in progress before Runtime
+teardown. Existing `_presentationGate`, `_xbox360Publisher`, routing
+coordinator, and VIIPER typed ownership remain authoritative; no new
+presentation state machine or authority was added. Resume uses current-world
+foreground state and does not restore remembered X360 presentation. X360
+PnP/XInput readiness and hardware validation are not claimed. SD7 remains
+PLANNED.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains
