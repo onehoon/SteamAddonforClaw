@@ -290,9 +290,9 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     /// <summary>
     /// Deck presentation pause: stop the existing live Deck publisher, then -- only once the publisher
     /// is proven fully stopped -- write one neutral report while the Deck stays attached and the
-    /// canonical session/route stay active. No Game Bar consumer, no Xbox360 behavior, and no
-    /// production caller exist yet (see docs/VIIPER_MIGRATION_TODO.md SD7); this is presentation-layer
-    /// foundation only, serialized against the stage's existing rollback/mutation boundary via
+    /// canonical session/route stay active. The production Game Bar presentation path uses this
+    /// pause primitive; it owns Deck presentation state only and does not attach or publish Xbox360.
+    /// It is serialized against the stage's existing rollback/mutation boundary via
     /// <see cref="_serial"/>. Ordering is safety-critical: neutral must never be written before the
     /// publisher is proven stopped, since a still-running publisher's next tick would immediately
     /// overwrite neutral with live state.
@@ -346,7 +346,8 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     /// <summary>
     /// Deck presentation resume: restart the same already-created Deck publisher against the same
     /// active canonical session/route -- no reattachment, no recreation, no PnP/HidHide/recovery
-    /// re-run. See <see cref="PausePresentationAsync"/> remarks; still no production caller.
+    /// re-run. The production Game Bar presentation path uses this primitive only after a
+    /// successful X360 retirement.
     /// </summary>
     internal async Task<bool> ResumePresentationAsync(CancellationToken cancellationToken = default)
     {

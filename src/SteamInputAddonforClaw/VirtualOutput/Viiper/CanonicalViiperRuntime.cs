@@ -133,10 +133,9 @@ internal sealed class CanonicalViiperRuntime
     internal bool SetDeckOutputCallback(SteamDeckOutputCallback? callback) =>
         State == CanonicalViiperRuntimeState.Ready && _native.SetSteamDeckOutputCallback(DeckDeviceHandle, callback);
 
-    // ---- Xbox360 route primitives (PR2c): equivalents of the Deck primitives above, over the
-    // already-persistent detached-ready Xbox360 handle. No production caller exists yet -- see
-    // docs/VIIPER_MIGRATION_TODO.md SD7. These primitives invent no presentation policy of their
-    // own (e.g. whether Attached is expected); that remains for a future coordinator to decide. ----
+    // ---- Xbox360 route primitives over the already-persistent detached-ready handle. The current
+    // Game Bar presentation path consumes these primitives. They invent no presentation policy of
+    // their own (e.g. whether Attached is expected); AddonRoutingRuntime owns that policy. ----
 
     internal bool TryGetXbox360AttachmentState(out USBDeviceAttachmentState state)
     {

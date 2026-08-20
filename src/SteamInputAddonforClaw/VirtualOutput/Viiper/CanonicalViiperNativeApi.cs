@@ -48,11 +48,11 @@ internal interface ICanonicalViiperNativeApi
     bool RemoveSteamDeckDevice(nuint deviceHandle);
     SteamDeckDeviceRemoveResult RemoveSteamDeckDeviceEx(nuint deviceHandle);
 
-    // Canonical typed Xbox360 surface. The persistent runtime creates one detached-ready logical
-    // handle, but PR2b does not attach, publish, or bind rumble/Game Bar behavior (see
-    // docs/VIIPER_MIGRATION_TODO.md SD7, still PLANNED). Buttons/D-pad/sticks/triggers only: no
-    // rumble callback is bound in this PR -- see Xbox360DeviceState/Xbox360DeviceStateMapper for
-    // the state this typed API accepts, which already carries no rumble/feedback fields.
+    // Canonical typed Xbox360 surface. The process-lifetime runtime creates one detached-ready
+    // logical handle. The current Game Bar presentation path may classified-attach it and publish
+    // typed Xbox360 state while an eligible outer Steam route is active. This interface binds the
+    // ABI surface only; presentation policy remains in AddonRoutingRuntime. Buttons/D-pad/sticks/
+    // triggers are supported here; no Xbox360 rumble callback is currently bound by the Addon.
     bool CreateXbox360Device(nuint serverHandle, out nuint deviceHandle, uint busId, bool autoAttachLocalhost, ushort idVendor, ushort idProduct, byte xinputSubType);
     bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state);
     bool RemoveXbox360Device(nuint deviceHandle);
@@ -282,14 +282,15 @@ internal sealed class CanonicalViiperNativeApi : ICanonicalViiperNativeApi
         }
     }
 
-    // ---- Canonical typed Xbox360 surface (ABI/foundation only -- see
-    // docs/VIIPER_MIGRATION_TODO.md SD7, still PLANNED). CanonicalViiperRuntime creates one
-    // detached-ready Xbox360 logical handle in production; PR2b does not attach, publish, or
-    // bind rumble/Game Bar behavior.
-    // Ownership is tracked in the shared _deviceOwnership map (see its declaration above) -- no
-    // rumble callback is bound in this PR, so there is nothing Xbox360-specific to root/release
-    // beyond that shared ownership record. RemoveUSBBus/CloseUSBServer already release it via the
-    // existing ReleaseOutputCallbacksLocked path. ----
+    // ---- Canonical typed Xbox360 surface. The process-lifetime runtime creates one
+    // detached-ready logical handle. The current Game Bar presentation path may
+    // classified-attach it and publish typed Xbox360 state while an eligible outer
+    // Steam route is active. This API layer owns only ABI binding/managed callback
+    // rooting; presentation policy remains in AddonRoutingRuntime. Buttons/D-pad/
+    // sticks/triggers are mapped here; no Xbox360 rumble callback is currently bound.
+    // Ownership is tracked in the shared _deviceOwnership map (see its declaration above).
+    // RemoveUSBBus/CloseUSBServer release it through the existing
+    // ReleaseOutputCallbacksLocked path. ----
 
     public bool CreateXbox360Device(
         nuint serverHandle,

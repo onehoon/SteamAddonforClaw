@@ -1,5 +1,12 @@
 # Steam Input Addon for Claw
 
+> [!WARNING]
+> **This project is still under active development. Do not download or install it yet.**
+>
+> The current code is not release-ready. Do not install source archives, CI/Actions
+> artifacts, or development builds. Hardware and lifecycle validation is still in
+> progress. Please wait for an official release.
+
 Steam Input Addon for Claw exposes the built-in MSI Claw controller to Steam
 through a canonical Steam Deck virtual output. The active output identity is
 Steam Deck `VID=0x28DE`, `PID=0x1205`.
@@ -15,11 +22,11 @@ Steam Deck `VID=0x28DE`, `PID=0x1205`.
 | Addon Steam Deck session / mapper / publisher | Implemented |
 | EX hardware basic non-gyro controller input | Validated |
 | Lifecycle and recovery hardware validation | Remaining validation track |
-| Rumble | Production wiring implemented; hardware validation pending |
-| Haptics | Separate feature track |
+| Rumble / haptic feedback | Production two-motor translation/wiring implemented; hardware validation pending |
+| Audio / jingle feedback | Unsupported |
 | Gyro / accelerometer | Separate feature track |
-| Quick Access / OEM1 | Planned |
-| Game Bar / typed Xbox360 route | Planned |
+| Quick Access / OEM1 | Production wiring + configurable mappings implemented; hardware validation pending |
+| Game Bar / typed Xbox360 presentation | Production wiring implemented; hardware validation pending |
 
 ## Product goal
 
@@ -27,12 +34,19 @@ Expose the Claw's native controller to Steam while preserving the device's
 normal Windows behavior outside an active Steam routing session. The Addon
 must acquire only the verified MSI controller collection, establish a safe
 native mode boundary, create one owned Steam Deck virtual device, publish
-normalized input, and restore the live stock state during teardown.
+normalized input, and restore the live stock state during teardown. Its
+process-lifetime VIIPER owner also retains a typed Xbox360 logical handle for
+temporary Game Bar presentation; this is not an additional Steam routing
+target.
 
-The current active virtual output is the Steam Deck device at `28DE:1205`.
-The basic non-gyro controller input path has been validated on MSI Claw EX
-hardware. Lifecycle, recovery, and failure-path evidence remains separate
-from that basic-input result.
+The sole Steam routing target is the Steam Deck device at `28DE:1205`.
+The process-lifetime VIIPER owner also keeps a persistent typed Xbox360 logical
+device. It is a temporary child presentation of an already-active Steam route,
+not a second routing target or fallback: while Game Bar is foreground, Deck
+becomes attached-neutral and the persistent Xbox360 presentation attaches and
+publishes; when Game Bar leaves, Xbox360 stops/detaches and the same Deck
+publisher resumes. X360 PnP/XInput readiness and the remaining lifecycle
+evidence are still hardware-validation tracks.
 
 ## Initial MSI Claw mapping
 
@@ -86,14 +100,14 @@ and D-pad state. Output-specific policy is applied only after normalization.
 Current  Steam Deck 28DE:1205 active runtime
 SD3      lifecycle, recovery, and failure-path hardware validation
 SD4      production readiness review
-SD5      OEM1 / Quick Access completion
+SD5      OEM1 / Quick Access software implemented; hardware validation pending
 SD6      gyro / accelerometer feature track
-SD7      Game Bar / typed Xbox360 route
+SD7      Game Bar / typed Xbox360 software wired; hardware validation pending
 ```
 
-Rumble and haptics are tracked separately from the basic controller-input
-validation. Do not treat one validated feature as validation of the remaining
-hardware or lifecycle surface.
+Rumble and haptic commands are translated through the production two-motor
+feedback path, but hardware validation remains pending. Do not treat one
+validated feature as validation of the remaining hardware or lifecycle surface.
 
 ## Frontend transport foundation
 

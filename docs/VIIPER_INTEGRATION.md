@@ -1,7 +1,8 @@
 # VIIPER Integration Contract
 
 This document defines the current Addon integration with the canonical typed
-VIIPER API. The active Steam virtual-output target is Steam Deck `28DE:1205`.
+VIIPER API. The sole Steam routing target is Steam Deck `28DE:1205`; typed
+Xbox360 is a temporary Game Bar presentation only.
 
 ## Current status
 
@@ -9,11 +10,12 @@ VIIPER API. The active Steam virtual-output target is Steam Deck `28DE:1205`.
 | --- | --- |
 | Canonical embedded API | `lib/viiper` typed ABI |
 | Embedded VIIPER revision | `a6bb749199aa797da690c611d2f18edc5e770c1e` |
-| Active Steam output | Steam Deck `28DE:1205` only |
+| Primary Steam routing target | Steam Deck `28DE:1205` |
+| Temporary Game Bar presentation | Persistent typed Xbox360 logical device |
 | Addon integration | Session, mapper, publisher, identity resolver, safety stage implemented |
 | Hardware status | EX basic non-gyro input validated; lifecycle evidence remains pending |
 | Rumble | Production callback/authority/STOP wiring implemented; hardware validation pending |
-| Haptics | Separate feature track |
+| Rumble / haptic feedback | Production two-motor translation/wiring implemented; hardware validation pending |
 | Gyro / IMU | Separate feature track |
 
 The DLL, generated header, managed P/Invoke definitions, ABI tests, hashes,
@@ -61,7 +63,9 @@ decodes ordinary 0xEB rumble, and gates physical writes through the shared
 feedback authority. Teardown of an armed session revokes and drains feedback,
 sends an explicit physical STOP, clears the callback, and only then performs
 classified Steam Deck attachment detach; final logical removal belongs only to
-runtime teardown. Haptic/audio commands remain unsupported.
+runtime teardown. Steam Deck `0xEA` Haptic and `0x8F` Haptic Pulse are translated
+through the existing two-motor physical feedback path. Audio/jingle and unknown
+output commands remain unsupported; hardware validation remains pending.
 
 ### Automated dependency update PRs
 
@@ -107,14 +111,14 @@ managed ABI binding for all of these now exists in
 bool `AttachUSBDevice` / `DetachUSBDevice` compatibility surface remains
 available, but production Deck routing now uses
 the classified attachment/query surface. The persistent runtime creates one
-detached-ready Xbox360 logical handle, but it is not attached, published, or
-used for Game Bar behavior (see
-`docs/VIIPER_MIGRATION_TODO.md` SD7, still PLANNED). The attachment state
+detached-ready Xbox360 logical handle. While an eligible outer Steam route is
+active, Game Bar foreground presentation may pause the existing Steam Deck
+publisher, keep Deck attached-neutral, classified-attach the persistent
+Xbox360 handle, and start the Xbox360 publisher. Leaving Game Bar retires
+Xbox360 and resumes the same Deck publisher/session. The attachment state
 query is VIIPER ownership evidence only, not Windows PnP, HID, XInput, or
-Steam readiness. Software consumption of the classified/query APIs is
-implemented by PR2b; SD3 remains the lifecycle/recovery hardware-validation
-track. This PR does not claim SD3 implementation or hardware validation. The
-Xbox360 typed API in this PR covers
+Steam readiness; Game Bar/X360 hardware readiness validation remains pending.
+The Xbox360 typed API in this PR covers
 buttons/D-pad/sticks/triggers only -- no rumble callback is bound.
 
 ## 1. Upstream authority
@@ -186,7 +190,12 @@ neutral state, and uses classified `DetachUSBDeviceEx`; it does not remove
 the logical device, bus, or server. PnP disappearance and recovery evidence
 remain authoritative. Final runtime shutdown alone invokes the existing
 staged logical-device, bus, and server teardown. Xbox360 remains detached and
-unpublished with no Game Bar behavior.
+unpublished while Game Bar presentation is inactive. During an active outer
+Steam route, Game Bar foreground stops the Deck publisher, keeps Deck
+attached-neutral, classified-attaches the persistent Xbox360 handle, and
+starts the Xbox360 publisher. Leaving Game Bar stops/neutralizes/detaches
+Xbox360 and resumes the same Deck publisher; Xbox360 is not an independent
+routing target or fallback.
 
 ## 4. Steam Deck typed ABI
 
@@ -205,7 +214,9 @@ RemoveSteamDeckDeviceEx
 
 The Addon uses the generated header and the matching managed definitions from
 the same build. The generic output callback remains available in the native
-API; Addon rumble and haptics adoption is a separate feature track.
+API; Steam Deck `0xEA` Haptic and `0x8F` Haptic Pulse are translated through
+the production two-motor physical feedback path. Audio/jingle and unknown
+output commands remain unsupported; hardware validation remains pending.
 
 ## 5. Steam Deck state mapping
 
@@ -265,7 +276,9 @@ not independently infer application policy.
 
 The EX hardware result currently validates basic non-gyro controller input.
 It does not claim lifecycle, recovery, suspend/resume, teardown, rumble,
-haptics, gyro, or IMU support. Those are separate evidence requirements.
+haptics, Game Bar/XInput readiness, gyro, or IMU support. Those remain separate
+evidence requirements; haptic translation is implemented in software, but its
+hardware validation remains pending.
 
 ## 10. usbip-win2 compatibility
 

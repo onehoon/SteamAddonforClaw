@@ -1,4 +1,4 @@
-Rumble v1 planning status
+Rumble / haptic feedback status
 
 The former four-PR rumble sequence is historical planning context and is
 superseded by the current three-PR plan wherever they differ.
@@ -15,7 +15,7 @@ SmallMotor. Source decoding and physical sinks remain separate, with one
 feedback authority controlling accepted generations. PR2 represents the MSI
 command as an 11-byte semantic packet, then zero-pads it to a serialized
 64-byte HID write behind the optional physical sink capability. Production
-Deck-to-MSI production wiring is implemented. Before callback registration,
+Deck-to-MSI wiring is implemented. Before callback registration,
 the physical sink performs an explicit STOP preflight through endpoint
 resolution, retained-handle open, and the physical 64-byte write path. If that
 optional preflight is unavailable, Steam Deck input routing continues without
@@ -23,8 +23,9 @@ feedback; only an actually armed feedback session requires final STOP and
 callback-clear teardown. Hardware validation remains pending and no specific
 model success is claimed.
 
-Steam Haptic 0xEA and Haptic Pulse 0x8F now use the existing two-motor physical
-sink with HHC-compatible amplitude mapping and stale-safe pulse STOP ownership.
-Audio/jingle commands and unknown output commands remain unsupported in Rumble
-v1. Gyro/IMU remain separate. The
+Steam Deck 0xEB rumble is production wired. Steam Haptic 0xEA and Haptic Pulse
+0x8F use the existing two-motor physical sink with HHC-compatible amplitude
+mapping and stale-safe pulse STOP ownership. Audio/jingle commands and unknown
+output commands remain unsupported. Gyro/IMU remain separate. Hardware
+validation remains pending. The
 VIIPER native ABI, generated header, DLL, and pinned dependency are unchanged.
