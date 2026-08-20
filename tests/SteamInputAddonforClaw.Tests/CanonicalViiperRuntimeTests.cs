@@ -49,6 +49,13 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.False(native.Xbox360AutoAttach);
         Assert.DoesNotContain("AttachUSBDevice", native.Calls);
         Assert.DoesNotContain("AttachUSBDeviceEx", native.Calls);
+
+        // Minor fix: the Addon does not invent an Xbox360 identity -- it forwards zero
+        // VID/PID/subtype so VIIPER supplies its own canonical default (045E:028E, subtype 1),
+        // exactly like the existing Deck path already does.
+        Assert.Equal((ushort)0, native.Xbox360CreateVendorId);
+        Assert.Equal((ushort)0, native.Xbox360CreateProductId);
+        Assert.Equal((byte)0, native.Xbox360CreateXInputSubType);
     }
 
     [Fact]
@@ -100,7 +107,7 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
-    public void Deck_initial_attachment_state_not_detached_removes_the_deck_then_bus_and_server()
+    public void Deck_initial_attachment_state_attached_neutral_writes_detaches_then_removes_deck_then_bus_and_server()
     {
         var native = new FakeNative { DeckInitialAttachmentState = USBDeviceAttachmentState.Attached };
 
@@ -110,8 +117,44 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(
         [
             "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
-            "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
+            "SetSteamDeckDeviceState", "DetachUSBDeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
         ], native.Calls);
+    }
+
+    [Fact]
+    public void Deck_initial_attachment_state_outcome_unknown_stops_with_no_destructive_calls_and_retains_owner()
+    {
+        var native = new FakeNative { DeckInitialAttachmentState = USBDeviceAttachmentState.OutcomeUnknown };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime!.State);
+        Assert.Equal(
+        [
+            "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState"
+        ], native.Calls);
+        Assert.DoesNotContain("SetSteamDeckDeviceState", native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+    }
+
+    [Fact]
+    public void Deck_attachment_state_query_failure_stops_with_no_destructive_calls_and_retains_owner()
+    {
+        var native = new FakeNative { DeckAttachmentStateQuerySucceeds = false };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime!.State);
+        Assert.DoesNotContain("SetSteamDeckDeviceState", native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
     }
 
     [Fact]
@@ -145,9 +188,31 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
-    public void Xbox360_initial_attachment_state_not_detached_removes_xbox360_then_deck_then_bus_and_server()
+    public void Xbox360_initial_attachment_state_outcome_unknown_stops_with_no_destructive_calls_and_retains_owner()
     {
         var native = new FakeNative { Xbox360InitialAttachmentState = USBDeviceAttachmentState.OutcomeUnknown };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime!.State);
+        Assert.Equal(
+        [
+            "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
+            "CreateXbox360Device", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState"
+        ], native.Calls);
+        Assert.DoesNotContain("SetXbox360DeviceState", native.Calls);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+    }
+
+    [Fact]
+    public void Xbox360_initial_attachment_state_attached_neutral_writes_detaches_then_removes_xbox360_then_deck_then_bus_and_server()
+    {
+        var native = new FakeNative { Xbox360InitialAttachmentState = USBDeviceAttachmentState.Attached };
 
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
 
@@ -156,8 +221,24 @@ public sealed class CanonicalViiperRuntimeTests
         [
             "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
             "CreateXbox360Device", "GetUSBDeviceIdentity", "GetUSBDeviceAttachmentState",
+            "SetXbox360DeviceState", "DetachUSBDeviceEx",
             "RemoveXbox360DeviceEx", "RemoveSteamDeckDeviceEx", "RemoveUSBBus", "CloseUSBServer"
         ], native.Calls);
+    }
+
+    [Fact]
+    public void Xbox360_attachment_state_query_failure_stops_with_no_destructive_calls_and_retains_owner()
+    {
+        var native = new FakeNative { Xbox360AttachmentStateQuerySucceeds = false };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime!.State);
+        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
     }
 
     [Fact]
@@ -171,7 +252,9 @@ public sealed class CanonicalViiperRuntimeTests
 
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
 
-        Assert.Null(runtime);
+        // Native ownership is retained, not discarded, when unwind cannot be proven clean.
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime!.State);
         Assert.Equal(
         [
             "NewUSBServer", "CreateUSBBus", "CreateSteamDeckDevice", "GetUSBDeviceIdentity", "RemoveSteamDeckDeviceEx"
@@ -179,6 +262,100 @@ public sealed class CanonicalViiperRuntimeTests
         // No destructive cleanup continues past an unsafe/unknown removal result.
         Assert.DoesNotContain("RemoveUSBBus", native.Calls);
         Assert.DoesNotContain("CloseUSBServer", native.Calls);
+    }
+
+    [Fact]
+    public async Task Deck_identity_failure_with_invalid_deck_removal_marks_unsafe_and_never_retries()
+    {
+        var native = new FakeNative
+        {
+            DeckIdentityBusId = 999,
+            RemoveDeckResults = new Queue<SteamDeckDeviceRemoveResult>([SteamDeckDeviceRemoveResult.Invalid])
+        };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime!.State);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+
+        // A poisoned owner refuses to act again -- no further RemoveSteamDeckDeviceEx call.
+        Assert.False(await runtime.TeardownAsync());
+        Assert.Equal(1, native.Calls.Count(c => c == "RemoveSteamDeckDeviceEx"));
+    }
+
+    [Fact]
+    public async Task Deck_identity_failure_with_retryable_deck_removal_retains_owner_then_succeeds_on_retry()
+    {
+        var native = new FakeNative
+        {
+            DeckIdentityBusId = 999,
+            RemoveDeckResults = new Queue<SteamDeckDeviceRemoveResult>(
+                [SteamDeckDeviceRemoveResult.RetryableFailure, SteamDeckDeviceRemoveResult.Success])
+        };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime!.State);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.DeckRemove, runtime.TeardownPhase);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+
+        var closed = await runtime.TeardownAsync();
+
+        Assert.True(closed);
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
+        Assert.Equal(2, native.Calls.Count(c => c == "RemoveSteamDeckDeviceEx"));
+        Assert.Equal(1, native.Calls.Count(c => c == "RemoveUSBBus"));
+        Assert.Equal(1, native.Calls.Count(c => c == "CloseUSBServer"));
+    }
+
+    [Fact]
+    public async Task CreateSteamDeckDevice_failure_with_retryable_bus_removal_retains_owner_then_succeeds_on_retry()
+    {
+        var native = new FakeNative
+        {
+            CreateDeckResult = false,
+            RemoveBusResults = new Queue<bool>([false, true])
+        };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime!.State);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.BusRemoval, runtime.TeardownPhase);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+
+        var closed = await runtime.TeardownAsync();
+
+        Assert.True(closed);
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
+        Assert.Equal(2, native.Calls.Count(c => c == "RemoveUSBBus"));
+        Assert.Equal(1, native.Calls.Count(c => c == "CloseUSBServer"));
+    }
+
+    [Fact]
+    public async Task CreateUSBBus_failure_with_retryable_server_close_retains_owner_then_succeeds_on_retry()
+    {
+        var native = new FakeNative
+        {
+            CreateBusResult = false,
+            CloseServerResults = new Queue<bool>([false, true])
+        };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime!.State);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.ServerClose, runtime.TeardownPhase);
+
+        var closed = await runtime.TeardownAsync();
+
+        Assert.True(closed);
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
+        Assert.Equal(2, native.Calls.Count(c => c == "CloseUSBServer"));
     }
 
     [Fact]
@@ -196,6 +373,22 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(USBDeviceAttachResult.Invalid, runtime.AttachDeck());
         var beforeCount = native.Calls.Count(c => c == "AttachUSBDeviceEx");
         Assert.Equal(1, beforeCount);
+    }
+
+    [Fact]
+    public void AttachDeck_marks_runtime_unsafe_on_invalid()
+    {
+        var native = new FakeNative { AttachDeckResult = USBDeviceAttachResult.Invalid };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+
+        var result = runtime.AttachDeck();
+
+        Assert.Equal(USBDeviceAttachResult.Invalid, result);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
+
+        // A poisoned owner refuses to act again -- no retry of the same mutation.
+        Assert.Equal(USBDeviceAttachResult.Invalid, runtime.AttachDeck());
+        Assert.Equal(1, native.Calls.Count(c => c == "AttachUSBDeviceEx"));
     }
 
     // ---- Final teardown (work order sections 19-21, test section 32) ----
@@ -293,6 +486,157 @@ public sealed class CanonicalViiperRuntimeTests
         Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
         Assert.Equal(2, native.Calls.Count(c => c == "RemoveSteamDeckDeviceEx"));
         Assert.Equal(1, native.Calls.Count(c => c == "RemoveXbox360DeviceEx"));
+    }
+
+    [Fact]
+    public async Task TeardownAsync_deck_remove_invalid_marks_unsafe_and_never_retries()
+    {
+        var native = new FakeNative
+        {
+            RemoveDeckResults = new Queue<SteamDeckDeviceRemoveResult>([SteamDeckDeviceRemoveResult.Invalid])
+        };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        native.Calls.Clear();
+
+        var completed = await runtime.TeardownAsync();
+
+        Assert.False(completed);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
+        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+
+        Assert.False(await runtime.TeardownAsync());
+        Assert.Equal(1, native.Calls.Count(c => c == "RemoveSteamDeckDeviceEx"));
+    }
+
+    [Fact]
+    public async Task TeardownAsync_xbox360_remove_invalid_marks_unsafe_and_never_retries()
+    {
+        var native = new FakeNative
+        {
+            RemoveXbox360Results = new Queue<Xbox360DeviceRemoveResult>([Xbox360DeviceRemoveResult.Invalid])
+        };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        native.Calls.Clear();
+
+        var completed = await runtime.TeardownAsync();
+
+        Assert.False(completed);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+
+        Assert.False(await runtime.TeardownAsync());
+        Assert.Equal(1, native.Calls.Count(c => c == "RemoveXbox360DeviceEx"));
+    }
+
+    [Fact]
+    public async Task TeardownAsync_deck_detach_invalid_marks_unsafe_and_never_retries()
+    {
+        var native = new FakeNative
+        {
+            DeckAttachmentStateDuringTeardown = USBDeviceAttachmentState.Attached,
+            DeckDetachResults = new Queue<USBDeviceDetachResult>([USBDeviceDetachResult.Invalid])
+        };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        native.Calls.Clear();
+
+        var completed = await runtime.TeardownAsync();
+
+        Assert.False(completed);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+
+        Assert.False(await runtime.TeardownAsync());
+        Assert.Equal(1, native.Calls.Count(c => c == "DetachUSBDeviceEx"));
+    }
+
+    [Fact]
+    public async Task TeardownAsync_xbox360_detach_invalid_marks_unsafe_and_never_retries()
+    {
+        var native = new FakeNative
+        {
+            Xbox360AttachmentStateDuringTeardown = USBDeviceAttachmentState.Attached,
+            Xbox360DetachResults = new Queue<USBDeviceDetachResult>([USBDeviceDetachResult.Invalid])
+        };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        native.Calls.Clear();
+
+        var completed = await runtime.TeardownAsync();
+
+        Assert.False(completed);
+        Assert.Equal(CanonicalViiperRuntimeState.Unsafe, runtime.State);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+
+        Assert.False(await runtime.TeardownAsync());
+        Assert.Equal(1, native.Calls.Count(c => c == "DetachUSBDeviceEx"));
+    }
+
+    [Fact]
+    public async Task TeardownAsync_deck_neutral_write_failure_stops_before_detach_or_removal_then_succeeds_on_retry()
+    {
+        var native = new FakeNative
+        {
+            DeckAttachmentStateDuringTeardown = USBDeviceAttachmentState.Attached,
+            SetDeckStateResults = new Queue<bool>([false, true])
+        };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        native.Calls.Clear();
+
+        var completed = await runtime.TeardownAsync();
+
+        Assert.False(completed);
+        Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime.State);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.DeckDetach, runtime.TeardownPhase);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+
+        var retried = await runtime.TeardownAsync();
+
+        Assert.True(retried);
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
+        Assert.Equal(2, native.Calls.Count(c => c == "SetSteamDeckDeviceState"));
+        Assert.Equal(1, native.Calls.Count(c => c == "DetachUSBDeviceEx"));
+    }
+
+    [Fact]
+    public async Task TeardownAsync_xbox360_neutral_write_failure_stops_before_detach_or_removal_then_succeeds_on_retry()
+    {
+        var native = new FakeNative
+        {
+            Xbox360AttachmentStateDuringTeardown = USBDeviceAttachmentState.Attached,
+            SetXbox360StateResults = new Queue<bool>([false, true])
+        };
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        native.Calls.Clear();
+
+        var completed = await runtime.TeardownAsync();
+
+        Assert.False(completed);
+        Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime.State);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.Xbox360Detach, runtime.TeardownPhase);
+        Assert.DoesNotContain("DetachUSBDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveSteamDeckDeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveXbox360DeviceEx", native.Calls);
+        Assert.DoesNotContain("RemoveUSBBus", native.Calls);
+        Assert.DoesNotContain("CloseUSBServer", native.Calls);
+
+        var retried = await runtime.TeardownAsync();
+
+        Assert.True(retried);
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
+        Assert.Equal(2, native.Calls.Count(c => c == "SetXbox360DeviceState"));
+        Assert.Equal(1, native.Calls.Count(c => c == "DetachUSBDeviceEx"));
     }
 
     [Fact]
@@ -419,13 +763,22 @@ public sealed class CanonicalViiperRuntimeTests
         internal USBDeviceAttachmentState Xbox360InitialAttachmentState { get; init; } = USBDeviceAttachmentState.Detached;
         internal USBDeviceAttachmentState DeckAttachmentStateDuringTeardown { get; init; } = USBDeviceAttachmentState.Detached;
         internal USBDeviceAttachmentState Xbox360AttachmentStateDuringTeardown { get; init; } = USBDeviceAttachmentState.Detached;
+        internal bool DeckAttachmentStateQuerySucceeds { get; init; } = true;
+        internal bool Xbox360AttachmentStateQuerySucceeds { get; init; } = true;
         internal USBDeviceAttachResult AttachDeckResult { get; init; } = USBDeviceAttachResult.Success;
         internal Queue<SteamDeckDeviceRemoveResult> RemoveDeckResults { get; init; } = new([SteamDeckDeviceRemoveResult.Success]);
         internal Queue<Xbox360DeviceRemoveResult> RemoveXbox360Results { get; init; } = new([Xbox360DeviceRemoveResult.Success]);
+        internal Queue<USBDeviceDetachResult> DeckDetachResults { get; init; } = new([USBDeviceDetachResult.Success]);
+        internal Queue<USBDeviceDetachResult> Xbox360DetachResults { get; init; } = new([USBDeviceDetachResult.Success]);
+        internal Queue<bool> SetDeckStateResults { get; init; } = new([true]);
+        internal Queue<bool> SetXbox360StateResults { get; init; } = new([true]);
         internal Queue<bool> RemoveBusResults { get; init; } = new([true]);
         internal Queue<bool> CloseServerResults { get; init; } = new([true]);
         internal bool DeckAutoAttach { get; private set; }
         internal bool Xbox360AutoAttach { get; private set; }
+        internal ushort? Xbox360CreateVendorId { get; private set; }
+        internal ushort? Xbox360CreateProductId { get; private set; }
+        internal byte? Xbox360CreateXInputSubType { get; private set; }
 
         private int _attachmentStateQueries;
 
@@ -457,7 +810,12 @@ public sealed class CanonicalViiperRuntimeTests
 
         public USBDeviceAttachResult AttachUSBDeviceEx(nuint deviceHandle) { Calls.Add("AttachUSBDeviceEx"); return AttachDeckResult; }
 
-        public USBDeviceDetachResult DetachUSBDeviceEx(nuint deviceHandle) { Calls.Add("DetachUSBDeviceEx"); return USBDeviceDetachResult.Success; }
+        public USBDeviceDetachResult DetachUSBDeviceEx(nuint deviceHandle)
+        {
+            Calls.Add("DetachUSBDeviceEx");
+            var queue = deviceHandle == 20 ? DeckDetachResults : Xbox360DetachResults;
+            return queue.Count == 0 ? USBDeviceDetachResult.Success : queue.Dequeue();
+        }
 
         public bool GetUSBDeviceAttachmentState(nuint deviceHandle, out USBDeviceAttachmentState state)
         {
@@ -469,7 +827,7 @@ public sealed class CanonicalViiperRuntimeTests
             if (duringInit)
             {
                 state = deviceHandle == 20 ? DeckInitialAttachmentState : Xbox360InitialAttachmentState;
-                return true;
+                return deviceHandle == 20 ? DeckAttachmentStateQuerySucceeds : Xbox360AttachmentStateQuerySucceeds;
             }
             state = deviceHandle == 20 ? DeckAttachmentStateDuringTeardown : Xbox360AttachmentStateDuringTeardown;
             return true;
@@ -483,7 +841,11 @@ public sealed class CanonicalViiperRuntimeTests
             return CreateDeckResult;
         }
 
-        public bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state) { Calls.Add("SetSteamDeckDeviceState"); return true; }
+        public bool SetSteamDeckDeviceState(nuint deviceHandle, SteamDeckDeviceState state)
+        {
+            Calls.Add("SetSteamDeckDeviceState");
+            return SetDeckStateResults.Count == 0 || SetDeckStateResults.Dequeue();
+        }
         public bool SetSteamDeckOutputCallback(nuint deviceHandle, SteamDeckOutputCallback? callback) { Calls.Add("SetSteamDeckOutputCallback"); return true; }
         public bool RemoveSteamDeckDevice(nuint deviceHandle) { Calls.Add("RemoveSteamDeckDevice"); return true; }
 
@@ -498,10 +860,17 @@ public sealed class CanonicalViiperRuntimeTests
             Calls.Add("CreateXbox360Device");
             deviceHandle = 30;
             Xbox360AutoAttach = autoAttachLocalhost;
+            Xbox360CreateVendorId = idVendor;
+            Xbox360CreateProductId = idProduct;
+            Xbox360CreateXInputSubType = xinputSubType;
             return CreateXbox360Result;
         }
 
-        public bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state) { Calls.Add("SetXbox360DeviceState"); return true; }
+        public bool SetXbox360DeviceState(nuint deviceHandle, Xbox360DeviceState state)
+        {
+            Calls.Add("SetXbox360DeviceState");
+            return SetXbox360StateResults.Count == 0 || SetXbox360StateResults.Dequeue();
+        }
         public bool RemoveXbox360Device(nuint deviceHandle) { Calls.Add("RemoveXbox360Device"); return true; }
 
         public Xbox360DeviceRemoveResult RemoveXbox360DeviceEx(nuint deviceHandle)
