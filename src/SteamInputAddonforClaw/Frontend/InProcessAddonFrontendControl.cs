@@ -136,7 +136,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         // Accepted (authority/sequence) and physically-successful are different questions: a real MSI
         // HID write failure must be visible here even when the write was accepted, so PhysicalStatus/
         // PhysicalReason are logged separately from Succeeded rather than folded into one boolean.
-        WriteVibrationSessionIfCurrent(session, $"Result Command={command} Succeeded={outcome.Succeeded} PhysicalStatus={outcome.CommandResult?.Status} PhysicalReason={outcome.CommandResult?.Reason} StopPhysicalStatus={outcome.StopResult?.Status} StopPhysicalReason={outcome.StopResult?.Reason}");
+        WriteVibrationSessionIfCurrent(session, $"Result Command={command} Succeeded={outcome.Succeeded} {DecodeFields(outcome.Decode)} PhysicalStatus={outcome.CommandResult?.Status} PhysicalReason={outcome.CommandResult?.Reason} StopPhysicalStatus={outcome.StopResult?.Status} StopPhysicalReason={outcome.StopResult?.Reason}");
 
         var (succeeded, reason) = MapVibrationTestOutcome(outcome);
         return new FrontendVibrationTestResult(succeeded, reason, session.FilePath);
@@ -188,8 +188,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
         if (session is null) return new FrontendVibrationTestResult(true, "NoSessionActive", null);
 
-        _runtime?.CancelDeveloperVibrationTest();
-        session.Write("SessionClosed CancelledPendingDeveloperStop=True BestEffortStopIssued=True");
+        var stop = _runtime?.CancelDeveloperVibrationTest();
+        session.Write($"SessionClosed CancelledPendingDeveloperStop=True BestEffortStopRequested=True PhysicalStatus={stop?.Status} PhysicalReason={stop?.Reason}");
         var path = session.FilePath;
         await session.DisposeAsync().ConfigureAwait(false);
         return new FrontendVibrationTestResult(true, "SessionClosed", path);
@@ -215,6 +215,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         FrontendVibrationTestCommand.HapticPulse => "0x8F",
         FrontendVibrationTestCommand.Stop => "0xEB(zero)",
         _ => "Unknown"
+    };
+
+    private static string DecodeFields(Feedback.SteamDeckFeedbackDecodeResult? decoded) => decoded switch
+    {
+        { Command: Feedback.SteamDeckFeedbackCommand.Rumble, Rumble: var rumble } => $"Decode=Rumble Large16={rumble.LargeMotor} Small16={rumble.SmallMotor} Large8={rumble.LargeMotor / 257} Small8={rumble.SmallMotor / 257}",
+        { Command: Feedback.SteamDeckFeedbackCommand.Haptic, Intensity: var intensity, Gain: var gain, Strength8: var strength } => $"Decode=Haptic Intensity={intensity} Gain={gain} Strength8={strength}",
+        { Command: Feedback.SteamDeckFeedbackCommand.HapticPulse, PulsePeriod: var period, PulseCount: var count, Gain: var gain, Strength8: var strength, PulseDurationMilliseconds: var duration } => $"Decode=HapticPulse Period={period} Count={count} Gain={gain} Strength8={strength} PulseDurationMs={duration}",
+        _ => "Decode=Unavailable"
     };
 
     public async Task<FrontendPrerequisiteSetupResult> RunPrerequisiteSetupAsync(CancellationToken cancellationToken = default)
@@ -268,7 +276,16 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _ => FrontendPrerequisiteSetupResultKind.Failed
     };
 
-    internal void BeginProcessShutdown() => Interlocked.Exchange(ref _shutdownStarted, 1);
+    internal void BeginProcessShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0) return;
+        Feedback.VibrationTestSessionWriter? session;
+        lock (_vibrationSessionGate) { session = _vibrationSession; _vibrationSession = null; }
+        if (session is null) return;
+        var stop = _runtime?.CancelDeveloperVibrationTest();
+        session.Write($"SessionClosed Reason=RuntimeShutdown CancelledPendingDeveloperStop=True BestEffortStopRequested=True PhysicalStatus={stop?.Status} PhysicalReason={stop?.Reason}");
+        session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
 
     private void ThrowIfShuttingDown()
     {

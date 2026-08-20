@@ -9,7 +9,7 @@ namespace SteamInputAddonforClaw.Feedback;
 /// <see cref="CommandResult"/> and <see cref="StopResult"/> carry the actual physical write status/
 /// reason for diagnostic logging -- acceptance and physical success are different questions, and a
 /// real MSI HID write failure must be visible in the dedicated log even when acceptance succeeded.</summary>
-internal readonly record struct DeveloperVibrationTestOutcome(bool Succeeded, PhysicalRumbleWriteResult? CommandResult, PhysicalRumbleWriteResult? StopResult);
+internal readonly record struct DeveloperVibrationTestOutcome(bool Succeeded, PhysicalRumbleWriteResult? CommandResult, PhysicalRumbleWriteResult? StopResult, SteamDeckFeedbackDecodeResult? Decode = null);
 
 internal sealed class SteamDeckRumbleFeedbackBridge
 {
@@ -83,16 +83,17 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
         try
         {
+            var decoded = SteamDeckRumbleDecoder.Decode(report.Span);
             if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence, out var commandResult))
-                return new(false, commandResult, null);
-            if (!addDeveloperStop) return new(true, commandResult, null);
+                return new(false, commandResult, null, decoded);
+            if (!addDeveloperStop) return new(true, commandResult, null, decoded);
             await Task.Delay(250, linked.Token).ConfigureAwait(false);
             // Write directly against the original sequence instead of routing back through
             // ProcessNormalizedReport (which would call BeginFeedback() again): if real Steam
             // feedback arrived during the 250ms delay it is now the newest sequence, and this
             // stale developer STOP must be a silent no-op rather than stopping that newer feedback.
             var stopAccepted = TryWrite(sequence, TwoMotorRumble.Stopped, out var stopResult);
-            return new(stopAccepted, commandResult, stopResult);
+            return new(stopAccepted, commandResult, stopResult, decoded);
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { return new(false, null, null); }
         finally
@@ -105,7 +106,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     /// <summary>Called when the Vibration Test detail page is left: cancels any pending
     /// developer-owned delayed STOP (so it can no longer fire and stop newer real feedback) and
     /// issues a best-effort production-path zero write to leave the motors physically stopped.</summary>
-    internal void CancelDeveloperTestAndStop()
+    internal PhysicalRumbleWriteResult? CancelDeveloperTestAndStop()
     {
         lock (_gate)
         {
@@ -114,7 +115,8 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             _developerTest = null;
         }
         var stop = new byte[64]; stop[0] = 0xEB; stop[1] = 9;
-        ProcessNormalizedReport(stop, "DeveloperVibrationTestClose");
+        ProcessNormalizedReport(stop, "DeveloperVibrationTestClose", out _, out var physicalResult);
+        return physicalResult;
     }
 
     private void OnNativeOutput(nuint handle, nint data, uint length)
