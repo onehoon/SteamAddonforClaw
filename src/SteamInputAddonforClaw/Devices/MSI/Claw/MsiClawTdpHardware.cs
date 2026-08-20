@@ -26,7 +26,7 @@ internal sealed class MsiClawTdpHardware
     private const int ShiftBlock = 210;
     private const int Pl1Block = 80;
     private const int Pl2Block = 81;
-    private const int ShiftPayloadOffset = 0;
+    private const int ShiftPayloadOffset = 2;
     private readonly IMsiClawTdpTransport _transport;
     private int? _cachedPl1;
     private int? _cachedPl2;
@@ -49,11 +49,20 @@ internal sealed class MsiClawTdpHardware
         }
 
         var currentShift = ap[ShiftPayloadOffset];
-        var desiredShift = EncodeShift(currentShift, policy.ManualCompatibleShiftSelector);
-        if (currentShift != desiredShift && !_transport.TrySetData(ShiftBlock, desiredShift))
+        if ((currentShift & 0x80) == 0)
         {
             InvalidateCachedPowerLimits();
-            return new(false, MsiClawTdpFailureStage.ShiftWrite);
+            return new(false, MsiClawTdpFailureStage.ShiftRead);
+        }
+
+        var desiredShift = EncodeShift(currentShift, policy.ManualCompatibleShiftSelector);
+        if (currentShift != desiredShift)
+        {
+            // A real mismatch proves that an external owner changed hardware after the
+            // cached PL pair was recorded, so the PL cache cannot be trusted.
+            InvalidateCachedPowerLimits();
+            if (!_transport.TrySetData(ShiftBlock, desiredShift))
+                return new(false, MsiClawTdpFailureStage.ShiftWrite);
         }
 
         var pl1Changed = _cachedPl1 != target.Pl1Watts;
@@ -77,8 +86,9 @@ internal sealed class MsiClawTdpHardware
 
     internal static byte EncodeShift(byte current, int selector)
     {
-        var offset = selector switch { 0 => 4, 6 => 6, _ => throw new ArgumentOutOfRangeException(nameof(selector)) };
-        return (byte)((current & 0xC3 | 0xC0) & 0xFC | offset);
+        var mode = selector switch { 0 => 4, 6 => 6, _ => throw new ArgumentOutOfRangeException(nameof(selector)) };
+        // Preserve AP upper state bits, force the active bit, and replace only mode bits.
+        return (byte)((current & 0xC0) | 0x40 | mode);
     }
 
     private MsiClawTdpApplyResult RecoverAfterFailure(MsiClawTdpFailureStage stage, bool floorWritten, TdpPowerPair target)

@@ -26,12 +26,13 @@ public sealed class MsiClawTdpHardwareTests
     [InlineData("msi.claw.cg3em", 35, 8, 6, 0xC6)]
     public void ValidIndependentTargetsUseModelSelectorAndOemSequence(string model, int pl1, int pl2, int selector, int expectedShift)
     {
-        var transport = new FakeTransport { Ap = [0xC0] };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0x80] };
         var result = new MsiClawTdpHardware(transport).Apply(new(model), Pair(pl1, pl2));
 
         Assert.True(result.Succeeded);
         Assert.Equal(new[] { $"GetAp(0)", $"SetData(210,{expectedShift})", "SetData(80,8)", $"SetData(81,{pl2})", $"SetData(80,{pl1})" }, transport.Operations);
-        Assert.Equal(expectedShift, MsiClawTdpHardware.EncodeShift(0xC1, selector));
+        Assert.Equal(expectedShift, MsiClawTdpHardware.EncodeShift(0x80, selector));
+        Assert.Equal(expectedShift, MsiClawTdpHardware.EncodeShift(0xA0, selector));
     }
 
     [Fact]
@@ -57,7 +58,7 @@ public sealed class MsiClawTdpHardwareTests
     [Fact]
     public void AlreadyCorrectShiftSkipsBlock210AndStillAppliesLimits()
     {
-        var transport = new FakeTransport { Ap = [0xC4] };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0xC4] };
         var result = new MsiClawTdpHardware(transport).Apply(A2vm, Pair(20, 21));
 
         Assert.True(result.Succeeded);
@@ -68,7 +69,7 @@ public sealed class MsiClawTdpHardwareTests
     [Fact]
     public void TrustedCacheSkipsLimitsButStillVerifiesShift()
     {
-        var transport = new FakeTransport { Ap = [0xC4] };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0xC4] };
         var hardware = new MsiClawTdpHardware(transport);
         Assert.True(hardware.Apply(A2vm, Pair(20, 21)).Succeeded);
         transport.Operations.Clear();
@@ -80,7 +81,7 @@ public sealed class MsiClawTdpHardwareTests
     [Fact]
     public void Pl1OnlyChangeUsesFloorAndFinalWithoutPl2()
     {
-        var transport = new FakeTransport { Ap = [0xC4] };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0xC4] };
         var hardware = new MsiClawTdpHardware(transport);
         hardware.Apply(A2vm, Pair(20, 21));
         transport.Operations.Clear();
@@ -92,7 +93,7 @@ public sealed class MsiClawTdpHardwareTests
     [Fact]
     public void Pl2OnlyChangeWritesOnlyBlock81()
     {
-        var transport = new FakeTransport { Ap = [0xC4] };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0xC4] };
         var hardware = new MsiClawTdpHardware(transport);
         hardware.Apply(A2vm, Pair(20, 21));
         transport.Operations.Clear();
@@ -104,7 +105,7 @@ public sealed class MsiClawTdpHardwareTests
     [Fact]
     public void ShiftWriteFailurePreventsAnyPowerLimitWrite()
     {
-        var transport = new FakeTransport { Ap = [0xC0], FailOn = "SetData(210,196)" };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0x80], FailOn = "SetData(210,196)" };
         var result = new MsiClawTdpHardware(transport).Apply(A2vm, Pair(20, 21));
 
         Assert.Equal(MsiClawTdpFailureStage.ShiftWrite, result.FailureStage);
@@ -113,9 +114,35 @@ public sealed class MsiClawTdpHardwareTests
     }
 
     [Fact]
+    public void ExternalShiftMismatchInvalidatesCacheAndReappliesThePair()
+    {
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0xC4] };
+        var hardware = new MsiClawTdpHardware(transport);
+        Assert.True(hardware.Apply(A2vm, Pair(20, 21)).Succeeded);
+        transport.Operations.Clear();
+        transport.Ap = [0x11, 0x22, 0xC1];
+
+        var result = hardware.Apply(A2vm, Pair(20, 21));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(new[] { "GetAp(0)", "SetData(210,196)", "SetData(80,8)", "SetData(81,21)", "SetData(80,20)" }, transport.Operations);
+    }
+
+    [Fact]
+    public void UnsupportedShiftStateFailsClosed()
+    {
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0x40] };
+
+        var result = new MsiClawTdpHardware(transport).Apply(A2vm, Pair(20, 21));
+
+        Assert.Equal(MsiClawTdpFailureStage.ShiftRead, result.FailureStage);
+        Assert.Single(transport.Operations);
+    }
+
+    [Fact]
     public void InvalidatingCacheRestoresFullUnknownSequence()
     {
-        var transport = new FakeTransport { Ap = [0xC4] };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0xC4] };
         var hardware = new MsiClawTdpHardware(transport);
         hardware.Apply(A2vm, Pair(20, 21));
         transport.Operations.Clear();
@@ -128,7 +155,7 @@ public sealed class MsiClawTdpHardwareTests
     [Fact]
     public void Pl2FailureAttemptsOnePl1RecoveryAndInvalidatesCache()
     {
-        var transport = new FakeTransport { Ap = [0xC4], FailOn = "SetData(81,21)" };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0xC4], FailOn = "SetData(81,21)" };
         var hardware = new MsiClawTdpHardware(transport);
         var result = hardware.Apply(A2vm, Pair(20, 21));
 
@@ -142,7 +169,7 @@ public sealed class MsiClawTdpHardwareTests
     [Fact]
     public void FinalPl1FailureAttemptsOneRecoveryAndReportsRecoveryFailure()
     {
-        var transport = new FakeTransport { Ap = [0xC4], FailOn = "SetData(80,20)", FailRecoveryToo = true };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0xC4], FailOn = "SetData(80,20)", FailRecoveryToo = true };
         var result = new MsiClawTdpHardware(transport).Apply(A2vm, Pair(20, 21));
 
         Assert.Equal(MsiClawTdpFailureStage.Pl1Final, result.FailureStage);
@@ -154,7 +181,7 @@ public sealed class MsiClawTdpHardwareTests
     [Fact]
     public void Pl2OnlyFailureDoesNotAttemptPl1Recovery()
     {
-        var transport = new FakeTransport { Ap = [0xC4], FailOn = "SetData(81,21)" };
+        var transport = new FakeTransport { Ap = [0x11, 0x22, 0xC4], FailOn = "SetData(81,21)" };
         var hardware = new MsiClawTdpHardware(transport);
         hardware.Apply(A2vm, Pair(20, 21));
         transport.Operations.Clear();
