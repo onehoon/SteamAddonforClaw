@@ -111,6 +111,60 @@ public sealed class GameBarForegroundWatcherTests
     }
 
     [Fact]
+    public async Task PresentationDeliveryRetriesSameForegroundAfterARejectedReconciliationRequest()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            if (calls.Count == 1)
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+                return false;
+            }
+            return true;
+        });
+
+        delivery.Request(true);
+        await firstStarted.Task;
+        delivery.Request(true);
+        releaseFirst.TrySetResult();
+        await delivery.DrainAsync();
+
+        Assert.Equal([true, true], calls);
+    }
+
+    [Fact]
+    public async Task PresentationDeliveryAppliesNewerStateAfterTheCurrentApplyFaults()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<bool>();
+        var delivery = new GameBarForegroundPresentationDelivery(async foreground =>
+        {
+            calls.Add(foreground);
+            if (foreground)
+            {
+                firstStarted.TrySetResult();
+                await firstFailure.Task;
+                throw new InvalidOperationException("test failure");
+            }
+            return true;
+        });
+
+        delivery.Request(true);
+        await firstStarted.Task;
+        delivery.Request(false);
+        firstFailure.TrySetResult();
+        await delivery.DrainAsync();
+
+        Assert.Equal([true, false], calls);
+    }
+
+    [Fact]
     public async Task PresentationDeliveryAppliesNewerStateAfterAnEarlierApplyFaults()
     {
         var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

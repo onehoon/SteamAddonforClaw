@@ -281,6 +281,7 @@ internal sealed class GameBarForegroundPresentationDelivery
     private bool _desired;
     private bool _running;
     private bool _accepting = true;
+    private long _requestVersion;
     private Task? _dispatch;
 
     internal GameBarForegroundPresentationDelivery(Func<bool, Task<bool>> apply) =>
@@ -292,6 +293,7 @@ internal sealed class GameBarForegroundPresentationDelivery
         {
             if (!_accepting) return;
             _desired = foreground;
+            _requestVersion++;
             if (_running) return;
             _running = true;
             _dispatch = Task.Run(DispatchAsync);
@@ -317,16 +319,19 @@ internal sealed class GameBarForegroundPresentationDelivery
             while (true)
             {
                 bool desired;
+                long observedVersion;
                 lock (_sync)
                 {
                     if (!_accepting) return;
                     desired = _desired;
+                    observedVersion = _requestVersion;
                 }
 
+                var applied = false;
                 try
                 {
                     AppLog.Debug("GameBar", "Game Bar presentation delivery started.", ("Foreground", desired));
-                    await _apply(desired).ConfigureAwait(false);
+                    applied = await _apply(desired).ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
@@ -335,7 +340,15 @@ internal sealed class GameBarForegroundPresentationDelivery
 
                 lock (_sync)
                 {
-                    if (!_accepting || _desired == desired)
+                    if (!_accepting)
+                    {
+                        _running = false;
+                        return;
+                    }
+
+                    var requestArrived = _requestVersion != observedVersion;
+                    var latestStillSame = _desired == desired;
+                    if (!requestArrived || (applied && latestStillSame))
                     {
                         _running = false;
                         return;
@@ -343,10 +356,10 @@ internal sealed class GameBarForegroundPresentationDelivery
                 }
             }
         }
-        finally
+        catch (Exception exception)
         {
+            AppLog.Warn("GameBar", "Game Bar presentation dispatcher failed.", exception);
             lock (_sync) _running = false;
-            AppLog.Debug("GameBar", "Game Bar presentation delivery stopped.");
         }
     }
 }
