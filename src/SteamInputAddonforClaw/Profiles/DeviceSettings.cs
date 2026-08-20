@@ -36,6 +36,32 @@ public sealed record DevicePerformanceSettings
     /// <see cref="DeviceCpuBoostSettings"/> for the current initialized/uninitialized semantics.</summary>
     public DeviceCpuBoostSettings? CpuBoost { get; init; }
 
+    /// <summary><see langword="null"/> means Device TDP has not been initialized or configured by
+    /// the Addon. A non-null value always contains complete AC and DC power pairs.</summary>
+    public DeviceTdpSettings? Tdp { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+/// <summary>Persisted Device-wide TDP configuration. Values are desired watts only; hardware
+/// protocol details belong to the later MSI TDP backend.</summary>
+public sealed record DeviceTdpSettings
+{
+    public bool Enabled { get; init; }
+    public TdpPowerPair Ac { get; init; } = new();
+    public TdpPowerPair Dc { get; init; } = new();
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+/// <summary>Independent PL1/PL2 values for one power rail.</summary>
+public sealed record TdpPowerPair
+{
+    public int Pl1Watts { get; init; }
+    public int Pl2Watts { get; init; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
