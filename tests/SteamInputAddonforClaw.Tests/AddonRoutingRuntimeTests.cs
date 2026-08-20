@@ -15,6 +15,89 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class AddonRoutingRuntimeTests
 {
     [Fact]
+    public async Task GameBar_foreground_active_route_requests_enter_once()
+    {
+        var enters = 0;
+        var exits = 0;
+        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            isForeground: true,
+            steamOutputActive: true,
+            xbox360PresentationOwned: false,
+            enter: _ => { enters++; return Task.FromResult(true); },
+            exit: _ => { exits++; return Task.FromResult(true); },
+            CancellationToken.None);
+
+        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            isForeground: true,
+            steamOutputActive: true,
+            xbox360PresentationOwned: true,
+            enter: _ => { enters++; return Task.FromResult(true); },
+            exit: _ => { exits++; return Task.FromResult(true); },
+            CancellationToken.None);
+
+        Assert.Equal(1, enters);
+        Assert.Equal(0, exits);
+    }
+
+    [Fact]
+    public async Task GameBar_foreground_inactive_route_is_a_no_op()
+    {
+        var enters = 0;
+        var exits = 0;
+        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            true,
+            steamOutputActive: false,
+            xbox360PresentationOwned: false,
+            _ => { enters++; return Task.FromResult(true); },
+            _ => { exits++; return Task.FromResult(true); },
+            CancellationToken.None);
+
+        Assert.Equal(0, enters);
+        Assert.Equal(0, exits);
+    }
+
+    [Fact]
+    public async Task GameBar_leaving_with_owned_xbox360_requests_exit_once()
+    {
+        var enters = 0;
+        var exits = 0;
+        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            false,
+            steamOutputActive: true,
+            xbox360PresentationOwned: true,
+            _ => { enters++; return Task.FromResult(true); },
+            _ => { exits++; return Task.FromResult(true); },
+            CancellationToken.None);
+
+        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            false,
+            steamOutputActive: true,
+            xbox360PresentationOwned: false,
+            _ => { enters++; return Task.FromResult(true); },
+            _ => { exits++; return Task.FromResult(true); },
+            CancellationToken.None);
+
+        Assert.Equal(0, enters);
+        Assert.Equal(1, exits);
+    }
+
+    [Fact]
+    public async Task GameBar_policy_forwards_cancellation_to_selected_primitive()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var observed = CancellationToken.None;
+        await AddonRoutingRuntime.HandleGameBarForegroundChangedCoreAsync(
+            true,
+            steamOutputActive: true,
+            xbox360PresentationOwned: false,
+            token => { observed = token; return Task.FromResult(true); },
+            _ => Task.FromResult(true),
+            cancellation.Token);
+
+        Assert.Equal(cancellation.Token, observed);
+    }
+
+    [Fact]
     public async Task Xbox360_entry_orders_deck_pause_query_attach_and_first_live_publish()
     {
         var trace = new List<string>();

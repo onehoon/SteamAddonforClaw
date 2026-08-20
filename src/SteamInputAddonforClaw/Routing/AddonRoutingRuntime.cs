@@ -241,6 +241,42 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return exited.Succeeded;
     }
 
+    /// <summary>
+    /// Selects the existing presentation primitive for a Game Bar foreground change. This is a
+    /// policy seam only; the Game Bar watcher is deliberately not subscribed here, so normal
+    /// Runtime behavior remains unchanged until a later production-wiring step.
+    /// </summary>
+    internal Task HandleGameBarForegroundChangedAsync(bool isForeground, CancellationToken cancellationToken = default) =>
+        HandleGameBarForegroundChangedCoreAsync(
+            isForeground,
+            CaptureStatus().SteamOutputActive,
+            _xbox360Publisher is not null,
+            EnterXbox360PresentationAsync,
+            ExitXbox360PresentationAsync,
+            cancellationToken);
+
+    // Test seam for the boolean policy only. It owns no presentation state and does not add a
+    // second transition authority; the instance method supplies the existing Enter/Exit methods.
+    internal static async Task HandleGameBarForegroundChangedCoreAsync(
+        bool isForeground,
+        bool steamOutputActive,
+        bool xbox360PresentationOwned,
+        Func<CancellationToken, Task<bool>> enter,
+        Func<CancellationToken, Task<bool>> exit,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (isForeground)
+        {
+            if (steamOutputActive && !xbox360PresentationOwned)
+                await enter(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (xbox360PresentationOwned)
+            await exit(cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task HandleXbox360PublisherFaultAsync(Exception exception)
     {
         AppLog.Error("SteamOutput", "Canonical Xbox360 presentation publishing failed.", exception);
