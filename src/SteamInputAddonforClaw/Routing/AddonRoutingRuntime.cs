@@ -8,6 +8,7 @@ using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Feedback;
+using SteamInputAddonforClaw.Input;
 
 namespace SteamInputAddonforClaw.Routing;
 
@@ -56,6 +57,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     private readonly RoutingPipelineRuntimeCoordinator _coordinator;
     private readonly CanonicalSteamDeckOutputStage _deckStage;
     private readonly CanonicalViiperRuntime? _viiperRuntime;
+    private CanonicalXbox360InputPublisher? _xbox360Publisher;
 
     private AddonRoutingRuntime(IHandheldRoutingComposition composition, IRoutingSafetySession? safetySession, RoutingPipelineRuntimeCoordinator coordinator, CanonicalSteamDeckOutputStage deckStage, CanonicalViiperRuntime? viiperRuntime)
     {
@@ -180,6 +182,104 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         NativeDirectInputActive: _safetySession?.IsActive == true);
     internal Task<DeveloperVibrationTestOutcome> RunDeveloperVibrationTestAsync(Contracts.Frontend.FrontendVibrationTestCommand command, CancellationToken cancellationToken) => CaptureStatus().SteamOutputActive ? _deckStage.RunDeveloperVibrationTestAsync(command, cancellationToken) : Task.FromResult(new DeveloperVibrationTestOutcome(false, null, null));
     internal PhysicalRumbleWriteResult? CancelDeveloperVibrationTest() => _deckStage.CancelDeveloperVibrationTest();
+
+    /// <summary>
+    /// Enters the one-way Xbox360 presentation boundary while keeping the outer Steam route
+    /// active. This is an internal foundation seam only: no Game Bar event or normal Runtime
+    /// caller invokes it yet. Deck pause remains the first and authoritative step; the X360
+    /// attachment is not touched until the Deck publisher has stopped and neutral was accepted.
+    /// </summary>
+    internal async Task<bool> EnterXbox360PresentationAsync(CancellationToken cancellationToken = default)
+    {
+        if (!CaptureStatus().SteamOutputActive || _viiperRuntime is not { State: CanonicalViiperRuntimeState.Ready } || _xbox360Publisher is not null)
+            return false;
+
+        var entered = await EnterXbox360PresentationCoreAsync(
+            source: _composition.ControllerStateSource,
+            pauseDeck: () => _deckStage.PausePresentationAsync(cancellationToken),
+            queryAttachment: _viiperRuntime.TryGetXbox360AttachmentState,
+            attach: _viiperRuntime.AttachXbox360,
+            detach: _viiperRuntime.DetachXbox360,
+            setState: _viiperRuntime.SetXbox360State,
+            ticks: null,
+            publisherFault: exception => _ = HandleXbox360PublisherFaultAsync(exception),
+            createPublisher: () => new CanonicalXbox360InputPublisher(_composition.ControllerStateSource, _viiperRuntime!.SetXbox360State, fault: exception => _ = HandleXbox360PublisherFaultAsync(exception)),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        if (entered.Publisher is not null)
+        {
+            _xbox360Publisher = entered.Publisher;
+            return true;
+        }
+
+        await FailClosedForXbox360PresentationAsync("Xbox360PresentationEntryFailed").ConfigureAwait(false);
+        return false;
+    }
+
+    private async Task HandleXbox360PublisherFaultAsync(Exception exception)
+    {
+        AppLog.Error("SteamOutput", "Canonical Xbox360 presentation publishing failed.", exception);
+        await FailClosedForXbox360PresentationAsync("Xbox360PresentationPublisherFault").ConfigureAwait(false);
+    }
+
+    private async Task FailClosedForXbox360PresentationAsync(string reason)
+    {
+        try
+        {
+            if (_safetySession is not null)
+                await _safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);
+            var rollback = await _coordinator.FailClosedAsync().ConfigureAwait(false);
+            if (!rollback.Succeeded)
+                AppLog.Error("Routing.Runtime", "Xbox360 presentation fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Routing.Runtime", "Xbox360 presentation fail-close threw an exception.", exception, ("Reason", reason));
+        }
+    }
+
+    internal delegate bool Xbox360AttachmentQuery(out USBDeviceAttachmentState state);
+    internal sealed record Xbox360PresentationEntryResult(CanonicalXbox360InputPublisher? Publisher);
+
+    // Test seam for deterministic orchestration tests. Production supplies the real Deck pause,
+    // VIIPER attachment/state operations, and publisher fault path above; this method adds no
+    // production abstraction or alternate ownership model.
+    internal static async Task<Xbox360PresentationEntryResult> EnterXbox360PresentationCoreAsync(
+        IControllerStateSnapshotSource source,
+        Func<Task<bool>> pauseDeck,
+        Xbox360AttachmentQuery queryAttachment,
+        Func<USBDeviceAttachResult> attach,
+        Func<USBDeviceDetachResult> detach,
+        Func<Xbox360DeviceState, bool> setState,
+        IInputReportTickSource? ticks,
+        Action<Exception> publisherFault,
+        CancellationToken cancellationToken,
+        Func<CanonicalXbox360InputPublisher>? createPublisher = null)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!await pauseDeck().ConfigureAwait(false)) return new(null);
+
+        if (!queryAttachment(out var attachment) || attachment != USBDeviceAttachmentState.Detached)
+            return new(null);
+        if (attach() != USBDeviceAttachResult.Success)
+            return new(null);
+
+        CanonicalXbox360InputPublisher? publisher = null;
+        try
+        {
+            publisher = createPublisher is null
+                ? new CanonicalXbox360InputPublisher(source, setState, ticks, publisherFault)
+                : createPublisher();
+            publisher.Start();
+            return new(publisher);
+        }
+        catch (Exception exception)
+        {
+            try { detach(); } catch { }
+            publisherFault(exception);
+            return new(null);
+        }
+    }
 
     internal RoutingRuntimeTerminationSnapshot CaptureTerminationSnapshot() => _coordinator.CaptureTerminationSnapshot();
 
