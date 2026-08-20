@@ -291,7 +291,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         long removeMs = 0, pnpAbsenceMs = 0;
         RoutingStageOperationResult RollbackFailure(string reason)
         {
-            AppLog.Debug("RoutingTrace", "Steam Deck output rollback failed.", ("Event", "SteamDeckOutputRollbackFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Failure"), ("Reason", reason));
+            AppLog.Debug("RoutingTrace", "Steam Deck output rollback failed.", ("Event", "SteamDeckOutputRollbackFailed"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("DetachMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Failure"), ("Reason", reason));
             return RoutingStageOperationResult.Failure(reason);
         }
         if (_state == LifecycleState.Inactive) return RoutingStageOperationResult.Success("SteamOutputAlreadyInactive");
@@ -351,16 +351,16 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             return RollbackFailure("CanonicalSessionUnsafe");
         if (_canonicalSession.State is CanonicalSteamDeckSessionState.Active ||
             (_canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending &&
-             _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval))
+             _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.AttachmentDetach))
         {
             var removeStarted = Stopwatch.GetTimestamp();
             try
             {
                 var removed = _canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending &&
-                    _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.DeviceRemoval
+                    _canonicalSession.PendingCleanupPhase == CanonicalPendingCleanupPhase.AttachmentDetach
                     ? _canonicalSession.RetryPendingCleanup()
-                    : _canonicalSession.RemoveDevice();
-                if (!removed) return RollbackFailure(_canonicalSession.State == CanonicalSteamDeckSessionState.Unsafe ? "CanonicalSessionUnsafe" : "VirtualDeviceRemoveFailed");
+                    : _canonicalSession.DetachDevice();
+                if (!removed) return RollbackFailure(_canonicalSession.State == CanonicalSteamDeckSessionState.Unsafe ? "CanonicalSessionUnsafe" : "VirtualDeviceDetachFailed");
             }
             finally { removeMs = Elapsed(removeStarted); }
         }
@@ -384,22 +384,15 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             if (!complete.IsSafeToContinue) return RollbackFailure("VirtualDeviceRecoveryCompletionFailed");
             _recoveryMutationCompleted = true;
         }
-        if (_canonicalSession.State is CanonicalSteamDeckSessionState.DeviceRemoved or CanonicalSteamDeckSessionState.CleanupPending)
-        {
-            var cleaned = _canonicalSession.State == CanonicalSteamDeckSessionState.CleanupPending
-                ? _canonicalSession.RetryPendingCleanup()
-                : _canonicalSession.CompleteRuntimeCleanup();
-            if (!cleaned) return RollbackFailure("CanonicalSessionCleanupPending");
-        }
         AppLog.Debug("SteamOutput", "SteamDeckOutput inactive", ("BusId", _busId), ("DeviceId", _deviceId), ("PnPAbsent", true), ("RecoveryMutationCompleted", _recoveryMutationCompleted));
-        AppLog.Debug("RoutingTrace", "Steam Deck output rollback completed.", ("Event", "SteamDeckOutputRollbackCompleted"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("RemoveDeviceMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Success"), ("Reason", "SteamDeckRemoved"));
+        AppLog.Debug("RoutingTrace", "Steam Deck output rollback completed.", ("Event", "SteamDeckOutputRollbackCompleted"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(totalStarted)), ("DetachMs", removeMs), ("PnPAbsenceMs", pnpAbsenceMs), ("Result", "Success"), ("Reason", "SteamDeckDetached"));
         _canonicalSession.Dispose();
         _canonicalSession = null;
         _deviceId = 0; _busId = 0; _owned = null; _before = null; _potentialDeckInstanceIdsAtIdentityFailure = [];
         _recoveryMutationCompleted = false;
         _feedbackBridge = null; _feedbackToken = null; _feedbackRevoked = false;
         _state = LifecycleState.Inactive;
-        return RoutingStageOperationResult.Success("SteamDeckRemoved");
+        return RoutingStageOperationResult.Success("SteamDeckDetached");
     }
 
     private static IReadOnlyList<string> FindPotentialDeckInstanceIds(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlyList<ControllerDeviceInfo> snapshot)

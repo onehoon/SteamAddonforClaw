@@ -36,7 +36,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
         Assert.True(rollback.Succeeded, rollback.Reason);
-        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Dispose"], session.Trace);
+        Assert.Equal(["Start", "Neutral", "Remove", "Dispose"], session.Trace);
     }
 
     [Fact]
@@ -78,31 +78,57 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task BusRemovalRetryDoesNotReplayDeviceRemoval()
+    public async Task Unavailable_persistent_runtime_fails_route_without_residual_recovery_ownership()
     {
-        var session = new FakeCanonicalSession { CleanupFailure = CanonicalPendingCleanupPhase.BusRemoval };
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        var session = new UnavailableCanonicalSteamDeckSession();
+        var stage = Create(session, new FakeEnumerator([[]]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
-        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
-        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Retry:BusRemoval", "Dispose"], session.Trace);
+        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("CanonicalSessionStartFailed", result.Reason);
+        Assert.Equal(RecoveryStatus.NoRecoveryNeeded, new RecoveryManager(new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"))).LoadJournal().Status);
     }
 
     [Fact]
-    public async Task ServerCloseRetryDoesNotReplayDeviceRemoval()
+    public async Task DetachRetryDoesNotReplayLogicalRemoval()
     {
-        var session = new FakeCanonicalSession { CleanupFailure = CanonicalPendingCleanupPhase.ServerClose };
+        var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
-        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal(["Start", "Neutral", "Remove", "CompleteCleanup", "Retry:ServerClose", "Dispose"], session.Trace);
+        Assert.Equal(["Start", "Neutral", "Remove", "Dispose"], session.Trace);
+    }
+
+    [Fact]
+    public async Task RouteExitDoesNotClosePersistentRuntime()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(1, session.RemoveCalls);
+        Assert.Equal(["Start", "Neutral", "Remove", "Dispose"], session.Trace);
+    }
+
+    [Fact]
+    public async Task Retryable_detach_is_retried_explicitly_without_logical_removal()
+    {
+        var session = new FakeCanonicalSession { RemoveResult = false };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.False((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        session.RemoveResult = true;
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(1, session.RemoveCalls);
+        Assert.Contains("Retry:AttachmentDetach", session.Trace);
     }
 
     [Fact]
@@ -193,7 +219,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     {
         // The usbip-win2 host ancestor record is missing from the snapshot, so identity resolution
         // correctly fails closed (MissingUsbIpWin2Ancestor). But the 28DE:1205 node that appeared
-        // during the attempt does NOT actually disappear after RemoveDevice() in this fixture --
+        // during the attempt does NOT actually disappear after DetachDevice() in this fixture --
         // rollback's absence verification must catch that using the exact InstanceId observed at
         // failure time, not by re-running the same strict ownership predicate that already rejected
         // it (which would trivially report "no matching candidate" -> false-positive absence).
@@ -215,14 +241,14 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     {
         var deck = Device("USB\\VID_28DE&PID_1205\\DISAPPEARS");
         var enumerator = new DeckPresenceEnumerator(deck);
-        var session = new FakeCanonicalSession { OnRemoveDeviceCalled = () => enumerator.DeviceRemoved = true };
+        var session = new FakeCanonicalSession { OnDetachDeviceCalled = () => enumerator.DeviceRemoved = true };
         var stage = Create(session, enumerator, new FakeHidHide(), TimeSpan.FromMilliseconds(50));
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Contains("Rollback=SteamDeckRemoved", result.Reason);
+        Assert.Contains("Rollback=SteamDeckDetached", result.Reason);
         Assert.DoesNotContain("VirtualDevicePnPStillPresent", result.Reason);
         Assert.Equal(1, session.RemoveCalls);
     }
@@ -291,11 +317,6 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.Empty(session.Trace);
     }
 
-    // On the single canonical session path, a CompleteRuntimeCleanup() failure IS reported as a
-    // rollback failure by design (see CanonicalSteamDeckOutputStage.RollbackCoreAsync's
-    // "CanonicalSessionCleanupPending" branch) -- already covered by BusRemovalRetryDoesNotReplayDeviceRemoval
-    // and ServerCloseRetryDoesNotReplayDeviceRemoval above.
-
     [Fact]
     public async Task InactiveAndDoubleRollbackAreSuccessfulNoOps()
     {
@@ -309,7 +330,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task LivePublisherStartsAfterNeutralAndStopsBeforeDeviceRemoval()
+    public async Task LivePublisherStartsAfterNeutralAndStopsBeforeDetach()
     {
         var session = new FakeCanonicalSession { BlockInput = true };
         var ticks = new ManualTicks();
@@ -351,7 +372,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.Contains("SteamDeckFeedbackCallbackRegistrationFailed", result.Reason);
-        Assert.Equal(["Start", "Neutral", "SetOutputCallback", "Remove", "CompleteCleanup", "Dispose"], session.Trace);
+        Assert.Equal(["Start", "Neutral", "SetOutputCallback", "Remove", "Dispose"], session.Trace);
         Assert.Equal([TwoMotorRumble.Stopped], sink.Values);
     }
 
@@ -561,7 +582,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.Equal([TwoMotorRumble.Stopped, new TwoMotorRumble(0x1234, 0x5678), TwoMotorRumble.Stopped], sink.Values);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal(["Neutral", "Stop", "SetOutputCallback", "Nonzero", "Stop", "ClearOutputCallback", "RemoveDevice"], order);
+        Assert.Equal(["Neutral", "Stop", "SetOutputCallback", "Nonzero", "Stop", "ClearOutputCallback", "DetachDevice"], order);
     }
 
     [Fact]
@@ -604,7 +625,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoveDeviceFailureLogsRollbackTimingAndPreservesFailureResult()
+    public async Task DetachDeviceFailureLogsRollbackTimingAndPreservesFailureResult()
     {
         var session = new FakeCanonicalSession { RemoveResult = false };
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot());
@@ -614,12 +635,12 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var result = await stage.RollbackMutationAsync(CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Equal("VirtualDeviceRemoveFailed", result.Reason);
+        Assert.Equal("VirtualDeviceDetachFailed", result.Reason);
         AppLog.DrainForTests();
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Equal(1, log.Split("Event=SteamDeckOutputRollbackFailed", StringSplitOptions.None).Length - 1);
-        Assert.Contains("Reason=VirtualDeviceRemoveFailed", log);
-        Assert.Contains("RemoveDeviceMs=", log);
+        Assert.Contains("Reason=VirtualDeviceDetachFailed", log);
+        Assert.Contains("DetachMs=", log);
     }
 
     [Fact]
@@ -863,7 +884,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
-    private CanonicalSteamDeckOutputStage Create(FakeCanonicalSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null, IPhysicalRumbleSink? sink = null, FeedbackAuthority? authority = null)
+    private CanonicalSteamDeckOutputStage Create(ICanonicalSteamDeckSession session, IControllerDeviceEnumerator enumerator, FakeHidHide hid, TimeSpan? timeout = null, bool storeWriteFailsAfterSeed = false, IControllerStateSnapshotSource? snapshot = null, IInputReportTickSource? reportTicks = null, IPhysicalRumbleSink? sink = null, FeedbackAuthority? authority = null)
     {
         Directory.CreateDirectory(_directory);
         var store = new RecoveryJournalStore(Path.Combine(_directory, "recovery.json"));
@@ -926,12 +947,12 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public bool BusRemoved { get; init; } = true;
         public bool NeutralAccepted { get; init; } = true;
         public bool InputAccepted { get; init; } = true;
-        public bool RemoveResult { get; init; } = true;
+        public bool RemoveResult { get; set; } = true;
         public bool StartResult { get; init; } = true;
         public bool SetOutputCallbackResult { get; init; } = true;
         public bool ClearOutputCallbackResult { get; set; } = true;
         public bool BlockInput { get; init; }
-        public Action? OnRemoveDeviceCalled;
+        public Action? OnDetachDeviceCalled;
         public int RemoveCalls { get; private set; }
         public int ClearOutputCallbackCalls { get; private set; }
         public List<string>? ExternalTrace { get; set; }
@@ -988,18 +1009,23 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public bool SetOutputCallback(SteamDeckOutputCallback callback) { Trace.Add("SetOutputCallback"); ExternalTrace?.Add("SetOutputCallback"); Callback = callback; return State == CanonicalSteamDeckSessionState.Active && SetOutputCallbackResult; }
         public bool ClearOutputCallback() { Trace.Add("ClearOutputCallback"); ExternalTrace?.Add("ClearOutputCallback"); ClearOutputCallbackCalls++; return State == CanonicalSteamDeckSessionState.Active && ClearOutputCallbackResult; }
 
-        public bool RemoveDevice()
+        public bool DetachDevice()
         {
             Trace.Add("Remove");
-            ExternalTrace?.Add("RemoveDevice");
+            ExternalTrace?.Add("DetachDevice");
             RemoveCalls++;
-            OnRemoveDeviceCalled?.Invoke();
+            OnDetachDeviceCalled?.Invoke();
             // A known/classified remove failure (RemoveResult=false) leaves State unchanged (still
             // Active) so the stage classifies it as "VirtualDeviceRemoveFailed" rather than
             // "CanonicalSessionUnsafe" -- distinct from an actually-Unsafe session, which no test
             // fixture here needs to simulate.
-            if (!RemoveResult) return false;
-            State = CanonicalSteamDeckSessionState.DeviceRemoved;
+            if (!RemoveResult)
+            {
+                PendingCleanupPhase = CanonicalPendingCleanupPhase.AttachmentDetach;
+                State = CanonicalSteamDeckSessionState.CleanupPending;
+                return false;
+            }
+            State = CanonicalSteamDeckSessionState.Clean;
             return true;
         }
 
@@ -1007,19 +1033,6 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         {
             Trace.Add($"Retry:{PendingCleanupPhase}");
             PendingCleanupPhase = CanonicalPendingCleanupPhase.None;
-            State = CanonicalSteamDeckSessionState.Clean;
-            return true;
-        }
-
-        public bool CompleteRuntimeCleanup()
-        {
-            Trace.Add("CompleteCleanup");
-            if (!BusRemoved || CleanupFailure is { } failure)
-            {
-                PendingCleanupPhase = CleanupFailure ?? CanonicalPendingCleanupPhase.BusRemoval;
-                State = CanonicalSteamDeckSessionState.CleanupPending;
-                return false;
-            }
             State = CanonicalSteamDeckSessionState.Clean;
             return true;
         }
