@@ -138,10 +138,9 @@ public sealed class CanonicalXbox360InputPublisherTests
         Assert.False(publisher.IsRunning);
 
         publisher.Start();
-        // ManualTicks dequeues its waiter queue FIFO, but a cancelled wait from the first run's loop
-        // (cancelled by StopAsync, never dequeued) is still sitting at the front; one throwaway tick
-        // flushes that stale entry so the next tick actually reaches the restarted loop's new wait.
-        await ticks.TickAsync();
+        // ManualTicks.TickAsync() already skips a stale cancelled waiter left over from the first
+        // run (cancelled by StopAsync, never dequeued) before resolving one, so a single tick here
+        // reaches the restarted loop's new wait -- no throwaway tick needed.
         await ticks.TickAsync(); await sink.WaitForCountAsync(2);
         await publisher.StopAsync();
 
