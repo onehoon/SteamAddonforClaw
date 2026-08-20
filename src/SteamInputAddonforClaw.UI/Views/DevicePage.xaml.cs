@@ -126,23 +126,56 @@ public sealed partial class DevicePage : UserControl
     {
         if (_suppressSelectionEvents || _frontend is null) return;
         if (CpuBoostAcComboBox.SelectedItem is not CpuBoostModeItem item) return;
-        var result = await _frontend.SetDeviceCpuBoostAcAsync(item.Mode);
-        Render(result.Snapshot);
+        await RunCpuBoostMutationAsync(() => _frontend.SetDeviceCpuBoostAcAsync(item.Mode));
     }
 
     private async void CpuBoostDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionEvents || _frontend is null) return;
         if (CpuBoostDcComboBox.SelectedItem is not CpuBoostModeItem item) return;
-        var result = await _frontend.SetDeviceCpuBoostDcAsync(item.Mode);
-        Render(result.Snapshot);
+        await RunCpuBoostMutationAsync(() => _frontend.SetDeviceCpuBoostDcAsync(item.Mode));
     }
 
     private async void CpuBoostEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)
     {
         if (_suppressSelectionEvents || _frontend is null) return;
-        var result = await _frontend.SetDeviceCpuBoostEnabledAsync(CpuBoostEnabledToggleSwitch.IsOn);
-        Render(result.Snapshot);
+        var enabled = CpuBoostEnabledToggleSwitch.IsOn;
+        await RunCpuBoostMutationAsync(() => _frontend.SetDeviceCpuBoostEnabledAsync(enabled));
+    }
+
+    /// <summary>Shared path for all three CPU Boost mutation handlers (review fix, MAJOR): renders
+    /// the returned snapshot and, on a non-succeeded outcome (PersistenceFailed/ApplyFailed), surfaces
+    /// it visibly rather than letting the page silently snap back with no explanation. Also contains
+    /// the frontend call in a try/catch -- these are async void UI event handlers, so an unhandled
+    /// exception (e.g. the Runtime/Named Pipe connection dropping mid-change) would otherwise escape
+    /// onto the UI dispatcher. On that failure path, refresh from Runtime authority rather than leave
+    /// a speculative/stale UI selection in place.</summary>
+    private async Task RunCpuBoostMutationAsync(Func<Task<FrontendCpuBoostMutationResult>> mutation)
+    {
+        try
+        {
+            var result = await mutation();
+            Render(result.Snapshot);
+
+            if (!result.Succeeded)
+            {
+                CpuBoostInfoBar.Severity = result.Outcome == FrontendCpuBoostMutationOutcome.PersistenceFailed
+                    ? InfoBarSeverity.Error
+                    : InfoBarSeverity.Warning;
+                CpuBoostInfoBar.Message = result.FailureMessage ?? "The CPU Boost change failed.";
+                CpuBoostInfoBar.IsOpen = true;
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "CPU Boost mutation failed.", exception, ("Reason", exception.GetType().Name));
+            CpuBoostInfoBar.Severity = InfoBarSeverity.Error;
+            CpuBoostInfoBar.Message = "CPU Boost could not be updated because the Runtime connection was interrupted.";
+            CpuBoostInfoBar.IsOpen = true;
+
+            // Restore controls from Runtime authority when the connection is still usable.
+            await RefreshAsync();
+        }
     }
 
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
