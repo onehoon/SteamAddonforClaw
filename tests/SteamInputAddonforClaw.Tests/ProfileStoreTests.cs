@@ -98,6 +98,21 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Contains("futureTdp", saved);
     }
 
+    [Theory]
+    [InlineData("{\"schemaVersion\":1,\"device\":{\"performance\":{\"tdp\":{\"enabled\":true,\"dc\":{\"pl1Watts\":17,\"pl2Watts\":25}}}},\"games\":{}}")]
+    [InlineData("{\"schemaVersion\":1,\"device\":{\"performance\":{\"tdp\":{\"enabled\":true,\"ac\":null,\"dc\":{\"pl1Watts\":17,\"pl2Watts\":25}}}},\"games\":{}}")]
+    public void Load_IncompleteOrNullTdpPair_ReturnsMalformedAndPreservesFile(string json)
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, json);
+
+        var result = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Equal(ProfileLoadStatus.Malformed, result.Status);
+        Assert.False(result.CanSafelyReplace);
+        Assert.Equal(json, File.ReadAllText(ProfilesPath));
+    }
+
     [Fact]
     public void SaveAndLoad_RoundTripsMultipleGamesIndependently()
     {

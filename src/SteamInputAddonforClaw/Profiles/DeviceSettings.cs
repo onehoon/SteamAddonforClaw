@@ -48,9 +48,9 @@ public sealed record DevicePerformanceSettings
 /// protocol details belong to the later MSI TDP backend.</summary>
 public sealed record DeviceTdpSettings
 {
-    public bool Enabled { get; init; }
-    public TdpPowerPair Ac { get; init; } = new();
-    public TdpPowerPair Dc { get; init; } = new();
+    public required bool Enabled { get; init; }
+    public required TdpPowerPair Ac { get; init; }
+    public required TdpPowerPair Dc { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
@@ -59,8 +59,8 @@ public sealed record DeviceTdpSettings
 /// <summary>Independent PL1/PL2 values for one power rail.</summary>
 public sealed record TdpPowerPair
 {
-    public int Pl1Watts { get; init; }
-    public int Pl2Watts { get; init; }
+    public required int Pl1Watts { get; init; }
+    public required int Pl2Watts { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
