@@ -169,6 +169,61 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Contains("futureField", savedText);
     }
 
+    [Fact]
+    public void SaveAndLoad_PreservesFutureFieldUnderDevicePerformance()
+    {
+        var path = ProfilesPath;
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, """{"schemaVersion":1,"device":{"performance":{"futureCpuBoost":true},"display":{}},"games":{}}""");
+        var store = new ProfileStore(path);
+
+        var loaded = store.Load();
+        Assert.Equal(ProfileLoadStatus.Loaded, loaded.Status);
+
+        store.Save(loaded.Document);
+
+        Assert.Contains("futureCpuBoost", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void SaveAndLoad_PreservesFutureFieldUnderGamePerformance()
+    {
+        var path = ProfilesPath;
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, """{"schemaVersion":1,"device":{},"games":{"1091500":{"performance":{"futureTdpWatts":20}}}}""");
+        var store = new ProfileStore(path);
+
+        var loaded = store.Load();
+        Assert.Equal(ProfileLoadStatus.Loaded, loaded.Status);
+
+        store.Save(loaded.Document);
+
+        Assert.Contains("futureTdpWatts", File.ReadAllText(path));
+    }
+
+    // ---- Explicit JSON null in a required container must not poison the model ----
+
+    [Theory]
+    [InlineData("""{"schemaVersion":1,"device":null,"games":{}}""")]
+    [InlineData("""{"schemaVersion":1,"device":{},"games":null}""")]
+    [InlineData("""{"schemaVersion":1,"device":{"performance":null,"display":{}},"games":{}}""")]
+    [InlineData("""{"schemaVersion":1,"device":{},"games":{"1":null}}""")]
+    [InlineData("""{"schemaVersion":1,"device":{},"games":{"1":{"performance":null}}}""")]
+    public void Load_ExplicitNullStructuralField_ReturnsMalformedAndPreservesTheOriginalFile(string json)
+    {
+        var path = ProfilesPath;
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, json);
+
+        var result = new ProfileStore(path).Load();
+
+        Assert.Equal(ProfileLoadStatus.Malformed, result.Status);
+        Assert.False(result.CanSafelyReplace);
+        Assert.NotNull(result.Document.Device);
+        Assert.NotNull(result.Document.Games);
+        Assert.Equal(json, File.ReadAllText(path));
+    }
+
     // ---- Atomic save: failure before replacement must not destroy the existing document ----
 
     [Fact]

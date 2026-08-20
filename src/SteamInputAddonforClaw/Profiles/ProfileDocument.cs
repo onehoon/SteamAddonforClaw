@@ -30,9 +30,11 @@ public sealed record ProfileDocument
     /// round trip (e.g. a field a newer build added that this build does not understand yet), so
     /// an older/compatible build editing an unrelated value does not silently destroy it. Uses
     /// System.Text.Json's built-in extension-data support rather than a custom JSON DOM
-    /// synchronization engine. Deliberately NOT extended to nested sections (<see cref="DeviceSettings"/>,
-    /// <see cref="GameProfile"/>, etc.) in this PR -- see docs/DEVICE_PROFILE (PR1 report) for the
-    /// documented limitation.</summary>
+    /// synchronization engine. The same sidecar is applied to every intentionally extensible
+    /// nested section (<see cref="DeviceSettings"/>, <see cref="DevicePerformanceSettings"/>,
+    /// <see cref="DeviceDisplaySettings"/>, <see cref="GameProfile"/>,
+    /// <see cref="GamePerformanceOverrides"/>, <see cref="GameDisplayOverrides"/>) so a future
+    /// additive field anywhere in the document round-trips, not just at the root.</summary>
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }

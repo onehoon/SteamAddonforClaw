@@ -132,12 +132,17 @@ public sealed class ProfileStore
             try
             {
                 var parsed = JsonSerializer.Deserialize<ProfileDocument>(text, SerializerOptions);
-                if (parsed is null)
+                if (!HasValidStructure(parsed))
                 {
-                    AppLog.Warn("Profiles", "Profile document deserialized to null.", null, ("Path", _profilesPath));
+                    // A syntactically valid document can still carry an explicit JSON `null` for a
+                    // required container (e.g. "device": null), which property initializers do not
+                    // guard against -- Deserialize happily returns a non-null ProfileDocument with a
+                    // null Device/Games/nested section. Treat that exactly like malformed JSON rather
+                    // than letting a caller later NullReferenceException on it.
+                    AppLog.Warn("Profiles", "Profile document has invalid null structural fields. Preserving the original file.", null, ("Path", _profilesPath));
                     return new ProfileLoadResult(new ProfileDocument(), ProfileLoadStatus.Malformed);
                 }
-                AppLog.Debug("Profiles", "Profile document loaded.", ("Path", _profilesPath), ("GameCount", parsed.Games.Count));
+                AppLog.Debug("Profiles", "Profile document loaded.", ("Path", _profilesPath), ("GameCount", parsed!.Games.Count));
                 return new ProfileLoadResult(parsed, ProfileLoadStatus.Loaded);
             }
             catch (JsonException exception)
@@ -147,6 +152,22 @@ public sealed class ProfileStore
             }
         }
     }
+
+    /// <summary>Guards against a syntactically valid document that still carries an explicit JSON
+    /// <c>null</c> for a required structural container -- property initializers only apply when
+    /// the property is absent, not when it is present with value <c>null</c>. Ensures
+    /// <see cref="ProfileLoadStatus.Loaded"/> always means a structurally usable typed document, so
+    /// no later caller can NullReferenceException on <c>Device</c>/<c>Games</c>/a nested section.</summary>
+    private static bool HasValidStructure(ProfileDocument? document) =>
+        document is not null
+        && document.Device is not null
+        && document.Device.Performance is not null
+        && document.Device.Display is not null
+        && document.Games is not null
+        && document.Games.Values.All(game =>
+            game is not null
+            && game.Performance is not null
+            && game.Display is not null);
 
     /// <summary>Crash-resistant replace: serialize to a same-directory temporary file, then
     /// atomically move it over the canonical path -- mirrors <see cref="SteamInputAddonforClaw.Settings.SettingsStore.Save"/>.
