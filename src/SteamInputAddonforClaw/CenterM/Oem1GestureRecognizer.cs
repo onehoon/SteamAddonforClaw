@@ -1,3 +1,5 @@
+using SteamInputAddonforClaw.Diagnostics;
+
 namespace SteamInputAddonforClaw.CenterM;
 
 internal enum Oem1Gesture
@@ -60,7 +62,7 @@ internal sealed class Oem1TaskDelay : IOem1GestureDelay
 internal sealed class Oem1GestureRecognizer : IDisposable
 {
     private readonly object _gate = new();
-    private readonly bool _doubleClickEnabled;
+    private readonly Func<bool> _doubleClickEnabled;
     private readonly TimeSpan _doubleClickWindow;
     private readonly IOem1GestureDelay _delay;
     private readonly IOem1GestureClock _clock;
@@ -74,14 +76,15 @@ internal sealed class Oem1GestureRecognizer : IDisposable
     private bool _disposed;
 
     internal Oem1GestureRecognizer(
-        bool doubleClickEnabled,
+        Func<bool> doubleClickEnabled,
         TimeSpan doubleClickWindow,
         IOem1GestureDelay? delay = null,
         IOem1GestureClock? clock = null,
         IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null,
         Action<long>? deliveryBeforeNotification = null)
     {
-        if (doubleClickEnabled && doubleClickWindow <= TimeSpan.Zero)
+        ArgumentNullException.ThrowIfNull(doubleClickEnabled);
+        if (doubleClickWindow <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(doubleClickWindow), "The double-click window must be positive.");
 
         _doubleClickEnabled = doubleClickEnabled;
@@ -90,6 +93,17 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         _clock = clock ?? new Oem1StopwatchClock();
         _cancellationSourceFactory = cancellationSourceFactory ?? new Oem1GestureCancellationSourceFactory();
         _deliveryBeforeNotification = deliveryBeforeNotification;
+    }
+
+    internal Oem1GestureRecognizer(
+        bool doubleClickEnabled,
+        TimeSpan doubleClickWindow,
+        IOem1GestureDelay? delay = null,
+        IOem1GestureClock? clock = null,
+        IOem1GestureCancellationSourceFactory? cancellationSourceFactory = null,
+        Action<long>? deliveryBeforeNotification = null)
+        : this(() => doubleClickEnabled, doubleClickWindow, delay, clock, cancellationSourceFactory, deliveryBeforeNotification)
+    {
     }
 
     internal event Action<Oem1Gesture>? GestureRecognized;
@@ -112,48 +126,81 @@ internal sealed class Oem1GestureRecognizer : IDisposable
         CancellationToken token = default;
         var startTimeout = false;
         var now = _clock.GetTimestamp();
-
-        try
+        var needsNewSequencePolicy = false;
+        long policyGeneration;
+        lock (_gate)
         {
-            lock (_gate)
+            ThrowIfDisposed();
+            if (_firstPressPending)
             {
-                ThrowIfDisposed();
-                if (!_doubleClickEnabled)
+                if (_clock.GetElapsedTime(_firstPressTimestamp, now) < _doubleClickWindow)
                 {
-                    immediate = Oem1Gesture.Single;
+                    _firstPressPending = false;
+                    _generation++;
+                    CancelPendingCore();
+                    immediate = Oem1Gesture.Double;
                     immediateDeliveryEpoch = _deliveryEpoch;
-                }
-                else if (_firstPressPending)
-                {
-                    if (_clock.GetElapsedTime(_firstPressTimestamp, now) < _doubleClickWindow)
-                    {
-                        _firstPressPending = false;
-                        _generation++;
-                        CancelPendingCore();
-                        immediate = Oem1Gesture.Double;
-                        immediateDeliveryEpoch = _deliveryEpoch;
-                    }
-                    else
-                    {
-                        _firstPressPending = false;
-                        _generation++;
-                        CancelPendingCore();
-                        immediate = Oem1Gesture.Single;
-                        immediateDeliveryEpoch = _deliveryEpoch;
-                        BeginPendingPressCore(now, out generation, out token);
-                        startTimeout = true;
-                    }
                 }
                 else
                 {
-                    BeginPendingPressCore(now, out generation, out token);
-                    startTimeout = true;
+                    _firstPressPending = false;
+                    _generation++;
+                    CancelPendingCore();
+                    immediate = Oem1Gesture.Single;
+                    immediateDeliveryEpoch = _deliveryEpoch;
+                    needsNewSequencePolicy = true;
                 }
+            }
+            else
+            {
+                needsNewSequencePolicy = true;
+            }
+            policyGeneration = _generation;
+        }
 
+        try
+        {
+            Oem1Gesture? newImmediate = null;
+            long newImmediateDeliveryEpoch = 0;
+            if (needsNewSequencePolicy)
+            {
+                // Existing pending state was consumed atomically above. Only now, outside the
+                // recognizer lock, evaluate the current mapping/domain policy for this new press.
+                var enabledForNewSequence = _doubleClickEnabled();
+                lock (_gate)
+                {
+                    if (!_disposed && _generation == policyGeneration && !_firstPressPending)
+                    {
+                        if (enabledForNewSequence)
+                        {
+                            BeginPendingPressCore(now, out generation, out token);
+                            startTimeout = true;
+                        }
+                        else
+                        {
+                            newImmediate = Oem1Gesture.Single;
+                            newImmediateDeliveryEpoch = _deliveryEpoch;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // The in-window second press already consumed the existing sequence. No new
+                // policy evaluation is allowed to change its original Double semantics.
             }
 
             if (immediate.HasValue)
+            {
+                AppLog.Debug("CenterM.Oem1", "OEM1 gesture resolved", ("Gesture", immediate.Value), ("Immediate", true));
                 DeliverGesture(immediate.Value, immediateDeliveryEpoch);
+            }
+
+            if (newImmediate.HasValue)
+            {
+                AppLog.Debug("CenterM.Oem1", "OEM1 gesture resolved", ("Gesture", newImmediate.Value), ("Immediate", true));
+                DeliverGesture(newImmediate.Value, newImmediateDeliveryEpoch);
+            }
         }
         finally
         {
@@ -221,6 +268,7 @@ internal sealed class Oem1GestureRecognizer : IDisposable
             deliveryEpoch = _deliveryEpoch;
         }
 
+        AppLog.Debug("CenterM.Oem1", "OEM1 gesture resolved", ("Gesture", Oem1Gesture.Single), ("Immediate", false));
         DeliverGesture(Oem1Gesture.Single, deliveryEpoch);
     }
 

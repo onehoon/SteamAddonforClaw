@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.CenterM;
+using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
@@ -315,7 +316,22 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         }
 
         var eventSource = _testOnlyOem1EventSource ?? new WmiMsiEventSource();
-        var recognizer = new Oem1GestureRecognizer(doubleClickEnabled: true, doubleClickWindow: TimeSpan.FromMilliseconds(400),
+        var recognizer = new Oem1GestureRecognizer(
+            doubleClickEnabled: () =>
+            {
+                var mapping = mappingPreference.Oem1Mapping;
+                var routingActuallyActive = captureRoutingStatus().SteamOutputActive;
+                var doubleSlot = Oem1MappingSlots.Resolve(routingActuallyActive, Oem1Gesture.Double);
+                var binding = mapping.Resolve(doubleSlot);
+                var enabled = Oem1ActionCapabilities.Supports(binding.Action, doubleSlot)
+                    && binding.Action != Oem1Action.None;
+                AppLog.Debug("CenterM.Oem1", "OEM1 gesture policy",
+                    ("Domain", routingActuallyActive ? "Routing" : "Normal"),
+                    ("DoubleSlot", doubleSlot), ("DoubleAction", binding.Action),
+                    ("DoubleEnabled", enabled), ("DoubleWindowMs", enabled ? 200 : 0));
+                return enabled;
+            },
+            doubleClickWindow: TimeSpan.FromMilliseconds(200),
             delay: _testOnlyOem1GestureDelay, clock: _testOnlyOem1GestureClock);
         var bridge = new Oem1EventGestureBridge(eventSource, recognizer);
         var dispatcher = new Oem1ActionDispatcher(
@@ -332,6 +348,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             if (!dispatcher.Dispatch(request))
                 OnOem1ActionFailed();
         };
+        bridge.RecognitionFailed += OnOem1ActionFailed;
 
         _oem1EventSource = eventSource;
         _oem1GestureRecognizer = recognizer;
