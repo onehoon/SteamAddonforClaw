@@ -48,6 +48,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     private int _outputFaultReported;
     private ICanonicalSteamDeckSession? _canonicalSession;
     private bool _recoveryMutationCompleted;
+    private bool _presentationPaused;
     private readonly FeedbackAuthority? _feedbackAuthority;
     private readonly IPhysicalRumbleSink? _physicalRumbleSink;
     private SteamDeckRumbleFeedbackBridge? _feedbackBridge;
@@ -255,6 +256,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             try { _publisher.Start(); }
             finally { timing.PublisherStartMs = Elapsed(started); }
             _state = LifecycleState.Active;
+            _presentationPaused = false;
             AppLog.Debug("SteamOutput", "SteamDeckOutput active", ("BusId", _busId), ("DeviceId", _deviceId), ("VID", $"{SteamDeckVirtualDeviceIdentityPolicy.VendorId:X4}"), ("PID", $"{SteamDeckVirtualDeviceIdentityPolicy.ProductId:X4}"), ("NeutralAccepted", true));
             AppLog.Debug("RoutingTrace", "Steam Deck output creation completed.", ("Event", "SteamDeckOutputCreated"), ("RoutingExecution", RoutingTraceContext.Current), ("TotalMs", Elapsed(timing.Started)), ("CanonicalSessionStartMs", timing.CanonicalSessionStartMs), ("PnPResolveMs", timing.PnpResolveMs), ("RecoveryCheckpointMs", timing.RecoveryCheckpointMs), ("HidHideInspectionMs", timing.HidHideInspectionMs), ("NeutralReportMs", timing.NeutralReportMs), ("PublisherStartMs", timing.PublisherStartMs), ("OwnedPnpCount", _owned.Count), ("BusId", _busId), ("DeviceId", _deviceId), ("Result", "Success"));
             return RoutingStageOperationResult.Success("SteamDeckCreated");
@@ -285,6 +287,94 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         finally { _serial.Release(); }
     }
 
+    /// <summary>
+    /// Deck presentation pause: stop the existing live Deck publisher, then -- only once the publisher
+    /// is proven fully stopped -- write one neutral report while the Deck stays attached and the
+    /// canonical session/route stay active. No Game Bar consumer, no Xbox360 behavior, and no
+    /// production caller exist yet (see docs/VIIPER_MIGRATION_TODO.md SD7); this is presentation-layer
+    /// foundation only, serialized against the stage's existing rollback/mutation boundary via
+    /// <see cref="_serial"/>. Ordering is safety-critical: neutral must never be written before the
+    /// publisher is proven stopped, since a still-running publisher's next tick would immediately
+    /// overwrite neutral with live state.
+    /// </summary>
+    internal async Task<bool> PausePresentationAsync(CancellationToken cancellationToken = default)
+    {
+        await _serial.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_state != LifecycleState.Active || _canonicalSession is null ||
+                _canonicalSession.State != CanonicalSteamDeckSessionState.Active || _publisher is null)
+                return false;
+            if (_presentationPaused) return false;
+
+            try
+            {
+                await _publisher.StopAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                // Publisher shutdown could not be proven -- there may still be an in-flight SetState.
+                // Do not write neutral, do not mark paused: fail closed through the existing output
+                // fault path rather than attempting recovery/retry heuristics here.
+                ReportOutputFault(exception);
+                return false;
+            }
+
+            bool neutralAccepted;
+            try { neutralAccepted = _canonicalSession.SetNeutral(); }
+            catch (Exception exception)
+            {
+                ReportOutputFault(exception);
+                return false;
+            }
+            if (!neutralAccepted)
+            {
+                // Publisher is proven stopped but the Deck rejected neutral: a real failure boundary.
+                // Do not restart the publisher, do not detach here, do not pretend pause succeeded --
+                // report through the existing output-fault/fail-close path; outer routing rollback
+                // remains responsible for structural teardown.
+                ReportOutputFault(new InvalidOperationException("Canonical VIIPER rejected the Steam Deck neutral report during presentation pause."));
+                return false;
+            }
+
+            _presentationPaused = true;
+            return true;
+        }
+        finally { _serial.Release(); }
+    }
+
+    /// <summary>
+    /// Deck presentation resume: restart the same already-created Deck publisher against the same
+    /// active canonical session/route -- no reattachment, no recreation, no PnP/HidHide/recovery
+    /// re-run. See <see cref="PausePresentationAsync"/> remarks; still no production caller.
+    /// </summary>
+    internal async Task<bool> ResumePresentationAsync(CancellationToken cancellationToken = default)
+    {
+        await _serial.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_state != LifecycleState.Active || !_presentationPaused || _canonicalSession is null ||
+                _canonicalSession.State != CanonicalSteamDeckSessionState.Active || _publisher is null)
+                return false;
+
+            try
+            {
+                _publisher.Start();
+            }
+            catch (Exception exception)
+            {
+                // Restart failed -- do not claim live presentation, do not change attachment
+                // ownership, do not recreate publisher/session/device. Fail closed.
+                ReportOutputFault(exception);
+                return false;
+            }
+
+            _presentationPaused = false;
+            return true;
+        }
+        finally { _serial.Release(); }
+    }
+
     private async ValueTask<RoutingStageOperationResult> RollbackCoreAsync(CancellationToken cancellationToken)
     {
         var totalStarted = Stopwatch.GetTimestamp();
@@ -300,6 +390,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             _canonicalSession?.Dispose();
             _canonicalSession = null;
             _before = null;
+            _presentationPaused = false;
             _state = LifecycleState.Inactive;
             return RoutingStageOperationResult.Success("SteamOutputPreparationCancelled");
         }
@@ -391,6 +482,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         _deviceId = 0; _busId = 0; _owned = null; _before = null; _potentialDeckInstanceIdsAtIdentityFailure = [];
         _recoveryMutationCompleted = false;
         _feedbackBridge = null; _feedbackToken = null; _feedbackRevoked = false;
+        _presentationPaused = false;
         _state = LifecycleState.Inactive;
         return RoutingStageOperationResult.Success("SteamDeckDetached");
     }

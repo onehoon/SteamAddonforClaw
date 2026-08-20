@@ -310,6 +310,29 @@ Xbox360 remains detached/unpublished during normal Runtime behavior, and
 Game Bar presentation switching remains PLANNED. SD7 is not complete and no
 hardware validation of this publisher has been performed.
 
+Deck presentation pause/resume foundation step: `CanonicalSteamDeckOutputStage`
+(`src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalSteamDeckOutputStage.cs`)
+now exposes internal `PausePresentationAsync`/`ResumePresentationAsync`
+methods, serialized against the stage's existing rollback/mutation `_serial`,
+that let an already-active Steam Deck route go from live publication to
+attached-neutral and back: stop the existing Deck publisher, and only once
+that stop is proven complete, write one neutral report while the Deck stays
+attached, the canonical session stays Active, and the outer Steam route
+stays active (tracked by a single `_presentationPaused` bool, not a new
+lifecycle state); resume restarts the same publisher against the same
+session/handle with no reattachment, recreation, or PnP/HidHide/recovery
+re-run. Publisher-stop failure or neutral rejection both fail closed through
+the existing output-fault path without writing neutral, detaching, or
+restarting. Covered by `CanonicalSteamDeckOutputStageTests` (pause-before-
+neutral ordering, no publication while paused, resume, repeated pause/resume,
+rollback-from-paused, precondition failures, neutral-rejection fail-closed).
+There is still **no production caller**: it is not invoked from
+`AddonRoutingRuntime`, `AddonProcessHost`, `GameBarForegroundWatcher`, OEM1,
+or anywhere else, so normal Runtime behavior and `RoutingRuntimeStatusSnapshot
+.SteamOutputActive` semantics are unchanged. No Xbox360 attach, no Xbox360
+publisher start, and no Deck/Xbox360 switching are implemented here. SD7
+remains PLANNED and no hardware validation is claimed.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains
