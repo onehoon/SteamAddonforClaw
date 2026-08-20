@@ -342,26 +342,27 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
-    public async Task CreateSteamDeckDevice_failure_with_retryable_bus_removal_retains_owner_then_succeeds_on_retry()
+    public async Task CreateSteamDeckDevice_failure_with_bus_removal_failure_retains_owner_then_closes_server_directly_on_retry()
     {
         var native = new FakeNative
         {
             CreateDeckResult = false,
-            RemoveBusResults = new Queue<bool>([false, true])
+            RemoveBusResults = new Queue<bool>([false]),
+            RejectRemoveUSBBusAfterFirstCall = true
         };
 
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress);
 
         Assert.NotNull(runtime);
         Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime!.State);
-        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.BusRemoval, runtime.TeardownPhase);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.ServerClose, runtime.TeardownPhase);
         Assert.DoesNotContain("CloseUSBServer", native.Calls);
 
         var closed = await runtime.TeardownAsync();
 
         Assert.True(closed);
         Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
-        Assert.Equal(2, native.Calls.Count(c => c == "RemoveUSBBus"));
+        Assert.Equal(1, native.Calls.Count(c => c == "RemoveUSBBus"));
         Assert.Equal(1, native.Calls.Count(c => c == "CloseUSBServer"));
     }
 
@@ -794,20 +795,30 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
-    public async Task TeardownAsync_bus_removal_failure_retains_server_then_succeeds_on_retry()
+    public async Task TeardownAsync_bus_removal_failure_never_retries_RemoveUSBBus_and_closes_server_directly_on_retry()
     {
-        var native = new FakeNative { RemoveBusResults = new Queue<bool>([false, true]) };
+        // Models the pinned native VIIPER server lifecycle: RemoveUSBBus(false) can mean the
+        // server already transitioned to serverCloseFailed, at which point RemoveUSBBus itself
+        // rejects any further call (it only accepts mutations while serverActive) -- only
+        // CloseUSBServer is valid afterward, whether the server is serverActive or
+        // serverCloseFailed. The fake enforces this: a second RemoveUSBBus call after the first
+        // failure would be a bug, and is asserted against below.
+        var native = new FakeNative { RemoveBusResults = new Queue<bool>([false]), RejectRemoveUSBBusAfterFirstCall = true };
         var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
         native.Calls.Clear();
 
         Assert.False(await runtime.TeardownAsync());
-        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.BusRemoval, runtime.TeardownPhase);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.ServerClose, runtime.TeardownPhase);
         Assert.DoesNotContain("CloseUSBServer", native.Calls);
         Assert.Equal(1, native.Calls.Count(c => c == "RemoveUSBBus"));
 
         Assert.True(await runtime.TeardownAsync());
         Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
-        Assert.Equal(2, native.Calls.Count(c => c == "RemoveUSBBus"));
+        // The resumed retry must call CloseUSBServer directly -- never RemoveUSBBus again.
+        Assert.Equal(1, native.Calls.Count(c => c == "RemoveUSBBus"));
+        Assert.Equal(1, native.Calls.Count(c => c == "CloseUSBServer"));
+        Assert.Equal((nuint)0, runtime.ServerHandle);
+        Assert.Equal(0u, runtime.BusId);
         // Device removal must not be repeated once already successful.
         Assert.Equal(1, native.Calls.Count(c => c == "RemoveSteamDeckDeviceEx"));
         Assert.Equal(1, native.Calls.Count(c => c == "RemoveXbox360DeviceEx"));
@@ -867,6 +878,14 @@ public sealed class CanonicalViiperRuntimeTests
         internal Queue<bool> SetXbox360StateResults { get; init; } = new([true]);
         internal Queue<bool> RemoveBusResults { get; init; } = new([true]);
         internal Queue<bool> CloseServerResults { get; init; } = new([true]);
+        /// <summary>Models the pinned native VIIPER server lifecycle: once RemoveUSBBus has
+        /// returned false, the server may have transitioned to serverCloseFailed, and public
+        /// RemoveUSBBus rejects further calls (it only accepts mutations while serverActive) --
+        /// only CloseUSBServer remains valid. A second RemoveUSBBus call after that point is a
+        /// production bug; asserting via this flag makes the fake fail loudly instead of silently
+        /// allowing the wrong retry path.</summary>
+        internal bool RejectRemoveUSBBusAfterFirstCall { get; init; }
+        private bool _removeUsbBusCalledOnceAlready;
         internal bool DeckAutoAttach { get; private set; }
         internal bool Xbox360AutoAttach { get; private set; }
         internal ushort? Xbox360CreateVendorId { get; private set; }
@@ -889,7 +908,14 @@ public sealed class CanonicalViiperRuntimeTests
         }
 
         public bool CreateUSBBus(nuint serverHandle, ref uint busId) { Calls.Add("CreateUSBBus"); busId = 42; return CreateBusResult; }
-        public bool RemoveUSBBus(nuint serverHandle, uint busId) { Calls.Add("RemoveUSBBus"); return RemoveBusResults.Count == 0 || RemoveBusResults.Dequeue(); }
+        public bool RemoveUSBBus(nuint serverHandle, uint busId)
+        {
+            if (RejectRemoveUSBBusAfterFirstCall && _removeUsbBusCalledOnceAlready)
+                throw new InvalidOperationException("RemoveUSBBus must never be retried after an initial failure -- CloseUSBServer is the only valid recovery call.");
+            _removeUsbBusCalledOnceAlready = true;
+            Calls.Add("RemoveUSBBus");
+            return RemoveBusResults.Count == 0 || RemoveBusResults.Dequeue();
+        }
 
         public bool GetUSBDeviceIdentity(nuint deviceHandle, out uint busId, out uint deviceId)
         {

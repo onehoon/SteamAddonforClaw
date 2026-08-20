@@ -353,9 +353,25 @@ internal sealed class CanonicalViiperRuntime
                 TeardownPhase = CanonicalViiperRuntimeTeardownPhase.BusRemoval;
             }
 
-            if (TeardownPhase is CanonicalViiperRuntimeTeardownPhase.BusRemoval or CanonicalViiperRuntimeTeardownPhase.ServerClose)
+            if (TeardownPhase == CanonicalViiperRuntimeTeardownPhase.BusRemoval)
             {
                 if (!TryRemoveBusAndServer()) return false;
+                TeardownPhase = CanonicalViiperRuntimeTeardownPhase.None;
+                State = CanonicalViiperRuntimeState.Closed;
+                AppLog.Debug("SteamOutput", "Persistent canonical VIIPER runtime final teardown complete.");
+                return true;
+            }
+
+            if (TeardownPhase == CanonicalViiperRuntimeTeardownPhase.ServerClose)
+            {
+                // Resuming after a prior RemoveUSBBus(false): the pinned VIIPER server lifecycle
+                // can transition to serverCloseFailed on that exact failure, at which point
+                // RemoveUSBBus rejects further calls (it only accepts mutations while
+                // serverActive) but CloseUSBServer accepts both serverActive and
+                // serverCloseFailed. Never re-enter RemoveUSBBus here -- CloseUSBServer alone is
+                // the valid retry/cleanup boundary regardless of which of those two native states
+                // the server is actually in.
+                if (!TryCloseServer()) return false;
                 TeardownPhase = CanonicalViiperRuntimeTeardownPhase.None;
                 State = CanonicalViiperRuntimeState.Closed;
                 AppLog.Debug("SteamOutput", "Persistent canonical VIIPER runtime final teardown complete.");
@@ -467,17 +483,29 @@ internal sealed class CanonicalViiperRuntime
         {
             if (!_native.RemoveUSBBus(ServerHandle, BusId))
             {
-                TeardownPhase = CanonicalViiperRuntimeTeardownPhase.BusRemoval;
+                // RemoveUSBBus(false) is not classified by the pinned ABI. Native may now be
+                // serverActive OR serverCloseFailed -- do not retry RemoveUSBBus itself;
+                // CloseUSBServer is the one lifecycle operation valid in either state (see
+                // TeardownAsync's ServerClose phase, which resumes here directly).
+                TeardownPhase = CanonicalViiperRuntimeTeardownPhase.ServerClose;
                 return false;
             }
             _busCreated = false;
             BusId = 0;
         }
+        return TryCloseServer();
+    }
+
+    private bool TryCloseServer()
+    {
         if (!_native.CloseUSBServer(ServerHandle))
         {
             TeardownPhase = CanonicalViiperRuntimeTeardownPhase.ServerClose;
             return false;
         }
+        // Successful CloseUSBServer owns teardown of any remaining bus state too.
+        _busCreated = false;
+        BusId = 0;
         ServerHandle = 0;
         return true;
     }
