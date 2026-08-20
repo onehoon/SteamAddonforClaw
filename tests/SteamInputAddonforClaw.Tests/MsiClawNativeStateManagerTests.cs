@@ -281,6 +281,78 @@ public sealed class MsiClawNativeStateManagerTests
     }
 
     [Fact]
+    public async Task Restore_waits_for_missing_device_before_switching_using_new_identity()
+    {
+        var current = Topology(0x1902, "ROOT_CURRENT");
+        var controller = new RecordingSuccessModeController();
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([], [], [current], [Topology(0x1901, "ROOT_RESTORED")]), controller,
+            TimeSpan.FromSeconds(1), TimeSpan.Zero);
+
+        var restored = await manager.RestoreSnapshotAsync(Snapshot(new(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_ORIGINAL", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+        Assert.Equal(1, controller.CallCount);
+        Assert.Equal("USB\\VID_0DB0\\ROOT_CURRENT", controller.SourceIdentity!.PhysicalDeviceKey);
+    }
+
+    [Fact]
+    public async Task Restore_returns_already_original_when_device_reappears_as_xinput()
+    {
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([], [Topology(0x1901, "ROOT_CURRENT")]), new RecordingSuccessModeController(),
+            TimeSpan.FromSeconds(1), TimeSpan.Zero);
+
+        var restored = await manager.RestoreSnapshotAsync(Snapshot(new(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_ORIGINAL", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+        Assert.Equal("AlreadyOriginalState", restored.Reason);
+    }
+
+    [Fact]
+    public async Task Restore_verification_waits_for_missing_device_to_reappear()
+    {
+        var controller = new RecordingSuccessModeController();
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([Topology(0x1902, "ROOT_CURRENT")], [], [], [Topology(0x1901, "ROOT_RESTORED")]), controller,
+            TimeSpan.FromSeconds(1), TimeSpan.Zero);
+
+        var restored = await manager.RestoreSnapshotAsync(Snapshot(new MsiClawNativeStatePayload(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_ORIGINAL", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
+
+        Assert.Equal(NativeStateRestoreStatus.Success, restored.Status);
+    }
+
+    [Fact]
+    public async Task Restore_fails_closed_when_device_remains_missing()
+    {
+        var controller = new RecordingSuccessModeController();
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([]), controller, TimeSpan.Zero, TimeSpan.Zero);
+
+        var restored = await manager.RestoreSnapshotAsync(Snapshot(new MsiClawNativeStatePayload(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_ORIGINAL", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), CancellationToken.None);
+
+        Assert.NotEqual(NativeStateRestoreStatus.Success, restored.Status);
+        Assert.Equal(0, controller.CallCount);
+    }
+
+    [Fact]
+    public async Task Restore_propagates_cancellation_while_waiting_for_missing_device()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var enumerator = new CallbackEnumerator(() => cancellation.Cancel());
+        var manager = new MsiClawNativeStateManager(enumerator, new RecordingSuccessModeController(), TimeSpan.FromSeconds(1), TimeSpan.Zero);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.RestoreSnapshotAsync(
+            Snapshot(new(MsiClawNativeMode.XInput, "HID\\ORIGINAL", "PARENT_ORIGINAL", Guid.NewGuid(), MsiClawHardware.XInputProductId, MsiClawIdentityConfidence.Strong)), cancellation.Token));
+    }
+
+    [Fact]
+    public async Task Stable_capture_keeps_device_not_found_immediate_by_default()
+    {
+        var manager = new MsiClawNativeStateManager(new SequenceEnumerator([], [Topology(0x1901, "ROOT_CURRENT")]), restoreSettleTimeout: TimeSpan.FromSeconds(1), restoreSettlePollInterval: TimeSpan.Zero);
+
+        var result = await manager.CaptureStableCurrentSnapshotAsync(CancellationToken.None);
+
+        Assert.Equal(NativeStateCaptureStatus.DeviceNotFound, result.Status);
+    }
+
+    [Fact]
     public async Task Restore_rejects_independent_same_mode_controllers_without_settling()
     {
         var controller = new RecordingSuccessModeController();
@@ -313,6 +385,10 @@ public sealed class MsiClawNativeStateManagerTests
             var root = $"USB\\VID_0DB0&PID_{productId:X4}\\{Root}";
             return [Device(productId, $"USB\\VID_0DB0&PID_{productId:X4}&MI_00\\A", container, parentInstanceId: Parent, ancestors: [root])];
         }
+    }
+    private sealed class CallbackEnumerator(Action callback) : IControllerDeviceEnumerator
+    {
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() { callback(); return []; }
     }
     private sealed class ApplyingModeController(MutableModeEnumerator devices) : IMsiClawModeController
     {
