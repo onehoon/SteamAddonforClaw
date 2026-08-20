@@ -5,7 +5,13 @@ using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.GameBar;
 
-internal readonly record struct GameBarIdentityInspection(bool IsGameBar);
+internal readonly record struct GameBarIdentityInspection(
+    bool IsGameBar,
+    IntPtr Hwnd = default,
+    uint ProcessId = 0,
+    string? ExecutableName = null,
+    string? PackageFamilyName = null,
+    string Reason = "InspectionFailed");
 
 internal interface IGameBarForegroundProbe
 {
@@ -15,25 +21,43 @@ internal interface IGameBarForegroundProbe
 internal sealed class GameBarForegroundProbe : IGameBarForegroundProbe
 {
     internal const string PackageFamilyName = "Microsoft.XboxGamingOverlay_8wekyb3d8bbwe";
-    private const string ExecutableName = "GameBar.exe";
-
     public GameBarIdentityInspection Inspect(IntPtr hwnd)
     {
-        if (hwnd == IntPtr.Zero) return new(false);
+        if (hwnd == IntPtr.Zero) return new(false, hwnd, Reason: "InvalidHwnd");
         GetWindowThreadProcessId(hwnd, out var pid);
-        if (pid == 0) return new(false);
+        if (pid == 0) return new(false, hwnd, Reason: "ProcessIdUnavailable");
 
+        Process process;
         try
         {
-            using var process = Process.GetProcessById((int)pid);
-            var executable = Path.GetFileName(process.MainModule?.FileName);
-            if (!string.Equals(executable, ExecutableName, StringComparison.OrdinalIgnoreCase)) return new(false);
-            if (!TryGetPackageFamilyName(process.Handle, out var familyName)) return new(false);
-            return new(IsExpectedPackageFamily(familyName));
+            process = Process.GetProcessById((int)pid);
         }
         catch
         {
-            return new(false);
+            return new(false, hwnd, pid, Reason: "ProcessOpenFailed");
+        }
+
+        using (process)
+        {
+            string? executable = null;
+            try { executable = Path.GetFileName(process.MainModule?.FileName); } catch { }
+
+            string? familyName;
+            try
+            {
+                if (!TryGetPackageFamilyName(process.Handle, out familyName))
+                {
+                    return new(false, hwnd, pid, executable, Reason: "PackageIdentityUnavailable");
+                }
+            }
+            catch
+            {
+                return new(false, hwnd, pid, executable, Reason: "PackageIdentityUnavailable");
+            }
+
+            var matched = IsExpectedPackageFamily(familyName);
+            return new(matched, hwnd, pid, executable, familyName,
+                matched ? "AcceptedPackageFamily" : "PackageFamilyMismatch");
         }
     }
 
@@ -127,7 +151,9 @@ internal sealed class GameBarForegroundWatcher : IDisposable
 
     private void Publish(IntPtr authoritativeHwnd)
     {
-        var value = authoritativeHwnd != IntPtr.Zero && _probe.Inspect(authoritativeHwnd).IsGameBar;
+        var inspection = _probe.Inspect(authoritativeHwnd);
+        AppLog.Info("GameBar", $"Foreground identity inspected. Hwnd=0x{inspection.Hwnd.ToInt64():X} Pid={inspection.ProcessId} Executable={inspection.ExecutableName ?? "<unavailable>"} PackageFamily={inspection.PackageFamilyName ?? "<unavailable>"} Matched={inspection.IsGameBar} Reason={inspection.Reason}");
+        var value = inspection.IsGameBar;
         if (value == Volatile.Read(ref _isForeground) || Volatile.Read(ref _disposed) != 0) return;
         Volatile.Write(ref _isForeground, value);
         AppLog.Info("GameBar", value ? "Game Bar entered foreground." : "Game Bar left foreground.");

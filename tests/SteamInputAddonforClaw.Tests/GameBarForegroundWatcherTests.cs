@@ -196,6 +196,29 @@ public sealed class GameBarForegroundWatcherTests
     public void PackageFamilyIdentity_IsExact(string? familyName, bool expected) =>
         Assert.Equal(expected, GameBarForegroundProbe.IsExpectedPackageFamily(familyName));
 
+    [Theory]
+    [InlineData("Microsoft.XboxGamingOverlay_8wekyb3d8bbwe", "GameBar.exe", true)]
+    [InlineData("Microsoft.XboxGamingOverlay_8wekyb3d8bbwe", "GameBarFTServer.exe", true)]
+    [InlineData("Microsoft.XboxGamingOverlay_wrong", "GameBar.exe", false)]
+    [InlineData(null, "GameBar.exe", false)]
+    public void IdentityInspection_UsesPackageFamilyAsAuthority(string? familyName, string executableName, bool expected)
+    {
+        var inspection = new GameBarIdentityInspection(
+            GameBarForegroundProbe.IsExpectedPackageFamily(familyName),
+            new(0x1234), 42, executableName, familyName,
+            expected ? "AcceptedPackageFamily" : familyName is null ? "PackageIdentityUnavailable" : "PackageFamilyMismatch");
+
+        Assert.Equal(expected, inspection.IsGameBar);
+    }
+
+    [Fact]
+    public void IdentityInspection_FailureReasonsRemainFailSafe()
+    {
+        Assert.False(new GameBarIdentityInspection(false, Reason: "InvalidHwnd").IsGameBar);
+        Assert.False(new GameBarIdentityInspection(false, new(1), Reason: "ProcessIdUnavailable").IsGameBar);
+        Assert.False(new GameBarIdentityInspection(false, new(1), 42, Reason: "PackageIdentityUnavailable").IsGameBar);
+    }
+
     [Fact]
     public void Start_InstallsHookAndInspectsStartupForeground()
     {
