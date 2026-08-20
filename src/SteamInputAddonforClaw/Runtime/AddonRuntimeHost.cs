@@ -140,15 +140,9 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     /// <summary>Normal (non-resume) reconcile, via the safe C5b1 path. No-op when routing is unavailable.</summary>
     internal async Task ReconcileAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            if (_routingRuntime is not null)
-                await _routingRuntime.ReconcileSafelyAsync(RequestStatusRefresh, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
+        if (_routingRuntime is not null &&
+            await _routingRuntime.ReconcileSafelyAsync(RequestStatusRefresh, cancellationToken).ConfigureAwait(false))
             _routingReconcileCompleted?.Invoke();
-        }
     }
 
     /// <summary>
@@ -191,19 +185,15 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         // (before PowerTransitionCoordinator ever opens PowerMutationGate for this resume) -- see the
         // review-fix comment there. This callback owns only Steam refresh/suppression plus routing's
         // own fresh reconcile.
-        try
-        {
-            return await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
+        var succeeded = await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
                 freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
                 completeSuppression: _resumeFreshReconcileSuppression.Complete,
                 deferredReconcile: () => ReconcileAsync(),
                 requestStatusRefresh: RequestStatusRefresh,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
+        if (succeeded)
             _routingReconcileCompleted?.Invoke();
-        }
+        return succeeded;
     }
 
     /// <summary>Review fix (BLOCKER): runs after residual-cleanup/incomplete-recovery checks have

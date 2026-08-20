@@ -110,6 +110,80 @@ public sealed class AddonRuntimeHostTests
     }
 
     [Fact]
+    public async Task Routing_reconcile_completion_callback_runs_only_after_success()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var callbackCount = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime, powerGate, recoverySafetyState,
+            recoverySafe: true, hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false),
+            routingReconcileCompleted: () => callbackCount++);
+
+        try
+        {
+            await host.ReconcileAsync();
+            Assert.Equal(1, callbackCount);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Cancelled_routing_reconcile_does_not_request_foreground_re_evaluation()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var statusProvider = new FakeStatusProvider(Snapshot(WaitingForSteam()));
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(statusProvider, powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var callbackCount = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime, powerGate, recoverySafetyState,
+            recoverySafe: true, hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false),
+            routingReconcileCompleted: () => callbackCount++);
+
+        try
+        {
+            await host.ReconcileAsync(new CancellationToken(true));
+            Assert.Equal(0, callbackCount);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Failed_routing_reconcile_does_not_request_foreground_re_evaluation()
+    {
+        using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var recoverySafetyState = new RecoverySafetyState(RecoverySafety.Safe);
+        var routingRuntime = CreateRoutingRuntime(new ThrowingStatusProvider(), powerGate, recoverySafetyState);
+        Assert.NotNull(routingRuntime);
+        var callbackCount = 0;
+        var host = new AddonRuntimeHost(steamRuntime, routingRuntime, powerGate, recoverySafetyState,
+            recoverySafe: true, hasIncompleteRecovery: () => false, establishBaseline: _ => Task.FromResult(false),
+            routingReconcileCompleted: () => callbackCount++);
+
+        try
+        {
+            await host.ReconcileAsync();
+            Assert.Equal(0, callbackCount);
+        }
+        finally
+        {
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ReconcileFreshAfterResumeAsync_reconciles_exactly_once_refreshes_status_exactly_once_and_does_not_leave_suppression_stuck()
     {
         using var steamRuntime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference());
