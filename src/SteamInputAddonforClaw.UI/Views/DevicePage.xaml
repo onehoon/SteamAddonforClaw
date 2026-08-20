@@ -14,6 +14,9 @@
                 Header="CPU Boost"
                 Description="Processor performance boost mode."
                 IsExpanded="True">
+                <ctcontrols:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE945;" />
+                </ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch
                     x:Name="CpuBoostEnabledToggleSwitch"
                     OffContent=""
