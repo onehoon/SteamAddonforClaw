@@ -396,6 +396,18 @@ Game Bar switching, no suspend/hibernate X360 retirement, no finalized
 publisher-fault cleanup, no X360 PnP/XInput readiness claim, and no hardware
 validation claim. SD7 remains PLANNED.
 
+Suspend/hibernate retirement boundary step: while quiescing an owned outer
+routing session, `RoutingPipelineRuntimeCoordinator` now invokes the same
+no-resume X360 retirement callback after cancelling in-flight routing and
+acquiring the existing transition gate, before the existing suspend rollback.
+Retirement failure returns `false`, preserves the active/pending routing and
+X360 ownership evidence, and does not begin outer rollback. Resume does not
+restore X360 presentation automatically; current-world recovery and fresh
+routing reconciliation remain authoritative. `GameBarForegroundWatcher`
+production subscription and automatic switching remain unimplemented,
+publisher-fault X360 cleanup is not finalized, X360 PnP/XInput readiness is
+not claimed, and no hardware validation is claimed. SD7 remains PLANNED.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains
