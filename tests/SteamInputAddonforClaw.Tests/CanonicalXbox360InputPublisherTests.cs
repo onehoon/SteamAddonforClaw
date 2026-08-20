@@ -150,6 +150,64 @@ public sealed class CanonicalXbox360InputPublisherTests
     }
 
     [Fact]
+    public async Task Faulted_manual_tick_run_cannot_restart_until_StopAsync_cleans_previous_resources()
+    {
+        var sink = new FakeSink { Accept = false };
+        var ticks = new ManualTicks();
+        var faulted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalXbox360InputPublisher(
+            new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false]))),
+            sink.SetState, ticks, _ => faulted.TrySetResult(true));
+
+        publisher.Start();
+        await ticks.TickAsync();
+        await faulted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(publisher.IsRunning);
+
+        // The sink already self-terminated the run (IsRunning is false), but StopAsync() has not run
+        // yet, so the previous run's CTS/task are still owned -- Start() must still refuse.
+        Assert.Throws<InvalidOperationException>(publisher.Start);
+
+        await publisher.StopAsync();
+        sink.Accept = true;
+        publisher.Start();
+        await ticks.TickAsync(); await sink.WaitForCountAsync(2);
+        await publisher.StopAsync();
+    }
+
+    [Fact]
+    public async Task Faulted_production_worker_run_cannot_restart_until_StopAsync_cleans_previous_resources()
+    {
+        var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));
+        var sink = new FakeSink { Accept = false };
+        var faulted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new CanonicalXbox360InputPublisher(source, sink.SetState, fault: _ => faulted.TrySetResult(true));
+
+        publisher.Start();
+        await faulted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // The worker thread can take a moment to actually return after the fault is reported.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (publisher.IsRunning && DateTime.UtcNow < deadline) await Task.Delay(5);
+        Assert.False(publisher.IsRunning);
+
+        // The worker already self-terminated (IsRunning is false), but StopAsync() has not run yet, so
+        // the previous run's timer/stop-event/thread are still owned -- Start() must still refuse.
+        Assert.Throws<InvalidOperationException>(publisher.Start);
+
+        await publisher.StopAsync();
+        sink.Accept = true;
+        publisher.Start();
+        try
+        {
+            await sink.WaitForCountAsync(sink.Count + 1, TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            await publisher.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task Duplicate_Start_rejected()
     {
         var source = new Snapshot(new ControllerState(new AuxiliaryButtonState([false, false])));

@@ -75,15 +75,33 @@ internal sealed class CanonicalXbox360InputPublisher
     internal int PublishedStateCount => _publishedStateCount;
 
     /// <summary>
+    /// Whether the previous run's resources are still owned by this instance. Deliberately distinct
+    /// from <see cref="IsRunning"/>: a rejected sink or an unexpected exception can self-terminate
+    /// <c>_task</c>/the worker thread (so <see cref="IsRunning"/> goes false) while the CTS, timer,
+    /// stop event, or thread reference are still un-disposed/un-cleared -- only <see cref="StopAsync"/>
+    /// releases them. Gating <see cref="Start"/> on liveness alone would let a caller start a new run
+    /// on top of a stranded previous one.
+    /// </summary>
+    private bool HasRunResources =>
+        _task is not null ||
+        _stop is not null ||
+        _timer is not null ||
+        _workerStopEvent is not null ||
+        _workerThread is not null;
+
+    /// <summary>
     /// Starts publishing. On the production (no explicit tick source) path this throws synchronously
     /// and cleans up any partially-created resources if the timer cannot be created or armed, or the
     /// worker thread cannot be started -- fail closed rather than silently falling back to a defective
     /// cadence. Safe to call again after a completed <see cref="StopAsync"/> (a Steam game may open and
     /// close Xbox Game Bar, and therefore this publisher, multiple times within one routing session).
+    /// Throws if the previous run's resources have not yet been released via <see cref="StopAsync"/>,
+    /// even if that run already self-terminated (see <see cref="HasRunResources"/>).
     /// </summary>
     internal void Start()
     {
-        if (IsRunning) throw new InvalidOperationException("The canonical Xbox360 publisher is already running.");
+        if (HasRunResources)
+            throw new InvalidOperationException("The previous canonical Xbox360 publisher run has not been cleaned up; call StopAsync() before starting again.");
         Interlocked.Exchange(ref _faultReported, 0);
 
         if (_ticks is not null)
