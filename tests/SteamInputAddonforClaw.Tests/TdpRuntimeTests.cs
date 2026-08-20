@@ -157,6 +157,26 @@ public sealed class TdpRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task ReenableAfterDisableDoesNotTrustThePreviousHardwareCache()
+    {
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
+        var hardware = new MsiClawTdpHardware(transport);
+        await using var runtime = new TdpRuntime(new ProfileStore(PathName), new ProfileMutationGate(),
+            new HandheldDeviceModelId("msi.claw.a2vm.7"), hardware, () => TdpPowerSource.AC);
+        var pair = Pair(20, 30);
+
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = true, Ac = pair, Dc = Pair(10, 20) }).Succeeded);
+        await runtime.DrainAsync();
+        transport.Operations.Clear();
+
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = false, Ac = pair, Dc = Pair(10, 20) }).Succeeded);
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = true, Ac = pair, Dc = Pair(10, 20) }).Succeeded);
+        await runtime.DrainAsync();
+
+        Assert.Equal(["GetAp(0)", "SetData(80,8)", "SetData(81,30)", "SetData(80,20)"], transport.Operations);
+    }
+
+    [Fact]
     public async Task CommitPreservesTdpExtensionDataAtAllLevels()
     {
         Directory.CreateDirectory(_directory);

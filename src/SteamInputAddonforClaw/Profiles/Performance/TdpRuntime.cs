@@ -27,6 +27,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private readonly Lock _sync = new();
     private Task _tail = Task.CompletedTask;
     private long _authorityVersion;
+    private bool _invalidateHardwareCacheBeforeNextApply;
     private bool _accepting = true;
 
     internal TdpRuntime(ProfileStore profileStore, ProfileMutationGate mutationGate, HandheldDeviceModelId? modelId,
@@ -96,6 +97,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 if (!settings.Enabled)
                 {
                     _authorityVersion++;
+                    _invalidateHardwareCacheBeforeNextApply = true;
                     return new(TdpCommitOutcome.Succeeded, null);
                 }
 
@@ -174,15 +176,21 @@ internal sealed class TdpRuntime : IAsyncDisposable
 
     private async Task ExecuteAsync(TdpApplySnapshot snapshot)
     {
+        bool invalidateHardwareCache;
         lock (_sync)
         {
             if (!_accepting || snapshot.AuthorityVersion != _authorityVersion)
                 return;
+
+            invalidateHardwareCache = _invalidateHardwareCacheBeforeNextApply;
+            _invalidateHardwareCacheBeforeNextApply = false;
         }
 
         try
         {
             if (_modelId is not { } modelId) return;
+            if (invalidateHardwareCache)
+                _hardware.InvalidateCachedPowerLimits();
             var result = _hardware.Apply(modelId, new() { Pl1Watts = snapshot.Pl1Watts, Pl2Watts = snapshot.Pl2Watts });
             AppLog.Info("Profiles.Tdp", "Global TDP apply completed.",
                 ("Source", snapshot.Source), ("PL1", snapshot.Pl1Watts), ("PL2", snapshot.Pl2Watts),
