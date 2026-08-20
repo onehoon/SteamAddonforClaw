@@ -247,6 +247,47 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         Assert.Equal(0, backend.DcWriteCount);
     }
 
+    // ---- Mutation after an unreliable startup load must not overwrite the unsafe-to-replace file ----
+
+    [Fact]
+    public void Mutation_AfterMalformedStartup_FailsAndNeverWritesTheProfileOrWindows()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, "{ not valid json");
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        var result = runtime.SetDeviceCpuBoostAc(CpuBoostMode.Aggressive);
+
+        Assert.Equal(CpuBoostMutationOutcome.PersistenceFailed, result.Outcome);
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        // The original malformed file must survive untouched -- a mutation must never replace it
+        // with a default document derived from the unreliable load.
+        Assert.Equal("{ not valid json", File.ReadAllText(ProfilesPath));
+    }
+
+    [Fact]
+    public void Mutation_AfterUnsupportedSchemaStartup_FailsAndNeverWritesTheProfileOrWindows()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var original = "{\"schemaVersion\":" + (ProfileDocument.CurrentSchemaVersion + 1) + ",\"device\":{},\"games\":{}}";
+        File.WriteAllText(ProfilesPath, original);
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        var result = runtime.SetDeviceCpuBoostDc(CpuBoostMode.Disabled);
+
+        Assert.Equal(CpuBoostMutationOutcome.PersistenceFailed, result.Outcome);
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+        Assert.Equal(original, File.ReadAllText(ProfilesPath));
+    }
+
     // ---- AC mutation ----
 
     [Fact]
@@ -347,6 +388,86 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         Assert.Equal(0, backend.AcWriteCount);
         Assert.Equal(CpuBoostReadStatus.Unknown, runtime.Snapshot.AcCurrent.Status);
         Assert.Null(runtime.Snapshot.AcCurrent.Mode);
+    }
+
+    // ---- WindowsCpuBoostPowerPolicy.ResolveApplyResult native-backend decision logic ----
+
+    [Fact]
+    public void ResolveApplyResult_AcOnlyRequested_WriteAndActivationSucceed_ReportsSucceeded()
+    {
+        var result = WindowsCpuBoostPowerPolicy.ResolveApplyResult(CpuBoostMode.Aggressive, 0, null, null, () => 0);
+
+        Assert.True(result.AcSucceeded);
+        Assert.True(result.DcSucceeded);
+        Assert.True(result.Succeeded);
+        Assert.Null(result.FailureMessage);
+    }
+
+    [Fact]
+    public void ResolveApplyResult_AcOnlyRequested_WriteSucceedsButActivationFails_ReportsAcFailedNotSucceeded()
+    {
+        var result = WindowsCpuBoostPowerPolicy.ResolveApplyResult(CpuBoostMode.Aggressive, 0, null, null, () => 5);
+
+        Assert.False(result.AcSucceeded);
+        Assert.False(result.Succeeded);
+        Assert.NotNull(result.FailureMessage);
+    }
+
+    [Fact]
+    public void ResolveApplyResult_AcOnlyRequested_WriteFails_NeverInvokesActivation()
+    {
+        var activateInvoked = false;
+        uint Activate() { activateInvoked = true; return 0; }
+
+        var result = WindowsCpuBoostPowerPolicy.ResolveApplyResult(CpuBoostMode.Aggressive, 87, null, null, Activate);
+
+        Assert.False(activateInvoked);
+        Assert.False(result.AcSucceeded);
+        // DC was never requested, so it must remain trivially "succeeded" and never observed as a failure.
+        Assert.True(result.DcSucceeded);
+    }
+
+    [Fact]
+    public void ResolveApplyResult_BothRequested_AcFailsDcSucceeds_ActivationRunsAndDcSurvivesActivationSuccess()
+    {
+        var result = WindowsCpuBoostPowerPolicy.ResolveApplyResult(CpuBoostMode.Aggressive, 87, CpuBoostMode.Disabled, 0, () => 0);
+
+        Assert.False(result.AcSucceeded);
+        Assert.True(result.DcSucceeded);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public void ResolveApplyResult_BothRequestedAndWritesSucceed_ActivationFails_BothSidesReportFailure()
+    {
+        var result = WindowsCpuBoostPowerPolicy.ResolveApplyResult(CpuBoostMode.Aggressive, 0, CpuBoostMode.Disabled, 0, () => 5);
+
+        Assert.False(result.AcSucceeded);
+        Assert.False(result.DcSucceeded);
+        Assert.False(result.Succeeded);
+    }
+
+    // ---- Concurrent AC/DC mutations must not lose either change ----
+
+    [Fact]
+    public async Task ConcurrentAcAndDcMutations_BothChangesSurviveInTheFinalPersistedDocument()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(store, backend);
+        runtime.StartupReconcile();
+
+        var acTask = Task.Run(() => runtime.SetDeviceCpuBoostAc(CpuBoostMode.Aggressive));
+        var dcTask = Task.Run(() => runtime.SetDeviceCpuBoostDc(CpuBoostMode.Disabled));
+        var acResult = await acTask;
+        var dcResult = await dcTask;
+
+        Assert.True(acResult.Succeeded);
+        Assert.True(dcResult.Succeeded);
+
+        var loaded = store.Load();
+        Assert.Equal(CpuBoostMode.Aggressive, loaded.Document.Device.Performance.CpuBoost?.Ac);
+        Assert.Equal(CpuBoostMode.Disabled, loaded.Document.Device.Performance.CpuBoost?.Dc);
     }
 
     public void Dispose()

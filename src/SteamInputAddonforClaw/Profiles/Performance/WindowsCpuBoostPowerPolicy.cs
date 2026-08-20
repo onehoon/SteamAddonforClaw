@@ -60,49 +60,77 @@ internal sealed class WindowsCpuBoostPowerPolicy : ICpuBoostPowerPolicy
         if (!TryGetActiveScheme(out var scheme, out var failure))
             return new CpuBoostApplyResult(ac is null, dc is null, failure);
 
-        var acSucceeded = true;
-        var dcSucceeded = true;
-        string? failureMessage = null;
-
+        uint? acWriteResult = null;
         if (ac is { } acMode)
         {
             var subGroup = SubProcessorGuid;
             var setting = PerfBoostModeGuid;
             var schemeForCall = scheme;
-            var result = PowerWriteACValueIndex(0, ref schemeForCall, ref subGroup, ref setting, (uint)acMode);
-            acSucceeded = result == 0;
-            if (!acSucceeded)
-            {
-                failureMessage = $"PowerWriteACValueIndex failed (Win32 error {result}).";
-                AppLog.Warn("Profiles.CpuBoost", "CPU Boost AC write failed.", null, ("Win32Error", result));
-            }
+            acWriteResult = PowerWriteACValueIndex(0, ref schemeForCall, ref subGroup, ref setting, (uint)acMode);
+            if (acWriteResult != 0)
+                AppLog.Warn("Profiles.CpuBoost", "CPU Boost AC write failed.", null, ("Win32Error", acWriteResult));
         }
 
+        uint? dcWriteResult = null;
         if (dc is { } dcMode)
         {
             var subGroup = SubProcessorGuid;
             var setting = PerfBoostModeGuid;
             var schemeForCall = scheme;
-            var result = PowerWriteDCValueIndex(0, ref schemeForCall, ref subGroup, ref setting, (uint)dcMode);
-            dcSucceeded = result == 0;
-            if (!dcSucceeded)
-            {
-                failureMessage ??= $"PowerWriteDCValueIndex failed (Win32 error {result}).";
-                AppLog.Warn("Profiles.CpuBoost", "CPU Boost DC write failed.", null, ("Win32Error", result));
-            }
+            dcWriteResult = PowerWriteDCValueIndex(0, ref schemeForCall, ref subGroup, ref setting, (uint)dcMode);
+            if (dcWriteResult != 0)
+                AppLog.Warn("Profiles.CpuBoost", "CPU Boost DC write failed.", null, ("Win32Error", dcWriteResult));
         }
 
         // Re-activate the same scheme so Windows applies the newly written value(s) -- writing
-        // alone does not take effect (work order section 3/16). Only meaningful if at least one
-        // write actually succeeded; still safe/idempotent to call otherwise.
-        if (acSucceeded || dcSucceeded)
+        // alone does not take effect (work order section 3/16). Microsoft documents that changes
+        // to an active scheme have no effect until PowerSetActiveScheme is called, so a failure
+        // here must fail the apply for the requested side(s) that were just written -- it must
+        // never be reported as a successful write. Only invoked when at least one REQUESTED
+        // side's write actually succeeded (see ResolveApplyResult).
+        uint ActivateScheme()
         {
             var schemeForActivate = scheme;
             var activateResult = PowerSetActiveScheme(0, ref schemeForActivate);
             if (activateResult != 0)
+                AppLog.Warn("Profiles.CpuBoost", "CPU Boost active-scheme re-activation failed.", null, ("Win32Error", activateResult));
+            return activateResult;
+        }
+
+        return ResolveApplyResult(ac, acWriteResult, dc, dcWriteResult, ActivateScheme);
+    }
+
+    /// <summary>
+    /// The pure decision logic for <see cref="Apply"/>, extracted so it is unit-testable without
+    /// any real PowrProf call: given the raw Win32 result codes for whichever side(s) were
+    /// requested (<see langword="null"/> means "not requested"), decides success per side and
+    /// whether/how to invoke <paramref name="activateScheme"/>.
+    ///
+    /// Unrequested sides start "succeeded" trivially (there was nothing to fail), but that must
+    /// never be conflated with "a write succeeded, so activate the scheme" -- only a REQUESTED
+    /// side's success counts toward <c>anyRequestedWriteSucceeded</c>. A
+    /// <see cref="PowerSetActiveScheme"/> failure fails every REQUESTED side that had otherwise
+    /// succeeded, because Microsoft documents that a written value has no effect until the scheme
+    /// is re-activated -- an activation failure must never be reported as <c>Succeeded</c>.
+    /// </summary>
+    internal static CpuBoostApplyResult ResolveApplyResult(CpuBoostMode? ac, uint? acWriteResult, CpuBoostMode? dc, uint? dcWriteResult, Func<uint> activateScheme)
+    {
+        var acSucceeded = ac is null || acWriteResult == 0;
+        var dcSucceeded = dc is null || dcWriteResult == 0;
+        var anyRequestedWriteSucceeded = (ac is not null && acSucceeded) || (dc is not null && dcSucceeded);
+
+        string? failureMessage = null;
+        if (ac is not null && !acSucceeded) failureMessage = $"PowerWriteACValueIndex failed (Win32 error {acWriteResult}).";
+        if (dc is not null && !dcSucceeded) failureMessage ??= $"PowerWriteDCValueIndex failed (Win32 error {dcWriteResult}).";
+
+        if (anyRequestedWriteSucceeded)
+        {
+            var activateResult = activateScheme();
+            if (activateResult != 0)
             {
                 failureMessage ??= $"PowerSetActiveScheme failed (Win32 error {activateResult}).";
-                AppLog.Warn("Profiles.CpuBoost", "CPU Boost active-scheme re-activation failed.", null, ("Win32Error", activateResult));
+                if (ac is not null) acSucceeded = false;
+                if (dc is not null) dcSucceeded = false;
             }
         }
 
