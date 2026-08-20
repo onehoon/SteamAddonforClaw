@@ -408,6 +408,26 @@ production subscription and automatic switching remain unimplemented,
 publisher-fault X360 cleanup is not finalized, X360 PnP/XInput readiness is
 not claimed, and no hardware validation is claimed. SD7 remains PLANNED.
 
+Outer fail-close retirement boundary step: `RoutingPipelineRuntimeCoordinator
+.FailClosedAsync()` now invokes the same no-resume X360 retirement callback,
+after cancelling the in-flight routing transition and acquiring the existing
+transition gate, whenever an owned active/pending routing session exists and
+before the existing `RecoveryResetDecision` outer rollback. Retirement
+failure or a thrown exception from the callback returns an unsuccessful
+result with reason `Xbox360PresentationRetirementFailed`, preserves the
+active/pending routing and X360 ownership evidence, and blocks the outer
+rollback entirely -- no Deck resume, no partial teardown, no second
+recursive fail-close. A passive fail-close (no owned session) does not
+invoke the callback. This closes the fault-driven outer teardown gap for
+`CanonicalXbox360InputPublisher` faults routed through
+`AddonRoutingRuntime.HandleXbox360PublisherFaultAsync()` ->
+`FailClosedForXbox360PresentationAsync()` -> `FailClosedAsync()`; the
+publisher-fault outer fail-close retirement ordering is implemented.
+`GameBarForegroundWatcher` production subscription and automatic switching
+remain unimplemented, presentation event serialization is not
+implemented/finalized, X360 PnP/XInput readiness is not claimed, and no
+hardware validation is claimed. SD7 remains PLANNED.
+
 ## Separate feature tracks
 
 Rumble v1 production wiring is implemented, but hardware validation remains

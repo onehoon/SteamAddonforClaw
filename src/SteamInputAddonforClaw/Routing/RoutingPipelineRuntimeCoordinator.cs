@@ -142,6 +142,32 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
             using var transition = CreateTransitionCancellation(CancellationToken.None);
+
+            if ((_sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null) &&
+                _beforeActiveSessionExit is not null)
+            {
+                bool retired;
+                try
+                {
+                    retired = await _beforeActiveSessionExit(transition.Token).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    AppLog.Warn("Routing.Runtime", "X360 presentation retirement blocked outer fail-close rollback.",
+                        exception, fields: [("Action", "FailClosed"), ("Reason", exception.GetType().Name)]);
+                    return new(false, _sessionCoordinator.CurrentState, RoutingActionKind.None,
+                        "Xbox360PresentationRetirementFailed");
+                }
+
+                if (!retired)
+                {
+                    AppLog.Warn("Routing.Runtime", "X360 presentation retirement blocked outer fail-close rollback.",
+                        fields: [("Action", "FailClosed"), ("Reason", "Xbox360PresentationRetirementFailed")]);
+                    return new(false, _sessionCoordinator.CurrentState, RoutingActionKind.None,
+                        "Xbox360PresentationRetirementFailed");
+                }
+            }
+
             return await _sessionCoordinator.ReconcileAsync(
                 RecoveryResetDecision,
                 IndeterminateClassification,

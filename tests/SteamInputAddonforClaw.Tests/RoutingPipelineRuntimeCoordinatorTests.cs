@@ -179,6 +179,75 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task FailClosedRetiresPresentationBeforeOuterRollback()
+    {
+        var events = new List<string>();
+        var executor = new FakeExecutor(events);
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software())),
+            executor,
+            beforeActiveSessionExit: _ => { events.Add("RetireX360"); return Task.FromResult(true); });
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var result = await bridge.Bridge.FailClosedAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(["RetireX360", "PipelineRollback"], events);
+        Assert.Null(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task FailClosedRetirementFailureBlocksOuterRollbackAndPreservesActiveSession()
+    {
+        var executor = new FakeExecutor();
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software())),
+            executor,
+            beforeActiveSessionExit: _ => Task.FromResult(false));
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var result = await bridge.Bridge.FailClosedAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Xbox360PresentationRetirementFailed", result.Reason);
+        Assert.Empty(executor.RollbackPlans);
+        Assert.NotNull(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task FailClosedRetirementExceptionBlocksOuterRollbackAndPreservesActiveSession()
+    {
+        var executor = new FakeExecutor();
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software())),
+            executor,
+            beforeActiveSessionExit: _ => throw new InvalidOperationException("stop failed"));
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var result = await bridge.Bridge.FailClosedAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Xbox360PresentationRetirementFailed", result.Reason);
+        Assert.Empty(executor.RollbackPlans);
+        Assert.NotNull(bridge.Session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task PassiveFailClosedDoesNotInvokeRetirementCallback()
+    {
+        var callbackCalls = 0;
+        var bridge = CreateWithCallback(
+            new FakeStatusProvider(Snapshot(Eligible(), Software())),
+            new FakeExecutor(),
+            beforeActiveSessionExit: _ => { callbackCalls++; return Task.FromResult(true); });
+
+        var result = await bridge.Bridge.FailClosedAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, callbackCalls);
+    }
+
+    [Fact]
     public async Task PassiveSuspendDoesNotRetirePresentation()
     {
         var callbackCalls = 0;
