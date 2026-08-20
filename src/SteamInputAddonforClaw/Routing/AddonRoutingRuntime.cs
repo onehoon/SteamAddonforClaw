@@ -267,7 +267,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             cancellationToken);
 
     /// <summary>
-    /// Exits the manually-entered Xbox360 presentation boundary while keeping the outer Steam
+    /// Exits the Xbox360 presentation boundary while keeping the outer Steam
     /// route active. It is the narrow production policy primitive used by Game Bar delivery.
     /// The publisher must prove stopped before VIIPER detachment, and the
     /// Deck stage owns any failure encountered while resuming its existing publisher.
