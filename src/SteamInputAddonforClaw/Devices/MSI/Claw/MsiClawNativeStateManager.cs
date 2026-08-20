@@ -67,20 +67,36 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         return new(NativeStateCaptureStatus.Success, snapshot, "Snapshot captured.");
     }
 
-    internal async Task<NativeStateCaptureResult> CaptureStableCurrentSnapshotAsync(CancellationToken cancellationToken)
+    internal async Task<NativeStateCaptureResult> CaptureStableCurrentSnapshotAsync(CancellationToken cancellationToken, bool allowTransientDeviceNotFound = false)
     {
         var deadline = Stopwatch.GetTimestamp() + (long)(_restoreSettleTimeout.TotalSeconds * Stopwatch.Frequency);
+        var startedAt = Stopwatch.GetTimestamp();
         NativeStateCaptureResult current;
+        var poll = 0;
+        string? waitCause = null;
         do
         {
             cancellationToken.ThrowIfCancellationRequested();
             current = CaptureSnapshot();
-            if (current.Status != NativeStateCaptureStatus.Indeterminate || !HasMixedNativeModeTopology())
+            var missingDevice = current.Status == NativeStateCaptureStatus.DeviceNotFound && allowTransientDeviceNotFound;
+            var mixedTopology = current.Status == NativeStateCaptureStatus.Indeterminate && HasMixedNativeModeTopology();
+            if (!missingDevice && !mixedTopology)
                 return current;
-            AppLog.Debug("NativeMode", "NativeModeCurrentStateWaitingForTopologySettle", ("Reason", current.Reason));
-            if (Stopwatch.GetTimestamp() >= deadline) return current;
+            waitCause = missingDevice ? "DeviceReenumeration" : "MixedNativeModeTopology";
+            poll++;
+            var elapsedMs = (long)((Stopwatch.GetTimestamp() - startedAt) * 1000.0 / Stopwatch.Frequency);
+            AppLog.Debug("NativeMode", missingDevice ? "NativeModeRestoreWaitingForTopologySettle" : "NativeModeCurrentStateWaitingForTopologySettle",
+                ("CaptureStatus", current.Status), ("WaitCause", waitCause), ("Reason", current.Reason), ("Poll", poll), ("ElapsedMs", elapsedMs));
+            if (Stopwatch.GetTimestamp() >= deadline)
+            {
+                AppLog.Debug("NativeMode", "NativeModeRestoreTopologySettleEnded",
+                    ("CaptureStatus", current.Status), ("WaitCause", waitCause), ("Reason", current.Reason), ("ElapsedMs", elapsedMs));
+                return current;
+            }
             await Task.Delay(_restoreSettlePollInterval, cancellationToken).ConfigureAwait(false);
         } while (Stopwatch.GetTimestamp() < deadline);
+        AppLog.Debug("NativeMode", "NativeModeRestoreTopologySettleEnded",
+            ("CaptureStatus", current.Status), ("WaitCause", waitCause), ("Reason", current.Reason), ("ElapsedMs", (long)(_restoreSettleTimeout.TotalMilliseconds)));
         return current;
     }
 
@@ -97,7 +113,7 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         if (original is null || original.ProductId is null)
             return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, "MalformedSnapshotPayload");
 
-        var current = await CaptureStableCurrentSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        var current = await CaptureStableCurrentSnapshotAsync(cancellationToken, allowTransientDeviceNotFound: true).ConfigureAwait(false);
         if (!current.AllowsMutation || current.Snapshot is null)
             return new NativeStateRestoreResult(current.Status == NativeStateCaptureStatus.Indeterminate ? NativeStateRestoreStatus.Indeterminate : NativeStateRestoreStatus.Failed, current.Reason);
         var currentPayload = current.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
@@ -111,7 +127,7 @@ internal sealed class MsiClawNativeStateManager(IControllerDeviceEnumerator devi
         var currentIdentity = MsiClawPhysicalIdentity.FromPayload(currentPayload);
         var result = await modeController.SwitchModeAsync(original.Mode, currentIdentity, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return new NativeStateRestoreResult(NativeStateRestoreStatus.Failed, result.Reason);
-        var restored = await CaptureStableCurrentSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        var restored = await CaptureStableCurrentSnapshotAsync(cancellationToken, allowTransientDeviceNotFound: true).ConfigureAwait(false);
         if (!restored.AllowsMutation || restored.Snapshot is null) return new NativeStateRestoreResult(NativeStateRestoreStatus.Indeterminate, "RestoredStateCouldNotBeVerified");
         var restoredPayload = restored.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
         return restoredPayload is not null && PayloadMatchesOriginalState(restoredPayload, original)
