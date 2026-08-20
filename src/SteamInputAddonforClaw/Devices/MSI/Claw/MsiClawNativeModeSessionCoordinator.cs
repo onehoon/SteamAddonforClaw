@@ -56,6 +56,8 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
             if (_active || _recoveryBoundaryOwned || _recovery.HasIncompleteRecovery)
                 return false;
             _routingFaultLatched = false;
+            if (_recoverySafety.Current == RecoverySafety.Safe)
+                _unsafeRecoveryVersion = null;
             AppLog.Debug("NativeMode", "RoutingFaultLatchCleared", ("Reason", "SteamSessionEnded"));
             return true;
         }

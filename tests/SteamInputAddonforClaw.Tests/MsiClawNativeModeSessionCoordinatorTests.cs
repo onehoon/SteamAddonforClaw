@@ -324,6 +324,32 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task Steam_session_boundary_retires_old_version_evidence_before_new_fault()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var modeController = new FakeModeController(devices) { FailRestore = true };
+        var recoverySafety = new RecoverySafetyState(RecoverySafety.Safe);
+        await using var coordinator = CreateCoordinator(devices, modeController,
+            new PowerMutationGate(initiallyOpen: true), recoverySafety);
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.FailClosedAsync("OldFailure"));
+        modeController.FailRestore = false;
+        Assert.True(await coordinator.ExitForPipelineAsync(CancellationToken.None));
+        Assert.Equal(RecoverySafety.Safe, recoverySafety.Current);
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        await coordinator.LatchRoutingFaultAsync("NewOrdinaryFailure");
+        await coordinator.FailClosedAsync("NewOrdinaryFailure");
+
+        Assert.False(await coordinator.ConvergeAfterRoutingCleanupAsync());
+        Assert.Equal("RoutingFaultLatched",
+            (await coordinator.EnterForPipelineAsync(CancellationToken.None)).Reason);
+        Assert.True(await coordinator.OnSteamSessionEndedAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Convergence_accepts_newer_safe_recovery_commit_for_owned_stale_claim()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
