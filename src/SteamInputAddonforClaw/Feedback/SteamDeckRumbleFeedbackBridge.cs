@@ -51,6 +51,10 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         var decoded = SteamDeckRumbleDecoder.Decode(report);
         if (!decoded.HasPhysicalTranslation) return false;
         sequence = BeginFeedback();
+        if (origin == "DeveloperVibrationTest")
+        {
+            lock (_gate) _developerSequence = sequence;
+        }
         BeforeLease?.Invoke();
         var rumble = decoded.Rumble;
         var duration = GetSafetyDuration(decoded);
@@ -97,7 +101,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
                 return new(false, commandResult, null, decoded);
             lock (_gate)
             {
-                if (sequence == _sequence && ReferenceEquals(_developerTest, linked))
+                if (sequence == _sequence && _developerSequence == sequence && ReferenceEquals(_developerTest, linked))
                     _developerSequence = sequence;
             }
             if (!addDeveloperStop) return new(true, commandResult, null, decoded);

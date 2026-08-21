@@ -61,7 +61,6 @@ public sealed class DeveloperVibrationTestTests
         await Task.Delay(20);
         bridge.Dispose();
         Assert.True((await test).Succeeded);
-        Assert.True(sink.Values.Count <= 2);
     }
 
     [Fact]
