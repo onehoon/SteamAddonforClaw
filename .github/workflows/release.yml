@@ -50,7 +50,7 @@ jobs:
         run: |
           $testProjects = @(Get-ChildItem -Path tests -Filter *.csproj -Recurse -File)
           foreach ($testProject in $testProjects) {
-            dotnet test $testProject.FullName -c Release --no-restore `
+            dotnet test $testProject.FullName -c Release --no-build --no-restore `
               --blame-hang-timeout 3m --blame-hang-dump-type full `
               --results-directory artifacts/TestResults
             if ($LASTEXITCODE -ne 0) {
