@@ -35,6 +35,41 @@ public sealed class TdpRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task UserCommitCompletionReportsPhysicalSuccessSeparately()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC);
+
+        var result = runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(21, 31), Dc = Pair(10, 20) });
+        Assert.NotNull(result.Completion);
+        var completion = await result.Completion!;
+        await runtime.DrainAsync();
+
+        Assert.True(completion.Attempted);
+        Assert.True(completion.Succeeded);
+        Assert.Equal(TdpPowerSource.AC, completion.Source);
+        Assert.Equal((21, 31), (completion.Pl1Watts, completion.Pl2Watts));
+    }
+
+    [Fact]
+    public async Task UserCommitCompletionReportsPhysicalFailureWhenGetApFails()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        var transport = new FakeTransport { GetApSucceeds = false };
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC);
+
+        var result = runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(21, 31), Dc = Pair(10, 20) });
+        Assert.NotNull(result.Completion);
+        var completion = await result.Completion!;
+        await runtime.DrainAsync();
+
+        Assert.True(completion.Attempted);
+        Assert.False(completion.Succeeded);
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
     public async Task EnableTransitionIsLoggedEvenWhenPowerSourceIsUnknown()
     {
         Save(new DeviceTdpSettings { Enabled = false, Ac = Pair(20, 30), Dc = Pair(10, 20) });
@@ -354,12 +389,13 @@ public sealed class TdpRuntimeTests : IDisposable
     {
         public List<string> Operations { get; } = [];
         public byte[] Ap { get; set; } = [0x00, 0x00, 0xC0];
+        public bool GetApSucceeds { get; set; } = true;
         public bool BlockFirstApply { get; set; }
         public TaskCompletionSource FirstApplyStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim ReleaseFirstApply { get; } = new(false);
         private int _applyCount;
 
-        public bool TryGetAp(int index, out byte[] payload) { Operations.Add($"GetAp({index})"); payload = Ap; return true; }
+        public bool TryGetAp(int index, out byte[] payload) { Operations.Add($"GetAp({index})"); payload = Ap; return GetApSucceeds; }
         public bool TrySetData(int block, byte value)
         {
             Operations.Add($"SetData({block},{value})");

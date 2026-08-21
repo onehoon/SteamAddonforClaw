@@ -282,7 +282,7 @@ public sealed partial class DevicePage : UserControl
         SetTdpValueText(isAc ? TdpAcPl2ValueText : TdpDcPl2ValueText, pl2);
         SetTdpResult(isAc, null);
         _tdpDraftDirty = true;
-        if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit();
+        if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit(isAc);
     }
 
     private async void TdpEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)
@@ -304,7 +304,7 @@ public sealed partial class DevicePage : UserControl
         finally { SetTdpMutationBusy(false); }
     }
 
-    private void ScheduleTdpEdit()
+    private void ScheduleTdpEdit(bool editedAc)
     {
         _tdpEditDebounce?.Cancel();
         var generation = Interlocked.Increment(ref _tdpEditGeneration);
@@ -318,7 +318,7 @@ public sealed partial class DevicePage : UserControl
                 {
                     if (!TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpEditGeneration), TdpEnabledToggleSwitch.IsOn)) return;
                     var configuration = BuildTdpConfiguration(true);
-                    if (configuration is not null) _ = RunTdpMutationAsync(configuration, generation);
+                    if (configuration is not null) _ = RunTdpMutationAsync(configuration, generation, editedAc);
                 });
             }
             catch (OperationCanceledException) { }
@@ -339,9 +339,9 @@ public sealed partial class DevicePage : UserControl
     }
     private FrontendTdpConfiguration? BuildTdpToggleConfiguration(bool enabled) =>
         TdpDraftPolicy.TryBuildToggleConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft, _tdpSnapshot.Configuration);
-    private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration, long submittedGeneration)
+    private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration, long submittedGeneration, bool editedAc)
     {
-        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!newerEditExists && result.HardwareApply is { Attempted: true } hardware) SetTdpResult(hardware.Source == FrontendTdpPowerSource.AC, hardware.Succeeded ? "Success" : "Fail"); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
+        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!newerEditExists && result.HardwareApply is { Attempted: true } hardware && (hardware.Source == FrontendTdpPowerSource.AC) == editedAc) SetTdpResult(editedAc, hardware.Succeeded ? "Success" : "Fail"); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
         catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = "TDP could not be updated because the Runtime connection was interrupted."; TdpInfoBar.Severity = InfoBarSeverity.Error; TdpInfoBar.IsOpen = true; await RefreshAsync(); }
     }
     private void SetTdpResult(bool ac, string? result)
