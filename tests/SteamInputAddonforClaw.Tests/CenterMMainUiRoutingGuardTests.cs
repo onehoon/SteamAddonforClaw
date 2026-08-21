@@ -57,6 +57,22 @@ public sealed class CenterMMainUiRoutingGuardTests
     }
 
     [Fact]
+    public async Task Disarm_stops_borrowed_helper_when_persistent_OEM1_owner_is_gone()
+    {
+        var snapshots = new FakeSnapshotSource([[new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
+        var helperApi = new RecordingHelperApi();
+        var ownership = new CenterMHelperOwnership(helperApi);
+        Assert.Equal(HelperStartResult.Started, ownership.Start("C:\\fake\\MSI Center M.exe"));
+        var guard = Create(snapshots, new FakeStager(null), helperApi, new FakeMutexFactory(), helperOwnership: ownership,
+            persistentHelperOwnerReady: () => false);
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.Armed, await guard.ArmAsync());
+        Assert.True(await guard.DisarmAsync());
+        Assert.Contains("Terminate", helperApi.Calls);
+        Assert.False(ownership.IsOwned);
+    }
+
+    [Fact]
     public async Task Helper_demand_is_visible_during_the_in_flight_arm_transaction()
     {
         var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
