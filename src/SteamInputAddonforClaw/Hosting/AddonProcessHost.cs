@@ -46,6 +46,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly QamHostProcessController _qamHostController;
     private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
     private readonly GameBarForegroundPresentationDelivery _gameBarDelivery;
+    private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
 
     // Device/Profile Runtime -- a sibling capability of the routing/OEM1 composition above, not a
     // member of it (work order PR276 sections 0/2/12): CPU Boost must remain fully usable even with
@@ -60,6 +61,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private int _processShutdownStarted;
     private int _runtimeShutdownPrepared;
+    private Task? _deferredRuntimeStartup;
 
     internal AddonProcessHost(string[]? updateRestartArguments)
     {
@@ -201,6 +203,21 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         _gameBarForegroundWatcher.StateChanged += OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Start();
+        // Install last: once this returns, the owning thread must resume GetMessageW promptly.
+        _winGSuppressionGuard.Start();
+    }
+
+    internal void StartDeferredRuntimeStartup()
+    {
+        if (_deferredRuntimeStartup is not null) return;
+        var cancellationToken = _startupCancellationTokenSource.Token;
+        _deferredRuntimeStartup = Task.Run(async () =>
+        {
+            StartPowerObservation();
+            var reconcile = ReconcileAsync(cancellationToken);
+            ReconcileDeviceProfileStartup();
+            await reconcile.ConfigureAwait(false);
+        }, cancellationToken);
     }
 
     internal Task ReconcileAsync(CancellationToken cancellationToken = default) => GetRuntimeHost().ReconcileAsync(cancellationToken);
@@ -268,6 +285,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _gameBarDelivery.StopAccepting();
         _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Dispose();
+        _winGSuppressionGuard.Dispose();
         _qamHostController.BeginShutdown();
         _tdpRuntime?.BeginShutdown();
         _tdpCenterMRegistryWatcher?.Dispose();
@@ -284,6 +302,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
         BeginProcessShutdown();
         await _gameBarDelivery.DrainAsync().ConfigureAwait(false);
+        if (_deferredRuntimeStartup is not null)
+        {
+            try { await _deferredRuntimeStartup.ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_startupCancellationTokenSource.IsCancellationRequested) { }
+            catch (Exception exception) { AppLog.Error("Startup", "Deferred Runtime startup work failed.", exception); }
+            _deferredRuntimeStartup = null;
+        }
         if (_frontendServer is not null)
         {
             await _frontendServer.DisposeAsync().ConfigureAwait(false);

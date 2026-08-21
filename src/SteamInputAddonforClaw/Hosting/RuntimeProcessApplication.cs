@@ -36,12 +36,13 @@ internal sealed class RuntimeProcessApplication
                 return;
 
             _processHost.InitializeRuntimeAsync().GetAwaiter().GetResult();
-            _processHost.StartRuntimeEventWatchers();
-            _processHost.StartPowerObservation();
             _processHost.TryInitializeTray(RequestRestart, RequestExit);
-            _ = _processHost.ReconcileAsync();
-            _processHost.ReconcileDeviceProfileStartup();
-            _messageLoop.Run();
+            _messageLoop.Run(() =>
+            {
+                _processHost.StartRuntimeEventWatchers();
+                // Return to GetMessageW before unrelated startup/reconcile work can hold the hook thread.
+                _processHost.StartDeferredRuntimeStartup();
+            });
         }
         catch (Exception exception)
         {
