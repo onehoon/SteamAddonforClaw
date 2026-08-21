@@ -68,7 +68,6 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     private readonly Func<string, string?> _stager;
     private readonly TimeSpan _helperStopTimeout;
     private readonly Func<bool>? _persistentHelperOwnerReady;
-    private readonly Func<CancellationToken, Task<bool>>? _releaseSharedHelper;
     /// <summary>Phase 2: retires an already-running real MainUI (tray-resident or visible) before
     /// the helper/mutex arm sequence below. Null is a valid, fully-Phase-1-compatible configuration
     /// -- an existing real MainUI then still simply refuses to arm, exactly as before.</summary>
@@ -99,8 +98,7 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         Func<string, string?>? stager = null,
         TimeSpan? helperStopTimeout = null,
         CenterMMainUiRoutingRetirement? retirement = null,
-        Func<bool>? persistentHelperOwnerReady = null,
-        Func<CancellationToken, Task<bool>>? releaseSharedHelper = null)
+        Func<bool>? persistentHelperOwnerReady = null)
     {
         _publishRootProvider = publishRootProvider ?? (() => AppContext.BaseDirectory);
         _processSnapshotSource = processSnapshotSource ?? new Win32ProcessSnapshotSource();
@@ -110,7 +108,6 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         _helperStopTimeout = helperStopTimeout ?? TimeSpan.FromSeconds(5);
         _retirement = retirement;
         _persistentHelperOwnerReady = persistentHelperOwnerReady;
-        _releaseSharedHelper = releaseSharedHelper;
     }
 
     internal bool IsArmed => _armed;
@@ -122,26 +119,18 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         try
         {
             _helperDemandActive = true;
-            // The production persistent-owner callback is serialized by the OEM1 coordinator gate.
-            // Resolve it before entering the routing transaction so an OEM1 Stop already authorized
-            // by that gate cannot race a later borrow decision.
-            _ = PersistentHelperOwnerReady();
             // Idempotent: a duplicate arm request while already armed is a confirmation, not a
             // fresh attempt -- it must never stage a second helper or re-acquire the mutex.
             if (_armed) return CenterMMainUiRoutingGuardResult.Armed;
 
             var result = await ArmCoreAsync(cancellationToken).ConfigureAwait(false);
             if (result != CenterMMainUiRoutingGuardResult.Armed)
-            {
                 _helperDemandActive = false;
-                await FinalizeFailedArmDemandAsync().ConfigureAwait(false);
-            }
             return result;
         }
         catch
         {
             _helperDemandActive = false;
-            await FinalizeFailedArmDemandAsync().ConfigureAwait(false);
             throw;
         }
         finally { _gate.Release(); }
@@ -266,35 +255,22 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
             // this arm is responsible for that retained ownership exactly as it would be for a
             // successful Start, so UnwindAsync/DisposeAsync must still be allowed to retry/register
             // it rather than treating it as borrowed/unowned.
-            if (startResult == HelperStartResult.Started)
+            _helperStartedByCurrentArm = startResult is HelperStartResult.Started or HelperStartResult.PartialCleanupUnconfirmed;
+            if (startResult != HelperStartResult.Started)
             {
-                _helperStartedByCurrentArm = true;
-            }
-            else if (startResult == HelperStartResult.AlreadyOwned && _helperOwnership.IsOperationallyOwned)
-            {
-                // OEM1 won the serialized Start race. Join the same exact ownership as a borrower;
-                // do not unwind the winner's helper merely because Routing observed it late.
-                _helperStartedByCurrentArm = false;
-                AppLog.Info("CenterM.RoutingGuard", "Helper became operationally owned during arm; borrowing shared helper.",
-                    ("HelperProcessId", _helperOwnership.ProcessId));
-            }
-            else
-            {
-                _helperStartedByCurrentArm = startResult == HelperStartResult.PartialCleanupUnconfirmed;
                 AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: helper did not start.", null, ("Result", startResult));
-                await UnwindAsync(endingHelperDemand: true).ConfigureAwait(false);
+                await UnwindAsync().ConfigureAwait(false);
                 return CenterMMainUiRoutingGuardResult.HelperFailure;
             }
 
-            if (startResult == HelperStartResult.Started)
-                AppLog.Info("CenterM.RoutingGuard", "Helper started.", ("HelperProcessId", _helperOwnership.ProcessId));
+            AppLog.Info("CenterM.RoutingGuard", "Helper started.", ("HelperProcessId", _helperOwnership.ProcessId));
         }
 
         var mutexResult = _mutexOwnership.Acquire();
         if (mutexResult == CenterMMainUiMutexAcquireResult.Unavailable)
         {
             AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: MainUI mutex unavailable.", null);
-            await UnwindAsync(endingHelperDemand: true).ConfigureAwait(false);
+            await UnwindAsync().ConfigureAwait(false);
             return CenterMMainUiRoutingGuardResult.MutexFailure;
         }
         AppLog.Info("CenterM.RoutingGuard", "MainUI mutex acquired.");
@@ -305,7 +281,7 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         if (afterSnapshot is null)
         {
             AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: post-arm same-name enumeration was uncertain.", null);
-            await UnwindAsync(endingHelperDemand: true).ConfigureAwait(false);
+            await UnwindAsync().ConfigureAwait(false);
             return CenterMMainUiRoutingGuardResult.Uncertain;
         }
 
@@ -313,7 +289,7 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         if (invariant != CenterMHelperInvariantState.Valid)
         {
             AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: helper invariant check failed.", null, ("Invariant", invariant));
-            await UnwindAsync(endingHelperDemand: true).ConfigureAwait(false);
+            await UnwindAsync().ConfigureAwait(false);
 
             // A foreign same-name process appearing during arm is only ever a reason to abandon
             // this arm attempt -- it is never terminated here (Phase 1 policy, section 13/19).
@@ -332,7 +308,7 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
             // just acquired rather than publishing Armed for a transition about to be rolled back
             // anyway.
             AppLog.Info("CenterM.RoutingGuard", "Routing guard arm cancelled just before Armed publication; unwinding.");
-            await UnwindAsync(endingHelperDemand: true).ConfigureAwait(false);
+            await UnwindAsync().ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
         }
 
@@ -356,8 +332,8 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         {
             AppLog.Debug("CenterM.RoutingGuard", "Routing guard disarm started.");
             _armed = false;
+            var confirmed = await UnwindAsync().ConfigureAwait(false);
             _helperDemandActive = false;
-            var confirmed = await UnwindAsync(endingHelperDemand: true).ConfigureAwait(false);
             AppLog.Info("CenterM.RoutingGuard", "Routing guard disarmed.", ("Confirmed", confirmed));
             return confirmed;
         }
@@ -375,27 +351,18 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     /// <see cref="CenterMHelperOwnership.Stop"/> leaves it true so this arm remains the responsible
     /// party for terminal <see cref="DisposeAsync"/>'s bounded retry / orphan-registration path,
     /// exactly as it would be for a helper this arm is still mid-cleanup on.</summary>
-    private async Task<bool> UnwindAsync(bool endingHelperDemand)
+    private Task<bool> UnwindAsync()
     {
         var helperStopped = true;
-        if (_helperOwnership.IsOwned)
+        if (_helperStartedByCurrentArm && _helperOwnership.IsOwned)
         {
-            if (_releaseSharedHelper is not null && endingHelperDemand)
-            {
-                helperStopped = await _releaseSharedHelper(CancellationToken.None).ConfigureAwait(false);
-                _helperStartedByCurrentArm = !helperStopped;
-                AppLog.Info("CenterM.RoutingGuard", "Atomic shared-helper release completed.", ("Confirmed", helperStopped), ("HelperProcessId", _helperOwnership.ProcessId));
-            }
-            else if (PersistentHelperOwnerReady())
+            if (PersistentHelperOwnerReady())
             {
                 AppLog.Info("CenterM.RoutingGuard", "Routing relinquished helper lifetime to persistent OEM1 ownership.", ("HelperProcessId", _helperOwnership.ProcessId));
                 _helperStartedByCurrentArm = false;
             }
-            else if (_helperStartedByCurrentArm || (endingHelperDemand && _persistentHelperOwnerReady is not null))
+            else
             {
-                // Routing is the last active demand. This also covers a helper originally started
-                // by OEM1 and borrowed by Routing, after OEM1 has been disabled while Routing stays
-                // active; the final Routing unwind then owns the shared helper teardown.
                 helperStopped = _helperOwnership.Stop(_helperStopTimeout);
                 AppLog.Info("CenterM.RoutingGuard", "Helper stop attempted.", ("Confirmed", helperStopped), ("HelperProcessId", _helperOwnership.ProcessId));
                 _helperStartedByCurrentArm = !helperStopped;
@@ -408,7 +375,7 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
 
         _mutexOwnership.Release();
         AppLog.Info("CenterM.RoutingGuard", "MainUI mutex released.");
-        return helperStopped;
+        return Task.FromResult(helperStopped);
     }
 
     private bool PersistentHelperOwnerReady()
@@ -418,25 +385,6 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         {
             AppLog.Warn("CenterM.RoutingGuard", "Persistent helper ownership could not be confirmed; retaining Routing cleanup authority.", exception);
             return false;
-        }
-    }
-
-    private async Task FinalizeFailedArmDemandAsync()
-    {
-        if (_persistentHelperOwnerReady is null || _helperStartedByCurrentArm || !_helperOwnership.IsOwned)
-            return;
-
-        if (_releaseSharedHelper is not null || !PersistentHelperOwnerReady())
-        {
-            var stopped = _releaseSharedHelper is not null
-                ? await _releaseSharedHelper(CancellationToken.None).ConfigureAwait(false)
-                : _helperOwnership.Stop(_helperStopTimeout);
-            // Routing becomes the final cleanup authority once OEM1 has relinquished the helper.
-            // Preserve that responsibility when exact-handle termination is unconfirmed so the
-            // terminal bounded retry/orphan path cannot be skipped as if this were a borrow.
-            _helperStartedByCurrentArm = !stopped;
-            AppLog.Info("CenterM.RoutingGuard", "Failed Routing arm finalized borrowed helper cleanup.",
-                ("Confirmed", stopped), ("HelperProcessId", _helperOwnership.ProcessId));
         }
     }
 

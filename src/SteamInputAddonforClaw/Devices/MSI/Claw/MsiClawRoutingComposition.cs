@@ -213,6 +213,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // MsiClawNativeStateManager) as the guard's read-only native-mode probe, so retirement's
         // XInput verification observes the exact same authority the real NativeMode stage uses.
         var centerMProcesses = new Win32ProcessSnapshotSource();
+        CenterMOem1LifecycleCoordinator? oem1Coordinator = centerMOem1Coordinator;
         CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard(
             processSnapshotSource: centerMProcesses,
             helperOwnership: CenterMHelperOwnership,
@@ -222,7 +223,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
                 // look at the same route authority, so an already-doomed route (fault latch,
                 // recovery safety, power gate) never retires the user's real MainUI first.
                 new MsiClawCenterMRoutingPreflightProbe(NativeModeSession),
-                processSnapshotSource: centerMProcesses));
+                processSnapshotSource: centerMProcesses),
+            persistentHelperOwnerReady: () => oem1Coordinator?.GetSnapshot().SuppressionReady == true);
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
         // PR2: production-compose the already-implemented CenterMOem1LifecycleCoordinator into
@@ -236,12 +238,12 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // so `() => true` here IS the required explicit MSI Claw environment-eligibility predicate
         // (requirement 9) -- distinct from, and never widening, the coordinator's own fail-open
         // default of false for any caller that omits one.
-        CenterMOem1Coordinator = centerMOem1Coordinator ?? new CenterMOem1LifecycleCoordinator(
+        CenterMOem1Coordinator = oem1Coordinator ??= new CenterMOem1LifecycleCoordinator(
             publishRootProvider: () => AppContext.BaseDirectory,
             processSnapshotSource: centerMProcesses,
             helperOwnership: CenterMHelperOwnership,
             environmentEligibility: () => true,
-            externalHelperDemand: () => CenterMGuard.IsArmed);
+            externalHelperDemand: () => CenterMGuard.HasHelperDemand);
         // PR3: the two narrow callbacks below let the OEM1 action path (wired later, only by
         // ConfigureOem1ActionPath) refresh custom gesture-bridge authority from the coordinator's own
         // freshly reconciled SuppressionReady snapshot after every tick/resume -- see
@@ -375,7 +377,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         lock (_oem1TaskSync)
         {
             _oem1RemappingEnabled = enabled;
-            return _oem1ActivationTask = ApplyOem1RemappingEnabledAsync(enabled);
+            return _oem1ActivationTask = StartInitialOem1ActivationAsync(enabled);
         }
     }
 
@@ -398,6 +400,13 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             _wingBridge = null;
         }
         return Task.CompletedTask;
+
+    private async Task StartInitialOem1ActivationAsync(bool enabled)
+    {
+        // Keep synchronous WMI/helper work out of composition creation. The task remains owned
+        // and is joined by Routing at its helper-acquisition boundary and by disposal.
+        await Task.Yield();
+        await ApplyOem1RemappingEnabledAsync(enabled).ConfigureAwait(false);
     }
 
     /// <summary>Whether OEM1 desired-enabled should be requested, based solely on the persisted
