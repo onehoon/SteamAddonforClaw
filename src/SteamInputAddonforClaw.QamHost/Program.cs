@@ -81,7 +81,7 @@ try
                 }
                 log.Warn("CDP connection lost; starting GamepadUI reacquisition.");
                 installationSucceeded = false;
-                recoveryDeadline = DateTimeOffset.UtcNow.AddSeconds(10);
+                recoveryDeadline = QamHostRecovery.BeginAfterSessionFailure(managed, recoveryDeadline, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
                 break;
             }
             if (stopRequested || lifetimeToken.IsCancellationRequested) break;
@@ -93,9 +93,13 @@ try
         }
         catch (Exception ex)
         {
+            installationSucceeded = false;
+            recoveryDeadline = QamHostRecovery.BeginAfterSessionFailure(managed, recoveryDeadline, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
             if (!managed || !QamHostRecovery.IsOpen(DateTimeOffset.UtcNow, recoveryDeadline))
                 log.Warn($"QamHost QAM session ended. {ex.GetType().Name}: {ex.Message}");
-            installationSucceeded = false;
+            else
+                log.Warn($"QAM session failed; starting bounded GamepadUI recovery. {ex.GetType().Name}: {ex.Message}");
+            if (!managed) break;
         }
         finally
         {

@@ -83,4 +83,22 @@ public class QamHostCdpCommandCorrelatorTests
         Assert.False(QamHostRecovery.IsOpen(deadline, deadline));
         Assert.False(QamHostRecovery.IsOpen(deadline + TimeSpan.FromMinutes(1), deadline));
     }
+
+    [Fact]
+    public void HealthyManagedSessionFailureStartsOneFiniteRecoveryWindow()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var deadline = QamHostRecovery.BeginAfterSessionFailure(true, null, now, TimeSpan.FromSeconds(10));
+
+        Assert.Equal(now.AddSeconds(10), deadline);
+        Assert.False(QamHostRecovery.IsOpen(deadline!.Value, deadline));
+    }
+
+    [Fact]
+    public void NonManagedSessionFailureDoesNotEnterReconnectRecovery()
+    {
+        var deadline = QamHostRecovery.BeginAfterSessionFailure(false, null, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
+
+        Assert.Null(deadline);
+    }
 }
