@@ -269,6 +269,12 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         source.Current = TdpPowerSource.AC; delay.Reset(); watcher.Observe(TdpPowerNotification.PowerSourceChanged); delay.Release();
         await watcher.DrainPendingAsync(); await runtime.DrainAsync();
         Assert.Equal(["GetAp(0)", "SetData(80,8)", "SetData(81,30)", "SetData(80,20)"], transport.Operations);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Reason=PowerSourceChanged", log);
+        Assert.Contains("Invalidate=True", log);
+        Assert.Contains("Power-limit cache invalidated", log);
+        Assert.Contains("Reason=Resume", log);
     }
 
     private TdpRuntime CreateRuntime(FakeTransport transport, TdpPowerSource source) => CreateRuntime(transport, () => source);

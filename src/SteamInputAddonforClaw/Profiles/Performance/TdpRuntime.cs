@@ -111,7 +111,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
 
                 if (realPowerBoundary)
                     RequestCacheInvalidationUnderLock("PowerSourceBoundary");
-                var effectiveInvalidation = invalidateHardwareCache || realPowerBoundary;
+                var effectiveInvalidation = _invalidateHardwareCacheBeforeNextApply;
                 AppLog.Debug("Profiles.Tdp", "TDP reconcile admitted", ("Reason", reason), ("Source", currentSource), ("PL1", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl1Watts), ("PL2", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl2Watts), ("Force", forceApply), ("Invalidate", effectiveInvalidation));
                 EnqueueSnapshotUnderLock(currentSource, tdp, reason);
             }
