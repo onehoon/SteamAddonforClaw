@@ -27,6 +27,7 @@ var lifetimeToken = lifetime?.Token ?? CancellationToken.None;
 Task stopTask = managed ? lifetime!.StopTask : WaitForConsoleShutdownAsync();
 SteamGamepadUiCdpClient? currentClient = null;
 var installationSucceeded = false;
+var installMayExist = false;
 var teardownAttempted = false;
 var stopRequested = false;
 DateTimeOffset? recoveryDeadline = managed ? DateTimeOffset.UtcNow.AddSeconds(10) : null;
@@ -36,6 +37,7 @@ try
            QamHostRecovery.IsOpen(DateTimeOffset.UtcNow, recoveryDeadline))
     {
         currentClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+        installMayExist = false;
         currentClient.AddonQamConsoleMessage += message => log.Info(message);
         var reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnDocumentLoaded() => reload.TrySetResult();
@@ -59,6 +61,7 @@ try
             log.Info($"GamepadUI target acquired. Id={target.Id} Title={target.Title} Url={target.Url}");
             await currentClient.ConnectAsync(target, lifetimeToken);
             log.Info("CDP connected.");
+            installationSucceeded = true; // cleanup is eligible once the remote install may execute
             await InstallAsync(currentClient);
             teardownAttempted = false;
             installationSucceeded = true;
@@ -100,7 +103,6 @@ try
         }
         catch (Exception ex)
         {
-            installationSucceeded = false;
             recoveryDeadline = QamHostRecovery.BeginAfterSessionFailure(managed, recoveryDeadline, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
             if (!managed || !QamHostRecovery.IsOpen(DateTimeOffset.UtcNow, recoveryDeadline))
                 log.Warn($"QamHost QAM session ended. {ex.GetType().Name}: {ex.Message}");
@@ -110,7 +112,7 @@ try
         }
         finally
         {
-            if (installationSucceeded) await TeardownAsync(currentClient);
+            if (installMayExist) await TeardownAsync(currentClient);
             await currentClient.DisposeAsync();
             currentClient = null;
         }
@@ -131,6 +133,8 @@ return 0;
 
 async Task InstallAsync(SteamGamepadUiCdpClient client)
 {
+    // The remote command may execute even when the local await is cancelled.
+    installMayExist = true;
     var result = CdpEvaluateResult.Parse(await client.EvaluateAsync(frontendScript, lifetimeToken));
     if (!result.Succeeded) throw new InvalidOperationException($"qam.js evaluation exception: {result.ErrorText}");
     if (result.BooleanValue != true) throw new InvalidOperationException("install() returned false.");
@@ -140,6 +144,7 @@ async Task InstallAsync(SteamGamepadUiCdpClient client)
 async Task TeardownAsync(SteamGamepadUiCdpClient client)
 {
     if (!installationSucceeded || teardownAttempted) return;
+    if (!installMayExist) return;
     teardownAttempted = true;
     try
     {
