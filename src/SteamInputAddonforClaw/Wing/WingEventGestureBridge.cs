@@ -50,18 +50,14 @@ internal sealed class WingEventGestureBridge : IDisposable
 
     public void Dispose()
     {
-        lock (_deliveryGate)
+        lock (_gate)
         {
-            lock (_gate)
-            {
-                if (_disposed) return;
-                _disposed = true;
-                _source.EventReceived -= OnEvent;
-                _recognizer.GestureRecognized -= OnGesture;
-            }
-            _recognizer.InvalidatePending();
+            if (_disposed) return;
+            _disposed = true;
+            _source.EventReceived -= OnEvent;
         }
         _recognizer.Dispose();
+        _recognizer.GestureRecognized -= OnGesture;
         _source.Dispose();
     }
 }

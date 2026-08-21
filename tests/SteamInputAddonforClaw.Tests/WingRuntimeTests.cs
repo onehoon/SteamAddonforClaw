@@ -68,6 +68,54 @@ public sealed class WingRuntimeTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public async Task Event88_requires_active_matching_authority_epoch()
+    {
+        var authority = new WinGProtectionRoutingStage.AuthoritySnapshot(true, 7);
+        var actions = 0;
+        using var source = new FakeSource();
+        var delay = new HeldDelay();
+        using var recognizer = new WingGestureRecognizer(() => true, delay);
+        using var bridge = new WingEventGestureBridge(source, recognizer, () => authority,
+            new WingActionDispatcher(() => WingMapping.Default, () => { actions++; return true; }));
+
+        source.Emit(new(88, CenterMOemCode.Oem2));
+        authority = new(true, 8);
+        delay.Complete();
+        await Task.Delay(10);
+        Assert.Equal(0, actions);
+
+        source.Emit(new(41, CenterMOemCode.Oem1));
+        Assert.Equal(0, actions);
+    }
+
+    [Fact]
+    public void Recognition_policy_failure_stays_inside_event_path()
+    {
+        var actions = 0;
+        using var source = new FakeSource();
+        using var recognizer = new WingGestureRecognizer(() => throw new InvalidOperationException("policy"));
+        using var bridge = new WingEventGestureBridge(source, recognizer,
+            () => new(true, 1), new WingActionDispatcher(() => WingMapping.Default, () => { actions++; return true; }));
+
+        var exception = Record.Exception(() => source.Emit(new(88, CenterMOemCode.Oem2)));
+        Assert.Null(exception);
+        Assert.Equal(0, actions);
+    }
+
+    [Fact]
+    public void Disposed_bridge_rejects_later_event()
+    {
+        var actions = 0;
+        var source = new FakeSource();
+        using var recognizer = new WingGestureRecognizer(() => false);
+        var bridge = new WingEventGestureBridge(source, recognizer,
+            () => new(true, 1), new WingActionDispatcher(() => WingMapping.Default, () => { actions++; return true; }));
+        bridge.Dispose();
+        source.Emit(new(88, CenterMOemCode.Oem2));
+        Assert.Equal(0, actions);
+    }
+
     private sealed class HeldDelay : IOem1GestureDelay
     {
         private TaskCompletionSource _completion = NewCompletion();
@@ -81,5 +129,13 @@ public sealed class WingRuntimeTests
         private long _timestamp;
         public void Advance(TimeSpan amount) => _timestamp += (long)(amount.TotalSeconds * global::System.Diagnostics.Stopwatch.Frequency);
         public override long GetTimestamp() => _timestamp;
+    }
+
+    private sealed class FakeSource : IMsiEventSource
+    {
+        public event Action<MsiOemEvent>? EventReceived;
+        public bool Start() => true;
+        public void Emit(MsiOemEvent value) => EventReceived?.Invoke(value);
+        public void Dispose() { }
     }
 }
