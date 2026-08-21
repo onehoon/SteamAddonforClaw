@@ -398,7 +398,6 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             _feedbackRevoked = true;
             AppLog.Debug("Rumble", "Steam Deck feedback authority revoked.", ("Source", "SteamDeck"));
         }
-        _feedbackBridge?.Retire();
         _feedbackBridge?.Dispose();
         if (_feedbackCallbackRegistered)
         {

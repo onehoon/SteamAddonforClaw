@@ -96,13 +96,20 @@ public sealed class DeveloperVibrationTestTests
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        var delayEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDelay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bridge.DeveloperDelayOverride = (_, cancellationToken) =>
+        {
+            delayEntered.TrySetResult();
+            return releaseDelay.Task.WaitAsync(cancellationToken);
+        };
         var developerTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), addDeveloperStop: true, CancellationToken.None);
-        await Task.Delay(20);
+        await delayEntered.Task;
 
         bridge.CancelDeveloperTestAndStop();
+        releaseDelay.TrySetResult();
 
         Assert.False((await developerTest).Succeeded);
-        await Task.Delay(300);
         // Only the developer Rumble command and the CancelDeveloperTestAndStop() zero write --
         // the cancelled pending 250ms delayed STOP must never also fire.
         await WaitForCountAsync(sink, 1);

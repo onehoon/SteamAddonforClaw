@@ -460,11 +460,16 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var session = new FakeCanonicalSession();
         var sink = new RecordingRumbleSink();
         sink.Results.Enqueue(new(stopStatus, "test"));
+        sink.BlockWrites = true;
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
-        var result = await stage.RollbackMutationAsync(CancellationToken.None);
+        var rollback = stage.RollbackMutationAsync(CancellationToken.None).AsTask();
+        await sink.WriteEntered.Task;
+        await session.DetachEntered.Task;
+        sink.ReleaseWrite.TrySetResult();
+        var result = await rollback;
 
         Assert.True(result.Succeeded, result.Reason);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
@@ -1100,6 +1105,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public List<string>? ExternalTrace { get; set; }
         public SteamDeckOutputCallback? Callback { get; private set; }
         public TaskCompletionSource InputEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource DetachEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseInput { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public CanonicalSteamDeckSessionState State { get; private set; } = CanonicalSteamDeckSessionState.Clean;
@@ -1156,6 +1162,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
             Trace.Add("Remove");
             ExternalTrace?.Add("DetachDevice");
             RemoveCalls++;
+            DetachEntered.TrySetResult();
             OnDetachDeviceCalled?.Invoke();
             // A known/classified remove failure (RemoveResult=false) leaves State unchanged (still
             // Active) so the stage classifies it as "VirtualDeviceRemoveFailed" rather than
@@ -1189,8 +1196,17 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     {
         public List<TwoMotorRumble> Values { get; } = [];
         public Queue<PhysicalRumbleWriteResult> Results { get; } = new();
+        public bool BlockWrites { get; set; }
+        public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseWrite { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<string>? Trace { get; set; }
-        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble) { Values.Add(rumble); if (rumble == TwoMotorRumble.Stopped) Trace?.Add("RumblePreflightStop"); return Results.Count > 0 ? Results.Dequeue() : new(PhysicalRumbleWriteStatus.Succeeded, ""); }
+        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
+        {
+            Values.Add(rumble);
+            if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Task.GetAwaiter().GetResult(); }
+            if (rumble == TwoMotorRumble.Stopped) Trace?.Add("RumblePreflightStop");
+            return Results.Count > 0 ? Results.Dequeue() : new(PhysicalRumbleWriteStatus.Succeeded, "");
+        }
     }
 
     private sealed class BlockingRumbleSink : IPhysicalRumbleSink

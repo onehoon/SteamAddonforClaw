@@ -38,6 +38,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
     internal SteamDeckOutputCallback Callback { get; }
     internal Action? BeforeLease { get; set; }
+    internal Func<TimeSpan, CancellationToken, Task>? DeveloperDelayOverride { get; set; }
     internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam") => ProcessNormalizedReportCore(report, origin, out _, out _);
 
     internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence) => ProcessNormalizedReportCore(report, origin, out sequence, out _);
@@ -113,7 +114,8 @@ internal sealed class SteamDeckRumbleFeedbackBridge
                     _developerSequence = sequence;
             }
             if (!addDeveloperStop) return new(true, commandResult, null, decoded);
-            await Task.Delay(250, linked.Token).ConfigureAwait(false);
+            var delay = DeveloperDelayOverride ?? Task.Delay;
+            await delay(TimeSpan.FromMilliseconds(250), linked.Token).ConfigureAwait(false);
             // Write directly against the original sequence instead of routing back through
             // ProcessNormalizedReport (which would call BeginFeedback() again): if real Steam
             // feedback arrived during the 250ms delay it is now the newest sequence, and this
