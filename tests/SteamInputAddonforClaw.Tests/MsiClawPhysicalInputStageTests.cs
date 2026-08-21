@@ -70,7 +70,7 @@ public sealed class MsiClawPhysicalInputStageTests
         var result = await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.False(result.Succeeded);
         Assert.Equal("InputSourceAlreadyRunning", result.Reason);
-        Assert.Equal(1, input.StopCount);
+        Assert.Equal(0, input.StopCount);
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public sealed class MsiClawPhysicalInputStageTests
         await transport.Entered.Task;
         var rollback = Task.Run(async () => await stage.RollbackMutationAsync(CancellationToken.None));
         await retirementReached.Task;
-        Assert.Equal(0, input.StopCount);
+        Assert.Equal(1, input.StopCount);
         transport.Release.Set();
         Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, (await write).Status);
         await rollback;
