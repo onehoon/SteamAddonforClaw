@@ -62,12 +62,20 @@ public sealed partial class ControllerPage : UserControl
         _wingMapping = mapping;
         WingSingleActionComboBox.ItemsSource = Enum.GetValues<WingAction>();
         WingDoubleActionComboBox.ItemsSource = Enum.GetValues<WingAction>();
+        WingSingleModifiersComboBox.ItemsSource = Enum.GetValues<WingHotkeyModifiers>();
+        WingDoubleModifiersComboBox.ItemsSource = Enum.GetValues<WingHotkeyModifiers>();
+        WingSingleKeyComboBox.ItemsSource = Enum.GetValues<WingHotkeyKey>();
+        WingDoubleKeyComboBox.ItemsSource = Enum.GetValues<WingHotkeyKey>();
         WingSingleActionComboBox.SelectedItem = mapping.Single.Action;
         WingDoubleActionComboBox.SelectedItem = mapping.Double.Action;
         WingSingleExecutableTextBox.Text = mapping.Single.Launch.ExecutablePath;
         WingSingleArgumentsTextBox.Text = mapping.Single.Launch.Arguments;
         WingDoubleExecutableTextBox.Text = mapping.Double.Launch.ExecutablePath;
         WingDoubleArgumentsTextBox.Text = mapping.Double.Launch.Arguments;
+        WingSingleModifiersComboBox.SelectedItem = mapping.Single.Hotkey.Modifiers;
+        WingSingleKeyComboBox.SelectedItem = mapping.Single.Hotkey.Key;
+        WingDoubleModifiersComboBox.SelectedItem = mapping.Double.Hotkey.Modifiers;
+        WingDoubleKeyComboBox.SelectedItem = mapping.Double.Hotkey.Key;
         ApplyWingDetails();
     }
 
@@ -81,14 +89,21 @@ public sealed partial class ControllerPage : UserControl
     {
         if (_isLoading || _frontend is null || !_wingMappingAvailable) return;
         ApplyWingDetails();
-        var single = BuildWingBinding(_wingMapping.Single, WingSingleActionComboBox.SelectedItem is WingAction action ? action : WingAction.None, WingSingleExecutableTextBox, WingSingleArgumentsTextBox);
-        var doubled = BuildWingBinding(_wingMapping.Double, WingDoubleActionComboBox.SelectedItem is WingAction doubleAction ? doubleAction : WingAction.None, WingDoubleExecutableTextBox, WingDoubleArgumentsTextBox);
+        var single = BuildWingBinding(WingSingleActionComboBox, WingSingleModifiersComboBox, WingSingleKeyComboBox, WingSingleExecutableTextBox, WingSingleArgumentsTextBox);
+        var doubled = BuildWingBinding(WingDoubleActionComboBox, WingDoubleModifiersComboBox, WingDoubleKeyComboBox, WingDoubleExecutableTextBox, WingDoubleArgumentsTextBox);
+        if (single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows) && single.Hotkey.Key == WingHotkeyKey.G || doubled.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows) && doubled.Hotkey.Key == WingHotkeyKey.G)
+        { ApplyWingMapping(_wingMapping); return; }
         try { var result = await _frontend.SetWingMappingAsync(_wingMapping with { Single = single, Double = doubled }); ApplyWingMapping(result.WingMapping ?? WingMappingSettings.Default); }
         catch (Exception exception) { AppLog.Warn("Controller", "WING mapping update failed.", exception); ApplyWingMapping(_wingMapping); }
     }
 
-    private static WingSlotBinding BuildWingBinding(WingSlotBinding previous, WingAction action, TextBox executable, TextBox arguments) =>
-        previous with { Action = action, Launch = new WingLaunchApplicationBinding(executable.Text, arguments.Text) };
+    private static WingSlotBinding BuildWingBinding(ComboBox actionBox, ComboBox modifiersBox, ComboBox keyBox, TextBox executable, TextBox arguments)
+    {
+        var action = actionBox.SelectedItem is WingAction selected ? selected : WingAction.None;
+        var modifiers = modifiersBox.SelectedItem is WingHotkeyModifiers selectedModifiers ? selectedModifiers : WingHotkeyModifiers.None;
+        var key = keyBox.SelectedItem is WingHotkeyKey selectedKey ? selectedKey : WingHotkeyKey.None;
+        return new WingSlotBinding { Action = action, Hotkey = new WingHotkeyBinding(modifiers, key), Launch = new WingLaunchApplicationBinding(executable.Text, arguments.Text) };
+    }
 
     /// <summary>
     /// Unsupported-hardware presentation, composed from the patterns already in this app: the card

@@ -22,12 +22,16 @@
                         <TextBlock Text="Single Press" />
                         <ComboBox x:Name="WingSingleActionComboBox" SelectionChanged="WingAction_SelectionChanged" />
                         <StackPanel x:Name="WingSingleDetails" Spacing="6" Visibility="Collapsed">
+                            <ComboBox x:Name="WingSingleModifiersComboBox" Header="Modifiers" />
+                            <ComboBox x:Name="WingSingleKeyComboBox" Header="Key" />
                             <TextBox x:Name="WingSingleExecutableTextBox" Header="Executable (.exe)" />
                             <TextBox x:Name="WingSingleArgumentsTextBox" Header="Arguments" />
                         </StackPanel>
                         <TextBlock Text="Double Press" />
                         <ComboBox x:Name="WingDoubleActionComboBox" SelectionChanged="WingAction_SelectionChanged" />
                         <StackPanel x:Name="WingDoubleDetails" Spacing="6" Visibility="Collapsed">
+                            <ComboBox x:Name="WingDoubleModifiersComboBox" Header="Modifiers" />
+                            <ComboBox x:Name="WingDoubleKeyComboBox" Header="Key" />
                             <TextBox x:Name="WingDoubleExecutableTextBox" Header="Executable (.exe)" />
                             <TextBox x:Name="WingDoubleArgumentsTextBox" Header="Arguments" />
                         </StackPanel>
