@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.GameBar;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Input;
@@ -466,8 +467,9 @@ public sealed class AddonRoutingRuntimeTests
             new RecoveryManager(new MemoryJournalStore()),
             new PowerMutationGate(initiallyOpen: true),
             new RecoverySafetyState(RecoverySafety.Safe),
-        new DefaultOem1MappingPreference(),
-            hardwareSupported: true);
+            new DefaultOem1MappingPreference(),
+            hardwareSupported: true,
+            winGSuppressionGuard: CreateTestWinGGuard());
 
         Assert.Null(runtime);
         if (runtime is not null) await runtime.DisposeAsync();
@@ -734,7 +736,8 @@ public sealed class AddonRoutingRuntimeTests
             new PowerMutationGate(initiallyOpen: true),
             new RecoverySafetyState(RecoverySafety.Safe),
             new DefaultOem1MappingPreference(),
-            hardwareSupported: false);
+            hardwareSupported: false,
+            winGSuppressionGuard: CreateTestWinGGuard());
 
         runtime?.TestOnly_SetSteamOutputReady(steamOutputReady);
         return runtime;
@@ -744,6 +747,14 @@ public sealed class AddonRoutingRuntimeTests
         new(new("Test", "Test", "Test", []), null!, [], null!, null!, null!, decision, null!, true, false);
 
     private static RoutingDecision WaitingForSteam() => new(RoutingDecisionKind.WaitingForSteam, RoutingDecisionReason.SteamInactive);
+
+    private static WinGSuppressionGuard CreateTestWinGGuard()
+    {
+        var guard = new WinGSuppressionGuard((_, _, _, _, _) => new(1), (_, _, _, _) => IntPtr.Zero, _ => true,
+            _ => 0, _ => 0);
+        guard.Start();
+        return guard;
+    }
 
     private sealed class EmptyDeviceEnumerator : IControllerDeviceEnumerator
     {

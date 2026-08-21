@@ -10,6 +10,7 @@ internal enum RoutingStageMode
 
 internal enum RoutingStageKind
 {
+    WinGProtection,
     NativeMode,
     PhysicalInput,
     PhysicalIsolation,
@@ -31,7 +32,8 @@ internal sealed record RoutingPipelinePlan(
     RoutingStageMode SteamOutput,
     RoutingStageMode XboxOutput,
     RoutingStageMode GameBarRouting,
-    RoutingStageMode CenterMGuard = RoutingStageMode.Disabled)
+    RoutingStageMode CenterMGuard = RoutingStageMode.Disabled,
+    RoutingStageMode WinGProtection = RoutingStageMode.Disabled)
 {
     internal static RoutingPipelinePlan StockCenterM { get; } = new(
         RoutingStageMode.Enabled,
@@ -41,9 +43,11 @@ internal sealed record RoutingPipelinePlan(
         RoutingStageMode.Enabled,
         RoutingStageMode.Disabled,
         RoutingStageMode.Disabled,
+        RoutingStageMode.Enabled,
         RoutingStageMode.Enabled);
 
     internal static RoutingPipelinePlan AllDisabled { get; } = new(
+        RoutingStageMode.Disabled,
         RoutingStageMode.Disabled,
         RoutingStageMode.Disabled,
         RoutingStageMode.Disabled,
@@ -63,6 +67,7 @@ internal sealed record RoutingPipelinePlan(
         RoutingStageKind.XboxOutput => XboxOutput,
         RoutingStageKind.GameBarRouting => GameBarRouting,
         RoutingStageKind.CenterMGuard => CenterMGuard,
+        RoutingStageKind.WinGProtection => WinGProtection,
         _ => RoutingStageMode.Disabled
     };
 }

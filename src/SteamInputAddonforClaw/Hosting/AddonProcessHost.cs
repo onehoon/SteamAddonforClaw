@@ -138,8 +138,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startupComposition.StockCenterMBaseline,
             startupResult.RecoverySafe,
             startupResult.HardwareSupported,
-            _qamHostController.OnBigPictureStateChanged,
-            RequestGameBarPresentationReconcile);
+            winGSuppressionGuard: _winGSuppressionGuard,
+            bigPictureStateChanged: _qamHostController.OnBigPictureStateChanged,
+            routingReconcileCompleted: null);
 
         // Review fix (BLOCKER): the OEM1 coordinator and the routing guard share the SAME underlying
         // helper ownership, but only their exact-handle Start() call itself serializes between them.
@@ -199,11 +200,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
 
+    internal async Task ShutdownRuntimeBeforeMessageLoopExitAsync()
+    {
+        if (_runtimeHost is not null)
+            await _runtimeHost.DisposeAsync().ConfigureAwait(false);
+    }
+
     internal void StartRuntimeEventWatchers()
     {
-        _gameBarForegroundWatcher.StateChanged += OnGameBarForegroundChanged;
-        _gameBarForegroundWatcher.Start();
-        // Install last: once this returns, the owning thread must resume GetMessageW promptly.
+        // Game Bar foreground presentation remains dormant in production. Install the existing
+        // Runtime-owned Win+G hook after all synchronous watcher work (none in this mode).
         _winGSuppressionGuard.Start();
     }
 
@@ -285,7 +291,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _gameBarDelivery.StopAccepting();
         _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Dispose();
-        _winGSuppressionGuard.Dispose();
         _qamHostController.BeginShutdown();
         _tdpRuntime?.BeginShutdown();
         _tdpCenterMRegistryWatcher?.Dispose();
@@ -321,8 +326,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _trayHostWindow = null;
         if (_runtimeHost is not null)
         {
-            await _runtimeHost.DisposeAsync().ConfigureAwait(false);
+            var runtimeHost = _runtimeHost;
+            await runtimeHost.DisposeAsync().ConfigureAwait(false);
             _runtimeHost = null;
+            FinalizeWinGGuardAfterRoutingShutdown(_winGSuppressionGuard, runtimeHost.RoutingShutdownSucceeded);
+        }
+        else
+        {
+            _winGSuppressionGuard.Dispose();
         }
         if (_tdpRuntime is not null)
         {
@@ -331,6 +342,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         await _qamHostController.DisposeAsync().ConfigureAwait(false);
         _startupComposition = null;
+    }
+
+    internal static void FinalizeWinGGuardAfterRoutingShutdown(WinGSuppressionGuard guard, bool routingShutdownSucceeded)
+    {
+        ArgumentNullException.ThrowIfNull(guard);
+        if (routingShutdownSucceeded)
+            guard.Dispose();
+        else
+            AppLog.Warn("Wing.Guard", "Win+G hook retained until process exit because routing shutdown did not complete safely.");
     }
 
     private AddonRuntimeHost GetRuntimeHost() => _runtimeHost ?? throw new InvalidOperationException("Runtime has not been initialized.");

@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
 using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.Input;
+using SteamInputAddonforClaw.GameBar;
 
 namespace SteamInputAddonforClaw.Routing;
 
@@ -99,9 +100,11 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         PowerMutationGate powerGate,
         RecoverySafetyState recoverySafety,
         Settings.IOem1MappingPreference oem1MappingPreference,
-        bool hardwareSupported)
+        bool hardwareSupported,
+        WinGSuppressionGuard winGSuppressionGuard)
     {
         ArgumentNullException.ThrowIfNull(oem1MappingPreference);
+        ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         // Forwarded, never recomputed: the startup hardware-support result is the single authority
         // both routing and the device composition's OEM1 availability gate read.
         var handheldRoutingComposition = new HandheldRoutingCompositionFactory().Create(handheldDeviceAdapter, recovery, powerGate, recoverySafety, hardwareSupported);
@@ -126,7 +129,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             new HidHideDriverClient(), handheldRoutingComposition.ControllerStateSource,
             feedbackAuthority: feedbackAuthority, physicalRumbleSink: handheldRoutingComposition.PhysicalRumbleSink);
         IRoutingPipelineStage steamOutputStage = deckStage;
-        var pipelineExecutor = new RoutingPipelineExecutor([.. handheldRoutingComposition.Stages, steamOutputStage]);
+        var stages = new List<IRoutingPipelineStage>(handheldRoutingComposition.Stages) { steamOutputStage, new WinGProtectionRoutingStage(winGSuppressionGuard) };
+        var pipelineExecutor = new RoutingPipelineExecutor(stages);
         var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(pipelineExecutor);
         AddonRoutingRuntime? runtime = null;
         var coordinator = new RoutingPipelineRuntimeCoordinator(

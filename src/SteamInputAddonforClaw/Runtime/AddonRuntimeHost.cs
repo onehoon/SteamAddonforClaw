@@ -39,6 +39,7 @@ namespace SteamInputAddonforClaw.Runtime;
 internal sealed class AddonRuntimeHost : IAsyncDisposable
 {
     internal static bool ShouldDisposeRoutingBackend(bool canonicalShutdownSucceeded) => canonicalShutdownSucceeded;
+    internal bool RoutingShutdownSucceeded { get; private set; }
     private readonly SteamSessionRuntime _steamRuntime;
     private readonly AddonRoutingRuntime? _routingRuntime;
     private readonly ResumeFreshReconcileSuppression _resumeFreshReconcileSuppression = new();
@@ -273,6 +274,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         var routingShutdownSucceeded = _routingShutdownOverride is not null
             ? await _routingShutdownOverride().ConfigureAwait(false)
             : _routingRuntime is null || await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
+        RoutingShutdownSucceeded = routingShutdownSucceeded;
         await _powerCoordinator.DisposeAsync().ConfigureAwait(false);
         if (ShouldDisposeRoutingBackend(routingShutdownSucceeded))
         {

@@ -102,14 +102,30 @@ internal sealed class RuntimeProcessApplication
     {
         if (Interlocked.Exchange(ref _shutdownRequested, 1) != 0) return;
         _processHost?.BeginProcessShutdown();
+        _ = ShutdownRuntimeAndRequestLoopExitAsync();
+    }
+
+    private async Task ShutdownRuntimeAndRequestLoopExitAsync()
+    {
         try
         {
-            _messageLoop?.RequestExit();
+            if (_processHost is not null)
+                await _processHost.ShutdownRuntimeBeforeMessageLoopExitAsync().ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            Volatile.Write(ref _shutdownRequested, 0);
-            AppLog.Error("Runtime", "Native message loop exit could not be requested; a later exit request may retry.", exception);
+            AppLog.Error("Runtime", "Runtime shutdown before message-loop exit failed.", exception);
         }
+        finally
+        {
+            try { _messageLoop?.RequestExit(); }
+            catch (Exception exception) { AppLog.Error("Runtime", "Native message loop exit could not be requested.", exception); }
+        }
+    }
+
+    internal static async Task RunShutdownBeforeMessageLoopExitAsync(Func<Task> shutdown, Action requestExit)
+    {
+        await shutdown().ConfigureAwait(false);
+        requestExit();
     }
 }

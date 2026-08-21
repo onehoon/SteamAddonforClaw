@@ -13,6 +13,7 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.Status;
 using SteamInputAddonforClaw.Steam;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.GameBar;
 
 namespace SteamInputAddonforClaw.Runtime;
 
@@ -38,9 +39,11 @@ internal static class AddonRuntimeCompositionFactory
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
         bool hardwareSupported,
+        WinGSuppressionGuard winGSuppressionGuard,
         Action<bool>? bigPictureStateChanged = null,
         Action? routingReconcileCompleted = null)
     {
+        ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);
@@ -81,7 +84,8 @@ internal static class AddonRuntimeCompositionFactory
             powerGate,
             recoverySafetyState,
             startupSettings,
-            hardwareSupported);
+            hardwareSupported,
+            winGSuppressionGuard);
 
         Func<CancellationToken, Task<bool>> establishBaseline = stockCenterMBaseline is null
             ? _ => Task.FromResult(false)

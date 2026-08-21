@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.GameBar;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -8,8 +9,8 @@ public sealed class RoutingPipelineExecutorTests
     [Fact]
     public void StageOrder_IsExplicitAndDependencyAwareForRollback()
     {
-        Assert.Equal([RoutingStageKind.CenterMGuard, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalInput, RoutingStageKind.PhysicalIsolation, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.SteamOutput, RoutingStageKind.XboxOutput, RoutingStageKind.GameBarRouting], RoutingPipelineStageOrder.Forward);
-        Assert.Equal([RoutingStageKind.GameBarRouting, RoutingStageKind.XboxOutput, RoutingStageKind.SteamOutput, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalIsolation, RoutingStageKind.CenterMGuard], RoutingPipelineStageOrder.Rollback);
+        Assert.Equal([RoutingStageKind.WinGProtection, RoutingStageKind.CenterMGuard, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalInput, RoutingStageKind.PhysicalIsolation, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.SteamOutput, RoutingStageKind.XboxOutput, RoutingStageKind.GameBarRouting], RoutingPipelineStageOrder.Forward);
+        Assert.Equal([RoutingStageKind.GameBarRouting, RoutingStageKind.XboxOutput, RoutingStageKind.SteamOutput, RoutingStageKind.ThirdPartyIsolation, RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode, RoutingStageKind.PhysicalIsolation, RoutingStageKind.CenterMGuard, RoutingStageKind.WinGProtection], RoutingPipelineStageOrder.Rollback);
     }
 
     [Fact]
@@ -238,7 +239,7 @@ public sealed class RoutingPipelineExecutorTests
     }
 
     [Fact]
-    public async Task CenterMGuard_ExecutesFirstOnEntry_AndRollsBackLastOnFailure()
+    public async Task CenterMGuard_ExecutesFirstAmongNativeStages_AndRollsBackLastAmongThem()
     {
         // The CenterM MainUI routing guard must be Armed before any native-mode/PID1902 mutation
         // begins, and must only disarm after every other stage (in particular native-mode
@@ -264,6 +265,38 @@ public sealed class RoutingPipelineExecutorTests
             "SteamOutput.Prepare", "SteamOutput.Execute",
             "SteamOutput.Rollback", "NativeMode.Rollback", "CenterMGuard.Rollback"
         ], trace);
+    }
+
+    [Fact]
+    public async Task WinGProtectionFailureStopsEntryBeforeCenterMGuard()
+    {
+        var wing = new WinGProtectionRoutingStage(() => false, () => throw new InvalidOperationException());
+        var center = new FakeStage(RoutingStageKind.CenterMGuard);
+        var native = new FakeStage(RoutingStageKind.NativeMode);
+        var result = await new RoutingPipelineExecutor([wing, center, native]).ExecuteAsync(RoutingPipelinePlan.StockCenterM with { SteamOutput = RoutingStageMode.Disabled }, CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Equal(RoutingStageKind.WinGProtection, result.FailedStage);
+        Assert.Empty(center.Calls);
+        Assert.Empty(native.Calls);
+    }
+
+    [Fact]
+    public async Task WinGProtectionRollsBackLastAndDisarmFailureCannotVetoExit()
+    {
+        var trace = new List<string>();
+        var wing = new WinGProtectionRoutingStage(
+            () => { trace.Add("WinGProtection.Execute"); return true; },
+            () => { trace.Add("WinGProtection.Rollback"); throw new InvalidOperationException("best-effort disarm failure"); });
+        var center = new FakeStage(RoutingStageKind.CenterMGuard, trace);
+        var native = new FakeStage(RoutingStageKind.NativeMode, trace);
+        var result = await new RoutingPipelineExecutor([wing, center, native]).ExecuteAsync(
+            RoutingPipelinePlan.AllDisabled with { WinGProtection = RoutingStageMode.Enabled, CenterMGuard = RoutingStageMode.Enabled, NativeMode = RoutingStageMode.Enabled }, CancellationToken.None);
+        Assert.True(result.Succeeded);
+        Assert.Equal(["WinGProtection.Execute", "CenterMGuard.Prepare", "CenterMGuard.Execute", "NativeMode.Prepare", "NativeMode.Execute"], trace);
+        var rollback = await new RoutingPipelineExecutor([wing, center, native]).RollbackAsync(
+            RoutingPipelinePlan.AllDisabled with { WinGProtection = RoutingStageMode.Enabled, CenterMGuard = RoutingStageMode.Enabled, NativeMode = RoutingStageMode.Enabled }, CancellationToken.None);
+        Assert.True(rollback.Succeeded);
+        Assert.Equal(["WinGProtection.Execute", "CenterMGuard.Prepare", "CenterMGuard.Execute", "NativeMode.Prepare", "NativeMode.Execute", "NativeMode.Rollback", "CenterMGuard.Rollback", "WinGProtection.Rollback"], trace);
     }
 
     [Fact]

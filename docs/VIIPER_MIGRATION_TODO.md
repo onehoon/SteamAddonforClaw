@@ -257,15 +257,14 @@ approved.
 
 ### SD7 — Game Bar and typed Xbox360 route
 
-Status: **SOFTWARE WIRED — HARDWARE VALIDATION PENDING**
+Status: **FOUNDATION RETAINED — PRODUCTION SWITCHING DISABLED**
 
-Current main production-subscribes `GameBarForegroundWatcher`, delivers
-latest-state foreground intent, re-evaluates foreground after successful
-routing/resume reconciliation, serializes Deck/Xbox360 presentation mutations,
-and drains Game Bar delivery before Runtime teardown. The remaining SD7 gate is
-hardware evidence and any readiness fix proven necessary by that evidence.
-X360 PnP/XInput readiness is not currently claimed. The historical PR
-paragraphs below intentionally describe the earlier incremental states.
+Current main does not start or subscribe `GameBarForegroundWatcher` in
+production. The typed Xbox360 device/publisher and Deck/Xbox360 presentation
+primitives remain retained as dormant foundations. Route-bound Win+G
+protection is the active production policy; real hardware validation remains
+pending. The historical PR paragraphs below intentionally describe earlier
+incremental states.
 
 Define the Game Bar transition and typed Xbox360 composition without weakening
 the active Deck lifecycle or recovery invariants.
@@ -503,6 +502,14 @@ presentation state machine or authority was added. Resume uses current-world
 foreground state and does not restore remembered X360 presentation. X360
 PnP/XInput readiness and hardware validation are not claimed. SD7 remains
 PLANNED.
+
+Current PR2 status: Game Bar foreground production switching is intentionally
+disabled while the existing watcher, typed Xbox360 device, publisher, and
+Deck/Xbox360 presentation primitives remain dormant foundations. Route-bound
+Win+G protection is software-integrated as the first mandatory
+`StockCenterM` routing stage and is disarmed only after route rollback reaches
+the final protection stage. Real MSI Claw Win+G/Game Bar hardware validation
+remains pending; this does not complete SD7.
 
 ## Separate feature tracks
 

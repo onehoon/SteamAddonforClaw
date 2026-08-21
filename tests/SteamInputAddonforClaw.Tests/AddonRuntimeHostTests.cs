@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Hosting;
+using SteamInputAddonforClaw.GameBar;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
@@ -18,6 +19,17 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class AddonRuntimeHostTests
 {
+    [Fact]
+    public void Failed_routing_shutdown_retains_runtime_win_g_hook()
+    {
+        using var guard = CreateTestWinGGuard();
+        Assert.True(guard.IsHookInstalled);
+
+        AddonProcessHost.FinalizeWinGGuardAfterRoutingShutdown(guard, routingShutdownSucceeded: false);
+
+        Assert.True(guard.IsHookInstalled);
+    }
+
     [Theory]
     [InlineData("FinalStop", false)]
     [InlineData("CallbackClear", false)]
@@ -34,6 +46,7 @@ public sealed class AddonRuntimeHostTests
         await host.DisposeAsync();
 
         Assert.Equal(shutdownSucceeded ? 1 : 0, disposed);
+        Assert.Equal(shutdownSucceeded, host.RoutingShutdownSucceeded);
     }
 
     [Fact]
@@ -584,10 +597,19 @@ public sealed class AddonRuntimeHostTests
             powerGate,
             recoverySafetyState,
             new DefaultOem1MappingPreference(),
-            hardwareSupported: false);
+            hardwareSupported: false,
+            winGSuppressionGuard: CreateTestWinGGuard());
         runtime?.TestOnly_SetOem1ActivationTask(Task.CompletedTask);
         runtime?.TestOnly_SetSteamOutputReady(true);
         return runtime;
+    }
+
+    private static WinGSuppressionGuard CreateTestWinGGuard()
+    {
+        var guard = new WinGSuppressionGuard((_, _, _, _, _) => new(1), (_, _, _, _) => IntPtr.Zero, _ => true,
+            _ => 0, _ => 0);
+        guard.Start();
+        return guard;
     }
 
     private sealed class FakeSteamInputRoutingPreference : ISteamInputRoutingPreference
