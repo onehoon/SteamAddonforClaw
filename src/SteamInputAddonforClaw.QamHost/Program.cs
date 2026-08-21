@@ -83,7 +83,10 @@ try
             void OnBindingCalled(string name, string payload)
             {
                 if (string.Equals(name, "__steamInputAddonQamHost", StringComparison.Ordinal))
-                    _ = Task.Run(() => DeliverResponseAsync(payload, Volatile.Read(ref documentGeneration)), lifetimeToken);
+                {
+                    var admittedGeneration = Volatile.Read(ref documentGeneration);
+                    _ = Task.Run(() => DeliverResponseAsync(payload, admittedGeneration), lifetimeToken);
+                }
             }
             async Task DeliverInvalidationAsync()
             {

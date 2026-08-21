@@ -64,6 +64,28 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_bridge_requires_active_big_picture_without_a_running_game()
+    {
+        var bridge = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
+
+        Assert.Contains("!status.Steam.Active", bridge);
+        Assert.Contains("status.Steam.AppId != 0", bridge);
+        Assert.Contains("status.Steam.Source != FrontendSteamSource.BigPicture", bridge);
+    }
+
+    [Fact]
+    public void Qam_uninstall_retires_pending_bridge_consumers_without_resetting_ids()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("function retireBridgeConsumers()", source);
+        Assert.Contains("pending.reject(new Error(\"QAM bridge stopped\"))", source);
+        Assert.Contains("state.bridgePending?.clear()", source);
+        Assert.Contains("state.onStateInvalidated = null", source);
+        Assert.DoesNotContain("state.bridgeNextId = 0", source);
+    }
+
+    [Fact]
     public void Nested_react_walker_traverses_props_children_child_and_sibling()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");

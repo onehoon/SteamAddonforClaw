@@ -418,6 +418,14 @@
     if (kind === "state-invalidated") state.onStateInvalidated?.();
   }
 
+  function retireBridgeConsumers() {
+    for (const pending of state.bridgePending?.values() ?? []) {
+      try { pending.reject(new Error("QAM bridge stopped")); } catch (_) {}
+    }
+    state.bridgePending?.clear();
+    state.onStateInvalidated = null;
+  }
+
   function install() {
     if (state.installed) {
       log("install() called but already installed; no-op.");
@@ -483,6 +491,7 @@
   }
 
   function uninstall() {
+    retireBridgeConsumers();
     if (!state.installed) {
       log("uninstall() called but not installed; no-op.");
       return true;

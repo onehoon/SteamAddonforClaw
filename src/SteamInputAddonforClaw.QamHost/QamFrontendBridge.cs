@@ -20,6 +20,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
     internal async Task ConnectAsync(CancellationToken cancellationToken)
     {
         await _client.ConnectAsync(cancellationToken).ConfigureAwait(false);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnStateInvalidated(object? sender, EventArgs e) => StateInvalidated?.Invoke(this, e);
@@ -54,7 +55,8 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
     private async Task<object> MutateAsync(JsonElement root, CancellationToken token, Func<NamedPipeAddonFrontendClient, JsonElement, CancellationToken, Task<object>> mutation)
     {
         var status = await _client.CaptureStatusAsync(token).ConfigureAwait(false);
-        if (status.Steam.AppId != 0) throw new InvalidOperationException("Device QAM mutation is unavailable while a game is active.");
+        if (!status.Steam.Active || status.Steam.AppId != 0 || status.Steam.Source != FrontendSteamSource.BigPicture)
+            throw new InvalidOperationException("Device QAM mutation is available only in Big Picture with no running game.");
         return await mutation(_client, root.GetProperty("payload"), token).ConfigureAwait(false);
     }
     internal static FrontendTdpConfiguration DecodeTdpConfiguration(JsonElement payload) =>
