@@ -735,6 +735,24 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         }, result.FailureMessage, snapshot));
     }
 
+    public Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        if (_tdpRuntime is null)
+            return Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
+
+        var result = _tdpRuntime.SetEnabled(enabled);
+        var snapshot = MapTdpSnapshot(_tdpRuntime.CaptureSnapshot());
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(new FrontendTdpMutationResult(result.Outcome switch
+        {
+            TdpCommitOutcome.Succeeded => FrontendTdpMutationOutcome.Succeeded,
+            TdpCommitOutcome.InvalidTarget => FrontendTdpMutationOutcome.InvalidTarget,
+            TdpCommitOutcome.PersistenceFailed => FrontendTdpMutationOutcome.PersistenceFailed,
+            _ => FrontendTdpMutationOutcome.Unavailable
+        }, result.FailureMessage, snapshot));
+    }
+
     private static FrontendTdpSnapshot MapTdpSnapshot(TdpRuntimeSnapshot snapshot) => new(
         snapshot.Available,
         snapshot.PersistenceWritable,

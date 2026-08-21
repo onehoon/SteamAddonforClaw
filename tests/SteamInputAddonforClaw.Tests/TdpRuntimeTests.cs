@@ -62,6 +62,61 @@ public sealed class TdpRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task FirstEnableSeedsCenterMManualValuesAndPreservesIndependentPairs()
+    {
+        var seed = new DeviceTdpSettings { Enabled = true, Ac = Pair(30, 8), Dc = Pair(30, 8) };
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, () => seed);
+
+        var result = runtime.SetEnabled(true);
+        await runtime.DrainAsync();
+
+        Assert.True(result.Succeeded);
+        var persisted = new ProfileStore(PathName).Load().Document.Device.Performance.Tdp;
+        Assert.Equal(seed.Ac, persisted?.Ac);
+        Assert.Equal(seed.Dc, persisted?.Dc);
+        Assert.Contains("SetData(81,8)", transport.Operations);
+    }
+
+    [Fact]
+    public async Task FirstEnableWithoutCenterMManualValuesDoesNotPersistOrApply()
+    {
+        var transport = new FakeTransport();
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, () => null);
+
+        var result = runtime.SetEnabled(true);
+
+        Assert.Equal(TdpCommitOutcome.InvalidTarget, result.Outcome);
+        Assert.False(File.Exists(PathName));
+        Assert.Empty(transport.Operations);
+    }
+
+    [Fact]
+    public async Task CaptureDoesNotReadCenterMManualValues()
+    {
+        var reads = 0;
+        await using var runtime = Create(new ProfileStore(PathName), new FakeTransport(), TdpPowerSource.AC,
+            () => { reads++; return new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) }; });
+
+        _ = runtime.CaptureSnapshot();
+
+        Assert.Equal(0, reads);
+    }
+
+    [Fact]
+    public async Task InitializedToggleDoesNotReadCenterMManualValues()
+    {
+        Save(new DeviceTdpSettings { Enabled = false, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        var reads = 0;
+        await using var runtime = Create(new ProfileStore(PathName), new FakeTransport(), TdpPowerSource.AC,
+            () => { reads++; return null; });
+
+        Assert.True(runtime.SetEnabled(true).Succeeded);
+
+        Assert.Equal(0, reads);
+    }
+
+    [Fact]
     public async Task CaptureSnapshot_fails_closed_for_out_of_range_persisted_values()
     {
         Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(31, 30), Dc = Pair(10, 20) });
@@ -276,8 +331,8 @@ public sealed class TdpRuntimeTests : IDisposable
         Assert.Equal(TdpCommitOutcome.Unavailable, runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(22, 32), Dc = Pair(10, 20) }).Outcome);
     }
 
-    private TdpRuntime Create(ProfileStore store, FakeTransport transport, TdpPowerSource? source) =>
-        new(store, new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport), () => source);
+    private TdpRuntime Create(ProfileStore store, FakeTransport transport, TdpPowerSource? source, Func<DeviceTdpSettings?>? seed = null) =>
+        new(store, new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport), () => source, seed);
 
     private void Save(DeviceTdpSettings tdp)
     {

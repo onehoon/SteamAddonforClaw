@@ -29,6 +29,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private readonly HandheldDeviceModelId? _modelId;
     private readonly MsiClawTdpHardware _hardware;
     private readonly Func<TdpPowerSource?> _powerSource;
+    private readonly Func<DeviceTdpSettings?> _centerMManualSeed;
     private readonly Lock _sync = new();
     private Task _tail = Task.CompletedTask;
     private long _authorityVersion;
@@ -40,13 +41,40 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private bool _accepting = true;
 
     internal TdpRuntime(ProfileStore profileStore, ProfileMutationGate mutationGate, HandheldDeviceModelId? modelId,
-        MsiClawTdpHardware hardware, Func<TdpPowerSource?>? powerSource = null)
+        MsiClawTdpHardware hardware, Func<TdpPowerSource?>? powerSource = null, Func<DeviceTdpSettings?>? centerMManualSeed = null)
     {
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _mutationGate = mutationGate ?? throw new ArgumentNullException(nameof(mutationGate));
         _modelId = modelId;
         _hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
         _powerSource = powerSource ?? WindowsTdpPowerSource.Read;
+        _centerMManualSeed = centerMManualSeed ?? (() => _modelId is { } id ? WindowsTdpCenterMManualSettings.Read(id) : null);
+    }
+
+    internal TdpCommitResult SetEnabled(bool enabled)
+    {
+        DeviceTdpSettings? current;
+        lock (_mutationGate.Sync)
+        {
+            var loaded = _profileStore.Load();
+            if (!loaded.CanSafelyReplace)
+                return new(TdpCommitOutcome.PersistenceFailed, "Profile state is not safe to replace.");
+            current = loaded.Document.Device.Performance.Tdp;
+        }
+
+        if (current is not null)
+            return CommitGlobalTdp(current with { Enabled = enabled });
+        if (!enabled)
+            return new(TdpCommitOutcome.Succeeded, null);
+
+        var seed = _centerMManualSeed();
+        if (seed is null)
+            return new(TdpCommitOutcome.InvalidTarget, "Center M Manual TDP values could not be loaded.");
+
+        AppLog.Debug("Profiles.Tdp", "TDP initial configuration seeded", ("Source", "CenterMManual"),
+            ("AcPL1", seed.Ac.Pl1Watts), ("AcPL2", seed.Ac.Pl2Watts),
+            ("DcPL1", seed.Dc.Pl1Watts), ("DcPL2", seed.Dc.Pl2Watts));
+        return CommitGlobalTdp(seed with { Enabled = true });
     }
 
     internal void StartupReconcile()
@@ -321,4 +349,39 @@ internal static class WindowsTdpPowerSource
         if (!GetSystemPowerStatus(out var status)) return null;
         return status.ACLineStatus switch { 1 => TdpPowerSource.AC, 0 => TdpPowerSource.DC, _ => null };
     }
+}
+
+internal static class WindowsTdpCenterMManualSettings
+{
+    private const string UserScenarioPath = @"SOFTWARE\WOW6432Node\MSI\MSI Center M\Component\User Scenario";
+
+    internal static DeviceTdpSettings? Read(HandheldDeviceModelId modelId)
+    {
+        if (!MsiClawTdpPolicy.TryResolve(modelId, out var policy)) return null;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(UserScenarioPath, writable: false);
+            if (key is null) return null;
+            var values = new[] { "ManualPL1AC", "ManualPL2AC", "ManualPL1DC", "ManualPL2DC" }
+                .Select(name => ReadInt(key.GetValue(name))).ToArray();
+            if (values.Any(value => value is null)) return null;
+            var ac = new TdpPowerPair { Pl1Watts = values[0]!.Value, Pl2Watts = values[1]!.Value };
+            var dc = new TdpPowerPair { Pl1Watts = values[2]!.Value, Pl2Watts = values[3]!.Value };
+            return policy.IsValid(ac) && policy.IsValid(dc)
+                ? new DeviceTdpSettings { Enabled = true, Ac = ac, Dc = dc }
+                : null;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            return null;
+        }
+    }
+
+    private static int? ReadInt(object? value) => value switch
+    {
+        int number => number,
+        long number when number is >= int.MinValue and <= int.MaxValue => (int)number,
+        string text when int.TryParse(text, out var number) => number,
+        _ => null
+    };
 }

@@ -244,6 +244,8 @@ public interface IAddonFrontendControl
         Task.FromResult(FrontendTdpSnapshot.Unavailable);
     Task<FrontendTdpMutationResult> SetDeviceTdpAsync(FrontendTdpConfiguration configuration, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
+    Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
 
     // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
     /// <summary>Opens (or re-opens, if the previous session Completed/Failed) the diagnostic session:
