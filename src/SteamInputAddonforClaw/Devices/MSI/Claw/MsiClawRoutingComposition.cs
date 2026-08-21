@@ -255,7 +255,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             processSnapshotSource: centerMProcesses,
             helperOwnership: CenterMHelperOwnership,
             environmentEligibility: () => true,
-            externalHelperDemand: () => CenterMGuard.HasHelperDemand);
+            externalHelperDemand: () => CenterMGuard.HasHelperDemand,
+            sharedHelperSafetyFault: ReportRuntimeFault);
         // PR3: the two narrow callbacks below let the OEM1 action path (wired later, only by
         // ConfigureOem1ActionPath) refresh custom gesture-bridge authority from the coordinator's own
         // freshly reconciled SuppressionReady snapshot after every tick/resume -- see

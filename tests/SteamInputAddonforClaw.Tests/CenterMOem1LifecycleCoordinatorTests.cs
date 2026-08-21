@@ -25,6 +25,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         internal string? StagedPath = @"C:\fake\Runtime\MSI Center M.exe";
         internal Func<bool> EnvironmentEligible = () => true;
         internal bool ExternalHelperDemand { get; set; }
+        internal string? SharedHelperSafetyFaultReason { get; private set; }
         internal readonly CenterMHelperOwnership HelperOwnership;
         /// <summary>Review 4957630432 finding #2: fires whenever the stager is invoked, letting a
         /// test simulate a suspend/disable/shutdown request's lifecycle-epoch bump becoming
@@ -64,6 +65,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
                 delay: Delay.DelayAsync,
                 environmentEligibility: () => EnvironmentEligible(),
                 externalHelperDemand: () => ExternalHelperDemand,
+                sharedHelperSafetyFault: reason => SharedHelperSafetyFaultReason = reason,
                 hiddenDebounce: debounce ?? TimeSpan.FromMilliseconds(1));
         }
     }
@@ -530,6 +532,22 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
+    public async Task Liveness_Exited_while_Routing_demands_helper_requests_Routing_fail_close()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        h.ExternalHelperDemand = true;
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
+
+        await coordinator.PollHelperLivenessAsync();
+
+        Assert.Equal("CenterMSharedHelperExited", h.SharedHelperSafetyFaultReason);
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+    }
+
+    [Fact]
     public async Task TimedOutSuspendDuringHelperLivenessExit_RetiresOwnershipAndDefersRearmUntilResume()
     {
         var h = NewHarness();
@@ -594,6 +612,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.True(h.HelperOwnership.IsOwned);
         Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
         Assert.Equal(0, h.HelperApi.TerminateCallCount);
+        Assert.Equal("CenterMSharedHelperLivenessUncertain", h.SharedHelperSafetyFaultReason);
     }
 
     // ============================================================
