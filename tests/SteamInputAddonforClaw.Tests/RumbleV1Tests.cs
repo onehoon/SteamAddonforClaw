@@ -18,6 +18,7 @@ public sealed class RumbleV1Tests
         var newBridge = new SteamDeckRumbleFeedbackBridge(authority, second, sink);
         Invoke(oldBridge.Callback, Packet(0x1234, 0x5678));
         Invoke(newBridge.Callback, Packet(0x1234, 0x5678));
+        SpinWait.SpinUntil(() => sink.Values.Count == 1, TimeSpan.FromSeconds(2));
         Assert.Single(sink.Values);
         Assert.Equal(new TwoMotorRumble(0x1234, 0x5678), sink.Values[0]);
     }
