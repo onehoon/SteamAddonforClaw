@@ -33,6 +33,27 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task Steam_pulse_is_rejected_during_and_after_output_rollback()
+    {
+        using var releaseDetach = new ManualResetEventSlim(false);
+        var session = new FakeCanonicalSession { OnDetachDeviceCalled = () => releaseDetach.Wait() };
+        var stage = Create(session,
+            new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]),
+            new FakeHidHide());
+
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var rollback = stage.RollbackMutationAsync(CancellationToken.None).AsTask();
+        await session.DetachEntered.Task;
+        Assert.False(stage.TryRequestSteamPulse());
+
+        releaseDetach.Set();
+        Assert.True((await rollback).Succeeded);
+        Assert.False(stage.TryRequestSteamPulse());
+    }
+
+    [Fact]
     public async Task SessionPathUsesTypedPublisherAndCleanupOrder()
     {
         var session = new FakeCanonicalSession();
