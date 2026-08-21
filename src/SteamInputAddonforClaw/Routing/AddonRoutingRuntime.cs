@@ -176,12 +176,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             mappingPreference: oem1MappingPreference);
         _ = handheldRoutingComposition.ConfigureWingActionPath(
             captureAuthority: winGProtectionStage.CaptureAuthority,
-            tryRequestSteamPulse: () =>
-            {
-                if (!runtime.CaptureStatus().SteamOutputActive) return false;
-                deckStage.RequestSteamPulse();
-                return true;
-            });
+            tryRequestSteamPulse: deckStage.TryRequestSteamPulse);
 
         return runtime;
     }

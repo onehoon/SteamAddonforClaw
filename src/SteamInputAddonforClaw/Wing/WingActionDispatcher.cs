@@ -15,9 +15,12 @@ internal sealed class WingActionDispatcher
 
     internal void Dispatch(WingGesture gesture)
     {
-        var binding = gesture == WingGesture.Single ? _mapping().Single : _mapping().Double;
+        WingAction action = WingAction.None;
         try
         {
+            var mapping = _mapping();
+            var binding = gesture == WingGesture.Single ? mapping.Single : mapping.Double;
+            action = binding.Action;
             AppLog.Debug("Wing.Action", "MappingResolved", ("Gesture", gesture), ("Action", binding.Action));
             switch (binding.Action)
             {
@@ -36,6 +39,6 @@ internal sealed class WingActionDispatcher
                     return;
             }
         }
-        catch (Exception ex) { AppLog.Warn("Wing.Action", "ActionFailed", ex, ("Gesture", gesture), ("Action", binding.Action)); }
+        catch (Exception ex) { AppLog.Warn("Wing.Action", "ActionFailed", ex, ("Gesture", gesture), ("Action", action)); }
     }
 }

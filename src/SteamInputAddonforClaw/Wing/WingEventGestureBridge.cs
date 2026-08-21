@@ -11,6 +11,7 @@ internal sealed class WingEventGestureBridge : IDisposable
     private readonly Func<WinGProtectionRoutingStage.AuthoritySnapshot> _authority;
     private readonly WingActionDispatcher _dispatcher;
     private readonly object _gate = new();
+    private readonly object _deliveryGate = new();
     private bool _disposed;
     private long _pendingEpoch;
 
@@ -33,14 +34,32 @@ internal sealed class WingEventGestureBridge : IDisposable
 
     private void OnGesture(WingGesture gesture)
     {
-        var current = _authority();
-        lock (_gate)
+        lock (_deliveryGate)
         {
-            if (_disposed || !current.Active || current.Epoch != _pendingEpoch)
-            { AppLog.Debug("Wing.Event", "GestureDiscardedAuthorityChanged", ("AuthorityEpoch", _pendingEpoch)); return; }
+            var current = _authority();
+            lock (_gate)
+            {
+                if (_disposed || !current.Active || current.Epoch != _pendingEpoch)
+                { AppLog.Debug("Wing.Event", "GestureDiscardedAuthorityChanged", ("AuthorityEpoch", _pendingEpoch)); return; }
+            }
+            _dispatcher.Dispatch(gesture);
         }
-        _dispatcher.Dispatch(gesture);
     }
 
-    public void Dispose() { lock (_gate) { if (_disposed) return; _disposed = true; _source.EventReceived -= OnEvent; _recognizer.GestureRecognized -= OnGesture; } _recognizer.Dispose(); _source.Dispose(); }
+    public void Dispose()
+    {
+        lock (_deliveryGate)
+        {
+            lock (_gate)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                _source.EventReceived -= OnEvent;
+                _recognizer.GestureRecognized -= OnGesture;
+            }
+            _recognizer.InvalidatePending();
+        }
+        _recognizer.Dispose();
+        _source.Dispose();
+    }
 }

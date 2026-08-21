@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Contracts.Oem1;
 using SteamInputAddonforClaw.GameBar;
 using SteamInputAddonforClaw.Wing;
+using SteamInputAddonforClaw.CenterM;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -39,5 +40,39 @@ public sealed class WingRuntimeTests
         var dispatcher = new WingActionDispatcher(() => mapping, () => false, _ => executed++);
         dispatcher.Dispatch(WingGesture.Single);
         Assert.Equal(0, executed);
+    }
+
+    [Fact]
+    public void Late_second_press_is_not_classified_as_double_even_when_timeout_is_delayed()
+    {
+        var time = new TestTimeProvider();
+        var delay = new HeldDelay();
+        var gestures = new List<WingGesture>();
+        using var recognizer = new WingGestureRecognizer(() => true, delay, time);
+        recognizer.GestureRecognized += gestures.Add;
+        recognizer.OnPress();
+        time.Advance(TimeSpan.FromMilliseconds(201));
+        recognizer.OnPress();
+        Assert.Equal([WingGesture.Single], gestures);
+    }
+
+    [Fact]
+    public void Mapping_capture_failure_is_contained()
+    {
+        var dispatcher = new WingActionDispatcher(() => throw new InvalidOperationException("mapping"), () => true);
+        var exception = Record.Exception(() => dispatcher.Dispatch(WingGesture.Single));
+        Assert.Null(exception);
+    }
+
+    private sealed class HeldDelay : IOem1GestureDelay
+    {
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+    }
+
+    private sealed class TestTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+        public void Advance(TimeSpan amount) => _timestamp += (long)(amount.TotalSeconds * global::System.Diagnostics.Stopwatch.Frequency);
+        public override long GetTimestamp() => _timestamp;
     }
 }
