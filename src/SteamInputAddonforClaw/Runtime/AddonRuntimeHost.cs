@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Feedback;
@@ -50,7 +49,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private readonly Func<Task<bool>>? _routingShutdownOverride;
     private readonly Func<ValueTask>? _routingDisposeOverride;
     private readonly Action? _routingReconcileCompleted;
-    private readonly ConcurrentDictionary<Task, byte> _backgroundTasks = new();
+    private readonly Lock _backgroundTaskSync = new();
+    private readonly HashSet<Task> _backgroundTasks = [];
 
     // Guards against a resume notification that was already queued in PowerTransitionCoordinator
     // before shutdown began running ReconcileFreshAfterResumeAsync's Steam refresh concurrently
@@ -252,7 +252,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private void OnSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args)
     {
         SteamSessionStateChanged?.Invoke(this, args);
-        if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) TrackBackgroundTask(ReconcileAsync());
+        if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) TrackBackgroundTask(ReconcileAsync);
     }
 
     private void RequestStatusRefresh() => StatusRefreshRequested?.Invoke(this, EventArgs.Empty);
@@ -265,7 +265,11 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        lock (_backgroundTaskSync)
+        {
+            if (_disposed != 0) return;
+            _disposed = 1;
+        }
         PrepareForShutdown();
         _powerWatcher.Dispose();
         await _powerWatcher.DrainAsync().ConfigureAwait(false);
@@ -281,9 +285,15 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         }
     }
 
-    private void TrackBackgroundTask(Task task)
+    private void TrackBackgroundTask(Func<Task> startTask)
     {
-        _backgroundTasks.TryAdd(task, 0);
+        Task task;
+        lock (_backgroundTaskSync)
+        {
+            if (_disposed != 0) return;
+            task = startTask();
+            _backgroundTasks.Add(task);
+        }
         _ = RemoveBackgroundTaskAsync(task);
     }
 
@@ -291,14 +301,22 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     {
         try { await task.ConfigureAwait(false); }
         catch { }
-        finally { _backgroundTasks.TryRemove(task, out _); }
+        finally
+        {
+            lock (_backgroundTaskSync) _backgroundTasks.Remove(task);
+        }
     }
 
     private async Task DrainBackgroundTasksAsync()
     {
-        while (!_backgroundTasks.IsEmpty)
+        while (true)
         {
-            var tasks = _backgroundTasks.Keys.ToArray();
+            Task[] tasks;
+            lock (_backgroundTaskSync)
+            {
+                if (_backgroundTasks.Count == 0) return;
+                tasks = [.. _backgroundTasks];
+            }
             try { await Task.WhenAll(tasks).ConfigureAwait(false); }
             catch { }
         }
