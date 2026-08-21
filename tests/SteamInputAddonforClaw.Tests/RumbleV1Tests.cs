@@ -16,10 +16,33 @@ public sealed class RumbleV1Tests
         authority.Revoke();
         var second = authority.Acquire("SteamDeck");
         var newBridge = new SteamDeckRumbleFeedbackBridge(authority, second, sink);
-        Invoke(oldBridge.Callback, Packet(0x1234, 0x5678));
-        Invoke(newBridge.Callback, Packet(0x1234, 0x5678));
-        Assert.True(sink.WaitForValue(new TwoMotorRumble(0x1234, 0x5678), TimeSpan.FromSeconds(2)));
+        Invoke(oldBridge.Callback, Packet(0x1111, 0x2222));
+        Invoke(newBridge.Callback, Packet(0x3333, 0x4444));
+        Assert.True(sink.WaitForValue(new TwoMotorRumble(0x3333, 0x4444), TimeSpan.FromSeconds(2)));
+        Assert.DoesNotContain(new TwoMotorRumble(0x1111, 0x2222), sink.Snapshot());
         Assert.Single(sink.Snapshot());
+    }
+
+    [Fact]
+    public async Task Eb_missing_stop_is_forced_by_the_replaceable_safety_deadline()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        var sink = new RecordingSink();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
+        var delayEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDelay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bridge.SafetyDelayOverride = async (_, cancellationToken) =>
+        {
+            delayEntered.TrySetResult();
+            await releaseDelay.Task.WaitAsync(cancellationToken);
+        };
+
+        Assert.True(bridge.ProcessNormalizedReport(Packet(0x1234, 0x5678)));
+        await sink.WriteAttempted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await delayEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        releaseDelay.TrySetResult();
+        Assert.True(sink.WaitForValue(TwoMotorRumble.Stopped, TimeSpan.FromSeconds(2)));
     }
 
     [Fact]

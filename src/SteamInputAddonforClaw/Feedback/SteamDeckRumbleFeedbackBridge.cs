@@ -39,6 +39,11 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     internal SteamDeckOutputCallback Callback { get; }
     internal Action? BeforeLease { get; set; }
     internal Func<TimeSpan, CancellationToken, Task>? DeveloperDelayOverride { get; set; }
+    internal Func<TimeSpan, CancellationToken, Task>? SafetyDelayOverride
+    {
+        get => _writer.SafetyDelayOverride;
+        set => _writer.SafetyDelayOverride = value;
+    }
     internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam") => ProcessNormalizedReportCore(report, origin, out _, out _);
 
     internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence) => ProcessNormalizedReportCore(report, origin, out sequence, out _);
@@ -254,6 +259,8 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         private bool _retired;
         private CancellationTokenSource? _safetyDeadline;
 
+        internal Func<TimeSpan, CancellationToken, Task>? SafetyDelayOverride { get; set; }
+
         internal LatestWinsRumbleWriter(IPhysicalRumbleSink sink)
         {
             _sink = sink;
@@ -332,12 +339,20 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
         private void ReplaceSafetyDeadline(Request request, bool retired)
         {
-            var previous = Interlocked.Exchange(ref _safetyDeadline, null);
-            previous?.Cancel();
-            previous?.Dispose();
-            if (retired || request.SafetyDuration <= TimeSpan.Zero) return;
-            var next = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-            Interlocked.Exchange(ref _safetyDeadline, next);
+            CancellationTokenSource? next = null;
+            lock (_gate)
+            {
+                // The writer gate owns cancellation and publication of this CTS. The
+                // deadline continuation is the only code allowed to dispose it.
+                _safetyDeadline?.Cancel();
+                _safetyDeadline = null;
+                if (!retired && !_retired && request.SafetyDuration > TimeSpan.Zero)
+                {
+                    next = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+                    _safetyDeadline = next;
+                }
+            }
+            if (next is null) return;
             _ = StopAfterSafetyDeadlineAsync(request, next);
         }
 
@@ -345,7 +360,8 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         {
             try
             {
-                await Task.Delay(request.SafetyDuration, deadline.Token).ConfigureAwait(false);
+                var delay = SafetyDelayOverride ?? Task.Delay;
+                await delay(request.SafetyDuration, deadline.Token).ConfigureAwait(false);
                 lock (_gate)
                 {
                     if (_retired || deadline.IsCancellationRequested) return;
@@ -354,11 +370,15 @@ internal sealed class SteamDeckRumbleFeedbackBridge
                 }
                 _wake.Set();
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested) { }
+            catch (ObjectDisposedException) { }
             finally
             {
-                if (ReferenceEquals(Volatile.Read(ref _safetyDeadline), deadline))
-                    Interlocked.CompareExchange(ref _safetyDeadline, null, deadline);
+                lock (_gate)
+                {
+                    if (ReferenceEquals(_safetyDeadline, deadline))
+                        _safetyDeadline = null;
+                }
                 deadline.Dispose();
             }
         }
