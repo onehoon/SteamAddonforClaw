@@ -49,5 +49,13 @@ public sealed class DirectInputDeviceTopologyResolverTests
 
     private static ControllerDeviceInfo Device(string instanceId, ushort vendorId, ushort productId, IReadOnlyList<string> ancestors, string? hardwareIds = null) => new(instanceId, null, ancestors.FirstOrDefault(), ancestors, "HID", (hardwareIds ?? "HID\\VID_0DB0&PID_1902&MI_00&COL01 | HID\\VID_0DB0&UP:0001_U:0005").Split(" | "), [], "HIDClass", null, null, vendorId, productId, true);
     private sealed class FakeEnumerator(IReadOnlyList<ControllerDeviceInfo> devices) : IControllerDeviceEnumerator
-    { public Exception? Exception { get; init; } public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => Exception is null ? devices : throw Exception; }
+    {
+        public Exception? Exception { get; init; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => throw new InvalidOperationException("Broad enumeration must not be used by exact DirectInput lookup.");
+        public ControllerDeviceInfo? FindPresentDevice(string instanceId)
+        {
+            if (Exception is not null) throw Exception;
+            return devices.SingleOrDefault(device => string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase));
+        }
+    }
 }
