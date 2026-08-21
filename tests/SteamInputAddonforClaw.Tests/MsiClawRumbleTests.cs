@@ -268,7 +268,8 @@ public sealed class MsiClawRumbleTests
         transport.InvalidationRequested = () => requested.TrySetResult();
         var invalidation = Task.Run(transport.InvalidatePhysicalSession);
         await requested.Task;
-        Assert.True(invalidation.IsCompleted);
+        // The callback is only the request boundary; wait for the actual
+        // invalidation operation before making assertions about its effects.
         native.ReleaseFirstWrite.Set();
         Assert.True((await first).Succeeded);
         await invalidation;
