@@ -23,6 +23,7 @@
 
   const GLOBAL_KEY = "__STEAM_INPUT_ADDON_QAM__";
   const TAB_MARKER = "steamInputAddonQam";
+  const BRIDGE_BINDING = "__steamInputAddonQamHost";
   const QAM_SIGNATURES = ["QuickAccessMenuBrowserView", "QuickAccessMenuEmbedded"];
 
   function log(message) {
@@ -395,6 +396,28 @@
   // replacing it, so the functions exposed on it below always remain callable.
   const state = window[GLOBAL_KEY] || (window[GLOBAL_KEY] = {});
 
+  function request(method, payload) {
+    return new Promise((resolve, reject) => {
+      state.bridgePending ??= new Map();
+      state.bridgeNextId = (state.bridgeNextId || 0) + 1;
+      const id = state.bridgeNextId;
+      state.bridgePending.set(id, { resolve, reject });
+      try { window[BRIDGE_BINDING](JSON.stringify({ id, method, payload })); }
+      catch (error) { state.bridgePending.delete(id); reject(new Error("QAM bridge unavailable")); }
+    });
+  }
+
+  function receiveBridgeResponse(response) {
+    const pending = state.bridgePending?.get(response.id);
+    if (!pending) return;
+    state.bridgePending.delete(response.id);
+    response.ok ? pending.resolve(response.payload) : pending.reject(new Error(response.error || "QAM bridge request failed"));
+  }
+
+  function receiveBridgeNotification(kind) {
+    if (kind === "state-invalidated") state.onStateInvalidated?.();
+  }
+
   function install() {
     if (state.installed) {
       log("install() called but already installed; no-op.");
@@ -489,7 +512,7 @@
     return true;
   }
 
-  Object.assign(state, { install, uninstall });
+  Object.assign(state, { install, uninstall, request, __receiveBridgeResponse: receiveBridgeResponse, __receiveBridgeNotification: receiveBridgeNotification });
 
   return install();
 })();

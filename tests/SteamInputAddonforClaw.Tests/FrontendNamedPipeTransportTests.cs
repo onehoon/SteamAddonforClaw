@@ -30,6 +30,18 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public void Qam_endpoint_is_stable_and_distinct_from_desktop_endpoint()
+    {
+        var desktop = FrontendPipeEndpoint.CreateForCurrentUser();
+        var first = FrontendPipeEndpoint.CreateQamForCurrentUser();
+        var second = FrontendPipeEndpoint.CreateQamForCurrentUser();
+
+        Assert.Equal(first, second);
+        Assert.NotEqual(desktop, first);
+        Assert.EndsWith(".Qam", first, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Every_frontend_operation_round_trips_typed_values_and_arguments()
     {
         var fake = new RecordingFrontendControl();

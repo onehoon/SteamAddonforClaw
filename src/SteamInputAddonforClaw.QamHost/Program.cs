@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.QamHost;
 using SteamInputAddonforClaw.FrontendTransport;
+using System.Text.Json;
 
 var managed = args.Contains("--managed", StringComparer.OrdinalIgnoreCase);
 string? logDirectory = null;
@@ -55,7 +56,18 @@ try
         installationSucceeded = false;
         installMayExist = false;
         teardownAttempted = false;
-        currentClient.AddonQamConsoleMessage += message => log.Info(message);
+            currentClient.AddonQamConsoleMessage += message => log.Info(message);
+            currentClient.BindingCalled += (name, payload) =>
+            {
+                if (!string.Equals(name, "__steamInputAddonQamHost", StringComparison.Ordinal)) return;
+                _ = Task.Run(async () =>
+                {
+                    var response = await frontendBridge.HandleRequestAsync(payload, lifetimeToken);
+                    try { await currentClient.EvaluateAsync($"window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeResponse?.({JsonSerializer.Serialize(response)})", lifetimeToken); }
+                    catch (Exception exception) { log.Warn($"QAM bridge response delivery failed. {exception.Message}"); }
+                }, lifetimeToken);
+            };
+            frontendBridge.StateInvalidated += (_, _) => _ = currentClient.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeNotification?.('state-invalidated')", lifetimeToken);
         var reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnDocumentLoaded() => reload.TrySetResult();
         currentClient.DocumentLoaded += OnDocumentLoaded;

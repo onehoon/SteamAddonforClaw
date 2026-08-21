@@ -20,6 +20,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
     private Task? _receiveLoop;
     public event Action<string>? AddonQamConsoleMessage;
     public event Action? DocumentLoaded;
+    public event Action<string, string>? BindingCalled;
     public Task ConnectionEnded => _connectionEnded.Task;
     private readonly TaskCompletionSource _connectionEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -67,9 +68,10 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         _socket = socket;
 
         _receiveLoopCts = new CancellationTokenSource();
-        _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token, AddonQamConsoleMessage, () => DocumentLoaded?.Invoke(), _connectionEnded);
+        _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token, AddonQamConsoleMessage, () => DocumentLoaded?.Invoke(), (name, payload) => BindingCalled?.Invoke(name, payload), _connectionEnded);
         await SendCommandAsync("Runtime.enable", parameters: null, cancellationToken).ConfigureAwait(false);
         await SendCommandAsync("Page.enable", parameters: null, cancellationToken).ConfigureAwait(false);
+        await SendCommandAsync("Runtime.addBinding", new { name = "__steamInputAddonQamHost" }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Runs <c>Runtime.evaluate</c> with the given JS expression and returns the raw JSON result.</summary>
@@ -99,7 +101,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
     internal static string SerializeCommandPayload(int id, string method, object? parameters) =>
         JsonSerializer.Serialize(new { id, method, @params = parameters ?? new { } });
 
-    private static async Task RunReceiveLoopAsync(ClientWebSocket socket, CdpCommandCorrelator correlator, CancellationToken cancellationToken, Action<string>? consoleMessage, Action documentLoaded, TaskCompletionSource connectionEnded)
+    private static async Task RunReceiveLoopAsync(ClientWebSocket socket, CdpCommandCorrelator correlator, CancellationToken cancellationToken, Action<string>? consoleMessage, Action documentLoaded, Action<string, string> bindingCalled, TaskCompletionSource connectionEnded)
     {
         var buffer = new byte[64 * 1024];
         try
@@ -120,7 +122,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
                 } while (!result.EndOfMessage);
 
                 var json = Encoding.UTF8.GetString(messageStream.ToArray());
-                TryDispatch(json, correlator, consoleMessage, documentLoaded);
+                TryDispatch(json, correlator, consoleMessage, documentLoaded, bindingCalled);
             }
         }
         catch (OperationCanceledException)
@@ -139,11 +141,13 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         }
     }
 
-    private static void TryDispatch(string json, CdpCommandCorrelator correlator, Action<string>? consoleMessage, Action documentLoaded)
+    private static void TryDispatch(string json, CdpCommandCorrelator correlator, Action<string>? consoleMessage, Action documentLoaded, Action<string, string> bindingCalled)
     {
         using var document = JsonDocument.Parse(json);
         if (IsDocumentLoadedEvent(document.RootElement))
             documentLoaded();
+        if (document.RootElement.TryGetProperty("method", out var eventMethod) && eventMethod.GetString() == "Runtime.bindingCalled" && document.RootElement.TryGetProperty("params", out var binding) && binding.TryGetProperty("name", out var name) && binding.TryGetProperty("payload", out var payload))
+            bindingCalled(name.GetString() ?? string.Empty, payload.GetString() ?? string.Empty);
 
         if (document.RootElement.TryGetProperty("method", out var method) && method.GetString() == "Runtime.consoleAPICalled" &&
             document.RootElement.TryGetProperty("params", out var parameters) && parameters.TryGetProperty("args", out var args))
