@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
 using System.Text.Json;
@@ -7,10 +8,44 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("AppLog")]
 public sealed class TdpRuntimeTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"TdpRuntimeTests.{Guid.NewGuid():N}");
     private string PathName => Path.Combine(_directory, "profiles.json");
+
+    public TdpRuntimeTests()
+    {
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+    }
+
+    [Fact]
+    public async Task EnabledValueEditLogsCommitWithoutRepeatedEnableTransition()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        await using var runtime = Create(new ProfileStore(PathName), new FakeTransport(), TdpPowerSource.AC);
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(21, 31), Dc = Pair(10, 20) }).Succeeded);
+        await runtime.DrainAsync();
+        AppLog.DrainForTests();
+
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("TDP configuration committed", log);
+        Assert.DoesNotContain("TDP control enabled", log);
+    }
+
+    [Fact]
+    public async Task EnableTransitionIsLoggedEvenWhenPowerSourceIsUnknown()
+    {
+        Save(new DeviceTdpSettings { Enabled = false, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        await using var runtime = Create(new ProfileStore(PathName), new FakeTransport(), null);
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) }).Succeeded);
+        AppLog.DrainForTests();
+
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("TDP control enabled", log);
+        Assert.Contains("Current power source is unknown", log);
+    }
 
     [Fact]
     public async Task MissingOrDisabledTdpDoesNotApplyOrRewrite()
@@ -189,6 +224,10 @@ public sealed class TdpRuntimeTests : IDisposable
         await runtime.DrainAsync();
 
         Assert.Equal(["GetAp(0)", "SetData(80,8)", "SetData(81,30)", "SetData(80,20)"], transport.Operations);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Power-limit cache invalidated", log);
+        Assert.Contains("Reason=TdpDisabled", log);
     }
 
     [Fact]
@@ -248,7 +287,13 @@ public sealed class TdpRuntimeTests : IDisposable
 
     private static TdpPowerPair Pair(int pl1, int pl2) => new() { Pl1Watts = pl1, Pl2Watts = pl2 };
 
-    public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
+    public void Dispose()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = null;
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+    }
 
     private sealed class FakeTransport : IMsiClawTdpTransport
     {

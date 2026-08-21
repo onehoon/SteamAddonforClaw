@@ -8,7 +8,7 @@ namespace SteamInputAddonforClaw.Profiles.Performance;
 
 internal enum TdpPowerSource { AC, DC }
 
-internal sealed record TdpApplySnapshot(long AuthorityVersion, long ReconcileVersion, TdpPowerSource Source, int Pl1Watts, int Pl2Watts);
+internal sealed record TdpApplySnapshot(long AuthorityVersion, long ReconcileVersion, TdpPowerSource Source, int Pl1Watts, int Pl2Watts, string Reason);
 
 internal enum TdpCommitOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
 
@@ -34,6 +34,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private long _authorityVersion;
     private long _reconcileVersion;
     private bool _invalidateHardwareCacheBeforeNextApply;
+    private readonly List<string> _pendingCacheInvalidationReasons = [];
     private TdpPowerSource? _lastAdmittedPowerSource;
     private bool _reconcileRequired;
     private bool _accepting = true;
@@ -50,6 +51,10 @@ internal sealed class TdpRuntime : IAsyncDisposable
 
     internal void StartupReconcile()
     {
+        var startup = CaptureSnapshot();
+        var startupEnabled = startup.Configuration?.Enabled == true;
+        AppLog.Debug("Profiles.Tdp", startupEnabled ? "TDP startup reconcile scheduled" : "TDP startup passive",
+            ("Configured", startup.Configuration is not null), ("Enabled", startupEnabled));
         ReconcileCurrent(forceApply: true, invalidateHardwareCache: false, "Startup");
     }
 
@@ -89,13 +94,13 @@ internal sealed class TdpRuntime : IAsyncDisposable
             {
                 if (!_accepting) return;
                 if (invalidateHardwareCache)
-                    _invalidateHardwareCacheBeforeNextApply = true;
+                    RequestCacheInvalidationUnderLock(reason);
                 var source = _powerSource();
                 if (source is not { } currentSource)
                 {
                     MarkReconcileRequiredUnderLock();
                     AppLog.Warn("Profiles.Tdp", "Current power source is unknown; lifecycle reconcile was not queued.",
-                        null, ("Reason", reason));
+                        null, ("Reason", reason), ("Action", "Deferred"), ("Cause", "UnknownPowerSource"));
                     return;
                 }
 
@@ -105,8 +110,10 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     return;
 
                 if (realPowerBoundary)
-                    _invalidateHardwareCacheBeforeNextApply = true;
-                EnqueueSnapshotUnderLock(currentSource, tdp);
+                    RequestCacheInvalidationUnderLock("PowerSourceBoundary");
+                var effectiveInvalidation = _invalidateHardwareCacheBeforeNextApply;
+                AppLog.Debug("Profiles.Tdp", "TDP reconcile admitted", ("Reason", reason), ("Source", currentSource), ("PL1", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl1Watts), ("PL2", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl2Watts), ("Force", forceApply), ("Invalidate", effectiveInvalidation));
+                EnqueueSnapshotUnderLock(currentSource, tdp, reason);
             }
         }
     }
@@ -125,6 +132,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 return new(TdpCommitOutcome.PersistenceFailed, "Profile state is not safe to replace.");
 
             var previous = loaded.Document.Device.Performance.Tdp;
+            var wasEnabled = previous?.Enabled == true;
             var updated = loaded.Document with
             {
                 Device = loaded.Document.Device with
@@ -148,23 +156,33 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     return new(TdpCommitOutcome.PersistenceFailed, exception.Message);
                 }
 
+                AppLog.Debug("Profiles.Tdp", "TDP configuration committed",
+                    ("Enabled", settings.Enabled), ("AcPL1", settings.Ac.Pl1Watts), ("AcPL2", settings.Ac.Pl2Watts),
+                    ("DcPL1", settings.Dc.Pl1Watts), ("DcPL2", settings.Dc.Pl2Watts));
+
                 if (!settings.Enabled)
                 {
                     _authorityVersion++;
                     _reconcileVersion++;
                     _reconcileRequired = false;
-                    _invalidateHardwareCacheBeforeNextApply = true;
+                    RequestCacheInvalidationUnderLock("TdpDisabled");
+                    AppLog.Debug("Profiles.Tdp", "TDP authority revoked", ("Reason", "TdpDisabled"));
+                    if (wasEnabled)
+                        AppLog.Info("Profiles.Tdp", "TDP control disabled", ("Action", "StopManaging"), ("Restore", false));
                     return new(TdpCommitOutcome.Succeeded, null);
                 }
+
+                if (!wasEnabled)
+                    AppLog.Info("Profiles.Tdp", "TDP control enabled", ("AcPL1", settings.Ac.Pl1Watts), ("AcPL2", settings.Ac.Pl2Watts), ("DcPL1", settings.Dc.Pl1Watts), ("DcPL2", settings.Dc.Pl2Watts));
 
                 var source = _powerSource();
                 if (source is not { } currentSource)
                 {
                     MarkReconcileRequiredUnderLock();
-                    AppLog.Warn("Profiles.Tdp", "Current power source is unknown; committed TDP apply was not queued.");
+                    AppLog.Warn("Profiles.Tdp", "Current power source is unknown; committed TDP apply was not queued.", null, ("Reason", "ConfigurationCommit"), ("Action", "Deferred"), ("Cause", "UnknownPowerSource"));
                     return new(TdpCommitOutcome.Succeeded, null);
                 }
-                EnqueueSnapshotUnderLock(currentSource, settings);
+                EnqueueSnapshotUnderLock(currentSource, settings, "ConfigurationCommit");
                 return new(TdpCommitOutcome.Succeeded, null);
             }
         }
@@ -172,6 +190,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
 
     internal void BeginShutdown()
     {
+        AppLog.Debug("Profiles.Tdp", "TDP runtime stopping", ("Action", "CloseAdmission"));
         lock (_sync)
         {
             _accepting = false;
@@ -190,19 +209,27 @@ internal sealed class TdpRuntime : IAsyncDisposable
         await DrainAsync().ConfigureAwait(false);
     }
 
-    private void EnqueueSnapshotUnderLock(TdpPowerSource currentSource, DeviceTdpSettings settings)
+    private void EnqueueSnapshotUnderLock(TdpPowerSource currentSource, DeviceTdpSettings settings, string reason)
     {
         var pair = currentSource == TdpPowerSource.AC ? settings.Ac : settings.Dc;
         var reconcileVersion = ++_reconcileVersion;
         _lastAdmittedPowerSource = currentSource;
         _reconcileRequired = true;
-        EnqueueSnapshotUnderLock(new TdpApplySnapshot(_authorityVersion, reconcileVersion, currentSource, pair.Pl1Watts, pair.Pl2Watts));
+        AppLog.Debug("Profiles.Tdp", "TDP apply queued", ("Reason", reason), ("Source", currentSource), ("PL1", pair.Pl1Watts), ("PL2", pair.Pl2Watts), ("AuthorityVersion", _authorityVersion), ("ReconcileVersion", reconcileVersion));
+        EnqueueSnapshotUnderLock(new TdpApplySnapshot(_authorityVersion, reconcileVersion, currentSource, pair.Pl1Watts, pair.Pl2Watts, reason));
     }
 
     private void MarkReconcileRequiredUnderLock()
     {
         _reconcileVersion++;
         _reconcileRequired = true;
+    }
+
+    private void RequestCacheInvalidationUnderLock(string reason)
+    {
+        _invalidateHardwareCacheBeforeNextApply = true;
+        if (!_pendingCacheInvalidationReasons.Contains(reason, StringComparer.Ordinal))
+            _pendingCacheInvalidationReasons.Add(reason);
     }
 
     private void EnqueueSnapshotUnderLock(TdpApplySnapshot snapshot)
@@ -226,20 +253,28 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private async Task ExecuteAsync(TdpApplySnapshot snapshot)
     {
         bool invalidateHardwareCache;
+        string? cacheInvalidationReason;
         lock (_sync)
         {
             if (!_accepting || snapshot.AuthorityVersion != _authorityVersion)
+            {
+                AppLog.Debug("Profiles.Tdp", "Pending TDP apply skipped", ("Reason", "AuthorityRevoked"), ("Source", snapshot.Source), ("PL1", snapshot.Pl1Watts), ("PL2", snapshot.Pl2Watts));
                 return;
+            }
 
             invalidateHardwareCache = _invalidateHardwareCacheBeforeNextApply;
+            cacheInvalidationReason = invalidateHardwareCache
+                ? string.Join('+', _pendingCacheInvalidationReasons)
+                : null;
             _invalidateHardwareCacheBeforeNextApply = false;
+            _pendingCacheInvalidationReasons.Clear();
         }
 
         try
         {
             if (_modelId is not { } modelId) return;
             if (invalidateHardwareCache)
-                _hardware.InvalidateCachedPowerLimits();
+                _hardware.InvalidateCachedPowerLimits(cacheInvalidationReason ?? "Unknown");
             var result = _hardware.Apply(modelId, new() { Pl1Watts = snapshot.Pl1Watts, Pl2Watts = snapshot.Pl2Watts });
             lock (_sync)
             {
@@ -247,7 +282,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     _reconcileRequired = !result.Succeeded;
             }
             AppLog.Info("Profiles.Tdp", "Global TDP apply completed.",
-                ("Source", snapshot.Source), ("PL1", snapshot.Pl1Watts), ("PL2", snapshot.Pl2Watts),
+                ("Reason", snapshot.Reason), ("Source", snapshot.Source), ("PL1", snapshot.Pl1Watts), ("PL2", snapshot.Pl2Watts),
                 ("Succeeded", result.Succeeded), ("FailureStage", result.FailureStage),
                 ("RecoveryAttempted", result.RecoveryAttempted), ("RecoverySucceeded", result.RecoverySucceeded));
         }

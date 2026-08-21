@@ -21,6 +21,7 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
     private Task _pendingTask = Task.CompletedTask;
     private bool _pendingForce;
     private bool _pendingInvalidate;
+    private readonly List<string> _pendingReasons = [];
     private bool _suspended;
     private bool _resumeSeen;
     private bool _disposed;
@@ -60,6 +61,7 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
 
     internal void Observe(TdpPowerNotification notification)
     {
+        AppLog.Debug("Profiles.Tdp", "Lifecycle notification", ("Event", notification));
         lock (_sync)
         {
             if (_disposed) return;
@@ -73,7 +75,11 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
 
             if (notification is TdpPowerNotification.ResumeAutomatic or TdpPowerNotification.ResumeSuspend)
             {
-                if (_resumeSeen) return;
+                if (_resumeSeen)
+                {
+                    AppLog.Debug("Profiles.Tdp", "Lifecycle notification", ("Event", notification), ("Action", "IgnoredDuplicate"));
+                    return;
+                }
                 _resumeSeen = true;
                 _suspended = false;
                 ScheduleUnderLock(force: true, invalidate: true, "Resume");
@@ -103,6 +109,8 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
     {
         _pendingForce |= force;
         _pendingInvalidate |= invalidate;
+        if (!_pendingReasons.Contains(reason, StringComparer.Ordinal))
+            _pendingReasons.Add(reason);
         _pending?.Cancel();
         var pending = new CancellationTokenSource();
         _pending = pending;
@@ -116,16 +124,20 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
             await _delay(SettleDelay, pending.Token).ConfigureAwait(false);
             bool force;
             bool invalidate;
+            string settledReason;
             lock (_sync)
             {
                 if (_disposed || !ReferenceEquals(_pending, pending)) return;
                 _pending = null;
                 force = _pendingForce;
                 invalidate = _pendingInvalidate;
+                settledReason = string.Join('+', _pendingReasons);
                 _pendingForce = false;
                 _pendingInvalidate = false;
+                _pendingReasons.Clear();
             }
-            _runtime.ReconcileCurrent(force, invalidate, reason);
+            AppLog.Debug("Profiles.Tdp", "Lifecycle reconcile settled", ("Reason", settledReason), ("Force", force), ("Invalidate", invalidate));
+            _runtime.ReconcileCurrent(force, invalidate, settledReason);
         }
         catch (OperationCanceledException) when (pending.IsCancellationRequested) { }
         catch (Exception exception) { AppLog.Error("Profiles.Tdp", "TDP lifecycle settle failed.", exception, ("Reason", reason)); }
@@ -138,6 +150,7 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
         _pending = null;
         _pendingForce = false;
         _pendingInvalidate = false;
+        _pendingReasons.Clear();
     }
 
     public void Dispose()
