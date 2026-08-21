@@ -1087,6 +1087,12 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         {
             case HelperStartResult.Started:
                 break;
+            case HelperStartResult.AlreadyOwned when _helperOwnership.IsOperationallyOwned:
+                // Routing won the serialized shared Start race. Re-enter the existing-helper path
+                // under this coordinator gate so OEM1 validates and adopts the exact helper without
+                // creating a second process or treating the handoff as an arm failure.
+                await ReconcileCore("RoutingWonSharedHelperStartRace", expectedEpoch, cancellationToken).ConfigureAwait(false);
+                return;
             case HelperStartResult.PartialCleanupUnconfirmed:
                 // IsOwned is true here -- no second helper may ever be created while this remains
                 // retained.
