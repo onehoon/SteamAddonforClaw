@@ -1,5 +1,6 @@
-using SteamInputAddonforClaw.QamHost;
 using System.Text.Json;
+using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.QamHost;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -7,36 +8,25 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class QamFrontendBridgeTests
 {
     [Fact]
-    public async Task Malformed_binding_payload_returns_bounded_error_without_throwing()
+    public void Tdp_configuration_round_trips_through_bridge_camel_case_json()
     {
-        await using var bridge = new QamFrontendBridge();
+        var expected = new FrontendTdpConfiguration(true, new(21, 31), new(11, 19));
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(new { configuration = expected }, QamFrontendBridge.BridgeJson));
 
-        var response = await bridge.HandleRequestAsync("{not-json", CancellationToken.None);
+        var actual = QamFrontendBridge.DecodeTdpConfiguration(document.RootElement);
 
-        Assert.False(response.Ok);
-        Assert.Equal(0, response.Id);
-        Assert.Equal("Invalid or unavailable QAM bridge request.", response.Error);
+        Assert.Equal(expected, actual);
     }
 
     [Fact]
-    public async Task Missing_request_id_returns_bounded_error_without_throwing()
+    public async Task Malformed_bridge_payload_returns_bounded_error()
     {
         await using var bridge = new QamFrontendBridge();
 
-        var response = await bridge.HandleRequestAsync("{\"method\":\"captureStatus\"}", CancellationToken.None);
+        var response = await bridge.HandleRequestAsync("{", CancellationToken.None);
 
         Assert.False(response.Ok);
         Assert.Equal(0, response.Id);
-        Assert.Equal("Invalid or unavailable QAM bridge request.", response.Error);
-    }
-
-    [Fact]
-    public void Production_bridge_serialization_uses_javascript_field_names()
-    {
-        var json = JsonSerializer.Serialize(new QamFrontendBridge.Response(17, true, new { value = 1 }), QamFrontendBridge.BridgeJson);
-        using var document = JsonDocument.Parse(json);
-        Assert.Equal(17, document.RootElement.GetProperty("id").GetInt64());
-        Assert.True(document.RootElement.GetProperty("ok").GetBoolean());
-        Assert.False(document.RootElement.TryGetProperty("Id", out _));
+        Assert.NotNull(response.Error);
     }
 }

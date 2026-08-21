@@ -28,12 +28,13 @@ log.Info($"Frontend script loaded. Path={frontendPath} Bytes={frontendScript.Len
 using var lifetime = managed ? QamHostManagedLifetime.Start(() => Console.In.ReadLineAsync()) : null;
 var lifetimeToken = lifetime?.Token ?? CancellationToken.None;
 await using var frontendBridge = new QamFrontendBridge();
-async Task ConnectRuntimeBridgeBoundedAsync()
+using var bridgeConnectCts = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+async Task ConnectRuntimeBridgeBoundedAsync(CancellationToken token)
 {
     var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
-    while (!lifetimeToken.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+    while (!token.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
     {
-        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(token);
         attempt.CancelAfter(TimeSpan.FromSeconds(1));
         try
         {
@@ -41,16 +42,17 @@ async Task ConnectRuntimeBridgeBoundedAsync()
             log.Info("QAM frontend transport connected.");
             return;
         }
-        catch (Exception exception) when ((exception is IOException or TimeoutException or OperationCanceledException or FrontendTransportException) && DateTimeOffset.UtcNow < deadline)
+        catch (Exception exception) when (exception is IOException or TimeoutException or OperationCanceledException or FrontendTransportException)
         {
-            try { await Task.Delay(250, lifetimeToken).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (lifetimeToken.IsCancellationRequested) { return; }
+            if (token.IsCancellationRequested || DateTimeOffset.UtcNow >= deadline) return;
+            try { await Task.Delay(250, token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
         }
     }
-    if (!lifetimeToken.IsCancellationRequested)
+    if (!token.IsCancellationRequested)
         log.Warn("QAM frontend transport unavailable after bounded startup acquisition; CDP integration remains active.");
 }
-var bridgeConnectTask = ConnectRuntimeBridgeBoundedAsync();
+var bridgeConnectTask = ConnectRuntimeBridgeBoundedAsync(bridgeConnectCts.Token);
 Task stopTask = managed ? lifetime!.StopTask : WaitForConsoleShutdownAsync();
 SteamGamepadUiCdpClient? currentClient = null;
 var installationSucceeded = false;
@@ -173,6 +175,9 @@ try
 catch (OperationCanceledException) when (lifetimeToken.IsCancellationRequested) { }
 finally
 {
+    bridgeConnectCts.Cancel();
+    try { await bridgeConnectTask.ConfigureAwait(false); }
+    catch (OperationCanceledException) when (bridgeConnectCts.IsCancellationRequested) { }
     if (currentClient is not null) await currentClient.DisposeAsync();
 }
 if (!stopRequested && !lifetimeToken.IsCancellationRequested && recoveryDeadline is not null)

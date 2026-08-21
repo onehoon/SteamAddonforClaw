@@ -42,7 +42,7 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
                 "setDeviceCpuBoostEnabled" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostEnabledAsync(p.GetProperty("enabled").GetBoolean(), t)),
                 "setDeviceCpuBoostAc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostAcAsync(p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
                 "setDeviceCpuBoostDc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostDcAsync(p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
-                "setDeviceTdp" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceTdpAsync(p.GetProperty("configuration").Deserialize<FrontendTdpConfiguration>() ?? throw new JsonException(), t)),
+                "setDeviceTdp" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceTdpAsync(DecodeTdpConfiguration(p), t)),
                 "setDeviceTdpEnabled" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceTdpEnabledAsync(p.GetProperty("enabled").GetBoolean(), t)),
                 _ => throw new InvalidOperationException("Unsupported QAM method.")
             };
@@ -57,6 +57,9 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
         if (status.Steam.AppId != 0) throw new InvalidOperationException("Device QAM mutation is unavailable while a game is active.");
         return await mutation(_client, root.GetProperty("payload"), token).ConfigureAwait(false);
     }
+    internal static FrontendTdpConfiguration DecodeTdpConfiguration(JsonElement payload) =>
+        payload.GetProperty("configuration").Deserialize<FrontendTdpConfiguration>(BridgeJson)
+        ?? throw new JsonException("Invalid TDP configuration.");
     private static Response Error(long id, string message) => new(id, false, Error: message);
     internal void StopAccepting() => Interlocked.Exchange(ref _stopping, 1);
     public async ValueTask DisposeAsync()
