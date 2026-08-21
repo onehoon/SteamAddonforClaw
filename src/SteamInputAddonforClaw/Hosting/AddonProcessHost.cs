@@ -205,8 +205,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _gameBarForegroundWatcher.Start();
         // Install last: once this returns, the owning thread must resume GetMessageW promptly.
         _winGSuppressionGuard.Start();
-        // Install last: the owning thread must return to NativeMessageLoop.GetMessageW promptly.
-        _winGSuppressionGuard.Start();
     }
 
     internal void StartDeferredRuntimeStartup()

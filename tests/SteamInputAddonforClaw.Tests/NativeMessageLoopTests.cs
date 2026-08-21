@@ -6,6 +6,21 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class NativeMessageLoopTests
 {
     [Fact]
+    public void Ready_callback_runs_from_the_message_loop_and_can_exit_cleanly()
+    {
+        var loop = new NativeMessageLoop();
+        var readyCalls = 0;
+
+        loop.Run(() =>
+        {
+            readyCalls++;
+            loop.RequestExit();
+        });
+
+        Assert.Equal(1, readyCalls);
+    }
+
+    [Fact]
     public void Request_exit_before_run_returns_without_blocking()
     {
         var loop = new NativeMessageLoop();
