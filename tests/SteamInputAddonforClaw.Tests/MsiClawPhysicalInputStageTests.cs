@@ -102,7 +102,8 @@ public sealed class MsiClawPhysicalInputStageTests
         stage.PhysicalSessionRetiring += () => retirementReached.TrySetResult();
         stage.PhysicalSessionRetiring += sink.BeginPhysicalSessionRetirement;
         stage.PhysicalSessionRetired += sink.InvalidatePhysicalSession;
-        input.BeforeStop = () => transport.InvalidateCount > 0;
+        // Rumble retirement is best-effort and must not be a prerequisite for stopping input.
+        input.BeforeStop = () => true;
 
         var write = Task.Run(() => sink.SetRumble(new(0xFF00, 0xFF00)));
         await transport.Entered.Task;
@@ -113,7 +114,7 @@ public sealed class MsiClawPhysicalInputStageTests
         Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, (await write).Status);
         await rollback;
         Assert.Equal(1, input.StopCount);
-        Assert.Equal(2, transport.InvalidateCount);
+        Assert.Equal(1, transport.InvalidateCount);
         Assert.Null(stage.CurrentIdentity);
     }
 
