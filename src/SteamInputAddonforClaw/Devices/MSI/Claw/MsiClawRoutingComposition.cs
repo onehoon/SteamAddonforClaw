@@ -235,7 +235,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
                     State: CenterMOem1LifecycleState.Armed,
                     HelperProcessId: not null
                 };
-            });
+            },
+            releaseSharedHelper: cancellationToken => (oem1Coordinator ?? throw new InvalidOperationException("OEM1 coordinator is unavailable.")).ReleaseRoutingHelperAsync(cancellationToken));
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
         // PR2: production-compose the already-implemented CenterMOem1LifecycleCoordinator into
