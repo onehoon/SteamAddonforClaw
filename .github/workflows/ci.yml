@@ -26,6 +26,28 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Detect VIIPER maintenance tooling changes
+        id: viiper-changes
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -ne 'pull_request') {
+            "run=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $paths = @(git diff --name-only '${{ github.event.pull_request.base.sha }}' '${{ github.sha }}')
+          $relevant = $paths | Where-Object {
+            $_ -like 'scripts/*viiper*' -or
+            $_ -like 'scripts/tests/*viiper*' -or
+            $_ -eq '.github/workflows/viiper-dependency-update.yml' -or
+            $_ -like 'src/SteamInputAddonforClaw/Dependencies/Viiper/*' -or
+            $_ -like 'docs/VIIPER*' -or
+            $_ -eq 'THIRD_PARTY_NOTICES.md'
+          }
+          "run=$([bool]$relevant)" >> $env:GITHUB_OUTPUT
 
       - name: Verify embedded VIIPER dependency
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-viiper.ps1
@@ -34,15 +56,19 @@ jobs:
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/verify-viiper.tests.ps1
 
       - name: Test VIIPER artifact update tooling
+        if: steps.viiper-changes.outputs.run == 'true'
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/update-viiper.tests.ps1
 
       - name: Test VIIPER dependency adoption tooling
+        if: steps.viiper-changes.outputs.run == 'true'
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/adopt-viiper.tests.ps1
 
       - name: Test VIIPER dependency-update receiver idempotency classifier
+        if: steps.viiper-changes.outputs.run == 'true'
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/viiper-existing-automation-check.tests.ps1
 
       - name: Test VIIPER dependency-update receiver stale-base classifier
+        if: steps.viiper-changes.outputs.run == 'true'
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/viiper-base-drift-check.tests.ps1
 
       - name: Restore
