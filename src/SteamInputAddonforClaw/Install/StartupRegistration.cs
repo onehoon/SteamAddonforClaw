@@ -59,7 +59,7 @@ public sealed class WindowsTaskSchedulerStartupManager : IWindowsStartupManager
             taskDefinition.RegistrationInfo.Description = "Starts Steam Input Addon for Claw after Windows logon.";
             taskDefinition.Principal.UserId = configuration.UserId;
             taskDefinition.Principal.LogonType = TaskLogonInteractiveToken;
-            taskDefinition.Principal.RunLevel = 0;
+            taskDefinition.Principal.RunLevel = 1;
 
             dynamic logonTrigger = taskDefinition.Triggers.Create(TaskTriggerLogon);
             logonTrigger.UserId = configuration.UserId;

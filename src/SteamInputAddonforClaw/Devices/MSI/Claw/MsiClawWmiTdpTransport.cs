@@ -44,7 +44,7 @@ internal sealed class MsiClawWmiTdpTransport : IMsiClawTdpTransport
 
             if (input is null || data is null)
             {
-                LogStage(method, "GetWmiFallback", field, fieldValue);
+                LogFallbackStarted(method, field, fieldValue);
                 input?.Dispose();
                 input = null;
                 data = null;
@@ -104,6 +104,10 @@ internal sealed class MsiClawWmiTdpTransport : IMsiClawTdpTransport
 
     private static void LogFallbackSucceeded(string method, string field, object value) =>
         AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI compatibility fallback succeeded",
+            ("Method", method), (field, value), ("Stage", "GetWmiFallback"));
+
+    private static void LogFallbackStarted(string method, string field, object value) =>
+        AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI compatibility fallback started",
             ("Method", method), (field, value), ("Stage", "GetWmiFallback"));
 
     private static void LogFailure(string method, string stage, Exception exception, string field, object value)
