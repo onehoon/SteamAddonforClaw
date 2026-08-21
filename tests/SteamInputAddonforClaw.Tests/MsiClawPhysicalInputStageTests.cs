@@ -103,13 +103,14 @@ public sealed class MsiClawPhysicalInputStageTests
         stage.PhysicalSessionRetiring += sink.BeginPhysicalSessionRetirement;
         stage.PhysicalSessionRetired += sink.InvalidatePhysicalSession;
         // Rumble retirement is best-effort and must not be a prerequisite for stopping input.
-        input.BeforeStop = () => true;
+        // Assert the ordering at the StopAsync boundary rather than racing the rollback
+        // continuation after the first retirement event handler signals.
+        input.BeforeStop = () => retirementReached.Task.IsCompleted;
 
         var write = Task.Run(() => sink.SetRumble(new(0xFF00, 0xFF00)));
         await transport.Entered.Task;
         var rollback = Task.Run(async () => await stage.RollbackMutationAsync(CancellationToken.None));
         await retirementReached.Task;
-        Assert.Equal(0, input.StopCount);
         transport.Release.Set();
         Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, (await write).Status);
         await rollback;
