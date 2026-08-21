@@ -26,6 +26,13 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     private readonly Guid _session = Guid.NewGuid();
 
     [Fact]
+    public void Steam_pulse_is_rejected_when_output_stage_is_inactive()
+    {
+        var stage = Create(new FakeCanonicalSession(), new FakeEnumerator([[]]), new FakeHidHide());
+        Assert.False(stage.TryRequestSteamPulse());
+    }
+
+    [Fact]
     public async Task SessionPathUsesTypedPublisherAndCleanupOrder()
     {
         var session = new FakeCanonicalSession();

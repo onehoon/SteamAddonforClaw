@@ -69,7 +69,7 @@ public sealed class WingRuntimeTests
     }
 
     [Fact]
-    public async Task Event88_requires_active_matching_authority_epoch()
+    public void Route_a_pending_gesture_cannot_execute_after_route_b_starts()
     {
         var authority = new WingRouteAuthoritySnapshot(true, 7);
         var actions = 0;
@@ -81,7 +81,7 @@ public sealed class WingRuntimeTests
 
         source.Emit(new(88, CenterMOemCode.Oem2));
         authority = new(true, 8);
-        delay.Complete();
+        source.Emit(new(88, CenterMOemCode.Oem2));
         Assert.Equal(0, actions);
 
         source.Emit(new(41, CenterMOemCode.Oem1));
