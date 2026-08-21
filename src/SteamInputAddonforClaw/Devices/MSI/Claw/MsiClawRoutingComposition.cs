@@ -714,7 +714,6 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             mappingPreference.Oem1MappingChanged -= OnOem1MappingChanged;
 
         _oem1Bridge?.Dispose();
-        _oem1EventSource?.Dispose();
         _oem1GestureRecognizer?.Dispose();
 
         // Captures whatever activation/fail-open work is currently owned/in-flight -- both background
@@ -766,6 +765,11 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
         if (!activationDrained || !failOpenDrained)
             return;
+
+        // WmiMsiEventSource serializes Start/Dispose under its own lock. Dispose the source only
+        // after the owned activation/fail-open tasks have drained, so a slow Start cannot block
+        // shutdown before the cancellation and bounded-join policy has taken effect.
+        _oem1EventSource?.Dispose();
 
         // Shutdown ordering (work order requirement 14): stop the OEM1 periodic driver and dispose
         // the coordinator BEFORE the routing guard's own terminal cleanup below -- a timer callback
