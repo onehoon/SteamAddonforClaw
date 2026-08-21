@@ -9,7 +9,7 @@ namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class ControllerPage : UserControl
 {
-    private sealed record WingActionOption(WingAction Action, string Label);
+    internal sealed record WingActionOption(WingAction Action, string Label);
     private static readonly WingActionOption[] WingActionOptions = WingActionCapabilities.Actions
         .Select(action => new WingActionOption(action, action switch
         {
@@ -107,11 +107,16 @@ public sealed partial class ControllerPage : UserControl
 
     private void ApplyWingDetails()
     {
-        WingSingleHotkeyDetails.Visibility = WingSingleActionComboBox.SelectedItem is WingAction.KeyboardHotkey ? Visibility.Visible : Visibility.Collapsed;
-        WingSingleLaunchDetails.Visibility = WingSingleActionComboBox.SelectedItem is WingAction.LaunchApplication ? Visibility.Visible : Visibility.Collapsed;
-        WingDoubleHotkeyDetails.Visibility = WingDoubleActionComboBox.SelectedItem is WingAction.KeyboardHotkey ? Visibility.Visible : Visibility.Collapsed;
-        WingDoubleLaunchDetails.Visibility = WingDoubleActionComboBox.SelectedItem is WingAction.LaunchApplication ? Visibility.Visible : Visibility.Collapsed;
+        var single = SelectedWingAction(WingSingleActionComboBox);
+        var doubled = SelectedWingAction(WingDoubleActionComboBox);
+        WingSingleHotkeyDetails.Visibility = single == WingAction.KeyboardHotkey ? Visibility.Visible : Visibility.Collapsed;
+        WingSingleLaunchDetails.Visibility = single == WingAction.LaunchApplication ? Visibility.Visible : Visibility.Collapsed;
+        WingDoubleHotkeyDetails.Visibility = doubled == WingAction.KeyboardHotkey ? Visibility.Visible : Visibility.Collapsed;
+        WingDoubleLaunchDetails.Visibility = doubled == WingAction.LaunchApplication ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    internal static WingAction SelectedWingAction(object? selectedItem) =>
+        selectedItem is WingActionOption option ? option.Action : WingAction.None;
 
     private void WingAction_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
