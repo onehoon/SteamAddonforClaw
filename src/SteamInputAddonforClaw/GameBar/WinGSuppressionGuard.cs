@@ -77,7 +77,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
         _callback = null;
     }
 
-    internal IntPtr ProcessKey(int vk, bool keyDown, uint flags = 0, long extraInfo = 0)
+    internal IntPtr ProcessKey(int vk, bool keyDown, uint flags = 0, long extraInfo = 0, uint scan = 0)
     {
         var own = extraInfo == OwnMarker;
         if (own) return IntPtr.Zero;
@@ -88,18 +88,20 @@ internal sealed class WinGSuppressionGuard : IDisposable
             else
             {
                 var syntheticRelease = (Volatile.Read(ref _releasedByCleanup) & bit) != 0;
-                if (syntheticRelease)
-                    Interlocked.And(ref _releasedByCleanup, ~bit);
-                else Interlocked.And(ref _winDown, ~bit);
+                Interlocked.And(ref _winDown, ~bit);
+                if (syntheticRelease) Interlocked.And(ref _releasedByCleanup, ~bit);
                 if (syntheticRelease) return new(1);
             }
         }
 
         var blocking = IsArmed || Volatile.Read(ref _suppressG) != 0;
+        if (blocking && (bit != 0 || vk == VkG))
+            LogRelevant(vk, keyDown, flags, extraInfo, scan);
         if (vk == VkG && keyDown && blocking && Volatile.Read(ref _winDown) != 0)
         {
             Interlocked.Exchange(ref _suppressG, 1);
-            SendCleanup(Volatile.Read(ref _winDown));
+            try { SendCleanup(Volatile.Read(ref _winDown)); }
+            catch (Exception exception) { AppLog.Warn("Wing.Input", "Win+G modifier cleanup failed after suppression was committed.", exception); }
             AppLog.Debug("Wing.Input", "Win+G suppressed.", ("Vk", vk), ("KeyDown", keyDown));
             return new(1);
         }
@@ -115,8 +117,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
         {
             var vk = bit == 1 ? VkLWin : VkRWin;
             var scan = MapVirtualKey((uint)vk, 0);
-            inputs.Add(Input.Key((ushort)vk, KeyUp | (bit == 2 ? Extended : 0), OwnMarker, (ushort)scan));
-            Interlocked.Or(ref _releasedByCleanup, bit);
+            inputs.Add(Input.Key((ushort)vk, KeyUp | Extended, OwnMarker, (ushort)scan));
         }
         var sent = _sendInput(inputs.ToArray());
         if (sent == 1)
@@ -124,8 +125,28 @@ internal sealed class WinGSuppressionGuard : IDisposable
             try { _sendInput([inputs[1]]); AppLog.Debug("Wing.Input", "Cleanup fallback attempted."); }
             catch (Exception exception) { AppLog.Warn("Wing.Input", "Cleanup fallback failed.", exception); }
         }
+        if (wins is 1 or 2 or 3)
+        {
+            if ((wins & 1) != 0 && sent > 2) Interlocked.Or(ref _releasedByCleanup, 1);
+            if ((wins & 2) != 0 && sent > (wins == 3 ? 3 : 2)) Interlocked.Or(ref _releasedByCleanup, 2);
+        }
+        AppLog.Debug("Wing.Input", "Modifier cleanup completed.", ("RequestedInputs", inputs.Count), ("SentInputs", sent));
         if (sent != inputs.Count)
             AppLog.Warn("Wing.Input", "Partial SendInput during Win+G cleanup.", fields: [("RequestedInputs", inputs.Count), ("SentInputs", sent), ("Win32Error", Marshal.GetLastWin32Error())]);
+    }
+
+    private void LogRelevant(int vk, bool keyDown, uint flags, long extraInfo, uint scan)
+    {
+        if (!AppLog.IsEnabled(AppLogLevel.Debug)) return;
+        AppLog.Debug("Wing.Input", "Relevant keyboard hook event.",
+            ("Vk", vk), ("Scan", scan), ("Flags", $"0x{flags:X}"),
+            ("Injected", (flags & LlkhfInjected) != 0),
+            ("LowerIlInjected", (flags & LlkhfLowerIlInjected) != 0),
+            ("ExtraInfo", $"0x{unchecked((ulong)extraInfo):X}"),
+            ("KeyDown", keyDown),
+            ("LeftWinDown", (Volatile.Read(ref _winDown) & 1) != 0),
+            ("RightWinDown", (Volatile.Read(ref _winDown) & 2) != 0),
+            ("Armed", IsArmed));
     }
 
     private IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam)
@@ -134,15 +155,17 @@ internal sealed class WinGSuppressionGuard : IDisposable
         try
         {
             var data = Marshal.PtrToStructure<KeyboardData>(lParam);
-            var result = ProcessKey((int)data.VkCode, (wParam.ToInt64() & 1) == 0, data.Flags, data.ExtraInfo);
+            var result = ProcessKey((int)data.VkCode, (wParam.ToInt64() & 1) == 0, data.Flags, data.ExtraInfo, data.ScanCode);
             return result != IntPtr.Zero ? result : _next(_hook, code, lParam);
         }
         catch (Exception exception) { AppLog.Warn("Wing.Guard", "Win+G hook callback was contained.", exception); return _next(_hook, code, lParam); }
     }
 
-    [StructLayout(LayoutKind.Sequential)] internal struct KeyboardData { internal uint VkCode, ScanCode, Flags, Time; internal long ExtraInfo; }
-    [StructLayout(LayoutKind.Sequential)] internal struct Input { internal uint Type; internal KeyInput Data; internal static Input Key(ushort vk, uint flags, long extra, ushort scan = 0) => new() { Type = 1, Data = new() { Vk = vk, Scan = scan, Flags = flags, ExtraInfo = extra } }; }
-    [StructLayout(LayoutKind.Sequential)] internal struct KeyInput { internal ushort Vk, Scan; internal uint Flags, Time; internal long ExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)] internal struct KeyboardData { internal uint VkCode, ScanCode, Flags, Time; internal nint ExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)] internal struct Input { internal uint Type; internal InputUnion Data; internal static Input Key(ushort vk, uint flags, long extra, ushort scan = 0) => new() { Type = 1, Data = new() { Keyboard = new() { Vk = vk, Scan = scan, Flags = flags, ExtraInfo = (nint)extra } } }; }
+    [StructLayout(LayoutKind.Explicit)] internal struct InputUnion { [FieldOffset(0)] internal KeyInput Keyboard; [FieldOffset(0)] internal MouseInput Mouse; }
+    [StructLayout(LayoutKind.Sequential)] internal struct KeyInput { internal ushort Vk, Scan; internal uint Flags, Time; internal nint ExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)] internal struct MouseInput { internal int X, Y; internal uint MouseData, Flags, Time; internal nint ExtraInfo; }
     internal delegate IntPtr LowLevelKeyboardProc(int code, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(uint id, LowLevelKeyboardProc callback, IntPtr module, uint thread);
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr data);

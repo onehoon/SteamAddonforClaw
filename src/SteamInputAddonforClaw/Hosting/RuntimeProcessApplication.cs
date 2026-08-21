@@ -36,12 +36,15 @@ internal sealed class RuntimeProcessApplication
                 return;
 
             _processHost.InitializeRuntimeAsync().GetAwaiter().GetResult();
-            _processHost.StartRuntimeEventWatchers();
-            _processHost.StartPowerObservation();
             _processHost.TryInitializeTray(RequestRestart, RequestExit);
-            _ = _processHost.ReconcileAsync();
-            _processHost.ReconcileDeviceProfileStartup();
-            _messageLoop.Run();
+            _messageLoop.Run(() =>
+            {
+                if (!_processHost.StartRuntimeEventWatchers())
+                    throw new InvalidOperationException("Runtime Win+G suppression hook could not be installed before routing startup.");
+                _processHost.StartPowerObservation();
+                _ = _processHost.ReconcileAsync();
+                _processHost.ReconcileDeviceProfileStartup();
+            });
         }
         catch (Exception exception)
         {

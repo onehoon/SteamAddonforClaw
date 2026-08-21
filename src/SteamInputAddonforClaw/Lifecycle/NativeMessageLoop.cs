@@ -8,6 +8,7 @@ internal sealed class NativeMessageLoop
 {
     private const uint PM_NOREMOVE = 0x0000;
     private const uint WM_QUIT = 0x0012;
+    private const uint WM_RUNTIME_READY = 0x8001;
     private readonly uint _ownerThreadId;
     private readonly Func<uint, bool> _postThreadMessage;
     private int _exitRequested;
@@ -24,15 +25,23 @@ internal sealed class NativeMessageLoop
         _ = PeekMessageW(out _, IntPtr.Zero, 0, 0, PM_NOREMOVE);
     }
 
-    internal void Run()
+    internal void Run(Action? onReady = null)
     {
         AppLog.Info("Runtime", "Native message loop entering.", ("ThreadId", _ownerThreadId));
+        if (onReady is not null && !PostThreadMessageW(_ownerThreadId, WM_RUNTIME_READY, IntPtr.Zero, IntPtr.Zero))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not post Runtime ready message.");
         while (true)
         {
             var result = GetMessageW(out var message, IntPtr.Zero, 0, 0);
             if (result == 0) break;
             if (result == -1)
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "The Runtime message loop failed.");
+
+            if (message.Message == WM_RUNTIME_READY)
+            {
+                onReady?.Invoke();
+                continue;
+            }
 
             TranslateMessage(ref message);
             DispatchMessageW(ref message);
