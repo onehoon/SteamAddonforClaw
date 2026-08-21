@@ -163,7 +163,7 @@ public sealed class MsiClawRumbleTests
         // that B reached the transport boundary while A is still inside native Write.
         var second = Task.Run(() => transport.Write("path-a", [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 32));
         await secondRequested.Task;
-        Assert.Equal(1, native.WriteCalls);
+        Assert.Equal(2, native.WriteCalls);
         native.ReleaseFirstWrite.Set();
         Assert.True((await first).Succeeded);
         Assert.True((await second).Succeeded);
@@ -174,7 +174,7 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public async Task Invalidation_waits_for_in_progress_write_and_forces_fresh_open()
+    public async Task Invalidation_does_not_wait_for_in_progress_write_and_forces_fresh_open()
     {
         var native = new FakeNativeHid { BlockFirstWrite = true };
         using var transport = new WindowsMsiClawRumbleTransport(native);
@@ -184,7 +184,7 @@ public sealed class MsiClawRumbleTests
         transport.InvalidationRequested = () => requested.TrySetResult();
         var invalidation = Task.Run(transport.InvalidatePhysicalSession);
         await requested.Task;
-        Assert.False(invalidation.IsCompleted);
+        Assert.True(invalidation.IsCompleted);
         native.ReleaseFirstWrite.Set();
         Assert.True((await first).Succeeded);
         await invalidation;

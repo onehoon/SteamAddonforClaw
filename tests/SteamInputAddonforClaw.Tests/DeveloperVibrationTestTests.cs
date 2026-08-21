@@ -112,7 +112,7 @@ public sealed class DeveloperVibrationTestTests
         Assert.False((await developerTest).Succeeded);
         // Only the developer Rumble command and the CancelDeveloperTestAndStop() zero write --
         // the cancelled pending 250ms delayed STOP must never also fire.
-        await WaitForCountAsync(sink, 1);
+        await sink.StopEntered.Task;
         Assert.True(sink.Contains(TwoMotorRumble.Stopped));
     }
 
@@ -185,8 +185,9 @@ public sealed class DeveloperVibrationTestTests
     {
         private readonly object _gate = new();
         public List<TwoMotorRumble> Values { get; } = [];
+        public TaskCompletionSource StopEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
-        { lock (_gate) Values.Add(rumble); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+        { lock (_gate) Values.Add(rumble); if (rumble == TwoMotorRumble.Stopped) StopEntered.TrySetResult(); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
         public bool Contains(TwoMotorRumble rumble) { lock (_gate) return Values.Contains(rumble); }
     }
 
