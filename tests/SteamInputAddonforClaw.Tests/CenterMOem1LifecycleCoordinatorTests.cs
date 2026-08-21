@@ -93,6 +93,24 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         await coordinator.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Prerequisite_cleanup_preserves_helper_while_Routing_demands_it()
+    {
+        var harness = NewHarness();
+        var coordinator = harness.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+        harness.ExternalHelperDemand = true;
+        harness.Snapshots.Launcher = [];
+
+        await coordinator.ReconcileAsync("LauncherMissingWhileRoutingActive");
+
+        Assert.True(harness.HelperOwnership.IsOwned);
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+
+        await coordinator.DisposeAsync();
+    }
+
     private sealed class FakeSnapshotSource : IProcessSnapshotSource
     {
         internal IReadOnlyList<ProcessSnapshotEntry>? Launcher { get; set; } = [new(1, CenterMProcessNames.Launcher, null)];

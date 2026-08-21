@@ -969,6 +969,12 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private async Task<bool> EnsureNoHelperOwned(CancellationToken cancellationToken)
     {
         if (!_helperOwnership.IsOwned) return true;
+        if (HasExternalHelperDemand())
+        {
+            AppLog.Warn("CenterM.Oem1", "OEM1 cleanup deferred because Routing still requires the shared helper.", null,
+                ("ProcessId", _helperOwnership.ProcessId));
+            return false;
+        }
         var stopped = _helperOwnership.Stop(_helperStopTimeout);
         if (!stopped)
             AppLog.Warn("CenterM.Oem1", "Could not confirm helper cleanup while leaving suppression readiness.", null, ("ProcessId", _helperOwnership.ProcessId));
@@ -1107,6 +1113,14 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             // outcome below. Stop the exact owned helper before ever considering adoption of the
             // remaining process.
             var ownedPid = _helperOwnership.ProcessId;
+            if (HasExternalHelperDemand())
+            {
+                _lastReason = "ForeignMainUiWhileRoutingDemandActive";
+                SetState(CenterMOem1LifecycleState.FaultedNative);
+                AppLog.Warn("CenterM.Oem1", "Foreign same-name process observed; preserving the shared helper while Routing still demands it.", null,
+                    ("HelperProcessId", ownedPid));
+                return;
+            }
             var stopped = _helperOwnership.Stop(_helperStopTimeout);
             if (!stopped)
             {
