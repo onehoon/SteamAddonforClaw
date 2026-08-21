@@ -51,6 +51,8 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
 
     internal void ScheduleStartup() => Schedule(true, false, "Startup");
 
+    internal void ScheduleCenterMReconcile() => Schedule(true, true, "CenterM");
+
     internal Task DrainPendingAsync()
     {
         lock (_sync) return _pendingTask;
