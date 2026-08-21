@@ -623,9 +623,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     {
         try
         {
-            if (CenterMGuard.HasHelperDemand && _runtimeFaultHandler is { } failCloseRouting)
-                await failCloseRouting("Oem1ReplacementActionFailed").ConfigureAwait(false);
-
+            // Replacement-action failure is feature-local. Revoke OEM1 authority and let the
+            // existing shared-demand policy keep Routing alive until its own teardown.
             await CenterMOem1Coordinator.SetDesiredEnabledAsync(false).ConfigureAwait(false);
         }
         catch (Exception exception)

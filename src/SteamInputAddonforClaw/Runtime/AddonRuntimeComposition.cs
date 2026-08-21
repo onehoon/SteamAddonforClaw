@@ -22,10 +22,9 @@ internal sealed record AddonRuntimeComposition(
     StartupSettingsCoordinator StartupSettings,
     string StartupRegistrationMessage,
     ISystemStatusProvider StatusProvider,
-    /// <summary>Review fix (BLOCKER): the routing composition's OEM1 action-path startup activation
-    /// (see <see cref="AddonRoutingRuntime.Oem1ActivationTask"/>), forwarded so
-    /// <see cref="Hosting.AddonProcessHost.InitializeRuntimeAsync"/> can await it before routing/power
-    /// observation begins. <see cref="Task.CompletedTask"/> when there is no routing runtime.</summary>
+    /// <summary>The owned initial OEM1 action-path activation task. Frontend/tray startup does not
+    /// await it; Routing awaits the same task before entering its pipeline/helper-acquisition
+    /// boundary. <see cref="Task.CompletedTask"/> when there is no routing runtime.</summary>
     Task Oem1ActivationTask);
 
 internal static class AddonRuntimeCompositionFactory

@@ -287,12 +287,20 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     {
         var (composition, eventSource, mapping) = BuildArmable();
         IHandheldRoutingComposition handheld = composition;
+        using var entered = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+        eventSource.BeforeStart = () =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(5));
+        };
 
         var activation = handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
 
-        Assert.False(eventSource.StartCalled);
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
         Assert.False(activation.IsCompleted);
 
+        release.Set();
         await activation;
         Assert.True(eventSource.StartCalled);
         await ((IAsyncDisposable)composition).DisposeAsync();
@@ -509,8 +517,10 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         /// <summary>Proves whether Event41 WMI observation was ever actually started -- the exact
         /// thing unsupported hardware must never reach.</summary>
         internal bool StartCalled { get; private set; }
+        internal Action? BeforeStart { get; set; }
         public bool Start()
         {
+            BeforeStart?.Invoke();
             StartCalled = true;
             return startSucceeds;
         }
