@@ -73,28 +73,37 @@ internal sealed class TdpCenterMRegistryWatcher : IDisposable
     }
 
     private static IReadOnlyList<ITdpCenterMRegistryEventSource> CreateSources() =>
-        new[] { "Mode", "ManualPL1AC", "ManualPL2AC", "ManualPL1DC", "ManualPL2DC" }
-            .Select(valueName => (ITdpCenterMRegistryEventSource)new WindowsTdpCenterMRegistryEventSource(valueName))
-            .ToArray();
+        new[]
+        {
+            new WindowsTdpCenterMRegistryEventSource(WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath, "Mode"),
+            new WindowsTdpCenterMRegistryEventSource(WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath, "ManualPL1AC"),
+            new WindowsTdpCenterMRegistryEventSource(WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath, "ManualPL2AC"),
+            new WindowsTdpCenterMRegistryEventSource(WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath, "ManualPL1DC"),
+            new WindowsTdpCenterMRegistryEventSource(WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath, "ManualPL2DC"),
+            new WindowsTdpCenterMRegistryEventSource(WindowsTdpCenterMRegistryEventSource.AiEngineKeyPath, "AIModeM")
+        };
 }
 
 internal sealed class WindowsTdpCenterMRegistryEventSource : ITdpCenterMRegistryEventSource
 {
     internal const string Hive = "HKEY_LOCAL_MACHINE";
-    internal const string KeyPath = @"SOFTWARE\WOW6432Node\MSI\MSI Center M\Component\User Scenario";
+    internal const string UserScenarioKeyPath = @"SOFTWARE\WOW6432Node\MSI\MSI Center M\Component\User Scenario";
+    internal const string AiEngineKeyPath = @"SOFTWARE\WOW6432Node\MSI\MSI Center M\Component\AI Engine";
     private readonly ManagementEventWatcher _watcher;
 
-    internal WindowsTdpCenterMRegistryEventSource(string valueName)
+    internal WindowsTdpCenterMRegistryEventSource(string keyPath, string valueName)
     {
+        KeyPath = keyPath ?? throw new ArgumentNullException(nameof(keyPath));
         ValueName = valueName ?? throw new ArgumentNullException(nameof(valueName));
-        _watcher = new(new ManagementScope(@"\\.\root\default"), new EventQuery(BuildQuery(valueName)));
+        _watcher = new(new ManagementScope(@"\\.\root\default"), new EventQuery(BuildQuery(keyPath, valueName)));
         _watcher.EventArrived += OnEventArrived;
     }
 
+    internal string KeyPath { get; }
     public string ValueName { get; }
     public event Action? Changed;
-    internal static string BuildQuery(string valueName) =>
-        $"SELECT * FROM RegistryValueChangeEvent WHERE Hive = '{Hive}' AND KeyPath = '{KeyPath}' AND ValueName = '{valueName}'";
+    internal static string BuildQuery(string keyPath, string valueName) =>
+        $"SELECT * FROM RegistryValueChangeEvent WHERE Hive = '{WindowsTdpCenterMRegistryEventSource.Hive}' AND KeyPath = '{keyPath}' AND ValueName = '{valueName}'";
 
     public bool TryStart(out Exception? error)
     {

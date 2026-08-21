@@ -12,15 +12,22 @@ public sealed class TdpCenterMRegistryWatcherTests : IDisposable
     private string ProfilePath => Path.Combine(_directory, "profiles.json");
 
     [Fact]
-    public void ProductionQueriesUseTheExactConfirmedUserScenarioValues()
+    public void ProductionQueriesUseExactUserScenarioAndAiEnginePaths()
     {
-        Assert.Equal(@"SOFTWARE\WOW6432Node\MSI\MSI Center M\Component\User Scenario", WindowsTdpCenterMRegistryEventSource.KeyPath);
+        Assert.Equal(@"SOFTWARE\WOW6432Node\MSI\MSI Center M\Component\User Scenario", WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath);
+        Assert.Equal(@"SOFTWARE\WOW6432Node\MSI\MSI Center M\Component\AI Engine", WindowsTdpCenterMRegistryEventSource.AiEngineKeyPath);
         foreach (var value in new[] { "Mode", "ManualPL1AC", "ManualPL2AC", "ManualPL1DC", "ManualPL2DC" })
         {
-            var query = WindowsTdpCenterMRegistryEventSource.BuildQuery(value);
+            var query = WindowsTdpCenterMRegistryEventSource.BuildQuery(WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath, value);
+            Assert.Contains($"KeyPath = '{WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath}'", query);
             Assert.Contains($"ValueName = '{value}'", query);
             Assert.Contains("Hive = 'HKEY_LOCAL_MACHINE'", query);
         }
+
+        var aiQuery = WindowsTdpCenterMRegistryEventSource.BuildQuery(WindowsTdpCenterMRegistryEventSource.AiEngineKeyPath, "AIModeM");
+        Assert.Contains($"KeyPath = '{WindowsTdpCenterMRegistryEventSource.AiEngineKeyPath}'", aiQuery);
+        Assert.Contains("ValueName = 'AIModeM'", aiQuery);
+        Assert.DoesNotContain(WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath, aiQuery);
     }
 
     [Fact]
@@ -31,7 +38,7 @@ public sealed class TdpCenterMRegistryWatcherTests : IDisposable
         var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
         await using var runtime = CreateRuntime(transport, () => power.Current);
         using var lifecycle = new TdpPowerLifecycleWatcher(runtime, power, delay.WaitAsync);
-        var center = new FakeRegistrySource("Mode");
+        var center = new FakeRegistrySource("AIModeM");
         using var watcher = new TdpCenterMRegistryWatcher(lifecycle.ScheduleCenterMReconcile, [center]);
 
         lifecycle.ScheduleStartup(); delay.Release(); await lifecycle.DrainPendingAsync(); await runtime.DrainAsync();
@@ -49,11 +56,11 @@ public sealed class TdpCenterMRegistryWatcherTests : IDisposable
         var delay = new FakeDelay(); var power = new FakePowerSource(); var transport = new FakeTransport { Ap = [0, 0, 0xC4] };
         await using var runtime = CreateRuntime(transport, () => power.Current);
         using var lifecycle = new TdpPowerLifecycleWatcher(runtime, power, delay.WaitAsync);
-        var mode = new FakeRegistrySource("Mode"); var pl1 = new FakeRegistrySource("ManualPL1AC"); var pl2 = new FakeRegistrySource("ManualPL2AC");
-        using var watcher = new TdpCenterMRegistryWatcher(lifecycle.ScheduleCenterMReconcile, [mode, pl1, pl2]);
+        var mode = new FakeRegistrySource("Mode"); var pl1 = new FakeRegistrySource("ManualPL1AC"); var pl2 = new FakeRegistrySource("ManualPL2AC"); var ai = new FakeRegistrySource("AIModeM");
+        using var watcher = new TdpCenterMRegistryWatcher(lifecycle.ScheduleCenterMReconcile, [mode, pl1, pl2, ai]);
         lifecycle.ScheduleStartup(); delay.Release(); await lifecycle.DrainPendingAsync(); await runtime.DrainAsync(); transport.Operations.Clear();
 
-        watcher.Start(); delay.Reset(); mode.Raise(); pl1.Raise(); pl2.Raise(); await Task.Yield(); delay.Release();
+        watcher.Start(); delay.Reset(); mode.Raise(); pl1.Raise(); pl2.Raise(); ai.Raise(); await Task.Yield(); delay.Release();
         await lifecycle.DrainPendingAsync(); await runtime.DrainAsync();
         Assert.Equal(1, transport.Operations.Count(x => x == "GetAp(0)"));
     }
