@@ -171,7 +171,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
             var decoded = SteamDeckRumbleDecoder.Decode(report);
             if (decoded.Command == SteamDeckFeedbackCommand.Rumble)
-                AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("Left", decoded.Rumble.LargeMotor), ("Right", decoded.Rumble.SmallMotor));
+                AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("Type", decoded.RumbleType), ("Intensity", decoded.RumbleIntensity), ("Left", decoded.Rumble.LargeMotor), ("Right", decoded.Rumble.SmallMotor), ("LeftGain", decoded.RumbleLeftGain), ("RightGain", decoded.RumbleRightGain));
             else if (decoded.Command == SteamDeckFeedbackCommand.Haptic)
                 AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("Intensity", decoded.Intensity), ("Gain", decoded.Gain), ("Strength8", decoded.Strength8));
             else if (decoded.Command == SteamDeckFeedbackCommand.HapticPulse)

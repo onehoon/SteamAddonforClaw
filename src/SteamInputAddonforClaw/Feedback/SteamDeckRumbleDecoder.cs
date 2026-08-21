@@ -18,7 +18,11 @@ internal readonly record struct SteamDeckFeedbackDecodeResult(
     int? Gain = null,
     ushort? PulsePeriod = null,
     ushort? PulseCount = null,
-    byte? Strength8 = null)
+    byte? Strength8 = null,
+    byte? RumbleType = null,
+    ushort? RumbleIntensity = null,
+    sbyte? RumbleLeftGain = null,
+    sbyte? RumbleRightGain = null)
 {
     internal bool IsSupported => Command is SteamDeckFeedbackCommand.Rumble or SteamDeckFeedbackCommand.Haptic or SteamDeckFeedbackCommand.HapticPulse;
 }
@@ -40,9 +44,17 @@ internal static class SteamDeckRumbleDecoder
             // [0xEB, 9, rumbleType, intensity(2), left(2), right(2), leftGain, rightGain].
             if (report.Length < MinimumReportLength || report[1] != 9)
                 return new(SteamDeckFeedbackCommand.Malformed, TwoMotorRumble.Stopped);
+            var rumbleType = report[2];
+            var intensity = (ushort)(report[3] | report[4] << 8);
             var left = (ushort)(report[5] | report[6] << 8);
             var right = (ushort)(report[7] | report[8] << 8);
-            return new(SteamDeckFeedbackCommand.Rumble, new TwoMotorRumble(left, right));
+            var leftGain = unchecked((sbyte)report[9]);
+            var rightGain = unchecked((sbyte)report[10]);
+            return new(SteamDeckFeedbackCommand.Rumble, new TwoMotorRumble(left, right),
+                RumbleType: rumbleType,
+                RumbleIntensity: intensity,
+                RumbleLeftGain: leftGain,
+                RumbleRightGain: rightGain);
         }
 
         if (opcode == HapticOpcode)
