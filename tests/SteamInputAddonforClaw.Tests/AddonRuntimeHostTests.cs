@@ -574,15 +574,21 @@ public sealed class AddonRuntimeHostTests
     /// <summary>Accepts the same PowerMutationGate/RecoverySafetyState instances the caller passes
     /// to AddonRuntimeHost, matching production composition where App constructs both once and
     /// threads them into AddonRoutingRuntime.Create and AddonRuntimeHost's constructor.</summary>
-    private static AddonRoutingRuntime? CreateRoutingRuntime(ISystemStatusProvider statusProvider, PowerMutationGate powerGate, RecoverySafetyState recoverySafetyState) => AddonRoutingRuntime.Create(
-        new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
-        statusProvider,
-        new AddonOwnedVirtualDeviceTracker(),
-        new RecoveryManager(new MemoryJournalStore()),
-        powerGate,
-        recoverySafetyState,
-        new DefaultOem1MappingPreference(),
-        hardwareSupported: true);
+    private static AddonRoutingRuntime? CreateRoutingRuntime(ISystemStatusProvider statusProvider, PowerMutationGate powerGate, RecoverySafetyState recoverySafetyState)
+    {
+        var runtime = AddonRoutingRuntime.Create(
+            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
+            statusProvider,
+            new AddonOwnedVirtualDeviceTracker(),
+            new RecoveryManager(new MemoryJournalStore()),
+            powerGate,
+            recoverySafetyState,
+            new DefaultOem1MappingPreference(),
+            hardwareSupported: false);
+        runtime?.TestOnly_SetOem1ActivationTask(Task.CompletedTask);
+        runtime?.TestOnly_SetSteamOutputReady(true);
+        return runtime;
+    }
 
     private sealed class FakeSteamInputRoutingPreference : ISteamInputRoutingPreference
     {
