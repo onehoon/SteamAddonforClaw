@@ -91,6 +91,25 @@ public sealed class CenterMMainUiRoutingGuardTests
     }
 
     [Fact]
+    public async Task Failed_arm_stops_borrowed_helper_when_persistent_owner_disappears()
+    {
+        var snapshots = new FakeSnapshotSource([
+            [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)],
+            [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]
+        ]);
+        var helperApi = new RecordingHelperApi();
+        var ownership = new CenterMHelperOwnership(helperApi);
+        Assert.Equal(HelperStartResult.Started, ownership.Start("C:\\fake\\MSI Center M.exe"));
+        var mutexFactory = new FakeMutexFactory { NextCreatedNew = false };
+        var guard = Create(snapshots, new FakeStager(null), helperApi, mutexFactory,
+            helperOwnership: ownership, persistentHelperOwnerReady: () => false);
+
+        Assert.Equal(CenterMMainUiRoutingGuardResult.MutexFailure, await guard.ArmAsync());
+        Assert.Contains("Terminate", helperApi.Calls);
+        Assert.False(ownership.IsOwned);
+    }
+
+    [Fact]
     public async Task Repeated_arm_while_already_armed_is_idempotent()
     {
         var snapshots = new FakeSnapshotSource([[], [new ProcessSnapshotEntry(RecordingHelperApi.FixedProcessId, "MSI Center M", null)]]);
