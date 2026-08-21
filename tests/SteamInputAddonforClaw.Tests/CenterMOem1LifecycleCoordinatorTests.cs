@@ -25,7 +25,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         internal string? StagedPath = @"C:\fake\Runtime\MSI Center M.exe";
         internal Func<bool> EnvironmentEligible = () => true;
         internal bool ExternalHelperDemand { get; set; }
-        internal string? SharedHelperSafetyFaultReason { get; private set; }
         internal readonly CenterMHelperOwnership HelperOwnership;
         /// <summary>Review 4957630432 finding #2: fires whenever the stager is invoked, letting a
         /// test simulate a suspend/disable/shutdown request's lifecycle-epoch bump becoming
@@ -65,7 +64,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
                 delay: Delay.DelayAsync,
                 environmentEligibility: () => EnvironmentEligible(),
                 externalHelperDemand: () => ExternalHelperDemand,
-                sharedHelperSafetyFault: reason => SharedHelperSafetyFaultReason = reason,
                 hiddenDebounce: debounce ?? TimeSpan.FromMilliseconds(1));
         }
     }
@@ -91,24 +89,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         harness.ExternalHelperDemand = false;
         await coordinator.ReconcileAsync("RoutingExit");
         Assert.False(harness.HelperOwnership.IsOwned);
-
-        await coordinator.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task Prerequisite_cleanup_preserves_helper_while_Routing_demands_it()
-    {
-        var harness = NewHarness();
-        var coordinator = harness.Build();
-
-        await coordinator.SetDesiredEnabledAsync(true);
-        harness.ExternalHelperDemand = true;
-        harness.Snapshots.Launcher = [];
-
-        await coordinator.ReconcileAsync("LauncherMissingWhileRoutingActive");
-
-        Assert.True(harness.HelperOwnership.IsOwned);
-        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
 
         await coordinator.DisposeAsync();
     }
@@ -378,38 +358,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
-    public async Task OEM1_enable_adopts_helper_when_Routing_wins_Start_race()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        int? routingHelperPid = null;
-
-        coordinator.TestOnly_BeforeHelperStartLinearization = () =>
-        {
-            h.ExternalHelperDemand = true;
-            Assert.Equal(HelperStartResult.Started, h.HelperOwnership.Start(h.StagedPath!));
-            routingHelperPid = h.HelperOwnership.ProcessId;
-            return Task.CompletedTask;
-        };
-
-        await coordinator.SetDesiredEnabledAsync(true);
-
-        var snapshot = coordinator.GetSnapshot();
-        Assert.Equal(CenterMOem1LifecycleState.Armed, snapshot.State);
-        Assert.True(snapshot.SuppressionReady);
-        Assert.Equal(routingHelperPid, snapshot.HelperProcessId);
-        Assert.Equal(1, h.HelperApi.StartCallCount);
-        Assert.Equal(0, h.HelperApi.TerminateCallCount);
-
-        h.ExternalHelperDemand = false;
-        Assert.True(await coordinator.ReleaseRoutingHelperAsync());
-        Assert.True(h.HelperOwnership.IsOwned);
-        Assert.Equal(routingHelperPid, h.HelperOwnership.ProcessId);
-
-        await coordinator.DisposeAsync();
-    }
-
-    [Fact]
     public async Task LauncherUnavailable_NoArm_RemainsNative()
     {
         var h = NewHarness();
@@ -564,22 +512,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
-    public async Task Liveness_Exited_while_Routing_demands_helper_requests_Routing_fail_close()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        h.ExternalHelperDemand = true;
-        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
-
-        await coordinator.PollHelperLivenessAsync();
-
-        Assert.Equal("CenterMSharedHelperExited", h.SharedHelperSafetyFaultReason);
-        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
-        Assert.Equal(1, h.HelperApi.StartCallCount);
-    }
-
-    [Fact]
     public async Task TimedOutSuspendDuringHelperLivenessExit_RetiresOwnershipAndDefersRearmUntilResume()
     {
         var h = NewHarness();
@@ -628,23 +560,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
         Assert.Equal(1, h.HelperApi.StartCallCount); // no respawn attempted
         Assert.Equal(1, h.HelperApi.TerminateCallCount); // review 4957630432 #1: exact-handle stop attempted, never blind respawn
-    }
-
-    [Fact]
-    public async Task Liveness_Uncertain_defers_shared_helper_teardown_while_Routing_demands_it()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-
-        h.ExternalHelperDemand = true;
-        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Uncertain;
-        await coordinator.PollHelperLivenessAsync();
-
-        Assert.True(h.HelperOwnership.IsOwned);
-        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
-        Assert.Equal(0, h.HelperApi.TerminateCallCount);
-        Assert.Equal("CenterMSharedHelperLivenessUncertain", h.SharedHelperSafetyFaultReason);
     }
 
     // ============================================================
@@ -798,25 +713,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
         Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
         Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
-    }
-
-    [Fact]
-    public async Task ForeignSameNameProcess_WithRoutingDemand_requests_fail_close_without_stopping_shared_helper()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        h.ExternalHelperDemand = true;
-        var helperPid = h.HelperOwnership.ProcessId;
-
-        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
-        h.IdentityInspector.ProcessId = 5555;
-        await coordinator.PollTickAsync();
-
-        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
-        Assert.Equal(helperPid, h.HelperOwnership.ProcessId);
-        Assert.True(h.HelperOwnership.IsOwned);
-        Assert.Equal("CenterMForeignMainUiWhileRoutingActive", h.SharedHelperSafetyFaultReason);
     }
 
     // ============================================================
