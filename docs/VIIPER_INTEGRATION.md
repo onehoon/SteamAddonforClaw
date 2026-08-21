@@ -54,19 +54,19 @@ revision adds exactly one native export, `SetSteamDeckOutputCallback`
 and `SteamDeckDeviceRemoveResult` are unchanged. The managed
 `ICanonicalViiperNativeApi` surface, `RequiredExports`, and callback-lifetime
 rooting were updated in the same change to keep the native and managed ABI
-aligned. Production registers the Steam Deck output callback only after the
-optional physical rumble capability succeeds at an explicit STOP preflight
-through the real endpoint/handle/write path. If preflight is unavailable,
-Steam Deck input routing continues without feedback and no callback is
-registered. An armed session copies the synchronous normalized payload,
-decodes ordinary 0xEB rumble, and gates physical writes through the shared
-feedback authority. Teardown of an armed session revokes and drains feedback,
-sends an explicit physical STOP, clears the callback, and only then performs
-classified Steam Deck attachment detach; final logical removal belongs only to
-runtime teardown. Steam Deck `0xEA` Haptic is translated through the existing
-two-motor MSI Claw fallback with protocol metadata preserved; `0x8F` Haptic
-Pulse is recognized and decoded for diagnostics only, with no MSI Claw physical
-translation or pulse emulation. Audio/jingle and unknown
+aligned. Production registers the Steam Deck output callback as an optional
+diagnostic side channel; callback registration, feedback availability, write
+success, timeouts, and callback cleanup never participate in routing success or
+failure. The callback only copies, decodes, and submits latest feedback intent
+to one best-effort physical writer. Teardown revokes feedback, invalidates
+stale commands, requests a physical STOP, and continues structural Steam Deck
+teardown without waiting for physical feedback completion. MSI physical
+feedback uses bounded cancellable writes and safety-stop deadlines to prevent
+persistent motor activation after a missing or lost STOP command. Steam Deck
+`0xEB` ordinary rumble is physically translated, `0xEA` Haptic uses the
+existing two-motor MSI Claw fallback with protocol metadata preserved, and
+`0x8F` Haptic Pulse is recognized and decoded for diagnostics only, with no
+MSI Claw physical translation or pulse emulation. Audio/jingle and unknown
 output commands remain unsupported; hardware validation remains pending.
 
 ### Automated dependency update PRs

@@ -89,7 +89,7 @@ public sealed class MsiClawPhysicalInputStageTests
     }
 
     [Fact]
-    public async Task Rollback_uses_retirement_barrier_before_stopping_input_source()
+    public async Task Rollback_does_not_wait_for_rumble_before_stopping_input_source()
     {
         var input = new FakeInput();
         var stage = new MsiClawPhysicalInputStage(() => new FakeEnumerator([Device()]), input);
@@ -102,18 +102,20 @@ public sealed class MsiClawPhysicalInputStageTests
         stage.PhysicalSessionRetiring += () => retirementReached.TrySetResult();
         stage.PhysicalSessionRetiring += sink.BeginPhysicalSessionRetirement;
         stage.PhysicalSessionRetired += sink.InvalidatePhysicalSession;
-        input.BeforeStop = () => transport.InvalidateCount > 0;
+        // Rumble retirement is best-effort and must not be a prerequisite for stopping input.
+        // Assert the ordering at the StopAsync boundary rather than racing the rollback
+        // continuation after the first retirement event handler signals.
+        input.BeforeStop = () => retirementReached.Task.IsCompleted;
 
         var write = Task.Run(() => sink.SetRumble(new(0xFF00, 0xFF00)));
         await transport.Entered.Task;
         var rollback = Task.Run(async () => await stage.RollbackMutationAsync(CancellationToken.None));
         await retirementReached.Task;
-        Assert.Equal(0, input.StopCount);
         transport.Release.Set();
-        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, (await write).Status);
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, (await write).Status);
         await rollback;
         Assert.Equal(1, input.StopCount);
-        Assert.Equal(2, transport.InvalidateCount);
+        Assert.Equal(1, transport.InvalidateCount);
         Assert.Null(stage.CurrentIdentity);
     }
 

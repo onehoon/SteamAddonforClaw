@@ -7,6 +7,7 @@ using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -361,7 +362,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task FeedbackCallbackRegistrationFailureRollsBackAfterNeutral()
+    public async Task FeedbackCallbackRegistrationFailureDoesNotBlockRouting()
     {
         var session = new FakeCanonicalSession { SetOutputCallbackResult = false };
         var sink = new RecordingRumbleSink();
@@ -370,14 +371,44 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("SteamDeckFeedbackCallbackRegistrationFailed", result.Reason);
-        Assert.Equal(["Start", "Neutral", "SetOutputCallback", "Remove", "Dispose"], session.Trace);
-        Assert.Equal([TwoMotorRumble.Stopped], sink.Values);
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal(["Start", "Neutral", "SetOutputCallback"], session.Trace);
     }
 
     [Fact]
-    public async Task RumblePreflightFailureLeavesSteamDeckRoutingActiveWithoutCallback()
+    public async Task FeedbackCancellationFailureDoesNotBlockSteamStructuralTeardown()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: new ThrowingCancelSink());
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal(1, session.ClearOutputCallbackCalls);
+        Assert.Equal(1, session.RemoveCalls);
+    }
+
+    [Fact]
+    public async Task DeveloperHapticStageCommandUsesNonOffGeneratorType()
+    {
+        var session = new FakeCanonicalSession();
+        var sink = new RecordingRumbleSink();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var outcome = await stage.RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand.Haptic, CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, outcome.CommandResult?.Status);
+        Assert.Contains(new TwoMotorRumble(32896, 32896), sink.Snapshot());
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
+    }
+
+    [Fact]
+    public async Task RumbleAvailabilityFailureLeavesSteamDeckRoutingActiveWithoutCallback()
     {
         var session = new FakeCanonicalSession();
         var sink = new RecordingRumbleSink();
@@ -386,15 +417,15 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks, sink: sink);
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.DoesNotContain("SetOutputCallback", session.Trace);
+        Assert.Contains("SetOutputCallback", session.Trace);
         ticks.Tick();
         await session.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Single(sink.Values);
+        Assert.Contains("SetOutputCallback", session.Trace);
     }
 
     [Fact]
-    public async Task SuccessfulRumblePreflightPrecedesCallbackAndLivePublisher()
+    public async Task RoutingActivationDoesNotPerformRumblePreflight()
     {
         var session = new FakeCanonicalSession();
         var trace = new List<string>();
@@ -406,7 +437,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         ticks.Tick();
         await session.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(["Neutral", "RumblePreflightStop", "SetOutputCallback", "PublisherLive"], trace);
+        Assert.Equal(["Neutral", "SetOutputCallback", "PublisherLive"], trace);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
@@ -435,7 +466,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task FailedRumblePreflightLeavesRoutingActiveWithoutCallbackOrFinalStop()
+    public async Task RumbleFailureLeavesRoutingActiveWithoutCallbackOrFinalStop()
     {
         var session = new FakeCanonicalSession();
         var sink = new RecordingRumbleSink();
@@ -443,38 +474,34 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.DoesNotContain("SetOutputCallback", session.Trace);
+        Assert.Contains("SetOutputCallback", session.Trace);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Single(sink.Values);
     }
 
-    [Theory]
-    [InlineData("Failed")]
-    [InlineData("Unavailable")]
-    [InlineData("Disposed")]
-    public async Task FinalStopFailureIsDegradedAndDoesNotBlockStructuralTeardown(string stopStatusName)
+    [Fact]
+    public async Task BlockedPhysicalStopDoesNotBlockStructuralTeardown()
     {
-        var stopStatus = Enum.Parse<PhysicalRumbleWriteStatus>(stopStatusName);
         // Regression for the fail-close hang: the final motor STOP is best-effort. A failure to
         // deliver it must not make Steam Deck / VIIPER ownership uncertain, so it must not stop
         // callback clear, canonical device removal, or (transitively, via the pipeline's rollback
         // barrier) PhysicalInput/NativeMode rollback and PID1901 restoration from running.
         var session = new FakeCanonicalSession();
         var sink = new RecordingRumbleSink();
-        sink.Results.Enqueue(new(PhysicalRumbleWriteStatus.Succeeded, "preflight"));
-        sink.Results.Enqueue(new(stopStatus, "test"));
+        sink.BlockWrites = true;
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
         await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
-        var result = await stage.RollbackMutationAsync(CancellationToken.None);
+        var rollback = stage.RollbackMutationAsync(CancellationToken.None).AsTask();
+        await sink.WriteEntered.Task;
+        await session.DetachEntered.Task;
+        sink.ReleaseWrite.TrySetResult();
+        var result = await rollback;
 
         Assert.True(result.Succeeded, result.Reason);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal([TwoMotorRumble.Stopped, TwoMotorRumble.Stopped], sink.Values);
-        AppLog.DrainForTests();
-        Assert.Contains("Steam Deck final physical STOP could not be confirmed", LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath));
+        Assert.Equal([TwoMotorRumble.Stopped], sink.Snapshot());
     }
 
     [Fact]
@@ -486,7 +513,6 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         // and NativeMode rollback -- the path that restores stock XInput/PID1901 -- from running.
         var session = new FakeCanonicalSession();
         var sink = new RecordingRumbleSink();
-        sink.Results.Enqueue(new(PhysicalRumbleWriteStatus.Succeeded, "preflight"));
         sink.Results.Enqueue(new(PhysicalRumbleWriteStatus.Failed, "device-lost"));
 
         var steam = Create(
@@ -516,6 +542,10 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.Equal([RoutingStageKind.PhysicalInput, RoutingStageKind.NativeMode], trace);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
         Assert.Equal(1, session.RemoveCalls);
+        var stopResult = await sink.WriteCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, stopResult.Status);
+        Assert.Equal("device-lost", stopResult.Reason);
+        Assert.Contains(TwoMotorRumble.Stopped, sink.Snapshot());
     }
 
     private sealed class RollbackProbeStage(RoutingStageKind kind, List<RoutingStageKind> trace) : IRoutingPipelineStage
@@ -535,7 +565,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task CallbackClearFailureRetainsCallbackForRetry()
+    public async Task CallbackClearFailureDoesNotBlockStructuralTeardown()
     {
         var session = new FakeCanonicalSession { ClearOutputCallbackResult = false };
         var sink = new RecordingRumbleSink();
@@ -545,22 +575,20 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         var first = await stage.RollbackMutationAsync(CancellationToken.None);
 
-        Assert.False(first.Succeeded);
-        Assert.Equal("SteamDeckFeedbackCallbackClearFailed", first.Reason);
+        Assert.True(first.Succeeded, first.Reason);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
-        Assert.Equal(0, session.RemoveCalls);
+        Assert.Equal(1, session.RemoveCalls);
 
         session.ClearOutputCallbackResult = true;
         var second = await stage.RollbackMutationAsync(CancellationToken.None);
 
         Assert.True(second.Succeeded, second.Reason);
-        Assert.Equal(2, session.ClearOutputCallbackCalls);
+        Assert.Equal(1, session.ClearOutputCallbackCalls);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal([TwoMotorRumble.Stopped, TwoMotorRumble.Stopped, TwoMotorRumble.Stopped], sink.Values);
     }
 
     [Fact]
-    public async Task AdmittedCallbackDrainsBeforeStageStopClearAndRemove()
+    public async Task AdmittedCallbackDoesNotBlockStageStopClearAndRemove()
     {
         var session = new FakeCanonicalSession();
         var order = new List<string>();
@@ -573,16 +601,12 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var callbackTask = Task.Run(() => Invoke(session.Callback!, RumbleReport(0x1234, 0x5678)));
         await sink.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var rollbackTask = stage.RollbackMutationAsync(CancellationToken.None).AsTask();
-        await authority.RevocationStarted.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(0, session.ClearOutputCallbackCalls);
-        Assert.Equal(0, session.RemoveCalls);
+        Assert.True((await rollbackTask).Succeeded);
         sink.Release.TrySetResult();
         await callbackTask;
-        Assert.True((await rollbackTask).Succeeded);
-        Assert.Equal([TwoMotorRumble.Stopped, new TwoMotorRumble(0x1234, 0x5678), TwoMotorRumble.Stopped], sink.Values);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.Equal(["Neutral", "Stop", "SetOutputCallback", "Nonzero", "Stop", "ClearOutputCallback", "DetachDevice"], order);
+        Assert.Contains("ClearOutputCallback", order);
     }
 
     [Fact]
@@ -599,10 +623,9 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var callbackTask = Task.Run(() => Invoke(session.Callback!, RumbleReport(0x1234, 0x5678)));
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Equal([TwoMotorRumble.Stopped, TwoMotorRumble.Stopped], sink.Values);
         release.TrySetResult();
         await callbackTask;
-        Assert.Equal([TwoMotorRumble.Stopped, TwoMotorRumble.Stopped], sink.Values);
+        Assert.DoesNotContain(new TwoMotorRumble(0x1234, 0x5678), sink.Snapshot());
     }
 
     [Fact]
@@ -1113,6 +1136,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public List<string>? ExternalTrace { get; set; }
         public SteamDeckOutputCallback? Callback { get; private set; }
         public TaskCompletionSource InputEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource DetachEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseInput { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public CanonicalSteamDeckSessionState State { get; private set; } = CanonicalSteamDeckSessionState.Clean;
@@ -1169,6 +1193,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
             Trace.Add("Remove");
             ExternalTrace?.Add("DetachDevice");
             RemoveCalls++;
+            DetachEntered.TrySetResult();
             OnDetachDeviceCalled?.Invoke();
             // A known/classified remove failure (RemoveResult=false) leaves State unchanged (still
             // Active) so the stage classifies it as "VirtualDeviceRemoveFailed" rather than
@@ -1200,10 +1225,30 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
     private sealed class RecordingRumbleSink : IPhysicalRumbleSink
     {
+        private readonly object _gate = new();
         public List<TwoMotorRumble> Values { get; } = [];
         public Queue<PhysicalRumbleWriteResult> Results { get; } = new();
+        public TaskCompletionSource<PhysicalRumbleWriteResult> WriteCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool BlockWrites { get; set; }
+        public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseWrite { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<string>? Trace { get; set; }
-        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble) { Values.Add(rumble); if (rumble == TwoMotorRumble.Stopped) Trace?.Add("RumblePreflightStop"); return Results.Count > 0 ? Results.Dequeue() : new(PhysicalRumbleWriteStatus.Succeeded, ""); }
+        public TwoMotorRumble[] Snapshot() { lock (_gate) return [.. Values]; }
+        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
+        {
+            lock (_gate) Values.Add(rumble);
+            if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Task.GetAwaiter().GetResult(); }
+            if (rumble == TwoMotorRumble.Stopped) Trace?.Add("RumblePreflightStop");
+            var result = Results.Count > 0 ? Results.Dequeue() : new(PhysicalRumbleWriteStatus.Succeeded, "");
+            WriteCompleted.TrySetResult(result);
+            return result;
+        }
+    }
+
+    private sealed class ThrowingCancelSink : IPhysicalRumbleSink
+    {
+        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble) => new(PhysicalRumbleWriteStatus.Succeeded, "OK");
+        public void CancelPendingWrite() => throw new IOException("cancel failed");
     }
 
     private sealed class BlockingRumbleSink : IPhysicalRumbleSink

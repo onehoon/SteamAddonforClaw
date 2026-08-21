@@ -13,6 +13,7 @@ internal interface IMsiClawRumbleTransport : IDisposable
     /// reports 32 bytes for the real PID1902 gamepad collection, not 64).</param>
     MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket, int outputReportLength);
     void InvalidatePhysicalSession();
+    void CancelPendingWrite() { }
 }
 
 internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
@@ -23,7 +24,9 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
     private const uint OpenExisting = 3;
 
     private readonly IMsiClawNativeHidApi _api;
-    private readonly Lock _sync = new();
+    private readonly TimeSpan _physicalWriteTimeout;
+    private readonly object _sync = new();
+    private readonly object _writeSerial = new();
     private SafeFileHandle? _handle;
     private string? _devicePath;
     private bool _disposed;
@@ -31,11 +34,21 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
     internal Action? WriteRequested { get; set; }
     internal Action? InvalidationRequested { get; set; }
 
-    internal WindowsMsiClawRumbleTransport(IMsiClawNativeHidApi? api = null) => _api = api ?? new WindowsMsiClawNativeHidApi();
+    internal WindowsMsiClawRumbleTransport(IMsiClawNativeHidApi? api = null, TimeSpan? physicalWriteTimeout = null)
+    {
+        _api = api ?? new WindowsMsiClawNativeHidApi();
+        _physicalWriteTimeout = physicalWriteTimeout ?? TimeSpan.FromMilliseconds(250);
+    }
 
     public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket, int outputReportLength)
     {
         WriteRequested?.Invoke();
+        lock (_writeSerial)
+            return WriteSerialized(devicePath, semanticPacket, outputReportLength);
+    }
+
+    private MsiClawRumbleTransportResult WriteSerialized(string devicePath, ReadOnlySpan<byte> semanticPacket, int outputReportLength)
+    {
         lock (_sync)
         {
             if (_disposed) return new(false, "Disposed");
@@ -49,11 +62,11 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             var openStarted = Stopwatch.GetTimestamp();
             if (_handle is null)
             {
-                // Normal synchronous HID Open/Write, matching the ClawTweaks-proven behavior --
-                // no overlapped I/O, no event/wait/cancel machinery. Some MSI HID collections deny
-                // GENERIC_READ while still allowing output writes (ClawButtonMonitor.SharedHidWrite
-                // retries write-only for exactly this reason), so fall back to GENERIC_WRITE only
-                // before giving up.
+                // Normal synchronous HID Open/Write, matching the ClawTweaks-proven behavior.
+                // A separate watchdog uses CancelSynchronousIo for the actual writer thread.
+                // Some MSI HID collections deny GENERIC_READ while still allowing output writes
+                // (ClawButtonMonitor.SharedHidWrite retries write-only for exactly this reason),
+                // so fall back to GENERIC_WRITE only before giving up.
                 _handle = _api.Open(devicePath, GenericRead | GenericWrite, ShareReadWrite, OpenExisting);
                 if (_handle.IsInvalid)
                 {
@@ -73,7 +86,43 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             var bytes = new byte[outputReportLength];
             semanticPacket.CopyTo(bytes);
             var writeStarted = Stopwatch.GetTimestamp();
-            if (!_api.Write(_handle, bytes, out var written))
+            // Do not hold the transport state lock while native I/O is pending. Retirement must
+            // be able to reach the native cancellation seam while this call is blocked.
+            var pendingHandle = _handle;
+            Monitor.Exit(_sync);
+            using var watchdogCancellation = new CancellationTokenSource();
+            var watchdog = CancelAfterDeadlineAsync(pendingHandle, watchdogCancellation.Token);
+            bool writeSucceeded;
+            uint written;
+            try
+            {
+                try
+                {
+                    writeSucceeded = _api.Write(pendingHandle, bytes, out written);
+                }
+                finally
+                {
+                    watchdogCancellation.Cancel();
+                    try
+                    {
+                        watchdog.GetAwaiter().GetResult();
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception exception)
+                    {
+                        try
+                        {
+                            AppLog.Debug("Rumble", "Physical rumble watchdog failure was contained.", ("Reason", exception.GetType().Name));
+                        }
+                        catch { }
+                    }
+                }
+            }
+            finally
+            {
+                Monitor.Enter(_sync);
+            }
+            if (!writeSucceeded)
             {
                 var error = _api.LastError;
                 CloseHandleLocked();
@@ -94,6 +143,31 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
         InvalidationRequested?.Invoke();
         lock (_sync)
             CloseHandleLocked();
+    }
+
+    private async Task CancelAfterDeadlineAsync(SafeFileHandle handle, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(_physicalWriteTimeout, cancellationToken).ConfigureAwait(false);
+            _api.CancelWrite(handle);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            try
+            {
+                AppLog.Debug("Rumble", "Physical rumble watchdog cancellation failure was contained.", ("Reason", exception.GetType().Name));
+            }
+            catch { }
+        }
+    }
+
+    public void CancelPendingWrite()
+    {
+        SafeFileHandle? handle;
+        lock (_sync) handle = _handle;
+        if (handle is not null && !handle.IsInvalid) _api.CancelWrite(handle);
     }
 
     public void Dispose()

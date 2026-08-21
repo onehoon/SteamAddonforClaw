@@ -14,6 +14,8 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
     private bool _failureWarningEmitted;
     private long? _endpointGeneration;
     private MsiClawRumbleEndpointResolution _cachedEndpoint;
+    private long? _lastWrittenGeneration;
+    private TwoMotorRumble? _lastWrittenRumble;
 
     internal MsiClawRumbleSink(IMsiClawPhysicalInputIdentityProvider identityProvider, IMsiClawRumbleTransport transport, IMsiClawRumbleEndpointResolver? endpointResolver = null)
     {
@@ -36,63 +38,77 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
     private PhysicalRumbleWriteResult SetRumbleCore(TwoMotorRumble rumble)
     {
         if (Volatile.Read(ref _disposed) != 0) return new(PhysicalRumbleWriteStatus.Disposed, "Disposed");
+        MsiClawRumbleEndpointResolution endpoint;
+        MsiClawPhysicalInputIdentity identity;
+        long generation;
+        bool needsResolve;
         lock (_sync)
         {
-            if (!_admissionOpen) return new(PhysicalRumbleWriteStatus.Unavailable, "PhysicalSessionRetiring");
-            var generation = _identityProvider.CurrentSessionGeneration;
-            var identity = _identityProvider.CurrentIdentity;
-            if (identity is null || string.IsNullOrWhiteSpace(identity.PhysicalIdentity))
+            if (!_admissionOpen && !rumble.Equals(TwoMotorRumble.Stopped)) return new(PhysicalRumbleWriteStatus.Unavailable, "PhysicalSessionRetiring");
+            generation = _identityProvider.CurrentSessionGeneration;
+            var currentIdentity = _identityProvider.CurrentIdentity;
+            if (currentIdentity is null || string.IsNullOrWhiteSpace(currentIdentity.PhysicalIdentity))
                 return new(PhysicalRumbleWriteStatus.Unavailable, "PhysicalIdentityUnavailable");
-            var generationEndpoint = _identityProvider.CurrentSessionGeneration;
-            MsiClawRumbleEndpointResolution endpoint;
-            try
-            {
-                endpoint = _endpointGeneration == generationEndpoint && _cachedEndpoint.IsAvailable
-                    ? _cachedEndpoint
-                    : _endpointResolver.Resolve(identity);
-            }
+            identity = currentIdentity;
+            needsResolve = _endpointGeneration != generation || !_cachedEndpoint.IsAvailable;
+            endpoint = needsResolve ? default : _cachedEndpoint;
+            if (!needsResolve && _lastWrittenGeneration == generation && _lastWrittenRumble is { } previous && previous.Equals(rumble))
+                return new(PhysicalRumbleWriteStatus.Succeeded, "Unchanged");
+        }
+
+        if (needsResolve)
+        {
+            try { endpoint = _endpointResolver.Resolve(identity); }
             catch (Exception exception)
             {
-                AppLog.Debug("Rumble", "MSI rumble endpoint resolution failed.", ("PID", 1902), ("PhysicalGeneration", generationEndpoint), ("Reason", "EndpointResolutionException"), ("Exception", exception.GetType().Name), ("HResult", exception.HResult), ("Message", exception.Message));
+                AppLog.Debug("Rumble", "MSI rumble endpoint resolution failed.", ("PID", 1902), ("PhysicalGeneration", generation), ("Reason", "EndpointResolutionException"), ("Exception", exception.GetType().Name));
                 return new(PhysicalRumbleWriteStatus.Failed, "EndpointResolutionException");
             }
-            if (endpoint.IsAvailable)
-            {
-                if (!_cachedEndpoint.Equals(endpoint))
-                {
-                    AppLog.Info("Rumble", "Rumble endpoint selected", ("PID", 1902), ("OutputReportLength", endpoint.OutputReportLength));
-                }
-                _cachedEndpoint = endpoint;
-                _endpointGeneration = generationEndpoint;
-            }
-            if (!endpoint.IsAvailable)
-            {
-                AppLog.Debug("Rumble", "MSI rumble endpoint unavailable.", ("PID", 1902), ("PhysicalGeneration", generationEndpoint), ("Reason", endpoint.Reason));
-                return new(PhysicalRumbleWriteStatus.Unavailable, endpoint.Reason);
-            }
+        }
+
+        lock (_sync)
+        {
             var current = _identityProvider.CurrentIdentity;
             if (_identityProvider.CurrentSessionGeneration != generation || !SameIdentity(identity, current))
                 return new(PhysicalRumbleWriteStatus.Unavailable, "StalePhysicalSession");
-
-            var large8 = MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.LargeMotor);
-            var small8 = MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.SmallMotor);
-            try
+            if (!_admissionOpen && !rumble.Equals(TwoMotorRumble.Stopped))
+                return new(PhysicalRumbleWriteStatus.Unavailable, "PhysicalSessionRetiring");
+            if (!endpoint.IsAvailable)
+                return new(PhysicalRumbleWriteStatus.Unavailable, endpoint.Reason);
+            if (needsResolve)
             {
-                var result = _transport.Write(endpoint.DevicePath!, MsiClawRumblePacketBuilder.Build(rumble), endpoint.OutputReportLength);
-                if (result.Succeeded)
-            {
-                AppLog.Debug("Rumble", "Rumble TX", ("Device", "MSIClaw"), ("PID", 1902), ("Large16", rumble.LargeMotor), ("Small16", rumble.SmallMotor), ("Large8", large8), ("Small8", small8), ("Result", "OK"), ("WriteMs", result.WriteMs));
-                return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
+                _cachedEndpoint = endpoint;
+                _endpointGeneration = generation;
             }
+            if (_lastWrittenGeneration == generation && _lastWrittenRumble is { } previous && previous.Equals(rumble))
+                return new(PhysicalRumbleWriteStatus.Succeeded, "Unchanged");
+            ResetLastWritten();
+        }
 
+        var large8 = MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.LargeMotor);
+        var small8 = MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.SmallMotor);
+        try
+        {
+            var result = _transport.Write(endpoint.DevicePath!, MsiClawRumblePacketBuilder.Build(rumble), endpoint.OutputReportLength);
+            if (!result.Succeeded)
+            {
                 LogFailureOnce(result.Reason, large8, small8, result.Win32Error);
                 return new(PhysicalRumbleWriteStatus.Failed, result.Reason);
             }
-            catch (Exception exception)
+            lock (_sync)
             {
-                LogFailureOnce("TransportException", large8, small8, 0, exception);
-                return new(PhysicalRumbleWriteStatus.Failed, "TransportException");
+                if (_identityProvider.CurrentSessionGeneration != generation || !_admissionOpen && !rumble.Equals(TwoMotorRumble.Stopped))
+                    return new(PhysicalRumbleWriteStatus.Unavailable, "StalePhysicalSession");
+                _lastWrittenGeneration = generation;
+                _lastWrittenRumble = rumble;
             }
+            AppLog.Debug("Rumble", "Rumble TX", ("Device", "MSIClaw"), ("PID", 1902), ("Large16", rumble.LargeMotor), ("Small16", rumble.SmallMotor), ("Large8", large8), ("Small8", small8), ("Result", "OK"), ("WriteMs", result.WriteMs));
+            return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
+        }
+        catch (Exception exception)
+        {
+            LogFailureOnce("TransportException", large8, small8, 0, exception);
+            return new(PhysicalRumbleWriteStatus.Failed, "TransportException");
         }
     }
 
@@ -104,19 +120,27 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
 
     internal void InvalidatePhysicalSession()
     {
-        lock (_sync) _transport.InvalidatePhysicalSession();
+        try { _transport.InvalidatePhysicalSession(); }
+        catch (Exception exception)
+        {
+            try { AppLog.Debug("Rumble", "MSI rumble invalidation failure was contained.", ("Reason", exception.GetType().Name)); }
+            catch { }
+        }
+    }
+
+    public void CancelPendingWrite()
+    {
+        try { _transport.CancelPendingWrite(); }
+        catch (Exception exception)
+        {
+            try { AppLog.Debug("Rumble", "MSI rumble cancellation failure was contained.", ("Reason", exception.GetType().Name)); }
+            catch { }
+        }
     }
 
     internal void BeginPhysicalSessionRetirement()
     {
-        lock (_sync)
-        {
-            _admissionOpen = false;
-            _failureWarningEmitted = false;
-            _endpointGeneration = null;
-            _cachedEndpoint = default;
-            _transport.InvalidatePhysicalSession();
-        }
+        Volatile.Write(ref _admissionOpen, false);
     }
 
     internal void BeginPhysicalSession()
@@ -124,10 +148,17 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
         lock (_sync)
         {
             _admissionOpen = true;
+            ResetLastWritten();
             _failureWarningEmitted = false;
             _endpointGeneration = null;
             _cachedEndpoint = default;
         }
+    }
+
+    private void ResetLastWritten()
+    {
+        _lastWrittenGeneration = null;
+        _lastWrittenRumble = null;
     }
 
     private void LogFailureOnce(string reason, byte large8, byte small8, int win32Error, Exception? exception = null)
