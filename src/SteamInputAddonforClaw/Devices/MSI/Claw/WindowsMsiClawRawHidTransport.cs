@@ -101,8 +101,9 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     {
         var threadId = Volatile.Read(ref _writeThreadId);
         if (threadId == 0) return;
-        using var thread = OpenThread(ThreadSetInformation, false, unchecked((uint)threadId));
-        if (!thread.IsInvalid) CancelSynchronousIo(thread);
+        using var thread = OpenThread(ThreadTerminate, false, unchecked((uint)threadId));
+        if (!thread.IsInvalid && !CancelSynchronousIo(thread))
+            LastError = Marshal.GetLastWin32Error();
     }
 
     public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
@@ -147,7 +148,7 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CancelIoEx(SafeFileHandle file, IntPtr overlapped);
-    private const uint ThreadSetInformation = 0x0020;
+    private const uint ThreadTerminate = 0x0001;
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern SafeFileHandle OpenThread(uint desiredAccess, bool inheritHandle, uint threadId);
     [DllImport("kernel32.dll", SetLastError = true)]

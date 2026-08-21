@@ -111,7 +111,7 @@ public sealed class MsiClawPhysicalInputStageTests
         await retirementReached.Task;
         Assert.Equal(0, input.StopCount);
         transport.Release.Set();
-        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, (await write).Status);
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, (await write).Status);
         await rollback;
         Assert.Equal(1, input.StopCount);
         Assert.Equal(1, transport.InvalidateCount);

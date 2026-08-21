@@ -18,6 +18,7 @@ internal interface IMsiClawRumbleTransport : IDisposable
 
 internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
 {
+    private static readonly TimeSpan PhysicalWriteTimeout = TimeSpan.FromMilliseconds(250);
     private const uint GenericRead = 0x80000000;
     private const uint GenericWrite = 0x40000000;
     private const uint ShareReadWrite = 0x00000001 | 0x00000002;
@@ -78,10 +79,17 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             // be able to reach the native cancellation seam while this call is blocked.
             var pendingHandle = _handle;
             Monitor.Exit(_sync);
+            using var watchdogCancellation = new CancellationTokenSource();
+            var watchdog = CancelAfterDeadlineAsync(pendingHandle, watchdogCancellation.Token);
             bool writeSucceeded;
             uint written;
             try { writeSucceeded = _api.Write(pendingHandle, bytes, out written); }
-            finally { Monitor.Enter(_sync); }
+            finally
+            {
+                watchdogCancellation.Cancel();
+                try { watchdog.GetAwaiter().GetResult(); } catch (OperationCanceledException) { }
+                Monitor.Enter(_sync);
+            }
             if (!writeSucceeded)
             {
                 var error = _api.LastError;
@@ -103,6 +111,16 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
         InvalidationRequested?.Invoke();
         lock (_sync)
             CloseHandleLocked();
+    }
+
+    private async Task CancelAfterDeadlineAsync(SafeFileHandle handle, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(PhysicalWriteTimeout, cancellationToken).ConfigureAwait(false);
+            _api.CancelWrite(handle);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
     public void CancelPendingWrite()

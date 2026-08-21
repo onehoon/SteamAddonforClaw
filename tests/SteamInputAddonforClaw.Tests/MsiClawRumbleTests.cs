@@ -554,7 +554,7 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public async Task Sink_retirement_barrier_waits_for_admitted_write_and_closes_admission()
+    public async Task Sink_retirement_closes_admission_without_waiting_and_allows_terminal_stop()
     {
         var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
         var transport = new FakeTransport { BlockWrites = true };
@@ -562,11 +562,11 @@ public sealed class MsiClawRumbleTests
         var write = Task.Run(() => sink.SetRumble(new(0xFF00, 0xFF00)));
         await transport.WriteEntered.Task;
         var retire = Task.Run(sink.BeginPhysicalSessionRetirement);
-        Assert.False(retire.IsCompleted);
-        transport.ReleaseWrite.Set();
-        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, (await write).Status);
         await retire;
-        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.True(retire.IsCompleted);
+        transport.ReleaseWrite.Set();
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, (await write).Status);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
     }
 
     private sealed class FakeIdentity(MsiClawPhysicalInputIdentity? identity) : IMsiClawPhysicalInputIdentityProvider
