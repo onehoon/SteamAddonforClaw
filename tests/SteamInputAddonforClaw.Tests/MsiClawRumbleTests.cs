@@ -239,6 +239,25 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public async Task Watchdog_cancel_failure_is_contained_and_does_not_corrupt_transport_lock()
+    {
+        var native = new FakeNativeHid
+        {
+            BlockFirstWriteUntilCancel = true,
+            ThrowOnCancelWrite = true
+        };
+        using var transport = new WindowsMsiClawRumbleTransport(native, TimeSpan.FromMilliseconds(10));
+
+        var first = await Task.Run(() => transport.Write("path-a", new byte[11], 32)).WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.False(first.Succeeded);
+
+        native.BlockFirstWriteUntilCancel = false;
+        native.ThrowOnCancelWrite = false;
+        native.WriteResult = true;
+        Assert.True(transport.Write("path-a", new byte[11], 32).Succeeded);
+    }
+
+    [Fact]
     public async Task Invalidation_does_not_wait_for_in_progress_write_and_forces_fresh_open()
     {
         var native = new FakeNativeHid { BlockFirstWrite = true };
@@ -717,6 +736,7 @@ public sealed class MsiClawRumbleTests
         public bool PartialWrite { get; set; }
         public bool BlockFirstWrite { get; init; }
         public bool BlockFirstWriteUntilCancel { get; set; }
+        public bool ThrowOnCancelWrite { get; set; }
         public bool DenyReadWriteOpen { get; set; }
         public List<uint> OpenAccessRequests { get; } = [];
         public int WriteCalls { get; private set; }
@@ -757,6 +777,8 @@ public sealed class MsiClawRumbleTests
                 WriteResult = false;
                 ReleaseFirstWrite.Set();
             }
+            if (ThrowOnCancelWrite)
+                throw new IOException("cancel failed");
         }
         public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
         {

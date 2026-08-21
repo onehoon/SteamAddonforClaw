@@ -94,11 +94,32 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             var watchdog = CancelAfterDeadlineAsync(pendingHandle, watchdogCancellation.Token);
             bool writeSucceeded;
             uint written;
-            try { writeSucceeded = _api.Write(pendingHandle, bytes, out written); }
+            try
+            {
+                try
+                {
+                    writeSucceeded = _api.Write(pendingHandle, bytes, out written);
+                }
+                finally
+                {
+                    watchdogCancellation.Cancel();
+                    try
+                    {
+                        watchdog.GetAwaiter().GetResult();
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception exception)
+                    {
+                        try
+                        {
+                            AppLog.Debug("Rumble", "Physical rumble watchdog failure was contained.", ("Reason", exception.GetType().Name));
+                        }
+                        catch { }
+                    }
+                }
+            }
             finally
             {
-                watchdogCancellation.Cancel();
-                try { watchdog.GetAwaiter().GetResult(); } catch (OperationCanceledException) { }
                 Monitor.Enter(_sync);
             }
             if (!writeSucceeded)
@@ -132,6 +153,14 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             _api.CancelWrite(handle);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            try
+            {
+                AppLog.Debug("Rumble", "Physical rumble watchdog cancellation failure was contained.", ("Reason", exception.GetType().Name));
+            }
+            catch { }
+        }
     }
 
     public void CancelPendingWrite()

@@ -401,14 +401,17 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         _feedbackBridge?.Dispose();
         if (_feedbackCallbackRegistered)
         {
-            if (!_canonicalSession?.ClearOutputCallback() ?? false)
+            var cleared = _canonicalSession?.ClearOutputCallback() ?? false;
+            if (!cleared)
             {
-                AppLog.Warn("Rumble", "Steam Deck feedback callback clear failed.", null, ("Operation", "ClearOutputCallback"));
-                AppLog.Warn("Rumble", "Steam Deck feedback callback clear failed; continuing structural teardown.", null, ("Operation", "ClearOutputCallback"));
+                AppLog.Warn("Rumble", "Steam Deck feedback callback clear failed; callback remains rooted and inert while structural teardown continues.", null, ("Operation", "ClearOutputCallback"));
+            }
+            else
+            {
+                AppLog.Debug("Rumble", "Steam Deck feedback callback cleared.", ("Source", "SteamDeck"));
             }
             _feedbackCallbackRegistered = false;
             _feedbackArmed = false;
-            AppLog.Debug("Rumble", "Steam Deck feedback callback cleared.", ("Source", "SteamDeck"));
         }
         if (_sessionId() is not { } session) return RollbackFailure("RecoverySessionUnavailable");
         var hadResolvedIdentity = _owned is { Count: > 0 };

@@ -65,10 +65,10 @@ public sealed class RumbleV1Tests
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
         var callback = Task.Run(() => Invoke(bridge.Callback, Packet(1, 2)));
         await sink.Entered.Task;
+        await callback.WaitAsync(TimeSpan.FromSeconds(2));
         await Task.Run(authority.Revoke).WaitAsync(TimeSpan.FromSeconds(2));
         Assert.False(authority.IsCurrent(token));
         sink.Release.Set();
-        await callback;
         Assert.Equal([new TwoMotorRumble(1, 2)], sink.Snapshot());
     }
 
