@@ -562,6 +562,22 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.Equal(1, h.HelperApi.TerminateCallCount); // review 4957630432 #1: exact-handle stop attempted, never blind respawn
     }
 
+    [Fact]
+    public async Task Liveness_Uncertain_defers_shared_helper_teardown_while_Routing_demands_it()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        h.ExternalHelperDemand = true;
+        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Uncertain;
+        await coordinator.PollHelperLivenessAsync();
+
+        Assert.True(h.HelperOwnership.IsOwned);
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.Equal(0, h.HelperApi.TerminateCallCount);
+    }
+
     // ============================================================
     // Review 4957630432, finding #1 (BLOCKER): exact-handle liveness Uncertain must actually disarm
     // the suppression helper (shared DisarmOwnedHelperForFailOpen contract), not merely relabel

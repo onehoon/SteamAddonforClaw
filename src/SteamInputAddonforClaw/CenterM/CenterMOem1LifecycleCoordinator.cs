@@ -941,6 +941,12 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private bool DisarmOwnedHelperForFailOpen()
     {
         if (!_helperOwnership.IsOwned) return true;
+        if (HasExternalHelperDemand())
+        {
+            AppLog.Warn("CenterM.Oem1", "OEM1 fail-open deferred shared-helper teardown because Routing still requires it.", null,
+                ("ProcessId", _helperOwnership.ProcessId));
+            return false;
+        }
         var stopped = _helperOwnership.Stop(_helperStopTimeout);
         if (stopped) BumpGeneration();
         return stopped;
