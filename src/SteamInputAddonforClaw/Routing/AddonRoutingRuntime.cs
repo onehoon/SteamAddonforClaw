@@ -75,14 +75,10 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         _viiperRuntime = viiperRuntime;
     }
 
-    /// <summary>Review fix (BLOCKER): the OEM1 action path's startup activation
-    /// (<see cref="IHandheldRoutingComposition.ConfigureOem1ActionPath"/>) and the routing guard
-    /// share the SAME underlying helper ownership, but only their exact-handle Start() call itself
-    /// serializes between them -- so the production startup boundary
-    /// (<see cref="Hosting.AddonProcessHost.InitializeRuntimeAsync"/>) must await this task before
-    /// routing/power observation is allowed to begin, ensuring the long-lived OEM1 owner's activation
-    /// decision is settled first. <see cref="Task.CompletedTask"/> for a backend with no OEM1 feature
-    /// (the interface default).</summary>
+    /// <summary>Owned initial OEM1 activation task. Frontend and tray startup do not await this task.
+    /// Each routing reconcile awaits it before entering the routing pipeline/helper-acquisition
+    /// boundary, ensuring persistent OEM1 ownership is settled before Routing may borrow the
+    /// shared helper. <see cref="Task.CompletedTask"/> for a backend with no OEM1 feature.</summary>
     internal Task Oem1ActivationTask { get; private set; } = Task.CompletedTask;
     private bool? _testOnlySteamOutputReadyOverride;
 
