@@ -24,6 +24,7 @@ public sealed partial class DevicePage : UserControl
     private FrontendTdpSnapshot _tdpSnapshot = FrontendTdpSnapshot.Unavailable;
     private int? _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft;
     private CancellationTokenSource? _tdpEditDebounce;
+    private long _tdpEditGeneration;
 
     private static readonly CpuBoostModeItem[] Modes =
     [
@@ -233,26 +234,60 @@ public sealed partial class DevicePage : UserControl
     private async void TdpEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)
     {
         if (_suppressTdpEvents || _frontend is null) return;
-        _tdpEditDebounce?.Cancel();
+        CancelPendingTdpEdit();
         if (TdpEnabledToggleSwitch.IsOn && !CompleteTdpDraft())
         {
             _suppressTdpEvents = true; TdpEnabledToggleSwitch.IsOn = false; _suppressTdpEvents = false;
             TdpInfoBar.Message = "Set valid PL1 and PL2 values for Plugged in and On battery before enabling TDP Control."; TdpInfoBar.IsOpen = true; return;
         }
-        await RunTdpMutationAsync(BuildTdpConfiguration(TdpEnabledToggleSwitch.IsOn));
+        var configuration = BuildTdpConfiguration(TdpEnabledToggleSwitch.IsOn);
+        if (configuration is not null) await RunTdpMutationAsync(configuration);
     }
 
     private void ScheduleTdpEdit()
     {
-        _tdpEditDebounce?.Cancel(); var cts = _tdpEditDebounce = new CancellationTokenSource();
-        _ = Task.Run(async () => { try { await Task.Delay(300, cts.Token); DispatcherQueue.TryEnqueue(() => _ = RunTdpMutationAsync(BuildTdpConfiguration(true))); } catch (OperationCanceledException) { } });
+        _tdpEditDebounce?.Cancel();
+        var generation = Interlocked.Increment(ref _tdpEditGeneration);
+        var cts = _tdpEditDebounce = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(300, cts.Token);
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpEditGeneration), TdpEnabledToggleSwitch.IsOn)) return;
+                    var configuration = BuildTdpConfiguration(true);
+                    if (configuration is not null) _ = RunTdpMutationAsync(configuration);
+                });
+            }
+            catch (OperationCanceledException) { }
+        });
     }
+    private void CancelPendingTdpEdit() { Interlocked.Increment(ref _tdpEditGeneration); _tdpEditDebounce?.Cancel(); }
     private bool CompleteTdpDraft() => _acPl1Draft is not null && _acPl2Draft is not null && _dcPl1Draft is not null && _dcPl2Draft is not null;
-    private FrontendTdpConfiguration BuildTdpConfiguration(bool enabled) => new(enabled, new(_acPl1Draft ?? 0, _acPl2Draft ?? 0), new(_dcPl1Draft ?? 0, _dcPl2Draft ?? 0));
+    private FrontendTdpConfiguration? BuildTdpConfiguration(bool enabled)
+    {
+        return TdpDraftPolicy.TryBuildConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft, _tdpSnapshot.Configuration);
+    }
     private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration)
     {
         try { var result = await _frontend!.SetDeviceTdpAsync(configuration); RenderTdp(result.Snapshot); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
         catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = "TDP could not be updated because the Runtime connection was interrupted."; TdpInfoBar.Severity = InfoBarSeverity.Error; TdpInfoBar.IsOpen = true; await RefreshAsync(); }
+    }
+
+    internal static class TdpDraftPolicy
+    {
+        internal static bool CanSubmitDebouncedEdit(long generation, long currentGeneration, bool enabled) =>
+            generation == currentGeneration && enabled;
+
+        internal static FrontendTdpConfiguration? TryBuildConfiguration(bool enabled, int? acPl1, int? acPl2, int? dcPl1, int? dcPl2, FrontendTdpConfiguration? saved)
+        {
+            acPl1 ??= saved?.Ac.Pl1Watts; acPl2 ??= saved?.Ac.Pl2Watts;
+            dcPl1 ??= saved?.Dc.Pl1Watts; dcPl2 ??= saved?.Dc.Pl2Watts;
+            return acPl1 is null || acPl2 is null || dcPl1 is null || dcPl2 is null
+                ? null : new(enabled, new(acPl1.Value, acPl2.Value), new(dcPl1.Value, dcPl2.Value));
+        }
     }
 
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);

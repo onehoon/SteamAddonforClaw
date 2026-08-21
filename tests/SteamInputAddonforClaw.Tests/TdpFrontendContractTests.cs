@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SteamInputAddonforClaw.Contracts.Frontend;
+using SteamInputAddonforClaw.Views;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -43,5 +44,25 @@ public sealed class TdpFrontendContractTests
         Assert.False(result.Succeeded);
         Assert.Equal(FrontendTdpMutationOutcome.InvalidTarget, result.Outcome);
         Assert.Equal("outside model ranges", result.FailureMessage);
+    }
+
+    [Fact]
+    public void Retired_debounce_generation_cannot_submit_an_enabled_edit()
+    {
+        Assert.False(DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(4, 5, true));
+        Assert.False(DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(5, 5, false));
+        Assert.True(DevicePage.TdpDraftPolicy.CanSubmitDebouncedEdit(5, 5, true));
+    }
+
+    [Fact]
+    public void Disable_falls_back_to_saved_pairs_when_a_number_box_is_temporarily_blank()
+    {
+        var saved = new FrontendTdpConfiguration(true, new(20, 30), new(10, 20));
+        var result = DevicePage.TdpDraftPolicy.TryBuildConfiguration(false, null, 30, 10, 20, saved);
+
+        Assert.NotNull(result);
+        Assert.False(result!.Enabled);
+        Assert.Equal(new FrontendTdpPowerPair(20, 30), result.Ac);
+        Assert.Equal(new FrontendTdpPowerPair(10, 20), result.Dc);
     }
 }
