@@ -174,10 +174,21 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
             cpuBoostRuntime: _cpuBoostRuntime);
-        _frontendServer = new NamedPipeAddonFrontendServer(
-            FrontendPipeEndpoint.CreateForCurrentUser(),
-            _frontendControl);
-        await _frontendServer.StartAsync().ConfigureAwait(false);
+        var pipeName = FrontendPipeEndpoint.CreateForCurrentUser();
+        _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
+        try
+        {
+            AppLog.Debug("FrontendTransport", "Frontend named-pipe server starting.", ("PipeName", pipeName));
+            await _frontendServer.StartAsync().ConfigureAwait(false);
+            AppLog.Info("FrontendTransport", "Frontend named-pipe server ready.", ("PipeName", pipeName));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("FrontendTransport", "Frontend named-pipe server startup failed.", exception,
+                ("PipeName", pipeName), ("ExceptionType", exception.GetType().FullName ?? exception.GetType().Name),
+                ("HResult", $"0x{exception.HResult:X8}"));
+            throw;
+        }
         _frontendLauncher.MarkRuntimeReady();
         _startupComposition = null;
     }
