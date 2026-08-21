@@ -1,5 +1,7 @@
 using SteamInputAddonforClaw.Diagnostics;
 
+using System.Collections.Concurrent;
+
 namespace SteamInputAddonforClaw.Power;
 
 internal interface IPowerSuspendResumeNotificationSource : IDisposable
@@ -14,6 +16,7 @@ internal sealed class PowerTransitionWatcher : IDisposable
     private readonly PowerMutationGate _gate;
     private readonly PowerTransitionCoordinator _coordinator;
     private readonly Action _cancelLifecycle;
+    private readonly ConcurrentDictionary<Task, byte> _inFlight = new();
     private int _disposed;
     // 0 = awake/unknown, 1 = suspend observed, 2 = first resume observed.
     private int _phase;
@@ -25,7 +28,17 @@ internal sealed class PowerTransitionWatcher : IDisposable
         if (_source.TryRegister(out _)) return true;
         _source.Notification -= OnNotification; _gate.Close(); return false;
     }
-    private void OnNotification(uint rawCode) => _ = ObserveNotificationSafelyAsync(rawCode);
+    private void OnNotification(uint rawCode)
+    {
+        var task = ObserveNotificationSafelyAsync(rawCode);
+        _inFlight.TryAdd(task, 0);
+        _ = RemoveWhenCompleteAsync(task);
+    }
+    private async Task RemoveWhenCompleteAsync(Task task)
+    {
+        try { await task.ConfigureAwait(false); }
+        finally { _inFlight.TryRemove(task, out _); }
+    }
     private async Task ObserveNotificationSafelyAsync(uint rawCode)
     {
         try { await ObserveAsync(rawCode).ConfigureAwait(false); }
@@ -63,4 +76,13 @@ internal sealed class PowerTransitionWatcher : IDisposable
     }
     internal static PowerSignal Map(uint rawCode) => rawCode switch { 4 => PowerSignal.Suspend, 18 => PowerSignal.ResumeAutomatic, 7 => PowerSignal.ResumeSuspend, _ => PowerSignal.Unknown };
     public void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) != 0) return; _source.Notification -= OnNotification; _source.Dispose(); }
+    internal async Task DrainAsync()
+    {
+        while (!_inFlight.IsEmpty)
+        {
+            var tasks = _inFlight.Keys.ToArray();
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch { }
+        }
+    }
 }
