@@ -19,8 +19,8 @@ internal enum RoutingStageKind
     XboxOutput,
     GameBarRouting,
     /// <summary>Transient prevention of a new real MSI Center M MainUI becoming operational while
-    /// routing is active. See <see cref="RoutingPipelineStageOrder"/> for why it runs first on entry
-    /// and last on rollback.</summary>
+    /// routing is active. It runs first among MSI/native routing stages after WinGProtection and
+    /// rolls back last among those stages before WinGProtection is released.</summary>
     CenterMGuard
 }
 

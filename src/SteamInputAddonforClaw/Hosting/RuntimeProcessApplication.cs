@@ -118,8 +118,22 @@ internal sealed class RuntimeProcessApplication
         }
         finally
         {
-            try { _messageLoop?.RequestExit(); }
-            catch (Exception exception) { AppLog.Error("Runtime", "Native message loop exit could not be requested.", exception); }
+            if (!TryRequestMessageLoopExit(() => _messageLoop?.RequestExit()))
+                Volatile.Write(ref _shutdownRequested, 0);
+        }
+    }
+
+    internal static bool TryRequestMessageLoopExit(Action requestExit)
+    {
+        try
+        {
+            requestExit();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Runtime", "Native message loop exit could not be requested; a later Exit/Restart request may retry.", exception);
+            return false;
         }
     }
 
