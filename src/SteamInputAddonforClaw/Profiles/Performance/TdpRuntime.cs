@@ -8,11 +8,12 @@ namespace SteamInputAddonforClaw.Profiles.Performance;
 
 internal enum TdpPowerSource { AC, DC }
 
-internal sealed record TdpApplySnapshot(long AuthorityVersion, long ReconcileVersion, TdpPowerSource Source, int Pl1Watts, int Pl2Watts, string Reason);
+internal sealed record TdpApplyCompletion(TdpPowerSource Source, int Pl1Watts, int Pl2Watts, bool Attempted, bool Succeeded);
+internal sealed record TdpApplySnapshot(long AuthorityVersion, long ReconcileVersion, TdpPowerSource Source, int Pl1Watts, int Pl2Watts, string Reason, TaskCompletionSource<TdpApplyCompletion>? Completion = null);
 
 internal enum TdpCommitOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
 
-internal readonly record struct TdpCommitResult(TdpCommitOutcome Outcome, string? FailureMessage)
+internal readonly record struct TdpCommitResult(TdpCommitOutcome Outcome, string? FailureMessage, Task<TdpApplyCompletion>? Completion = null)
 {
     public bool Succeeded => Outcome == TdpCommitOutcome.Succeeded;
 }
@@ -210,8 +211,9 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     AppLog.Warn("Profiles.Tdp", "Current power source is unknown; committed TDP apply was not queued.", null, ("Reason", "ConfigurationCommit"), ("Action", "Deferred"), ("Cause", "UnknownPowerSource"));
                     return new(TdpCommitOutcome.Succeeded, null);
                 }
-                EnqueueSnapshotUnderLock(currentSource, settings, "ConfigurationCommit");
-                return new(TdpCommitOutcome.Succeeded, null);
+                var completion = new TaskCompletionSource<TdpApplyCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+                EnqueueSnapshotUnderLock(currentSource, settings, "ConfigurationCommit", completion);
+                return new(TdpCommitOutcome.Succeeded, null, completion.Task);
             }
         }
     }
@@ -237,14 +239,14 @@ internal sealed class TdpRuntime : IAsyncDisposable
         await DrainAsync().ConfigureAwait(false);
     }
 
-    private void EnqueueSnapshotUnderLock(TdpPowerSource currentSource, DeviceTdpSettings settings, string reason)
+    private void EnqueueSnapshotUnderLock(TdpPowerSource currentSource, DeviceTdpSettings settings, string reason, TaskCompletionSource<TdpApplyCompletion>? completion = null)
     {
         var pair = currentSource == TdpPowerSource.AC ? settings.Ac : settings.Dc;
         var reconcileVersion = ++_reconcileVersion;
         _lastAdmittedPowerSource = currentSource;
         _reconcileRequired = true;
         AppLog.Debug("Profiles.Tdp", "TDP apply queued", ("Reason", reason), ("Source", currentSource), ("PL1", pair.Pl1Watts), ("PL2", pair.Pl2Watts), ("AuthorityVersion", _authorityVersion), ("ReconcileVersion", reconcileVersion));
-        EnqueueSnapshotUnderLock(new TdpApplySnapshot(_authorityVersion, reconcileVersion, currentSource, pair.Pl1Watts, pair.Pl2Watts, reason));
+        EnqueueSnapshotUnderLock(new TdpApplySnapshot(_authorityVersion, reconcileVersion, currentSource, pair.Pl1Watts, pair.Pl2Watts, reason, completion));
     }
 
     private void MarkReconcileRequiredUnderLock()
@@ -287,6 +289,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
             if (!_accepting || snapshot.AuthorityVersion != _authorityVersion)
             {
                 AppLog.Debug("Profiles.Tdp", "Pending TDP apply skipped", ("Reason", "AuthorityRevoked"), ("Source", snapshot.Source), ("PL1", snapshot.Pl1Watts), ("PL2", snapshot.Pl2Watts));
+                snapshot.Completion?.TrySetResult(new(snapshot.Source, snapshot.Pl1Watts, snapshot.Pl2Watts, false, false));
                 return;
             }
 
@@ -300,7 +303,11 @@ internal sealed class TdpRuntime : IAsyncDisposable
 
         try
         {
-            if (_modelId is not { } modelId) return;
+            if (_modelId is not { } modelId)
+            {
+                snapshot.Completion?.TrySetResult(new(snapshot.Source, snapshot.Pl1Watts, snapshot.Pl2Watts, false, false));
+                return;
+            }
             if (invalidateHardwareCache)
                 _hardware.InvalidateCachedPowerLimits(cacheInvalidationReason ?? "Unknown");
             var result = _hardware.Apply(modelId, new() { Pl1Watts = snapshot.Pl1Watts, Pl2Watts = snapshot.Pl2Watts });
@@ -313,6 +320,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 ("Reason", snapshot.Reason), ("Source", snapshot.Source), ("PL1", snapshot.Pl1Watts), ("PL2", snapshot.Pl2Watts),
                 ("Succeeded", result.Succeeded), ("FailureStage", result.FailureStage),
                 ("RecoveryAttempted", result.RecoveryAttempted), ("RecoverySucceeded", result.RecoverySucceeded));
+            snapshot.Completion?.TrySetResult(new(snapshot.Source, snapshot.Pl1Watts, snapshot.Pl2Watts, true, result.Succeeded));
         }
         catch (Exception exception)
         {
@@ -323,6 +331,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
             }
             AppLog.Error("Profiles.Tdp", "Global TDP queue item failed; later items continue.", exception,
                 ("Source", snapshot.Source), ("PL1", snapshot.Pl1Watts), ("PL2", snapshot.Pl2Watts));
+            snapshot.Completion?.TrySetResult(new(snapshot.Source, snapshot.Pl1Watts, snapshot.Pl2Watts, true, false));
         }
         await Task.CompletedTask;
     }

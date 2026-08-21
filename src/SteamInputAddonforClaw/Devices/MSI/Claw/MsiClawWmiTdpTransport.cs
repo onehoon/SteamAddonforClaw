@@ -1,5 +1,6 @@
 using System.Management;
 using System.Runtime.InteropServices;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -14,12 +15,16 @@ internal sealed class MsiClawWmiTdpTransport : IMsiClawTdpTransport
     public bool TrySetData(int block, byte value)
     {
         var package = BuildPackage(block, value);
+        AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI method call started", ("Method", "Set_Data"), ("Block", block), ("PackageLength", package.Length));
         try
         {
             using var managementObject = new ManagementObject(Scope, Path, null);
             using var input = managementObject.GetMethodParameters("Set_Data");
             if (input?["Data"] is not ManagementBaseObject data)
+            {
+                AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI method failed", ("Method", "Set_Data"), ("Block", block), ("Stage", "InputDataMissing"));
                 return false;
+            }
 
             data["Bytes"] = package;
             input["Data"] = data;
@@ -30,6 +35,7 @@ internal sealed class MsiClawWmiTdpTransport : IMsiClawTdpTransport
             or COMException
             or UnauthorizedAccessException)
         {
+            LogFailure("Set_Data", "InvokeMethod", exception, block);
             return false;
         }
     }
@@ -59,16 +65,23 @@ internal sealed class MsiClawWmiTdpTransport : IMsiClawTdpTransport
             using var managementObject = new ManagementObject(Scope, Path, null);
             using var input = managementObject.GetMethodParameters(method);
             if (input?["Data"] is not ManagementBaseObject data)
+            {
+                AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI method failed", ("Method", method), ("Stage", "InputDataMissing"));
                 return false;
+            }
 
             data["Bytes"] = package;
             input["Data"] = data;
             using var output = managementObject.InvokeMethod(method, input, null);
             if (output?["Data"] is not ManagementBaseObject response
-                || response["Bytes"] is not byte[] bytes
-                || bytes.Length < 1
-                || bytes[0] != 1)
+                || response["Bytes"] is not byte[] bytes)
+            {
+                AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI method failed", ("Method", method), ("Stage", "OutputDataMissing"));
                 return false;
+            }
+            if (bytes.Length == 0) { AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI method failed", ("Method", method), ("Stage", "OutputBytesEmpty")); return false; }
+            AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI method response", ("Method", method), ("Index", package[0]), ("BytesLength", bytes.Length), ("Flag", $"0x{bytes[0]:X2}"), ("PayloadLength", bytes.Length - 1));
+            if (bytes[0] != 1) { AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI method failed", ("Method", method), ("Stage", "OutputFlagRejected"), ("Flag", $"0x{bytes[0]:X2}")); return false; }
 
             payload = bytes[1..];
             return true;
@@ -77,7 +90,15 @@ internal sealed class MsiClawWmiTdpTransport : IMsiClawTdpTransport
             or COMException
             or UnauthorizedAccessException)
         {
+            LogFailure(method, "InvokeMethod", exception, package[0]);
             return false;
         }
+    }
+
+    private static void LogFailure(string method, string stage, Exception exception, int index)
+    {
+        var values = new List<(string Name, object? Value)> { ("Method", method), ("Index", index), ("Stage", stage), ("ExceptionType", exception.GetType().Name), ("HResult", $"0x{exception.HResult:X8}"), ("Message", exception.Message) };
+        if (exception is ManagementException management) values.Add(("ManagementStatus", management.ErrorCode));
+        AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI method failed", values.ToArray());
     }
 }
