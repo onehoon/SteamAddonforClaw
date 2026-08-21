@@ -67,21 +67,23 @@ try
     {
         var sessionClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
         currentClient = sessionClient;
+        long documentGeneration = 0;
         // Cleanup ownership belongs to this CDP/GamepadUI session only.
         installationSucceeded = false;
         installMayExist = false;
         teardownAttempted = false;
             sessionClient.AddonQamConsoleMessage += message => log.Info(message);
-            async Task DeliverResponseAsync(string payload)
+            async Task DeliverResponseAsync(string payload, long admittedGeneration)
             {
                 var response = await frontendBridge.HandleRequestAsync(payload, lifetimeToken);
+                if (admittedGeneration != Volatile.Read(ref documentGeneration)) return;
                 try { await sessionClient.EvaluateAsync($"window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeResponse?.({JsonSerializer.Serialize(response, QamFrontendBridge.BridgeJson)})", lifetimeToken); }
                 catch (Exception exception) { log.Info($"QAM bridge response delivery skipped for retired CDP session. {exception.Message}"); }
             }
             void OnBindingCalled(string name, string payload)
             {
                 if (string.Equals(name, "__steamInputAddonQamHost", StringComparison.Ordinal))
-                    _ = Task.Run(() => DeliverResponseAsync(payload), lifetimeToken);
+                    _ = Task.Run(() => DeliverResponseAsync(payload, Volatile.Read(ref documentGeneration)), lifetimeToken);
             }
             async Task DeliverInvalidationAsync()
             {
@@ -92,7 +94,7 @@ try
             sessionClient.BindingCalled += OnBindingCalled;
             frontendBridge.StateInvalidated += OnStateInvalidated;
         var reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        void OnDocumentLoaded() => reload.TrySetResult();
+        void OnDocumentLoaded() { Interlocked.Increment(ref documentGeneration); reload.TrySetResult(); }
         currentClient.DocumentLoaded += OnDocumentLoaded;
         CdpTarget? target = null;
         try

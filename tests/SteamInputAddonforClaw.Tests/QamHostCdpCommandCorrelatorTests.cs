@@ -86,6 +86,15 @@ public class QamHostCdpCommandCorrelatorTests
     }
 
     [Fact]
+    public void Serializes_runtime_binding_registration_for_each_cdp_session()
+    {
+        var command = SteamGamepadUiCdpClient.SerializeCommandPayload(1, "Runtime.addBinding", new { name = "__steamInputAddonQamHost" });
+
+        Assert.Contains("Runtime.addBinding", command);
+        Assert.Contains("__steamInputAddonQamHost", command);
+    }
+
+    [Fact]
     public void RecoveryWindowStopsRetryingAfterItsSingleDeadline()
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(10);

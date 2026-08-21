@@ -50,6 +50,20 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_cdp_bridge_serializes_sends_and_drops_old_document_responses()
+    {
+        var cdp = ReadSource("src", "SteamInputAddonforClaw.QamHost", "SteamGamepadUiCdpClient.cs");
+        var program = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Program.cs");
+
+        Assert.Contains("private readonly SemaphoreSlim _sendGate", cdp);
+        Assert.Contains("await _sendGate.WaitAsync", cdp);
+        Assert.Contains("_sendGate.Release()", cdp);
+        Assert.Contains("long documentGeneration = 0", program);
+        Assert.Contains("admittedGeneration != Volatile.Read(ref documentGeneration)", program);
+        Assert.Contains("Interlocked.Increment(ref documentGeneration)", program);
+    }
+
+    [Fact]
     public void Nested_react_walker_traverses_props_children_child_and_sibling()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
