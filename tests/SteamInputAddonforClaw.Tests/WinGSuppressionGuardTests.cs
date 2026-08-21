@@ -19,6 +19,7 @@ public sealed class WinGSuppressionGuardTests
     [Fact] public void DisarmLeavesCurrentResidueConsumedThenPassesNewChord() { using var g = Create(); g.EnsureArmed(); g.ProcessKey(0x5B, true); Assert.NotEqual(IntPtr.Zero, g.ProcessKey(0x47, true)); g.Disarm(); Assert.NotEqual(IntPtr.Zero, g.ProcessKey(0x47, false)); Assert.NotEqual(IntPtr.Zero, g.ProcessKey(0x5B, false)); Assert.Equal(IntPtr.Zero, g.ProcessKey(0x5B, true)); Assert.Equal(IntPtr.Zero, g.ProcessKey(0x47, true)); }
     [Fact] public void StartAndDisposeAreIdempotent() { var installs = 0; var removes = 0; using var g = new WinGSuppressionGuard((_, _, _, _, _) => { installs++; return new(1); }, (_, _, _) => IntPtr.Zero, _ => removes++); g.Start(); g.Start(); g.Dispose(); g.Dispose(); Assert.Equal(1, installs); Assert.Equal(1, removes); }
     [Fact] public void FailedInstallationCannotArm() { using var g = new WinGSuppressionGuard((_, _, _, _, _) => IntPtr.Zero); g.Start(); Assert.False(g.EnsureArmed()); Assert.False(g.IsArmed); }
+    [Fact] public void EnsureArmedResynchronizesWinHeldBeforeHookObservation() { using var g = Create(getAsync: vk => vk == 0x5B ? unchecked((short)0x8000) : (short)0); Assert.True(g.EnsureArmed()); Assert.NotEqual(IntPtr.Zero, g.ProcessKey(0x47, true)); }
     [Fact] public void InputMatchesNativeWin32Layout() => Assert.Equal(IntPtr.Size == 8 ? 40 : 28, Marshal.SizeOf<WinGSuppressionGuard.Input>());
     [Fact] public void CleanupExceptionStillSuppressesG() { using var g = Create(send: _ => throw new InvalidOperationException()); g.EnsureArmed(); g.ProcessKey(0x5B, true); Assert.NotEqual(IntPtr.Zero, g.ProcessKey(0x47, true)); }
     [Fact] public void SuccessfulCleanupDoesNotPoisonLaterPlainG() { using var g = Create(); g.EnsureArmed(); g.ProcessKey(0x5B, true); g.ProcessKey(0x47, true); g.ProcessKey(0x47, false); g.ProcessKey(0x5B, false); Assert.Equal(IntPtr.Zero, g.ProcessKey(0x47, true)); }
@@ -28,9 +29,9 @@ public sealed class WinGSuppressionGuardTests
         using var g = Create(); g.EnsureArmed(); g.ProcessKey(win, true); Assert.NotEqual(IntPtr.Zero, g.ProcessKey(0x47, true));
     }
 
-    private static WinGSuppressionGuard Create(List<WinGSuppressionGuard.Input[]>? calls = null, Func<WinGSuppressionGuard.Input[], uint>? send = null)
+    private static WinGSuppressionGuard Create(List<WinGSuppressionGuard.Input[]>? calls = null, Func<WinGSuppressionGuard.Input[], uint>? send = null, Func<int, short>? getAsync = null)
     {
-        var guard = new WinGSuppressionGuard((_, _, _, _, _) => new(1), (_, _, _) => IntPtr.Zero, _ => { }, inputs => { calls?.Add(inputs); return send?.Invoke(inputs) ?? (uint)inputs.Length; });
+        var guard = new WinGSuppressionGuard((_, _, _, _, _) => new(1), (_, _, _) => IntPtr.Zero, _ => { }, inputs => { calls?.Add(inputs); return send?.Invoke(inputs) ?? (uint)inputs.Length; }, getAsync ?? (_ => 0));
         guard.Start();
         return guard;
     }

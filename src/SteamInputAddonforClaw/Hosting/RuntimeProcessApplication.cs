@@ -39,11 +39,21 @@ internal sealed class RuntimeProcessApplication
             _processHost.TryInitializeTray(RequestRestart, RequestExit);
             _messageLoop.Run(() =>
             {
-                if (!_processHost.StartRuntimeEventWatchers())
-                    throw new InvalidOperationException("Runtime Win+G suppression hook could not be installed before routing startup.");
-                _processHost.StartPowerObservation();
-                _ = _processHost.ReconcileAsync();
-                _processHost.ReconcileDeviceProfileStartup();
+                _processHost.StartRuntimeEventWatchers();
+                // Return to GetMessageW before unrelated startup/reconcile work can hold the hook thread.
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        _processHost.StartPowerObservation();
+                        await _processHost.ReconcileAsync().ConfigureAwait(false);
+                        _processHost.ReconcileDeviceProfileStartup();
+                    }
+                    catch (Exception exception)
+                    {
+                        AppLog.Error("Startup", "Deferred Runtime startup work failed.", exception);
+                    }
+                });
             });
         }
         catch (Exception exception)

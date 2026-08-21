@@ -198,12 +198,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
 
-    internal bool StartRuntimeEventWatchers()
+    internal void StartRuntimeEventWatchers()
     {
-        _winGSuppressionGuard.Start();
         _gameBarForegroundWatcher.StateChanged += OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Start();
-        return _winGSuppressionGuard.IsHookInstalled;
+        // Install last: the owning thread must return to NativeMessageLoop.GetMessageW promptly.
+        _winGSuppressionGuard.Start();
     }
 
     internal Task ReconcileAsync(CancellationToken cancellationToken = default) => GetRuntimeHost().ReconcileAsync(cancellationToken);

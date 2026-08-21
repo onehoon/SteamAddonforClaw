@@ -13,6 +13,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
     private readonly Func<IntPtr, int, IntPtr, IntPtr> _next;
     private readonly Action<IntPtr> _remove;
     private readonly Func<Input[], uint> _sendInput;
+    private readonly Func<int, short> _getAsyncKeyState;
     private LowLevelKeyboardProc? _callback;
     private IntPtr _hook;
     private int _started, _disposed, _armed;
@@ -23,12 +24,14 @@ internal sealed class WinGSuppressionGuard : IDisposable
         Func<IntPtr, int, LowLevelKeyboardProc, IntPtr, uint, IntPtr>? install = null,
         Func<IntPtr, int, IntPtr, IntPtr>? next = null,
         Action<IntPtr>? remove = null,
-        Func<Input[], uint>? sendInput = null)
+        Func<Input[], uint>? sendInput = null,
+        Func<int, short>? getAsyncKeyState = null)
     {
         _install = install ?? ((module, thread, callback, _, flags) => SetWindowsHookEx(WhKeyboardLl, callback, module, (uint)thread));
         _next = next ?? ((hook, code, data) => CallNextHookEx(hook, code, data));
         _remove = remove ?? (hook => _ = UnhookWindowsHookEx(hook));
         _sendInput = sendInput ?? (inputs => SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()));
+        _getAsyncKeyState = getAsyncKeyState ?? (vk => GetAsyncKeyState(vk));
     }
 
     internal bool IsArmed => Volatile.Read(ref _armed) != 0 && Volatile.Read(ref _hook) != IntPtr.Zero;
@@ -55,6 +58,10 @@ internal sealed class WinGSuppressionGuard : IDisposable
     internal bool EnsureArmed()
     {
         if (!IsHookInstalled || Volatile.Read(ref _disposed) != 0) return false;
+        var currentWins = 0;
+        if ((_getAsyncKeyState(VkLWin) & unchecked((short)0x8000)) != 0) currentWins |= 1;
+        if ((_getAsyncKeyState(VkRWin) & unchecked((short)0x8000)) != 0) currentWins |= 2;
+        Interlocked.Exchange(ref _winDown, currentWins);
         if (Interlocked.Exchange(ref _armed, 1) == 0) AppLog.Info("Wing.Guard", "Win+G suppression armed.");
         return true;
     }
@@ -80,7 +87,12 @@ internal sealed class WinGSuppressionGuard : IDisposable
     internal IntPtr ProcessKey(int vk, bool keyDown, uint flags = 0, long extraInfo = 0, uint scan = 0)
     {
         var own = extraInfo == OwnMarker;
-        if (own) return IntPtr.Zero;
+        if (own)
+        {
+            if (AppLog.IsEnabled(AppLogLevel.Debug) && (vk is VkLWin or VkRWin or 0xFF))
+                AppLog.Debug("Wing.Input", "Own synthetic cleanup event bypassed.", ("Vk", vk), ("Scan", scan), ("Flags", $"0x{flags:X}"), ("KeyDown", keyDown));
+            return IntPtr.Zero;
+        }
         var bit = vk == VkLWin ? 1 : vk == VkRWin ? 2 : 0;
         if (bit != 0)
         {
@@ -89,8 +101,13 @@ internal sealed class WinGSuppressionGuard : IDisposable
             {
                 var syntheticRelease = (Volatile.Read(ref _releasedByCleanup) & bit) != 0;
                 Interlocked.And(ref _winDown, ~bit);
-                if (syntheticRelease) Interlocked.And(ref _releasedByCleanup, ~bit);
-                if (syntheticRelease) return new(1);
+                if (syntheticRelease)
+                {
+                    Interlocked.And(ref _releasedByCleanup, ~bit);
+                    LogRelevant(vk, keyDown, flags, extraInfo, scan);
+                    AppLog.Debug("Wing.Input", "Physical Win-up consumed after synthetic release.", ("Vk", vk));
+                    return new(1);
+                }
             }
         }
 
@@ -171,5 +188,6 @@ internal sealed class WinGSuppressionGuard : IDisposable
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr data);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool UnhookWindowsHookEx(IntPtr hook);
     [DllImport("user32.dll")] private static extern uint MapVirtualKey(uint code, uint mapType);
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
 }
