@@ -241,7 +241,9 @@ public sealed class QamFrontendContractTests
         Assert.Contains("modes.map(([mode])", source);
         Assert.Contains("const mutationAvailable", source);
         Assert.Contains("const modeWritable = mutationAvailable && cpu.enabled", source);
-        Assert.Contains("disabled: !modeWritable || value == null", source);
+        Assert.Contains("disabled: !modeWritable", source);
+        Assert.Contains("minHeight: \"1.2em\"", source);
+        Assert.DoesNotContain("value: value == null ? 0 : value", source);
         Assert.Contains("const failClosed", source);
         Assert.Contains("setStatus(null); setCpu(null); setPreviewAc(null); setPreviewDc(null)", source);
         Assert.Contains("cpu.lastFailure", source);

@@ -481,8 +481,10 @@
       const slider = (title, side, value) => React.createElement("div", { style: { display: "block", marginTop: "14px" } },
         React.createElement("div", { style: { marginBottom: "5px" } }, title),
         React.createElement("div", { style: { marginBottom: "6px", minHeight: "2.4em" } }, labelFor(value)),
-        React.createElement("input", { type: "range", min: 0, max: 6, step: 1, value: value == null ? 0 : value, disabled: !modeWritable || value == null,
-          "aria-label": title, style: { width: "100%" }, onChange: event => scheduleMode(side, Number(event.target.value)) }),
+        value == null
+          ? React.createElement("div", { "aria-hidden": "true", style: { width: "100%", minHeight: "1.2em" } })
+          : React.createElement("input", { type: "range", min: 0, max: 6, step: 1, value, disabled: !modeWritable,
+            "aria-label": title, style: { width: "100%" }, onChange: event => scheduleMode(side, Number(event.target.value)) }),
         React.createElement("div", { "aria-hidden": "true", style: { display: "flex", justifyContent: "space-between", padding: "0 2px", lineHeight: 1 } },
           modes.map(([mode]) => React.createElement("span", { key: mode }, "•"))));
 
