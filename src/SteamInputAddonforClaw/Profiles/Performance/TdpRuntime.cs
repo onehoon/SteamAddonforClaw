@@ -130,6 +130,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 return new(TdpCommitOutcome.PersistenceFailed, "Profile state is not safe to replace.");
 
             var previous = loaded.Document.Device.Performance.Tdp;
+            var wasEnabled = previous?.Enabled == true;
             var updated = loaded.Document with
             {
                 Device = loaded.Document.Device with
@@ -153,6 +154,10 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     return new(TdpCommitOutcome.PersistenceFailed, exception.Message);
                 }
 
+                AppLog.Debug("Profiles.Tdp", "TDP configuration committed",
+                    ("Enabled", settings.Enabled), ("AcPL1", settings.Ac.Pl1Watts), ("AcPL2", settings.Ac.Pl2Watts),
+                    ("DcPL1", settings.Dc.Pl1Watts), ("DcPL2", settings.Dc.Pl2Watts));
+
                 if (!settings.Enabled)
                 {
                     _authorityVersion++;
@@ -160,9 +165,13 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     _reconcileRequired = false;
                     _invalidateHardwareCacheBeforeNextApply = true;
                     AppLog.Debug("Profiles.Tdp", "TDP authority revoked", ("Reason", "TdpDisabled"));
-                    AppLog.Info("Profiles.Tdp", "TDP control disabled", ("Action", "StopManaging"), ("Restore", false));
+                    if (wasEnabled)
+                        AppLog.Info("Profiles.Tdp", "TDP control disabled", ("Action", "StopManaging"), ("Restore", false));
                     return new(TdpCommitOutcome.Succeeded, null);
                 }
+
+                if (!wasEnabled)
+                    AppLog.Info("Profiles.Tdp", "TDP control enabled", ("AcPL1", settings.Ac.Pl1Watts), ("AcPL2", settings.Ac.Pl2Watts), ("DcPL1", settings.Dc.Pl1Watts), ("DcPL2", settings.Dc.Pl2Watts));
 
                 var source = _powerSource();
                 if (source is not { } currentSource)
@@ -171,7 +180,6 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     AppLog.Warn("Profiles.Tdp", "Current power source is unknown; committed TDP apply was not queued.", null, ("Reason", "ConfigurationCommit"), ("Action", "Deferred"), ("Cause", "UnknownPowerSource"));
                     return new(TdpCommitOutcome.Succeeded, null);
                 }
-                AppLog.Info("Profiles.Tdp", "TDP control enabled", ("AcPL1", settings.Ac.Pl1Watts), ("AcPL2", settings.Ac.Pl2Watts), ("DcPL1", settings.Dc.Pl1Watts), ("DcPL2", settings.Dc.Pl2Watts));
                 EnqueueSnapshotUnderLock(currentSource, settings, "ConfigurationCommit");
                 return new(TdpCommitOutcome.Succeeded, null);
             }

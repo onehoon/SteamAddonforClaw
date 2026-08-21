@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
 using System.Reflection;
@@ -8,10 +9,38 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("AppLog")]
 public sealed class TdpPowerLifecycleTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"TdpPowerLifecycleTests.{Guid.NewGuid():N}");
     private string ProfilePath => Path.Combine(_directory, "profiles.json");
+
+    public TdpPowerLifecycleTests()
+    {
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+    }
+
+    [Fact]
+    public async Task CoalescedLifecycleReasonsRemainVisibleInSettledTrace()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        var source = new FakeSource();
+        var delay = new FakeDelay();
+        await using var runtime = CreateRuntime(new FakeTransport { Ap = [0, 0, 0xC4] }, TdpPowerSource.AC);
+        using var watcher = CreateWatcher(runtime, source, delay);
+
+        watcher.ScheduleCenterMReconcile();
+        watcher.Observe(TdpPowerNotification.PowerSourceChanged);
+        delay.Release();
+        await watcher.DrainPendingAsync();
+        await runtime.DrainAsync();
+        AppLog.DrainForTests();
+
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Reason=CenterM+PowerSourceChanged", log);
+        Assert.Contains("Invalidate=True", log);
+    }
 
     [Fact]
     public async Task StartupIsSettledAndInitialPowerCallbackIsCoalesced()
@@ -249,7 +278,13 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         new ProfileStore(ProfilePath).Save(new ProfileDocument { Device = new DeviceSettings { Performance = new DevicePerformanceSettings { Tdp = tdp } } });
     }
     private static TdpPowerPair Pair(int pl1, int pl2) => new() { Pl1Watts = pl1, Pl2Watts = pl2 };
-    public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
+    public void Dispose()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = null;
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+    }
 
     private sealed class FakeSource : ITdpPowerNotificationSource
     {
