@@ -84,6 +84,18 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Physical_session_feedback_cleanup_contains_transport_failures()
+    {
+        var transport = new FakeTransport { ThrowOnCancel = true, ThrowOnInvalidate = true };
+        using var sink = new MsiClawRumbleSink(new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")), transport, new VerifiedEndpointResolver());
+
+        var exception = Record.Exception(() => sink.BeginPhysicalSessionRetirement());
+        Assert.Null(exception);
+        exception = Record.Exception(() => sink.InvalidatePhysicalSession());
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public void Transport_reuses_handle_changes_path_and_invalidates_after_write_failure()
     {
         var native = new FakeNativeHid();
@@ -683,6 +695,8 @@ public sealed class MsiClawRumbleTests
         public MsiClawRumbleTransportResult Result { get; set; } = new(true, "OK");
         public Exception? Exception { get; set; }
         public bool BlockWrites { get; set; }
+        public bool ThrowOnCancel { get; set; }
+        public bool ThrowOnInvalidate { get; set; }
         public int FailWrites { get; set; }
         public int WriteCount { get; private set; }
         public int? LastOutputReportLength { get; private set; }
@@ -691,7 +705,8 @@ public sealed class MsiClawRumbleTests
         public MsiClawRumbleTransportResult Write(string _, ReadOnlySpan<byte> packet, int outputReportLength)
         { WriteCount++; LastOutputReportLength = outputReportLength; if (Exception is not null) throw Exception; if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Wait(); } if (FailWrites > 0) { FailWrites--; return new(false, "WriteFailed"); } Packets.Add(packet.ToArray()); return Result; }
         public void Dispose() { }
-        public void InvalidatePhysicalSession() { }
+        public void InvalidatePhysicalSession() { if (ThrowOnInvalidate) throw new IOException("invalidate failed"); }
+        public void CancelPendingWrite() { if (ThrowOnCancel) throw new IOException("cancel failed"); }
     }
 
     private sealed class FakeNativeHid : IMsiClawNativeHidApi

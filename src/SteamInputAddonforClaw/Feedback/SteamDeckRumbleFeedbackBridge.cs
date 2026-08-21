@@ -297,7 +297,12 @@ internal sealed class SteamDeckRumbleFeedbackBridge
                 _latestGeneration = long.MaxValue;
                 _lifetime.Cancel();
             }
-            _sink.CancelPendingWrite();
+            try { _sink.CancelPendingWrite(); }
+            catch (Exception exception)
+            {
+                try { AppLog.Debug("Rumble", "Physical rumble cancellation failure was contained.", ("Reason", exception.GetType().Name)); }
+                catch { }
+            }
             _wake.Set();
         }
 

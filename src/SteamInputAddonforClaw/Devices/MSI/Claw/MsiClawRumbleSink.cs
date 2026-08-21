@@ -121,15 +121,28 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
 
     internal void InvalidatePhysicalSession()
     {
-        _transport.InvalidatePhysicalSession();
+        try { _transport.InvalidatePhysicalSession(); }
+        catch (Exception exception)
+        {
+            try { AppLog.Debug("Rumble", "MSI rumble invalidation failure was contained.", ("Reason", exception.GetType().Name)); }
+            catch { }
+        }
     }
 
-    public void CancelPendingWrite() => _transport.CancelPendingWrite();
+    public void CancelPendingWrite()
+    {
+        try { _transport.CancelPendingWrite(); }
+        catch (Exception exception)
+        {
+            try { AppLog.Debug("Rumble", "MSI rumble cancellation failure was contained.", ("Reason", exception.GetType().Name)); }
+            catch { }
+        }
+    }
 
     internal void BeginPhysicalSessionRetirement()
     {
         Volatile.Write(ref _admissionOpen, false);
-        _transport.CancelPendingWrite();
+        CancelPendingWrite();
     }
 
     internal void BeginPhysicalSession()
