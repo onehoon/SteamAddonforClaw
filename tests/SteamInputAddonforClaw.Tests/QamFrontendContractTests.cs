@@ -86,6 +86,20 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_enabled_mutation_is_retired_with_the_installed_panel_and_clears_mode_previews()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var enabledIndex = source.IndexOf("const setEnabled = async value =>", StringComparison.Ordinal);
+        Assert.True(enabledIndex >= 0);
+        var enabledPath = source[enabledIndex..];
+
+        Assert.Contains("cancelModeTimers();", enabledPath);
+        Assert.Contains("setPreviewAc(null); setPreviewDc(null);", enabledPath);
+        Assert.Contains("if (!state.installed) return;", enabledPath);
+        Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", enabledPath);
+    }
+
+    [Fact]
     public void Nested_react_walker_traverses_props_children_child_and_sibling()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");

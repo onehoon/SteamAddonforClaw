@@ -468,6 +468,8 @@
       };
       const setEnabled = async value => {
         cancelModeTimers();
+        setPreviewAc(null); setPreviewDc(null);
+        if (!state.installed) return;
         if (!mutationAvailable) return;
         setBusy(true); setError(null);
         try {
