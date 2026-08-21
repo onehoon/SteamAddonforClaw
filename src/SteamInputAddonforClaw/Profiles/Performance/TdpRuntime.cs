@@ -61,8 +61,17 @@ internal sealed class TdpRuntime : IAsyncDisposable
         lock (_mutationGate.Sync)
         {
             var loaded = _profileStore.Load();
-            return new(true, loaded.CanSafelyReplace,
-                loaded.CanSafelyReplace ? loaded.Document.Device.Performance.Tdp : null, policy);
+            if (!loaded.CanSafelyReplace)
+                return new(true, false, null, policy);
+
+            var configuration = loaded.Document.Device.Performance.Tdp;
+            if (configuration is not null && (!policy.IsValid(configuration.Ac) || !policy.IsValid(configuration.Dc)))
+            {
+                AppLog.Warn("Profiles.Tdp", "Persisted TDP configuration is outside the current model ranges; frontend mutation is disabled.");
+                return new(true, false, null, policy);
+            }
+
+            return new(true, true, configuration, policy);
         }
     }
 

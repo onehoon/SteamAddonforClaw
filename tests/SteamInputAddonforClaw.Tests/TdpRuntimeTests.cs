@@ -27,6 +27,21 @@ public sealed class TdpRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task CaptureSnapshot_fails_closed_for_out_of_range_persisted_values()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(31, 30), Dc = Pair(10, 20) });
+        var transport = new FakeTransport();
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC);
+
+        var snapshot = runtime.CaptureSnapshot();
+
+        Assert.True(snapshot.Available);
+        Assert.False(snapshot.PersistenceWritable);
+        Assert.Null(snapshot.Configuration);
+        Assert.Empty(transport.Operations);
+    }
+
+    [Fact]
     public async Task EnabledAcStartupQueuesThePersistedAcPair()
     {
         Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
