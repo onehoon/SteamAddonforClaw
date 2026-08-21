@@ -36,7 +36,7 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public void Sink_returns_unavailable_without_authoritative_identity_and_repeats_stop()
+    public void Sink_returns_unavailable_without_authoritative_identity_and_deduplicates_stop()
     {
         var identity = new FakeIdentity(null);
         var transport = new FakeTransport();
@@ -45,8 +45,7 @@ public sealed class MsiClawRumbleTests
         identity.Current = new(Guid.NewGuid(), "path-a", "PNP", "USB\\VID_0DB0&PID_1902");
         Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
         Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
-        Assert.Equal(2, transport.Packets.Count);
-        Assert.Equal(transport.Packets[0], transport.Packets[1]);
+        Assert.Single(transport.Packets);
     }
 
     [Fact]
@@ -503,6 +502,36 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Sink_deduplicates_only_confirmed_writes_within_a_physical_generation()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var transport = new FakeTransport();
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
+
+        Assert.Equal("OK", sink.SetRumble(new(0x1234, 0x5678)).Reason);
+        Assert.Equal("Unchanged", sink.SetRumble(new(0x1234, 0x5678)).Reason);
+        Assert.Single(transport.Packets);
+
+        sink.BeginPhysicalSessionRetirement();
+        identity.Generation = 2;
+        sink.BeginPhysicalSession();
+        Assert.Equal("OK", sink.SetRumble(new(0x1234, 0x5678)).Reason);
+        Assert.Equal(2, transport.Packets.Count);
+    }
+
+    [Fact]
+    public void Sink_retries_identical_value_after_a_failed_write()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var transport = new FakeTransport { FailWrites = 1 };
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, sink.SetRumble(new(1, 2)).Status);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(new(1, 2)).Status);
+        Assert.Equal(2, transport.WriteCount);
+    }
+
+    [Fact]
     public void Sink_does_not_cache_failed_endpoint_resolution()
     {
         var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
@@ -596,11 +625,13 @@ public sealed class MsiClawRumbleTests
         public MsiClawRumbleTransportResult Result { get; set; } = new(true, "OK");
         public Exception? Exception { get; set; }
         public bool BlockWrites { get; set; }
+        public int FailWrites { get; set; }
+        public int WriteCount { get; private set; }
         public int? LastOutputReportLength { get; private set; }
         public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim ReleaseWrite { get; } = new(false);
         public MsiClawRumbleTransportResult Write(string _, ReadOnlySpan<byte> packet, int outputReportLength)
-        { LastOutputReportLength = outputReportLength; if (Exception is not null) throw Exception; if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Wait(); } Packets.Add(packet.ToArray()); return Result; }
+        { WriteCount++; LastOutputReportLength = outputReportLength; if (Exception is not null) throw Exception; if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Wait(); } if (FailWrites > 0) { FailWrites--; return new(false, "WriteFailed"); } Packets.Add(packet.ToArray()); return Result; }
         public void Dispose() { }
         public void InvalidatePhysicalSession() { }
     }

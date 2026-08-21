@@ -14,6 +14,8 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
     private bool _failureWarningEmitted;
     private long? _endpointGeneration;
     private MsiClawRumbleEndpointResolution _cachedEndpoint;
+    private long? _lastWrittenGeneration;
+    private TwoMotorRumble? _lastWrittenRumble;
 
     internal MsiClawRumbleSink(IMsiClawPhysicalInputIdentityProvider identityProvider, IMsiClawRumbleTransport transport, IMsiClawRumbleEndpointResolver? endpointResolver = null)
     {
@@ -74,6 +76,9 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
             if (_identityProvider.CurrentSessionGeneration != generation || !SameIdentity(identity, current))
                 return new(PhysicalRumbleWriteStatus.Unavailable, "StalePhysicalSession");
 
+            if (_lastWrittenGeneration == generation && _lastWrittenRumble is { } previous && previous.Equals(rumble))
+                return new(PhysicalRumbleWriteStatus.Succeeded, "Unchanged");
+
             var large8 = MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.LargeMotor);
             var small8 = MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.SmallMotor);
             try
@@ -81,6 +86,8 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
                 var result = _transport.Write(endpoint.DevicePath!, MsiClawRumblePacketBuilder.Build(rumble), endpoint.OutputReportLength);
                 if (result.Succeeded)
             {
+                _lastWrittenGeneration = generation;
+                _lastWrittenRumble = rumble;
                 AppLog.Debug("Rumble", "Rumble TX", ("Device", "MSIClaw"), ("PID", 1902), ("Large16", rumble.LargeMotor), ("Small16", rumble.SmallMotor), ("Large8", large8), ("Small8", small8), ("Result", "OK"), ("WriteMs", result.WriteMs));
                 return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
             }
@@ -104,7 +111,11 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
 
     internal void InvalidatePhysicalSession()
     {
-        lock (_sync) _transport.InvalidatePhysicalSession();
+        lock (_sync)
+        {
+            ResetLastWritten();
+            _transport.InvalidatePhysicalSession();
+        }
     }
 
     public void CancelPendingWrite() => _transport.CancelPendingWrite();
@@ -112,6 +123,7 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
     internal void BeginPhysicalSessionRetirement()
     {
         Volatile.Write(ref _admissionOpen, false);
+        ResetLastWritten();
         _failureWarningEmitted = false;
         _endpointGeneration = null;
         _cachedEndpoint = default;
@@ -123,10 +135,17 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
         lock (_sync)
         {
             _admissionOpen = true;
+            ResetLastWritten();
             _failureWarningEmitted = false;
             _endpointGeneration = null;
             _cachedEndpoint = default;
         }
+    }
+
+    private void ResetLastWritten()
+    {
+        _lastWrittenGeneration = null;
+        _lastWrittenRumble = null;
     }
 
     private void LogFailureOnce(string reason, byte large8, byte small8, int win32Error, Exception? exception = null)
