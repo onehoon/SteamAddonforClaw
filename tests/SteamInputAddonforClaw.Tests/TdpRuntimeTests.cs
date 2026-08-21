@@ -278,6 +278,26 @@ public sealed class TdpRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task RevokedQueuedUserCompletionResolvesAsNotAttempted()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4], BlockFirstApply = true };
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC);
+
+        _ = runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(21, 31), Dc = Pair(10, 20) });
+        await transport.FirstApplyStarted.Task;
+        var queued = runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(22, 32), Dc = Pair(10, 20) });
+        Assert.NotNull(queued.Completion);
+
+        Assert.True(runtime.CommitGlobalTdp(new() { Enabled = false, Ac = Pair(22, 32), Dc = Pair(10, 20) }).Succeeded);
+        transport.ReleaseFirstApply.Set();
+
+        var completion = await queued.Completion!;
+        Assert.False(completion.Attempted);
+        Assert.False(completion.Succeeded);
+    }
+
+    [Fact]
     public async Task FailedDisableLeavesCommittedPendingWorkValid()
     {
         var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4], BlockFirstApply = true };

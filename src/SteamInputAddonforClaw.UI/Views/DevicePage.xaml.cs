@@ -341,7 +341,7 @@ public sealed partial class DevicePage : UserControl
         TdpDraftPolicy.TryBuildToggleConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft, _tdpSnapshot.Configuration);
     private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration, long submittedGeneration, bool editedAc)
     {
-        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!newerEditExists && result.HardwareApply is { Attempted: true } hardware && (hardware.Source == FrontendTdpPowerSource.AC) == editedAc) SetTdpResult(editedAc, hardware.Succeeded ? "Success" : "Fail"); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
+        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!newerEditExists && result.HardwareApply is { Attempted: true } hardware && TdpDraftPolicy.ShouldShowHardwareResult(editedAc, hardware)) SetTdpResult(editedAc, hardware.Succeeded ? "Success" : "Fail"); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
         catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = "TDP could not be updated because the Runtime connection was interrupted."; TdpInfoBar.Severity = InfoBarSeverity.Error; TdpInfoBar.IsOpen = true; await RefreshAsync(); }
     }
     private void SetTdpResult(bool ac, string? result)
@@ -385,6 +385,9 @@ public sealed partial class DevicePage : UserControl
 
         internal static bool ShouldPreserveDirtyDraft(bool dirty, long submittedGeneration, long currentGeneration) =>
             dirty && submittedGeneration != currentGeneration;
+
+        internal static bool ShouldShowHardwareResult(bool editedAc, FrontendTdpHardwareApplyResult hardware) =>
+            (hardware.Source == FrontendTdpPowerSource.AC) == editedAc;
 
         internal static FrontendTdpConfiguration? TryBuildCompleteConfiguration(bool enabled, int? acPl1, int? acPl2, int? dcPl1, int? dcPl2)
         {

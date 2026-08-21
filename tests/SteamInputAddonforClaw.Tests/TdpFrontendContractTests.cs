@@ -119,4 +119,13 @@ public sealed class TdpFrontendContractTests
         Assert.Equal(8, loaded.Ac.Pl2Watts);
         Assert.Equal(new(18, 20), DevicePage.TdpDraftPolicy.AdjustAfterEdit(false, 30, 20, new(8, 35, 8, 45)));
     }
+
+    [Fact]
+    public void Inactive_rail_edit_does_not_show_active_rail_hardware_result()
+    {
+        var hardware = new FrontendTdpHardwareApplyResult(FrontendTdpPowerSource.AC, 22, 24, true, true);
+
+        Assert.False(DevicePage.TdpDraftPolicy.ShouldShowHardwareResult(editedAc: false, hardware));
+        Assert.True(DevicePage.TdpDraftPolicy.ShouldShowHardwareResult(editedAc: true, hardware));
+    }
 }
