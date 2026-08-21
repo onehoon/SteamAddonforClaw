@@ -3,11 +3,11 @@ using SteamInputAddonforClaw.Diagnostics;
 namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 /// <summary>
-/// Output-only synthetic Steam Deck <c>QuickAccess</c> system-button primitive. Holds a short pulse
+/// Output-only synthetic Steam Deck <c>Steam</c>/<c>QuickAccess</c> system-button primitive. Holds short pulses
 /// intent that <see cref="Apply"/> merges into an otherwise mapper-produced <see cref="SteamDeckDeviceState"/>
 /// on the existing continuous Steam Deck publish path -- this is not a second state-publication path
-/// and never calls VIIPER directly. See docs/VIIPER_MIGRATION_TODO.md SD5 for the (not yet wired)
-/// OEM1/Quick Access routing this primitive will eventually serve.
+/// and never calls VIIPER directly. Steam pulse timing is software-only and remains unvalidated on
+/// physical hardware.
 /// </summary>
 internal sealed class SteamDeckSystemButtonOverlay
 {
@@ -15,8 +15,10 @@ internal sealed class SteamDeckSystemButtonOverlay
 
     private readonly TimeProvider _time;
     private readonly object _gate = new();
-    private DateTimeOffset? _pulseExpiresAt;
-    private bool _publishedActive;
+    private DateTimeOffset? _steamPulseExpiresAt;
+    private DateTimeOffset? _quickAccessPulseExpiresAt;
+    private bool _publishedSteamActive;
+    private bool _publishedQuickAccessActive;
 
     internal SteamDeckSystemButtonOverlay(TimeProvider? timeProvider = null) => _time = timeProvider ?? TimeProvider.System;
 
@@ -27,14 +29,20 @@ internal sealed class SteamDeckSystemButtonOverlay
     /// </summary>
     internal void RequestQuickAccessPulse()
     {
-        lock (_gate) _pulseExpiresAt = _time.GetUtcNow() + PulseDuration;
+        lock (_gate) _quickAccessPulseExpiresAt = _time.GetUtcNow() + PulseDuration;
         AppLog.Debug("SteamDeck.QuickAccess", "QuickAccess pulse requested");
+    }
+
+    internal void RequestSteamPulse()
+    {
+        lock (_gate) _steamPulseExpiresAt = _time.GetUtcNow() + PulseDuration;
+        AppLog.Debug("SteamDeck.SystemButton", "Steam pulse requested");
     }
 
     /// <summary>Immediately clears any pending/active synthetic Quick Access pulse.</summary>
     internal void Clear()
     {
-        lock (_gate) _pulseExpiresAt = null;
+        lock (_gate) { _steamPulseExpiresAt = null; _quickAccessPulseExpiresAt = null; }
     }
 
     /// <summary>
@@ -45,20 +53,25 @@ internal sealed class SteamDeckSystemButtonOverlay
     /// </summary>
     internal SteamDeckDeviceState Apply(SteamDeckDeviceState state)
     {
-        bool active;
-        bool edge;
+        bool steamActive, quickAccessActive, steamEdge, quickAccessEdge;
         lock (_gate)
         {
-            active = _pulseExpiresAt is { } expiresAt && _time.GetUtcNow() < expiresAt;
-            if (!active) _pulseExpiresAt = null;
-            edge = active != _publishedActive;
-            _publishedActive = active;
+            var now = _time.GetUtcNow();
+            steamActive = _steamPulseExpiresAt is { } steam && now < steam;
+            quickAccessActive = _quickAccessPulseExpiresAt is { } quick && now < quick;
+            if (!steamActive) _steamPulseExpiresAt = null;
+            if (!quickAccessActive) _quickAccessPulseExpiresAt = null;
+            steamEdge = steamActive != _publishedSteamActive;
+            quickAccessEdge = quickAccessActive != _publishedQuickAccessActive;
+            _publishedSteamActive = steamActive;
+            _publishedQuickAccessActive = quickAccessActive;
         }
 
-        if (edge)
-            AppLog.Debug("SteamDeck.QuickAccess", active ? "QuickAccess asserted into published state" : "QuickAccess cleared/expired");
+        if (steamEdge) AppLog.Debug("SteamDeck.SystemButton", steamActive ? "Steam asserted" : "Steam cleared");
+        if (quickAccessEdge) AppLog.Debug("SteamDeck.SystemButton", quickAccessActive ? "QuickAccess asserted" : "QuickAccess cleared");
 
-        state.QuickAccess = active ? (byte)1 : (byte)0;
+        state.Steam = steamActive ? (byte)1 : (byte)0;
+        state.QuickAccess = quickAccessActive ? (byte)1 : (byte)0;
         return state;
     }
 }

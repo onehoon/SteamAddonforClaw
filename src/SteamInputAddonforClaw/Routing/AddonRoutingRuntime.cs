@@ -129,7 +129,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             new HidHideDriverClient(), handheldRoutingComposition.ControllerStateSource,
             feedbackAuthority: feedbackAuthority, physicalRumbleSink: handheldRoutingComposition.PhysicalRumbleSink);
         IRoutingPipelineStage steamOutputStage = deckStage;
-        var stages = new List<IRoutingPipelineStage>(handheldRoutingComposition.Stages) { steamOutputStage, new WinGProtectionRoutingStage(winGSuppressionGuard) };
+        var winGProtectionStage = new WinGProtectionRoutingStage(winGSuppressionGuard);
+        var stages = new List<IRoutingPipelineStage>(handheldRoutingComposition.Stages) { steamOutputStage, winGProtectionStage };
         var pipelineExecutor = new RoutingPipelineExecutor(stages);
         var pipelineSessionCoordinator = new RoutingPipelineSessionCoordinator(pipelineExecutor);
         AddonRoutingRuntime? runtime = null;
@@ -173,6 +174,14 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             // routing layer's own state: this runtime never reads it, and the mapping never becomes a
             // routing input.
             mappingPreference: oem1MappingPreference);
+        _ = handheldRoutingComposition.ConfigureWingActionPath(
+            captureAuthority: winGProtectionStage.CaptureAuthority,
+            tryRequestSteamPulse: () =>
+            {
+                if (!runtime.CaptureStatus().SteamOutputActive) return false;
+                deckStage.RequestSteamPulse();
+                return true;
+            });
 
         return runtime;
     }

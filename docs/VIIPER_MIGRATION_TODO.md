@@ -247,6 +247,14 @@ Button detail page. **Still does not mark SD5 complete: no real-hardware
 validation has been performed** -- all coverage remains deterministic
 automated tests with fake WMI/process/launch/key-injection seams.
 
+PR3 WING Event88 runtime path: the MSI Event88 semantic source is now
+software-wired to the canonical WinGProtection authority epoch. The default
+Single action is SteamButton and Double is None; SteamButton uses the existing
+canonical Steam Deck publisher and cleanly no-ops while Steam output is still
+being acquired. Game Bar foreground/X360 production switching remains
+disabled. Real MSI Claw WING and Steam-button hardware validation is pending;
+SD3/SD7 are not complete.
+
 ### SD6 — gyro and accelerometer
 
 Status: **SEPARATE FEATURE TRACK**

@@ -5,9 +5,14 @@ namespace SteamInputAddonforClaw.GameBar;
 
 internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
 {
+    internal readonly record struct AuthoritySnapshot(bool Active, long Epoch);
     private readonly WinGSuppressionGuard? _guard;
     private readonly Func<bool> _arm;
     private readonly Action _disarm;
+    private long _epoch;
+    private int _active;
+
+    internal AuthoritySnapshot CaptureAuthority() => new(Volatile.Read(ref _active) != 0, Volatile.Read(ref _epoch));
 
     internal WinGProtectionRoutingStage(WinGSuppressionGuard guard)
     {
@@ -30,6 +35,7 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
         cancellationToken.ThrowIfCancellationRequested();
         AppLog.Debug("Routing.Wing", "WinGProtectionArmStarted.");
         var armed = _arm();
+        if (armed) { Volatile.Write(ref _active, 1); Interlocked.Increment(ref _epoch); }
         AppLog.Debug("Routing.Wing", armed ? "WinGProtectionArmed." : "WinGProtectionArmFailed.");
         return ValueTask.FromResult(armed
             ? RoutingStageOperationResult.Success("WinGProtectionArmed")
@@ -42,6 +48,8 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
         AppLog.Debug("Routing.Wing", "WinGProtectionDisarmRequested.");
         try
         {
+            Volatile.Write(ref _active, 0);
+            Interlocked.Increment(ref _epoch);
             _disarm();
             AppLog.Debug("Routing.Wing", "WinGProtectionDisarmed.");
         }
