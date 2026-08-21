@@ -224,7 +224,16 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
                 // recovery safety, power gate) never retires the user's real MainUI first.
                 new MsiClawCenterMRoutingPreflightProbe(NativeModeSession),
                 processSnapshotSource: centerMProcesses),
-            persistentHelperOwnerReady: () => oem1Coordinator?.GetSnapshot().SuppressionReady == true);
+            persistentHelperOwnerReady: () =>
+            {
+                var snapshot = oem1Coordinator?.GetSnapshot();
+                return snapshot is
+                {
+                    DesiredEnabled: true,
+                    State: CenterMOem1LifecycleState.Armed,
+                    HelperProcessId: not null
+                };
+            });
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
         // PR2: production-compose the already-implemented CenterMOem1LifecycleCoordinator into
@@ -614,6 +623,9 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     {
         try
         {
+            if (CenterMGuard.HasHelperDemand && _runtimeFaultHandler is { } failCloseRouting)
+                await failCloseRouting("Oem1ReplacementActionFailed").ConfigureAwait(false);
+
             await CenterMOem1Coordinator.SetDesiredEnabledAsync(false).ConfigureAwait(false);
         }
         catch (Exception exception)
