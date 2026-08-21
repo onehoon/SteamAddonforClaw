@@ -68,6 +68,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private readonly CenterMBackendProbe _backendProbe;
     private readonly IProcessSnapshotSource _processSnapshotSource;
     private readonly CenterMHelperOwnership _helperOwnership;
+    private readonly Func<bool>? _externalHelperDemand;
     private readonly MainUiLifecycleObserver _mainUiObserver;
     private readonly SafeMainUiTerminator _terminator;
     private readonly IProcessHandleOpener? _handleOpener;
@@ -230,6 +231,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         Func<string, string?>? stager = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         Func<bool>? environmentEligibility = null,
+        Func<bool>? externalHelperDemand = null,
         TimeSpan? hiddenDebounce = null,
         TimeSpan? helperStopTimeout = null,
         TimeSpan? mainUiTerminateTimeout = null,
@@ -245,6 +247,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         // exercise the true default/internal ownership construction path (as opposed to the
         // caller-injected `helperOwnership` parameter) without making any real Win32 calls.
         _helperOwnership = helperOwnership ?? new CenterMHelperOwnership(testOnlyDefaultHelperNativeApi);
+        _externalHelperDemand = externalHelperDemand;
         _mainUiObserver = mainUiObserver ?? new MainUiLifecycleObserver();
         _terminator = terminator ?? new SafeMainUiTerminator();
         _handleOpener = handleOpener;
@@ -690,7 +693,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         _trackedMainUi = null;
         _mainUiObserver.Reset();
 
-        if (_helperOwnership.IsOwned)
+        if (_helperOwnership.IsOwned && !HasExternalHelperDemand())
         {
             var stopped = _helperOwnership.Stop(_helperStopTimeout);
             if (!stopped)
@@ -729,7 +732,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             // just the direct SetDesiredEnabledAsync(false) -> DisableCore path) must preserve the
             // same "never falsely report clean" semantics -- it must not blindly commit Disabled
             // while the exact owned helper's cleanup remains unconfirmed.
-            if (_helperOwnership.IsOwned)
+            if (_helperOwnership.IsOwned && !HasExternalHelperDemand())
             {
                 var stopped = _helperOwnership.Stop(_helperStopTimeout);
                 if (!stopped)
@@ -941,6 +944,16 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         var stopped = _helperOwnership.Stop(_helperStopTimeout);
         if (stopped) BumpGeneration();
         return stopped;
+    }
+
+    private bool HasExternalHelperDemand()
+    {
+        try { return _externalHelperDemand?.Invoke() == true; }
+        catch (Exception exception)
+        {
+            AppLog.Warn("CenterM.Oem1", "External helper demand could not be confirmed; OEM1 retains fail-open cleanup authority.", exception);
+            return false;
+        }
     }
 
     /// <summary>Attempts to stop any owned helper and reports whether cleanup was actually

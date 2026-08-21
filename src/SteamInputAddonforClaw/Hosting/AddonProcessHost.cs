@@ -143,21 +143,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             bigPictureStateChanged: _qamHostController.OnBigPictureStateChanged,
             routingReconcileCompleted: null);
 
-        // Review fix (BLOCKER): the OEM1 coordinator and the routing guard share the SAME underlying
-        // helper ownership, but only their exact-handle Start() call itself serializes between them.
-        // This must be awaited BEFORE StartPowerObservation()/the initial ReconcileAsync() (called by
-        // RuntimeProcessApplication only after this method returns) can let routing enter and possibly
-        // start the shared helper first -- otherwise both owners could race toward Start(), or routing
-        // could win first while OEM1 later observes and re-arms around an operational helper the guard
-        // still believes it exclusively owns.
-        try
-        {
-            await composition.Oem1ActivationTask.ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("OEM1 startup activation did not complete cleanly.", exception);
-        }
+        // Frontend transport and tray readiness are independent of OEM1 activation. Routing still
+        // awaits this task at its helper-acquisition boundary, so removing this process-wide await
+        // does not reintroduce a shared-helper Start race.
+        AppLog.Info("CenterM.Oem1", "OEM1 activation pending; Frontend transport will initialize independently.");
 
         _runtimeHost = composition.RuntimeHost;
         if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM

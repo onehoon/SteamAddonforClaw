@@ -24,6 +24,7 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
 
         internal string? StagedPath = @"C:\fake\Runtime\MSI Center M.exe";
         internal Func<bool> EnvironmentEligible = () => true;
+        internal bool ExternalHelperDemand { get; set; }
         internal readonly CenterMHelperOwnership HelperOwnership;
         /// <summary>Review 4957630432 finding #2: fires whenever the stager is invoked, letting a
         /// test simulate a suspend/disable/shutdown request's lifecycle-epoch bump becoming
@@ -62,8 +63,34 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
                 stager: _ => { OnStagerCalled?.Invoke(); return StagedPath; },
                 delay: Delay.DelayAsync,
                 environmentEligibility: () => EnvironmentEligible(),
+                externalHelperDemand: () => ExternalHelperDemand,
                 hiddenDebounce: debounce ?? TimeSpan.FromMilliseconds(1));
         }
+    }
+
+    [Fact]
+    public async Task Disabling_OEM1_preserves_helper_when_Routing_still_demands_it()
+    {
+        var harness = NewHarness();
+        var coordinator = harness.Build();
+
+        await coordinator.SetDesiredEnabledAsync(true);
+        var helperPid = harness.HelperOwnership.ProcessId;
+        Assert.True(coordinator.GetSnapshot().SuppressionReady);
+
+        harness.ExternalHelperDemand = true;
+        await coordinator.SetDesiredEnabledAsync(false);
+
+        var disabled = coordinator.GetSnapshot();
+        Assert.False(disabled.SuppressionReady);
+        Assert.Equal(helperPid, disabled.HelperProcessId);
+        Assert.True(harness.HelperOwnership.IsOwned);
+
+        harness.ExternalHelperDemand = false;
+        await coordinator.ReconcileAsync("RoutingExit");
+        Assert.False(harness.HelperOwnership.IsOwned);
+
+        await coordinator.DisposeAsync();
     }
 
     private sealed class FakeSnapshotSource : IProcessSnapshotSource

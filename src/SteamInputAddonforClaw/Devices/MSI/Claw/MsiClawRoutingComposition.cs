@@ -240,7 +240,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             publishRootProvider: () => AppContext.BaseDirectory,
             processSnapshotSource: centerMProcesses,
             helperOwnership: CenterMHelperOwnership,
-            environmentEligibility: () => true);
+            environmentEligibility: () => true,
+            externalHelperDemand: () => CenterMGuard.IsArmed);
         // PR3: the two narrow callbacks below let the OEM1 action path (wired later, only by
         // ConfigureOem1ActionPath) refresh custom gesture-bridge authority from the coordinator's own
         // freshly reconciled SuppressionReady snapshot after every tick/resume -- see
@@ -439,12 +440,17 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     {
         try
         {
+            AppLog.Info("CenterM.Oem1", enabled ? "OEM1 activation started." : "OEM1 activation skipped; mapping is OFF.",
+                ("Enabled", enabled), ("RoutingGuardArmed", CenterMGuard.IsArmed));
             // Scope 8: WMI startup failure must remain feature-local -- never arm custom suppression,
             // leave native Center M available, continue the Addon runtime otherwise unaffected.
             if (enabled && !TryStartOem1Observation())
                 return;
 
             await CenterMOem1Coordinator.SetDesiredEnabledAsync(enabled).ConfigureAwait(false);
+            AppLog.Info("CenterM.Oem1", "OEM1 activation completed.",
+                ("Enabled", enabled), ("HelperProcessId", CenterMHelperOwnership.ProcessId),
+                ("RoutingGuardArmed", CenterMGuard.IsArmed));
         }
         catch (Exception exception)
         {
