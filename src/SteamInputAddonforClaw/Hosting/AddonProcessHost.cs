@@ -173,7 +173,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         try
         {
             AppLog.Debug("FrontendTransport", "Frontend named-pipe server starting.", ("PipeName", pipeName));
-            await _frontendServer.StartAsync().ConfigureAwait(false);
+            await StartFrontendTransportAsync(composition.Oem1ActivationTask, _frontendServer.StartAsync, _frontendLauncher.MarkRuntimeReady).ConfigureAwait(false);
             AppLog.Info("FrontendTransport", "Frontend named-pipe server ready.", ("PipeName", pipeName));
         }
         catch (Exception exception)
@@ -200,6 +200,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         _frontendLauncher.MarkRuntimeReady();
         _startupComposition = null;
+    }
+
+    /// <summary>Starts Frontend transport and publishes RuntimeReady without awaiting the owned
+    /// OEM1 activation task. Routing awaits that task at its own helper-acquisition boundary.</summary>
+    internal static async Task StartFrontendTransportAsync(Task oem1ActivationTask, Func<Task> startTransport, Action markRuntimeReady)
+    {
+        ArgumentNullException.ThrowIfNull(oem1ActivationTask);
+        ArgumentNullException.ThrowIfNull(startTransport);
+        ArgumentNullException.ThrowIfNull(markRuntimeReady);
+
+        await startTransport().ConfigureAwait(false);
+        markRuntimeReady();
     }
 
     internal void RequestFrontendOpen(FrontendOpenReason reason) => _frontendLauncher.RequestOpen(reason);
