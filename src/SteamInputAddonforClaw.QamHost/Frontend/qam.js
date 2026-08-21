@@ -373,22 +373,100 @@
     const icon = React.createElement(
       "svg",
       { viewBox: "0 0 24 24", width: 24, height: 24 },
-      React.createElement("circle", { cx: 12, cy: 12, r: 9, fill: "currentColor" })
+      React.createElement("path", { fill: "currentColor", d: "M7.3 8.1h9.4c1.7 0 3.1 1.1 3.6 2.7l1.1 3.6c.5 1.8-.8 3.6-2.6 3.6-.8 0-1.5-.3-2-.9l-1.7-1.8H8.9l-1.7 1.8c-.5.6-1.2.9-2 .9-1.8 0-3.1-1.8-2.6-3.6l1.1-3.6c.5-1.6 1.9-2.7 3.6-2.7Zm1.2 2.2v1.5H7v1.3h1.5v1.5h1.3v-1.5h1.5v-1.3H9.8v-1.5H8.5Zm7.1 1.2a.8.8 0 1 0 0 1.6.8.8 0 0 0 0-1.6Zm2.2 1.7a.8.8 0 1 0 0 1.6.8.8 0 0 0 0-1.6Z" })
     );
 
-    const panel = React.createElement(
-      "div",
-      { style: { padding: "16px" } },
-      React.createElement("h2", null, "Steam Input Addon"),
-      React.createElement("p", null, "QAM integration test")
-    );
+    const modes = [
+      [0, "Disabled"], [1, "Enabled"], [2, "Aggressive"],
+      [3, "Efficient Enabled"], [4, "Efficient Aggressive"],
+      [5, "Aggressive at Guaranteed"], [6, "Efficient Aggressive at Guaranteed"],
+    ];
+
+    function CpuBoostPanel() {
+      const [status, setStatus] = React.useState(null);
+      const [cpu, setCpu] = React.useState(null);
+      const [previewAc, setPreviewAc] = React.useState(null);
+      const [previewDc, setPreviewDc] = React.useState(null);
+      const [busy, setBusy] = React.useState(false);
+      const [error, setError] = React.useState(null);
+      const refreshInFlight = React.useRef(false);
+      const refreshDirty = React.useRef(false);
+      const settleTimers = React.useRef({ ac: null, dc: null });
+
+      const refresh = React.useCallback(async () => {
+        if (refreshInFlight.current) { refreshDirty.current = true; return; }
+        refreshInFlight.current = true;
+        try {
+          const nextStatus = await request("captureStatus");
+          const nextCpu = await request("captureCpuBoost");
+          setStatus(nextStatus); setCpu(nextCpu); setPreviewAc(null); setPreviewDc(null); setError(null);
+        } catch (_) { setError("QAM bridge unavailable"); }
+        finally {
+          refreshInFlight.current = false;
+          if (refreshDirty.current) { refreshDirty.current = false; void refresh(); }
+        }
+      }, []);
+
+      React.useEffect(() => { void refresh(); return () => {
+        for (const key of ["ac", "dc"]) if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
+      }; }, [refresh]);
+
+      React.useEffect(() => {
+        const previous = state.onStateInvalidated;
+        state.onStateInvalidated = () => { previous?.(); void refresh(); };
+        return () => { if (state.onStateInvalidated) state.onStateInvalidated = previous || null; };
+      }, [refresh]);
+
+      const unavailable = !status || status.steam?.appId !== 0 || !status.steam?.active || status.steam?.source !== 1;
+      const writable = !!cpu && cpu.persistenceWritable && !unavailable && !busy;
+      const sideValue = (side, preview) => preview ?? side?.desired ?? (side?.currentStatus === 0 ? side.current : null);
+      const labelFor = value => modes.find(item => item[0] === value)?.[1] || "Unknown / unset";
+      const scheduleMode = (side, value) => {
+        const key = side === "ac" ? "ac" : "dc";
+        side === "ac" ? setPreviewAc(value) : setPreviewDc(value);
+        if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
+        settleTimers.current[key] = setTimeout(async () => {
+          if (!writable) return;
+          setBusy(true); setError(null);
+          try {
+            const result = await request(side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value });
+            setCpu(result.snapshot); side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
+            if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
+          } catch (_) { setError("CPU Boost update failed"); }
+          finally { setBusy(false); }
+        }, 250);
+      };
+      const setEnabled = async value => {
+        if (!writable) return;
+        setBusy(true); setError(null);
+        try {
+          const result = await request("setDeviceCpuBoostEnabled", { enabled: value });
+          setCpu(result.snapshot); if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
+        } catch (_) { setError("CPU Boost update failed"); }
+        finally { setBusy(false); }
+      };
+      const slider = (title, side, value) => React.createElement("label", { style: { display: "block", marginTop: "14px" } },
+        React.createElement("span", { style: { display: "block", marginBottom: "5px" } }, `${title}: ${labelFor(value)}`),
+        React.createElement("input", { type: "range", min: 0, max: 6, step: 1, value: value == null ? 0 : value, disabled: !writable || value == null,
+          "aria-label": title, onChange: event => scheduleMode(side, Number(event.target.value)) }));
+
+      return React.createElement("div", { style: { padding: "18px", color: "white", fontFamily: "sans-serif", minWidth: "300px" } },
+        React.createElement("h3", { style: { margin: "0 0 14px" } }, "CPU Boost"),
+        unavailable ? React.createElement("p", null, status?.steam?.appId ? "Unavailable while a game is running" : "CPU Boost unavailable") : null,
+        error ? React.createElement("p", { style: { color: "#ffb4ab" } }, error) : null,
+        React.createElement("label", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          React.createElement("span", null, "Enabled"),
+          React.createElement("input", { type: "checkbox", checked: !!cpu?.enabled, disabled: !writable, "aria-label": "Enabled", onChange: event => void setEnabled(event.target.checked) })),
+        slider("AC Mode", "ac", sideValue(cpu?.ac, previewAc)),
+        slider("DC Mode", "dc", sideValue(cpu?.dc, previewDc)));
+    }
 
     return {
       [TAB_MARKER]: true,
       key: "steam-input-addon",
       title: "Steam Input Addon",
       tab: icon,
-      panel,
+      panel: React.createElement(CpuBoostPanel),
     };
   }
 

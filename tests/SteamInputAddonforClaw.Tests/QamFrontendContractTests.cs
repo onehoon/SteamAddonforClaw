@@ -196,6 +196,31 @@ public sealed class QamFrontendContractTests
         Assert.Contains("return { kind: \"object.type\", target: type.type };", source);
     }
 
+    [Fact]
+    public void Qam_cpu_boost_panel_uses_the_existing_seven_mode_contract_and_bridge_allowlist()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.DoesNotContain("QAM integration test", source);
+        Assert.Contains("title: \"Steam Input Addon\"", source);
+        Assert.Contains("fill: \"currentColor\"", source);
+        Assert.Contains("[0, \"Disabled\"]", source);
+        Assert.Contains("[1, \"Enabled\"]", source);
+        Assert.Contains("[2, \"Aggressive\"]", source);
+        Assert.Contains("[3, \"Efficient Enabled\"]", source);
+        Assert.Contains("[4, \"Efficient Aggressive\"]", source);
+        Assert.Contains("[5, \"Aggressive at Guaranteed\"]", source);
+        Assert.Contains("[6, \"Efficient Aggressive at Guaranteed\"]", source);
+        Assert.Contains("request(\"captureStatus\")", source);
+        Assert.Contains("request(\"captureCpuBoost\")", source);
+        Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", source);
+        Assert.Contains("request(side === \"ac\" ? \"setDeviceCpuBoostAc\" : \"setDeviceCpuBoostDc\"", source);
+        Assert.Contains("setTimeout(async () =>", source);
+        Assert.Contains("state.onStateInvalidated", source);
+        Assert.DoesNotContain("setInterval", source);
+        Assert.DoesNotContain("captureTdp", source[source.IndexOf("function buildAddonTab", StringComparison.Ordinal)..]);
+    }
+
     private static string ReadSource(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
