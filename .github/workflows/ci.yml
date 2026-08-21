@@ -65,7 +65,7 @@ jobs:
           }
 
           foreach ($testProject in $testProjects) {
-            dotnet test $testProject.FullName -c Release --no-restore `
+            dotnet test $testProject.FullName -c Release --no-build --no-restore `
               --blame-hang-timeout 3m --blame-hang-dump-type full `
               --blame-crash --blame-crash-dump-type mini `
               --results-directory artifacts/TestResults
@@ -110,6 +110,7 @@ jobs:
           -File scripts/verify-centerm-helper-smoke.ps1
           -PublishDirectory artifacts/publish
           -Configuration Release
+          -NoBuild
 
       - name: Startup process smoke test
         shell: pwsh

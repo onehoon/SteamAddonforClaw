@@ -7,7 +7,9 @@ param(
     [string]$RepoRoot,
 
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+
+    [switch]$NoBuild
 )
 
 Set-StrictMode -Version Latest
@@ -33,11 +35,13 @@ $smokeExe = Join-Path $RepoRoot "src\SteamInputAddonforClaw.CenterMHelperSmoke\b
 # Built as a plain console executable and run directly here (not via `dotnet test`/VSTest) --
 # VSTest's own process-tree management was found to interfere with the CreateProcess(SUSPENDED) +
 # Job sequence this smoke check exercises.
-& dotnet build $smokeProject -c $Configuration | Out-Host
-if ($LASTEXITCODE -ne 0) { throw "Failed to build $smokeProject" }
+if (-not $NoBuild) {
+    & dotnet build $smokeProject -c $Configuration | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Failed to build $smokeProject" }
+}
 
 if (-not (Test-Path -LiteralPath $smokeExe -PathType Leaf)) {
-    throw "Smoke tool executable not found after build: $smokeExe"
+    throw "Smoke tool executable not found: $smokeExe"
 }
 
 & $smokeExe $PublishDirectory | Out-Host
