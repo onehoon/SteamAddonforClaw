@@ -212,19 +212,30 @@ public sealed partial class DevicePage : UserControl
         _suppressTdpEvents = true;
         try
         {
+            if (snapshot.Limits is { } limits)
+            {
+                foreach (var slider in new[] { TdpAcPl1Slider, TdpDcPl1Slider })
+                {
+                    slider.Minimum = limits.Pl1MinimumWatts;
+                    slider.Maximum = limits.Pl1MaximumWatts;
+                    slider.StepFrequency = 1;
+                }
+                foreach (var slider in new[] { TdpAcPl2Slider, TdpDcPl2Slider })
+                {
+                    slider.Minimum = limits.Pl2MinimumWatts;
+                    slider.Maximum = limits.Pl2MaximumWatts;
+                    slider.StepFrequency = 1;
+                }
+            }
+
             TdpEnabledToggleSwitch.IsOn = snapshot.Configuration?.Enabled == true;
             SetSlider(TdpAcPl1Slider, _acPl1Draft); SetSlider(TdpAcPl2Slider, _acPl2Draft);
             SetSlider(TdpDcPl1Slider, _dcPl1Draft); SetSlider(TdpDcPl2Slider, _dcPl2Draft);
         }
         finally { _suppressTdpEvents = false; }
-        var editable = snapshot.Available && snapshot.PersistenceWritable && (snapshot.Configuration is null || snapshot.Configuration.Enabled);
+        var editable = snapshot.Available && snapshot.PersistenceWritable && snapshot.Configuration?.Enabled == true;
         TdpEnabledToggleSwitch.IsEnabled = snapshot.Available && snapshot.PersistenceWritable;
         foreach (var slider in new[] { TdpAcPl1Slider, TdpAcPl2Slider, TdpDcPl1Slider, TdpDcPl2Slider }) slider.IsEnabled = editable;
-        if (snapshot.Limits is { } limits)
-        {
-            foreach (var slider in new[] { TdpAcPl1Slider, TdpDcPl1Slider }) { slider.Minimum = limits.Pl1MinimumWatts; slider.Maximum = limits.Pl1MaximumWatts; slider.StepFrequency = 1; }
-            foreach (var slider in new[] { TdpAcPl2Slider, TdpDcPl2Slider }) { slider.Minimum = limits.Pl2MinimumWatts; slider.Maximum = limits.Pl2MaximumWatts; slider.StepFrequency = 1; }
-        }
         SetTdpValueText(TdpAcPl1ValueText, _acPl1Draft); SetTdpValueText(TdpAcPl2ValueText, _acPl2Draft);
         SetTdpValueText(TdpDcPl1ValueText, _dcPl1Draft); SetTdpValueText(TdpDcPl2ValueText, _dcPl2Draft);
         if (!snapshot.Available) { TdpInfoBar.Message = "TDP Control is unavailable on this device."; TdpInfoBar.IsOpen = true; }
@@ -314,7 +325,7 @@ public sealed partial class DevicePage : UserControl
         TdpEnabledToggleSwitch.IsEnabled = !busy && _tdpSnapshot.Available && _tdpSnapshot.PersistenceWritable;
         foreach (var slider in new[] { TdpAcPl1Slider, TdpAcPl2Slider, TdpDcPl1Slider, TdpDcPl2Slider })
             slider.IsEnabled = !busy && _tdpSnapshot.Available && _tdpSnapshot.PersistenceWritable
-                && (_tdpSnapshot.Configuration is null || _tdpSnapshot.Configuration.Enabled);
+                && _tdpSnapshot.Configuration?.Enabled == true;
     }
     private bool CompleteTdpDraft() => _acPl1Draft is not null && _acPl2Draft is not null && _dcPl1Draft is not null && _dcPl2Draft is not null;
     private FrontendTdpConfiguration? BuildTdpConfiguration(bool enabled)
