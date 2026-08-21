@@ -80,6 +80,7 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private volatile bool _armed;
     private volatile bool _helperDemandActive;
+    private bool _disarming;
 
     /// <summary>Per-arm "did I start it?" state (PR1 ownership convergence). True only when THIS
     /// arm attempt itself called <see cref="CenterMHelperOwnership.Start"/> and it succeeded --
@@ -332,8 +333,17 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         {
             AppLog.Debug("CenterM.RoutingGuard", "Routing guard disarm started.");
             _armed = false;
-            var confirmed = await UnwindAsync().ConfigureAwait(false);
-            _helperDemandActive = false;
+            _disarming = true;
+            bool confirmed;
+            try
+            {
+                confirmed = await UnwindAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _disarming = false;
+                _helperDemandActive = false;
+            }
             AppLog.Info("CenterM.RoutingGuard", "Routing guard disarmed.", ("Confirmed", confirmed));
             return confirmed;
         }
@@ -354,15 +364,18 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
     private Task<bool> UnwindAsync()
     {
         var helperStopped = true;
-        if (_helperStartedByCurrentArm && _helperOwnership.IsOwned)
+        if (_helperOwnership.IsOwned)
         {
             if (PersistentHelperOwnerReady())
             {
                 AppLog.Info("CenterM.RoutingGuard", "Routing relinquished helper lifetime to persistent OEM1 ownership.", ("HelperProcessId", _helperOwnership.ProcessId));
                 _helperStartedByCurrentArm = false;
             }
-            else
+            else if (_helperStartedByCurrentArm || (_disarming && _helperDemandActive && _persistentHelperOwnerReady is not null))
             {
+                // Routing is the last active demand. This also covers a helper originally started
+                // by OEM1 and borrowed by Routing, after OEM1 has been disabled while Routing stays
+                // active; the final Routing unwind then owns the shared helper teardown.
                 helperStopped = _helperOwnership.Stop(_helperStopTimeout);
                 AppLog.Info("CenterM.RoutingGuard", "Helper stop attempted.", ("Confirmed", helperStopped), ("HelperProcessId", _helperOwnership.ProcessId));
                 _helperStartedByCurrentArm = !helperStopped;
