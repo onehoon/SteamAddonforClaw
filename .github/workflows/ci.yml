@@ -32,13 +32,19 @@ jobs:
       - name: Detect VIIPER maintenance tooling changes
         id: viiper-changes
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ('${{ github.event_name }}' -ne 'pull_request') {
             "run=true" >> $env:GITHUB_OUTPUT
             exit 0
           }
 
-          $paths = @(git diff --name-only '${{ github.event.pull_request.base.sha }}' '${{ github.sha }}')
+          $compareUrl = "repos/$env:GITHUB_REPOSITORY/compare/${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          $paths = @(gh api --paginate $compareUrl --jq '.files[].filename')
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to determine changed files for the pull request."
+          }
           $relevant = $paths | Where-Object {
             $_ -like 'scripts/*viiper*' -or
             $_ -like 'scripts/tests/*viiper*' -or
