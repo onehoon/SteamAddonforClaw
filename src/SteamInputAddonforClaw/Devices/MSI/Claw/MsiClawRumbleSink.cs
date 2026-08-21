@@ -121,7 +121,6 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
 
     internal void InvalidatePhysicalSession()
     {
-        ResetLastWritten();
         _transport.InvalidatePhysicalSession();
     }
 
@@ -130,10 +129,6 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
     internal void BeginPhysicalSessionRetirement()
     {
         Volatile.Write(ref _admissionOpen, false);
-        ResetLastWritten();
-        _failureWarningEmitted = false;
-        _endpointGeneration = null;
-        _cachedEndpoint = default;
         _transport.CancelPendingWrite();
     }
 

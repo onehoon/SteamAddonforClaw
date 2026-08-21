@@ -61,7 +61,10 @@ public sealed class DeveloperVibrationTestTests
         secondRelease.TrySetResult();
         await Task.WhenAll(oldTest, newTest);
 
-        await sink.WaitForValueAsync(new TwoMotorRumble(32896, 32896), TimeSpan.FromSeconds(2));
+        var values = sink.Snapshot();
+        Assert.False((await oldTest).Succeeded);
+        Assert.True((await newTest).Succeeded);
+        Assert.Equal([new TwoMotorRumble(32768, 32768), new TwoMotorRumble(32896, 32896), TwoMotorRumble.Stopped], values);
     }
 
     [Fact]
@@ -100,6 +103,7 @@ public sealed class DeveloperVibrationTestTests
         // not a failure of the original command -- exactly the intended behavior being verified here.
         Assert.False((await developerTest).Succeeded);
         await sink.WaitForValueAsync(new TwoMotorRumble(32896, 32896), TimeSpan.FromSeconds(2));
+        Assert.Equal([new TwoMotorRumble(32768, 32768), new TwoMotorRumble(32896, 32896)], sink.Snapshot());
     }
 
     [Fact]
@@ -125,7 +129,7 @@ public sealed class DeveloperVibrationTestTests
         // Only the developer Rumble command and the CancelDeveloperTestAndStop() zero write --
         // the cancelled pending 250ms delayed STOP must never also fire.
         await sink.StopEntered.Task;
-        Assert.True(sink.Contains(TwoMotorRumble.Stopped));
+        Assert.Equal([new TwoMotorRumble(32768, 32768), TwoMotorRumble.Stopped], sink.Snapshot());
     }
 
     [Fact]
@@ -138,11 +142,12 @@ public sealed class DeveloperVibrationTestTests
         var developerTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None);
         await delayEntered;
         Assert.True(bridge.ProcessNormalizedReport(Report(FrontendVibrationTestCommand.Haptic), "Steam"));
-        bridge.CancelDeveloperTestAndStop();
+        Assert.Null(bridge.CancelDeveloperTestAndStop());
         releaseDelay();
         await developerTest;
 
         await sink.WaitForValueAsync(new TwoMotorRumble(32896, 32896), TimeSpan.FromSeconds(2));
+        Assert.Equal([new TwoMotorRumble(32768, 32768), new TwoMotorRumble(32896, 32896)], sink.Snapshot());
     }
 
     [Fact]
@@ -227,6 +232,7 @@ public sealed class DeveloperVibrationTestTests
             }
         }
         public bool Contains(TwoMotorRumble expected) { lock (_gate) return Values.Contains(expected); }
+        public TwoMotorRumble[] Snapshot() { lock (_gate) return [.. Values]; }
     }
 
     private sealed class FailingSink : IPhysicalRumbleSink

@@ -69,6 +69,21 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public void Terminal_stop_after_retirement_reuses_current_session_endpoint()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var transport = new FakeTransport();
+        var resolver = new VerifiedEndpointResolver();
+        using var sink = new MsiClawRumbleSink(identity, transport, resolver);
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(new(0x8000, 0x8000)).Status);
+        Assert.Equal(1, resolver.Calls);
+        sink.BeginPhysicalSessionRetirement();
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(TwoMotorRumble.Stopped).Status);
+        Assert.Equal(1, resolver.Calls);
+    }
+
+    [Fact]
     public void Transport_reuses_handle_changes_path_and_invalidates_after_write_failure()
     {
         var native = new FakeNativeHid();
@@ -174,7 +189,7 @@ public sealed class MsiClawRumbleTests
     public async Task Transport_serializes_native_writes_without_blocking_cancellation()
     {
         var native = new FakeNativeHid { BlockFirstWrite = true };
-        using var transport = new WindowsMsiClawRumbleTransport(native);
+        using var transport = new WindowsMsiClawRumbleTransport(native, TimeSpan.FromSeconds(5));
         var first = Task.Run(() => transport.Write("path-a", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 32));
         await native.FirstWriteEntered.Task;
         var secondRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -193,6 +208,22 @@ public sealed class MsiClawRumbleTests
         Assert.Equal(1, native.Writes[0][0]);
         Assert.Equal(2, native.Writes[1][0]);
         Assert.All(native.Writes, write => { Assert.Equal(32, write.Length); Assert.All(write[11..], value => Assert.Equal(0, value)); });
+    }
+
+    [Fact]
+    public async Task Write_timeout_cancels_native_io_and_transport_remains_usable()
+    {
+        var native = new FakeNativeHid { BlockFirstWriteUntilCancel = true };
+        using var transport = new WindowsMsiClawRumbleTransport(native, TimeSpan.FromMilliseconds(10));
+
+        var first = await Task.Run(() => transport.Write("path-a", new byte[11], 32)).WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.False(first.Succeeded);
+        Assert.Equal(1, native.CancelWriteCalls);
+
+        native.BlockFirstWriteUntilCancel = false;
+        native.WriteResult = true;
+        Assert.True(transport.Write("path-a", new byte[11], 32).Succeeded);
     }
 
     [Fact]
@@ -601,8 +632,13 @@ public sealed class MsiClawRumbleTests
 
     private sealed class VerifiedEndpointResolver : IMsiClawRumbleEndpointResolver
     {
-        public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity) =>
+        public int Calls { get; private set; }
+        public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity)
+        {
+            Calls++;
+            return
             string.IsNullOrWhiteSpace(identity.DevicePath) ? new(null, "NoVerifiedEndpoint") : new(identity.DevicePath, "VerifiedTestEndpoint", 32);
+        }
     }
 
     private sealed class MutatingResolver(FakeIdentity identity) : IMsiClawRumbleEndpointResolver
@@ -665,6 +701,7 @@ public sealed class MsiClawRumbleTests
         public bool WriteResult { get; set; } = true;
         public bool PartialWrite { get; set; }
         public bool BlockFirstWrite { get; init; }
+        public bool BlockFirstWriteUntilCancel { get; set; }
         public bool DenyReadWriteOpen { get; set; }
         public List<uint> OpenAccessRequests { get; } = [];
         public int WriteCalls { get; private set; }
@@ -688,7 +725,7 @@ public sealed class MsiClawRumbleTests
         {
             WriteCalls++;
             Writes.Add(buffer.ToArray());
-            if (BlockFirstWrite && WriteCalls == 1)
+            if ((BlockFirstWrite || BlockFirstWriteUntilCancel) && WriteCalls == 1)
             {
                 FirstWriteEntered.TrySetResult();
                 ReleaseFirstWrite.Wait();
@@ -697,7 +734,15 @@ public sealed class MsiClawRumbleTests
             LastError = WriteResult ? 0 : 5;
             return WriteResult;
         }
-        public void CancelWrite(SafeFileHandle handle) => CancelWriteCalls++;
+        public void CancelWrite(SafeFileHandle handle)
+        {
+            CancelWriteCalls++;
+            if (BlockFirstWriteUntilCancel)
+            {
+                WriteResult = false;
+                ReleaseFirstWrite.Set();
+            }
+        }
         public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
         {
             inputReportLength = 0;

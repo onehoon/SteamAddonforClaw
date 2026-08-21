@@ -18,13 +18,13 @@ internal interface IMsiClawRumbleTransport : IDisposable
 
 internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
 {
-    private static readonly TimeSpan PhysicalWriteTimeout = TimeSpan.FromMilliseconds(250);
     private const uint GenericRead = 0x80000000;
     private const uint GenericWrite = 0x40000000;
     private const uint ShareReadWrite = 0x00000001 | 0x00000002;
     private const uint OpenExisting = 3;
 
     private readonly IMsiClawNativeHidApi _api;
+    private readonly TimeSpan _physicalWriteTimeout;
     private readonly object _sync = new();
     private readonly object _writeSerial = new();
     private SafeFileHandle? _handle;
@@ -34,7 +34,11 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
     internal Action? WriteRequested { get; set; }
     internal Action? InvalidationRequested { get; set; }
 
-    internal WindowsMsiClawRumbleTransport(IMsiClawNativeHidApi? api = null) => _api = api ?? new WindowsMsiClawNativeHidApi();
+    internal WindowsMsiClawRumbleTransport(IMsiClawNativeHidApi? api = null, TimeSpan? physicalWriteTimeout = null)
+    {
+        _api = api ?? new WindowsMsiClawNativeHidApi();
+        _physicalWriteTimeout = physicalWriteTimeout ?? TimeSpan.FromMilliseconds(250);
+    }
 
     public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket, int outputReportLength)
     {
@@ -124,7 +128,7 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
     {
         try
         {
-            await Task.Delay(PhysicalWriteTimeout, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(_physicalWriteTimeout, cancellationToken).ConfigureAwait(false);
             _api.CancelWrite(handle);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }

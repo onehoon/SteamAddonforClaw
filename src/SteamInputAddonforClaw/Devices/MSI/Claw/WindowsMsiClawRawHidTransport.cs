@@ -79,6 +79,8 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
 {
     public int LastError { get; private set; }
     private int _writeThreadId;
+    private readonly object _writeCancellationGate = new();
+    private SafeFileHandle? _activeWriteHandle;
 
     public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
     {
@@ -89,21 +91,34 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
 
     public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
     {
-        Volatile.Write(ref _writeThreadId, unchecked((int)GetCurrentThreadId()));
+        lock (_writeCancellationGate)
+        {
+            _writeThreadId = unchecked((int)GetCurrentThreadId());
+            _activeWriteHandle = handle;
+        }
         bool result;
         try { result = WriteFile(handle, buffer, (uint)buffer.Length, out bytesWritten, IntPtr.Zero); }
-        finally { Volatile.Write(ref _writeThreadId, 0); }
+        finally
+        {
+            lock (_writeCancellationGate)
+            {
+                _writeThreadId = 0;
+                _activeWriteHandle = null;
+            }
+        }
         LastError = result ? 0 : Marshal.GetLastWin32Error();
         return result;
     }
 
     public void CancelWrite(SafeFileHandle handle)
     {
-        var threadId = Volatile.Read(ref _writeThreadId);
-        if (threadId == 0) return;
-        using var thread = OpenThread(ThreadTerminate, false, unchecked((uint)threadId));
-        if (!thread.IsInvalid && !CancelSynchronousIo(thread))
-            LastError = Marshal.GetLastWin32Error();
+        lock (_writeCancellationGate)
+        {
+            if (_writeThreadId == 0 || !ReferenceEquals(_activeWriteHandle, handle)) return;
+            using var thread = OpenThread(ThreadTerminate, false, unchecked((uint)_writeThreadId));
+            if (!thread.IsInvalid && !CancelSynchronousIo(thread))
+                LastError = Marshal.GetLastWin32Error();
+        }
     }
 
     public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
@@ -145,9 +160,6 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WriteFile(SafeFileHandle file, byte[] buffer, uint numberOfBytesToWrite, out uint numberOfBytesWritten, IntPtr overlapped);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CancelIoEx(SafeFileHandle file, IntPtr overlapped);
     private const uint ThreadTerminate = 0x0001;
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern SafeFileHandle OpenThread(uint desiredAccess, bool inheritHandle, uint threadId);
