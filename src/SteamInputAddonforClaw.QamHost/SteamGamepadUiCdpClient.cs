@@ -16,6 +16,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
     private readonly HttpClient _http;
     private readonly CdpCommandCorrelator _correlator = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private readonly CancellationTokenSource _sessionLifetime = new();
     private ClientWebSocket? _socket;
     private CancellationTokenSource? _receiveLoopCts;
     private Task? _receiveLoop;
@@ -24,6 +25,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
     public event Action<string, string>? BindingCalled;
     public Task ConnectionEnded => _connectionEnded.Task;
     private readonly TaskCompletionSource _connectionEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _disposed;
 
     public SteamGamepadUiCdpClient(Uri devToolsEndpoint)
     {
@@ -56,6 +58,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
     public async Task ConnectAsync(CdpTarget target, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (string.IsNullOrWhiteSpace(target.WebSocketDebuggerUrl))
         {
             throw new InvalidOperationException("Target has no webSocketDebuggerUrl; cannot connect.");
@@ -83,10 +86,11 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
     private async Task<string> SendCommandAsync(string method, object? parameters, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var id = _correlator.NextId();
         var payload = SerializeCommandPayload(id, method, parameters);
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _sessionLifetime.Token);
         cts.CancelAfter(ResponseTimeout);
 
         var responseTask = _correlator.RegisterAsync(id, cts.Token);
@@ -94,6 +98,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         await _sendGate.WaitAsync(cts.Token).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
             if (_socket is not { State: WebSocketState.Open } socket)
                 throw new InvalidOperationException("Not connected to a CDP target.");
             await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, cts.Token).ConfigureAwait(false);
@@ -175,6 +180,8 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _sessionLifetime.Cancel();
         _receiveLoopCts?.Cancel();
         if (_receiveLoop is not null)
         {
@@ -187,20 +194,26 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
             }
         }
 
-        if (_socket is { State: WebSocketState.Open })
+        await _sendGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
         {
-            try
+            if (_socket is { State: WebSocketState.Open } socket)
             {
-                await _socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "QamHost shutdown", CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (WebSocketException)
-            {
+                try
+                {
+                    await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "QamHost shutdown", CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (WebSocketException)
+                {
+                }
             }
         }
+        finally { _sendGate.Release(); }
 
         _socket?.Dispose();
         _receiveLoopCts?.Dispose();
         _http.Dispose();
         _sendGate.Dispose();
+        _sessionLifetime.Dispose();
     }
 }
