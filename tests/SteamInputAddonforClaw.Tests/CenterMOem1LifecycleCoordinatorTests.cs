@@ -768,6 +768,25 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
     }
 
+    [Fact]
+    public async Task ForeignSameNameProcess_WithRoutingDemand_requests_fail_close_without_stopping_shared_helper()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        await coordinator.SetDesiredEnabledAsync(true);
+        h.ExternalHelperDemand = true;
+        var helperPid = h.HelperOwnership.ProcessId;
+
+        h.Snapshots.Foreign = [new ProcessSnapshotEntry(5555, CenterMProcessNames.MainUi, ExpectedPath)];
+        h.IdentityInspector.ProcessId = 5555;
+        await coordinator.PollTickAsync();
+
+        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
+        Assert.Equal(helperPid, h.HelperOwnership.ProcessId);
+        Assert.True(h.HelperOwnership.IsOwned);
+        Assert.Equal("CenterMForeignMainUiWhileRoutingActive", h.SharedHelperSafetyFaultReason);
+    }
+
     // ============================================================
     // Steady-state Armed prerequisite drift revalidation
     // ============================================================

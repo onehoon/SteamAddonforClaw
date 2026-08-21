@@ -1165,10 +1165,11 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             var ownedPid = _helperOwnership.ProcessId;
             if (HasExternalHelperDemand())
             {
-                _lastReason = "ForeignMainUiWhileRoutingDemandActive";
+                _lastReason = "ForeignMainUiWhileRoutingDemandActive:RoutingFailCloseRequested";
                 SetState(CenterMOem1LifecycleState.FaultedNative);
                 AppLog.Warn("CenterM.Oem1", "Foreign same-name process observed; preserving the shared helper while Routing still demands it.", null,
                     ("HelperProcessId", ownedPid));
+                NotifySharedHelperSafetyFault("CenterMForeignMainUiWhileRoutingActive");
                 return;
             }
             var stopped = _helperOwnership.Stop(_helperStopTimeout);
