@@ -25,6 +25,7 @@ public sealed partial class DevicePage : UserControl
     private int? _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft;
     private CancellationTokenSource? _tdpEditDebounce;
     private long _tdpEditGeneration;
+    private bool _tdpDraftDirty;
 
     private static readonly CpuBoostModeItem[] Modes =
     [
@@ -190,10 +191,11 @@ public sealed partial class DevicePage : UserControl
         }
     }
 
-    private void RenderTdp(FrontendTdpSnapshot snapshot)
+    private void RenderTdp(FrontendTdpSnapshot snapshot, bool preserveDirtyDraft = true)
     {
+        var keepDraft = preserveDirtyDraft && _tdpDraftDirty;
         _tdpSnapshot = snapshot;
-        if (snapshot.Configuration is { } configuration)
+        if (!keepDraft && snapshot.Configuration is { } configuration)
         {
             _acPl1Draft = configuration.Ac.Pl1Watts; _acPl2Draft = configuration.Ac.Pl2Watts;
             _dcPl1Draft = configuration.Dc.Pl1Watts; _dcPl2Draft = configuration.Dc.Pl2Watts;
@@ -228,6 +230,7 @@ public sealed partial class DevicePage : UserControl
         else if (sender == TdpAcPl2NumberBox) _acPl2Draft = value;
         else if (sender == TdpDcPl1NumberBox) _dcPl1Draft = value;
         else _dcPl2Draft = value;
+        _tdpDraftDirty = true;
         if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit();
     }
 
@@ -241,7 +244,7 @@ public sealed partial class DevicePage : UserControl
             TdpInfoBar.Message = "Set valid PL1 and PL2 values for Plugged in and On battery before enabling TDP Control."; TdpInfoBar.IsOpen = true; return;
         }
         var configuration = BuildTdpConfiguration(TdpEnabledToggleSwitch.IsOn);
-        if (configuration is not null) await RunTdpMutationAsync(configuration);
+        if (configuration is not null) await RunTdpMutationAsync(configuration, Volatile.Read(ref _tdpEditGeneration));
     }
 
     private void ScheduleTdpEdit()
@@ -258,7 +261,7 @@ public sealed partial class DevicePage : UserControl
                 {
                     if (!TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpEditGeneration), TdpEnabledToggleSwitch.IsOn)) return;
                     var configuration = BuildTdpConfiguration(true);
-                    if (configuration is not null) _ = RunTdpMutationAsync(configuration);
+                    if (configuration is not null) _ = RunTdpMutationAsync(configuration, generation);
                 });
             }
             catch (OperationCanceledException) { }
@@ -270,9 +273,9 @@ public sealed partial class DevicePage : UserControl
     {
         return TdpDraftPolicy.TryBuildConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft, _tdpSnapshot.Configuration);
     }
-    private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration)
+    private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration, long submittedGeneration)
     {
-        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); RenderTdp(result.Snapshot); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
+        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
         catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = "TDP could not be updated because the Runtime connection was interrupted."; TdpInfoBar.Severity = InfoBarSeverity.Error; TdpInfoBar.IsOpen = true; await RefreshAsync(); }
     }
 
@@ -280,6 +283,9 @@ public sealed partial class DevicePage : UserControl
     {
         internal static bool CanSubmitDebouncedEdit(long generation, long currentGeneration, bool enabled) =>
             generation == currentGeneration && enabled;
+
+        internal static bool ShouldPreserveDirtyDraft(bool dirty, long submittedGeneration, long currentGeneration) =>
+            dirty && submittedGeneration != currentGeneration;
 
         internal static FrontendTdpConfiguration? TryBuildConfiguration(bool enabled, int? acPl1, int? acPl2, int? dcPl1, int? dcPl2, FrontendTdpConfiguration? saved)
         {

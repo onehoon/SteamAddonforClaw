@@ -65,4 +65,12 @@ public sealed class TdpFrontendContractTests
         Assert.Equal(new FrontendTdpPowerPair(20, 30), result.Ac);
         Assert.Equal(new FrontendTdpPowerPair(10, 20), result.Dc);
     }
+
+    [Fact]
+    public void Older_snapshot_cannot_replace_a_newer_dirty_edit()
+    {
+        Assert.True(DevicePage.TdpDraftPolicy.ShouldPreserveDirtyDraft(true, 7, 8));
+        Assert.False(DevicePage.TdpDraftPolicy.ShouldPreserveDirtyDraft(true, 8, 8));
+        Assert.False(DevicePage.TdpDraftPolicy.ShouldPreserveDirtyDraft(false, 7, 8));
+    }
 }
