@@ -290,8 +290,7 @@ public sealed partial class DevicePage : UserControl
             RenderTdp(result.Snapshot, preserveDirtyDraft: false);
             if (!result.Succeeded)
             {
-                _suppressTdpEvents = true; TdpEnabledToggleSwitch.IsOn = false; _suppressTdpEvents = false;
-                TdpInfoBar.Message = result.FailureMessage ?? "TDP could not be enabled.";
+                TdpInfoBar.Message = result.FailureMessage ?? "TDP could not be updated.";
                 TdpInfoBar.IsOpen = true;
             }
         }
