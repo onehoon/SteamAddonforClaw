@@ -263,15 +263,28 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
             // this arm is responsible for that retained ownership exactly as it would be for a
             // successful Start, so UnwindAsync/DisposeAsync must still be allowed to retry/register
             // it rather than treating it as borrowed/unowned.
-            _helperStartedByCurrentArm = startResult is HelperStartResult.Started or HelperStartResult.PartialCleanupUnconfirmed;
-            if (startResult != HelperStartResult.Started)
+            if (startResult == HelperStartResult.Started)
             {
+                _helperStartedByCurrentArm = true;
+            }
+            else if (startResult == HelperStartResult.AlreadyOwned && _helperOwnership.IsOperationallyOwned)
+            {
+                // OEM1 won the serialized Start race. Join the same exact ownership as a borrower;
+                // do not unwind the winner's helper merely because Routing observed it late.
+                _helperStartedByCurrentArm = false;
+                AppLog.Info("CenterM.RoutingGuard", "Helper became operationally owned during arm; borrowing shared helper.",
+                    ("HelperProcessId", _helperOwnership.ProcessId));
+            }
+            else
+            {
+                _helperStartedByCurrentArm = startResult == HelperStartResult.PartialCleanupUnconfirmed;
                 AppLog.Warn("CenterM.RoutingGuard", "Routing guard arm failed: helper did not start.", null, ("Result", startResult));
                 await UnwindAsync(endingHelperDemand: true).ConfigureAwait(false);
                 return CenterMMainUiRoutingGuardResult.HelperFailure;
             }
 
-            AppLog.Info("CenterM.RoutingGuard", "Helper started.", ("HelperProcessId", _helperOwnership.ProcessId));
+            if (startResult == HelperStartResult.Started)
+                AppLog.Info("CenterM.RoutingGuard", "Helper started.", ("HelperProcessId", _helperOwnership.ProcessId));
         }
 
         var mutexResult = _mutexOwnership.Acquire();
