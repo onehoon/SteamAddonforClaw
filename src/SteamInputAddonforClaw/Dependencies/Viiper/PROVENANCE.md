@@ -7,7 +7,7 @@ licenses built from:
 
 ```text
 Repository: onehoon/VIIPER
-Commit:     49e5796b9f31f8ddb7009fde6f910c66837e2315
+Commit:     77a8af547de2253862ede648a212c01d4dd950c1
 Branch:     main
 Entrypoint: just build-libVIIPER Release
 ```
@@ -34,7 +34,7 @@ the canonical `viiper-artifact.json` manifest for this commit):
 
 ```text
 Generated header SHA-256: 202444479f20cd599d0ad48890fc644dd3085f9c6ade1e00fa404e689d88f718
-DLL SHA-256:              2db4da332a012ae1212f64b2e1cb0d2a27d6b1b723dd01bd4367ec342f85c9e3
+DLL SHA-256:              d07d2e5a622983aed6b9cc676b59b5b3a31a2b343015c4492fa5bdae74dd0cb6
 ```
 
 CI verifies the committed hashes match this record and the vendored files.
@@ -42,9 +42,9 @@ CI verifies the committed hashes match this record and the vendored files.
 <!-- AUTOMATION: BEGIN MANAGED ABI REVIEW SECTION -->
 ## ABI review
 
-Reviewed VIIPER `a6bb749199aa797da690c611d2f18edc5e770c1e` ->
-`49e5796b9f31f8ddb7009fde6f910c66837e2315`. The target is exactly one
-canonical main commit, `Correct Steam Deck 0x83 attributes (#43)`.
+Reviewed VIIPER `49e5796b9f31f8ddb7009fde6f910c66837e2315` ->
+`77a8af547de2253862ede648a212c01d4dd950c1`. The target is exactly one
+canonical main commit, `Reduce Windows USBIP loopback attach latency (#44)`.
 
 The generated canonical `libVIIPER.h` is byte-identical to the previously
 reviewed Addon header. The Addon base and dependency-PR head vendored headers
@@ -60,36 +60,33 @@ current Addon managed P/Invoke surface, 19-entry `RequiredExports`, classified
 attach/detach bindings, callback rooting, Xbox360 typed bindings, and ABI tests
 require no adaptation.
 
-PR #43 changes only the Steam Deck device-side handling of feature command
-`GET_ATTRIBUTES_VALUES (0x83)` plus constants and focused tests. The virtual
-Deck now returns the observed real-device nine-entry / 45-byte payload in the
-exact order `01 -> 02 -> 0A -> 04 -> 09 -> 0B -> 0D -> 0C -> 0E`, with VIIPER
-framing `83 2D ...`. ProductID remains derived from the device descriptor so a
-caller-supplied PID override is preserved; the remaining corrected values and
-unknown tags follow the reviewed real-device reference payload. Regression
-coverage checks the byte-exact default response, zero padding, and custom-PID
-behavior.
+PR #44 changes only the Windows localhost endpoint used by USB/IP attach from
+the hostname `localhost` to the numeric IPv4 loopback address `127.0.0.1`.
+The change is applied consistently to the tracked native IOCTL path, the shared
+command argument contract, and the legacy command fallback. The Addon already
+creates its canonical VIIPER server on `127.0.0.1:3242`, so the new attach
+endpoint matches the actual listener address and does not require any Addon
+configuration or runtime change.
 
-This feature response is generated inside `device/steamdeck` when the USB host
-queries the virtual controller. SteamInputAddonforClaw does not construct,
-parse, cache, or otherwise own the `0x83` payload, so no Addon mapper,
-publisher, native binding, callback, feedback, routing, PnP, HidHide, or
-recovery code needs to change for this correction.
+No attachment classification, native backend selection/fallback policy,
+verified positive import-port token ownership, detach behavior, rollback,
+server/bus ownership, lifecycle serialization, retryable/unknown result
+handling, `close-failed` behavior, teardown ordering, callback contract, or PnP
+readiness policy changes are included. `AttachUSBDeviceEx` continues to expose
+the same classified result and the Addon continues to treat VIIPER attachment
+state as native ownership evidence only, with separate exact Windows PnP
+stabilization.
 
-No descriptor, input-report, output-callback, attachment, removal, USB/IP,
-transport, server/bus ownership, lifecycle, or teardown implementation changes
-are included in the delta. Caller-owned bus lifetime, persistent detached-ready
-Steam Deck/Xbox360 logical devices, classified attachment ownership,
-per-server lifecycle serialization, exact-token detach, `close-failed`,
-post-unlock diagnostics, callback draining, and fail-closed unknown-outcome
-semantics remain unchanged.
+The upstream regression coverage verifies both command argument construction
+and the native IOCTL host field use `127.0.0.1`. The canonical artifact comes
+from the exact successful push/main run recorded above. This is a latency-path
+implementation correction only; no hardware timing improvement is inferred
+from automated validation, and existing hardware-validation claims remain
+unchanged.
 
-This is a Steam Deck protocol-fidelity correction, not a rumble or haptics
-implementation change. The corrected `0x83` response may affect how Steam
-classifies or interacts with the virtual Deck, but no feedback improvement or
-hardware behavior is inferred from the software change. Existing hardware
-validation claims remain unchanged; any effect on Steam feedback traffic still
-requires separate real-hardware A/B evidence.
+No Addon mapper, publisher, native binding, callback lifetime, feedback,
+routing, Game Bar/Xbox360 presentation, PnP, HidHide, recovery, lifecycle, or
+teardown code change is required for this dependency update.
 <!-- AUTOMATION: END MANAGED ABI REVIEW SECTION -->
 
 ## Addon integration alignment
