@@ -380,13 +380,13 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     Task IHandheldRoutingComposition.ConfigureWingActionPath(
         Func<SteamInputAddonforClaw.Wing.WingRouteAuthoritySnapshot> captureAuthority,
-        Func<bool> tryRequestSteamPulse)
+        Func<bool> tryRequestSteamPulse,
+        Settings.IWingMappingPreference mappingPreference)
     {
         if (!_hardwareSupported || _wingBridge is not null) return Task.CompletedTask;
         var source = _testOnlyWingEventSource ?? new WmiMsiEventSource();
-        var mapping = WingMapping.Default;
-        var recognizer = new WingGestureRecognizer(() => mapping.Double.Action != WingAction.None);
-        var dispatcher = new WingActionDispatcher(() => mapping, tryRequestSteamPulse);
+        var recognizer = new WingGestureRecognizer(() => WingMapping.From(mappingPreference.WingMapping).Double.Action != WingAction.None);
+        var dispatcher = new WingActionDispatcher(() => WingMapping.From(mappingPreference.WingMapping), tryRequestSteamPulse);
         _wingEventSource = source;
         _wingRecognizer = recognizer;
         _wingBridge = new WingEventGestureBridge(source, recognizer, captureAuthority, dispatcher);

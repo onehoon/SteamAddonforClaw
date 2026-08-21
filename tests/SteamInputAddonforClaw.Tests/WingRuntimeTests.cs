@@ -9,6 +9,16 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class WingRuntimeTests
 {
     [Fact]
+    public void Unsupported_contract_action_is_not_silently_converted_to_none()
+    {
+        var mapping = WingMapping.From(new SteamInputAddonforClaw.Contracts.Wing.WingMappingSettings
+        {
+            Single = new() { Action = (SteamInputAddonforClaw.Contracts.Wing.WingAction)99 }
+        });
+
+        Assert.Equal((WingAction)99, mapping.Single.Action);
+    }
+    [Fact]
     public async Task WinG_authority_is_active_only_between_successful_arm_and_rollback()
     {
         var stage = new WinGProtectionRoutingStage(() => true, () => { });

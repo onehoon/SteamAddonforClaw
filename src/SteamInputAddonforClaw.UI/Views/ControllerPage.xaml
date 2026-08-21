@@ -9,12 +9,50 @@
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
                 <TextBlock Opacity="0.7" Text="Configure Steam Input controller routing." TextWrapping="Wrap" />
             </StackPanel>
-            <ctcontrols:SettingsCard Header="Steam Input Routing" Description="Automatically route the built-in controller through Steam Input for Steam games and Big Picture Mode.">
-                <ctcontrols:SettingsCard.HeaderIcon>
+            <ctcontrols:SettingsExpander x:Name="SteamInputRoutingExpander" Header="Steam Input Routing" IsExpanded="True" Description="Automatically route the built-in controller through Steam Input for Steam games and Big Picture Mode.">
+                <ctcontrols:SettingsExpander.HeaderIcon>
                     <SymbolIcon Symbol="Repair" />
-                </ctcontrols:SettingsCard.HeaderIcon>
+                </ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch x:Name="SteamInputRoutingToggleSwitch" OffContent="" OnContent="" Toggled="SteamInputRoutingToggleSwitch_Toggled" />
-            </ctcontrols:SettingsCard>
+                <ctcontrols:SettingsExpander.Items>
+                    <ctcontrols:SettingsCard x:Name="WingMappingCard" Header="Gamebar Widget Button">
+                    <StackPanel Spacing="10" Padding="0,8,0,0">
+                        <TextBlock FontWeight="SemiBold" Text="Gamebar Widget Button" />
+                        <TextBlock Text="During Steam Input routing, Xbox Game Bar is disabled and this button uses the action configured below. Win + G is also blocked while routing to protect controller routing." TextWrapping="Wrap" Opacity="0.75" />
+                        <TextBlock Text="Single Press" />
+                        <ComboBox x:Name="WingSingleActionComboBox" SelectionChanged="WingAction_SelectionChanged" />
+                        <StackPanel x:Name="WingSingleHotkeyDetails" Spacing="6" Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <CheckBox x:Name="WingSingleControlCheckBox" Content="Ctrl" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
+                                <CheckBox x:Name="WingSingleShiftCheckBox" Content="Shift" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
+                                <CheckBox x:Name="WingSingleAltCheckBox" Content="Alt" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
+                                <CheckBox x:Name="WingSingleWindowsCheckBox" Content="Windows" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
+                            </StackPanel>
+                            <ComboBox x:Name="WingSingleKeyComboBox" Header="Key" SelectionChanged="WingAction_SelectionChanged" />
+                        </StackPanel>
+                        <StackPanel x:Name="WingSingleLaunchDetails" Spacing="6" Visibility="Collapsed">
+                            <TextBox x:Name="WingSingleExecutableTextBox" Header="Executable (.exe)" LostFocus="WingConfiguration_LostFocus" />
+                            <TextBox x:Name="WingSingleArgumentsTextBox" Header="Arguments" LostFocus="WingConfiguration_LostFocus" />
+                        </StackPanel>
+                        <TextBlock Text="Double Press" />
+                        <ComboBox x:Name="WingDoubleActionComboBox" SelectionChanged="WingAction_SelectionChanged" />
+                        <StackPanel x:Name="WingDoubleHotkeyDetails" Spacing="6" Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <CheckBox x:Name="WingDoubleControlCheckBox" Content="Ctrl" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
+                                <CheckBox x:Name="WingDoubleShiftCheckBox" Content="Shift" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
+                                <CheckBox x:Name="WingDoubleAltCheckBox" Content="Alt" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
+                                <CheckBox x:Name="WingDoubleWindowsCheckBox" Content="Windows" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
+                            </StackPanel>
+                            <ComboBox x:Name="WingDoubleKeyComboBox" Header="Key" SelectionChanged="WingAction_SelectionChanged" />
+                        </StackPanel>
+                        <StackPanel x:Name="WingDoubleLaunchDetails" Spacing="6" Visibility="Collapsed">
+                            <TextBox x:Name="WingDoubleExecutableTextBox" Header="Executable (.exe)" LostFocus="WingConfiguration_LostFocus" />
+                            <TextBox x:Name="WingDoubleArgumentsTextBox" Header="Arguments" LostFocus="WingConfiguration_LostFocus" />
+                        </StackPanel>
+                    </StackPanel>
+                    </ctcontrols:SettingsCard>
+                </ctcontrols:SettingsExpander.Items>
+            </ctcontrols:SettingsExpander>
 
             <!--
                 The toggle changes ONLY the global remapping switch; clicking anywhere else on the

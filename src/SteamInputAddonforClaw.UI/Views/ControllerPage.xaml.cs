@@ -1,12 +1,24 @@
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml;
+using System.Threading;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.Wing;
 
 namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class ControllerPage : UserControl
 {
+    internal sealed record WingActionOption(WingAction Action, string Label);
+    private static readonly WingActionOption[] WingActionOptions = WingActionCapabilities.Actions
+        .Select(action => new WingActionOption(action, action switch
+        {
+            WingAction.None => "None",
+            WingAction.SteamButton => "Steam Button",
+            WingAction.KeyboardHotkey => "Keyboard Hotkey",
+            WingAction.LaunchApplication => "Launch Application",
+            _ => action.ToString()
+        })).ToArray();
     private IAddonFrontendControl? _frontend;
     private bool _isLoading;
     private bool _lastKnownSteamInputRoutingEnabled;
@@ -21,6 +33,10 @@ public sealed partial class ControllerPage : UserControl
     /// Steam, BPM, or the persisted remapping switch. False until Initialize runs, so the card can
     /// never briefly offer a feature this machine does not have.</summary>
     private bool _oem1MappingAvailable;
+    private bool _wingMappingAvailable;
+    private WingMappingSettings _wingMapping = WingMappingSettings.Default;
+    private readonly SemaphoreSlim _wingMutationGate = new(1, 1);
+    private long _wingEditRevision;
 
     public ControllerPage()
     {
@@ -47,10 +63,123 @@ public sealed partial class ControllerPage : UserControl
         SteamInputRoutingToggleSwitch.IsOn = bootstrap.Settings.SteamInputRoutingEnabled;
         _lastKnownSteamInputRoutingEnabled = bootstrap.Settings.SteamInputRoutingEnabled;
         _oem1MappingAvailable = bootstrap.Oem1MappingAvailable;
+        _wingMappingAvailable = bootstrap.WingMappingAvailable;
+        ApplyWingMappingAvailability();
         ApplyOem1MappingAvailability();
         ApplyOem1Mapping(bootstrap.Settings.Oem1Mapping);
+        ApplyWingMapping(bootstrap.Settings.WingMapping ?? WingMappingSettings.Default);
         _isLoading = false;
     }
+
+    private void ApplyWingMapping(WingMappingSettings mapping)
+    {
+        var wasLoading = _isLoading;
+        _isLoading = true;
+        try
+        {
+            _wingMapping = mapping;
+            WingSingleActionComboBox.ItemsSource = WingActionOptions;
+            WingDoubleActionComboBox.ItemsSource = WingActionOptions;
+            WingSingleActionComboBox.DisplayMemberPath = nameof(WingActionOption.Label);
+            WingDoubleActionComboBox.DisplayMemberPath = nameof(WingActionOption.Label);
+            WingSingleKeyComboBox.ItemsSource = Enum.GetValues<WingHotkeyKey>();
+            WingDoubleKeyComboBox.ItemsSource = Enum.GetValues<WingHotkeyKey>();
+            WingSingleActionComboBox.SelectedItem = WingActionOptions.First(option => option.Action == mapping.Single.Action);
+            WingDoubleActionComboBox.SelectedItem = WingActionOptions.First(option => option.Action == mapping.Double.Action);
+            WingSingleExecutableTextBox.Text = mapping.Single.Launch.ExecutablePath;
+            WingSingleArgumentsTextBox.Text = mapping.Single.Launch.Arguments;
+            WingDoubleExecutableTextBox.Text = mapping.Double.Launch.ExecutablePath;
+            WingDoubleArgumentsTextBox.Text = mapping.Double.Launch.Arguments;
+            WingSingleControlCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Control);
+            WingSingleShiftCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Shift);
+            WingSingleAltCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Alt);
+            WingSingleWindowsCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows);
+            WingSingleKeyComboBox.SelectedItem = mapping.Single.Hotkey.Key;
+            WingDoubleControlCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Control);
+            WingDoubleShiftCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Shift);
+            WingDoubleAltCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Alt);
+            WingDoubleWindowsCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows);
+            WingDoubleKeyComboBox.SelectedItem = mapping.Double.Hotkey.Key;
+            ApplyWingDetails();
+        }
+        finally { _isLoading = wasLoading; }
+    }
+
+    private void ApplyWingDetails()
+    {
+        var single = SelectedWingAction(WingSingleActionComboBox);
+        var doubled = SelectedWingAction(WingDoubleActionComboBox);
+        WingSingleHotkeyDetails.Visibility = single == WingAction.KeyboardHotkey ? Visibility.Visible : Visibility.Collapsed;
+        WingSingleLaunchDetails.Visibility = single == WingAction.LaunchApplication ? Visibility.Visible : Visibility.Collapsed;
+        WingDoubleHotkeyDetails.Visibility = doubled == WingAction.KeyboardHotkey ? Visibility.Visible : Visibility.Collapsed;
+        WingDoubleLaunchDetails.Visibility = doubled == WingAction.LaunchApplication ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    internal static WingAction SelectedWingAction(object? selectedItem) =>
+        selectedItem is WingActionOption option ? option.Action : WingAction.None;
+
+    private void WingAction_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_isLoading || _frontend is null || !_wingMappingAvailable) return;
+        ApplyWingDetails();
+        QueueWingMappingSave(BuildCurrentWingMapping());
+    }
+
+    private void WingConfiguration_Changed(object sender, RoutedEventArgs args)
+    {
+        if (_isLoading || _frontend is null || !_wingMappingAvailable) return;
+        QueueWingMappingSave(BuildCurrentWingMapping());
+    }
+
+    private void WingConfiguration_LostFocus(object sender, RoutedEventArgs args)
+    {
+        if (_isLoading || _frontend is null || !_wingMappingAvailable) return;
+        QueueWingMappingSave(BuildCurrentWingMapping());
+    }
+
+    private WingMappingSettings BuildCurrentWingMapping()
+    {
+        var single = BuildWingBinding(WingSingleActionComboBox, WingSingleControlCheckBox, WingSingleShiftCheckBox, WingSingleAltCheckBox, WingSingleWindowsCheckBox, WingSingleKeyComboBox, WingSingleExecutableTextBox, WingSingleArgumentsTextBox);
+        var doubled = BuildWingBinding(WingDoubleActionComboBox, WingDoubleControlCheckBox, WingDoubleShiftCheckBox, WingDoubleAltCheckBox, WingDoubleWindowsCheckBox, WingDoubleKeyComboBox, WingDoubleExecutableTextBox, WingDoubleArgumentsTextBox);
+        return _wingMapping with { Single = single, Double = doubled };
+    }
+
+    private async void QueueWingMappingSave(WingMappingSettings desired)
+    {
+        if (_isLoading || _frontend is null || !_wingMappingAvailable) return;
+        if (ContainsBlockedWinG(desired)) { ApplyWingMapping(_wingMapping); return; }
+        var revision = Interlocked.Increment(ref _wingEditRevision);
+        await _wingMutationGate.WaitAsync();
+        try
+        {
+            var result = await _frontend.SetWingMappingAsync(desired);
+            _wingMapping = result.WingMapping ?? WingMappingSettings.Default;
+            if (revision == Volatile.Read(ref _wingEditRevision)) ApplyWingMapping(_wingMapping);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Controller", "WING mapping update failed.", exception);
+            if (revision == Volatile.Read(ref _wingEditRevision)) ApplyWingMapping(_wingMapping);
+        }
+        finally { _wingMutationGate.Release(); }
+    }
+
+    private static bool ContainsBlockedWinG(WingMappingSettings mapping) =>
+        (mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows) && mapping.Single.Hotkey.Key == WingHotkeyKey.G)
+        || (mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows) && mapping.Double.Hotkey.Key == WingHotkeyKey.G);
+
+    private static WingSlotBinding BuildWingBinding(ComboBox actionBox, CheckBox control, CheckBox shift, CheckBox alt, CheckBox windows, ComboBox keyBox, TextBox executable, TextBox arguments)
+    {
+        var action = actionBox.SelectedItem is WingActionOption selected ? selected.Action : WingAction.None;
+        var modifiers = (control.IsChecked == true ? WingHotkeyModifiers.Control : WingHotkeyModifiers.None)
+            | (shift.IsChecked == true ? WingHotkeyModifiers.Shift : WingHotkeyModifiers.None)
+            | (alt.IsChecked == true ? WingHotkeyModifiers.Alt : WingHotkeyModifiers.None)
+            | (windows.IsChecked == true ? WingHotkeyModifiers.Windows : WingHotkeyModifiers.None);
+        var key = keyBox.SelectedItem is WingHotkeyKey selectedKey ? selectedKey : WingHotkeyKey.None;
+        return new WingSlotBinding { Action = action, Hotkey = new WingHotkeyBinding(modifiers, key), Launch = new WingLaunchApplicationBinding(executable.Text, arguments.Text) };
+    }
+
+    private void ApplyWingMappingAvailability() => WingMappingCard.IsEnabled = _wingMappingAvailable;
 
     /// <summary>
     /// Unsupported-hardware presentation, composed from the patterns already in this app: the card
