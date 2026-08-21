@@ -32,6 +32,20 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Non_managed_connection_loss_exits_without_reconnect_recovery()
+    {
+        var program = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Program.cs");
+
+        var lossIndex = program.IndexOf("log.Warn(\"CDP connection lost.\")", StringComparison.Ordinal);
+        Assert.True(lossIndex >= 0);
+        var lossPath = program[lossIndex..];
+
+        Assert.Contains("if (!managed)", lossPath);
+        Assert.Contains("stopRequested = true", lossPath);
+        Assert.Contains("reconnect recovery is disabled", lossPath);
+    }
+
+    [Fact]
     public void Nested_react_walker_traverses_props_children_child_and_sibling()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");

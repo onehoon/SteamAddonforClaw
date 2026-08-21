@@ -79,8 +79,15 @@ try
                     await InstallAsync(currentClient);
                     continue;
                 }
-                log.Warn("CDP connection lost; starting GamepadUI reacquisition.");
+                log.Warn("CDP connection lost.");
                 installationSucceeded = false;
+                if (!managed)
+                {
+                    log.Warn("Non-managed QAM session ended; reconnect recovery is disabled.");
+                    stopRequested = true;
+                    break;
+                }
+                log.Warn("Starting bounded GamepadUI reacquisition.");
                 recoveryDeadline = QamHostRecovery.BeginAfterSessionFailure(managed, recoveryDeadline, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
                 break;
             }
