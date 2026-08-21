@@ -584,8 +584,9 @@ public sealed class AddonRuntimeHostTests
             powerGate,
             recoverySafetyState,
             new DefaultOem1MappingPreference(),
-            hardwareSupported: true);
+            hardwareSupported: false);
         runtime?.TestOnly_SetOem1ActivationTask(Task.CompletedTask);
+        runtime?.TestOnly_SetSteamOutputReady(true);
         return runtime;
     }
 

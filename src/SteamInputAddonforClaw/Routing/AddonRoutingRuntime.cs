@@ -83,11 +83,13 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     /// decision is settled first. <see cref="Task.CompletedTask"/> for a backend with no OEM1 feature
     /// (the interface default).</summary>
     internal Task Oem1ActivationTask { get; private set; } = Task.CompletedTask;
+    private bool? _testOnlySteamOutputReadyOverride;
 
     /// <summary>Test-only seam: lets a test hold OEM1 activation deliberately incomplete and prove
     /// <see cref="ReconcileSafelyAsync"/> cannot enter the routing coordinator until it resolves.
     /// Never touched by production code.</summary>
     internal void TestOnly_SetOem1ActivationTask(Task task) => Oem1ActivationTask = task;
+    internal void TestOnly_SetSteamOutputReady(bool ready) => _testOnlySteamOutputReadyOverride = ready;
 
     internal static AddonRoutingRuntime? Create(
         IHandheldDeviceAdapter handheldDeviceAdapter,
@@ -615,7 +617,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return await _safetySession.ConvergeAfterRoutingCleanupAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
-    private bool SteamOutputReady => _viiperRuntime is { State: CanonicalViiperRuntimeState.Ready };
+    private bool SteamOutputReady => _testOnlySteamOutputReadyOverride
+        ?? (_viiperRuntime is { State: CanonicalViiperRuntimeState.Ready });
     private bool ShouldSkipNewForwardRouting => !SteamOutputReady && !_coordinator.HasResidualSessionState;
 
     /// <summary>
