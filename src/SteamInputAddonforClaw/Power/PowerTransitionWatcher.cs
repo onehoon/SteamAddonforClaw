@@ -14,6 +14,8 @@ internal sealed class PowerTransitionWatcher : IDisposable
     private readonly PowerMutationGate _gate;
     private readonly PowerTransitionCoordinator _coordinator;
     private readonly Action _cancelLifecycle;
+    private readonly object _inFlightSync = new();
+    private readonly HashSet<Task> _inFlight = [];
     private int _disposed;
     // 0 = awake/unknown, 1 = suspend observed, 2 = first resume observed.
     private int _phase;
@@ -25,7 +27,25 @@ internal sealed class PowerTransitionWatcher : IDisposable
         if (_source.TryRegister(out _)) return true;
         _source.Notification -= OnNotification; _gate.Close(); return false;
     }
-    private void OnNotification(uint rawCode) => _ = ObserveNotificationSafelyAsync(rawCode);
+    private void OnNotification(uint rawCode)
+    {
+        Task task;
+        lock (_inFlightSync)
+        {
+            if (Volatile.Read(ref _disposed) != 0) return;
+            task = ObserveNotificationSafelyAsync(rawCode);
+            _inFlight.Add(task);
+        }
+        _ = RemoveWhenCompleteAsync(task);
+    }
+    private async Task RemoveWhenCompleteAsync(Task task)
+    {
+        try { await task.ConfigureAwait(false); }
+        finally
+        {
+            lock (_inFlightSync) _inFlight.Remove(task);
+        }
+    }
     private async Task ObserveNotificationSafelyAsync(uint rawCode)
     {
         try { await ObserveAsync(rawCode).ConfigureAwait(false); }
@@ -62,5 +82,27 @@ internal sealed class PowerTransitionWatcher : IDisposable
         return _coordinator.Enqueue(observation);
     }
     internal static PowerSignal Map(uint rawCode) => rawCode switch { 4 => PowerSignal.Suspend, 18 => PowerSignal.ResumeAutomatic, 7 => PowerSignal.ResumeSuspend, _ => PowerSignal.Unknown };
-    public void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) != 0) return; _source.Notification -= OnNotification; _source.Dispose(); }
+    public void Dispose()
+    {
+        lock (_inFlightSync)
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            _source.Notification -= OnNotification;
+        }
+        _source.Dispose();
+    }
+    internal async Task DrainAsync()
+    {
+        while (true)
+        {
+            Task[] tasks;
+            lock (_inFlightSync)
+            {
+                if (_inFlight.Count == 0) return;
+                tasks = [.. _inFlight];
+            }
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch { }
+        }
+    }
 }

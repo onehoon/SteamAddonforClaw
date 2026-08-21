@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Feedback;
@@ -49,6 +50,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private readonly Func<Task<bool>>? _routingShutdownOverride;
     private readonly Func<ValueTask>? _routingDisposeOverride;
     private readonly Action? _routingReconcileCompleted;
+    private readonly ConcurrentDictionary<Task, byte> _backgroundTasks = new();
 
     // Guards against a resume notification that was already queued in PowerTransitionCoordinator
     // before shutdown began running ReconcileFreshAfterResumeAsync's Steam refresh concurrently
@@ -250,7 +252,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private void OnSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args)
     {
         SteamSessionStateChanged?.Invoke(this, args);
-        if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) _ = ReconcileAsync();
+        if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) TrackBackgroundTask(ReconcileAsync());
     }
 
     private void RequestStatusRefresh() => StatusRefreshRequested?.Invoke(this, EventArgs.Empty);
@@ -266,6 +268,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         PrepareForShutdown();
         _powerWatcher.Dispose();
+        await _powerWatcher.DrainAsync().ConfigureAwait(false);
+        await DrainBackgroundTasksAsync().ConfigureAwait(false);
         var routingShutdownSucceeded = _routingShutdownOverride is not null
             ? await _routingShutdownOverride().ConfigureAwait(false)
             : _routingRuntime is null || await _routingRuntime.ShutdownAsync().ConfigureAwait(false);
@@ -274,6 +278,29 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         {
             if (_routingDisposeOverride is not null) await _routingDisposeOverride().ConfigureAwait(false);
             else if (_routingRuntime is not null) await _routingRuntime.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private void TrackBackgroundTask(Task task)
+    {
+        _backgroundTasks.TryAdd(task, 0);
+        _ = RemoveBackgroundTaskAsync(task);
+    }
+
+    private async Task RemoveBackgroundTaskAsync(Task task)
+    {
+        try { await task.ConfigureAwait(false); }
+        catch { }
+        finally { _backgroundTasks.TryRemove(task, out _); }
+    }
+
+    private async Task DrainBackgroundTasksAsync()
+    {
+        while (!_backgroundTasks.IsEmpty)
+        {
+            var tasks = _backgroundTasks.Keys.ToArray();
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch { }
         }
     }
 }
