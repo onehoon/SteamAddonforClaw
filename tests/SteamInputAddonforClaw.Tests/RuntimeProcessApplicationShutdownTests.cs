@@ -15,4 +15,17 @@ public sealed class RuntimeProcessApplicationShutdownTests
 
         Assert.Equal(["ShutdownStarted", "ShutdownCompleted", "LoopExitRequested"], events);
     }
+
+    [Fact]
+    public void Failed_message_loop_exit_request_can_be_retried()
+    {
+        var attempts = 0;
+        Assert.False(RuntimeProcessApplication.TryRequestMessageLoopExit(() =>
+        {
+            attempts++;
+            if (attempts == 1) throw new InvalidOperationException("simulated post failure");
+        }));
+        Assert.True(RuntimeProcessApplication.TryRequestMessageLoopExit(() => attempts++));
+        Assert.Equal(2, attempts);
+    }
 }
