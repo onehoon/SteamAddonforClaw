@@ -119,18 +119,26 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         try
         {
             _helperDemandActive = true;
+            // The production persistent-owner callback is serialized by the OEM1 coordinator gate.
+            // Resolve it before entering the routing transaction so an OEM1 Stop already authorized
+            // by that gate cannot race a later borrow decision.
+            _ = PersistentHelperOwnerReady();
             // Idempotent: a duplicate arm request while already armed is a confirmation, not a
             // fresh attempt -- it must never stage a second helper or re-acquire the mutex.
             if (_armed) return CenterMMainUiRoutingGuardResult.Armed;
 
             var result = await ArmCoreAsync(cancellationToken).ConfigureAwait(false);
             if (result != CenterMMainUiRoutingGuardResult.Armed)
+            {
                 _helperDemandActive = false;
+                FinalizeFailedArmDemand();
+            }
             return result;
         }
         catch
         {
             _helperDemandActive = false;
+            FinalizeFailedArmDemand();
             throw;
         }
         finally { _gate.Release(); }
@@ -388,6 +396,19 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         {
             AppLog.Warn("CenterM.RoutingGuard", "Persistent helper ownership could not be confirmed; retaining Routing cleanup authority.", exception);
             return false;
+        }
+    }
+
+    private void FinalizeFailedArmDemand()
+    {
+        if (_persistentHelperOwnerReady is null || _helperStartedByCurrentArm || !_helperOwnership.IsOwned)
+            return;
+
+        if (!PersistentHelperOwnerReady())
+        {
+            var stopped = _helperOwnership.Stop(_helperStopTimeout);
+            AppLog.Info("CenterM.RoutingGuard", "Failed Routing arm finalized borrowed helper cleanup.",
+                ("Confirmed", stopped), ("HelperProcessId", _helperOwnership.ProcessId));
         }
     }
 
