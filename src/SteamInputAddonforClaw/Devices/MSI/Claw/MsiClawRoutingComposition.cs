@@ -653,9 +653,13 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         if (!MsiClawPhysicalInputFaultPolicy.IsFatal(summary.StopReason, PhysicalInputStage.CurrentIdentity is not null))
             return;
 
-        AppLog.Warn("Routing.Runtime", "Owned physical-input session terminated unexpectedly; requesting routing fail-close.", null,
-            ("Event", "PhysicalInputSessionLost"), ("StopReason", summary.StopReason), ("Action", "FailClosed"));
-        ReportRuntimeFault(MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason);
+        var reason = NativeModeSession.ConfirmExternalNativeTakeover()
+            ? MsiClawPhysicalInputFaultPolicy.ExternalNativeTakeoverReason
+            : MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason;
+        if (reason == MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason)
+            AppLog.Warn("Routing.Runtime", "Owned physical-input session terminated unexpectedly; requesting routing fail-close.", null,
+                ("Event", "PhysicalInputSessionLost"), ("StopReason", summary.StopReason), ("Action", "FailClosed"));
+        ReportRuntimeFault(reason);
     }
 
     /// <summary>

@@ -8,6 +8,7 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 internal static class MsiClawPhysicalInputFaultPolicy
 {
     internal const string PhysicalInputSessionLostReason = "PhysicalInputSessionLost";
+    internal const string ExternalNativeTakeoverReason = "ExternalNativeTakeover";
 
     /// <summary>
     /// An owned physical-input session that stops for any reason other than an expected

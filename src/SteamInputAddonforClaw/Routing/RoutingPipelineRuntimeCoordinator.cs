@@ -28,6 +28,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private readonly SemaphoreSlim _transitionGate = new(1, 1);
     private readonly Lock _cancellationSync = new();
     private CancellationTokenSource _transitionCancellation = new();
+    private string? _sessionYieldReason;
     private int _shutdownRequested;
     private int _transitionOperationCount;
 
@@ -124,7 +125,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         }
     }
 
-    internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedAsync()
+    internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedAsync(bool yieldCurrentSteamSession = false)
     {
         // Fail-close must stop any in-flight forward transition before waiting for the gate --
         // otherwise a caller reporting a fault that already invalidates the active session (e.g.
@@ -141,6 +142,12 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
+            if (yieldCurrentSteamSession)
+            {
+                _sessionYieldReason = "ExternalNativeTakeover";
+                AppLog.Warn("Routing.Runtime", "ExternalNativeTakeoverDetected", null,
+                    ("Action", "YieldUntilSteamSessionEnd"));
+            }
             using var transition = CreateTransitionCancellation(CancellationToken.None);
 
             if ((_sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null) &&
@@ -310,6 +317,13 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileCoreAsync(CancellationToken cancellationToken)
     {
         var snapshot = await _statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
+        if (_sessionYieldReason is not null && snapshot.RoutingDecision.Kind == RoutingDecisionKind.Eligible)
+        {
+            AppLog.Debug("Routing.Runtime", "RouteDemandIgnored",
+                ("Reason", "ExternalNativeTakeoverLatched"), ("Decision", snapshot.RoutingDecision.Kind),
+                ("OperationalState", RoutingOperationalState.Passive), ("Action", "Yield"));
+            return new(true, _sessionCoordinator.CurrentState, RoutingActionKind.None, "ExternalNativeTakeoverLatched");
+        }
         var classification = Classify(snapshot.ControllerSoftware);
         if (_sessionCoordinator.ActiveSession is not null &&
             _sessionCoordinator.PendingCleanup is null &&
@@ -389,6 +403,11 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
                 AppLog.Error("Routing.Runtime", "Steam session boundary participant failed.", exception);
                 return new(false, result.State, result.Action, "SteamSessionBoundaryFailed");
             }
+        }
+        if (_sessionYieldReason is not null)
+        {
+            _sessionYieldReason = null;
+            AppLog.Info("Routing.Runtime", "ExternalNativeTakeoverYieldCleared", ("Reason", "SteamSessionEnded"));
         }
         return result;
     }

@@ -48,6 +48,33 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
         finally { _gate.Release(); }
     }
 
+    internal bool ConfirmExternalNativeTakeover()
+    {
+        if (!_gate.Wait(0)) return false;
+        try
+        {
+            if (!_active || _snapshot is null) return false;
+            var original = _snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
+            var current = _nativeState.CaptureSnapshot();
+            var currentPayload = current.Snapshot?.Payload.Deserialize<MsiClawNativeStatePayload>();
+            if (original is null || currentPayload is null || original.Mode != MsiClawNativeMode.XInput
+                || currentPayload.Mode != MsiClawNativeMode.XInput
+                || currentPayload.ProductId != MsiClawHardware.XInputProductId)
+                return false;
+            var originalIdentity = MsiClawPhysicalIdentity.FromPayload(original);
+            var currentIdentity = MsiClawPhysicalIdentity.FromPayload(currentPayload);
+            return originalIdentity.Confidence == MsiClawIdentityConfidence.Strong
+                && currentIdentity.Confidence == MsiClawIdentityConfidence.Strong
+                && ((MsiClawPhysicalIdentity.IsUsableContainer(originalIdentity.ContainerId)
+                    && MsiClawPhysicalIdentity.IsUsableContainer(currentIdentity.ContainerId)
+                    && originalIdentity.ContainerId == currentIdentity.ContainerId)
+                    || (!string.IsNullOrWhiteSpace(originalIdentity.PhysicalDeviceKey)
+                        && string.Equals(originalIdentity.PhysicalDeviceKey, currentIdentity.PhysicalDeviceKey, StringComparison.OrdinalIgnoreCase)));
+        }
+        catch (JsonException) { return false; }
+        finally { _gate.Release(); }
+    }
+
     public async ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

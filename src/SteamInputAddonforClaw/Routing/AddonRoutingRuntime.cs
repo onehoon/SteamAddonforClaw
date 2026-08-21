@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Power;
@@ -148,7 +149,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             if (safetySession is not null)
                 await safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);
 
-            var rollback = await coordinator.FailClosedAsync().ConfigureAwait(false);
+            var rollback = await coordinator.FailClosedAsync(
+                yieldCurrentSteamSession: reason == MsiClawPhysicalInputFaultPolicy.ExternalNativeTakeoverReason).ConfigureAwait(false);
             if (!rollback.Succeeded)
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
             else if (runtime is not null)

@@ -11,6 +11,37 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class RoutingPipelineRuntimeCoordinatorTests
 {
     [Fact]
+    public async Task External_takeover_yields_before_forward_pipeline_and_clears_at_session_end()
+    {
+        var executor = new FakeExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(Eligible(), Software()),
+                Snapshot(Eligible(), Software()),
+                Snapshot(WaitingForSteam(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var yielded = await bridge.Bridge.FailClosedAsync(yieldCurrentSteamSession: true);
+        Assert.True(yielded.Succeeded);
+        var ignored = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(ignored.Succeeded);
+        Assert.Equal("ExternalNativeTakeoverLatched", ignored.Reason);
+        Assert.Single(executor.ExecutedPlans);
+        Assert.Single(executor.RollbackPlans);
+
+        var ended = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        Assert.True(ended.Succeeded);
+        var nextSession = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(nextSession.Succeeded);
+        Assert.Equal(RoutingActionKind.EnterOverride, nextSession.Action);
+        Assert.Equal(2, executor.ExecutedPlans.Count);
+    }
+
+    [Fact]
     public async Task SyntheticTestModeSessionBoundaryEntersAndRollsBackTheProductionPipeline()
     {
         var executor = new FakeExecutor();
