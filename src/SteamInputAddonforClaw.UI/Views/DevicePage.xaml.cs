@@ -226,10 +226,29 @@ public sealed partial class DevicePage : UserControl
     {
         if (_suppressTdpEvents) return;
         var value = double.IsFinite(args.NewValue) && args.NewValue == Math.Truncate(args.NewValue) ? (int)args.NewValue : (int?)null;
-        if (sender == TdpAcPl1NumberBox) _acPl1Draft = value;
-        else if (sender == TdpAcPl2NumberBox) _acPl2Draft = value;
-        else if (sender == TdpDcPl1NumberBox) _dcPl1Draft = value;
-        else _dcPl2Draft = value;
+        var isAc = sender == TdpAcPl1NumberBox || sender == TdpAcPl2NumberBox;
+        var isPl1 = sender == TdpAcPl1NumberBox || sender == TdpDcPl1NumberBox;
+        var pl1 = isAc ? _acPl1Draft : _dcPl1Draft;
+        var pl2 = isAc ? _acPl2Draft : _dcPl2Draft;
+        if (isPl1) pl1 = value;
+        else pl2 = value;
+
+        if (_tdpSnapshot.Limits is { } limits)
+        {
+            var adjusted = TdpDraftPolicy.AdjustAfterEdit(isPl1, pl1, pl2, limits);
+            pl1 = adjusted.Pl1Watts;
+            pl2 = adjusted.Pl2Watts;
+            _suppressTdpEvents = true;
+            try
+            {
+                SetNumberBox(isAc ? TdpAcPl1NumberBox : TdpDcPl1NumberBox, pl1);
+                SetNumberBox(isAc ? TdpAcPl2NumberBox : TdpDcPl2NumberBox, pl2);
+            }
+            finally { _suppressTdpEvents = false; }
+        }
+
+        if (isAc) { _acPl1Draft = pl1; _acPl2Draft = pl2; }
+        else { _dcPl1Draft = pl1; _dcPl2Draft = pl2; }
         _tdpDraftDirty = true;
         if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit();
     }
@@ -295,6 +314,33 @@ public sealed partial class DevicePage : UserControl
 
     internal static class TdpDraftPolicy
     {
+        internal readonly record struct AdjustedPair(int? Pl1Watts, int? Pl2Watts);
+
+        internal static AdjustedPair AdjustAfterEdit(bool pl1WasEdited, int? pl1, int? pl2, FrontendTdpLimits limits)
+        {
+            var gap = limits switch
+            {
+                { Pl1MinimumWatts: 8, Pl1MaximumWatts: 30, Pl2MinimumWatts: 8, Pl2MaximumWatts: 37 } => 1,
+                { Pl1MinimumWatts: 8, Pl1MaximumWatts: 35, Pl2MinimumWatts: 8, Pl2MaximumWatts: 45 } => 2,
+                _ => 0
+            };
+            if (gap == 0) return new(pl1, pl2);
+            if (pl1WasEdited)
+            {
+                if (pl1 is not { } editedPl1 || pl2 is not { } currentPl2 || currentPl2 >= editedPl1 + gap)
+                    return new(pl1, pl2);
+                return editedPl1 + gap <= limits.Pl2MaximumWatts
+                    ? new(editedPl1, editedPl1 + gap)
+                    : new(limits.Pl2MaximumWatts - gap, currentPl2);
+            }
+
+            if (pl2 is not { } editedPl2 || pl1 is not { } currentPl1 || currentPl1 <= editedPl2 - gap)
+                return new(pl1, pl2);
+            return editedPl2 - gap >= limits.Pl1MinimumWatts
+                ? new(editedPl2 - gap, editedPl2)
+                : new(limits.Pl1MinimumWatts, limits.Pl1MinimumWatts + gap);
+        }
+
         internal static bool CanSubmitDebouncedEdit(long generation, long currentGeneration, bool enabled) =>
             generation == currentGeneration && enabled;
 
