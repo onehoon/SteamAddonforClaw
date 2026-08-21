@@ -127,6 +127,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     // order against OnGestureRecognized's bridge-lock-then-PolicyRequested-callback path and could
     // deadlock a real action failure against a concurrent lifecycle refresh/disposal.
     private readonly object _oem1TaskSync = new();
+    private readonly CancellationTokenSource _oem1LifetimeCancellation = new();
+    private static readonly TimeSpan Oem1ShutdownJoinTimeout = TimeSpan.FromSeconds(5);
     private Task _oem1ActivationTask = Task.CompletedTask;
     private Task? _oem1FailOpenTask;
     private bool _oem1Stopping;
@@ -213,6 +215,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // MsiClawNativeStateManager) as the guard's read-only native-mode probe, so retirement's
         // XInput verification observes the exact same authority the real NativeMode stage uses.
         var centerMProcesses = new Win32ProcessSnapshotSource();
+        CenterMOem1LifecycleCoordinator? oem1Coordinator = centerMOem1Coordinator;
         CenterMGuard = centerMGuard ?? new CenterMMainUiRoutingGuard(
             processSnapshotSource: centerMProcesses,
             helperOwnership: CenterMHelperOwnership,
@@ -222,7 +225,18 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
                 // look at the same route authority, so an already-doomed route (fault latch,
                 // recovery safety, power gate) never retires the user's real MainUI first.
                 new MsiClawCenterMRoutingPreflightProbe(NativeModeSession),
-                processSnapshotSource: centerMProcesses));
+                processSnapshotSource: centerMProcesses),
+            persistentHelperOwnerReady: () =>
+            {
+                var snapshot = oem1Coordinator?.GetSnapshot();
+                return snapshot is
+                {
+                    DesiredEnabled: true,
+                    State: CenterMOem1LifecycleState.Armed,
+                    HelperProcessId: not null
+                };
+            },
+            releaseSharedHelper: cancellationToken => (oem1Coordinator ?? throw new InvalidOperationException("OEM1 coordinator is unavailable.")).ReleaseRoutingHelperAsync(cancellationToken));
         CenterMGuardStage = new CenterMMainUiRoutingGuardStage(CenterMGuard);
 
         // PR2: production-compose the already-implemented CenterMOem1LifecycleCoordinator into
@@ -236,11 +250,13 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // so `() => true` here IS the required explicit MSI Claw environment-eligibility predicate
         // (requirement 9) -- distinct from, and never widening, the coordinator's own fail-open
         // default of false for any caller that omits one.
-        CenterMOem1Coordinator = centerMOem1Coordinator ?? new CenterMOem1LifecycleCoordinator(
+        CenterMOem1Coordinator = oem1Coordinator ??= new CenterMOem1LifecycleCoordinator(
             publishRootProvider: () => AppContext.BaseDirectory,
             processSnapshotSource: centerMProcesses,
             helperOwnership: CenterMHelperOwnership,
-            environmentEligibility: () => true);
+            environmentEligibility: () => true,
+            externalHelperDemand: () => CenterMGuard.HasHelperDemand,
+            sharedHelperSafetyFault: ReportRuntimeFault);
         // PR3: the two narrow callbacks below let the OEM1 action path (wired later, only by
         // ConfigureOem1ActionPath) refresh custom gesture-bridge authority from the coordinator's own
         // freshly reconciled SuppressionReady snapshot after every tick/resume -- see
@@ -374,7 +390,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         lock (_oem1TaskSync)
         {
             _oem1RemappingEnabled = enabled;
-            return _oem1ActivationTask = ApplyOem1RemappingEnabledAsync(enabled);
+            return _oem1ActivationTask = StartInitialOem1ActivationAsync(enabled);
         }
     }
 
@@ -397,6 +413,14 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             _wingBridge = null;
         }
         return Task.CompletedTask;
+    }
+
+    private async Task StartInitialOem1ActivationAsync(bool enabled)
+    {
+        // Keep synchronous WMI/helper work out of composition creation. The task remains owned
+        // and is joined by Routing at its helper-acquisition boundary and by disposal.
+        await Task.Yield();
+        await ApplyOem1RemappingEnabledAsync(enabled, _oem1LifetimeCancellation.Token).ConfigureAwait(false);
     }
 
     /// <summary>Whether OEM1 desired-enabled should be requested, based solely on the persisted
@@ -435,16 +459,22 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// enable (arming suppression once its own prerequisites are met); off means it is asked to
     /// disable, restoring native MSI Center M behaviour. Persisted mappings are untouched either way.
     /// </summary>
-    private async Task ApplyOem1RemappingEnabledAsync(bool enabled)
+    private async Task ApplyOem1RemappingEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            AppLog.Info("CenterM.Oem1", enabled ? "OEM1 activation started." : "OEM1 activation skipped; mapping is OFF.",
+                ("Enabled", enabled), ("RoutingGuardArmed", CenterMGuard.IsArmed));
             // Scope 8: WMI startup failure must remain feature-local -- never arm custom suppression,
             // leave native Center M available, continue the Addon runtime otherwise unaffected.
             if (enabled && !TryStartOem1Observation())
                 return;
 
-            await CenterMOem1Coordinator.SetDesiredEnabledAsync(enabled).ConfigureAwait(false);
+            await CenterMOem1Coordinator.SetDesiredEnabledAsync(enabled, cancellationToken).ConfigureAwait(false);
+            AppLog.Info("CenterM.Oem1", "OEM1 activation completed.",
+                ("Enabled", enabled), ("HelperProcessId", CenterMHelperOwnership.ProcessId),
+                ("RoutingGuardArmed", CenterMGuard.IsArmed));
         }
         catch (Exception exception)
         {
@@ -497,7 +527,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         try { await previous.ConfigureAwait(false); }
         catch { /* observed above */ }
 
-        await ApplyOem1RemappingEnabledAsync(enabled).ConfigureAwait(false);
+        await ApplyOem1RemappingEnabledAsync(enabled, _oem1LifetimeCancellation.Token).ConfigureAwait(false);
     }
 
     /// <summary>Test-only observability: awaits the fire-and-forget startup activation
@@ -591,15 +621,17 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             if (_oem1Stopping || _oem1FailOpenTask is not null)
                 return;
 
-            _oem1FailOpenTask = DisableOem1AfterActionFailureAsync();
+            _oem1FailOpenTask = DisableOem1AfterActionFailureAsync(_oem1LifetimeCancellation.Token);
         }
     }
 
-    private async Task DisableOem1AfterActionFailureAsync()
+    private async Task DisableOem1AfterActionFailureAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await CenterMOem1Coordinator.SetDesiredEnabledAsync(false).ConfigureAwait(false);
+            // Replacement-action failure is feature-local. Revoke OEM1 authority and let the
+            // existing shared-demand policy keep Routing alive until its own teardown.
+            await CenterMOem1Coordinator.SetDesiredEnabledAsync(false, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -682,7 +714,6 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             mappingPreference.Oem1MappingChanged -= OnOem1MappingChanged;
 
         _oem1Bridge?.Dispose();
-        _oem1EventSource?.Dispose();
         _oem1GestureRecognizer?.Dispose();
 
         // Captures whatever activation/fail-open work is currently owned/in-flight -- both background
@@ -692,6 +723,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         lock (_oem1TaskSync)
         {
             _oem1Stopping = true;
+            _oem1LifetimeCancellation.Cancel();
             oem1ActivationTask = _oem1ActivationTask;
             oem1FailOpenTask = _oem1FailOpenTask ?? Task.CompletedTask;
         }
@@ -712,10 +744,32 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         await NativeModeSession.DisposeAsync().ConfigureAwait(false);
         await PhysicalInputSource.DisposeAsync().ConfigureAwait(false);
 
-        try { await oem1ActivationTask.ConfigureAwait(false); }
+        var activationDrained = true;
+        try { await oem1ActivationTask.WaitAsync(Oem1ShutdownJoinTimeout).ConfigureAwait(false); }
+        catch (TimeoutException exception)
+        {
+            activationDrained = false;
+            AppLog.Error("CenterM.Oem1", "OEM1 startup activation did not drain during shutdown; retaining its coordinator and helper authority.", exception);
+        }
+        catch (OperationCanceledException) when (_oem1LifetimeCancellation.IsCancellationRequested) { }
         catch (Exception exception) { AppLog.Error("CenterM.Oem1", "OEM1 startup activation did not complete cleanly during shutdown.", exception); }
-        try { await oem1FailOpenTask.ConfigureAwait(false); }
+        var failOpenDrained = true;
+        try { await oem1FailOpenTask.WaitAsync(Oem1ShutdownJoinTimeout).ConfigureAwait(false); }
+        catch (TimeoutException exception)
+        {
+            failOpenDrained = false;
+            AppLog.Error("CenterM.Oem1", "OEM1 action-failure fail-open did not drain during shutdown; retaining its coordinator and helper authority.", exception);
+        }
+        catch (OperationCanceledException) when (_oem1LifetimeCancellation.IsCancellationRequested) { }
         catch (Exception exception) { AppLog.Error("CenterM.Oem1", "OEM1 action-failure fail-open did not complete cleanly during shutdown.", exception); }
+
+        if (!activationDrained || !failOpenDrained)
+            return;
+
+        // WmiMsiEventSource serializes Start/Dispose under its own lock. Dispose the source only
+        // after the owned activation/fail-open tasks have drained, so a slow Start cannot block
+        // shutdown before the cancellation and bounded-join policy has taken effect.
+        _oem1EventSource?.Dispose();
 
         // Shutdown ordering (work order requirement 14): stop the OEM1 periodic driver and dispose
         // the coordinator BEFORE the routing guard's own terminal cleanup below -- a timer callback
@@ -741,5 +795,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // nothing is owned (never started, already stopped by the guard above).
         if (_ownsCenterMHelperOwnership)
             CenterMHelperOwnership.Dispose();
+
+        _oem1LifetimeCancellation.Dispose();
     }
 }

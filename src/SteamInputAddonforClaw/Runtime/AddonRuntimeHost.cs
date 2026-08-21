@@ -52,6 +52,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private readonly Func<ValueTask>? _routingDisposeOverride;
     private readonly Action? _routingReconcileCompleted;
     private readonly ConcurrentDictionary<Task, byte> _backgroundTasks = new();
+    private readonly CancellationTokenSource _shutdownCancellation = new();
 
     // Guards against a resume notification that was already queued in PowerTransitionCoordinator
     // before shutdown began running ReconcileFreshAfterResumeAsync's Steam refresh concurrently
@@ -191,7 +192,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         var succeeded = await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
                 freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
                 completeSuppression: _resumeFreshReconcileSuppression.Complete,
-                deferredReconcile: () => ReconcileAsync(),
+                deferredReconcile: QueueDeferredRoutingReconcile,
                 requestStatusRefresh: RequestStatusRefresh,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         if (succeeded)
@@ -241,6 +242,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     /// </summary>
     internal void PrepareForShutdown()
     {
+        _shutdownCancellation.Cancel();
         lock (_steamLifecycleLock)
         {
             if (_steamStopped) return;
@@ -253,7 +255,14 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private void OnSteamSessionStateChanged(object? sender, SteamSessionStateChangedEventArgs args)
     {
         SteamSessionStateChanged?.Invoke(this, args);
-        if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) TrackBackgroundTask(ReconcileAsync());
+        if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) TrackBackgroundTask(ReconcileAsync(_shutdownCancellation.Token));
+    }
+
+    private Task QueueDeferredRoutingReconcile()
+    {
+        var task = ReconcileAsync(_shutdownCancellation.Token);
+        TrackBackgroundTask(task);
+        return task;
     }
 
     private void RequestStatusRefresh() => StatusRefreshRequested?.Invoke(this, EventArgs.Empty);
@@ -281,6 +290,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
             if (_routingDisposeOverride is not null) await _routingDisposeOverride().ConfigureAwait(false);
             else if (_routingRuntime is not null) await _routingRuntime.DisposeAsync().ConfigureAwait(false);
         }
+        _shutdownCancellation.Dispose();
     }
 
     private void TrackBackgroundTask(Task task)

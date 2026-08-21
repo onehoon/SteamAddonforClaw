@@ -31,6 +31,8 @@ internal enum AddonProcessStartupOutcome
 internal sealed class AddonProcessHost : IAsyncDisposable
 {
     private readonly string[]? _updateRestartArguments;
+    private readonly Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? _runtimeCompositionFactory;
+    private readonly Func<string>? _frontendPipeNameFactory;
     private readonly CancellationTokenSource _startupCancellationTokenSource = new();
     private AddonStartupComposition? _startupComposition;
     private AddonRuntimeHost? _runtimeHost;
@@ -53,7 +55,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     // member of it (work order PR276 sections 0/2/12): CPU Boost must remain fully usable even with
     // Routing/OEM1/Steam/the frontend absent, so it is constructed and reconciled independently
     // here rather than inside AddonRuntimeCompositionFactory/AddonRoutingRuntime.
-    private readonly ProfileStore _profileStore = new(AddonDataPaths.ProfilesPath);
+    private readonly ProfileStore _profileStore;
     private readonly ProfileMutationGate _profileMutationGate = new();
     private readonly CpuBoostRuntime _cpuBoostRuntime;
     private TdpRuntime? _tdpRuntime;
@@ -64,12 +66,24 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _runtimeShutdownPrepared;
     private Task? _deferredRuntimeStartup;
 
-    internal AddonProcessHost(string[]? updateRestartArguments)
+    internal AddonProcessHost(string[]? updateRestartArguments,
+        Func<AddonStartupComposition, StartupResult, AddonRuntimeComposition>? testRuntimeCompositionFactory = null,
+        string? testOnlyDataRoot = null,
+        Func<string>? testFrontendPipeNameFactory = null)
     {
         _updateRestartArguments = updateRestartArguments;
+        _runtimeCompositionFactory = testRuntimeCompositionFactory;
+        _frontendPipeNameFactory = testFrontendPipeNameFactory;
+        var profilePath = testOnlyDataRoot is null
+            ? AddonDataPaths.ProfilesPath
+            : Path.Combine(testOnlyDataRoot, "profiles.json");
+        var logDirectory = testOnlyDataRoot is null
+            ? Install.AddonDataPaths.LogDirectory
+            : Path.Combine(testOnlyDataRoot, "logs");
+        _profileStore = new(profilePath);
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
-        _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
-        _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, Install.AddonDataPaths.LogDirectory);
+        _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
+        _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, logDirectory);
         _gameBarForegroundWatcher = new GameBarForegroundWatcher();
         _gameBarDelivery = new GameBarForegroundPresentationDelivery(
             foreground => _runtimeHost?.HandleGameBarForegroundChangedAsync(foreground) ?? Task.FromResult(false));
@@ -77,6 +91,13 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal bool IsTrayAvailable => _systemTrayIcon?.IsAvailable == true;
     internal IAddonFrontendControl FrontendControl => _frontendControl ?? throw new InvalidOperationException("Frontend control has not been initialized.");
+
+    internal void TestOnly_SetStartupForInitialization(AddonStartupComposition composition, StartupResult result)
+    {
+        _startupComposition = composition;
+        _startupResult = result;
+        _startupOutcome = AddonProcessStartupOutcome.RuntimeReady;
+    }
 
     internal async Task<AddonProcessStartupOutcome> RunStartupAsync()
     {
@@ -130,34 +151,24 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var startupResult = _startupResult ?? throw new InvalidOperationException("Startup result is unavailable.");
         AppLog.Info($"Starting runtime. Environment={startupResult.EnvironmentMode}; Readiness={startupResult.EnvironmentReadiness}.");
 
-        var composition = AddonRuntimeCompositionFactory.Create(
-            startupComposition.HandheldDeviceAdapter,
-            startupComposition.DeviceRegistry,
-            startupComposition.ControllerEnvironmentAssessmentProvider,
-            startupComposition.AddonOwnedVirtualDeviceTracker,
-            startupComposition.RuntimeRecoveryManager,
-            startupComposition.StockCenterMBaseline,
-            startupResult.RecoverySafe,
-            startupResult.HardwareSupported,
-            winGSuppressionGuard: _winGSuppressionGuard,
-            bigPictureStateChanged: _qamHostController.OnBigPictureStateChanged,
-            routingReconcileCompleted: null);
+        var composition = _runtimeCompositionFactory?.Invoke(startupComposition, startupResult)
+            ?? AddonRuntimeCompositionFactory.Create(
+                startupComposition.HandheldDeviceAdapter,
+                startupComposition.DeviceRegistry,
+                startupComposition.ControllerEnvironmentAssessmentProvider,
+                startupComposition.AddonOwnedVirtualDeviceTracker,
+                startupComposition.RuntimeRecoveryManager,
+                startupComposition.StockCenterMBaseline,
+                startupResult.RecoverySafe,
+                startupResult.HardwareSupported,
+                winGSuppressionGuard: _winGSuppressionGuard,
+                bigPictureStateChanged: _qamHostController.OnBigPictureStateChanged,
+                routingReconcileCompleted: null);
 
-        // Review fix (BLOCKER): the OEM1 coordinator and the routing guard share the SAME underlying
-        // helper ownership, but only their exact-handle Start() call itself serializes between them.
-        // This must be awaited BEFORE StartPowerObservation()/the initial ReconcileAsync() (called by
-        // RuntimeProcessApplication only after this method returns) can let routing enter and possibly
-        // start the shared helper first -- otherwise both owners could race toward Start(), or routing
-        // could win first while OEM1 later observes and re-arms around an operational helper the guard
-        // still believes it exclusively owns.
-        try
-        {
-            await composition.Oem1ActivationTask.ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("OEM1 startup activation did not complete cleanly.", exception);
-        }
+        // Frontend transport and tray readiness are independent of OEM1 activation. Routing still
+        // awaits this task at its helper-acquisition boundary, so removing this process-wide await
+        // does not reintroduce a shared-helper Start race.
+        AppLog.Info("CenterM.Oem1", "OEM1 activation pending; Frontend transport will initialize independently.");
 
         _runtimeHost = composition.RuntimeHost;
         if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
@@ -178,13 +189,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime);
-        var pipeName = FrontendPipeEndpoint.CreateForCurrentUser();
+        var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
         try
         {
             AppLog.Debug("FrontendTransport", "Frontend named-pipe server starting.", ("PipeName", pipeName));
             await _frontendServer.StartAsync().ConfigureAwait(false);
+            _frontendLauncher.MarkRuntimeReady();
             AppLog.Info("FrontendTransport", "Frontend named-pipe server ready.", ("PipeName", pipeName));
         }
         catch (Exception exception)
