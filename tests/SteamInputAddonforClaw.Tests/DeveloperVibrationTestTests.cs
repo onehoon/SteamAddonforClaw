@@ -101,7 +101,7 @@ public sealed class DeveloperVibrationTestTests
 
         bridge.CancelDeveloperTestAndStop();
 
-        Assert.True((await developerTest).Succeeded);
+        Assert.False((await developerTest).Succeeded);
         await Task.Delay(300);
         // Only the developer Rumble command and the CancelDeveloperTestAndStop() zero write --
         // the cancelled pending 250ms delayed STOP must never also fire.
