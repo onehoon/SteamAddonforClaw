@@ -413,6 +413,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             _wingBridge = null;
         }
         return Task.CompletedTask;
+    }
 
     private async Task StartInitialOem1ActivationAsync(bool enabled)
     {
