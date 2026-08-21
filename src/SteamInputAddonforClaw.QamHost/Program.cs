@@ -22,133 +22,108 @@ if (!File.Exists(frontendPath))
 var frontendScript = await File.ReadAllTextAsync(frontendPath);
 log.Info($"Frontend script loaded. Path={frontendPath} Bytes={frontendScript.Length}");
 
-await using var client = new SteamGamepadUiCdpClient(devToolsEndpoint);
-client.AddonQamConsoleMessage += message => log.Info(message);
 using var lifetime = managed ? QamHostManagedLifetime.Start(() => Console.In.ReadLineAsync()) : null;
-Task? managedStopTask = null;
-if (managed)
-{
-    managedStopTask = lifetime!.StopTask;
-}
 var lifetimeToken = lifetime?.Token ?? CancellationToken.None;
-
-CdpTarget? gamepadUiTarget = null;
+Task stopTask = managed ? lifetime!.StopTask : WaitForConsoleShutdownAsync();
+SteamGamepadUiCdpClient? currentClient = null;
 var installationSucceeded = false;
 var teardownAttempted = false;
 try
 {
-    var deadline = DateTimeOffset.UtcNow.AddSeconds(managed ? 10 : 0);
-    while (true)
+    while (!lifetimeToken.IsCancellationRequested)
     {
-        IReadOnlyList<CdpTarget> targets;
-        try { targets = await client.ListTargetsAsync(lifetimeToken); }
-        catch (Exception ex) when (managed && ex is HttpRequestException or TaskCanceledException && DateTimeOffset.UtcNow < deadline)
-        { await Task.Delay(250, lifetimeToken); continue; }
+        currentClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+        currentClient.AddonQamConsoleMessage += message => log.Info(message);
+        var reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        currentClient.DocumentLoaded += () => reload.TrySetResult();
+        CdpTarget? target = null;
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(managed ? 10 : 0);
+        try
+        {
+            while (!lifetimeToken.IsCancellationRequested)
+            {
+                var targets = await currentClient.ListTargetsAsync(lifetimeToken);
+                target = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
+                if (target is not null || !managed || DateTimeOffset.UtcNow >= deadline) break;
+                await Task.Delay(250, lifetimeToken);
+            }
+            if (target is null) { log.Warn("GamepadUI target not found."); break; }
+            log.Info($"GamepadUI target acquired. Id={target.Id} Title={target.Title} Url={target.Url}");
+            await currentClient.ConnectAsync(target, lifetimeToken);
+            log.Info("CDP connected.");
+            await InstallAsync(currentClient);
+            teardownAttempted = false;
+            installationSucceeded = true;
 
-        log.Info($"target count={targets.Count}");
-        foreach (var target in targets) log.Info($"Target Type={target.Type} Title={target.Title} Url={target.Url}");
-        gamepadUiTarget = GamepadUiTargetSelector.SelectGamepadUiTarget(targets);
-        if (gamepadUiTarget is not null || !managed || DateTimeOffset.UtcNow >= deadline) break;
-        await Task.Delay(250, lifetimeToken);
+            while (!lifetimeToken.IsCancellationRequested)
+            {
+                var completed = await Task.WhenAny(stopTask, currentClient.ConnectionEnded, reload.Task);
+                if (completed == stopTask) break;
+                if (completed == reload.Task)
+                {
+                    log.Info("GamepadUI document reloaded; reinjecting QAM.");
+                    reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    currentClient.DocumentLoaded += () => reload.TrySetResult();
+                    await InstallAsync(currentClient);
+                    continue;
+                }
+                log.Warn("CDP connection lost; starting GamepadUI reacquisition.");
+                installationSucceeded = false;
+                break;
+            }
+            if (lifetimeToken.IsCancellationRequested) break;
+        }
+        catch (Exception ex) when (lifetimeToken.IsCancellationRequested)
+        {
+            log.Info($"QamHost stop requested. {ex.GetType().Name}: {ex.Message}");
+            break;
+        }
+        catch (Exception ex)
+        {
+            log.Warn($"QamHost QAM session ended. {ex.GetType().Name}: {ex.Message}");
+            installationSucceeded = false;
+        }
+        finally
+        {
+            if (installationSucceeded) await TeardownAsync(currentClient);
+            await currentClient.DisposeAsync();
+            currentClient = null;
+        }
+        if (!lifetimeToken.IsCancellationRequested) await Task.Delay(250, lifetimeToken);
     }
 }
-catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+catch (OperationCanceledException) when (lifetimeToken.IsCancellationRequested) { }
+finally
 {
-    if (lifetimeToken.IsCancellationRequested)
-    {
-        log.Info("QamHost stop requested during startup.");
-        return 0;
-    }
-    log.Warn($"DevTools endpoint unavailable. Steam CEF debugging is not active for this Steam session. If the Addon just created .cef-enable-remote-debugging while Steam was already running, restart Steam once. {ex.GetType().Name}: {ex.Message}");
-    return 0;
+    if (currentClient is not null) await currentClient.DisposeAsync();
 }
-
-if (gamepadUiTarget is null)
-{
-    log.Warn("GamepadUI target not found.");
-    return 0;
-}
-
-log.Info($"GamepadUI target selected. Id={gamepadUiTarget.Id} Title={gamepadUiTarget.Title} Url={gamepadUiTarget.Url}");
-
-try
-{
-    await client.ConnectAsync(gamepadUiTarget, lifetimeToken);
-    log.Info("CDP connected.");
-
-    var rawEvalResult = await client.EvaluateAsync(frontendScript, lifetimeToken);
-    var evalResult = CdpEvaluateResult.Parse(rawEvalResult);
-
-    if (!evalResult.Succeeded)
-    {
-        log.Error($"qam.js evaluation exception. {evalResult.ErrorText}");
-        return 0;
-    }
-
-    if (evalResult.BooleanValue != true)
-    {
-        log.Warn("install() returned false.");
-        return 0;
-    }
-
-    log.Info("Frontend evaluation succeeded. QAM hook installed.");
-    installationSucceeded = true;
-
-    if (lifetimeToken.IsCancellationRequested)
-    {
-        await TeardownAsync();
-        return 0;
-    }
-
-    if (managed)
-    {
-        await managedStopTask!.ConfigureAwait(false);
-    }
-    else
-    {
-        using var shutdown = new ManualResetEventSlim(initialState: false);
-        Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Set(); };
-        shutdown.Wait();
-    }
-
-    await TeardownAsync();
-}
-catch (Exception ex)
-{
-    if (lifetimeToken.IsCancellationRequested)
-    {
-        if (installationSucceeded) await TeardownAsync();
-        else log.Info("QamHost stop requested before installation completed.");
-        return 0;
-    }
-    if (installationSucceeded) await TeardownAsync();
-    log.Error($"QamHost error at runtime. {ex.GetType().Name}: {ex.Message}");
-    return 0;
-}
-
+log.Info("managed stop requested; cleanup completed.");
 return 0;
 
-async Task TeardownAsync()
+async Task InstallAsync(SteamGamepadUiCdpClient client)
+{
+    var result = CdpEvaluateResult.Parse(await client.EvaluateAsync(frontendScript, lifetimeToken));
+    if (!result.Succeeded) throw new InvalidOperationException($"qam.js evaluation exception: {result.ErrorText}");
+    if (result.BooleanValue != true) throw new InvalidOperationException("install() returned false.");
+    log.Info("QAM injection succeeded.");
+}
+
+async Task TeardownAsync(SteamGamepadUiCdpClient client)
 {
     if (!installationSucceeded || teardownAttempted) return;
     teardownAttempted = true;
-    log.Info("uninstall requested.");
     try
     {
-        var raw = await client.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.uninstall?.() ?? false", CancellationToken.None).ConfigureAwait(false);
-        var result = CdpEvaluateResult.Parse(raw);
-        if (!result.Succeeded || result.BooleanValue != true)
-            log.Error($"QAM cleanup failed: {result.ErrorText ?? "uninstall() returned false"}.");
-        else log.Info("cleanup completed.");
+        var result = CdpEvaluateResult.Parse(await client.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.uninstall?.() ?? false", CancellationToken.None));
+        if (result.Succeeded && result.BooleanValue == true) log.Info("cleanup completed.");
     }
-    catch (Exception exception)
-        when (exception is InvalidOperationException && exception.Message == "Not connected to a CDP target." ||
-              exception is System.Net.WebSockets.WebSocketException)
-    {
-        log.Info($"QAM target already closed; explicit uninstall was not available. {exception.GetType().Name}: {exception.Message}");
-    }
-    catch (Exception exception)
-    {
-        log.Warn($"QAM cleanup failed unexpectedly. {exception.GetType().Name}: {exception.Message}");
-    }
+    catch (Exception ex) when (ex is InvalidOperationException or System.Net.WebSockets.WebSocketException or IOException)
+    { log.Info($"QAM target already closed; explicit uninstall was not available. {ex.GetType().Name}: {ex.Message}"); }
+}
+
+static async Task WaitForConsoleShutdownAsync()
+{
+    var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; tcs.TrySetResult(); };
+    await tcs.Task;
 }

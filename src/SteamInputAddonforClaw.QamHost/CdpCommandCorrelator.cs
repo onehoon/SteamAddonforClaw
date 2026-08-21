@@ -37,6 +37,15 @@ public sealed class CdpCommandCorrelator
         return false;
     }
 
+    public void FailConnection(Exception exception)
+    {
+        foreach (var pair in _pending)
+        {
+            if (_pending.TryRemove(pair.Key, out var tcs))
+                tcs.TrySetException(exception);
+        }
+    }
+
     private void Cancel(int id)
     {
         if (_pending.TryRemove(id, out var tcs))

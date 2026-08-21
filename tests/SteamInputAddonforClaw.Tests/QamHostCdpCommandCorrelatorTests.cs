@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.QamHost;
+using System.Text.Json;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -51,5 +52,25 @@ public class QamHostCdpCommandCorrelatorTests
         var second = correlator.NextId();
 
         Assert.True(second > first);
+    }
+
+    [Fact]
+    public async Task FailConnectionCompletesPendingCommandsImmediately()
+    {
+        var correlator = new CdpCommandCorrelator();
+        var id = correlator.NextId();
+        var responseTask = correlator.RegisterAsync(id, CancellationToken.None);
+
+        correlator.FailConnection(new IOException("closed"));
+
+        await Assert.ThrowsAsync<IOException>(() => responseTask);
+    }
+
+    [Fact]
+    public void RecognizesDocumentContentLoadedEvent()
+    {
+        using var document = JsonDocument.Parse("{\"method\":\"Page.domContentEventFired\",\"params\":{}} ");
+
+        Assert.True(SteamGamepadUiCdpClient.IsDocumentLoadedEvent(document.RootElement));
     }
 }
