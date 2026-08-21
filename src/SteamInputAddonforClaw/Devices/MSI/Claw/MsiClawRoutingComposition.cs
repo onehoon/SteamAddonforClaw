@@ -9,6 +9,7 @@ using SteamInputAddonforClaw.Power;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Feedback;
+using SteamInputAddonforClaw.Wing;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -100,6 +101,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private Oem1EventGestureBridge? _oem1Bridge;
     private bool _oem1ActionPathConfigured;
     private readonly IMsiEventSource? _testOnlyOem1EventSource;
+    private readonly IMsiEventSource? _testOnlyWingEventSource;
+    private WingEventGestureBridge? _wingBridge;
+    private WingGestureRecognizer? _wingRecognizer;
+    private IMsiEventSource? _wingEventSource;
     // Review fix (MAJOR): lets a test drive Oem1GestureRecognizer's single/double-click debounce
     // deterministically (no real-time sleeps) and observe the normal-mapping replacement action
     // without spawning a real process -- never supplied by production composition.
@@ -160,10 +165,12 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         IMsiEventSource? testOnlyOem1EventSource = null,
         IOem1GestureDelay? testOnlyOem1GestureDelay = null,
         IOem1GestureClock? testOnlyOem1GestureClock = null,
-        Action? testOnlyOem1LaunchBigPicture = null)
+        Action? testOnlyOem1LaunchBigPicture = null,
+        IMsiEventSource? testOnlyWingEventSource = null)
     {
         _hardwareSupported = hardwareSupported;
         _testOnlyOem1EventSource = testOnlyOem1EventSource;
+        _testOnlyWingEventSource = testOnlyWingEventSource;
         _testOnlyOem1GestureDelay = testOnlyOem1GestureDelay;
         _testOnlyOem1GestureClock = testOnlyOem1GestureClock;
         _testOnlyOem1LaunchBigPicture = testOnlyOem1LaunchBigPicture;
@@ -369,6 +376,27 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             _oem1RemappingEnabled = enabled;
             return _oem1ActivationTask = ApplyOem1RemappingEnabledAsync(enabled);
         }
+    }
+
+    Task IHandheldRoutingComposition.ConfigureWingActionPath(
+        Func<SteamInputAddonforClaw.Wing.WingRouteAuthoritySnapshot> captureAuthority,
+        Func<bool> tryRequestSteamPulse)
+    {
+        if (!_hardwareSupported || _wingBridge is not null) return Task.CompletedTask;
+        var source = _testOnlyWingEventSource ?? new WmiMsiEventSource();
+        var mapping = WingMapping.Default;
+        var recognizer = new WingGestureRecognizer(() => mapping.Double.Action != WingAction.None);
+        var dispatcher = new WingActionDispatcher(() => mapping, tryRequestSteamPulse);
+        _wingEventSource = source;
+        _wingRecognizer = recognizer;
+        _wingBridge = new WingEventGestureBridge(source, recognizer, captureAuthority, dispatcher);
+        if (!source.Start())
+        {
+            AppLog.Warn("Wing.Event", "WING Event88 observation unavailable; routing remains functional.");
+            _wingBridge.Dispose();
+            _wingBridge = null;
+        }
+        return Task.CompletedTask;
     }
 
     /// <summary>Whether OEM1 desired-enabled should be requested, based solely on the persisted
@@ -629,6 +657,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     public async ValueTask DisposeAsync()
     {
+        _wingBridge?.Dispose();
+        _wingBridge = null;
+        _wingRecognizer = null;
+        _wingEventSource = null;
         // Review fix (MAJOR): close custom OEM1 gesture admission and dispose the event/gesture/
         // bridge path as the VERY FIRST step of composition disposal -- before any other awaited
         // teardown below. The bridge race fix (Oem1EventGestureBridge.OnGestureRecognized) only

@@ -2,8 +2,9 @@ namespace SteamInputAddonforClaw.CenterM;
 
 /// <summary>
 /// Semantic classification of an MSI_Event low byte. OEM1 = Center M / MainUI (event code 41,
-/// semantic LaunchMcxMainUI). OEM2 = WING / Game Bar (event code 88, semantic LaunchMcxOSD) and is
-/// never the target of any suppression/remapping in this feature -- it stays fully native.
+/// semantic LaunchMcxMainUI). OEM2 = WING / Game Bar (event code 88, semantic LaunchMcxOSD).
+/// OEM2 remains native while no protected Steam route owns WING; during the canonical
+/// WinGProtection lifetime Event88 may drive the route-bound WING action path.
 /// Physical left/right button position differs by MSI Claw model, so this type deliberately never
 /// encodes "left"/"right".
 /// </summary>

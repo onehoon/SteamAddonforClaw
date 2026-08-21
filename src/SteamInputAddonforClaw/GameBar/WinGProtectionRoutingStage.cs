@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Wing;
 
 namespace SteamInputAddonforClaw.GameBar;
 
@@ -8,6 +9,11 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
     private readonly WinGSuppressionGuard? _guard;
     private readonly Func<bool> _arm;
     private readonly Action _disarm;
+    private readonly object _authorityGate = new();
+    private long _epoch;
+    private bool _active;
+
+    internal WingRouteAuthoritySnapshot CaptureAuthority() { lock (_authorityGate) return new(_active, _epoch); }
 
     internal WinGProtectionRoutingStage(WinGSuppressionGuard guard)
     {
@@ -30,6 +36,7 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
         cancellationToken.ThrowIfCancellationRequested();
         AppLog.Debug("Routing.Wing", "WinGProtectionArmStarted.");
         var armed = _arm();
+        if (armed) lock (_authorityGate) { _epoch++; _active = true; }
         AppLog.Debug("Routing.Wing", armed ? "WinGProtectionArmed." : "WinGProtectionArmFailed.");
         return ValueTask.FromResult(armed
             ? RoutingStageOperationResult.Success("WinGProtectionArmed")
@@ -42,6 +49,7 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
         AppLog.Debug("Routing.Wing", "WinGProtectionDisarmRequested.");
         try
         {
+            lock (_authorityGate) { _active = false; _epoch++; }
             _disarm();
             AppLog.Debug("Routing.Wing", "WinGProtectionDisarmed.");
         }

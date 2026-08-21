@@ -94,6 +94,24 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     /// actually active; see docs/VIIPER_MIGRATION_TODO.md SD5.
     /// </summary>
     internal void RequestQuickAccessPulse() => _systemButtonOverlay.RequestQuickAccessPulse();
+    internal void RequestSteamPulse() => _systemButtonOverlay.RequestSteamPulse();
+
+    /// <summary>Attempts a pulse without waiting behind the output lifecycle boundary. WING is an
+    /// auxiliary action, so acquisition, pause, rollback, and a stopped publisher are all clean
+    /// no-ops rather than queued work.</summary>
+    internal bool TryRequestSteamPulse()
+    {
+        if (!_serial.Wait(0)) return false;
+        try
+        {
+            if (_state != LifecycleState.Active || _presentationPaused || _publisher is null ||
+                _canonicalSession?.State != CanonicalSteamDeckSessionState.Active)
+                return false;
+            _systemButtonOverlay.RequestSteamPulse();
+            return true;
+        }
+        finally { _serial.Release(); }
+    }
     internal Task<DeveloperVibrationTestOutcome> RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken)
     {
         if (!_feedbackArmed || _feedbackBridge is null) return Task.FromResult(new DeveloperVibrationTestOutcome(false, null, null));

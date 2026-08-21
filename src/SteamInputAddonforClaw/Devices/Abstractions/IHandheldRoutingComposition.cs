@@ -95,4 +95,8 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
         Func<RoutingRuntimeStatusSnapshot> captureRoutingStatus,
         Action requestQuickAccessPulse,
         Settings.IOem1MappingPreference mappingPreference) => Task.CompletedTask;
+
+    Task ConfigureWingActionPath(
+        Func<SteamInputAddonforClaw.Wing.WingRouteAuthoritySnapshot> captureAuthority,
+        Func<bool> tryRequestSteamPulse) => Task.CompletedTask;
 }
