@@ -244,7 +244,12 @@ public sealed partial class DevicePage : UserControl
             TdpInfoBar.Message = "Set valid PL1 and PL2 values for Plugged in and On battery before enabling TDP Control."; TdpInfoBar.IsOpen = true; return;
         }
         var configuration = BuildTdpConfiguration(TdpEnabledToggleSwitch.IsOn);
-        if (configuration is not null) await RunTdpMutationAsync(configuration, Volatile.Read(ref _tdpEditGeneration));
+        if (configuration is not null)
+        {
+            SetTdpMutationBusy(true);
+            try { await RunTdpMutationAsync(configuration, Volatile.Read(ref _tdpEditGeneration)); }
+            finally { SetTdpMutationBusy(false); }
+        }
     }
 
     private void ScheduleTdpEdit()
@@ -268,6 +273,13 @@ public sealed partial class DevicePage : UserControl
         });
     }
     private void CancelPendingTdpEdit() { Interlocked.Increment(ref _tdpEditGeneration); _tdpEditDebounce?.Cancel(); }
+    private void SetTdpMutationBusy(bool busy)
+    {
+        TdpEnabledToggleSwitch.IsEnabled = !busy && _tdpSnapshot.Available && _tdpSnapshot.PersistenceWritable;
+        foreach (var box in new[] { TdpAcPl1NumberBox, TdpAcPl2NumberBox, TdpDcPl1NumberBox, TdpDcPl2NumberBox })
+            box.IsEnabled = !busy && _tdpSnapshot.Available && _tdpSnapshot.PersistenceWritable
+                && (_tdpSnapshot.Configuration is null || _tdpSnapshot.Configuration.Enabled);
+    }
     private bool CompleteTdpDraft() => _acPl1Draft is not null && _acPl2Draft is not null && _dcPl1Draft is not null && _dcPl2Draft is not null;
     private FrontendTdpConfiguration? BuildTdpConfiguration(bool enabled)
     {

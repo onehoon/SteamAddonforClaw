@@ -88,6 +88,17 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Tdp_toggle_disables_editors_while_the_first_enable_is_in_flight()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw.UI/Views/DevicePage.xaml.cs"));
+
+        Assert.Contains("SetTdpMutationBusy(true)", page, StringComparison.Ordinal);
+        Assert.Contains("finally { SetTdpMutationBusy(false); }", page, StringComparison.Ordinal);
+        Assert.Contains("if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit();", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Developer_cards_have_unique_gyro_icon_and_requested_order()
     {
         var root = FindRepositoryRoot();
