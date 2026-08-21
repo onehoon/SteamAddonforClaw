@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Dispatching;
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
@@ -195,39 +196,51 @@ public sealed partial class DevicePage : UserControl
     {
         var keepDraft = preserveDirtyDraft && _tdpDraftDirty;
         _tdpSnapshot = snapshot;
-        if (!keepDraft && snapshot.Configuration is { } configuration)
+        if (!keepDraft)
         {
-            _acPl1Draft = configuration.Ac.Pl1Watts; _acPl2Draft = configuration.Ac.Pl2Watts;
-            _dcPl1Draft = configuration.Dc.Pl1Watts; _dcPl2Draft = configuration.Dc.Pl2Watts;
+            if (snapshot.Configuration is { } configuration)
+            {
+                _acPl1Draft = configuration.Ac.Pl1Watts; _acPl2Draft = configuration.Ac.Pl2Watts;
+                _dcPl1Draft = configuration.Dc.Pl1Watts; _dcPl2Draft = configuration.Dc.Pl2Watts;
+            }
+            else
+            {
+                _acPl1Draft = null; _acPl2Draft = null;
+                _dcPl1Draft = null; _dcPl2Draft = null;
+            }
         }
         _suppressTdpEvents = true;
         try
         {
             TdpEnabledToggleSwitch.IsOn = snapshot.Configuration?.Enabled == true;
-            SetNumberBox(TdpAcPl1NumberBox, _acPl1Draft); SetNumberBox(TdpAcPl2NumberBox, _acPl2Draft);
-            SetNumberBox(TdpDcPl1NumberBox, _dcPl1Draft); SetNumberBox(TdpDcPl2NumberBox, _dcPl2Draft);
+            SetSlider(TdpAcPl1Slider, _acPl1Draft); SetSlider(TdpAcPl2Slider, _acPl2Draft);
+            SetSlider(TdpDcPl1Slider, _dcPl1Draft); SetSlider(TdpDcPl2Slider, _dcPl2Draft);
         }
         finally { _suppressTdpEvents = false; }
         var editable = snapshot.Available && snapshot.PersistenceWritable && (snapshot.Configuration is null || snapshot.Configuration.Enabled);
         TdpEnabledToggleSwitch.IsEnabled = snapshot.Available && snapshot.PersistenceWritable;
-        foreach (var box in new[] { TdpAcPl1NumberBox, TdpAcPl2NumberBox, TdpDcPl1NumberBox, TdpDcPl2NumberBox }) box.IsEnabled = editable;
+        foreach (var slider in new[] { TdpAcPl1Slider, TdpAcPl2Slider, TdpDcPl1Slider, TdpDcPl2Slider }) slider.IsEnabled = editable;
         if (snapshot.Limits is { } limits)
         {
-            foreach (var box in new[] { TdpAcPl1NumberBox, TdpDcPl1NumberBox }) { box.Minimum = limits.Pl1MinimumWatts; box.Maximum = limits.Pl1MaximumWatts; }
-            foreach (var box in new[] { TdpAcPl2NumberBox, TdpDcPl2NumberBox }) { box.Minimum = limits.Pl2MinimumWatts; box.Maximum = limits.Pl2MaximumWatts; }
+            foreach (var slider in new[] { TdpAcPl1Slider, TdpDcPl1Slider }) { slider.Minimum = limits.Pl1MinimumWatts; slider.Maximum = limits.Pl1MaximumWatts; slider.StepFrequency = 1; }
+            foreach (var slider in new[] { TdpAcPl2Slider, TdpDcPl2Slider }) { slider.Minimum = limits.Pl2MinimumWatts; slider.Maximum = limits.Pl2MaximumWatts; slider.StepFrequency = 1; }
         }
+        SetTdpValueText(TdpAcPl1ValueText, _acPl1Draft); SetTdpValueText(TdpAcPl2ValueText, _acPl2Draft);
+        SetTdpValueText(TdpDcPl1ValueText, _dcPl1Draft); SetTdpValueText(TdpDcPl2ValueText, _dcPl2Draft);
         if (!snapshot.Available) { TdpInfoBar.Message = "TDP Control is unavailable on this device."; TdpInfoBar.IsOpen = true; }
         else if (!snapshot.PersistenceWritable) { TdpInfoBar.Message = "TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."; TdpInfoBar.Severity = InfoBarSeverity.Error; TdpInfoBar.IsOpen = true; }
         else if (snapshot.Available) TdpInfoBar.IsOpen = false;
     }
 
-    private static void SetNumberBox(NumberBox box, int? value) => box.Value = value ?? double.NaN;
-    private void TdpNumberBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    private static void SetSlider(Slider slider, int? value) { if (value is { } watts) slider.Value = watts; }
+    private static void SetTdpValueText(TextBlock text, int? value) => text.Text = value is { } watts ? $"{watts} W" : "— W";
+    private void TdpSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs args)
     {
         if (_suppressTdpEvents) return;
-        var value = double.IsFinite(args.NewValue) && args.NewValue == Math.Truncate(args.NewValue) ? (int)args.NewValue : (int?)null;
-        var isAc = sender == TdpAcPl1NumberBox || sender == TdpAcPl2NumberBox;
-        var isPl1 = sender == TdpAcPl1NumberBox || sender == TdpDcPl1NumberBox;
+        var value = (int)Math.Round(args.NewValue);
+        var slider = (Slider)sender;
+        var isAc = ReferenceEquals(slider, TdpAcPl1Slider) || ReferenceEquals(slider, TdpAcPl2Slider);
+        var isPl1 = ReferenceEquals(slider, TdpAcPl1Slider) || ReferenceEquals(slider, TdpDcPl1Slider);
         var pl1 = isAc ? _acPl1Draft : _dcPl1Draft;
         var pl2 = isAc ? _acPl2Draft : _dcPl2Draft;
         if (isPl1) pl1 = value;
@@ -241,14 +254,16 @@ public sealed partial class DevicePage : UserControl
             _suppressTdpEvents = true;
             try
             {
-                SetNumberBox(isAc ? TdpAcPl1NumberBox : TdpDcPl1NumberBox, pl1);
-                SetNumberBox(isAc ? TdpAcPl2NumberBox : TdpDcPl2NumberBox, pl2);
+                SetSlider(isAc ? TdpAcPl1Slider : TdpDcPl1Slider, pl1);
+                SetSlider(isAc ? TdpAcPl2Slider : TdpDcPl2Slider, pl2);
             }
             finally { _suppressTdpEvents = false; }
         }
 
         if (isAc) { _acPl1Draft = pl1; _acPl2Draft = pl2; }
         else { _dcPl1Draft = pl1; _dcPl2Draft = pl2; }
+        SetTdpValueText(isAc ? TdpAcPl1ValueText : TdpDcPl1ValueText, pl1);
+        SetTdpValueText(isAc ? TdpAcPl2ValueText : TdpDcPl2ValueText, pl2);
         _tdpDraftDirty = true;
         if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit();
     }
@@ -257,18 +272,20 @@ public sealed partial class DevicePage : UserControl
     {
         if (_suppressTdpEvents || _frontend is null) return;
         CancelPendingTdpEdit();
-        if (TdpEnabledToggleSwitch.IsOn && !CompleteTdpDraft())
+        SetTdpMutationBusy(true);
+        try
         {
-            _suppressTdpEvents = true; TdpEnabledToggleSwitch.IsOn = false; _suppressTdpEvents = false;
-            TdpInfoBar.Message = "Set valid PL1 and PL2 values for Plugged in and On battery before enabling TDP Control."; TdpInfoBar.IsOpen = true; return;
+            var result = await _frontend.SetDeviceTdpEnabledAsync(TdpEnabledToggleSwitch.IsOn);
+            RenderTdp(result.Snapshot, preserveDirtyDraft: false);
+            if (!result.Succeeded)
+            {
+                _suppressTdpEvents = true; TdpEnabledToggleSwitch.IsOn = false; _suppressTdpEvents = false;
+                TdpInfoBar.Message = result.FailureMessage ?? "TDP could not be enabled.";
+                TdpInfoBar.IsOpen = true;
+            }
         }
-        var configuration = BuildTdpToggleConfiguration(TdpEnabledToggleSwitch.IsOn);
-        if (configuration is not null)
-        {
-            SetTdpMutationBusy(true);
-            try { await RunTdpMutationAsync(configuration, Volatile.Read(ref _tdpEditGeneration)); }
-            finally { SetTdpMutationBusy(false); }
-        }
+        catch (Exception exception) { AppLog.Warn("Device", "TDP enable mutation failed.", exception); TdpInfoBar.Message = "TDP could not be updated because the Runtime connection was interrupted."; TdpInfoBar.IsOpen = true; await RefreshAsync(); }
+        finally { SetTdpMutationBusy(false); }
     }
 
     private void ScheduleTdpEdit()
@@ -295,8 +312,8 @@ public sealed partial class DevicePage : UserControl
     private void SetTdpMutationBusy(bool busy)
     {
         TdpEnabledToggleSwitch.IsEnabled = !busy && _tdpSnapshot.Available && _tdpSnapshot.PersistenceWritable;
-        foreach (var box in new[] { TdpAcPl1NumberBox, TdpAcPl2NumberBox, TdpDcPl1NumberBox, TdpDcPl2NumberBox })
-            box.IsEnabled = !busy && _tdpSnapshot.Available && _tdpSnapshot.PersistenceWritable
+        foreach (var slider in new[] { TdpAcPl1Slider, TdpAcPl2Slider, TdpDcPl1Slider, TdpDcPl2Slider })
+            slider.IsEnabled = !busy && _tdpSnapshot.Available && _tdpSnapshot.PersistenceWritable
                 && (_tdpSnapshot.Configuration is null || _tdpSnapshot.Configuration.Enabled);
     }
     private bool CompleteTdpDraft() => _acPl1Draft is not null && _acPl2Draft is not null && _dcPl1Draft is not null && _dcPl2Draft is not null;
