@@ -37,7 +37,10 @@ try
            QamHostRecovery.IsOpen(DateTimeOffset.UtcNow, recoveryDeadline))
     {
         currentClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+        // Cleanup ownership belongs to this CDP/GamepadUI session only.
+        installationSucceeded = false;
         installMayExist = false;
+        teardownAttempted = false;
         currentClient.AddonQamConsoleMessage += message => log.Info(message);
         var reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnDocumentLoaded() => reload.TrySetResult();
@@ -63,8 +66,6 @@ try
             log.Info("CDP connected.");
             installationSucceeded = true; // cleanup is eligible once the remote install may execute
             await InstallAsync(currentClient);
-            teardownAttempted = false;
-            installationSucceeded = true;
             recoveryDeadline = null;
 
             while (!lifetimeToken.IsCancellationRequested)
