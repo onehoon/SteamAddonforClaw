@@ -228,6 +228,21 @@ public sealed class QamFrontendContractTests
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
     }
 
+    [Fact]
+    public void Qam_cpu_boost_panel_reuses_its_descriptor_and_retires_settled_mode_work()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("if (state.addonTabDescriptor) return state.addonTabDescriptor;", source);
+        Assert.Contains("state.addonTabDescriptor = {", source);
+        Assert.Contains("const modeWritableRef = React.useRef(false);", source);
+        Assert.Contains("modeWritableRef.current = modeWritable;", source);
+        Assert.Contains("if (!state.installed || !modeWritableRef.current) return;", source);
+        Assert.Contains("const cancelModeTimers = React.useCallback", source);
+        Assert.Contains("cancelModeTimers();", source);
+        Assert.Contains("settleTimers.current[key] = null;", source);
+    }
+
     private static string ReadSource(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

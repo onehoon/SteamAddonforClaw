@@ -370,6 +370,8 @@
   }
 
   function buildAddonTab(React) {
+    if (state.addonTabDescriptor) return state.addonTabDescriptor;
+
     const icon = React.createElement(
       "svg",
       { viewBox: "0 0 24 24", width: 24, height: 24 },
@@ -392,6 +394,7 @@
       const refreshInFlight = React.useRef(false);
       const refreshDirty = React.useRef(false);
       const settleTimers = React.useRef({ ac: null, dc: null });
+      const modeWritableRef = React.useRef(false);
 
       const failClosed = React.useCallback(message => {
         setStatus(null); setCpu(null); setPreviewAc(null); setPreviewDc(null); setError(message);
@@ -411,9 +414,14 @@
         }
       }, [failClosed]);
 
-      React.useEffect(() => { void refresh(); return () => {
-        for (const key of ["ac", "dc"]) if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
-      }; }, [refresh]);
+      const cancelModeTimers = React.useCallback(() => {
+        for (const key of ["ac", "dc"]) {
+          if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
+          settleTimers.current[key] = null;
+        }
+      }, []);
+
+      React.useEffect(() => { void refresh(); return cancelModeTimers; }, [refresh, cancelModeTimers]);
 
       React.useEffect(() => {
         const previous = state.onStateInvalidated;
@@ -424,6 +432,7 @@
       const unavailable = !status || status.steam?.appId !== 0 || !status.steam?.active || status.steam?.source !== 1;
       const mutationAvailable = !!cpu && cpu.persistenceWritable && !unavailable && !busy;
       const modeWritable = mutationAvailable && cpu.enabled;
+      modeWritableRef.current = modeWritable;
       const snapshotMessage = !cpu ? null : !cpu.persistenceWritable
         ? "CPU Boost settings could not be loaded, so changes are disabled."
         : cpu.lastFailure ? `The last CPU Boost change could not be applied to Windows: ${cpu.lastFailure}` : null;
@@ -431,12 +440,13 @@
       const sideValue = (side, preview) => preview ?? side?.desired ?? (side?.currentStatus === 0 ? side.current : null);
       const labelFor = value => modes.find(item => item[0] === value)?.[1] || "Unknown / unset";
       const scheduleMode = (side, value) => {
+        if (!state.installed || !modeWritableRef.current) return;
         const key = side === "ac" ? "ac" : "dc";
         side === "ac" ? setPreviewAc(value) : setPreviewDc(value);
-        if (!modeWritable) return;
         if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
         settleTimers.current[key] = setTimeout(async () => {
-          if (!modeWritable) return;
+          settleTimers.current[key] = null;
+          if (!state.installed || !modeWritableRef.current) return;
           setBusy(true); setError(null);
           try {
             const result = await request(side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value });
@@ -447,6 +457,7 @@
         }, 250);
       };
       const setEnabled = async value => {
+        cancelModeTimers();
         if (!mutationAvailable) return;
         setBusy(true); setError(null);
         try {
@@ -471,13 +482,14 @@
         slider("DC Mode", "dc", sideValue(cpu?.dc, previewDc)));
     }
 
-    return {
+    state.addonTabDescriptor = {
       [TAB_MARKER]: true,
       key: "steam-input-addon",
       title: "Steam Input Addon",
       tab: icon,
       panel: React.createElement(CpuBoostPanel),
     };
+    return state.addonTabDescriptor;
   }
 
   // One stable, Addon-owned state object. install()/uninstall() mutate it in place rather than
