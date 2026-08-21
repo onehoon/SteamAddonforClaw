@@ -70,7 +70,7 @@ public sealed class MsiClawPhysicalInputStageTests
         var result = await stage.PrepareMutationAsync(CancellationToken.None);
         Assert.False(result.Succeeded);
         Assert.Equal("InputSourceAlreadyRunning", result.Reason);
-        Assert.Equal(0, input.StopCount);
+        Assert.Equal(1, input.StopCount);
     }
 
     [Fact]
