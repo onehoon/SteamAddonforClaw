@@ -15,14 +15,10 @@ internal sealed class DirectInputDeviceTopologyResolver(IControllerDeviceEnumera
         var pnpInstanceId = TryGetPnpInstanceId(devicePath);
         if (pnpInstanceId is null) return DirectInputTopologyResolution.Unresolved(devicePath, "InvalidDevicePath");
 
-        IReadOnlyList<ControllerDeviceInfo> devices;
-        try { devices = controllerDevices.EnumeratePresentDevices(); }
+        ControllerDeviceInfo? device;
+        try { device = controllerDevices.FindPresentDevice(pnpInstanceId); }
         catch (Exception exception) { return DirectInputTopologyResolution.Unresolved(devicePath, $"PnPEnumerationFailed:{exception.GetType().Name}"); }
-
-        var matches = devices.Where(device => string.Equals(device.InstanceId, pnpInstanceId, StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (matches.Length != 1) return DirectInputTopologyResolution.Unresolved(devicePath, matches.Length == 0 ? "PnpInstanceNotFound" : "AmbiguousPnpInstance");
-
-        var device = matches[0];
+        if (device is null) return DirectInputTopologyResolution.Unresolved(devicePath, "PnpInstanceNotFound");
         if (device.VendorId != MsiVendorId || device.ProductId != DirectInputProductId)
             return DirectInputTopologyResolution.Unresolved(devicePath, "PnpIdentityIsNotMsiPid1902");
 

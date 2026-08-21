@@ -51,7 +51,7 @@ internal sealed class MsiClawModeController(
     Func<DateTimeOffset>? now = null) : IMsiClawModeController
 {
     private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromSeconds(5);
-    private readonly TimeSpan _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(500);
+    private readonly TimeSpan _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(75);
     private readonly Func<DateTimeOffset> _now = now ?? (() => DateTimeOffset.UtcNow);
 
     public async Task<MsiClawModeTransitionResult> SwitchModeAsync(MsiClawNativeMode target, MsiClawPhysicalIdentity expectedIdentity, CancellationToken cancellationToken)
@@ -96,14 +96,21 @@ internal sealed class MsiClawModeController(
         {
             cancellationToken.ThrowIfCancellationRequested();
             poll++;
-            var enumerationStarted = Stopwatch.GetTimestamp();
-            var current = deviceEnumerator.EnumeratePresentDevices();
-            var enumerationMs = Stopwatch.GetElapsedTime(enumerationStarted).TotalMilliseconds;
-            oldGone = !current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == oldPid);
+            var probeStarted = Stopwatch.GetTimestamp();
+            var targetPidPresent = deviceEnumerator.IsPresent(MsiClawHardware.VendorId, targetTopology.ProductId);
+            var targetProbeMs = Stopwatch.GetElapsedTime(probeStarted).TotalMilliseconds;
+            IReadOnlyList<ControllerDeviceInfo> current = [];
+            var exactVerificationMs = 0d;
+            if (targetPidPresent)
+            {
+                var verificationStarted = Stopwatch.GetTimestamp();
+                current = deviceEnumerator.EnumeratePresentDevices(MsiClawHardware.VendorId, targetTopology.ProductId);
+                exactVerificationMs = Stopwatch.GetElapsedTime(verificationStarted).TotalMilliseconds;
+            }
+            oldGone = oldPid is not { } sourcePid || !deviceEnumerator.IsPresent(MsiClawHardware.VendorId, sourcePid);
             // TargetPidPresent: any present node with the target PID, regardless of topology --
             // distinguishes "PID_1902 hasn't appeared yet" from "PID_1902 is present but the
             // strict control-HID candidate below hasn't shown up yet".
-            var targetPidPresent = current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId);
             var targets = current.Where(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId && d.UsagePage == targetTopology.UsagePage && d.Usage == targetTopology.Usage).ToArray();
             var targetGroups = targets.GroupBy(MsiClawLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase).ToArray();
             targetSeen = targetGroups.Length > 0;
@@ -111,7 +118,9 @@ internal sealed class MsiClawModeController(
                 ("Poll", poll),
                 ("ElapsedMs", (long)(_now() - started).TotalMilliseconds),
                 ("SinceCommandWriteMs", (long)Stopwatch.GetElapsedTime(commandWrittenAt).TotalMilliseconds),
-                ("EnumerationMs", (long)enumerationMs),
+                ("TargetProbeMs", (long)targetProbeMs),
+                ("ExactVerificationMs", (long)exactVerificationMs),
+                ("EnumerationMs", (long)exactVerificationMs),
                 ("OldPidPresent", !oldGone),
                 ("TargetPidPresent", targetPidPresent),
                 ("TargetControlCandidateCount", targets.Length),

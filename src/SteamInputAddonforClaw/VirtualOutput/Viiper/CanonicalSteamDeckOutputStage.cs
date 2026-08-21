@@ -144,6 +144,8 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         if (_sessionId() is null) return ValueTask.FromResult(RoutingStageOperationResult.Failure("RecoverySessionUnavailable"));
         if (_state != LifecycleState.Inactive) return ValueTask.FromResult(RoutingStageOperationResult.Failure("SteamOutputAlreadyActive"));
         if (_before is not null) return ValueTask.FromResult(RoutingStageOperationResult.Failure("SteamOutputAlreadyPrepared"));
+        // Recovery and exact before/after delta semantics require the complete pre-mutation view.
+        // Only the repeated post-create stabilization snapshots are target-scoped.
         _before = _enumerator.EnumeratePresentDevices();
         _mutationId = Guid.NewGuid();
         _state = LifecycleState.Prepared;
@@ -495,7 +497,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         string? lastCandidateSignature = null;
         while (true)
         {
-            snapshot = _enumerator.EnumeratePresentDevices();
+            snapshot = _enumerator.EnumeratePresentDevices(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId);
             result = _resolver.Resolve(before, snapshot);
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Ambiguous)
                 return (result, snapshot);

@@ -79,6 +79,106 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         }
     }
 
+    public bool IsPresent(ushort vendorId, ushort productId)
+    {
+        using var set = OpenPresentSet();
+        for (uint index = 0; TryGetDevice(set.Handle, index, out var data); index++)
+        {
+            var parsed = ParseVendorProductId(GetRegistryMultiString(set.Handle, ref data, SpdrpHardwareId));
+            if (parsed.VendorId == vendorId && parsed.ProductId == productId) return true;
+        }
+        return false;
+    }
+
+    public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId)
+    {
+        using var set = OpenPresentSet();
+        var light = ReadLightweightDevices(set.Handle);
+        var target = light.Values.Where(d => ParseVendorProductId(d.HardwareIds).VendorId == vendorId && ParseVendorProductId(d.HardwareIds).ProductId == productId).ToArray();
+        var selected = target.SelectMany(d => AncestorIds(d.DevInst)).Concat(target.Select(d => d.InstanceId))
+            .Where(id => id.Length != 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return selected.Select(id => light.TryGetValue(id, out var node) ? Hydrate(set.Handle, node) : null)
+            .Where(device => device is not null).Cast<ControllerDeviceInfo>().ToArray();
+    }
+
+    public ControllerDeviceInfo? FindPresentDevice(string instanceId) =>
+        FindNarrowDevice(instanceId);
+
+    private ControllerDeviceInfo? FindNarrowDevice(string instanceId)
+    {
+        using var set = OpenPresentSet();
+        var data = new SpDevinfoData { CbSize = (uint)Marshal.SizeOf<SpDevinfoData>() };
+        if (!SetupDiOpenDeviceInfoW(set.Handle, instanceId, IntPtr.Zero, 0, ref data)) return null;
+        if (CM_Locate_DevNodeW(out var devInst, instanceId, 0) != CrSuccess) return null;
+        data.DevInst = devInst;
+        var hardwareIds = GetRegistryMultiString(set.Handle, ref data, SpdrpHardwareId);
+        return Hydrate(set.Handle, new LightDevice(instanceId, devInst, hardwareIds, data));
+    }
+
+    private static IEnumerable<string> AncestorIds(uint devInst)
+    {
+        var current = devInst;
+        var visited = new HashSet<uint>();
+        while (CM_Get_Parent(out var parent, current, 0) == CrSuccess)
+        {
+            if (!visited.Add(parent)) yield break;
+            var buffer = new StringBuilder(1024);
+            if (CM_Get_Device_IDW(parent, buffer, buffer.Capacity, 0) != CrSuccess) yield break;
+            yield return buffer.ToString();
+            current = parent;
+        }
+    }
+
+    private static ControllerDeviceInfo Hydrate(IntPtr set, LightDevice node)
+    {
+        var data = node.Data;
+        var hardwareIds = GetRegistryMultiString(set, ref data, SpdrpHardwareId);
+        var compatibleIds = GetRegistryMultiString(set, ref data, SpdrpCompatibleIds);
+        var ancestors = AncestorIds(node.DevInst).ToArray();
+        var usage = ParseUsage(hardwareIds.Concat(compatibleIds));
+        return new ControllerDeviceInfo(node.InstanceId, GetContainerId(set, ref data), ancestors.FirstOrDefault(), ancestors,
+            GetRegistryString(set, ref data, SpdrpEnumeratorName), hardwareIds, compatibleIds,
+            GetRegistryString(set, ref data, SpdrpClass), GetRegistryString(set, ref data, SpdrpClassGuid),
+            GetRegistryString(set, ref data, SpdrpService), ParseVendorProductId(hardwareIds.Concat(compatibleIds)).VendorId,
+            ParseVendorProductId(hardwareIds.Concat(compatibleIds)).ProductId, true,
+            GetRegistryString(set, ref data, SpdrpFriendlyName), usage.Page, usage.Usage);
+    }
+
+    private static Dictionary<string, LightDevice> ReadLightweightDevices(IntPtr set)
+    {
+        var result = new Dictionary<string, LightDevice>(StringComparer.OrdinalIgnoreCase);
+        for (uint index = 0; TryGetDevice(set, index, out var data); index++)
+        {
+            var ids = GetRegistryMultiString(set, ref data, SpdrpHardwareId);
+            var instanceId = GetDeviceInstanceId(set, ref data);
+            result[instanceId] = new LightDevice(instanceId, data.DevInst, ids, data);
+        }
+        return result;
+    }
+
+    private static DeviceInfoSet OpenPresentSet()
+    {
+        var handle = SetupDiGetClassDevsW(IntPtr.Zero, null, IntPtr.Zero, DigcfPresent | DigcfAllClasses);
+        if (handle == InvalidDeviceInfoSet) throw new InvalidOperationException("Unable to enumerate present PnP devices.");
+        return new DeviceInfoSet(handle);
+    }
+
+    private static bool TryGetDevice(IntPtr set, uint index, out SpDevinfoData data)
+    {
+        data = new SpDevinfoData { CbSize = (uint)Marshal.SizeOf<SpDevinfoData>() };
+        if (SetupDiEnumDeviceInfo(set, index, ref data)) return true;
+        var error = Marshal.GetLastWin32Error();
+        if (error == 259) return false;
+        throw new InvalidOperationException($"Unable to enumerate PnP device at index {index}.");
+    }
+
+    private sealed record LightDevice(string InstanceId, uint DevInst, IReadOnlyList<string> HardwareIds, SpDevinfoData Data);
+    private sealed class DeviceInfoSet(IntPtr handle) : IDisposable
+    {
+        public IntPtr Handle { get; } = handle;
+        public void Dispose() => SetupDiDestroyDeviceInfoList(Handle);
+    }
+
     private static (ushort? Page, ushort? Usage) ParseUsage(IEnumerable<string> identifiers)
     {
         foreach (var identifier in identifiers)
@@ -211,6 +311,10 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetupDiOpenDeviceInfoW(IntPtr deviceInfoSet, string deviceInstanceId, IntPtr hwndParent, uint openFlags, ref SpDevinfoData deviceInfoData);
+
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetupDiGetDeviceRegistryPropertyW(IntPtr deviceInfoSet, ref SpDevinfoData deviceInfoData, uint property, out uint propertyRegDataType, byte[] propertyBuffer, uint propertyBufferSize, out uint requiredSize);
 
     [DllImport("setupapi.dll", SetLastError = true)]
@@ -226,4 +330,7 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
 
     [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
     private static extern int CM_Get_Device_IDW(uint deviceInstance, StringBuilder buffer, int bufferLength, uint flags);
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    private static extern int CM_Locate_DevNodeW(out uint deviceInstance, string deviceInstanceId, uint flags);
 }
