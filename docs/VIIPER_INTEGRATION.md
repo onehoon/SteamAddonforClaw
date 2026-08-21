@@ -9,7 +9,7 @@ Xbox360 is a temporary Game Bar presentation only.
 | Item | Current contract |
 | --- | --- |
 | Canonical embedded API | `lib/viiper` typed ABI |
-| Embedded VIIPER revision | `49e5796b9f31f8ddb7009fde6f910c66837e2315` |
+| Embedded VIIPER revision | `77a8af547de2253862ede648a212c01d4dd950c1` |
 | Primary Steam routing target | Steam Deck `28DE:1205` |
 | Temporary Game Bar presentation | Persistent typed Xbox360 logical device |
 | Addon integration | Session, mapper, publisher, identity resolver, safety stage implemented |
