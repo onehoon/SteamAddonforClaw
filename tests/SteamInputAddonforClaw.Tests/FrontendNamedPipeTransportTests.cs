@@ -590,6 +590,38 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Initial_pipe_creation_failure_faults_startup_and_disposes_cleanly()
+    {
+        var creationAttempts = 0;
+        await using var server = new NamedPipeAddonFrontendServer(
+            $"SteamInputAddonforClaw.Tests.{Guid.NewGuid():N}",
+            new RecordingFrontendControl(),
+            () =>
+            {
+                Interlocked.Increment(ref creationAttempts);
+                throw new InvalidOperationException("Injected pipe creation failure.");
+            });
+
+        var startup = server.StartAsync();
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => startup.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal("Injected pipe creation failure.", exception.Message);
+        Assert.Equal(1, creationAttempts);
+        await server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Start_completes_before_any_client_connects()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+
+        await using var client = await ConnectAsync(pipeName);
+        Assert.Equal(fake.Bootstrap, await client.GetBootstrapAsync());
+    }
+
+    [Fact]
     public async Task Concurrent_requests_are_correlated_to_their_own_results()
     {
         var fake = new RecordingFrontendControl();
