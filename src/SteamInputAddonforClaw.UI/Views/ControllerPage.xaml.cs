@@ -9,6 +9,16 @@ namespace SteamInputAddonforClaw.Views;
 
 public sealed partial class ControllerPage : UserControl
 {
+    private sealed record WingActionOption(WingAction Action, string Label);
+    private static readonly WingActionOption[] WingActionOptions = WingActionCapabilities.Actions
+        .Select(action => new WingActionOption(action, action switch
+        {
+            WingAction.None => "None",
+            WingAction.SteamButton => "Steam Button",
+            WingAction.KeyboardHotkey => "Keyboard Hotkey",
+            WingAction.LaunchApplication => "Launch Application",
+            _ => action.ToString()
+        })).ToArray();
     private IAddonFrontendControl? _frontend;
     private bool _isLoading;
     private bool _lastKnownSteamInputRoutingEnabled;
@@ -63,28 +73,36 @@ public sealed partial class ControllerPage : UserControl
 
     private void ApplyWingMapping(WingMappingSettings mapping)
     {
-        _wingMapping = mapping;
-        WingSingleActionComboBox.ItemsSource = Enum.GetValues<WingAction>();
-        WingDoubleActionComboBox.ItemsSource = Enum.GetValues<WingAction>();
-        WingSingleKeyComboBox.ItemsSource = Enum.GetValues<WingHotkeyKey>();
-        WingDoubleKeyComboBox.ItemsSource = Enum.GetValues<WingHotkeyKey>();
-        WingSingleActionComboBox.SelectedItem = mapping.Single.Action;
-        WingDoubleActionComboBox.SelectedItem = mapping.Double.Action;
-        WingSingleExecutableTextBox.Text = mapping.Single.Launch.ExecutablePath;
-        WingSingleArgumentsTextBox.Text = mapping.Single.Launch.Arguments;
-        WingDoubleExecutableTextBox.Text = mapping.Double.Launch.ExecutablePath;
-        WingDoubleArgumentsTextBox.Text = mapping.Double.Launch.Arguments;
-        WingSingleControlCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Control);
-        WingSingleShiftCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Shift);
-        WingSingleAltCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Alt);
-        WingSingleWindowsCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows);
-        WingSingleKeyComboBox.SelectedItem = mapping.Single.Hotkey.Key;
-        WingDoubleControlCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Control);
-        WingDoubleShiftCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Shift);
-        WingDoubleAltCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Alt);
-        WingDoubleWindowsCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows);
-        WingDoubleKeyComboBox.SelectedItem = mapping.Double.Hotkey.Key;
-        ApplyWingDetails();
+        var wasLoading = _isLoading;
+        _isLoading = true;
+        try
+        {
+            _wingMapping = mapping;
+            WingSingleActionComboBox.ItemsSource = WingActionOptions;
+            WingDoubleActionComboBox.ItemsSource = WingActionOptions;
+            WingSingleActionComboBox.DisplayMemberPath = nameof(WingActionOption.Label);
+            WingDoubleActionComboBox.DisplayMemberPath = nameof(WingActionOption.Label);
+            WingSingleKeyComboBox.ItemsSource = Enum.GetValues<WingHotkeyKey>();
+            WingDoubleKeyComboBox.ItemsSource = Enum.GetValues<WingHotkeyKey>();
+            WingSingleActionComboBox.SelectedItem = WingActionOptions.First(option => option.Action == mapping.Single.Action);
+            WingDoubleActionComboBox.SelectedItem = WingActionOptions.First(option => option.Action == mapping.Double.Action);
+            WingSingleExecutableTextBox.Text = mapping.Single.Launch.ExecutablePath;
+            WingSingleArgumentsTextBox.Text = mapping.Single.Launch.Arguments;
+            WingDoubleExecutableTextBox.Text = mapping.Double.Launch.ExecutablePath;
+            WingDoubleArgumentsTextBox.Text = mapping.Double.Launch.Arguments;
+            WingSingleControlCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Control);
+            WingSingleShiftCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Shift);
+            WingSingleAltCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Alt);
+            WingSingleWindowsCheckBox.IsChecked = mapping.Single.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows);
+            WingSingleKeyComboBox.SelectedItem = mapping.Single.Hotkey.Key;
+            WingDoubleControlCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Control);
+            WingDoubleShiftCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Shift);
+            WingDoubleAltCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Alt);
+            WingDoubleWindowsCheckBox.IsChecked = mapping.Double.Hotkey.Modifiers.HasFlag(WingHotkeyModifiers.Windows);
+            WingDoubleKeyComboBox.SelectedItem = mapping.Double.Hotkey.Key;
+            ApplyWingDetails();
+        }
+        finally { _isLoading = wasLoading; }
     }
 
     private void ApplyWingDetails()
@@ -102,8 +120,17 @@ public sealed partial class ControllerPage : UserControl
         QueueWingMappingSave(BuildCurrentWingMapping());
     }
 
-    private void WingConfiguration_Changed(object sender, RoutedEventArgs args) => QueueWingMappingSave(BuildCurrentWingMapping());
-    private void WingConfiguration_LostFocus(object sender, RoutedEventArgs args) => QueueWingMappingSave(BuildCurrentWingMapping());
+    private void WingConfiguration_Changed(object sender, RoutedEventArgs args)
+    {
+        if (_isLoading || _frontend is null || !_wingMappingAvailable) return;
+        QueueWingMappingSave(BuildCurrentWingMapping());
+    }
+
+    private void WingConfiguration_LostFocus(object sender, RoutedEventArgs args)
+    {
+        if (_isLoading || _frontend is null || !_wingMappingAvailable) return;
+        QueueWingMappingSave(BuildCurrentWingMapping());
+    }
 
     private WingMappingSettings BuildCurrentWingMapping()
     {
@@ -114,7 +141,7 @@ public sealed partial class ControllerPage : UserControl
 
     private async void QueueWingMappingSave(WingMappingSettings desired)
     {
-        if (_frontend is null || !_wingMappingAvailable) return;
+        if (_isLoading || _frontend is null || !_wingMappingAvailable) return;
         if (ContainsBlockedWinG(desired)) { ApplyWingMapping(_wingMapping); return; }
         var revision = Interlocked.Increment(ref _wingEditRevision);
         await _wingMutationGate.WaitAsync();
@@ -138,7 +165,7 @@ public sealed partial class ControllerPage : UserControl
 
     private static WingSlotBinding BuildWingBinding(ComboBox actionBox, CheckBox control, CheckBox shift, CheckBox alt, CheckBox windows, ComboBox keyBox, TextBox executable, TextBox arguments)
     {
-        var action = actionBox.SelectedItem is WingAction selected ? selected : WingAction.None;
+        var action = actionBox.SelectedItem is WingActionOption selected ? selected.Action : WingAction.None;
         var modifiers = (control.IsChecked == true ? WingHotkeyModifiers.Control : WingHotkeyModifiers.None)
             | (shift.IsChecked == true ? WingHotkeyModifiers.Shift : WingHotkeyModifiers.None)
             | (alt.IsChecked == true ? WingHotkeyModifiers.Alt : WingHotkeyModifiers.None)
