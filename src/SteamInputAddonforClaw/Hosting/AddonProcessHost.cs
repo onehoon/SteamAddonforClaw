@@ -139,7 +139,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startupResult.RecoverySafe,
             startupResult.HardwareSupported,
             _qamHostController.OnBigPictureStateChanged,
-            RequestGameBarPresentationReconcile);
+            routingReconcileCompleted: null,
+            winGSuppressionGuard: _winGSuppressionGuard);
 
         // Review fix (BLOCKER): the OEM1 coordinator and the routing guard share the SAME underlying
         // helper ownership, but only their exact-handle Start() call itself serializes between them.
@@ -201,9 +202,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void StartRuntimeEventWatchers()
     {
-        _gameBarForegroundWatcher.StateChanged += OnGameBarForegroundChanged;
-        _gameBarForegroundWatcher.Start();
-        // Install last: once this returns, the owning thread must resume GetMessageW promptly.
+        // Game Bar foreground presentation remains dormant in production. Install the existing
+        // Runtime-owned Win+G hook after all synchronous watcher work (none in this mode).
         _winGSuppressionGuard.Start();
     }
 
@@ -285,7 +285,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _gameBarDelivery.StopAccepting();
         _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Dispose();
-        _winGSuppressionGuard.Dispose();
         _qamHostController.BeginShutdown();
         _tdpRuntime?.BeginShutdown();
         _tdpCenterMRegistryWatcher?.Dispose();
@@ -324,6 +323,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             await _runtimeHost.DisposeAsync().ConfigureAwait(false);
             _runtimeHost = null;
         }
+        // Routing shutdown/rollback has completed before the Runtime-lifetime hook is removed.
+        _winGSuppressionGuard.Dispose();
         if (_tdpRuntime is not null)
         {
             await _tdpRuntime.DisposeAsync().ConfigureAwait(false);

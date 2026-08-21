@@ -8,6 +8,7 @@ public sealed class RoutingPipelinePlanTests
     [Fact]
     public void InitialStageSet_IsExactlyTheDefinedStages() => Assert.Equal(
         [
+            RoutingStageKind.WinGProtection,
             RoutingStageKind.NativeMode,
             RoutingStageKind.PhysicalInput,
             RoutingStageKind.PhysicalIsolation,
@@ -39,6 +40,7 @@ public sealed class RoutingPipelinePlanTests
         Assert.Equal(RoutingStageMode.Disabled, plan.XboxOutput);
         Assert.Equal(RoutingStageMode.Disabled, plan.GameBarRouting);
         Assert.Equal(RoutingStageMode.Enabled, plan.CenterMGuard);
+        Assert.Equal(RoutingStageMode.Enabled, plan.WinGProtection);
     }
 
     [Fact]

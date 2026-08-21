@@ -27,6 +27,7 @@ internal static class RoutingPipelineStageOrder
     // expected to remain PID1902).
     internal static IReadOnlyList<RoutingStageKind> Forward { get; } =
     [
+        RoutingStageKind.WinGProtection,
         RoutingStageKind.CenterMGuard,
         RoutingStageKind.NativeMode,
         RoutingStageKind.PhysicalInput,
@@ -46,7 +47,8 @@ internal static class RoutingPipelineStageOrder
         RoutingStageKind.PhysicalInput,
         RoutingStageKind.NativeMode,
         RoutingStageKind.PhysicalIsolation,
-        RoutingStageKind.CenterMGuard
+        RoutingStageKind.CenterMGuard,
+        RoutingStageKind.WinGProtection
     ];
 
     internal static bool IsRollbackFailureBarrier(RoutingStageKind kind) =>

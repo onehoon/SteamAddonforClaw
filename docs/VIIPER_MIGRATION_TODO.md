@@ -504,6 +504,14 @@ foreground state and does not restore remembered X360 presentation. X360
 PnP/XInput readiness and hardware validation are not claimed. SD7 remains
 PLANNED.
 
+Current PR2 status: Game Bar foreground production switching is intentionally
+disabled while the existing watcher, typed Xbox360 device, publisher, and
+Deck/Xbox360 presentation primitives remain dormant foundations. Route-bound
+Win+G protection is software-integrated as the first mandatory
+`StockCenterM` routing stage and is disarmed only after route rollback reaches
+the final protection stage. Real MSI Claw Win+G/Game Bar hardware validation
+remains pending; this does not complete SD7.
+
 ## Separate feature tracks
 
 Rumble v1 and Steam Deck `0xEA` Haptic two-motor fallback translation are
