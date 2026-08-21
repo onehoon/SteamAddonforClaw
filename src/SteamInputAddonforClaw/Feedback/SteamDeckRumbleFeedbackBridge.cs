@@ -25,6 +25,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     private bool _disposed;
     private CancellationTokenSource? _developerTest;
     private long _developerSequence;
+    private Task<PhysicalRumbleWriteResult>? _developerCompletion;
 
     internal SteamDeckRumbleFeedbackBridge(FeedbackAuthority authority, FeedbackAuthorityToken token, IPhysicalRumbleSink sink)
     {
@@ -99,6 +100,13 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             var decoded = SteamDeckRumbleDecoder.Decode(report.Span);
             if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence, out var commandResult))
                 return new(false, commandResult, null, decoded);
+            Task<PhysicalRumbleWriteResult>? commandCompletion;
+            lock (_gate) commandCompletion = _developerCompletion;
+            if (commandCompletion is not null)
+            {
+                var completed = await commandCompletion.WaitAsync(linked.Token).ConfigureAwait(false);
+                commandResult = completed;
+            }
             lock (_gate)
             {
                 if (sequence == _sequence && _developerSequence == sequence && ReferenceEquals(_developerTest, linked))
@@ -111,6 +119,8 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             // feedback arrived during the 250ms delay it is now the newest sequence, and this
             // stale developer STOP must be a silent no-op rather than stopping that newer feedback.
             var stopAccepted = TryWrite(sequence, TwoMotorRumble.Stopped, TimeSpan.Zero, out var stopResult);
+            if (stopAccepted && stopResult?.Reason == "Queued" && _developerCompletion is not null)
+                stopResult = await _developerCompletion.WaitAsync(linked.Token).ConfigureAwait(false);
             return new(stopAccepted, commandResult, stopResult, decoded);
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { return new(false, null, null); }
@@ -122,6 +132,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
                 {
                     _developerTest = null;
                     _developerSequence = 0;
+                    _developerCompletion = null;
                 }
             }
             linked.Dispose();
@@ -206,8 +217,16 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             physicalResult = null;
             if (_disposed || sequence != _sequence || !_authority.TryAcquireLease(_token, out var lease) || lease is null) return false;
             lease.Dispose();
-            _writer.Submit(sequence, rumble, safetyDuration);
-            physicalResult = new PhysicalRumbleWriteResult(PhysicalRumbleWriteStatus.Succeeded, "Queued");
+            if (sequence == _developerSequence)
+            {
+                _developerCompletion = _writer.SubmitForResult(sequence, rumble, safetyDuration);
+                physicalResult = new PhysicalRumbleWriteResult(PhysicalRumbleWriteStatus.Succeeded, "Queued");
+            }
+            else
+            {
+                _writer.Submit(sequence, rumble, safetyDuration);
+                physicalResult = new PhysicalRumbleWriteResult(PhysicalRumbleWriteStatus.Succeeded, "Queued");
+            }
             return true;
         }
     }
@@ -227,9 +246,10 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         private readonly IPhysicalRumbleSink _sink;
         private readonly object _gate = new();
         private readonly AutoResetEvent _wake = new(false);
+        private readonly CancellationTokenSource _lifetime = new();
         private Request? _pending;
         private long _latestGeneration;
-        private CancellationTokenSource _retirement = new();
+        private bool _retired;
 
         internal LatestWinsRumbleWriter(IPhysicalRumbleSink sink)
         {
@@ -237,13 +257,28 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             _ = Task.Run(Loop);
         }
 
-        internal void Submit(long generation, TwoMotorRumble rumble, TimeSpan safetyDuration)
+        internal void Submit(long generation, TwoMotorRumble rumble, TimeSpan safetyDuration) => SubmitCore(new Request(generation, rumble, safetyDuration));
+
+        internal Task<PhysicalRumbleWriteResult> SubmitForResult(long generation, TwoMotorRumble rumble, TimeSpan safetyDuration)
+        {
+            var completion = new TaskCompletionSource<PhysicalRumbleWriteResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            SubmitCore(new Request(generation, rumble, safetyDuration, completion));
+            return completion.Task;
+        }
+
+        private void SubmitCore(Request request)
         {
             lock (_gate)
             {
-                if (_retirement.IsCancellationRequested) return;
-                _pending = new Request(generation, rumble, safetyDuration);
-                _latestGeneration = generation;
+                if (_retired)
+                {
+                    request.Completion?.TrySetResult(new(PhysicalRumbleWriteStatus.Unavailable, "Retired"));
+                    return;
+                }
+                if (_pending is { Completion: { } superseded })
+                    superseded.TrySetResult(new(PhysicalRumbleWriteStatus.Unavailable, "Superseded"));
+                _pending = request;
+                _latestGeneration = request.Generation;
             }
             _wake.Set();
         }
@@ -252,11 +287,13 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         {
             lock (_gate)
             {
+                if (_retired) return;
+                _retired = true;
+                if (_pending is { Completion: { } pending })
+                    pending.TrySetResult(new(PhysicalRumbleWriteStatus.Unavailable, "Retired"));
                 _pending = new Request(long.MaxValue, TwoMotorRumble.Stopped, TimeSpan.Zero);
                 _latestGeneration = long.MaxValue;
-                _retirement.Cancel();
-                _retirement.Dispose();
-                _retirement = new CancellationTokenSource();
+                _lifetime.Cancel();
             }
             _sink.CancelPendingWrite();
             _wake.Set();
@@ -264,39 +301,36 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
         private void Loop()
         {
-            while (true)
+            try
             {
-                _wake.WaitOne();
-                Request? request;
-                lock (_gate)
+                while (true)
                 {
-                    request = _pending;
-                    _pending = null;
-                }
-                if (request is null) continue;
-                try
-                {
-                    _sink.SetRumble(request.Value.Rumble);
-                    if (request.Value.SafetyDuration > TimeSpan.Zero)
+                    _wake.WaitOne();
+                    Request? request;
+                    bool retired;
+                    lock (_gate) { request = _pending; _pending = null; retired = _retired; }
+                    if (request is null) continue;
+                    PhysicalRumbleWriteResult result;
+                    try { result = _sink.SetRumble(request.Value.Rumble); }
+                    catch (Exception exception) { result = new(PhysicalRumbleWriteStatus.Failed, exception.GetType().Name); }
+                    request.Value.Completion?.TrySetResult(result);
+                    if (request.Value.SafetyDuration > TimeSpan.Zero && !retired)
                         _ = StopAfterSafetyDeadlineAsync(request.Value);
-                }
-                catch (OperationCanceledException) { }
-                catch (Exception exception)
-                {
-                    try { AppLog.Debug("Rumble", "Physical rumble worker failure was contained.", ("Reason", exception.GetType().Name)); } catch { }
+                    if (retired) return;
                 }
             }
+            finally { _wake.Dispose(); _lifetime.Dispose(); }
         }
 
         private async Task StopAfterSafetyDeadlineAsync(Request request)
         {
             try
             {
-                var token = _retirement.Token;
+                var token = _lifetime.Token;
                 await Task.Delay(request.SafetyDuration, token).ConfigureAwait(false);
                 lock (_gate)
                 {
-                    if (_retirement.IsCancellationRequested) return;
+                    if (_retired) return;
                     if (_latestGeneration == request.Generation)
                         _pending = new Request(request.Generation, TwoMotorRumble.Stopped, TimeSpan.Zero);
                 }
@@ -305,7 +339,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             catch (OperationCanceledException) { }
         }
 
-        private readonly record struct Request(long Generation, TwoMotorRumble Rumble, TimeSpan SafetyDuration);
+        private readonly record struct Request(long Generation, TwoMotorRumble Rumble, TimeSpan SafetyDuration, TaskCompletionSource<PhysicalRumbleWriteResult>? Completion = null);
     }
 
 }

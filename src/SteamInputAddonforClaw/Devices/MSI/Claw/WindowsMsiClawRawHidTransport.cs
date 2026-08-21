@@ -78,6 +78,7 @@ internal interface IMsiClawNativeHidApi
 internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
 {
     public int LastError { get; private set; }
+    private int _writeThreadId;
 
     public SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition)
     {
@@ -88,12 +89,21 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
 
     public bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten)
     {
-        var result = WriteFile(handle, buffer, (uint)buffer.Length, out bytesWritten, IntPtr.Zero);
+        Volatile.Write(ref _writeThreadId, unchecked((int)GetCurrentThreadId()));
+        bool result;
+        try { result = WriteFile(handle, buffer, (uint)buffer.Length, out bytesWritten, IntPtr.Zero); }
+        finally { Volatile.Write(ref _writeThreadId, 0); }
         LastError = result ? 0 : Marshal.GetLastWin32Error();
         return result;
     }
 
-    public void CancelWrite(SafeFileHandle handle) => CancelIoEx(handle, IntPtr.Zero);
+    public void CancelWrite(SafeFileHandle handle)
+    {
+        var threadId = Volatile.Read(ref _writeThreadId);
+        if (threadId == 0) return;
+        using var thread = OpenThread(ThreadSetInformation, false, unchecked((uint)threadId));
+        if (!thread.IsInvalid) CancelSynchronousIo(thread);
+    }
 
     public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
     {
@@ -137,6 +147,14 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CancelIoEx(SafeFileHandle file, IntPtr overlapped);
+    private const uint ThreadSetInformation = 0x0020;
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern SafeFileHandle OpenThread(uint desiredAccess, bool inheritHandle, uint threadId);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CancelSynchronousIo(SafeFileHandle threadHandle);
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

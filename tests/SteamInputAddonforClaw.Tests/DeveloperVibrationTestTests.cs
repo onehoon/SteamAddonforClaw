@@ -60,7 +60,7 @@ public sealed class DeveloperVibrationTestTests
 
         await Task.Delay(20);
         bridge.Dispose();
-        Assert.True((await test).Succeeded);
+        Assert.False((await test).Succeeded);
     }
 
     [Fact]
@@ -142,8 +142,8 @@ public sealed class DeveloperVibrationTestTests
 
         Assert.True(outcome.Succeeded);
         Assert.NotNull(outcome.CommandResult);
-        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, outcome.CommandResult!.Value.Status);
-        Assert.Equal("Queued", outcome.CommandResult!.Value.Reason);
+        Assert.Equal(PhysicalRumbleWriteStatus.Failed, outcome.CommandResult!.Value.Status);
+        Assert.Equal("WriteFailed", outcome.CommandResult!.Value.Reason);
     }
 
     [Fact]

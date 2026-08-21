@@ -24,7 +24,7 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
     private const uint OpenExisting = 3;
 
     private readonly IMsiClawNativeHidApi _api;
-    private readonly Lock _sync = new();
+    private readonly object _sync = new();
     private SafeFileHandle? _handle;
     private string? _devicePath;
     private bool _disposed;
@@ -74,7 +74,15 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             var bytes = new byte[outputReportLength];
             semanticPacket.CopyTo(bytes);
             var writeStarted = Stopwatch.GetTimestamp();
-            if (!_api.Write(_handle, bytes, out var written))
+            // Do not hold the transport state lock while native I/O is pending. Retirement must
+            // be able to reach the native cancellation seam while this call is blocked.
+            var pendingHandle = _handle;
+            Monitor.Exit(_sync);
+            bool writeSucceeded;
+            uint written;
+            try { writeSucceeded = _api.Write(pendingHandle, bytes, out written); }
+            finally { Monitor.Enter(_sync); }
+            if (!writeSucceeded)
             {
                 var error = _api.LastError;
                 CloseHandleLocked();
