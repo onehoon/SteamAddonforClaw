@@ -138,9 +138,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             startupComposition.StockCenterMBaseline,
             startupResult.RecoverySafe,
             startupResult.HardwareSupported,
-            _qamHostController.OnBigPictureStateChanged,
-            routingReconcileCompleted: null,
-            winGSuppressionGuard: _winGSuppressionGuard);
+            winGSuppressionGuard: _winGSuppressionGuard,
+            bigPictureStateChanged: _qamHostController.OnBigPictureStateChanged,
+            routingReconcileCompleted: null);
 
         // Review fix (BLOCKER): the OEM1 coordinator and the routing guard share the SAME underlying
         // helper ownership, but only their exact-handle Start() call itself serializes between them.
@@ -320,8 +320,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _trayHostWindow = null;
         if (_runtimeHost is not null)
         {
-            await _runtimeHost.DisposeAsync().ConfigureAwait(false);
+            var runtimeHost = _runtimeHost;
+            await runtimeHost.DisposeAsync().ConfigureAwait(false);
             _runtimeHost = null;
+            if (runtimeHost.RoutingShutdownSucceeded)
+                _winGSuppressionGuard.Dispose();
+            else
+                AppLog.Warn("Wing.Guard", "Win+G hook retained until process exit because routing shutdown did not complete safely.");
+        }
+        else
+        {
+            _winGSuppressionGuard.Dispose();
         }
         // Routing shutdown/rollback has completed before the Runtime-lifetime hook is removed.
         _winGSuppressionGuard.Dispose();

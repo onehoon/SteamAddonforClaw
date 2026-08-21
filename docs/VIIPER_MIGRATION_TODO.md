@@ -257,15 +257,14 @@ approved.
 
 ### SD7 — Game Bar and typed Xbox360 route
 
-Status: **SOFTWARE WIRED — HARDWARE VALIDATION PENDING**
+Status: **FOUNDATION RETAINED — PRODUCTION SWITCHING DISABLED**
 
-Current main production-subscribes `GameBarForegroundWatcher`, delivers
-latest-state foreground intent, re-evaluates foreground after successful
-routing/resume reconciliation, serializes Deck/Xbox360 presentation mutations,
-and drains Game Bar delivery before Runtime teardown. The remaining SD7 gate is
-hardware evidence and any readiness fix proven necessary by that evidence.
-X360 PnP/XInput readiness is not currently claimed. The historical PR
-paragraphs below intentionally describe the earlier incremental states.
+Current main does not start or subscribe `GameBarForegroundWatcher` in
+production. The typed Xbox360 device/publisher and Deck/Xbox360 presentation
+primitives remain retained as dormant foundations. Route-bound Win+G
+protection is the active production policy; real hardware validation remains
+pending. The historical PR paragraphs below intentionally describe earlier
+incremental states.
 
 Define the Game Bar transition and typed Xbox360 composition without weakening
 the active Deck lifecycle or recovery invariants.

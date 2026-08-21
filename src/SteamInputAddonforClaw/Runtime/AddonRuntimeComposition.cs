@@ -39,10 +39,11 @@ internal static class AddonRuntimeCompositionFactory
         IStockCenterMStartupBaseline? stockCenterMBaseline,
         bool recoverySafe,
         bool hardwareSupported,
+        WinGSuppressionGuard winGSuppressionGuard,
         Action<bool>? bigPictureStateChanged = null,
-        Action? routingReconcileCompleted = null,
-        WinGSuppressionGuard? winGSuppressionGuard = null)
+        Action? routingReconcileCompleted = null)
     {
+        ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         var settingsStore = new SettingsStore(AddonDataPaths.SettingsPath);
         var settings = settingsStore.Load();
         AppLog.MinimumLevelOverride = AppSettingsPolicy.ToAppLogLevel(settings.LogLevel);

@@ -4,10 +4,11 @@ namespace SteamInputAddonforClaw.CenterM;
 
 /// <summary>
 /// Adapts <see cref="CenterMMainUiRoutingGuard"/> to the generic routing pipeline. Arms on
-/// <see cref="ExecuteMutationAsync"/> (scheduled first in <see cref="RoutingPipelineStageOrder.Forward"/>,
-/// before any native-mode/PID1902 mutation) and disarms on <see cref="RollbackMutationAsync"/>
-/// (scheduled last in <see cref="RoutingPipelineStageOrder.Rollback"/>, after native-mode
-/// restoration). The generic pipeline only ever sees this stage/its Kind -- it never learns
+/// <see cref="ExecuteMutationAsync"/> (scheduled first among the native MSI stages in
+/// <see cref="RoutingPipelineStageOrder.Forward"/>, after route-bound Win+G protection) and disarms
+/// on <see cref="RollbackMutationAsync"/> (scheduled last among those stages in
+/// <see cref="RoutingPipelineStageOrder.Rollback"/>, after native-mode restoration and before
+/// Win+G protection is released). The generic pipeline only ever sees this stage/its Kind -- it never learns
 /// MSI-specific identifiers like the MainUI process name or mutex name, which stay inside
 /// <see cref="CenterMMainUiRoutingGuard"/>.
 /// </summary>

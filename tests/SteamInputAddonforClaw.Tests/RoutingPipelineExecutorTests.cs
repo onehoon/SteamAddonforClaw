@@ -284,15 +284,19 @@ public sealed class RoutingPipelineExecutorTests
     public async Task WinGProtectionRollsBackLastAndDisarmFailureCannotVetoExit()
     {
         var trace = new List<string>();
-        var wing = new WinGProtectionRoutingStage(() => true, () => throw new InvalidOperationException());
+        var wing = new WinGProtectionRoutingStage(
+            () => { trace.Add("WinGProtection.Execute"); return true; },
+            () => { trace.Add("WinGProtection.Rollback"); throw new InvalidOperationException("best-effort disarm failure"); });
         var center = new FakeStage(RoutingStageKind.CenterMGuard, trace);
         var native = new FakeStage(RoutingStageKind.NativeMode, trace);
         var result = await new RoutingPipelineExecutor([wing, center, native]).ExecuteAsync(
             RoutingPipelinePlan.AllDisabled with { WinGProtection = RoutingStageMode.Enabled, CenterMGuard = RoutingStageMode.Enabled, NativeMode = RoutingStageMode.Enabled }, CancellationToken.None);
         Assert.True(result.Succeeded);
+        Assert.Equal(["WinGProtection.Execute", "CenterMGuard.Prepare", "CenterMGuard.Execute", "NativeMode.Prepare", "NativeMode.Execute"], trace);
         var rollback = await new RoutingPipelineExecutor([wing, center, native]).RollbackAsync(
             RoutingPipelinePlan.AllDisabled with { WinGProtection = RoutingStageMode.Enabled, CenterMGuard = RoutingStageMode.Enabled, NativeMode = RoutingStageMode.Enabled }, CancellationToken.None);
         Assert.True(rollback.Succeeded);
+        Assert.Equal(["WinGProtection.Execute", "CenterMGuard.Prepare", "CenterMGuard.Execute", "NativeMode.Prepare", "NativeMode.Execute", "NativeMode.Rollback", "CenterMGuard.Rollback", "WinGProtection.Rollback"], trace);
     }
 
     [Fact]

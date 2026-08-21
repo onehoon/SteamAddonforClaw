@@ -9,11 +9,11 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
     private readonly Func<bool> _arm;
     private readonly Action _disarm;
 
-    internal WinGProtectionRoutingStage(WinGSuppressionGuard? guard)
+    internal WinGProtectionRoutingStage(WinGSuppressionGuard guard)
     {
-        _guard = guard;
-        _arm = () => _guard?.EnsureArmed() ?? true;
-        _disarm = () => _guard?.Disarm();
+        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
+        _arm = _guard.EnsureArmed;
+        _disarm = _guard.Disarm;
     }
 
     internal WinGProtectionRoutingStage(Func<bool> arm, Action disarm)
