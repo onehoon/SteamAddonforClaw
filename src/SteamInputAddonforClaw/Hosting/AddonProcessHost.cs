@@ -200,6 +200,12 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void StartPowerObservation() => GetRuntimeHost().StartPowerObservation();
 
+    internal async Task ShutdownRuntimeBeforeMessageLoopExitAsync()
+    {
+        if (_runtimeHost is not null)
+            await _runtimeHost.DisposeAsync().ConfigureAwait(false);
+    }
+
     internal void StartRuntimeEventWatchers()
     {
         // Game Bar foreground presentation remains dormant in production. Install the existing
@@ -332,8 +338,6 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             _winGSuppressionGuard.Dispose();
         }
-        // Routing shutdown/rollback has completed before the Runtime-lifetime hook is removed.
-        _winGSuppressionGuard.Dispose();
         if (_tdpRuntime is not null)
         {
             await _tdpRuntime.DisposeAsync().ConfigureAwait(false);
