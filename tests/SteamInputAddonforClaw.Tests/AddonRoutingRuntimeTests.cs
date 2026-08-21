@@ -552,7 +552,7 @@ public sealed class AddonRoutingRuntimeTests
     public async Task Unavailable_viiper_skips_eligible_new_forward_route_before_pipeline_entry()
     {
         var status = new FakeStatusProvider(Snapshot(new RoutingDecision(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible)));
-        var runtime = CreateMsiRuntime(status, hardwareSupported: false);
+        var runtime = CreateMsiRuntime(status, steamOutputReady: false);
         Assert.NotNull(runtime);
         try
         {
@@ -573,7 +573,7 @@ public sealed class AddonRoutingRuntimeTests
     public async Task Unavailable_viiper_does_not_suppress_existing_residual_cleanup_boundary()
     {
         var status = new FakeStatusProvider(Snapshot(WaitingForSteam()));
-        var runtime = CreateMsiRuntime(status, hardwareSupported: false);
+        var runtime = CreateMsiRuntime(status, steamOutputReady: false);
         Assert.NotNull(runtime);
         try
         {
@@ -692,25 +692,10 @@ public sealed class AddonRoutingRuntimeTests
     {
         var status = new FakeStatusProvider(Snapshot(new RoutingDecision(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible)));
         var safety = new RecoverySafetyState(RecoverySafety.Safe);
-        var runtime = AddonRoutingRuntime.Create(
-            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()), status,
-            new AddonOwnedVirtualDeviceTracker(), new RecoveryManager(new MemoryJournalStore()),
-            new PowerMutationGate(initiallyOpen: true), safety, new DefaultOem1MappingPreference(),
-            hardwareSupported: true);
+        var runtime = CreateMsiRuntime(status);
         Assert.NotNull(runtime);
         try
         {
-            // Keep the production runtime on the fresh Eligible path without loading a native
-            // VIIPER DLL. NativeMode preflight will stop at the empty-device boundary, but only
-            // after this test has proved that stale fault convergence ran before that preflight.
-            var viiperField = typeof(AddonRoutingRuntime).GetField("_viiperRuntime", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-#pragma warning disable SYSLIB0050 // The test needs a Ready-only owner to reach NativeMode preflight without a native DLL.
-            var viiper = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(CanonicalViiperRuntime));
-#pragma warning restore SYSLIB0050
-            typeof(CanonicalViiperRuntime).GetProperty("State", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-                .SetValue(viiper, CanonicalViiperRuntimeState.Ready);
-            viiperField.SetValue(runtime, viiper);
-
             var unsafeVersion = safety.Set(RecoverySafety.Unsafe);
             var safetySession = typeof(AddonRoutingRuntime)
                 .GetField("_safetySession", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -729,7 +714,6 @@ public sealed class AddonRoutingRuntimeTests
                 .GetValue(safetySession)!;
             Assert.False(latched);
             Assert.Equal(1, status.CaptureCalls);
-            viiperField.SetValue(runtime, null);
         }
         finally
         {
@@ -738,15 +722,23 @@ public sealed class AddonRoutingRuntimeTests
         }
     }
 
-    private static AddonRoutingRuntime? CreateMsiRuntime(ISystemStatusProvider? statusProvider = null, bool hardwareSupported = true) => AddonRoutingRuntime.Create(
-        new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
-        statusProvider ?? new FakeStatusProvider(),
-        new AddonOwnedVirtualDeviceTracker(),
-        new RecoveryManager(new MemoryJournalStore()),
-        new PowerMutationGate(initiallyOpen: true),
-        new RecoverySafetyState(RecoverySafety.Safe),
-        new DefaultOem1MappingPreference(),
-        hardwareSupported: hardwareSupported);
+    private static AddonRoutingRuntime? CreateMsiRuntime(
+        ISystemStatusProvider? statusProvider = null,
+        bool steamOutputReady = true)
+    {
+        var runtime = AddonRoutingRuntime.Create(
+            new MsiClawDeviceAdapter(new EmptyDeviceEnumerator()),
+            statusProvider ?? new FakeStatusProvider(),
+            new AddonOwnedVirtualDeviceTracker(),
+            new RecoveryManager(new MemoryJournalStore()),
+            new PowerMutationGate(initiallyOpen: true),
+            new RecoverySafetyState(RecoverySafety.Safe),
+            new DefaultOem1MappingPreference(),
+            hardwareSupported: false);
+
+        runtime?.TestOnly_SetSteamOutputReady(steamOutputReady);
+        return runtime;
+    }
 
     private static SystemStatusSnapshot Snapshot(RoutingDecision decision) =>
         new(new("Test", "Test", "Test", []), null!, [], null!, null!, null!, decision, null!, true, false);
