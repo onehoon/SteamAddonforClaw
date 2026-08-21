@@ -84,6 +84,10 @@ public sealed class TdpPowerLifecycleTests : IDisposable
 
         Assert.Contains("SetData(81,20)", transport.Operations);
         Assert.Equal(before, File.ReadAllText(ProfilePath));
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Invalidate=True", log);
+        Assert.Contains("Reason=PowerSourceBoundary", log);
     }
 
     [Fact]

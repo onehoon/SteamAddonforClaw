@@ -34,6 +34,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private long _authorityVersion;
     private long _reconcileVersion;
     private bool _invalidateHardwareCacheBeforeNextApply;
+    private readonly List<string> _pendingCacheInvalidationReasons = [];
     private TdpPowerSource? _lastAdmittedPowerSource;
     private bool _reconcileRequired;
     private bool _accepting = true;
@@ -93,7 +94,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
             {
                 if (!_accepting) return;
                 if (invalidateHardwareCache)
-                    _invalidateHardwareCacheBeforeNextApply = true;
+                    RequestCacheInvalidationUnderLock(reason);
                 var source = _powerSource();
                 if (source is not { } currentSource)
                 {
@@ -109,8 +110,9 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     return;
 
                 if (realPowerBoundary)
-                    _invalidateHardwareCacheBeforeNextApply = true;
-                AppLog.Debug("Profiles.Tdp", "TDP reconcile admitted", ("Reason", reason), ("Source", currentSource), ("PL1", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl1Watts), ("PL2", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl2Watts), ("Force", forceApply), ("Invalidate", invalidateHardwareCache));
+                    RequestCacheInvalidationUnderLock("PowerSourceBoundary");
+                var effectiveInvalidation = invalidateHardwareCache || realPowerBoundary;
+                AppLog.Debug("Profiles.Tdp", "TDP reconcile admitted", ("Reason", reason), ("Source", currentSource), ("PL1", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl1Watts), ("PL2", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl2Watts), ("Force", forceApply), ("Invalidate", effectiveInvalidation));
                 EnqueueSnapshotUnderLock(currentSource, tdp, reason);
             }
         }
@@ -163,7 +165,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     _authorityVersion++;
                     _reconcileVersion++;
                     _reconcileRequired = false;
-                    _invalidateHardwareCacheBeforeNextApply = true;
+                    RequestCacheInvalidationUnderLock("TdpDisabled");
                     AppLog.Debug("Profiles.Tdp", "TDP authority revoked", ("Reason", "TdpDisabled"));
                     if (wasEnabled)
                         AppLog.Info("Profiles.Tdp", "TDP control disabled", ("Action", "StopManaging"), ("Restore", false));
@@ -223,6 +225,13 @@ internal sealed class TdpRuntime : IAsyncDisposable
         _reconcileRequired = true;
     }
 
+    private void RequestCacheInvalidationUnderLock(string reason)
+    {
+        _invalidateHardwareCacheBeforeNextApply = true;
+        if (!_pendingCacheInvalidationReasons.Contains(reason, StringComparer.Ordinal))
+            _pendingCacheInvalidationReasons.Add(reason);
+    }
+
     private void EnqueueSnapshotUnderLock(TdpApplySnapshot snapshot)
     {
         if (!_accepting) return;
@@ -244,6 +253,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private async Task ExecuteAsync(TdpApplySnapshot snapshot)
     {
         bool invalidateHardwareCache;
+        string? cacheInvalidationReason;
         lock (_sync)
         {
             if (!_accepting || snapshot.AuthorityVersion != _authorityVersion)
@@ -253,14 +263,18 @@ internal sealed class TdpRuntime : IAsyncDisposable
             }
 
             invalidateHardwareCache = _invalidateHardwareCacheBeforeNextApply;
+            cacheInvalidationReason = invalidateHardwareCache
+                ? string.Join('+', _pendingCacheInvalidationReasons)
+                : null;
             _invalidateHardwareCacheBeforeNextApply = false;
+            _pendingCacheInvalidationReasons.Clear();
         }
 
         try
         {
             if (_modelId is not { } modelId) return;
             if (invalidateHardwareCache)
-                _hardware.InvalidateCachedPowerLimits(snapshot.Reason);
+                _hardware.InvalidateCachedPowerLimits(cacheInvalidationReason ?? "Unknown");
             var result = _hardware.Apply(modelId, new() { Pl1Watts = snapshot.Pl1Watts, Pl2Watts = snapshot.Pl2Watts });
             lock (_sync)
             {

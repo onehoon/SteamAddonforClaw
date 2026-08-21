@@ -224,6 +224,10 @@ public sealed class TdpRuntimeTests : IDisposable
         await runtime.DrainAsync();
 
         Assert.Equal(["GetAp(0)", "SetData(80,8)", "SetData(81,30)", "SetData(80,20)"], transport.Operations);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Power-limit cache invalidated", log);
+        Assert.Contains("Reason=TdpDisabled", log);
     }
 
     [Fact]
