@@ -109,8 +109,11 @@ internal sealed class WindowsTdpCenterMRegistryEventSource : ITdpCenterMRegistry
     internal string KeyPath { get; }
     public string ValueName { get; }
     public event Action? Changed;
-    internal static string BuildQuery(string keyPath, string valueName) =>
-        $"SELECT * FROM RegistryValueChangeEvent WHERE Hive = '{WindowsTdpCenterMRegistryEventSource.Hive}' AND KeyPath = '{keyPath}' AND ValueName = '{valueName}'";
+    internal static string BuildQuery(string keyPath, string valueName)
+    {
+        var escapedKeyPath = keyPath.Replace(@"\", @"\\");
+        return $"SELECT * FROM RegistryValueChangeEvent WHERE Hive = '{WindowsTdpCenterMRegistryEventSource.Hive}' AND KeyPath = '{escapedKeyPath}' AND ValueName = '{valueName}'";
+    }
 
     public bool TryStart(out Exception? error)
     {

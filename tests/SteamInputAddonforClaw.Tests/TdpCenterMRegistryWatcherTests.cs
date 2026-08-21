@@ -41,13 +41,17 @@ public sealed class TdpCenterMRegistryWatcherTests : IDisposable
         foreach (var value in new[] { "Mode", "ManualPL1AC", "ManualPL2AC", "ManualPL1DC", "ManualPL2DC" })
         {
             var query = WindowsTdpCenterMRegistryEventSource.BuildQuery(WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath, value);
-            Assert.Contains($"KeyPath = '{WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath}'", query);
+            var escapedPath = WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath.Replace(@"\", @"\\");
+            Assert.Contains($"KeyPath = '{escapedPath}'", query);
+            Assert.DoesNotContain($"KeyPath = '{WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath}'", query);
             Assert.Contains($"ValueName = '{value}'", query);
             Assert.Contains("Hive = 'HKEY_LOCAL_MACHINE'", query);
         }
 
         var aiQuery = WindowsTdpCenterMRegistryEventSource.BuildQuery(WindowsTdpCenterMRegistryEventSource.AiEngineKeyPath, "AIModeM");
-        Assert.Contains($"KeyPath = '{WindowsTdpCenterMRegistryEventSource.AiEngineKeyPath}'", aiQuery);
+        var escapedAiPath = WindowsTdpCenterMRegistryEventSource.AiEngineKeyPath.Replace(@"\", @"\\");
+        Assert.Contains($"KeyPath = '{escapedAiPath}'", aiQuery);
+        Assert.DoesNotContain($"KeyPath = '{WindowsTdpCenterMRegistryEventSource.AiEngineKeyPath}'", aiQuery);
         Assert.Contains("ValueName = 'AIModeM'", aiQuery);
         Assert.DoesNotContain(WindowsTdpCenterMRegistryEventSource.UserScenarioKeyPath, aiQuery);
     }
