@@ -43,17 +43,21 @@ public sealed class WingRuntimeTests
     }
 
     [Fact]
-    public void Late_second_press_is_not_classified_as_double_even_when_timeout_is_delayed()
+    public async Task Late_second_press_is_not_classified_as_double_even_when_timeout_is_delayed()
     {
         var time = new TestTimeProvider();
         var delay = new HeldDelay();
         var gestures = new List<WingGesture>();
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var recognizer = new WingGestureRecognizer(() => true, delay, time);
-        recognizer.GestureRecognized += gestures.Add;
+        recognizer.GestureRecognized += gesture => { gestures.Add(gesture); if (gestures.Count == 2) completed.SetResult(); };
         recognizer.OnPress();
         time.Advance(TimeSpan.FromMilliseconds(201));
         recognizer.OnPress();
         Assert.Equal([WingGesture.Single], gestures);
+        delay.Complete();
+        await completed.Task;
+        Assert.Equal([WingGesture.Single, WingGesture.Single], gestures);
     }
 
     [Fact]
@@ -66,7 +70,10 @@ public sealed class WingRuntimeTests
 
     private sealed class HeldDelay : IOem1GestureDelay
     {
-        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        private TaskCompletionSource _completion = NewCompletion();
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => _completion.Task.WaitAsync(cancellationToken);
+        public void Complete() { _completion.TrySetResult(); }
+        private static TaskCompletionSource NewCompletion() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private sealed class TestTimeProvider : TimeProvider

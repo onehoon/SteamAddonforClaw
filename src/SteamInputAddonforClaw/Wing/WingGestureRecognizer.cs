@@ -24,14 +24,17 @@ internal sealed class WingGestureRecognizer : IDisposable
     internal void OnPress()
     {
         WingGesture? gesture = null;
+        bool beginNewSequence = false;
+        long now = _time.GetTimestamp();
         lock (_gate)
         {
             if (_disposed) return;
             if (_first)
             {
-                var inWindow = _time.GetElapsedTime(_firstPressTimestamp, _time.GetTimestamp()) < TimeSpan.FromMilliseconds(200);
+                var inWindow = _time.GetElapsedTime(_firstPressTimestamp, now) < TimeSpan.FromMilliseconds(200);
                 _first = false; _generation++; _pending?.Cancel(); _pending = null;
                 gesture = inWindow ? WingGesture.Double : WingGesture.Single;
+                beginNewSequence = !inWindow;
             }
             else if (_doubleEnabled())
             {
@@ -41,6 +44,18 @@ internal sealed class WingGestureRecognizer : IDisposable
             else gesture = WingGesture.Single;
         }
         Deliver(gesture!.Value);
+        if (beginNewSequence) BeginPending(now);
+    }
+
+    private void BeginPending(long timestamp)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_doubleEnabled()) return;
+            _first = true; _firstPressTimestamp = timestamp; _generation++;
+            _pending = new CancellationTokenSource();
+            _ = CompleteAsync(_generation, _pending.Token);
+        }
     }
 
     internal void InvalidatePending()

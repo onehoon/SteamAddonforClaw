@@ -29,7 +29,12 @@ internal sealed class WingEventGestureBridge : IDisposable
             _pendingEpoch = current.Epoch;
         }
         AppLog.Debug("Wing.Event", "Event88Accepted", ("AuthorityEpoch", current.Epoch));
-        _recognizer.OnPress();
+        try { _recognizer.OnPress(); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Wing.Event", "WING gesture recognition failed; routing continues.", exception,
+                ("AuthorityEpoch", current.Epoch));
+        }
     }
 
     private void OnGesture(WingGesture gesture)
