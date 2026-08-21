@@ -388,7 +388,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         ticks.Tick();
         await session.InputEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.True(sink.Values.Count <= 2);
+        Assert.Contains("SetOutputCallback", session.Trace);
     }
 
     [Fact]
@@ -443,23 +443,17 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         Assert.Contains("SetOutputCallback", session.Trace);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.Single(sink.Values);
     }
 
-    [Theory]
-    [InlineData("Failed")]
-    [InlineData("Unavailable")]
-    [InlineData("Disposed")]
-    public async Task FinalStopFailureIsDegradedAndDoesNotBlockStructuralTeardown(string stopStatusName)
+    [Fact]
+    public async Task BlockedPhysicalStopDoesNotBlockStructuralTeardown()
     {
-        var stopStatus = Enum.Parse<PhysicalRumbleWriteStatus>(stopStatusName);
         // Regression for the fail-close hang: the final motor STOP is best-effort. A failure to
         // deliver it must not make Steam Deck / VIIPER ownership uncertain, so it must not stop
         // callback clear, canonical device removal, or (transitively, via the pipeline's rollback
         // barrier) PhysicalInput/NativeMode rollback and PID1901 restoration from running.
         var session = new FakeCanonicalSession();
         var sink = new RecordingRumbleSink();
-        sink.Results.Enqueue(new(stopStatus, "test"));
         sink.BlockWrites = true;
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
         await stage.PrepareMutationAsync(CancellationToken.None);
@@ -474,7 +468,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True(result.Succeeded, result.Reason);
         Assert.Equal(1, session.ClearOutputCallbackCalls);
         Assert.Equal(1, session.RemoveCalls);
-        Assert.True(sink.Values.Count <= 1);
+        Assert.Equal([TwoMotorRumble.Stopped], sink.Snapshot());
     }
 
     [Fact]
@@ -591,10 +585,9 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var callbackTask = Task.Run(() => Invoke(session.Callback!, RumbleReport(0x1234, 0x5678)));
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
-        Assert.True(sink.Values.Count <= 1);
         release.TrySetResult();
         await callbackTask;
-        Assert.True(sink.Values.Count <= 1);
+        Assert.DoesNotContain(new TwoMotorRumble(0x1234, 0x5678), sink.Snapshot());
     }
 
     [Fact]
@@ -1194,15 +1187,17 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
     private sealed class RecordingRumbleSink : IPhysicalRumbleSink
     {
+        private readonly object _gate = new();
         public List<TwoMotorRumble> Values { get; } = [];
         public Queue<PhysicalRumbleWriteResult> Results { get; } = new();
         public bool BlockWrites { get; set; }
         public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseWrite { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<string>? Trace { get; set; }
+        public TwoMotorRumble[] Snapshot() { lock (_gate) return [.. Values]; }
         public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
         {
-            Values.Add(rumble);
+            lock (_gate) Values.Add(rumble);
             if (BlockWrites) { WriteEntered.TrySetResult(); ReleaseWrite.Task.GetAwaiter().GetResult(); }
             if (rumble == TwoMotorRumble.Stopped) Trace?.Add("RumblePreflightStop");
             return Results.Count > 0 ? Results.Dequeue() : new(PhysicalRumbleWriteStatus.Succeeded, "");

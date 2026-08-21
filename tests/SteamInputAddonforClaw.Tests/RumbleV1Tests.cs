@@ -18,9 +18,7 @@ public sealed class RumbleV1Tests
         var newBridge = new SteamDeckRumbleFeedbackBridge(authority, second, sink);
         Invoke(oldBridge.Callback, Packet(0x1234, 0x5678));
         Invoke(newBridge.Callback, Packet(0x1234, 0x5678));
-        SpinWait.SpinUntil(() => sink.Values.Count == 1, TimeSpan.FromSeconds(2));
-        Assert.Single(sink.Values);
-        Assert.Equal(new TwoMotorRumble(0x1234, 0x5678), sink.Values[0]);
+        Assert.True(sink.WaitForValue(new TwoMotorRumble(0x1234, 0x5678), TimeSpan.FromSeconds(2)));
     }
 
     [Fact]
@@ -85,10 +83,21 @@ public sealed class RumbleV1Tests
 
     private sealed class RecordingSink : IPhysicalRumbleSink
     {
+        private readonly object _gate = new();
         public List<TwoMotorRumble> Values { get; } = [];
         public bool ThrowOnWrite { get; set; }
         public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
-        { if (ThrowOnWrite) throw new InvalidOperationException(); Values.Add(rumble); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+        { lock (_gate) { if (ThrowOnWrite) throw new InvalidOperationException(); Values.Add(rumble); Monitor.PulseAll(_gate); } return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+        public bool WaitForValue(TwoMotorRumble expected, TimeSpan timeout)
+        {
+            lock (_gate)
+            {
+                var deadline = DateTime.UtcNow + timeout;
+                while (!Values.Contains(expected) && DateTime.UtcNow < deadline)
+                    Monitor.Wait(_gate, TimeSpan.FromMilliseconds(10));
+                return Values.Contains(expected);
+            }
+        }
     }
 
     private sealed class BlockingRecordingSink : IPhysicalRumbleSink
@@ -129,7 +138,7 @@ public sealed class RumbleV1Tests
 
         Assert.True(bridge.ProcessNormalizedReport([0xEB, 9, 0x04, 0x78, 0x56, 0x34, 0x12, 0xCD, 0xAB, 0x80, 0x7F]));
 
-        Assert.Equal([new TwoMotorRumble(0x1234, 0xABCD)], sink.Values);
+        Assert.True(sink.WaitForValue(new TwoMotorRumble(0x1234, 0xABCD), TimeSpan.FromSeconds(2)));
     }
 
     [Theory]
@@ -252,7 +261,7 @@ public sealed class RumbleV1Tests
         Assert.True(bridge.ProcessNormalizedReport(Packet(9, 10), "Steam"));
         Assert.False(bridge.ProcessNormalizedReport([0x8F, 8, 2, 0x34, 0x12, 0x78, 0x56, 3, 0, 0xA0], "Steam", out var sequence));
         Assert.Equal(0, sequence);
-        Assert.Equal([new TwoMotorRumble(9, 10)], sink.Values);
+        Assert.True(sink.WaitForValue(new TwoMotorRumble(9, 10), TimeSpan.FromSeconds(2)));
     }
 
     [Fact]

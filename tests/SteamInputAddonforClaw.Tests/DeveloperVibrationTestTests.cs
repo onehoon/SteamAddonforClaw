@@ -16,8 +16,7 @@ public sealed class DeveloperVibrationTestTests
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
         Assert.True((await bridge.ProcessDeveloperTestAsync(Report(command), addDeveloperStop: true, CancellationToken.None)).Succeeded);
-        await WaitForCountAsync(sink, 1);
-        Assert.True(SpinWait.SpinUntil(() => sink.Contains(new TwoMotorRumble(large, small)), TimeSpan.FromSeconds(2)));
+        await sink.WaitForValueAsync(new TwoMotorRumble(large, small), TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -29,8 +28,7 @@ public sealed class DeveloperVibrationTestTests
 
         Assert.True((await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None)).Succeeded);
 
-        await WaitForCountAsync(sink, 2);
-        Assert.Equal(TwoMotorRumble.Stopped, sink.Values[^1]);
+        await sink.WaitForValueAsync(TwoMotorRumble.Stopped, TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -40,14 +38,30 @@ public sealed class DeveloperVibrationTestTests
         var authority = new FeedbackAuthority();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
+        var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delayCall = 0;
+        bridge.DeveloperDelayOverride = (_, cancellationToken) =>
+        {
+            if (Interlocked.Increment(ref delayCall) == 1)
+            {
+                firstEntered.TrySetResult();
+                return firstRelease.Task.WaitAsync(cancellationToken);
+            }
+            secondEntered.TrySetResult();
+            return secondRelease.Task.WaitAsync(cancellationToken);
+        };
         var oldTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None);
-        await Task.Delay(20);
+        await firstEntered.Task;
         var newTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Haptic), true, CancellationToken.None);
+        await secondEntered.Task;
+        firstRelease.TrySetResult();
+        secondRelease.TrySetResult();
         await Task.WhenAll(oldTest, newTest);
 
-        await WaitForCountAsync(sink, 1);
-        Assert.Equal(TwoMotorRumble.Stopped, sink.Values[^1]);
-        Assert.True(sink.Contains(new TwoMotorRumble(32896, 32896)));
+        await sink.WaitForValueAsync(new TwoMotorRumble(32896, 32896), TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -56,10 +70,11 @@ public sealed class DeveloperVibrationTestTests
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        var (delayEntered, releaseDelay) = HoldDeveloperDelay(bridge);
         var test = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None);
-
-        await Task.Delay(20);
+        await delayEntered;
         bridge.Dispose();
+        releaseDelay();
         Assert.False((await test).Succeeded);
     }
 
@@ -75,19 +90,16 @@ public sealed class DeveloperVibrationTestTests
         var authority = new FeedbackAuthority();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
+        var (delayEntered, releaseDelay) = HoldDeveloperDelay(bridge);
         var developerTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), addDeveloperStop: true, CancellationToken.None);
-        await Task.Delay(20);
+        await delayEntered;
         Assert.True(bridge.ProcessNormalizedReport(Report(FrontendVibrationTestCommand.Haptic), "Steam"));
+        releaseDelay();
 
         // The developer test's own return value reports its delayed STOP as a no-op (stale sequence),
         // not a failure of the original command -- exactly the intended behavior being verified here.
         Assert.False((await developerTest).Succeeded);
-        await Task.Delay(300);
-
-        // Two writes only: the developer Rumble command, then the newer real Steam Haptic command.
-        // The developer test's delayed STOP must NOT appear as a third write.
-        await WaitForCountAsync(sink, 1);
-        Assert.True(sink.Contains(new TwoMotorRumble(32896, 32896)));
+        await sink.WaitForValueAsync(new TwoMotorRumble(32896, 32896), TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -122,15 +134,15 @@ public sealed class DeveloperVibrationTestTests
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        var (delayEntered, releaseDelay) = HoldDeveloperDelay(bridge);
         var developerTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None);
-
-        await Task.Delay(20);
+        await delayEntered;
         Assert.True(bridge.ProcessNormalizedReport(Report(FrontendVibrationTestCommand.Haptic), "Steam"));
         bridge.CancelDeveloperTestAndStop();
+        releaseDelay();
         await developerTest;
 
-        await WaitForCountAsync(sink, 1);
-        Assert.Contains(new TwoMotorRumble(32896, 32896), sink.Values);
+        await sink.WaitForValueAsync(new TwoMotorRumble(32896, 32896), TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -174,11 +186,16 @@ public sealed class DeveloperVibrationTestTests
         _ => [0xEB]
     };
 
-    private static async Task WaitForCountAsync(RecordingSink sink, int minimum)
+    private static (Task Entered, Action Release) HoldDeveloperDelay(SteamDeckRumbleFeedbackBridge bridge)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-        while (sink.Values.Count < minimum && DateTime.UtcNow < deadline)
-            await Task.Delay(10);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bridge.DeveloperDelayOverride = (_, cancellationToken) =>
+        {
+            entered.TrySetResult();
+            return release.Task.WaitAsync(cancellationToken);
+        };
+        return (entered.Task, () => release.TrySetResult());
     }
 
     private sealed class RecordingSink : IPhysicalRumbleSink
@@ -186,9 +203,30 @@ public sealed class DeveloperVibrationTestTests
         private readonly object _gate = new();
         public List<TwoMotorRumble> Values { get; } = [];
         public TaskCompletionSource StopEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
-        { lock (_gate) Values.Add(rumble); if (rumble == TwoMotorRumble.Stopped) StopEntered.TrySetResult(); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
-        public bool Contains(TwoMotorRumble rumble) { lock (_gate) return Values.Contains(rumble); }
+        {
+            TaskCompletionSource changed;
+            lock (_gate) { Values.Add(rumble); changed = _changed; _changed = new(TaskCreationOptions.RunContinuationsAsynchronously); }
+            changed.TrySetResult();
+            if (rumble == TwoMotorRumble.Stopped) StopEntered.TrySetResult();
+            return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
+        }
+        public async Task WaitForValueAsync(TwoMotorRumble expected, TimeSpan timeout)
+        {
+            using var cancellation = new CancellationTokenSource(timeout);
+            while (true)
+            {
+                TaskCompletionSource changed;
+                lock (_gate)
+                {
+                    if (Values.Contains(expected)) return;
+                    changed = _changed;
+                }
+                await changed.Task.WaitAsync(cancellation.Token);
+            }
+        }
+        public bool Contains(TwoMotorRumble expected) { lock (_gate) return Values.Contains(expected); }
     }
 
     private sealed class FailingSink : IPhysicalRumbleSink

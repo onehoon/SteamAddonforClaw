@@ -151,7 +151,7 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public async Task Transport_serializes_native_writes_and_preserves_request_order()
+    public async Task Transport_allows_cancellation_boundary_while_another_write_is_pending()
     {
         var native = new FakeNativeHid { BlockFirstWrite = true };
         using var transport = new WindowsMsiClawRumbleTransport(native);
