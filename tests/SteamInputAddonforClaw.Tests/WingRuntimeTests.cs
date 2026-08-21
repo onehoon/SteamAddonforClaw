@@ -50,10 +50,10 @@ public sealed class WingRuntimeTests
         var gestures = new List<WingGesture>();
         var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var recognizer = new WingGestureRecognizer(() => true, delay, time);
-        recognizer.GestureRecognized += gesture => { gestures.Add(gesture); if (gestures.Count == 2) completed.SetResult(); };
-        recognizer.OnPress();
+        recognizer.GestureRecognized += delivery => { gestures.Add(delivery.Gesture); if (gestures.Count == 2) completed.SetResult(); };
+        recognizer.OnPress(1);
         time.Advance(TimeSpan.FromMilliseconds(201));
-        recognizer.OnPress();
+        recognizer.OnPress(1);
         Assert.Equal([WingGesture.Single], gestures);
         delay.Complete();
         await completed.Task;

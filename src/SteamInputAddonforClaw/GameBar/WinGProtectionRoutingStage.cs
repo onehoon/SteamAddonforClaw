@@ -9,10 +9,11 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
     private readonly WinGSuppressionGuard? _guard;
     private readonly Func<bool> _arm;
     private readonly Action _disarm;
+    private readonly object _authorityGate = new();
     private long _epoch;
-    private int _active;
+    private bool _active;
 
-    internal AuthoritySnapshot CaptureAuthority() => new(Volatile.Read(ref _active) != 0, Volatile.Read(ref _epoch));
+    internal AuthoritySnapshot CaptureAuthority() { lock (_authorityGate) return new(_active, _epoch); }
 
     internal WinGProtectionRoutingStage(WinGSuppressionGuard guard)
     {
@@ -35,7 +36,7 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
         cancellationToken.ThrowIfCancellationRequested();
         AppLog.Debug("Routing.Wing", "WinGProtectionArmStarted.");
         var armed = _arm();
-        if (armed) { Volatile.Write(ref _active, 1); Interlocked.Increment(ref _epoch); }
+        if (armed) lock (_authorityGate) { _epoch++; _active = true; }
         AppLog.Debug("Routing.Wing", armed ? "WinGProtectionArmed." : "WinGProtectionArmFailed.");
         return ValueTask.FromResult(armed
             ? RoutingStageOperationResult.Success("WinGProtectionArmed")
@@ -48,8 +49,7 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
         AppLog.Debug("Routing.Wing", "WinGProtectionDisarmRequested.");
         try
         {
-            Volatile.Write(ref _active, 0);
-            Interlocked.Increment(ref _epoch);
+            lock (_authorityGate) { _active = false; _epoch++; }
             _disarm();
             AppLog.Debug("Routing.Wing", "WinGProtectionDisarmed.");
         }

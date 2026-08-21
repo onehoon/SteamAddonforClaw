@@ -5,73 +5,53 @@ namespace SteamInputAddonforClaw.Wing;
 
 internal sealed class WingGestureRecognizer : IDisposable
 {
+    private static readonly TimeSpan DoubleWindow = TimeSpan.FromMilliseconds(200);
     private readonly Func<bool> _doubleEnabled;
     private readonly IOem1GestureDelay _delay;
     private readonly TimeProvider _time;
     private readonly object _gate = new();
     private CancellationTokenSource? _pending;
-    private bool _first;
-    private bool _disposed;
-    private long _generation;
-    private long _firstPressTimestamp;
-
+    private bool _first, _disposed;
+    private long _firstTimestamp, _firstEpoch, _generation;
     internal WingGestureRecognizer(Func<bool> doubleEnabled, IOem1GestureDelay? delay = null, TimeProvider? timeProvider = null)
     { _doubleEnabled = doubleEnabled ?? throw new ArgumentNullException(nameof(doubleEnabled)); _delay = delay ?? new Oem1TaskDelay(); _time = timeProvider ?? TimeProvider.System; }
-
-    internal event Action<WingGesture>? GestureRecognized;
+    internal event Action<WingGestureDelivery>? GestureRecognized;
     internal bool HasPending { get { lock (_gate) return _first; } }
-
-    internal void OnPress()
+    internal void OnPress(long authorityEpoch)
     {
-        WingGesture? gesture = null;
-        bool beginNewSequence = false;
-        long now = _time.GetTimestamp();
+        WingGestureDelivery? completed = null; var beginNew = false; var now = _time.GetTimestamp();
         lock (_gate)
         {
             if (_disposed) return;
             if (_first)
             {
-                var inWindow = _time.GetElapsedTime(_firstPressTimestamp, now) < TimeSpan.FromMilliseconds(200);
-                _first = false; _generation++; _pending?.Cancel(); _pending = null;
-                gesture = inWindow ? WingGesture.Double : WingGesture.Single;
-                beginNewSequence = !inWindow;
+                var inWindow = _firstEpoch == authorityEpoch && _time.GetElapsedTime(_firstTimestamp, now) < DoubleWindow;
+                var epoch = _firstEpoch; _first = false; _generation++; CancelPendingCore();
+                completed = new(inWindow ? WingGesture.Double : WingGesture.Single, epoch); beginNew = !inWindow;
             }
-            else if (_doubleEnabled())
-            {
-                _first = true; _firstPressTimestamp = _time.GetTimestamp(); _generation++;
-                _pending = new CancellationTokenSource(); var g = _generation; _ = CompleteAsync(g, _pending.Token); return;
-            }
-            else gesture = WingGesture.Single;
+            else beginNew = true;
         }
-        Deliver(gesture!.Value);
-        if (beginNewSequence) BeginPending(now);
+        if (completed is { } delivery) Deliver(delivery);
+        if (beginNew) BeginCurrentPress(now, authorityEpoch);
     }
-
-    private void BeginPending(long timestamp)
+    private void BeginCurrentPress(long timestamp, long epoch)
     {
+        if (!_doubleEnabled()) { Deliver(new(WingGesture.Single, epoch)); return; }
         lock (_gate)
         {
-            if (_disposed || !_doubleEnabled()) return;
-            _first = true; _firstPressTimestamp = timestamp; _generation++;
-            _pending = new CancellationTokenSource();
-            _ = CompleteAsync(_generation, _pending.Token);
+            if (_disposed) return; _first = true; _firstTimestamp = timestamp; _firstEpoch = epoch; _generation++;
+            var generation = _generation; _pending = new CancellationTokenSource(); _ = CompleteAsync(generation, epoch, _pending.Token);
         }
     }
-
-    internal void InvalidatePending()
-    { lock (_gate) { _first = false; _generation++; _pending?.Cancel(); _pending = null; } }
-
-    private async Task CompleteAsync(long generation, CancellationToken token)
+    internal void InvalidatePending() { lock (_gate) { _first = false; _generation++; CancelPendingCore(); } }
+    private async Task CompleteAsync(long generation, long epoch, CancellationToken token)
     {
-        try { await _delay.DelayAsync(TimeSpan.FromMilliseconds(200), token).ConfigureAwait(false); }
+        try { await _delay.DelayAsync(DoubleWindow, token).ConfigureAwait(false); }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
-        lock (_gate)
-        { if (_disposed || !_first || generation != _generation) return; _first = false; _pending = null; }
-        Deliver(WingGesture.Single);
+        lock (_gate) { if (_disposed || !_first || generation != _generation) return; _first = false; _pending = null; }
+        Deliver(new(WingGesture.Single, epoch));
     }
-
-    private void Deliver(WingGesture gesture)
-    { AppLog.Debug("Wing.Event", gesture == WingGesture.Single ? "GestureSingle" : "GestureDouble"); GestureRecognized?.Invoke(gesture); }
-
-    public void Dispose() { lock (_gate) { if (_disposed) return; _disposed = true; _first = false; _pending?.Cancel(); _pending = null; } }
+    private void Deliver(WingGestureDelivery delivery) { AppLog.Debug("Wing.Event", delivery.Gesture == WingGesture.Single ? "GestureSingle" : "GestureDouble"); GestureRecognized?.Invoke(delivery); }
+    private void CancelPendingCore() { _pending?.Cancel(); _pending?.Dispose(); _pending = null; }
+    public void Dispose() { lock (_gate) { if (_disposed) return; _disposed = true; _first = false; CancelPendingCore(); } }
 }

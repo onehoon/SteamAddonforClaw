@@ -29,7 +29,7 @@ internal sealed class WingEventGestureBridge : IDisposable
             _pendingEpoch = current.Epoch;
         }
         AppLog.Debug("Wing.Event", "Event88Accepted", ("AuthorityEpoch", current.Epoch));
-        try { _recognizer.OnPress(); }
+        try { _recognizer.OnPress(current.Epoch); }
         catch (Exception exception)
         {
             AppLog.Warn("Wing.Event", "WING gesture recognition failed; routing continues.", exception,
@@ -37,17 +37,17 @@ internal sealed class WingEventGestureBridge : IDisposable
         }
     }
 
-    private void OnGesture(WingGesture gesture)
+    private void OnGesture(WingGestureDelivery delivery)
     {
         lock (_deliveryGate)
         {
             var current = _authority();
             lock (_gate)
             {
-                if (_disposed || !current.Active || current.Epoch != _pendingEpoch)
-                { AppLog.Debug("Wing.Event", "GestureDiscardedAuthorityChanged", ("AuthorityEpoch", _pendingEpoch)); return; }
+                if (_disposed || !current.Active || current.Epoch != delivery.AuthorityEpoch)
+                { AppLog.Debug("Wing.Event", "GestureDiscardedAuthorityChanged", ("AuthorityEpoch", delivery.AuthorityEpoch)); return; }
             }
-            _dispatcher.Dispatch(gesture);
+            _dispatcher.Dispatch(delivery.Gesture);
         }
     }
 
