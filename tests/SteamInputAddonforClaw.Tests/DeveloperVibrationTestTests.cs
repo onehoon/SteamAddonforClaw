@@ -13,7 +13,7 @@ public sealed class DeveloperVibrationTestTests
     {
         var authority = new FeedbackAuthority();
         var sink = new RecordingSink();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
         Assert.True((await bridge.ProcessDeveloperTestAsync(Report(command), addDeveloperStop: true, CancellationToken.None)).Succeeded);
         await sink.WaitForValueAsync(new TwoMotorRumble(large, small), TimeSpan.FromSeconds(2));
@@ -24,7 +24,7 @@ public sealed class DeveloperVibrationTestTests
     {
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
         Assert.True((await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None)).Succeeded);
 
@@ -36,7 +36,7 @@ public sealed class DeveloperVibrationTestTests
     {
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
         var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -72,7 +72,7 @@ public sealed class DeveloperVibrationTestTests
     {
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
         var (delayEntered, releaseDelay) = HoldDeveloperDelay(bridge);
         var test = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None);
         await delayEntered;
@@ -91,7 +91,7 @@ public sealed class DeveloperVibrationTestTests
         // makes the delayed STOP a silent no-op.
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
         var (delayEntered, releaseDelay) = HoldDeveloperDelay(bridge);
         var developerTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), addDeveloperStop: true, CancellationToken.None);
@@ -111,7 +111,7 @@ public sealed class DeveloperVibrationTestTests
     {
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
         var delayEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDelay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         bridge.DeveloperDelayOverride = (_, cancellationToken) =>
@@ -137,7 +137,7 @@ public sealed class DeveloperVibrationTestTests
     {
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
         var (delayEntered, releaseDelay) = HoldDeveloperDelay(bridge);
         var developerTest = bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Rumble), true, CancellationToken.None);
         await delayEntered;
@@ -160,7 +160,7 @@ public sealed class DeveloperVibrationTestTests
         // acceptance, unchanged).
         var sink = new FailingSink();
         var authority = new FeedbackAuthority();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
         var outcome = await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.Haptic), addDeveloperStop: false, CancellationToken.None);
 
@@ -177,7 +177,7 @@ public sealed class DeveloperVibrationTestTests
         var authority = new FeedbackAuthority();
         var token = authority.Acquire("SteamDeck");
         authority.Revoke();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
 
         Assert.False(bridge.ProcessNormalizedReport(Report(FrontendVibrationTestCommand.Rumble), "DeveloperVibrationTest"));
         Assert.Empty(sink.Values);

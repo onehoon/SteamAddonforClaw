@@ -11,7 +11,7 @@ namespace SteamInputAddonforClaw.Feedback;
 /// real MSI HID write failure must be visible in the dedicated log even when acceptance succeeded.</summary>
 internal readonly record struct DeveloperVibrationTestOutcome(bool Succeeded, PhysicalRumbleWriteResult? CommandResult, PhysicalRumbleWriteResult? StopResult, SteamDeckFeedbackDecodeResult? Decode = null);
 
-internal sealed class SteamDeckRumbleFeedbackBridge
+internal sealed class SteamDeckRumbleFeedbackBridge : IDisposable
 {
     private const uint MaximumCallbackLength = 64;
     private const int EbDeadManMilliseconds = 5000;
@@ -76,7 +76,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         return true;
     }
 
-    internal void Dispose()
+    public void Dispose()
     {
         lock (_gate)
         {

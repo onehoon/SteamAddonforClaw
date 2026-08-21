@@ -369,10 +369,17 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
         await stage.PrepareMutationAsync(CancellationToken.None);
 
-        var result = await stage.ExecuteMutationAsync(CancellationToken.None);
+        try
+        {
+            var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.True(result.Succeeded, result.Reason);
-        Assert.Equal(["Start", "Neutral", "SetOutputCallback"], session.Trace);
+            Assert.True(result.Succeeded, result.Reason);
+            Assert.Equal(["Start", "Neutral", "SetOutputCallback"], session.Trace);
+        }
+        finally
+        {
+            await stage.RollbackMutationAsync(CancellationToken.None);
+        }
     }
 
     [Fact]

@@ -34,7 +34,7 @@ public sealed class SteamDeckFeedbackRxDiagnosticsTests : IDisposable
     [Fact]
     public void RumbleCallback_LogsRxAndRumbleDecodeWithMotorValues()
     {
-        var bridge = Create(out _, out _);
+        using var bridge = Create(out _, out _);
 
         Invoke(bridge.Callback, RumblePacket(0x1234, 0x5678));
 
@@ -51,7 +51,7 @@ public sealed class SteamDeckFeedbackRxDiagnosticsTests : IDisposable
     [Fact]
     public void HapticCommandCallback_LogsHhcFields()
     {
-        var bridge = Create(out _, out _);
+        using var bridge = Create(out _, out _);
 
         Invoke(bridge.Callback, [0xEA, 0, 0, 0, 100, 2]);
 
@@ -66,7 +66,7 @@ public sealed class SteamDeckFeedbackRxDiagnosticsTests : IDisposable
     [Fact]
     public void HapticPulseCallback_LogsProtocolFieldsWithoutPhysicalTranslation()
     {
-        var bridge = Create(out _, out _);
+        using var bridge = Create(out _, out _);
 
         Invoke(bridge.Callback, [0x8F, 8, 2, 0x34, 0x12, 0x78, 0x56, 2, 0, 0xA0]);
 
@@ -88,7 +88,7 @@ public sealed class SteamDeckFeedbackRxDiagnosticsTests : IDisposable
     [Fact]
     public void UnknownOpcodeCallback_LogsUnknown()
     {
-        var bridge = Create(out _, out _);
+        using var bridge = Create(out _, out _);
 
         Invoke(bridge.Callback, [0x99]);
 
@@ -100,7 +100,7 @@ public sealed class SteamDeckFeedbackRxDiagnosticsTests : IDisposable
     [Fact]
     public void MalformedRumbleOpcodeCallback_LogsMalformed()
     {
-        var bridge = Create(out _, out _);
+        using var bridge = Create(out _, out _);
 
         // 0xEB present but truncated below the minimum 11-byte report -- decoder rejects it as
         // Malformed, distinct from a genuinely unrecognized opcode.
@@ -117,7 +117,7 @@ public sealed class SteamDeckFeedbackRxDiagnosticsTests : IDisposable
         var authority = new FeedbackAuthority();
         var token = authority.Acquire("SteamDeck");
         var sink = new RecordingSink();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
+        using var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
         // Revoke before the callback runs so a well-formed, decodable Rumble command is rejected
         // purely by FeedbackAuthority, not by the decoder.
         authority.RevokeAndDrain();
