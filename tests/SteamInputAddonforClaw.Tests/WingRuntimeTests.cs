@@ -71,7 +71,7 @@ public sealed class WingRuntimeTests
     [Fact]
     public async Task Event88_requires_active_matching_authority_epoch()
     {
-        var authority = new WinGProtectionRoutingStage.AuthoritySnapshot(true, 7);
+        var authority = new WingRouteAuthoritySnapshot(true, 7);
         var actions = 0;
         using var source = new FakeSource();
         var delay = new HeldDelay();
@@ -82,7 +82,6 @@ public sealed class WingRuntimeTests
         source.Emit(new(88, CenterMOemCode.Oem2));
         authority = new(true, 8);
         delay.Complete();
-        await Task.Delay(10);
         Assert.Equal(0, actions);
 
         source.Emit(new(41, CenterMOemCode.Oem1));

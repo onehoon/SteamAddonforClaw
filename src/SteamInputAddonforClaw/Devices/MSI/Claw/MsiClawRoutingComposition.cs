@@ -379,7 +379,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     }
 
     Task IHandheldRoutingComposition.ConfigureWingActionPath(
-        Func<GameBar.WinGProtectionRoutingStage.AuthoritySnapshot> captureAuthority,
+        Func<SteamInputAddonforClaw.Wing.WingRouteAuthoritySnapshot> captureAuthority,
         Func<bool> tryRequestSteamPulse)
     {
         if (!_hardwareSupported || _wingBridge is not null) return Task.CompletedTask;

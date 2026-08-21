@@ -1,6 +1,5 @@
 using SteamInputAddonforClaw.CenterM;
 using SteamInputAddonforClaw.Diagnostics;
-using SteamInputAddonforClaw.GameBar;
 
 namespace SteamInputAddonforClaw.Wing;
 
@@ -8,13 +7,13 @@ internal sealed class WingEventGestureBridge : IDisposable
 {
     private readonly IMsiEventSource _source;
     private readonly WingGestureRecognizer _recognizer;
-    private readonly Func<WinGProtectionRoutingStage.AuthoritySnapshot> _authority;
+    private readonly Func<WingRouteAuthoritySnapshot> _authority;
     private readonly WingActionDispatcher _dispatcher;
     private readonly object _gate = new();
     private readonly object _deliveryGate = new();
     private bool _disposed;
 
-    internal WingEventGestureBridge(IMsiEventSource source, WingGestureRecognizer recognizer, Func<WinGProtectionRoutingStage.AuthoritySnapshot> authority, WingActionDispatcher dispatcher)
+    internal WingEventGestureBridge(IMsiEventSource source, WingGestureRecognizer recognizer, Func<WingRouteAuthoritySnapshot> authority, WingActionDispatcher dispatcher)
     { _source = source; _recognizer = recognizer; _authority = authority; _dispatcher = dispatcher; _source.EventReceived += OnEvent; _recognizer.GestureRecognized += OnGesture; }
 
     private void OnEvent(MsiOemEvent e)

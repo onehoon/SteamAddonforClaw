@@ -97,6 +97,6 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
         Settings.IOem1MappingPreference mappingPreference) => Task.CompletedTask;
 
     Task ConfigureWingActionPath(
-        Func<GameBar.WinGProtectionRoutingStage.AuthoritySnapshot> captureAuthority,
+        Func<SteamInputAddonforClaw.Wing.WingRouteAuthoritySnapshot> captureAuthority,
         Func<bool> tryRequestSteamPulse) => Task.CompletedTask;
 }

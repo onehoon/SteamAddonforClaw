@@ -1,11 +1,11 @@
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Wing;
 
 namespace SteamInputAddonforClaw.GameBar;
 
 internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
 {
-    internal readonly record struct AuthoritySnapshot(bool Active, long Epoch);
     private readonly WinGSuppressionGuard? _guard;
     private readonly Func<bool> _arm;
     private readonly Action _disarm;
@@ -13,7 +13,7 @@ internal sealed class WinGProtectionRoutingStage : IRoutingPipelineStage
     private long _epoch;
     private bool _active;
 
-    internal AuthoritySnapshot CaptureAuthority() { lock (_authorityGate) return new(_active, _epoch); }
+    internal WingRouteAuthoritySnapshot CaptureAuthority() { lock (_authorityGate) return new(_active, _epoch); }
 
     internal WinGProtectionRoutingStage(WinGSuppressionGuard guard)
     {
