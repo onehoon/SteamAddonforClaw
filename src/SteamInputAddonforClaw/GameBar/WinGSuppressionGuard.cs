@@ -11,7 +11,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
     private const uint WhKeyboardLl = 13;
     private readonly Func<IntPtr, int, LowLevelKeyboardProc, IntPtr, uint, IntPtr> _install;
     private readonly Func<IntPtr, int, IntPtr, IntPtr, IntPtr> _next;
-    private readonly Action<IntPtr> _remove;
+    private readonly Func<IntPtr, bool> _remove;
     private readonly Func<Input[], uint> _sendInput;
     private readonly Func<int, short> _getAsyncKeyState;
     private LowLevelKeyboardProc? _callback;
@@ -23,13 +23,13 @@ internal sealed class WinGSuppressionGuard : IDisposable
     internal WinGSuppressionGuard(
         Func<IntPtr, int, LowLevelKeyboardProc, IntPtr, uint, IntPtr>? install = null,
         Func<IntPtr, int, IntPtr, IntPtr, IntPtr>? next = null,
-        Action<IntPtr>? remove = null,
+        Func<IntPtr, bool>? remove = null,
         Func<Input[], uint>? sendInput = null,
         Func<int, short>? getAsyncKeyState = null)
     {
         _install = install ?? ((module, thread, callback, _, flags) => SetWindowsHookEx(WhKeyboardLl, callback, module, (uint)thread));
         _next = next ?? ((hook, code, wParam, data) => CallNextHookEx(hook, code, wParam, data));
-        _remove = remove ?? (hook => _ = UnhookWindowsHookEx(hook));
+        _remove = remove ?? UnhookWindowsHookEx;
         _sendInput = sendInput ?? (inputs => SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()));
         _getAsyncKeyState = getAsyncKeyState ?? (vk => GetAsyncKeyState(vk));
     }
@@ -81,10 +81,22 @@ internal sealed class WinGSuppressionGuard : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Volatile.Write(ref _armed, 0);
-        var hook = Interlocked.Exchange(ref _hook, IntPtr.Zero);
+        var hook = Volatile.Read(ref _hook);
         if (hook != IntPtr.Zero)
         {
-            try { _remove(hook); } catch { }
+            bool removed;
+            try { removed = _remove(hook); }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Wing.Guard", "Win+G hook removal failed; callback remains rooted until process exit.", exception);
+                return;
+            }
+            if (!removed)
+            {
+                AppLog.Warn("Wing.Guard", "Win+G hook removal failed; callback remains rooted until process exit.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
+                return;
+            }
+            Interlocked.Exchange(ref _hook, IntPtr.Zero);
             AppLog.Info("Wing.Guard", "Win+G hook removed.");
         }
         _callback = null;
