@@ -28,7 +28,25 @@ public sealed class QamFrontendContractTests
         Assert.Contains("if (!state.installed) return result;", frontend);
         Assert.Contains("if (!installationSucceeded || teardownAttempted) return;", program);
         Assert.Contains("QAM target already closed; explicit uninstall was not available.", program);
+        Assert.Contains("installMayExist = true", program);
+        Assert.Contains("if (installMayExist) await TeardownAsync(currentClient);", program);
+        Assert.Contains("installationSucceeded = false", program);
+        Assert.Contains("teardownAttempted = false", program);
         Assert.DoesNotContain("QamHost stop requested before installation completed.", program[..program.IndexOf("installationSucceeded = true", StringComparison.Ordinal)]);
+    }
+
+    [Fact]
+    public void Non_managed_connection_loss_exits_without_reconnect_recovery()
+    {
+        var program = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Program.cs");
+
+        var lossIndex = program.IndexOf("log.Warn(\"CDP connection lost.\")", StringComparison.Ordinal);
+        Assert.True(lossIndex >= 0);
+        var lossPath = program[lossIndex..];
+
+        Assert.Contains("if (!managed)", lossPath);
+        Assert.Contains("stopRequested = true", lossPath);
+        Assert.Contains("reconnect recovery is disabled", lossPath);
     }
 
     [Fact]

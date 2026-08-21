@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace SteamInputAddonforClaw.QamHost;
 
 /// <summary>
@@ -9,7 +7,9 @@ namespace SteamInputAddonforClaw.QamHost;
 /// </summary>
 public sealed class CdpCommandCorrelator
 {
-    private readonly ConcurrentDictionary<int, TaskCompletionSource<string>> _pending = new();
+    private readonly object _gate = new();
+    private readonly Dictionary<int, TaskCompletionSource<string>> _pending = new();
+    private Exception? _connectionFailure;
     private int _nextId;
 
     public int NextId() => Interlocked.Increment(ref _nextId);
@@ -17,9 +17,15 @@ public sealed class CdpCommandCorrelator
     public Task<string> RegisterAsync(int id, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_pending.TryAdd(id, tcs))
+        lock (_gate)
         {
-            throw new InvalidOperationException($"CDP command id {id} is already pending.");
+            if (_connectionFailure is { } failure)
+                return Task.FromException<string>(failure);
+
+            if (_pending.ContainsKey(id))
+                throw new InvalidOperationException($"CDP command id {id} is already pending.");
+
+            _pending.Add(id, tcs);
         }
 
         cancellationToken.Register(() => Cancel(id));
@@ -29,7 +35,11 @@ public sealed class CdpCommandCorrelator
     /// <summary>Delivers a raw response payload with the given id to its waiter, if any is pending.</summary>
     public bool TryComplete(int id, string rawJson)
     {
-        if (_pending.TryRemove(id, out var tcs))
+        TaskCompletionSource<string>? tcs;
+        lock (_gate)
+            _pending.Remove(id, out tcs);
+
+        if (tcs is not null)
         {
             return tcs.TrySetResult(rawJson);
         }
@@ -37,9 +47,27 @@ public sealed class CdpCommandCorrelator
         return false;
     }
 
+    public void FailConnection(Exception exception)
+    {
+        List<TaskCompletionSource<string>> pending;
+        lock (_gate)
+        {
+            _connectionFailure ??= exception;
+            pending = [.. _pending.Values];
+            _pending.Clear();
+        }
+
+        foreach (var tcs in pending)
+            tcs.TrySetException(_connectionFailure!);
+    }
+
     private void Cancel(int id)
     {
-        if (_pending.TryRemove(id, out var tcs))
+        TaskCompletionSource<string>? tcs;
+        lock (_gate)
+            _pending.Remove(id, out tcs);
+
+        if (tcs is not null)
         {
             tcs.TrySetCanceled();
         }

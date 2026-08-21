@@ -19,6 +19,9 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
     private CancellationTokenSource? _receiveLoopCts;
     private Task? _receiveLoop;
     public event Action<string>? AddonQamConsoleMessage;
+    public event Action? DocumentLoaded;
+    public Task ConnectionEnded => _connectionEnded.Task;
+    private readonly TaskCompletionSource _connectionEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public SteamGamepadUiCdpClient(Uri devToolsEndpoint)
     {
@@ -64,8 +67,9 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         _socket = socket;
 
         _receiveLoopCts = new CancellationTokenSource();
-        _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token, AddonQamConsoleMessage);
+        _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token, AddonQamConsoleMessage, () => DocumentLoaded?.Invoke(), _connectionEnded);
         await SendCommandAsync("Runtime.enable", parameters: null, cancellationToken).ConfigureAwait(false);
+        await SendCommandAsync("Page.enable", parameters: null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Runs <c>Runtime.evaluate</c> with the given JS expression and returns the raw JSON result.</summary>
@@ -95,7 +99,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
     internal static string SerializeCommandPayload(int id, string method, object? parameters) =>
         JsonSerializer.Serialize(new { id, method, @params = parameters ?? new { } });
 
-    private static async Task RunReceiveLoopAsync(ClientWebSocket socket, CdpCommandCorrelator correlator, CancellationToken cancellationToken, Action<string>? consoleMessage)
+    private static async Task RunReceiveLoopAsync(ClientWebSocket socket, CdpCommandCorrelator correlator, CancellationToken cancellationToken, Action<string>? consoleMessage, Action documentLoaded, TaskCompletionSource connectionEnded)
     {
         var buffer = new byte[64 * 1024];
         try
@@ -116,7 +120,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
                 } while (!result.EndOfMessage);
 
                 var json = Encoding.UTF8.GetString(messageStream.ToArray());
-                TryDispatch(json, correlator, consoleMessage);
+                TryDispatch(json, correlator, consoleMessage, documentLoaded);
             }
         }
         catch (OperationCanceledException)
@@ -125,13 +129,22 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         }
         catch (WebSocketException)
         {
-            // Connection dropped (e.g. Steam/GamepadUI closed); nothing further to correlate.
+            // Connection dropped (e.g. Steam/GamepadUI closed).
+        }
+        finally
+        {
+            if (!cancellationToken.IsCancellationRequested)
+                correlator.FailConnection(new IOException("The CDP connection ended."));
+            connectionEnded.TrySetResult();
         }
     }
 
-    private static void TryDispatch(string json, CdpCommandCorrelator correlator, Action<string>? consoleMessage)
+    private static void TryDispatch(string json, CdpCommandCorrelator correlator, Action<string>? consoleMessage, Action documentLoaded)
     {
         using var document = JsonDocument.Parse(json);
+        if (IsDocumentLoadedEvent(document.RootElement))
+            documentLoaded();
+
         if (document.RootElement.TryGetProperty("method", out var method) && method.GetString() == "Runtime.consoleAPICalled" &&
             document.RootElement.TryGetProperty("params", out var parameters) && parameters.TryGetProperty("args", out var args))
         {
@@ -147,6 +160,9 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
     private static string GetStringOrEmpty(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var value) ? value.GetString() ?? string.Empty : string.Empty;
+
+    internal static bool IsDocumentLoadedEvent(JsonElement message) =>
+        message.TryGetProperty("method", out var method) && method.GetString() == "Page.domContentEventFired";
 
     public async ValueTask DisposeAsync()
     {
