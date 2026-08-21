@@ -525,6 +525,11 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         if (ShouldSkipNewForwardRouting)
             return true;
 
+        // Frontend/tray are independent, but every forward Routing entry must wait until the
+        // initial OEM1 persistent-helper ownership decision has settled. Resume can begin before
+        // the deferred startup reconcile, so it needs the same one-shot barrier as normal routing.
+        await Oem1ActivationTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+
         // PowerTransitionCoordinator has already completed residual cleanup, committed Safe,
         // and opened the mutation gate before invoking this callback. Converge the stale routing
         // fault before fresh forward preflight can observe it.

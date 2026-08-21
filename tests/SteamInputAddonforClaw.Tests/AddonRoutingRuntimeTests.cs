@@ -713,6 +713,32 @@ public sealed class AddonRoutingRuntimeTests
     }
 
     [Fact]
+    public async Task Fresh_resume_reconcile_cannot_enter_routing_until_OEM1_activation_resolves()
+    {
+        var runtime = CreateMsiRuntime(new FakeStatusProvider(Snapshot(WaitingForSteam())));
+        Assert.NotNull(runtime);
+        try
+        {
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            runtime.TestOnly_SetOem1ActivationTask(gate.Task);
+
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var resume = runtime.ReconcileFreshAfterResumeAsync(cancellation.Token);
+
+            await Task.Delay(50);
+            Assert.False(resume.IsCompleted);
+
+            gate.SetResult();
+            await resume;
+        }
+        finally
+        {
+            Assert.True(await runtime.ShutdownAsync());
+            await runtime.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task Fresh_resume_converges_stale_owned_fault_before_reconcile_callback()
     {
         var status = new FakeStatusProvider(Snapshot(new RoutingDecision(RoutingDecisionKind.Eligible, RoutingDecisionReason.Eligible)));

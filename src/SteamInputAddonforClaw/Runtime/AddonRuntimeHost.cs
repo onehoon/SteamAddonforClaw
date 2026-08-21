@@ -192,7 +192,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         var succeeded = await RoutingReconcileStatusRefresh.RunResumeFreshAsync(
                 freshReconcile: token => routingRuntime.ReconcileFreshAfterResumeAsync(token),
                 completeSuppression: _resumeFreshReconcileSuppression.Complete,
-                deferredReconcile: () => ReconcileAsync(),
+                deferredReconcile: QueueDeferredRoutingReconcile,
                 requestStatusRefresh: RequestStatusRefresh,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         if (succeeded)
@@ -256,6 +256,13 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     {
         SteamSessionStateChanged?.Invoke(this, args);
         if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) TrackBackgroundTask(ReconcileAsync(_shutdownCancellation.Token));
+    }
+
+    private Task QueueDeferredRoutingReconcile()
+    {
+        var task = ReconcileAsync(_shutdownCancellation.Token);
+        TrackBackgroundTask(task);
+        return task;
     }
 
     private void RequestStatusRefresh() => StatusRefreshRequested?.Invoke(this, EventArgs.Empty);
