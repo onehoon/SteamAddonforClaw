@@ -101,6 +101,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private Oem1EventGestureBridge? _oem1Bridge;
     private bool _oem1ActionPathConfigured;
     private readonly IMsiEventSource? _testOnlyOem1EventSource;
+    private readonly IMsiEventSource? _testOnlyWingEventSource;
     private WingEventGestureBridge? _wingBridge;
     private WingGestureRecognizer? _wingRecognizer;
     private IMsiEventSource? _wingEventSource;
@@ -164,10 +165,12 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         IMsiEventSource? testOnlyOem1EventSource = null,
         IOem1GestureDelay? testOnlyOem1GestureDelay = null,
         IOem1GestureClock? testOnlyOem1GestureClock = null,
-        Action? testOnlyOem1LaunchBigPicture = null)
+        Action? testOnlyOem1LaunchBigPicture = null,
+        IMsiEventSource? testOnlyWingEventSource = null)
     {
         _hardwareSupported = hardwareSupported;
         _testOnlyOem1EventSource = testOnlyOem1EventSource;
+        _testOnlyWingEventSource = testOnlyWingEventSource;
         _testOnlyOem1GestureDelay = testOnlyOem1GestureDelay;
         _testOnlyOem1GestureClock = testOnlyOem1GestureClock;
         _testOnlyOem1LaunchBigPicture = testOnlyOem1LaunchBigPicture;
@@ -380,7 +383,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         Func<bool> tryRequestSteamPulse)
     {
         if (!_hardwareSupported || _wingBridge is not null) return Task.CompletedTask;
-        var source = new WmiMsiEventSource();
+        var source = _testOnlyWingEventSource ?? new WmiMsiEventSource();
         var mapping = WingMapping.Default;
         var recognizer = new WingGestureRecognizer(() => mapping.Double.Action != WingAction.None);
         var dispatcher = new WingActionDispatcher(() => mapping, tryRequestSteamPulse);

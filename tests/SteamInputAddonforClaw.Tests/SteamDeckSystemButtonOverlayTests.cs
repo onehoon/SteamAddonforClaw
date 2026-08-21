@@ -84,6 +84,25 @@ public sealed class SteamDeckSystemButtonOverlayTests
         Assert.Equal((byte)0, overlay.Apply(SampleMappedState()).QuickAccess);
     }
 
+    [Fact]
+    public void Steam_and_quick_access_pulses_have_independent_lifetimes()
+    {
+        var time = new FakeTimeProvider();
+        var overlay = new SteamDeckSystemButtonOverlay(time);
+        overlay.RequestSteamPulse();
+        time.Advance(TimeSpan.FromMilliseconds(25));
+        overlay.RequestQuickAccessPulse();
+
+        var both = overlay.Apply(SampleMappedState());
+        Assert.Equal((byte)1, both.Steam);
+        Assert.Equal((byte)1, both.QuickAccess);
+
+        time.Advance(TimeSpan.FromMilliseconds(30));
+        var quickOnly = overlay.Apply(SampleMappedState());
+        Assert.Equal((byte)0, quickOnly.Steam);
+        Assert.Equal((byte)1, quickOnly.QuickAccess);
+    }
+
     private static void AssertOnlyQuickAccessDiffers(SteamDeckDeviceState input, SteamDeckDeviceState result)
     {
         var expected = input;

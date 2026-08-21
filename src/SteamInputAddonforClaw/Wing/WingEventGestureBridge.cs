@@ -13,7 +13,6 @@ internal sealed class WingEventGestureBridge : IDisposable
     private readonly object _gate = new();
     private readonly object _deliveryGate = new();
     private bool _disposed;
-    private long _pendingEpoch;
 
     internal WingEventGestureBridge(IMsiEventSource source, WingGestureRecognizer recognizer, Func<WinGProtectionRoutingStage.AuthoritySnapshot> authority, WingActionDispatcher dispatcher)
     { _source = source; _recognizer = recognizer; _authority = authority; _dispatcher = dispatcher; _source.EventReceived += OnEvent; _recognizer.GestureRecognized += OnGesture; }
@@ -25,8 +24,6 @@ internal sealed class WingEventGestureBridge : IDisposable
         lock (_gate)
         {
             if (_disposed || !current.Active) { AppLog.Debug("Wing.Event", "Event88IgnoredNoRouteAuthority"); return; }
-            if (_recognizer.HasPending && _pendingEpoch != current.Epoch) _recognizer.InvalidatePending();
-            _pendingEpoch = current.Epoch;
         }
         AppLog.Debug("Wing.Event", "Event88Accepted", ("AuthorityEpoch", current.Epoch));
         try { _recognizer.OnPress(current.Epoch); }
