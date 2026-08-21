@@ -19,6 +19,17 @@ namespace SteamInputAddonforClaw.Tests;
 
 public sealed class AddonRuntimeHostTests
 {
+    [Fact]
+    public void Failed_routing_shutdown_retains_runtime_win_g_hook()
+    {
+        using var guard = CreateTestWinGGuard();
+        Assert.True(guard.IsHookInstalled);
+
+        AddonProcessHost.FinalizeWinGGuardAfterRoutingShutdown(guard, routingShutdownSucceeded: false);
+
+        Assert.True(guard.IsHookInstalled);
+    }
+
     [Theory]
     [InlineData("FinalStop", false)]
     [InlineData("CallbackClear", false)]

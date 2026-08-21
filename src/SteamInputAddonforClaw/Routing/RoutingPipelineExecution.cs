@@ -20,11 +20,9 @@ internal interface IRoutingPipelineStage
 
 internal static class RoutingPipelineStageOrder
 {
-    // CenterMGuard runs first on entry -- routing must not begin native-mode/PID1902 mutation until
-    // the routing-time real-MainUI launch guard is proven Armed -- and last on rollback, so the
-    // guard is only released after native/physical restoration below has already completed or been
-    // classified (never release Center M launch protection while the physical controller is still
-    // expected to remain PID1902).
+    // WinGProtection is the outer routing protection: it arms before any MSI/native mutation and
+    // releases last. CenterMGuard remains first/last among the native MSI routing stages, so real
+    // Center M MainUI cannot become operational while PID1902 ownership is still expected.
     internal static IReadOnlyList<RoutingStageKind> Forward { get; } =
     [
         RoutingStageKind.WinGProtection,

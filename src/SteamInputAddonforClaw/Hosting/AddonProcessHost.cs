@@ -329,10 +329,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             var runtimeHost = _runtimeHost;
             await runtimeHost.DisposeAsync().ConfigureAwait(false);
             _runtimeHost = null;
-            if (runtimeHost.RoutingShutdownSucceeded)
-                _winGSuppressionGuard.Dispose();
-            else
-                AppLog.Warn("Wing.Guard", "Win+G hook retained until process exit because routing shutdown did not complete safely.");
+            FinalizeWinGGuardAfterRoutingShutdown(_winGSuppressionGuard, runtimeHost.RoutingShutdownSucceeded);
         }
         else
         {
@@ -345,6 +342,15 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         }
         await _qamHostController.DisposeAsync().ConfigureAwait(false);
         _startupComposition = null;
+    }
+
+    internal static void FinalizeWinGGuardAfterRoutingShutdown(WinGSuppressionGuard guard, bool routingShutdownSucceeded)
+    {
+        ArgumentNullException.ThrowIfNull(guard);
+        if (routingShutdownSucceeded)
+            guard.Dispose();
+        else
+            AppLog.Warn("Wing.Guard", "Win+G hook retained until process exit because routing shutdown did not complete safely.");
     }
 
     private AddonRuntimeHost GetRuntimeHost() => _runtimeHost ?? throw new InvalidOperationException("Runtime has not been initialized.");

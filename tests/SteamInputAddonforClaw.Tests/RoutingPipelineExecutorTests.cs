@@ -239,7 +239,7 @@ public sealed class RoutingPipelineExecutorTests
     }
 
     [Fact]
-    public async Task CenterMGuard_ExecutesFirstOnEntry_AndRollsBackLastOnFailure()
+    public async Task CenterMGuard_ExecutesFirstAmongNativeStages_AndRollsBackLastAmongThem()
     {
         // The CenterM MainUI routing guard must be Armed before any native-mode/PID1902 mutation
         // begins, and must only disarm after every other stage (in particular native-mode
