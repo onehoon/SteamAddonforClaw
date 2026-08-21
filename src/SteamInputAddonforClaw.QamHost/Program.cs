@@ -1,4 +1,5 @@
 using SteamInputAddonforClaw.QamHost;
+using SteamInputAddonforClaw.FrontendTransport;
 
 var managed = args.Contains("--managed", StringComparer.OrdinalIgnoreCase);
 string? logDirectory = null;
@@ -24,6 +25,19 @@ log.Info($"Frontend script loaded. Path={frontendPath} Bytes={frontendScript.Len
 
 using var lifetime = managed ? QamHostManagedLifetime.Start(() => Console.In.ReadLineAsync()) : null;
 var lifetimeToken = lifetime?.Token ?? CancellationToken.None;
+await using var frontendBridge = new QamFrontendBridge();
+try
+{
+    using var bridgeTimeout = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+    bridgeTimeout.CancelAfter(TimeSpan.FromSeconds(5));
+    await frontendBridge.ConnectAsync(bridgeTimeout.Token);
+    frontendBridge.StateInvalidated += (_, _) => log.Info("Runtime state invalidated; QAM snapshot refresh is available.");
+    log.Info("QAM frontend transport connected.");
+}
+catch (Exception exception) when (exception is IOException or TimeoutException or OperationCanceledException or FrontendTransportException)
+{
+    log.Warn($"QAM frontend transport unavailable; CDP integration remains active. {exception.Message}");
+}
 Task stopTask = managed ? lifetime!.StopTask : WaitForConsoleShutdownAsync();
 SteamGamepadUiCdpClient? currentClient = null;
 var installationSucceeded = false;

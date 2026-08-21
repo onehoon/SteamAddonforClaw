@@ -42,6 +42,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private int _startupStarted;
     private IAddonFrontendControl? _frontendControl;
     private NamedPipeAddonFrontendServer? _frontendServer;
+    private NamedPipeAddonFrontendServer? _qamFrontendServer;
     private readonly FrontendProcessLauncher _frontendLauncher;
     private readonly QamHostProcessController _qamHostController;
     private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
@@ -179,10 +180,14 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime);
         var pipeName = FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
+        var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
+        _qamFrontendServer = new NamedPipeAddonFrontendServer(qamPipeName, _frontendControl, FrontendPipeAccess.Qam);
         try
         {
             AppLog.Debug("FrontendTransport", "Frontend named-pipe server starting.", ("PipeName", pipeName));
             await _frontendServer.StartAsync().ConfigureAwait(false);
+            AppLog.Debug("FrontendTransport", "QAM frontend named-pipe server starting.", ("PipeName", qamPipeName));
+            await _qamFrontendServer.StartAsync().ConfigureAwait(false);
             AppLog.Info("FrontendTransport", "Frontend named-pipe server ready.", ("PipeName", pipeName));
         }
         catch (Exception exception)
@@ -318,6 +323,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             await _frontendServer.DisposeAsync().ConfigureAwait(false);
             _frontendServer = null;
+        }
+        if (_qamFrontendServer is not null)
+        {
+            await _qamFrontendServer.DisposeAsync().ConfigureAwait(false);
+            _qamFrontendServer = null;
         }
         PrepareRuntimeForShutdown();
         _systemTrayIcon?.Dispose();
