@@ -378,6 +378,38 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
+    public async Task OEM1_enable_adopts_helper_when_Routing_wins_Start_race()
+    {
+        var h = NewHarness();
+        var coordinator = h.Build();
+        int? routingHelperPid = null;
+
+        coordinator.TestOnly_BeforeHelperStartLinearization = () =>
+        {
+            h.ExternalHelperDemand = true;
+            Assert.Equal(HelperStartResult.Started, h.HelperOwnership.Start(h.StagedPath!));
+            routingHelperPid = h.HelperOwnership.ProcessId;
+            return Task.CompletedTask;
+        };
+
+        await coordinator.SetDesiredEnabledAsync(true);
+
+        var snapshot = coordinator.GetSnapshot();
+        Assert.Equal(CenterMOem1LifecycleState.Armed, snapshot.State);
+        Assert.True(snapshot.SuppressionReady);
+        Assert.Equal(routingHelperPid, snapshot.HelperProcessId);
+        Assert.Equal(1, h.HelperApi.StartCallCount);
+        Assert.Equal(0, h.HelperApi.TerminateCallCount);
+
+        h.ExternalHelperDemand = false;
+        Assert.True(await coordinator.ReleaseRoutingHelperAsync());
+        Assert.True(h.HelperOwnership.IsOwned);
+        Assert.Equal(routingHelperPid, h.HelperOwnership.ProcessId);
+
+        await coordinator.DisposeAsync();
+    }
+
+    [Fact]
     public async Task LauncherUnavailable_NoArm_RemainsNative()
     {
         var h = NewHarness();
