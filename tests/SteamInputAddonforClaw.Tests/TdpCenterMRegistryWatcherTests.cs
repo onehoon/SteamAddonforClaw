@@ -1,15 +1,37 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("AppLog")]
 public sealed class TdpCenterMRegistryWatcherTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"TdpCenterMRegistryWatcherTests.{Guid.NewGuid():N}");
     private string ProfilePath => Path.Combine(_directory, "profiles.json");
+
+    public TdpCenterMRegistryWatcherTests()
+    {
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+    }
+
+    [Fact]
+    public void CenterMChangeLogsExactValueName()
+    {
+        var source = new FakeRegistrySource("ManualPL1AC");
+        using var watcher = new TdpCenterMRegistryWatcher(() => { }, [source]);
+        Assert.True(watcher.Start());
+        source.Raise();
+        AppLog.DrainForTests();
+
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Center M change detected", log);
+        Assert.Contains("ValueName=ManualPL1AC", log);
+    }
 
     [Fact]
     public void ProductionQueriesUseExactUserScenarioAndAiEnginePaths()
@@ -89,7 +111,13 @@ public sealed class TdpCenterMRegistryWatcherTests : IDisposable
         new ProfileStore(ProfilePath).Save(new ProfileDocument { Device = new DeviceSettings { Performance = new DevicePerformanceSettings { Tdp = tdp } } });
     }
     private static TdpPowerPair Pair(int pl1, int pl2) => new() { Pl1Watts = pl1, Pl2Watts = pl2 };
-    public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
+    public void Dispose()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = null;
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+    }
 
     private sealed class FakeRegistrySource(string valueName, bool startSucceeds = true) : ITdpCenterMRegistryEventSource
     {

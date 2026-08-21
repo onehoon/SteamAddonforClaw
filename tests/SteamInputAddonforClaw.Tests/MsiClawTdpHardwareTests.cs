@@ -1,14 +1,23 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Profiles;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
-public sealed class MsiClawTdpHardwareTests
+[Collection("AppLog")]
+public sealed class MsiClawTdpHardwareTests : IDisposable
 {
     private static readonly HandheldDeviceModelId A2vm = new("msi.claw.a2vm.7");
     private static readonly HandheldDeviceModelId Ex = new("msi.claw.cg3em");
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), $"MsiClawTdpHardwareTests.{Guid.NewGuid():N}");
+
+    public MsiClawTdpHardwareTests()
+    {
+        AppLog.DirectoryOverride = _directory;
+        AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+    }
 
     [Fact]
     public void UnsupportedModelAndInvalidTargetDoNotReadOrWrite()
@@ -33,6 +42,14 @@ public sealed class MsiClawTdpHardwareTests
         Assert.Equal(new[] { $"GetAp(0)", $"SetData(210,{expectedShift})", "SetData(80,8)", $"SetData(81,{pl2})", $"SetData(80,{pl1})" }, transport.Operations);
         Assert.Equal(expectedShift, MsiClawTdpHardware.EncodeShift(0x80, selector));
         Assert.Equal(expectedShift, MsiClawTdpHardware.EncodeShift(0xA0, selector));
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Shift state read", log);
+        Assert.Contains("Action=Rewrite", log);
+        Assert.Contains("Block=210", log);
+        Assert.Contains("Block=80 Value=8", log);
+        Assert.Contains($"Block=81 Value={pl2}", log);
+        Assert.Contains($"Block=80 Value={pl1}", log);
     }
 
     [Fact]
@@ -164,6 +181,11 @@ public sealed class MsiClawTdpHardwareTests
         Assert.True(result.RecoveryAttempted);
         Assert.True(result.RecoverySucceeded);
         Assert.Equal(new[] { "GetAp(0)", "SetData(80,8)", "SetData(81,21)", "SetData(80,20)" }, transport.Operations);
+        AppLog.DrainForTests();
+        var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
+        Assert.Contains("Stage=Pl2", log);
+        Assert.Contains("RecoveryAttempted=True", log);
+        Assert.Contains("PL1 recovery write", log);
     }
 
     [Fact]
@@ -199,6 +221,14 @@ public sealed class MsiClawTdpHardwareTests
     }
 
     private static TdpPowerPair Pair(int pl1, int pl2) => new() { Pl1Watts = pl1, Pl2Watts = pl2 };
+
+    public void Dispose()
+    {
+        AppLog.MinimumLevelOverride = AppLogLevel.Off;
+        AppLog.DrainForTests();
+        AppLog.DirectoryOverride = null;
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+    }
 
     [Fact]
     public void WmiSetDataPackageUsesThirtyTwoBytesWithOnlyBlockAndValue()
