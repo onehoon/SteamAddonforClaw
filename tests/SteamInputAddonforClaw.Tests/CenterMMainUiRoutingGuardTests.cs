@@ -568,6 +568,36 @@ public sealed class CenterMMainUiRoutingGuardTests
     }
 
     [Fact]
+    public async Task Failed_borrowed_arm_with_unconfirmed_final_stop_keeps_cleanup_responsibility()
+    {
+        CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        try
+        {
+            var helperApi = new RecordingHelperApi { WaitForExitSucceeds = false };
+            var helperOwnership = new CenterMHelperOwnership(helperApi);
+            Assert.Equal(HelperStartResult.Started, helperOwnership.Start("C:\\fake\\MSI Center M.exe"));
+
+            var guard = new CenterMMainUiRoutingGuard(
+                processSnapshotSource: new FakeSnapshotSource(uncertainFirst: true),
+                helperOwnership: helperOwnership,
+                mutexOwnership: new CenterMMainUiMutexOwnership(new FakeMutexFactory()),
+                persistentHelperOwnerReady: () => false,
+                helperStopTimeout: TimeSpan.Zero);
+
+            Assert.Equal(CenterMMainUiRoutingGuardResult.Uncertain, await guard.ArmAsync());
+            Assert.True(helperOwnership.IsOwned);
+
+            await guard.DisposeAsync();
+
+            Assert.True(CenterMOrphanedHelperRegistry.Contains(helperOwnership));
+        }
+        finally
+        {
+            CenterMOrphanedHelperRegistry.TestOnly_Clear();
+        }
+    }
+
+    [Fact]
     public async Task Disarm_with_unconfirmed_stop_still_lets_a_later_dispose_finish_cleanup_and_register_orphan()
     {
         // Review fix: an unconfirmed Stop() during DisarmAsync must leave _helperStartedByCurrentArm

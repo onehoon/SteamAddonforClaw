@@ -407,6 +407,10 @@ internal sealed class CenterMMainUiRoutingGuard : IAsyncDisposable
         if (!PersistentHelperOwnerReady())
         {
             var stopped = _helperOwnership.Stop(_helperStopTimeout);
+            // Routing becomes the final cleanup authority once OEM1 has relinquished the helper.
+            // Preserve that responsibility when exact-handle termination is unconfirmed so the
+            // terminal bounded retry/orphan path cannot be skipped as if this were a borrow.
+            _helperStartedByCurrentArm = !stopped;
             AppLog.Info("CenterM.RoutingGuard", "Failed Routing arm finalized borrowed helper cleanup.",
                 ("Confirmed", stopped), ("HelperProcessId", _helperOwnership.ProcessId));
         }
