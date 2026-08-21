@@ -64,6 +64,7 @@ internal interface IMsiClawNativeHidApi
     int LastError { get; }
     SafeFileHandle Open(string devicePath, uint desiredAccess, uint shareMode, uint creationDisposition);
     bool Write(SafeFileHandle handle, byte[] buffer, out uint bytesWritten);
+    void CancelWrite(SafeFileHandle handle) { }
 
     /// <summary>
     /// Reads the true input/output report byte lengths and HID Usage/UsagePage for an opened HID
@@ -91,6 +92,8 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
         LastError = result ? 0 : Marshal.GetLastWin32Error();
         return result;
     }
+
+    public void CancelWrite(SafeFileHandle handle) => CancelIoEx(handle, IntPtr.Zero);
 
     public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
     {
@@ -131,6 +134,9 @@ internal sealed class WindowsMsiClawNativeHidApi : IMsiClawNativeHidApi
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WriteFile(SafeFileHandle file, byte[] buffer, uint numberOfBytesToWrite, out uint numberOfBytesWritten, IntPtr overlapped);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CancelIoEx(SafeFileHandle file, IntPtr overlapped);
 
     [DllImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

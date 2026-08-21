@@ -219,34 +219,25 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             try { neutralAccepted = _canonicalSession.SetNeutral(); }
             finally { timing.NeutralReportMs = Elapsed(started); }
             if (!neutralAccepted) return await FailAndRollbackCoreAsync("NeutralReportRejected", timing).ConfigureAwait(false);
-            if (_physicalRumbleSink is not null)
+            if (_physicalRumbleSink is not null && _feedbackAuthority is not null)
             {
-                AppLog.Debug("Rumble", "Physical rumble preflight started.", ("Source", "SteamDeck"));
-                var preflight = _physicalRumbleSink.SetRumble(TwoMotorRumble.Stopped);
-                if (preflight.Status != PhysicalRumbleWriteStatus.Succeeded)
+                _feedbackArmed = true;
+                var token = _feedbackAuthority.Acquire("SteamDeck");
+                _feedbackToken = token;
+                _feedbackBridge = new SteamDeckRumbleFeedbackBridge(_feedbackAuthority, token, _physicalRumbleSink);
+                if (!_canonicalSession.SetOutputCallback(_feedbackBridge.Callback))
                 {
-                    AppLog.Warn("Rumble", "Physical rumble unavailable; Steam Deck routing will continue without physical feedback.", null, ("Source", "SteamDeck"), ("Result", preflight.Status), ("Reason", preflight.Reason));
+                    AppLog.Warn("Rumble", "Steam Deck feedback callback registration unavailable; routing continues without feedback.", null, ("Source", "SteamDeck"));
+                    _feedbackBridge.Retire();
+                    _feedbackCallbackRegistered = false;
+                    _feedbackArmed = false;
                 }
                 else
                 {
-                    _feedbackArmed = true;
-                    AppLog.Debug("Rumble", "Physical rumble preflight succeeded.", ("Source", "SteamDeck"), ("Result", "Success"));
-                    var token = _feedbackAuthority!.Acquire("SteamDeck");
-                    _feedbackToken = token;
-                    _feedbackBridge = new SteamDeckRumbleFeedbackBridge(_feedbackAuthority, token, _physicalRumbleSink);
-                    if (!_canonicalSession.SetOutputCallback(_feedbackBridge.Callback))
-                    {
-                        _feedbackAuthority.RevokeAndDrain();
-                        _feedbackRevoked = true;
-                        _feedbackBridge = null;
-                        _feedbackToken = null;
-                        _feedbackArmed = false;
-                        return await FailAndRollbackCoreAsync("SteamDeckFeedbackCallbackRegistrationFailed", timing).ConfigureAwait(false);
-                    }
                     _feedbackCallbackRegistered = true;
                     AppLog.Debug("Rumble", "Steam Deck feedback callback registered.", ("Source", "SteamDeck"));
-                    _feedbackRevoked = false;
                 }
+                _feedbackRevoked = false;
             }
             Interlocked.Exchange(ref _outputFaultReported, 0);
             _publisher = new CanonicalSteamDeckInputPublisher(_snapshot, _canonicalSession, _reportTicks,
@@ -403,33 +394,18 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         _systemButtonOverlay.Clear();
         if (_feedbackAuthority is not null && _feedbackToken is not null && !_feedbackRevoked)
         {
-            _feedbackAuthority.RevokeAndDrain();
+            _feedbackAuthority.Revoke();
             _feedbackRevoked = true;
-            AppLog.Debug("Rumble", "Steam Deck feedback authority revoked/drained.", ("Source", "SteamDeck"));
+            AppLog.Debug("Rumble", "Steam Deck feedback authority revoked.", ("Source", "SteamDeck"));
         }
+        _feedbackBridge?.Retire();
         _feedbackBridge?.Dispose();
-        if (_feedbackArmed && _physicalRumbleSink is not null && _feedbackToken is not null)
-        {
-            var stop = _physicalRumbleSink.SetRumble(TwoMotorRumble.Stopped);
-            if (stop.Status != PhysicalRumbleWriteStatus.Succeeded)
-            {
-                // Best-effort only: failure to deliver the final motor STOP does not make Steam
-                // Deck / VIIPER ownership uncertain, so it must not block structural SteamOutput
-                // teardown (callback clear, canonical device removal, NativeMode/PhysicalInput
-                // rollback and PID1901 restoration further down the pipeline).
-                AppLog.Warn("Rumble", "Steam Deck final physical STOP could not be confirmed; continuing structural routing teardown.", null, ("Status", stop.Status), ("Reason", stop.Reason));
-            }
-            else
-            {
-                AppLog.Debug("Rumble", "Steam Deck final physical STOP accepted.", ("Source", "SteamDeck"));
-            }
-        }
         if (_feedbackCallbackRegistered)
         {
             if (!_canonicalSession?.ClearOutputCallback() ?? false)
             {
                 AppLog.Warn("Rumble", "Steam Deck feedback callback clear failed.", null, ("Operation", "ClearOutputCallback"));
-                return RollbackFailure("SteamDeckFeedbackCallbackClearFailed");
+                AppLog.Warn("Rumble", "Steam Deck feedback callback clear failed; continuing structural teardown.", null, ("Operation", "ClearOutputCallback"));
             }
             _feedbackCallbackRegistered = false;
             _feedbackArmed = false;

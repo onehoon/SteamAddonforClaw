@@ -14,10 +14,13 @@ internal readonly record struct DeveloperVibrationTestOutcome(bool Succeeded, Ph
 internal sealed class SteamDeckRumbleFeedbackBridge
 {
     private const uint MaximumCallbackLength = 64;
+    private const int EbDeadManMilliseconds = 5000;
+    private const int UnknownHapticFallbackMilliseconds = 1000;
     private readonly FeedbackAuthority _authority;
     private readonly FeedbackAuthorityToken _token;
     private readonly IPhysicalRumbleSink _sink;
     private readonly object _gate = new();
+    private readonly LatestWinsRumbleWriter _writer;
     private long _sequence;
     private bool _disposed;
     private CancellationTokenSource? _developerTest;
@@ -28,6 +31,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         _authority = authority;
         _token = token;
         _sink = sink;
+        _writer = new LatestWinsRumbleWriter(sink);
         Callback = OnNativeOutput;
     }
 
@@ -48,7 +52,11 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         if (!decoded.HasPhysicalTranslation) return false;
         sequence = BeginFeedback();
         BeforeLease?.Invoke();
-        if (!TryWrite(sequence, decoded.Rumble, out physicalResult))
+        var rumble = decoded.Rumble;
+        var duration = GetSafetyDuration(decoded);
+        if (decoded.Command == SteamDeckFeedbackCommand.Haptic && decoded.Haptic?.CommandType == 0)
+            rumble = TwoMotorRumble.Stopped;
+        if (!TryWrite(sequence, rumble, duration, out physicalResult))
         {
             AppLog.Debug("Rumble", "SteamDeck feedback DROP", ("Reason", "AuthorityRejected"), ("Origin", origin));
             return false;
@@ -67,7 +75,10 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             _developerTest?.Dispose();
             _developerTest = null;
         }
+        _writer.Retire();
     }
+
+    internal void Retire() => _writer.Retire();
 
     internal async Task<DeveloperVibrationTestOutcome> ProcessDeveloperTestAsync(ReadOnlyMemory<byte> report, bool addDeveloperStop, CancellationToken cancellationToken)
     {
@@ -95,7 +106,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             // ProcessNormalizedReport (which would call BeginFeedback() again): if real Steam
             // feedback arrived during the 250ms delay it is now the newest sequence, and this
             // stale developer STOP must be a silent no-op rather than stopping that newer feedback.
-            var stopAccepted = TryWrite(sequence, TwoMotorRumble.Stopped, out var stopResult);
+            var stopAccepted = TryWrite(sequence, TwoMotorRumble.Stopped, TimeSpan.Zero, out var stopResult);
             return new(stopAccepted, commandResult, stopResult, decoded);
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { return new(false, null, null); }
@@ -128,7 +139,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             _developerTest = null;
         }
         if (developerSequence == 0) return null;
-        return TryWrite(developerSequence, TwoMotorRumble.Stopped, out var physicalResult)
+        return TryWrite(developerSequence, TwoMotorRumble.Stopped, TimeSpan.Zero, out var physicalResult)
             ? physicalResult
             : null;
     }
@@ -182,14 +193,115 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     private bool TryWrite(long sequence, TwoMotorRumble rumble) => TryWrite(sequence, rumble, out _);
 
     private bool TryWrite(long sequence, TwoMotorRumble rumble, out PhysicalRumbleWriteResult? physicalResult)
+        => TryWrite(sequence, rumble, TimeSpan.Zero, out physicalResult);
+
+    private bool TryWrite(long sequence, TwoMotorRumble rumble, TimeSpan safetyDuration, out PhysicalRumbleWriteResult? physicalResult)
     {
         lock (_gate)
         {
             physicalResult = null;
             if (_disposed || sequence != _sequence || !_authority.TryAcquireLease(_token, out var lease) || lease is null) return false;
-            using (lease) physicalResult = _sink.SetRumble(rumble);
+            lease.Dispose();
+            _writer.Submit(sequence, rumble, safetyDuration);
+            physicalResult = new PhysicalRumbleWriteResult(PhysicalRumbleWriteStatus.Succeeded, "Queued");
             return true;
         }
+    }
+
+    private static TimeSpan GetSafetyDuration(SteamDeckFeedbackDecodeResult decoded)
+    {
+        if (decoded.Command == SteamDeckFeedbackCommand.Rumble && !decoded.Rumble.Equals(TwoMotorRumble.Stopped))
+            return TimeSpan.FromMilliseconds(EbDeadManMilliseconds);
+        if (decoded.Command != SteamDeckFeedbackCommand.Haptic || decoded.Rumble.Equals(TwoMotorRumble.Stopped))
+            return TimeSpan.Zero;
+        var duration = decoded.Haptic?.DurationMilliseconds;
+        return duration is > 0 ? TimeSpan.FromMilliseconds(duration.Value) : TimeSpan.FromMilliseconds(UnknownHapticFallbackMilliseconds);
+    }
+
+    private sealed class LatestWinsRumbleWriter
+    {
+        private readonly IPhysicalRumbleSink _sink;
+        private readonly object _gate = new();
+        private readonly AutoResetEvent _wake = new(false);
+        private Request? _pending;
+        private long _latestGeneration;
+        private CancellationTokenSource _retirement = new();
+
+        internal LatestWinsRumbleWriter(IPhysicalRumbleSink sink)
+        {
+            _sink = sink;
+            _ = Task.Run(Loop);
+        }
+
+        internal void Submit(long generation, TwoMotorRumble rumble, TimeSpan safetyDuration)
+        {
+            lock (_gate)
+            {
+                if (_retirement.IsCancellationRequested) return;
+                _pending = new Request(generation, rumble, safetyDuration);
+                _latestGeneration = generation;
+            }
+            _wake.Set();
+        }
+
+        internal void Retire()
+        {
+            lock (_gate)
+            {
+                _pending = new Request(long.MaxValue, TwoMotorRumble.Stopped, TimeSpan.Zero);
+                _latestGeneration = long.MaxValue;
+                _retirement.Cancel();
+                _retirement.Dispose();
+                _retirement = new CancellationTokenSource();
+            }
+            _sink.CancelPendingWrite();
+            _wake.Set();
+        }
+
+        private void Loop()
+        {
+            while (true)
+            {
+                _wake.WaitOne();
+                Request? request;
+                lock (_gate)
+                {
+                    request = _pending;
+                    _pending = null;
+                }
+                if (request is null) continue;
+                try
+                {
+                    _sink.SetRumble(request.Value.Rumble);
+                    if (request.Value.SafetyDuration > TimeSpan.Zero)
+                        _ = StopAfterSafetyDeadlineAsync(request.Value);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception exception)
+                {
+                    try { AppLog.Debug("Rumble", "Physical rumble worker failure was contained.", ("Reason", exception.GetType().Name)); } catch { }
+                }
+            }
+        }
+
+        private async Task StopAfterSafetyDeadlineAsync(Request request)
+        {
+            try
+            {
+                var token = _retirement.Token;
+                await Task.Delay(request.SafetyDuration, token).ConfigureAwait(false);
+                lock (_gate)
+                {
+                    if (_retirement.IsCancellationRequested) return;
+                    if (_latestGeneration == request.Generation)
+                        _pending = new Request(request.Generation, TwoMotorRumble.Stopped, TimeSpan.Zero);
+                }
+                _wake.Set();
+            }
+            catch (OperationCanceledException) { }
+        }
+
+        private readonly record struct Request(long Generation, TwoMotorRumble Rumble, TimeSpan SafetyDuration);
     }
 
 }

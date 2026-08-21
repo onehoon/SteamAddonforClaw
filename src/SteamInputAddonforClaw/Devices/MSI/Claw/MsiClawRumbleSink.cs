@@ -107,16 +107,15 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
         lock (_sync) _transport.InvalidatePhysicalSession();
     }
 
+    public void CancelPendingWrite() => _transport.CancelPendingWrite();
+
     internal void BeginPhysicalSessionRetirement()
     {
-        lock (_sync)
-        {
-            _admissionOpen = false;
-            _failureWarningEmitted = false;
-            _endpointGeneration = null;
-            _cachedEndpoint = default;
-            _transport.InvalidatePhysicalSession();
-        }
+        Volatile.Write(ref _admissionOpen, false);
+        _failureWarningEmitted = false;
+        _endpointGeneration = null;
+        _cachedEndpoint = default;
+        _transport.CancelPendingWrite();
     }
 
     internal void BeginPhysicalSession()

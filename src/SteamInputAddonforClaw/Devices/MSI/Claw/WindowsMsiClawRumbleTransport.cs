@@ -13,6 +13,7 @@ internal interface IMsiClawRumbleTransport : IDisposable
     /// reports 32 bytes for the real PID1902 gamepad collection, not 64).</param>
     MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket, int outputReportLength);
     void InvalidatePhysicalSession();
+    void CancelPendingWrite() { }
 }
 
 internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
@@ -94,6 +95,13 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
         InvalidationRequested?.Invoke();
         lock (_sync)
             CloseHandleLocked();
+    }
+
+    public void CancelPendingWrite()
+    {
+        SafeFileHandle? handle;
+        lock (_sync) handle = _handle;
+        if (handle is not null && !handle.IsInvalid) _api.CancelWrite(handle);
     }
 
     public void Dispose()
