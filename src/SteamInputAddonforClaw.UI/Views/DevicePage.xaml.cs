@@ -226,15 +226,16 @@ public sealed partial class DevicePage : UserControl
     {
         if (_suppressTdpEvents) return;
         var value = double.IsFinite(args.NewValue) && args.NewValue == Math.Truncate(args.NewValue) ? (int)args.NewValue : (int?)null;
-        var isAc = sender is var box && (box == TdpAcPl1NumberBox || box == TdpAcPl2NumberBox);
+        var isAc = sender == TdpAcPl1NumberBox || sender == TdpAcPl2NumberBox;
         var isPl1 = sender == TdpAcPl1NumberBox || sender == TdpDcPl1NumberBox;
         var pl1 = isAc ? _acPl1Draft : _dcPl1Draft;
         var pl2 = isAc ? _acPl2Draft : _dcPl2Draft;
         if (isPl1) pl1 = value;
         else pl2 = value;
 
-        if (_tdpSnapshot.Limits is { } limits && TdpDraftPolicy.TryAdjustAfterEdit(isPl1, pl1, pl2, limits) is { } adjusted)
+        if (_tdpSnapshot.Limits is { } limits)
         {
+            var adjusted = TdpDraftPolicy.AdjustAfterEdit(isPl1, pl1, pl2, limits);
             pl1 = adjusted.Pl1Watts;
             pl2 = adjusted.Pl2Watts;
             _suppressTdpEvents = true;
@@ -315,7 +316,7 @@ public sealed partial class DevicePage : UserControl
     {
         internal readonly record struct AdjustedPair(int? Pl1Watts, int? Pl2Watts);
 
-        internal static AdjustedPair? TryAdjustAfterEdit(bool pl1WasEdited, int? pl1, int? pl2, FrontendTdpLimits limits)
+        internal static AdjustedPair AdjustAfterEdit(bool pl1WasEdited, int? pl1, int? pl2, FrontendTdpLimits limits)
         {
             var gap = limits switch
             {

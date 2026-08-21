@@ -83,12 +83,13 @@ public sealed class TdpFrontendContractTests
     }
 
     [Theory]
-    [InlineData(30, 30, 30, 32, 8, 35, 8, 45)]
-    [InlineData(30, 25, 25, 30, 8, 35, 8, 45)]
-    [InlineData(45, 44, 43, 45, 8, 35, 8, 45)]
-    public void Ex_pl1_edit_preserves_priority_and_bounds(int beforePl2, int editedPl1, int expectedPl1, int expectedPl2, int pl1Min, int pl1Max, int pl2Min, int pl2Max)
+    [InlineData(30, 30, 32)]
+    [InlineData(25, 25, 30)]
+    [InlineData(44, 43, 45)]
+    public void Ex_pl1_edit_preserves_priority_and_bounds(int editedPl1, int expectedPl1, int expectedPl2)
     {
-        var result = DevicePage.TdpDraftPolicy.TryAdjustAfterEdit(true, editedPl1, beforePl2, new(pl1Min, pl1Max, pl2Min, pl2Max));
+        var beforePl2 = expectedPl2 == 45 ? 45 : 30;
+        var result = DevicePage.TdpDraftPolicy.AdjustAfterEdit(true, editedPl1, beforePl2, new(8, 35, 8, 45));
         Assert.Equal(new(expectedPl1, expectedPl2), result);
     }
 
@@ -96,18 +97,18 @@ public sealed class TdpFrontendContractTests
     public void Ex_pl2_edit_pulls_pl1_down_and_respects_lower_boundary()
     {
         var limits = new FrontendTdpLimits(8, 35, 8, 45);
-        Assert.Equal(new(18, 20), DevicePage.TdpDraftPolicy.TryAdjustAfterEdit(false, 20, 20, limits));
-        Assert.Equal(new(8, 10), DevicePage.TdpDraftPolicy.TryAdjustAfterEdit(false, 8, 9, limits));
-        Assert.Equal(new(20, 25), DevicePage.TdpDraftPolicy.TryAdjustAfterEdit(false, 20, 25, limits));
+        Assert.Equal(new(18, 20), DevicePage.TdpDraftPolicy.AdjustAfterEdit(false, 20, 20, limits));
+        Assert.Equal(new(8, 10), DevicePage.TdpDraftPolicy.AdjustAfterEdit(false, 8, 9, limits));
+        Assert.Equal(new(20, 25), DevicePage.TdpDraftPolicy.AdjustAfterEdit(false, 20, 25, limits));
     }
 
     [Fact]
     public void A2vm_uses_one_watt_gap_and_blank_companion_stays_blank()
     {
         var limits = new FrontendTdpLimits(8, 30, 8, 37);
-        Assert.Equal(new(19, 20), DevicePage.TdpDraftPolicy.TryAdjustAfterEdit(false, 20, 20, limits));
-        Assert.Equal(new(20, 21), DevicePage.TdpDraftPolicy.TryAdjustAfterEdit(true, 20, 20, limits));
-        Assert.Equal(new(20, null), DevicePage.TdpDraftPolicy.TryAdjustAfterEdit(true, 20, null, limits));
+        Assert.Equal(new(19, 20), DevicePage.TdpDraftPolicy.AdjustAfterEdit(false, 20, 20, limits));
+        Assert.Equal(new(20, 21), DevicePage.TdpDraftPolicy.AdjustAfterEdit(true, 20, 20, limits));
+        Assert.Equal(new(20, null), DevicePage.TdpDraftPolicy.AdjustAfterEdit(true, 20, null, limits));
     }
 
     [Fact]
@@ -116,7 +117,6 @@ public sealed class TdpFrontendContractTests
         var loaded = new FrontendTdpConfiguration(true, new(30, 8), new(30, 8));
         Assert.Equal(30, loaded.Ac.Pl1Watts);
         Assert.Equal(8, loaded.Ac.Pl2Watts);
-        var limits = new FrontendTdpLimits(8, 35, 8, 45);
-        Assert.Equal(new(18, 20), DevicePage.TdpDraftPolicy.TryAdjustAfterEdit(false, 30, 20, limits));
+        Assert.Equal(new(18, 20), DevicePage.TdpDraftPolicy.AdjustAfterEdit(false, 30, 20, new(8, 35, 8, 45)));
     }
 }
