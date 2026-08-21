@@ -10,7 +10,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
     private const uint KeyUp = 0x0002, Extended = 0x0001;
     private const uint WhKeyboardLl = 13;
     private readonly Func<IntPtr, int, LowLevelKeyboardProc, IntPtr, uint, IntPtr> _install;
-    private readonly Func<IntPtr, int, IntPtr, IntPtr> _next;
+    private readonly Func<IntPtr, int, IntPtr, IntPtr, IntPtr> _next;
     private readonly Action<IntPtr> _remove;
     private readonly Func<Input[], uint> _sendInput;
     private readonly Func<int, short> _getAsyncKeyState;
@@ -22,13 +22,13 @@ internal sealed class WinGSuppressionGuard : IDisposable
 
     internal WinGSuppressionGuard(
         Func<IntPtr, int, LowLevelKeyboardProc, IntPtr, uint, IntPtr>? install = null,
-        Func<IntPtr, int, IntPtr, IntPtr>? next = null,
+        Func<IntPtr, int, IntPtr, IntPtr, IntPtr>? next = null,
         Action<IntPtr>? remove = null,
         Func<Input[], uint>? sendInput = null,
         Func<int, short>? getAsyncKeyState = null)
     {
         _install = install ?? ((module, thread, callback, _, flags) => SetWindowsHookEx(WhKeyboardLl, callback, module, (uint)thread));
-        _next = next ?? ((hook, code, data) => CallNextHookEx(hook, code, data));
+        _next = next ?? ((hook, code, wParam, data) => CallNextHookEx(hook, code, wParam, data));
         _remove = remove ?? (hook => _ = UnhookWindowsHookEx(hook));
         _sendInput = sendInput ?? (inputs => SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()));
         _getAsyncKeyState = getAsyncKeyState ?? (vk => GetAsyncKeyState(vk));
@@ -43,7 +43,13 @@ internal sealed class WinGSuppressionGuard : IDisposable
         _callback = HookCallback;
         try
         {
-            var hook = _install(IntPtr.Zero, 0, _callback, IntPtr.Zero, 0);
+            var module = GetModuleHandle(null);
+            if (module == IntPtr.Zero)
+            {
+                AppLog.Warn("Wing.Guard", "Win+G hook installation failed: module handle unavailable.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
+                return;
+            }
+            var hook = _install(module, 0, _callback, IntPtr.Zero, 0);
             if (hook == IntPtr.Zero)
             {
                 AppLog.Warn("Wing.Guard", "Win+G hook installation failed.", fields: [("Win32Error", Marshal.GetLastWin32Error())]);
@@ -127,6 +133,19 @@ internal sealed class WinGSuppressionGuard : IDisposable
         return IntPtr.Zero;
     }
 
+    internal IntPtr InvokeForTest(int vk, bool keyDown, IntPtr wParam, IntPtr lParam)
+    {
+        var data = Marshal.AllocHGlobal(Marshal.SizeOf<KeyboardData>());
+        try
+        {
+            Marshal.StructureToPtr(new KeyboardData { VkCode = (uint)vk }, data, false);
+            return HookCallback(0, wParam, data);
+        }
+        finally { Marshal.FreeHGlobal(data); }
+    }
+
+    internal IntPtr InvokeHookForTest(IntPtr wParam, IntPtr lParam) => HookCallback(0, wParam, lParam);
+
     private void SendCleanup(int wins)
     {
         var inputs = new List<Input> { Input.Key(0xFF, 0, OwnMarker), Input.Key(0xFF, KeyUp, OwnMarker) };
@@ -137,9 +156,17 @@ internal sealed class WinGSuppressionGuard : IDisposable
             inputs.Add(Input.Key((ushort)vk, KeyUp | Extended, OwnMarker, (ushort)scan));
         }
         var sent = _sendInput(inputs.ToArray());
+        var primaryError = sent == inputs.Count ? 0 : Marshal.GetLastWin32Error();
         if (sent == 1)
         {
-            try { _sendInput([inputs[1]]); AppLog.Debug("Wing.Input", "Cleanup fallback attempted."); }
+            try
+            {
+                var fallbackSent = _sendInput([inputs[1]]);
+                var fallbackError = fallbackSent == 1 ? 0 : Marshal.GetLastWin32Error();
+                AppLog.Debug("Wing.Input", "Dummy cleanup fallback completed.", ("SentInputs", fallbackSent), ("Win32Error", fallbackError));
+                if (fallbackSent != 1)
+                    AppLog.Warn("Wing.Input", "Dummy cleanup fallback failed.", fields: [("SentInputs", fallbackSent), ("Win32Error", fallbackError)]);
+            }
             catch (Exception exception) { AppLog.Warn("Wing.Input", "Cleanup fallback failed.", exception); }
         }
         if (wins is 1 or 2 or 3)
@@ -149,7 +176,7 @@ internal sealed class WinGSuppressionGuard : IDisposable
         }
         AppLog.Debug("Wing.Input", "Modifier cleanup completed.", ("RequestedInputs", inputs.Count), ("SentInputs", sent));
         if (sent != inputs.Count)
-            AppLog.Warn("Wing.Input", "Partial SendInput during Win+G cleanup.", fields: [("RequestedInputs", inputs.Count), ("SentInputs", sent), ("Win32Error", Marshal.GetLastWin32Error())]);
+            AppLog.Warn("Wing.Input", "Partial SendInput during Win+G cleanup.", fields: [("RequestedInputs", inputs.Count), ("SentInputs", sent), ("Win32Error", primaryError)]);
     }
 
     private void LogRelevant(int vk, bool keyDown, uint flags, long extraInfo, uint scan)
@@ -168,14 +195,14 @@ internal sealed class WinGSuppressionGuard : IDisposable
 
     private IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam)
     {
-        if (code < 0) return _next(_hook, code, lParam);
+        if (code < 0) return _next(_hook, code, wParam, lParam);
         try
         {
             var data = Marshal.PtrToStructure<KeyboardData>(lParam);
             var result = ProcessKey((int)data.VkCode, (wParam.ToInt64() & 1) == 0, data.Flags, data.ExtraInfo, data.ScanCode);
-            return result != IntPtr.Zero ? result : _next(_hook, code, lParam);
+            return result != IntPtr.Zero ? result : _next(_hook, code, wParam, lParam);
         }
-        catch (Exception exception) { AppLog.Warn("Wing.Guard", "Win+G hook callback was contained.", exception); return _next(_hook, code, lParam); }
+        catch (Exception exception) { AppLog.Warn("Wing.Guard", "Win+G hook callback was contained.", exception); return _next(_hook, code, wParam, lParam); }
     }
 
     [StructLayout(LayoutKind.Sequential)] internal struct KeyboardData { internal uint VkCode, ScanCode, Flags, Time; internal nint ExtraInfo; }
@@ -185,7 +212,8 @@ internal sealed class WinGSuppressionGuard : IDisposable
     [StructLayout(LayoutKind.Sequential)] internal struct MouseInput { internal int X, Y; internal uint MouseData, Flags, Time; internal nint ExtraInfo; }
     internal delegate IntPtr LowLevelKeyboardProc(int code, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(uint id, LowLevelKeyboardProc callback, IntPtr module, uint thread);
-    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr data);
+    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr data);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern IntPtr GetModuleHandle(string? moduleName);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool UnhookWindowsHookEx(IntPtr hook);
     [DllImport("user32.dll")] private static extern uint MapVirtualKey(uint code, uint mapType);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);

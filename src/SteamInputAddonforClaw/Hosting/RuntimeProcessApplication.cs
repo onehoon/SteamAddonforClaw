@@ -41,19 +41,7 @@ internal sealed class RuntimeProcessApplication
             {
                 _processHost.StartRuntimeEventWatchers();
                 // Return to GetMessageW before unrelated startup/reconcile work can hold the hook thread.
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        _processHost.StartPowerObservation();
-                        await _processHost.ReconcileAsync().ConfigureAwait(false);
-                        _processHost.ReconcileDeviceProfileStartup();
-                    }
-                    catch (Exception exception)
-                    {
-                        AppLog.Error("Startup", "Deferred Runtime startup work failed.", exception);
-                    }
-                });
+                _processHost.StartDeferredRuntimeStartup();
             });
         }
         catch (Exception exception)
