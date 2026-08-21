@@ -172,16 +172,61 @@ public sealed class RumbleV1Tests
         Assert.Equal(SteamDeckFeedbackCommand.Malformed, SteamDeckRumbleDecoder.Decode([]).Command);
     }
 
-    [Theory]
-    [InlineData(100, 2, 116)]
-    [InlineData(100, -20, 0)]
-    [InlineData(250, 20, 255)]
-    public void Decoder_MapsHapticCommandWithHhcStrength(byte intensity, sbyte gain, byte strength)
+    [Fact]
+    public void Decoder_PreservesModernSdlHapticMetadataAndExistingClawFallback()
     {
-        var result = SteamDeckRumbleDecoder.Decode([0xEA, 0, 0, 0, intensity, unchecked((byte)gain)]);
+        var result = SteamDeckRumbleDecoder.Decode([0xEA, 0x13, 0x03, 0x07, 0x04, 0xFE, 0x34, 0x12, 0xFC, 0xFF, 0x78, 0x56, 0xBC, 0x9A, 0x64, 0x7F, 0x06, 0x22, 0x11, 0x44, 0x33]);
+
         Assert.Equal(SteamDeckFeedbackCommand.Haptic, result.Command);
-        Assert.Equal(new TwoMotorRumble((ushort)(strength * 257), (ushort)(strength * 257)), result.Rumble);
-        Assert.Equal(strength, result.Strength8);
+        Assert.Equal(new SteamDeckHapticMetadata(19, 3, 7, 4, -2, true, 0x1234, -4, 0x5678, unchecked((ushort)0x9ABC), 100, 127, 6, 0x1122, 0x3344), result.Haptic);
+        Assert.Equal((byte)4, result.Intensity);
+        Assert.Equal(-2, result.Gain);
+        Assert.Equal((byte)0, result.Strength8);
+        Assert.Equal(TwoMotorRumble.Stopped, result.Rumble);
+    }
+
+    [Fact]
+    public void Decoder_RejectsTruncatedModernSdlHaptic()
+    {
+        Assert.Equal(SteamDeckFeedbackCommand.Malformed, SteamDeckRumbleDecoder.Decode([0xEA, 19, 1, 2, 3, 4]).Command);
+    }
+
+    [Fact]
+    public void Decoder_PreservesHistoricalHapticPrefixWithoutPretendingModernLayout()
+    {
+        var result = SteamDeckRumbleDecoder.Decode([0xEA, 0x0D, 2, 4, 100, 0]);
+
+        Assert.Equal(SteamDeckFeedbackCommand.Haptic, result.Command);
+        Assert.Equal((byte)0x0D, result.Haptic!.Value.DeclaredPayloadLength);
+        Assert.Equal((byte)2, result.Haptic.Value.Side);
+        Assert.Equal((byte)4, result.Haptic.Value.CommandType);
+        Assert.False(result.Haptic.Value.IsModernSdlLayout);
+        Assert.Null(result.Haptic.Value.Frequency);
+        Assert.Equal(new TwoMotorRumble(100 * 257, 100 * 257), result.Rumble);
+    }
+
+    [Theory]
+    [InlineData(0x80, -128)]
+    [InlineData(0x7F, 127)]
+    public void Decoder_PreservesModernHapticSignedGainBoundaries(byte encodedGain, sbyte expectedGain)
+    {
+        var report = new byte[21];
+        report[0] = 0xEA;
+        report[1] = 19;
+        report[5] = encodedGain;
+        var result = SteamDeckRumbleDecoder.Decode(report);
+
+        Assert.Equal(expectedGain, result.Haptic!.Value.DbGain);
+    }
+
+    [Fact]
+    public void Decoder_HapticMetadataDoesNotChangeExistingClawFallback()
+    {
+        var first = SteamDeckRumbleDecoder.Decode([0xEA, 19, 1, 1, 100, 0, 0x34, 0x12, 0x02, 0, 0x78, 0x56, 0xBC, 0x9A, 100, 1, 2, 0x22, 0x11, 0x44, 0x33]);
+        var second = SteamDeckRumbleDecoder.Decode([0xEA, 19, 3, 5, 100, 0, 0xFF, 0xFF, 0xFC, 0xFF, 0xAA, 0xBB, 0xCC, 0xDD, 1, 127, 6, 0x01, 0, 0x02, 0]);
+
+        Assert.Equal(new TwoMotorRumble(100 * 257, 100 * 257), first.Rumble);
+        Assert.Equal(first.Rumble, second.Rumble);
     }
 
     [Fact]
