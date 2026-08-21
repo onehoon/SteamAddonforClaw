@@ -1,7 +1,5 @@
 using SteamInputAddonforClaw.Diagnostics;
 
-using System.Collections.Concurrent;
-
 namespace SteamInputAddonforClaw.Power;
 
 internal interface IPowerSuspendResumeNotificationSource : IDisposable
@@ -16,7 +14,8 @@ internal sealed class PowerTransitionWatcher : IDisposable
     private readonly PowerMutationGate _gate;
     private readonly PowerTransitionCoordinator _coordinator;
     private readonly Action _cancelLifecycle;
-    private readonly ConcurrentDictionary<Task, byte> _inFlight = new();
+    private readonly object _inFlightSync = new();
+    private readonly HashSet<Task> _inFlight = [];
     private int _disposed;
     // 0 = awake/unknown, 1 = suspend observed, 2 = first resume observed.
     private int _phase;
@@ -30,14 +29,22 @@ internal sealed class PowerTransitionWatcher : IDisposable
     }
     private void OnNotification(uint rawCode)
     {
-        var task = ObserveNotificationSafelyAsync(rawCode);
-        _inFlight.TryAdd(task, 0);
+        Task task;
+        lock (_inFlightSync)
+        {
+            if (Volatile.Read(ref _disposed) != 0) return;
+            task = ObserveNotificationSafelyAsync(rawCode);
+            _inFlight.Add(task);
+        }
         _ = RemoveWhenCompleteAsync(task);
     }
     private async Task RemoveWhenCompleteAsync(Task task)
     {
         try { await task.ConfigureAwait(false); }
-        finally { _inFlight.TryRemove(task, out _); }
+        finally
+        {
+            lock (_inFlightSync) _inFlight.Remove(task);
+        }
     }
     private async Task ObserveNotificationSafelyAsync(uint rawCode)
     {
@@ -75,12 +82,25 @@ internal sealed class PowerTransitionWatcher : IDisposable
         return _coordinator.Enqueue(observation);
     }
     internal static PowerSignal Map(uint rawCode) => rawCode switch { 4 => PowerSignal.Suspend, 18 => PowerSignal.ResumeAutomatic, 7 => PowerSignal.ResumeSuspend, _ => PowerSignal.Unknown };
-    public void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) != 0) return; _source.Notification -= OnNotification; _source.Dispose(); }
+    public void Dispose()
+    {
+        lock (_inFlightSync)
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            _source.Notification -= OnNotification;
+        }
+        _source.Dispose();
+    }
     internal async Task DrainAsync()
     {
-        while (!_inFlight.IsEmpty)
+        while (true)
         {
-            var tasks = _inFlight.Keys.ToArray();
+            Task[] tasks;
+            lock (_inFlightSync)
+            {
+                if (_inFlight.Count == 0) return;
+                tasks = [.. _inFlight];
+            }
             try { await Task.WhenAll(tasks).ConfigureAwait(false); }
             catch { }
         }
