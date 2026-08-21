@@ -29,7 +29,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("if (!installationSucceeded || teardownAttempted) return;", program);
         Assert.Contains("QAM target already closed; explicit uninstall was not available.", program);
         Assert.Contains("installMayExist = true", program);
-        Assert.Contains("if (installMayExist) await TeardownAsync(currentClient);", program);
+        Assert.Contains("if (installMayExist) await TeardownAsync(sessionClient);", program);
         Assert.Contains("installationSucceeded = false", program);
         Assert.Contains("teardownAttempted = false", program);
         Assert.DoesNotContain("QamHost stop requested before installation completed.", program[..program.IndexOf("installationSucceeded = true", StringComparison.Ordinal)]);

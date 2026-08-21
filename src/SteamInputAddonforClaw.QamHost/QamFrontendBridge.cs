@@ -9,14 +9,16 @@ namespace SteamInputAddonforClaw.QamHost;
 internal sealed class QamFrontendBridge : IAsyncDisposable
 {
     internal sealed record Response(long Id, bool Ok, object? Payload = null, string? Error = null);
+    internal static readonly JsonSerializerOptions BridgeJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly NamedPipeAddonFrontendClient _client = new(FrontendPipeEndpoint.CreateQamForCurrentUser());
     internal NamedPipeAddonFrontendClient Client => _client;
     internal event EventHandler? StateInvalidated;
     private int _stopping;
 
+    internal QamFrontendBridge() => _client.StateInvalidated += OnStateInvalidated;
+
     internal async Task ConnectAsync(CancellationToken cancellationToken)
     {
-        _client.StateInvalidated += OnStateInvalidated;
         await _client.ConnectAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -57,5 +59,10 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
     }
     private static Response Error(long id, string message) => new(id, false, Error: message);
     internal void StopAccepting() => Interlocked.Exchange(ref _stopping, 1);
-    public ValueTask DisposeAsync() { StopAccepting(); return _client.DisposeAsync(); }
+    public async ValueTask DisposeAsync()
+    {
+        StopAccepting();
+        _client.StateInvalidated -= OnStateInvalidated;
+        await _client.DisposeAsync().ConfigureAwait(false);
+    }
 }

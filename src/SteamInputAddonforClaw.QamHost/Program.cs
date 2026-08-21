@@ -2,6 +2,7 @@ using SteamInputAddonforClaw.QamHost;
 using SteamInputAddonforClaw.FrontendTransport;
 using System.Text.Json;
 
+
 var managed = args.Contains("--managed", StringComparer.OrdinalIgnoreCase);
 string? logDirectory = null;
 for (var index = 0; index < args.Length - 1; index++)
@@ -27,18 +28,29 @@ log.Info($"Frontend script loaded. Path={frontendPath} Bytes={frontendScript.Len
 using var lifetime = managed ? QamHostManagedLifetime.Start(() => Console.In.ReadLineAsync()) : null;
 var lifetimeToken = lifetime?.Token ?? CancellationToken.None;
 await using var frontendBridge = new QamFrontendBridge();
-try
+async Task ConnectRuntimeBridgeBoundedAsync()
 {
-    using var bridgeTimeout = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
-    bridgeTimeout.CancelAfter(TimeSpan.FromSeconds(5));
-    await frontendBridge.ConnectAsync(bridgeTimeout.Token);
-    frontendBridge.StateInvalidated += (_, _) => log.Info("Runtime state invalidated; QAM snapshot refresh is available.");
-    log.Info("QAM frontend transport connected.");
+    var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+    while (!lifetimeToken.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+    {
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+        attempt.CancelAfter(TimeSpan.FromSeconds(1));
+        try
+        {
+            await frontendBridge.ConnectAsync(attempt.Token).ConfigureAwait(false);
+            log.Info("QAM frontend transport connected.");
+            return;
+        }
+        catch (Exception exception) when ((exception is IOException or TimeoutException or OperationCanceledException or FrontendTransportException) && DateTimeOffset.UtcNow < deadline)
+        {
+            try { await Task.Delay(250, lifetimeToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (lifetimeToken.IsCancellationRequested) { return; }
+        }
+    }
+    if (!lifetimeToken.IsCancellationRequested)
+        log.Warn("QAM frontend transport unavailable after bounded startup acquisition; CDP integration remains active.");
 }
-catch (Exception exception) when (exception is IOException or TimeoutException or OperationCanceledException or FrontendTransportException)
-{
-    log.Warn($"QAM frontend transport unavailable; CDP integration remains active. {exception.Message}");
-}
+var bridgeConnectTask = ConnectRuntimeBridgeBoundedAsync();
 Task stopTask = managed ? lifetime!.StopTask : WaitForConsoleShutdownAsync();
 SteamGamepadUiCdpClient? currentClient = null;
 var installationSucceeded = false;
@@ -61,7 +73,7 @@ try
             async Task DeliverResponseAsync(string payload)
             {
                 var response = await frontendBridge.HandleRequestAsync(payload, lifetimeToken);
-                try { await sessionClient.EvaluateAsync($"window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeResponse?.({JsonSerializer.Serialize(response)})", lifetimeToken); }
+                try { await sessionClient.EvaluateAsync($"window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeResponse?.({JsonSerializer.Serialize(response, QamFrontendBridge.BridgeJson)})", lifetimeToken); }
                 catch (Exception exception) { log.Info($"QAM bridge response delivery skipped for retired CDP session. {exception.Message}"); }
             }
             void OnBindingCalled(string name, string payload)
