@@ -15,19 +15,17 @@ internal enum SteamDeckFeedbackCommand
 internal readonly record struct SteamDeckFeedbackDecodeResult(
     SteamDeckFeedbackCommand Command,
     TwoMotorRumble Rumble,
-    int? PulseDurationMilliseconds = null,
     byte? Intensity = null,
     int? Gain = null,
-    ushort? PulsePeriod = null,
-    ushort? PulseCount = null,
     byte? Strength8 = null,
     byte? RumbleType = null,
     ushort? RumbleIntensity = null,
     sbyte? RumbleLeftGain = null,
     sbyte? RumbleRightGain = null,
-    SteamDeckHapticMetadata? Haptic = null)
+    SteamDeckHapticMetadata? Haptic = null,
+    SteamDeckHapticPulseMetadata? HapticPulse = null)
 {
-    internal bool IsSupported => Command is SteamDeckFeedbackCommand.Rumble or SteamDeckFeedbackCommand.Haptic or SteamDeckFeedbackCommand.HapticPulse;
+    internal bool HasPhysicalTranslation => Command is SteamDeckFeedbackCommand.Rumble or SteamDeckFeedbackCommand.Haptic;
 }
 
 internal readonly record struct SteamDeckHapticMetadata(
@@ -46,6 +44,15 @@ internal readonly record struct SteamDeckHapticMetadata(
     byte? ScriptId = null,
     ushort? SweepStartFrequency = null,
     ushort? SweepEndFrequency = null);
+
+internal readonly record struct SteamDeckHapticPulseMetadata(
+    byte DeclaredPayloadLength,
+    byte Side,
+    ushort OnDurationMicroseconds,
+    ushort OffIntervalMicroseconds,
+    ushort Count,
+    byte GainRaw,
+    bool IsLinuxLayout);
 
 internal static class SteamDeckRumbleDecoder
 {
@@ -107,19 +114,22 @@ internal static class SteamDeckRumbleDecoder
             // This is the existing MSI Claw translation heuristic, not Valve protocol strength.
             var strength8 = ComputeClawHapticFallbackStrength8(intensity, gain);
             var strength16 = (ushort)(strength8 * 257);
-            return new(SteamDeckFeedbackCommand.Haptic, new TwoMotorRumble(strength16, strength16), null, intensity, gain, Strength8: strength8, Haptic: haptic);
+            return new(SteamDeckFeedbackCommand.Haptic, new TwoMotorRumble(strength16, strength16), intensity, gain, Strength8: strength8, Haptic: haptic);
         }
 
         if (opcode == HapticPulseOpcode)
         {
             if (report.Length < 10) return new(SteamDeckFeedbackCommand.Malformed, TwoMotorRumble.Stopped);
-            var period = (ushort)(report[5] | report[6] << 8);
-            var count = (ushort)(report[7] | report[8] << 8);
-            var gain = report[9];
-            var strength8 = (byte)Math.Min(255, count * 16 + gain);
-            var duration = Math.Max(1, (int)Math.Ceiling(period * (long)count / 1000.0));
-            var strength16 = (ushort)(strength8 * 257);
-            return new(SteamDeckFeedbackCommand.HapticPulse, new TwoMotorRumble(strength16, strength16), duration, Gain: gain, PulsePeriod: period, PulseCount: count, Strength8: strength8);
+            var declaredPayloadLength = report[1];
+            var pulse = new SteamDeckHapticPulseMetadata(
+                declaredPayloadLength,
+                report[2],
+                BinaryPrimitives.ReadUInt16LittleEndian(report[3..5]),
+                BinaryPrimitives.ReadUInt16LittleEndian(report[5..7]),
+                BinaryPrimitives.ReadUInt16LittleEndian(report[7..9]),
+                report[9],
+                declaredPayloadLength == 8);
+            return new(SteamDeckFeedbackCommand.HapticPulse, TwoMotorRumble.Stopped, HapticPulse: pulse);
         }
 
         return new(opcode is 0xEA or 0x8F or 0xB6 or 0xB7 or 0xB8 or 0xB9 ?

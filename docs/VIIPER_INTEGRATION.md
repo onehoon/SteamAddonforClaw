@@ -63,8 +63,10 @@ decodes ordinary 0xEB rumble, and gates physical writes through the shared
 feedback authority. Teardown of an armed session revokes and drains feedback,
 sends an explicit physical STOP, clears the callback, and only then performs
 classified Steam Deck attachment detach; final logical removal belongs only to
-runtime teardown. Steam Deck `0xEA` Haptic and `0x8F` Haptic Pulse are translated
-through the existing two-motor physical feedback path. Audio/jingle and unknown
+runtime teardown. Steam Deck `0xEA` Haptic is translated through the existing
+two-motor MSI Claw fallback with protocol metadata preserved; `0x8F` Haptic
+Pulse is recognized and decoded for diagnostics only, with no MSI Claw physical
+translation or pulse emulation. Audio/jingle and unknown
 output commands remain unsupported; hardware validation remains pending.
 
 ### Automated dependency update PRs
@@ -214,8 +216,9 @@ RemoveSteamDeckDeviceEx
 
 The Addon uses the generated header and the matching managed definitions from
 the same build. The generic output callback remains available in the native
-API; Steam Deck `0xEA` Haptic and `0x8F` Haptic Pulse are translated through
-the production two-motor physical feedback path. Audio/jingle and unknown
+API; Steam Deck `0xEA` Haptic uses the production two-motor MSI Claw fallback,
+while `0x8F` Haptic Pulse is diagnostic-only and has no physical translation.
+Audio/jingle and unknown
 output commands remain unsupported; hardware validation remains pending.
 
 ## 5. Steam Deck state mapping

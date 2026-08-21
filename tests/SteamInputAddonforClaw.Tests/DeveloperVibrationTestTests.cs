@@ -9,20 +9,14 @@ public sealed class DeveloperVibrationTestTests
     [Theory]
     [InlineData(FrontendVibrationTestCommand.Rumble, 32768, 32768)]
     [InlineData(FrontendVibrationTestCommand.Haptic, 32896, 32896)]
-    [InlineData(FrontendVibrationTestCommand.HapticPulse, 41120, 41120)]
     public async Task Developer_command_uses_the_production_decoder_and_sink(FrontendVibrationTestCommand command, ushort large, ushort small)
     {
         var authority = new FeedbackAuthority();
         var sink = new RecordingSink();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
 
-        Assert.True((await bridge.ProcessDeveloperTestAsync(Report(command), addDeveloperStop: command is FrontendVibrationTestCommand.Rumble or FrontendVibrationTestCommand.Haptic, CancellationToken.None)).Succeeded);
+        Assert.True((await bridge.ProcessDeveloperTestAsync(Report(command), addDeveloperStop: true, CancellationToken.None)).Succeeded);
         Assert.Equal(new TwoMotorRumble(large, small), sink.Values[0]);
-        if (command == FrontendVibrationTestCommand.HapticPulse)
-        {
-            await Task.Delay(300);
-            Assert.Equal(2, sink.Values.Count);
-        }
     }
 
     [Fact]
@@ -147,21 +141,6 @@ public sealed class DeveloperVibrationTestTests
     }
 
     [Fact]
-    public async Task Haptic_pulse_waits_for_the_production_stop_and_reports_its_physical_result()
-    {
-        var sink = new FailingSink();
-        var authority = new FeedbackAuthority();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, authority.Acquire("SteamDeck"), sink);
-
-        var outcome = await bridge.ProcessDeveloperTestAsync(Report(FrontendVibrationTestCommand.HapticPulse), addDeveloperStop: false, CancellationToken.None);
-
-        Assert.True(outcome.Succeeded);
-        Assert.Equal(PhysicalRumbleWriteStatus.Failed, outcome.CommandResult!.Value.Status);
-        Assert.Equal(PhysicalRumbleWriteStatus.Failed, outcome.StopResult!.Value.Status);
-        Assert.Equal("WriteFailed", outcome.StopResult!.Value.Reason);
-    }
-
-    [Fact]
     public void Revoked_feedback_authority_rejects_developer_injection_without_a_write()
     {
         var sink = new RecordingSink();
@@ -178,7 +157,6 @@ public sealed class DeveloperVibrationTestTests
     {
         FrontendVibrationTestCommand.Rumble => [0xEB, 9, 0, 0, 0, 0, 0x80, 0, 0x80, 0, 0],
         FrontendVibrationTestCommand.Haptic => [0xEA, 0, 0, 0, 128, 0],
-        FrontendVibrationTestCommand.HapticPulse => [0x8F, 0, 0, 0, 0, 0xA8, 0x61, 10, 0, 0],
         _ => [0xEB]
     };
 
