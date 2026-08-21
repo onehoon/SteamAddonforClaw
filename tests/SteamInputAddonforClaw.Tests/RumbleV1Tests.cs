@@ -108,10 +108,38 @@ public sealed class RumbleV1Tests
     [Fact]
     public void Decoder_MapsValidatedDeckRumbleFieldsWithoutReduction()
     {
-        var report = new byte[] { 0xEB, 9, 0, 0, 0, 0x34, 0x12, 0xCD, 0xAB, 2, 0 };
+        var report = new byte[] { 0xEB, 9, 0x04, 0x78, 0x56, 0x34, 0x12, 0xCD, 0xAB, 0xFE, 0x7F };
         var result = SteamDeckRumbleDecoder.Decode(report);
         Assert.True(result.IsSupported);
+        Assert.Equal((byte)0x04, result.RumbleType);
+        Assert.Equal((ushort)0x5678, result.RumbleIntensity);
         Assert.Equal(new TwoMotorRumble(0x1234, 0xABCD), result.Rumble);
+        Assert.Equal((sbyte)-2, result.RumbleLeftGain);
+        Assert.Equal((sbyte)127, result.RumbleRightGain);
+    }
+
+    [Fact]
+    public void Bridge_IgnoresRumbleMetadataForPhysicalMapping()
+    {
+        var authority = new FeedbackAuthority();
+        var token = authority.Acquire("SteamDeck");
+        var sink = new RecordingSink();
+        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
+
+        Assert.True(bridge.ProcessNormalizedReport([0xEB, 9, 0x04, 0x78, 0x56, 0x34, 0x12, 0xCD, 0xAB, 0x80, 0x7F]));
+
+        Assert.Equal([new TwoMotorRumble(0x1234, 0xABCD)], sink.Values);
+    }
+
+    [Theory]
+    [InlineData(0x80, -128)]
+    [InlineData(0x7F, 127)]
+    public void Decoder_PreservesSignedRumbleGainBoundaries(byte encodedGain, sbyte expectedGain)
+    {
+        var result = SteamDeckRumbleDecoder.Decode([0xEB, 9, 0, 0, 0, 0, 0, 0, 0, encodedGain, encodedGain]);
+
+        Assert.Equal(expectedGain, result.RumbleLeftGain);
+        Assert.Equal(expectedGain, result.RumbleRightGain);
     }
 
     [Fact]
