@@ -1,4 +1,7 @@
 using SteamInputAddonforClaw.QamHost;
+using SteamInputAddonforClaw.FrontendTransport;
+using System.Text.Json;
+
 
 var managed = args.Contains("--managed", StringComparer.OrdinalIgnoreCase);
 string? logDirectory = null;
@@ -24,6 +27,32 @@ log.Info($"Frontend script loaded. Path={frontendPath} Bytes={frontendScript.Len
 
 using var lifetime = managed ? QamHostManagedLifetime.Start(() => Console.In.ReadLineAsync()) : null;
 var lifetimeToken = lifetime?.Token ?? CancellationToken.None;
+await using var frontendBridge = new QamFrontendBridge();
+using var bridgeConnectCts = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+async Task ConnectRuntimeBridgeBoundedAsync(CancellationToken token)
+{
+    var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+    while (!token.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+    {
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(token);
+        attempt.CancelAfter(TimeSpan.FromSeconds(1));
+        try
+        {
+            await frontendBridge.ConnectAsync(attempt.Token).ConfigureAwait(false);
+            log.Info("QAM frontend transport connected.");
+            return;
+        }
+        catch (Exception exception) when (exception is IOException or TimeoutException or OperationCanceledException or FrontendTransportException)
+        {
+            if (token.IsCancellationRequested || DateTimeOffset.UtcNow >= deadline) return;
+            try { await Task.Delay(250, token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+        }
+    }
+    if (!token.IsCancellationRequested)
+        log.Warn("QAM frontend transport unavailable after bounded startup acquisition; CDP integration remains active.");
+}
+var bridgeConnectTask = ConnectRuntimeBridgeBoundedAsync(bridgeConnectCts.Token);
 Task stopTask = managed ? lifetime!.StopTask : WaitForConsoleShutdownAsync();
 SteamGamepadUiCdpClient? currentClient = null;
 var installationSucceeded = false;
@@ -36,14 +65,39 @@ try
     while (!lifetimeToken.IsCancellationRequested &&
            QamHostRecovery.IsOpen(DateTimeOffset.UtcNow, recoveryDeadline))
     {
-        currentClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+        var sessionClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+        currentClient = sessionClient;
+        long documentGeneration = 0;
         // Cleanup ownership belongs to this CDP/GamepadUI session only.
         installationSucceeded = false;
         installMayExist = false;
         teardownAttempted = false;
-        currentClient.AddonQamConsoleMessage += message => log.Info(message);
+            sessionClient.AddonQamConsoleMessage += message => log.Info(message);
+            async Task DeliverResponseAsync(string payload, long admittedGeneration)
+            {
+                var response = await frontendBridge.HandleRequestAsync(payload, lifetimeToken);
+                if (admittedGeneration != Volatile.Read(ref documentGeneration)) return;
+                try { await sessionClient.EvaluateAsync($"window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeResponse?.({JsonSerializer.Serialize(response, QamFrontendBridge.BridgeJson)})", lifetimeToken); }
+                catch (Exception exception) { log.Info($"QAM bridge response delivery skipped for retired CDP session. {exception.Message}"); }
+            }
+            void OnBindingCalled(string name, string payload)
+            {
+                if (string.Equals(name, "__steamInputAddonQamHost", StringComparison.Ordinal))
+                {
+                    var admittedGeneration = Volatile.Read(ref documentGeneration);
+                    _ = Task.Run(() => DeliverResponseAsync(payload, admittedGeneration), lifetimeToken);
+                }
+            }
+            async Task DeliverInvalidationAsync()
+            {
+                try { await sessionClient.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeNotification?.('state-invalidated')", lifetimeToken); }
+                catch (Exception exception) { log.Info($"QAM invalidation delivery skipped for retired CDP session. {exception.Message}"); }
+            }
+            void OnStateInvalidated(object? _, EventArgs __) => _ = Task.Run(DeliverInvalidationAsync, lifetimeToken);
+            sessionClient.BindingCalled += OnBindingCalled;
+            frontendBridge.StateInvalidated += OnStateInvalidated;
         var reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        void OnDocumentLoaded() => reload.TrySetResult();
+        void OnDocumentLoaded() { Interlocked.Increment(ref documentGeneration); reload.TrySetResult(); }
         currentClient.DocumentLoaded += OnDocumentLoaded;
         CdpTarget? target = null;
         try
@@ -113,9 +167,11 @@ try
         }
         finally
         {
-            if (installMayExist) await TeardownAsync(currentClient);
-            await currentClient.DisposeAsync();
-            currentClient = null;
+            frontendBridge.StateInvalidated -= OnStateInvalidated;
+            sessionClient.BindingCalled -= OnBindingCalled;
+            if (installMayExist) await TeardownAsync(sessionClient);
+            await sessionClient.DisposeAsync();
+            if (ReferenceEquals(currentClient, sessionClient)) currentClient = null;
         }
         if (!stopRequested && !lifetimeToken.IsCancellationRequested && recoveryDeadline.HasValue)
             await Task.Delay(250, lifetimeToken);
@@ -124,6 +180,9 @@ try
 catch (OperationCanceledException) when (lifetimeToken.IsCancellationRequested) { }
 finally
 {
+    bridgeConnectCts.Cancel();
+    try { await bridgeConnectTask.ConfigureAwait(false); }
+    catch (OperationCanceledException) when (bridgeConnectCts.IsCancellationRequested) { }
     if (currentClient is not null) await currentClient.DisposeAsync();
 }
 if (!stopRequested && !lifetimeToken.IsCancellationRequested && recoveryDeadline is not null)

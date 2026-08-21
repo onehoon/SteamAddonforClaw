@@ -15,13 +15,17 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
     private readonly HttpClient _http;
     private readonly CdpCommandCorrelator _correlator = new();
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private readonly CancellationTokenSource _sessionLifetime = new();
     private ClientWebSocket? _socket;
     private CancellationTokenSource? _receiveLoopCts;
     private Task? _receiveLoop;
     public event Action<string>? AddonQamConsoleMessage;
     public event Action? DocumentLoaded;
+    public event Action<string, string>? BindingCalled;
     public Task ConnectionEnded => _connectionEnded.Task;
     private readonly TaskCompletionSource _connectionEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _disposed;
 
     public SteamGamepadUiCdpClient(Uri devToolsEndpoint)
     {
@@ -54,6 +58,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
     public async Task ConnectAsync(CdpTarget target, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (string.IsNullOrWhiteSpace(target.WebSocketDebuggerUrl))
         {
             throw new InvalidOperationException("Target has no webSocketDebuggerUrl; cannot connect.");
@@ -67,9 +72,10 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         _socket = socket;
 
         _receiveLoopCts = new CancellationTokenSource();
-        _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token, AddonQamConsoleMessage, () => DocumentLoaded?.Invoke(), _connectionEnded);
+        _receiveLoop = RunReceiveLoopAsync(socket, _correlator, _receiveLoopCts.Token, AddonQamConsoleMessage, () => DocumentLoaded?.Invoke(), (name, payload) => BindingCalled?.Invoke(name, payload), _connectionEnded);
         await SendCommandAsync("Runtime.enable", parameters: null, cancellationToken).ConfigureAwait(false);
         await SendCommandAsync("Page.enable", parameters: null, cancellationToken).ConfigureAwait(false);
+        await SendCommandAsync("Runtime.addBinding", new { name = "__steamInputAddonQamHost" }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Runs <c>Runtime.evaluate</c> with the given JS expression and returns the raw JSON result.</summary>
@@ -80,18 +86,24 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
     private async Task<string> SendCommandAsync(string method, object? parameters, CancellationToken cancellationToken)
     {
-        if (_socket is not { State: WebSocketState.Open })
-            throw new InvalidOperationException("Not connected to a CDP target.");
-
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var id = _correlator.NextId();
         var payload = SerializeCommandPayload(id, method, parameters);
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _sessionLifetime.Token);
         cts.CancelAfter(ResponseTimeout);
 
         var responseTask = _correlator.RegisterAsync(id, cts.Token);
         var bytes = Encoding.UTF8.GetBytes(payload);
-        await _socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, cts.Token).ConfigureAwait(false);
+        await _sendGate.WaitAsync(cts.Token).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            if (_socket is not { State: WebSocketState.Open } socket)
+                throw new InvalidOperationException("Not connected to a CDP target.");
+            await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, cts.Token).ConfigureAwait(false);
+        }
+        finally { _sendGate.Release(); }
 
         return await responseTask.ConfigureAwait(false);
     }
@@ -99,7 +111,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
     internal static string SerializeCommandPayload(int id, string method, object? parameters) =>
         JsonSerializer.Serialize(new { id, method, @params = parameters ?? new { } });
 
-    private static async Task RunReceiveLoopAsync(ClientWebSocket socket, CdpCommandCorrelator correlator, CancellationToken cancellationToken, Action<string>? consoleMessage, Action documentLoaded, TaskCompletionSource connectionEnded)
+    private static async Task RunReceiveLoopAsync(ClientWebSocket socket, CdpCommandCorrelator correlator, CancellationToken cancellationToken, Action<string>? consoleMessage, Action documentLoaded, Action<string, string> bindingCalled, TaskCompletionSource connectionEnded)
     {
         var buffer = new byte[64 * 1024];
         try
@@ -120,7 +132,7 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
                 } while (!result.EndOfMessage);
 
                 var json = Encoding.UTF8.GetString(messageStream.ToArray());
-                TryDispatch(json, correlator, consoleMessage, documentLoaded);
+                TryDispatch(json, correlator, consoleMessage, documentLoaded, bindingCalled);
             }
         }
         catch (OperationCanceledException)
@@ -139,11 +151,13 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
         }
     }
 
-    private static void TryDispatch(string json, CdpCommandCorrelator correlator, Action<string>? consoleMessage, Action documentLoaded)
+    private static void TryDispatch(string json, CdpCommandCorrelator correlator, Action<string>? consoleMessage, Action documentLoaded, Action<string, string> bindingCalled)
     {
         using var document = JsonDocument.Parse(json);
         if (IsDocumentLoadedEvent(document.RootElement))
             documentLoaded();
+        if (document.RootElement.TryGetProperty("method", out var eventMethod) && eventMethod.GetString() == "Runtime.bindingCalled" && document.RootElement.TryGetProperty("params", out var binding) && binding.TryGetProperty("name", out var name) && binding.TryGetProperty("payload", out var payload))
+            bindingCalled(name.GetString() ?? string.Empty, payload.GetString() ?? string.Empty);
 
         if (document.RootElement.TryGetProperty("method", out var method) && method.GetString() == "Runtime.consoleAPICalled" &&
             document.RootElement.TryGetProperty("params", out var parameters) && parameters.TryGetProperty("args", out var args))
@@ -166,6 +180,8 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _sessionLifetime.Cancel();
         _receiveLoopCts?.Cancel();
         if (_receiveLoop is not null)
         {
@@ -178,19 +194,26 @@ public sealed class SteamGamepadUiCdpClient : IAsyncDisposable
             }
         }
 
-        if (_socket is { State: WebSocketState.Open })
+        await _sendGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
         {
-            try
+            if (_socket is { State: WebSocketState.Open } socket)
             {
-                await _socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "QamHost shutdown", CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (WebSocketException)
-            {
+                try
+                {
+                    await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "QamHost shutdown", CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (WebSocketException)
+                {
+                }
             }
         }
+        finally { _sendGate.Release(); }
 
         _socket?.Dispose();
         _receiveLoopCts?.Dispose();
         _http.Dispose();
+        _sendGate.Dispose();
+        _sessionLifetime.Dispose();
     }
 }

@@ -33,6 +33,12 @@ public static class FrontendPipeEndpoint
         var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(sid));
         return $"SteamInputAddonforClaw.Frontend.{Convert.ToHexString(hash.AsSpan(0, 8))}";
     }
+
+    public static string CreateQamForCurrentUser()
+    {
+        var desktop = CreateForCurrentUser();
+        return $"{desktop}.Qam";
+    }
 }
 
 public class FrontendTransportException(string message, Exception? inner = null) : Exception(message, inner);
