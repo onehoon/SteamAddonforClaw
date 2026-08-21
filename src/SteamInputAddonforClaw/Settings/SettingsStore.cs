@@ -68,7 +68,11 @@ public sealed class SettingsStore
         try
         {
             var mapping = property.Deserialize<WingMappingSettings>(SerializerOptions) ?? throw new JsonException("WING mapping was null.");
-            if (mapping.Single is null || mapping.Double is null || !WingActionCapabilities.Supports(mapping.Single.Action) || !WingActionCapabilities.Supports(mapping.Double.Action))
+            if (mapping.Single is null || mapping.Double is null
+                || mapping.Single.Hotkey is null || mapping.Single.Launch is null
+                || mapping.Double.Hotkey is null || mapping.Double.Launch is null
+                || !WingActionCapabilities.Supports(mapping.Single.Action)
+                || !WingActionCapabilities.Supports(mapping.Double.Action))
                 throw new JsonException("WING mapping contains an invalid action or slot.");
             return mapping;
         }
