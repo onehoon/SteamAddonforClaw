@@ -26,6 +26,7 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
 
     private readonly IMsiClawNativeHidApi _api;
     private readonly object _sync = new();
+    private readonly object _writeSerial = new();
     private SafeFileHandle? _handle;
     private string? _devicePath;
     private bool _disposed;
@@ -38,6 +39,12 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
     public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> semanticPacket, int outputReportLength)
     {
         WriteRequested?.Invoke();
+        lock (_writeSerial)
+            return WriteSerialized(devicePath, semanticPacket, outputReportLength);
+    }
+
+    private MsiClawRumbleTransportResult WriteSerialized(string devicePath, ReadOnlySpan<byte> semanticPacket, int outputReportLength)
+    {
         lock (_sync)
         {
             if (_disposed) return new(false, "Disposed");
@@ -51,11 +58,11 @@ internal sealed class WindowsMsiClawRumbleTransport : IMsiClawRumbleTransport
             var openStarted = Stopwatch.GetTimestamp();
             if (_handle is null)
             {
-                // Normal synchronous HID Open/Write, matching the ClawTweaks-proven behavior --
-                // no overlapped I/O, no event/wait/cancel machinery. Some MSI HID collections deny
-                // GENERIC_READ while still allowing output writes (ClawButtonMonitor.SharedHidWrite
-                // retries write-only for exactly this reason), so fall back to GENERIC_WRITE only
-                // before giving up.
+                // Normal synchronous HID Open/Write, matching the ClawTweaks-proven behavior.
+                // A separate watchdog uses CancelSynchronousIo for the actual writer thread.
+                // Some MSI HID collections deny GENERIC_READ while still allowing output writes
+                // (ClawButtonMonitor.SharedHidWrite retries write-only for exactly this reason),
+                // so fall back to GENERIC_WRITE only before giving up.
                 _handle = _api.Open(devicePath, GenericRead | GenericWrite, ShareReadWrite, OpenExisting);
                 if (_handle.IsInvalid)
                 {

@@ -49,6 +49,26 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
+    public async Task Late_nonzero_invalidates_prior_stop_dedupe()
+    {
+        var identity = new FakeIdentity(new(Guid.NewGuid(), "path-a", "PNP", "ROOT")) { Generation = 1 };
+        var transport = new FakeTransport();
+        using var sink = new MsiClawRumbleSink(identity, transport, new VerifiedEndpointResolver());
+
+        Assert.Equal("OK", sink.SetRumble(TwoMotorRumble.Stopped).Reason);
+
+        transport.BlockWrites = true;
+        var nonzero = Task.Run(() => sink.SetRumble(new(0x8000, 0x8000)));
+        await transport.WriteEntered.Task;
+        sink.BeginPhysicalSessionRetirement();
+        transport.ReleaseWrite.Set();
+
+        Assert.Equal(PhysicalRumbleWriteStatus.Unavailable, (await nonzero).Status);
+        Assert.Equal("OK", sink.SetRumble(TwoMotorRumble.Stopped).Reason);
+        Assert.Equal(3, transport.WriteCount);
+    }
+
+    [Fact]
     public void Transport_reuses_handle_changes_path_and_invalidates_after_write_failure()
     {
         var native = new FakeNativeHid();
@@ -151,7 +171,7 @@ public sealed class MsiClawRumbleTests
     }
 
     [Fact]
-    public async Task Transport_allows_cancellation_boundary_while_another_write_is_pending()
+    public async Task Transport_serializes_native_writes_without_blocking_cancellation()
     {
         var native = new FakeNativeHid { BlockFirstWrite = true };
         using var transport = new WindowsMsiClawRumbleTransport(native);
@@ -163,7 +183,9 @@ public sealed class MsiClawRumbleTests
         // that B reached the transport boundary while A is still inside native Write.
         var second = Task.Run(() => transport.Write("path-a", [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 32));
         await secondRequested.Task;
-        Assert.Equal(2, native.WriteCalls);
+        Assert.Equal(1, native.WriteCalls);
+        transport.CancelPendingWrite();
+        Assert.Equal(1, native.CancelWriteCalls);
         native.ReleaseFirstWrite.Set();
         Assert.True((await first).Succeeded);
         Assert.True((await second).Succeeded);
@@ -646,6 +668,7 @@ public sealed class MsiClawRumbleTests
         public bool DenyReadWriteOpen { get; set; }
         public List<uint> OpenAccessRequests { get; } = [];
         public int WriteCalls { get; private set; }
+        public int CancelWriteCalls { get; private set; }
         public TaskCompletionSource FirstWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim ReleaseFirstWrite { get; } = new(false);
         public List<byte[]> Writes { get; } = [];
@@ -674,6 +697,7 @@ public sealed class MsiClawRumbleTests
             LastError = WriteResult ? 0 : 5;
             return WriteResult;
         }
+        public void CancelWrite(SafeFileHandle handle) => CancelWriteCalls++;
         public bool TryGetReportLengths(SafeFileHandle handle, out int inputReportLength, out int outputReportLength, out ushort usagePage, out ushort usage, out int hidStatus)
         {
             inputReportLength = 0;

@@ -7,6 +7,7 @@ using SteamInputAddonforClaw.Input;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Feedback;
 using SteamInputAddonforClaw.Routing;
+using SteamInputAddonforClaw.Contracts.Frontend;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -372,6 +373,23 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         Assert.True(result.Succeeded, result.Reason);
         Assert.Equal(["Start", "Neutral", "SetOutputCallback"], session.Trace);
+    }
+
+    [Fact]
+    public async Task DeveloperHapticStageCommandUsesNonOffGeneratorType()
+    {
+        var session = new FakeCanonicalSession();
+        var sink = new RecordingRumbleSink();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide(), sink: sink);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var outcome = await stage.RunDeveloperVibrationTestAsync(FrontendVibrationTestCommand.Haptic, CancellationToken.None);
+
+        Assert.True(outcome.Succeeded);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, outcome.CommandResult?.Status);
+        Assert.Contains(new TwoMotorRumble(32896, 32896), sink.Snapshot());
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]

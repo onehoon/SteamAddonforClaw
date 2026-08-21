@@ -13,16 +13,17 @@ public sealed class RumbleV1Tests
         var first = authority.Acquire("SteamDeck");
         var sink = new RecordingSink();
         var oldBridge = new SteamDeckRumbleFeedbackBridge(authority, first, sink);
-        authority.RevokeAndDrain();
+        authority.Revoke();
         var second = authority.Acquire("SteamDeck");
         var newBridge = new SteamDeckRumbleFeedbackBridge(authority, second, sink);
         Invoke(oldBridge.Callback, Packet(0x1234, 0x5678));
         Invoke(newBridge.Callback, Packet(0x1234, 0x5678));
         Assert.True(sink.WaitForValue(new TwoMotorRumble(0x1234, 0x5678), TimeSpan.FromSeconds(2)));
+        Assert.Single(sink.Snapshot());
     }
 
     [Fact]
-    public void SteamDeckFeedbackBridge_contains_invalid_native_callback_inputs_and_sink_exceptions()
+    public async Task SteamDeckFeedbackBridge_contains_invalid_native_callback_inputs_and_sink_exceptions()
     {
         var authority = new FeedbackAuthority();
         var token = authority.Acquire("SteamDeck");
@@ -33,7 +34,8 @@ public sealed class RumbleV1Tests
         try { bridge.Callback(0, oversized, 65); }
         finally { Marshal.FreeHGlobal(oversized); }
         Invoke(bridge.Callback, Packet(1, 2));
-        Assert.Empty(sink.Values);
+        await sink.WriteAttempted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Empty(sink.Snapshot());
     }
 
     [Fact]
@@ -48,14 +50,14 @@ public sealed class RumbleV1Tests
         bridge.BeforeLease = () => { beforeLease.TrySetResult(); release.Wait(); };
         var callback = Task.Run(() => Invoke(bridge.Callback, Packet(1, 2)));
         await beforeLease.Task;
-        authority.RevokeAndDrain();
+        authority.Revoke();
         release.Set();
         await callback;
         Assert.Empty(sink.Values);
     }
 
     [Fact]
-    public async Task SteamDeckFeedbackBridge_admitted_write_drains_before_revoke_returns()
+    public async Task Blocked_physical_write_does_not_block_callback_or_authority_revoke()
     {
         var authority = new FeedbackAuthority();
         var token = authority.Acquire("SteamDeck");
@@ -63,12 +65,11 @@ public sealed class RumbleV1Tests
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
         var callback = Task.Run(() => Invoke(bridge.Callback, Packet(1, 2)));
         await sink.Entered.Task;
-        var revoke = Task.Run(authority.RevokeAndDrain);
-        Assert.False(revoke.IsCompleted);
+        await Task.Run(authority.Revoke).WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(authority.IsCurrent(token));
         sink.Release.Set();
         await callback;
-        await revoke;
-        Assert.Equal([new TwoMotorRumble(1, 2)], sink.Values);
+        Assert.Equal([new TwoMotorRumble(1, 2)], sink.Snapshot());
     }
 
     private static void Invoke(SteamInputAddonforClaw.VirtualOutput.Viiper.SteamDeckOutputCallback callback, byte[] report)
@@ -86,8 +87,10 @@ public sealed class RumbleV1Tests
         private readonly object _gate = new();
         public List<TwoMotorRumble> Values { get; } = [];
         public bool ThrowOnWrite { get; set; }
+        public TaskCompletionSource WriteAttempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
-        { lock (_gate) { if (ThrowOnWrite) throw new InvalidOperationException(); Values.Add(rumble); Monitor.PulseAll(_gate); } return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+        { WriteAttempted.TrySetResult(); lock (_gate) { if (ThrowOnWrite) throw new InvalidOperationException(); Values.Add(rumble); Monitor.PulseAll(_gate); } return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+        public TwoMotorRumble[] Snapshot() { lock (_gate) return [.. Values]; }
         public bool WaitForValue(TwoMotorRumble expected, TimeSpan timeout)
         {
             lock (_gate)
@@ -102,11 +105,13 @@ public sealed class RumbleV1Tests
 
     private sealed class BlockingRecordingSink : IPhysicalRumbleSink
     {
+        private readonly object _gate = new();
         public List<TwoMotorRumble> Values { get; } = [];
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim Release { get; } = new(false);
         public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
-        { Entered.TrySetResult(); Release.Wait(); Values.Add(rumble); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+        { Entered.TrySetResult(); Release.Wait(); lock (_gate) Values.Add(rumble); return new(PhysicalRumbleWriteStatus.Succeeded, "OK"); }
+        public TwoMotorRumble[] Snapshot() { lock (_gate) return [.. Values]; }
     }
     [Fact]
     public void TwoMotorRumble_PreservesIndependentFullPrecisionChannels()

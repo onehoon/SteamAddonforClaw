@@ -79,6 +79,11 @@ internal sealed class MsiClawRumbleSink : IPhysicalRumbleSink, IDisposable
 
             if (_lastWrittenGeneration == generation && _lastWrittenRumble is { } previous && previous.Equals(rumble))
                 return new(PhysicalRumbleWriteStatus.Succeeded, "Unchanged");
+
+            // Once a new physical I/O attempt begins, the previous motor state is no longer
+            // authoritative until this attempt is confirmed successful. This is important when
+            // retirement races a non-zero write: the terminal STOP must not be deduplicated away.
+            ResetLastWritten();
         }
 
         var large8 = MsiClawRumblePacketBuilder.ToPhysicalByte(rumble.LargeMotor);

@@ -171,7 +171,7 @@ public sealed class DeveloperVibrationTestTests
         var sink = new RecordingSink();
         var authority = new FeedbackAuthority();
         var token = authority.Acquire("SteamDeck");
-        authority.RevokeAndDrain();
+        authority.Revoke();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
 
         Assert.False(bridge.ProcessNormalizedReport(Report(FrontendVibrationTestCommand.Rumble), "DeveloperVibrationTest"));
