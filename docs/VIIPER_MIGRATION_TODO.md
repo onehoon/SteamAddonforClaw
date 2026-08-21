@@ -506,8 +506,10 @@ PLANNED.
 
 ## Separate feature tracks
 
-Rumble v1 and Steam Deck `0xEA` Haptic / `0x8F` Haptic Pulse two-motor
-translation are production wired, but hardware validation remains pending.
+Rumble v1 and Steam Deck `0xEA` Haptic two-motor fallback translation are
+production wired, while `0x8F` Haptic Pulse is recognized and decoded for
+diagnostics only with no physical MSI Claw translation. Hardware validation
+of the supported feedback paths remains pending.
 Audio/jingle and unknown output commands remain unsupported. Gyro and
 accelerometer remain a separate feature track. These capabilities are not
 implied by the basic non-gyro input validation; each requires its own protocol,

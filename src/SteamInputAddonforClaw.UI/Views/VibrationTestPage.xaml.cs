@@ -69,7 +69,6 @@ public sealed partial class VibrationTestPage : UserControl
 
         RumbleButton.IsEnabled = enabled;
         HapticButton.IsEnabled = enabled;
-        PulseButton.IsEnabled = enabled;
         StopButton.IsEnabled = enabled;
 
         StatusText.Text = !bootstrap.Developer.TestModeEnabled
@@ -82,7 +81,6 @@ public sealed partial class VibrationTestPage : UserControl
     private void Back_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
     private async void Rumble_Click(object s, RoutedEventArgs e) => await RunAsync(FrontendVibrationTestCommand.Rumble);
     private async void Haptic_Click(object s, RoutedEventArgs e) => await RunAsync(FrontendVibrationTestCommand.Haptic);
-    private async void Pulse_Click(object s, RoutedEventArgs e) => await RunAsync(FrontendVibrationTestCommand.HapticPulse);
     private async void Stop_Click(object s, RoutedEventArgs e) => await RunAsync(FrontendVibrationTestCommand.Stop);
     private async Task RunAsync(FrontendVibrationTestCommand command)
     { if (_frontend is null) return; var result = await _frontend.RunVibrationTestAsync(command); ResultText.Text = $"{command}: {result.Reason}"; }

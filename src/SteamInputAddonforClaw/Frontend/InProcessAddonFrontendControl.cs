@@ -186,10 +186,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     internal static (bool Succeeded, string Reason) MapVibrationTestOutcome(Feedback.DeveloperVibrationTestOutcome outcome)
     {
         var commandPhysicalOk = outcome.CommandResult is { } commandResult && commandResult.Succeeded;
-        var stopRequired = outcome.Decode?.Command == Feedback.SteamDeckFeedbackCommand.HapticPulse;
-        var stopPhysicalOk = outcome.StopResult is { } stopResult
-            ? stopResult.Succeeded
-            : !stopRequired;
+        var stopPhysicalOk = outcome.StopResult is not { } stopResult || stopResult.Succeeded;
         var succeeded = outcome.Succeeded && commandPhysicalOk && stopPhysicalOk;
         var reason = !outcome.Succeeded
             ? "Feedback bridge is unavailable, superseded, or the test was cancelled."
@@ -253,7 +250,6 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         FrontendVibrationTestCommand.Rumble => "0xEB",
         FrontendVibrationTestCommand.Haptic => "0xEA",
-        FrontendVibrationTestCommand.HapticPulse => "0x8F",
         FrontendVibrationTestCommand.Stop => "0xEB(zero)",
         _ => "Unknown"
     };
@@ -262,7 +258,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         { Command: Feedback.SteamDeckFeedbackCommand.Rumble, Rumble: var rumble } => $"Decode=Rumble Large16={rumble.LargeMotor} Small16={rumble.SmallMotor} Large8={rumble.LargeMotor >> 8} Small8={rumble.SmallMotor >> 8}",
         { Command: Feedback.SteamDeckFeedbackCommand.Haptic, Rumble: var rumble, Haptic: var haptic, Strength8: var strength } => $"Decode=Haptic PayloadLength={haptic?.DeclaredPayloadLength} ModernSdl={haptic?.IsModernSdlLayout} Side={haptic?.Side} Type={haptic?.CommandType} UiIntensity={haptic?.UiIntensity} DbGain={haptic?.DbGain} Frequency={haptic?.Frequency} DurationMs={haptic?.DurationMilliseconds} NoiseIntensity={haptic?.NoiseIntensity} LfoFrequency={haptic?.LfoFrequency} LfoDepth={haptic?.LfoDepth} RandomToneGain={haptic?.RandomToneGain} ScriptId={haptic?.ScriptId} SweepStartFrequency={haptic?.SweepStartFrequency} SweepEndFrequency={haptic?.SweepEndFrequency} FallbackStrength8={strength} FallbackStrength16={rumble.LargeMotor}",
-        { Command: Feedback.SteamDeckFeedbackCommand.HapticPulse, Rumble: var rumble, PulsePeriod: var period, PulseCount: var count, Gain: var gain, Strength8: var strength, PulseDurationMilliseconds: var duration } => $"Decode=HapticPulse Period={period} Count={count} Gain={gain} Strength8={strength} Strength16={rumble.LargeMotor} PulseDurationMs={duration}",
+        { Command: Feedback.SteamDeckFeedbackCommand.HapticPulse, HapticPulse: var pulse } => $"Decode=HapticPulse PayloadLength={pulse?.DeclaredPayloadLength} LinuxLayout={pulse?.IsLinuxLayout} Side={pulse?.Side} OnDurationUs={pulse?.OnDurationMicroseconds} OffIntervalUs={pulse?.OffIntervalMicroseconds} Count={pulse?.Count} GainRaw={pulse?.GainRaw} PhysicalTranslation=None",
         _ => "Decode=Unavailable"
     };
 

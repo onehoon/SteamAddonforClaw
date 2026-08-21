@@ -4,7 +4,7 @@ using SteamInputAddonforClaw.Contracts.Oem1;
 namespace SteamInputAddonforClaw.Contracts.Frontend;
 
 public enum FrontendLogLevel { Off, Info, Debug }
-public enum FrontendVibrationTestCommand { Rumble, Haptic, HapticPulse, Stop }
+public enum FrontendVibrationTestCommand { Rumble = 0, Haptic = 1, Stop = 3 }
 public enum FrontendSetupStatus { Complete, Required, Blocked, RestartRequired, NotApplicable, Indeterminate }
 public enum FrontendHardwareStatus { Supported, Unsupported, Indeterminate }
 public enum FrontendControllerEnvironmentStatus { Supported, Unsupported, Indeterminate }

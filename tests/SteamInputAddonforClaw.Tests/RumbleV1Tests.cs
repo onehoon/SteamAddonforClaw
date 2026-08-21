@@ -110,7 +110,7 @@ public sealed class RumbleV1Tests
     {
         var report = new byte[] { 0xEB, 9, 0x04, 0x78, 0x56, 0x34, 0x12, 0xCD, 0xAB, 0xFE, 0x7F };
         var result = SteamDeckRumbleDecoder.Decode(report);
-        Assert.True(result.IsSupported);
+        Assert.True(result.HasPhysicalTranslation);
         Assert.Equal((byte)0x04, result.RumbleType);
         Assert.Equal((ushort)0x5678, result.RumbleIntensity);
         Assert.Equal(new TwoMotorRumble(0x1234, 0xABCD), result.Rumble);
@@ -230,94 +230,28 @@ public sealed class RumbleV1Tests
     }
 
     [Fact]
-    public void Decoder_MapsHapticPulseFieldsStrengthAndDuration()
+    public void Decoder_PreservesLinuxHapticPulseMetadataWithoutPhysicalTranslation()
     {
-        var result = SteamDeckRumbleDecoder.Decode([0x8F, 0, 0, 0, 0, 250, 0, 3, 0, 4]);
+        var result = SteamDeckRumbleDecoder.Decode([0x8F, 8, 2, 0x34, 0x12, 0x78, 0x56, 3, 0, 0xA0]);
+
         Assert.Equal(SteamDeckFeedbackCommand.HapticPulse, result.Command);
-        Assert.Equal((ushort)250, result.PulsePeriod!.Value);
-        Assert.Equal((ushort)3, result.PulseCount!.Value);
-        Assert.Equal((byte)52, result.Strength8!.Value);
-        Assert.Equal(1, result.PulseDurationMilliseconds!.Value);
-        Assert.Equal(new TwoMotorRumble((ushort)(52 * 257), (ushort)(52 * 257)), result.Rumble);
+        Assert.Equal(new SteamDeckHapticPulseMetadata(8, 2, 0x1234, 0x5678, 3, 0xA0, true), result.HapticPulse);
+        Assert.Equal(TwoMotorRumble.Stopped, result.Rumble);
+        Assert.False(result.HasPhysicalTranslation);
     }
 
     [Fact]
-    public void Decoder_HapticPulseDurationUsesWidenedMultiplication()
-    {
-        var result = SteamDeckRumbleDecoder.Decode([0x8F, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0]);
-        Assert.Equal((int)Math.Ceiling(65535L * 65535 / 1000.0), result.PulseDurationMilliseconds!.Value);
-    }
-
-    [Fact]
-    public async Task Bridge_PulseStopIsStaleSafeAndTeardownCancelsIt()
+    public void Bridge_IgnoresHapticPulseWithoutSupersedingSupportedFeedback()
     {
         var authority = new FeedbackAuthority();
         var token = authority.Acquire("SteamDeck");
         var sink = new RecordingSink();
         var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
-        Invoke(bridge.Callback, [0x8F, 0, 0, 0, 0, 10, 0, 10, 0, 0]);
-        Invoke(bridge.Callback, Packet(7, 8));
-        await Task.Delay(30);
-        Assert.Equal([new TwoMotorRumble(41120, 41120), new TwoMotorRumble(7, 8)], sink.Values);
-        bridge.Dispose();
-        await Task.Delay(30);
-        Assert.Equal(2, sink.Values.Count);
-    }
 
-    [Theory]
-    [InlineData(0xEA)]
-    [InlineData(0xEB)]
-    public async Task Bridge_PulseStopCannotCancelNewerSupportedFeedback(byte newerOpcode)
-    {
-        var authority = new FeedbackAuthority();
-        var token = authority.Acquire("SteamDeck");
-        var sink = new RecordingSink();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
-        Invoke(bridge.Callback, [0x8F, 0, 0, 0, 0, 10, 0, 10, 0, 0]);
-        Invoke(bridge.Callback, newerOpcode == 0xEA ? [0xEA, 0, 0, 0, 1, 0] : Packet(9, 10));
-        await Task.Delay(30);
-        Assert.Equal(2, sink.Values.Count);
-        Assert.Equal(newerOpcode == 0xEA ? new TwoMotorRumble(257, 257) : new TwoMotorRumble(9, 10), sink.Values[1]);
-    }
-
-    [Fact]
-    public async Task Bridge_DelayedStopHoldsBridgeGateAcrossPhysicalWrite()
-    {
-        var authority = new FeedbackAuthority();
-        var token = authority.Acquire("SteamDeck");
-        var sink = new BlockingStopSink();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
-        Invoke(bridge.Callback, [0x8F, 0, 0, 0, 0, 1, 0, 1, 0, 0]);
-        await sink.StopEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var newer = Task.Run(() => Invoke(bridge.Callback, Packet(9, 10)));
-        await Task.Delay(20);
-        Assert.False(newer.IsCompleted);
-        sink.ReleaseStop.Set();
-        await newer;
-        Assert.Equal(TwoMotorRumble.Stopped, sink.Values[1]);
-        Assert.Equal(new TwoMotorRumble(9, 10), sink.Values[^1]);
-        Assert.DoesNotContain(TwoMotorRumble.Stopped, sink.Values.Skip(2));
-    }
-
-    [Fact]
-    public async Task Bridge_ArmsOneMillisecondStopOnlyAfterImmediateWrite()
-    {
-        var authority = new FeedbackAuthority();
-        var token = authority.Acquire("SteamDeck");
-        var sink = new RecordingSink();
-        var bridge = new SteamDeckRumbleFeedbackBridge(authority, token, sink);
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new ManualResetEventSlim(false);
-        bridge.BeforeLease = () => { entered.TrySetResult(); release.Wait(); };
-
-        var callback = Task.Run(() => Invoke(bridge.Callback, [0x8F, 0, 0, 0, 0, 0, 0, 1, 0, 0]));
-        await entered.Task;
-        await Task.Delay(20);
-        Assert.Empty(sink.Values);
-        release.Set();
-        await callback;
-        await Task.Delay(20);
-        Assert.Equal([new TwoMotorRumble(4112, 4112), TwoMotorRumble.Stopped], sink.Values);
+        Assert.True(bridge.ProcessNormalizedReport(Packet(9, 10), "Steam"));
+        Assert.False(bridge.ProcessNormalizedReport([0x8F, 8, 2, 0x34, 0x12, 0x78, 0x56, 3, 0, 0xA0], "Steam", out var sequence));
+        Assert.Equal(0, sequence);
+        Assert.Equal([new TwoMotorRumble(9, 10)], sink.Values);
     }
 
     [Fact]
@@ -403,21 +337,4 @@ public sealed class RumbleV1Tests
         newLease!.Dispose();
     }
 
-    private sealed class BlockingStopSink : IPhysicalRumbleSink
-    {
-        public List<TwoMotorRumble> Values { get; } = [];
-        public TaskCompletionSource StopEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public ManualResetEventSlim ReleaseStop { get; } = new(false);
-
-        public PhysicalRumbleWriteResult SetRumble(TwoMotorRumble rumble)
-        {
-            if (rumble == TwoMotorRumble.Stopped)
-            {
-                StopEntered.TrySetResult();
-                ReleaseStop.Wait();
-            }
-            Values.Add(rumble);
-            return new(PhysicalRumbleWriteStatus.Succeeded, "OK");
-        }
-    }
 }

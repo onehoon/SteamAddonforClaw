@@ -64,18 +64,25 @@ public sealed class SteamDeckFeedbackRxDiagnosticsTests : IDisposable
     }
 
     [Fact]
-    public void HapticPulseCallback_LogsHhcFields()
+    public void HapticPulseCallback_LogsProtocolFieldsWithoutPhysicalTranslation()
     {
         var bridge = Create(out _, out _);
 
-        Invoke(bridge.Callback, [0x8F, 0, 0, 0, 0, 10, 0, 2, 0, 4]);
+        Invoke(bridge.Callback, [0x8F, 8, 2, 0x34, 0x12, 0x78, 0x56, 2, 0, 0xA0]);
 
         var log = Drain();
         Assert.Contains("Opcode=0x8F", log);
         Assert.Contains("Command=HapticPulse", log);
-        Assert.Contains("Period=10", log);
+        Assert.Contains("PayloadLength=8", log);
+        Assert.Contains("LinuxLayout=True", log);
+        Assert.Contains("Side=2", log);
+        Assert.Contains("OnDurationUs=4660", log);
+        Assert.Contains("OffIntervalUs=22136", log);
         Assert.Contains("Count=2", log);
-        Assert.Contains("Gain=4", log);
+        Assert.Contains("GainRaw=160", log);
+        Assert.Contains("PhysicalTranslation=None", log);
+        Assert.DoesNotContain("Strength8=", log);
+        Assert.DoesNotContain("DurationMs=", log);
     }
 
     [Fact]

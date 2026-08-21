@@ -18,7 +18,6 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     private readonly FeedbackAuthorityToken _token;
     private readonly IPhysicalRumbleSink _sink;
     private readonly object _gate = new();
-    private CancellationTokenSource? _pendingStop;
     private long _sequence;
     private bool _disposed;
     private CancellationTokenSource? _developerTest;
@@ -34,20 +33,19 @@ internal sealed class SteamDeckRumbleFeedbackBridge
 
     internal SteamDeckOutputCallback Callback { get; }
     internal Action? BeforeLease { get; set; }
-    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam") => ProcessNormalizedReport(report, origin, out _, out _, out _);
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin = "Steam") => ProcessNormalizedReportCore(report, origin, out _, out _);
 
-    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence) => ProcessNormalizedReport(report, origin, out sequence, out _, out _);
+    internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence) => ProcessNormalizedReportCore(report, origin, out sequence, out _);
 
     internal bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence, out PhysicalRumbleWriteResult? physicalResult) =>
-        ProcessNormalizedReport(report, origin, out sequence, out physicalResult, out _);
+        ProcessNormalizedReportCore(report, origin, out sequence, out physicalResult);
 
-    private bool ProcessNormalizedReport(ReadOnlySpan<byte> report, string origin, out long sequence, out PhysicalRumbleWriteResult? physicalResult, out Task<PhysicalRumbleWriteResult?>? scheduledStop)
+    private bool ProcessNormalizedReportCore(ReadOnlySpan<byte> report, string origin, out long sequence, out PhysicalRumbleWriteResult? physicalResult)
     {
         sequence = 0;
         physicalResult = null;
-        scheduledStop = null;
         var decoded = SteamDeckRumbleDecoder.Decode(report);
-        if (!decoded.IsSupported) return false;
+        if (!decoded.HasPhysicalTranslation) return false;
         sequence = BeginFeedback();
         BeforeLease?.Invoke();
         if (!TryWrite(sequence, decoded.Rumble, out physicalResult))
@@ -55,8 +53,6 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             AppLog.Debug("Rumble", "SteamDeck feedback DROP", ("Reason", "AuthorityRejected"), ("Origin", origin));
             return false;
         }
-        if (decoded.Command == SteamDeckFeedbackCommand.HapticPulse && decoded.PulseDurationMilliseconds is { } delay)
-            scheduledStop = ArmStop(sequence, delay);
         AppLog.Debug("Rumble", "Steam Deck feedback processed.", ("Origin", origin), ("Command", decoded.Command));
         return true;
     }
@@ -67,9 +63,6 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         {
             _disposed = true;
             _sequence++;
-            _pendingStop?.Cancel();
-            _pendingStop?.Dispose();
-            _pendingStop = null;
             _developerTest?.Cancel();
             _developerTest?.Dispose();
             _developerTest = null;
@@ -89,18 +82,14 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         try
         {
             var decoded = SteamDeckRumbleDecoder.Decode(report.Span);
-            if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence, out var commandResult, out var scheduledStop))
+            if (!ProcessNormalizedReport(report.Span, "DeveloperVibrationTest", out var sequence, out var commandResult))
                 return new(false, commandResult, null, decoded);
             lock (_gate)
             {
                 if (sequence == _sequence && ReferenceEquals(_developerTest, linked))
                     _developerSequence = sequence;
             }
-            if (!addDeveloperStop)
-            {
-                var productionStop = scheduledStop is null ? null : await scheduledStop.ConfigureAwait(false);
-                return new(true, commandResult, productionStop, decoded);
-            }
+            if (!addDeveloperStop) return new(true, commandResult, null, decoded);
             await Task.Delay(250, linked.Token).ConfigureAwait(false);
             // Write directly against the original sequence instead of routing back through
             // ProcessNormalizedReport (which would call BeginFeedback() again): if real Steam
@@ -130,7 +119,6 @@ internal sealed class SteamDeckRumbleFeedbackBridge
     internal PhysicalRumbleWriteResult? CancelDeveloperTestAndStop()
     {
         long developerSequence;
-        CancellationTokenSource? pendingStop = null;
         lock (_gate)
         {
             developerSequence = _developerSequence;
@@ -138,14 +126,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             _developerTest?.Cancel();
             _developerTest?.Dispose();
             _developerTest = null;
-            if (developerSequence != 0 && developerSequence == _sequence)
-            {
-                pendingStop = _pendingStop;
-                _pendingStop = null;
-            }
         }
-        pendingStop?.Cancel();
-        pendingStop?.Dispose();
         if (developerSequence == 0) return null;
         return TryWrite(developerSequence, TwoMotorRumble.Stopped, out var physicalResult)
             ? physicalResult
@@ -175,7 +156,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
             else if (decoded.Command == SteamDeckFeedbackCommand.Haptic)
                 AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("PayloadLength", decoded.Haptic?.DeclaredPayloadLength), ("ModernSdl", decoded.Haptic?.IsModernSdlLayout), ("Side", decoded.Haptic?.Side), ("HapticType", decoded.Haptic?.CommandType), ("UiIntensity", decoded.Haptic?.UiIntensity), ("DbGain", decoded.Haptic?.DbGain), ("Frequency", decoded.Haptic?.Frequency), ("DurationMs", decoded.Haptic?.DurationMilliseconds), ("NoiseIntensity", decoded.Haptic?.NoiseIntensity), ("LfoFrequency", decoded.Haptic?.LfoFrequency), ("LfoDepth", decoded.Haptic?.LfoDepth), ("RandomToneGain", decoded.Haptic?.RandomToneGain), ("ScriptId", decoded.Haptic?.ScriptId), ("SweepStartFrequency", decoded.Haptic?.SweepStartFrequency), ("SweepEndFrequency", decoded.Haptic?.SweepEndFrequency), ("FallbackStrength8", decoded.Strength8));
             else if (decoded.Command == SteamDeckFeedbackCommand.HapticPulse)
-                AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("Period", decoded.PulsePeriod), ("Count", decoded.PulseCount), ("Gain", decoded.Gain), ("Strength8", decoded.Strength8), ("DurationMs", decoded.PulseDurationMilliseconds));
+                AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command), ("PayloadLength", decoded.HapticPulse?.DeclaredPayloadLength), ("LinuxLayout", decoded.HapticPulse?.IsLinuxLayout), ("Side", decoded.HapticPulse?.Side), ("OnDurationUs", decoded.HapticPulse?.OnDurationMicroseconds), ("OffIntervalUs", decoded.HapticPulse?.OffIntervalMicroseconds), ("Count", decoded.HapticPulse?.Count), ("GainRaw", decoded.HapticPulse?.GainRaw), ("PhysicalTranslation", "None"));
             else
                 AppLog.Debug("Rumble", "SteamDeck feedback Decode", ("Command", decoded.Command));
 
@@ -193,22 +174,8 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         lock (_gate)
         {
             _sequence++;
-            _pendingStop?.Cancel();
-            _pendingStop?.Dispose();
-            _pendingStop = null;
             var sequence = _sequence;
             return sequence;
-        }
-    }
-
-    private Task<PhysicalRumbleWriteResult?> ArmStop(long sequence, int duration)
-    {
-        lock (_gate)
-        {
-            if (_disposed || sequence != _sequence) return Task.FromResult<PhysicalRumbleWriteResult?>(null);
-            var cts = new CancellationTokenSource();
-            _pendingStop = cts;
-            return StopAfterAsync(sequence, duration, cts);
         }
     }
 
@@ -225,16 +192,4 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         }
     }
 
-    private async Task<PhysicalRumbleWriteResult?> StopAfterAsync(long sequence, int duration, CancellationTokenSource cts)
-    {
-        try
-        {
-            await Task.Delay(duration, cts.Token).ConfigureAwait(false);
-            if (!TryWrite(sequence, TwoMotorRumble.Stopped, out var result)) return null;
-            lock (_gate) if (ReferenceEquals(_pendingStop, cts)) _pendingStop = null;
-            return result;
-        }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested) { return null; }
-        finally { cts.Dispose(); }
-    }
 }
