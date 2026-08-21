@@ -72,16 +72,15 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
         var enumerator = new SequenceEnumerator([source], [source]);
         var writer = new RecordingWriter();
         var baseTime = DateTimeOffset.UtcNow;
-        // The first EnumeratePresentDevices call is ResolveSource's initial read (before the
-        // poll loop starts); once the poll loop itself has enumerated once, jump the clock past
-        // the deadline so exactly one poll runs before the loop exits.
-        DateTimeOffset Clock() => enumerator.CallCount >= 2 ? baseTime.AddSeconds(1) : baseTime;
+        // The first broad read resolves the source. Once the target probe has run once, jump
+        // the clock past the deadline so exactly one poll runs before the loop exits.
+        DateTimeOffset Clock() => enumerator.TargetProbeCount >= 1 ? baseTime.AddSeconds(1) : baseTime;
         var controller = new MsiClawModeController(enumerator, new MsiClawControlHidResolver(), writer, TimeSpan.FromMilliseconds(50), TimeSpan.Zero, Clock);
 
         var result = await controller.SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
 
         Assert.Equal(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, result.Status);
-        Assert.Equal(2, enumerator.CallCount);
+        Assert.Equal(1, enumerator.CallCount);
         AppLog.DrainForTests();
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("TargetPidPresent=False", log);
@@ -97,8 +96,18 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
     private sealed class SequenceEnumerator(params IReadOnlyList<ControllerDeviceInfo>[] states) : IControllerDeviceEnumerator
     {
         private int _index;
+        internal int TargetProbeCount { get; private set; }
         internal int CallCount => _index;
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Length - 1)];
+        public bool IsPresent(ushort vendorId, ushort productId)
+        {
+            // NativeMode's target probe is the polling observation. Exact verification reads the
+            // same observed state; the source-PID absence check must not advance the sequence.
+            if (productId == 0x1902) TargetProbeCount++;
+            return states[Math.Min(_index, states.Length - 1)].Any(d => d.VendorId == vendorId && d.ProductId == productId);
+        }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId) =>
+            states[Math.Min(_index++, states.Length - 1)].Where(d => d.VendorId == vendorId && d.ProductId == productId).ToArray();
     }
 
     private sealed class RecordingWriter : IMsiClawModeWriter
