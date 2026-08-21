@@ -41,7 +41,6 @@ public static class FrontendPipeEndpoint
     }
 }
 
-public enum FrontendPipeAccess { Desktop, Qam }
 public class FrontendTransportException(string message, Exception? inner = null) : Exception(message, inner);
 public sealed class FrontendProtocolException(string message) : FrontendTransportException(message);
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }

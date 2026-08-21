@@ -51,23 +51,32 @@ try
     while (!lifetimeToken.IsCancellationRequested &&
            QamHostRecovery.IsOpen(DateTimeOffset.UtcNow, recoveryDeadline))
     {
-        currentClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+        var sessionClient = new SteamGamepadUiCdpClient(devToolsEndpoint);
+        currentClient = sessionClient;
         // Cleanup ownership belongs to this CDP/GamepadUI session only.
         installationSucceeded = false;
         installMayExist = false;
         teardownAttempted = false;
-            currentClient.AddonQamConsoleMessage += message => log.Info(message);
-            currentClient.BindingCalled += (name, payload) =>
+            sessionClient.AddonQamConsoleMessage += message => log.Info(message);
+            async Task DeliverResponseAsync(string payload)
             {
-                if (!string.Equals(name, "__steamInputAddonQamHost", StringComparison.Ordinal)) return;
-                _ = Task.Run(async () =>
-                {
-                    var response = await frontendBridge.HandleRequestAsync(payload, lifetimeToken);
-                    try { await currentClient.EvaluateAsync($"window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeResponse?.({JsonSerializer.Serialize(response)})", lifetimeToken); }
-                    catch (Exception exception) { log.Warn($"QAM bridge response delivery failed. {exception.Message}"); }
-                }, lifetimeToken);
-            };
-            frontendBridge.StateInvalidated += (_, _) => _ = currentClient.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeNotification?.('state-invalidated')", lifetimeToken);
+                var response = await frontendBridge.HandleRequestAsync(payload, lifetimeToken);
+                try { await sessionClient.EvaluateAsync($"window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeResponse?.({JsonSerializer.Serialize(response)})", lifetimeToken); }
+                catch (Exception exception) { log.Info($"QAM bridge response delivery skipped for retired CDP session. {exception.Message}"); }
+            }
+            void OnBindingCalled(string name, string payload)
+            {
+                if (string.Equals(name, "__steamInputAddonQamHost", StringComparison.Ordinal))
+                    _ = Task.Run(() => DeliverResponseAsync(payload), lifetimeToken);
+            }
+            async Task DeliverInvalidationAsync()
+            {
+                try { await sessionClient.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.__receiveBridgeNotification?.('state-invalidated')", lifetimeToken); }
+                catch (Exception exception) { log.Info($"QAM invalidation delivery skipped for retired CDP session. {exception.Message}"); }
+            }
+            void OnStateInvalidated(object? _, EventArgs __) => _ = Task.Run(DeliverInvalidationAsync, lifetimeToken);
+            sessionClient.BindingCalled += OnBindingCalled;
+            frontendBridge.StateInvalidated += OnStateInvalidated;
         var reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnDocumentLoaded() => reload.TrySetResult();
         currentClient.DocumentLoaded += OnDocumentLoaded;
@@ -139,9 +148,11 @@ try
         }
         finally
         {
-            if (installMayExist) await TeardownAsync(currentClient);
-            await currentClient.DisposeAsync();
-            currentClient = null;
+            frontendBridge.StateInvalidated -= OnStateInvalidated;
+            sessionClient.BindingCalled -= OnBindingCalled;
+            if (installMayExist) await TeardownAsync(sessionClient);
+            await sessionClient.DisposeAsync();
+            if (ReferenceEquals(currentClient, sessionClient)) currentClient = null;
         }
         if (!stopRequested && !lifetimeToken.IsCancellationRequested && recoveryDeadline.HasValue)
             await Task.Delay(250, lifetimeToken);

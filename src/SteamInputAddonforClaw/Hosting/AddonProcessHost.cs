@@ -181,13 +181,10 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         var pipeName = FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
-        _qamFrontendServer = new NamedPipeAddonFrontendServer(qamPipeName, _frontendControl, FrontendPipeAccess.Qam);
         try
         {
             AppLog.Debug("FrontendTransport", "Frontend named-pipe server starting.", ("PipeName", pipeName));
             await _frontendServer.StartAsync().ConfigureAwait(false);
-            AppLog.Debug("FrontendTransport", "QAM frontend named-pipe server starting.", ("PipeName", qamPipeName));
-            await _qamFrontendServer.StartAsync().ConfigureAwait(false);
             AppLog.Info("FrontendTransport", "Frontend named-pipe server ready.", ("PipeName", pipeName));
         }
         catch (Exception exception)
@@ -196,6 +193,21 @@ internal sealed class AddonProcessHost : IAsyncDisposable
                 ("PipeName", pipeName), ("ExceptionType", exception.GetType().FullName ?? exception.GetType().Name),
                 ("HResult", $"0x{exception.HResult:X8}"));
             throw;
+        }
+        try
+        {
+            _qamFrontendServer = new NamedPipeAddonFrontendServer(qamPipeName, _frontendControl);
+            AppLog.Debug("FrontendTransport", "QAM frontend named-pipe server starting.", ("PipeName", qamPipeName));
+            await _qamFrontendServer.StartAsync().ConfigureAwait(false);
+            AppLog.Info("FrontendTransport", "QAM frontend named-pipe server ready.", ("PipeName", qamPipeName));
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("FrontendTransport", "QAM frontend named-pipe server unavailable; continuing without QAM bridge.", exception,
+                ("PipeName", qamPipeName), ("ExceptionType", exception.GetType().FullName ?? exception.GetType().Name));
+            if (_qamFrontendServer is not null)
+                await _qamFrontendServer.DisposeAsync().ConfigureAwait(false);
+            _qamFrontendServer = null;
         }
         _frontendLauncher.MarkRuntimeReady();
         _startupComposition = null;
