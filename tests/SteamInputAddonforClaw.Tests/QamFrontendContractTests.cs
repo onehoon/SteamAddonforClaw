@@ -219,6 +219,12 @@ public sealed class QamFrontendContractTests
         Assert.Contains("state.onStateInvalidated", source);
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("captureTdp", source[source.IndexOf("function buildAddonTab", StringComparison.Ordinal)..]);
+        Assert.Contains("cancelModeTimers();", source);
+        Assert.Contains("setPreviewAc(null); setPreviewDc(null);", source);
+        Assert.Contains("state.onStateInvalidated === handler", source);
+        Assert.Contains("style: { width: \"100%\" }", source);
+        Assert.Contains("\"aria-hidden\": \"true\"", source);
+        Assert.Contains("modes.map(([mode])", source);
         Assert.Contains("const mutationAvailable", source);
         Assert.Contains("const modeWritable = mutationAvailable && cpu.enabled", source);
         Assert.Contains("disabled: !modeWritable || value == null", source);

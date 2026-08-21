@@ -397,6 +397,10 @@
       const modeWritableRef = React.useRef(false);
 
       const failClosed = React.useCallback(message => {
+        for (const key of ["ac", "dc"]) {
+          if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
+          settleTimers.current[key] = null;
+        }
         setStatus(null); setCpu(null); setPreviewAc(null); setPreviewDc(null); setError(message);
       }, []);
 
@@ -425,9 +429,15 @@
 
       React.useEffect(() => {
         const previous = state.onStateInvalidated;
-        state.onStateInvalidated = () => { previous?.(); void refresh(); };
-        return () => { if (state.onStateInvalidated) state.onStateInvalidated = previous || null; };
-      }, [refresh]);
+        const handler = () => {
+          previous?.();
+          cancelModeTimers();
+          setPreviewAc(null); setPreviewDc(null);
+          void refresh();
+        };
+        state.onStateInvalidated = handler;
+        return () => { if (state.onStateInvalidated === handler) state.onStateInvalidated = previous || null; };
+      }, [refresh, cancelModeTimers]);
 
       const unavailable = !status || status.steam?.appId !== 0 || !status.steam?.active || status.steam?.source !== 1;
       const mutationAvailable = !!cpu && cpu.persistenceWritable && !unavailable && !busy;
@@ -466,10 +476,13 @@
         } catch (_) { failClosed("CPU Boost update failed"); }
         finally { setBusy(false); }
       };
-      const slider = (title, side, value) => React.createElement("label", { style: { display: "block", marginTop: "14px" } },
-        React.createElement("span", { style: { display: "block", marginBottom: "5px" } }, `${title}: ${labelFor(value)}`),
+      const slider = (title, side, value) => React.createElement("div", { style: { display: "block", marginTop: "14px" } },
+        React.createElement("div", { style: { marginBottom: "5px" } }, title),
+        React.createElement("div", { style: { marginBottom: "6px", minHeight: "2.4em" } }, labelFor(value)),
         React.createElement("input", { type: "range", min: 0, max: 6, step: 1, value: value == null ? 0 : value, disabled: !modeWritable || value == null,
-          "aria-label": title, onChange: event => scheduleMode(side, Number(event.target.value)) }));
+          "aria-label": title, style: { width: "100%" }, onChange: event => scheduleMode(side, Number(event.target.value)) }),
+        React.createElement("div", { "aria-hidden": "true", style: { display: "flex", justifyContent: "space-between", padding: "0 2px", lineHeight: 1 } },
+          modes.map(([mode]) => React.createElement("span", { key: mode }, "•"))));
 
       return React.createElement("div", { style: { padding: "18px", color: "white", fontFamily: "sans-serif", minWidth: "300px" } },
         React.createElement("h3", { style: { margin: "0 0 14px" } }, "CPU Boost"),
