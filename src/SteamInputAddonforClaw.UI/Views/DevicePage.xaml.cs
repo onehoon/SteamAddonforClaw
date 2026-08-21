@@ -243,7 +243,7 @@ public sealed partial class DevicePage : UserControl
             _suppressTdpEvents = true; TdpEnabledToggleSwitch.IsOn = false; _suppressTdpEvents = false;
             TdpInfoBar.Message = "Set valid PL1 and PL2 values for Plugged in and On battery before enabling TDP Control."; TdpInfoBar.IsOpen = true; return;
         }
-        var configuration = BuildTdpConfiguration(TdpEnabledToggleSwitch.IsOn);
+        var configuration = BuildTdpToggleConfiguration(TdpEnabledToggleSwitch.IsOn);
         if (configuration is not null)
         {
             SetTdpMutationBusy(true);
@@ -283,8 +283,10 @@ public sealed partial class DevicePage : UserControl
     private bool CompleteTdpDraft() => _acPl1Draft is not null && _acPl2Draft is not null && _dcPl1Draft is not null && _dcPl2Draft is not null;
     private FrontendTdpConfiguration? BuildTdpConfiguration(bool enabled)
     {
-        return TdpDraftPolicy.TryBuildConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft, _tdpSnapshot.Configuration);
+        return TdpDraftPolicy.TryBuildCompleteConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft);
     }
+    private FrontendTdpConfiguration? BuildTdpToggleConfiguration(bool enabled) =>
+        TdpDraftPolicy.TryBuildToggleConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft, _tdpSnapshot.Configuration);
     private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration, long submittedGeneration)
     {
         try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
@@ -299,8 +301,16 @@ public sealed partial class DevicePage : UserControl
         internal static bool ShouldPreserveDirtyDraft(bool dirty, long submittedGeneration, long currentGeneration) =>
             dirty && submittedGeneration != currentGeneration;
 
-        internal static FrontendTdpConfiguration? TryBuildConfiguration(bool enabled, int? acPl1, int? acPl2, int? dcPl1, int? dcPl2, FrontendTdpConfiguration? saved)
+        internal static FrontendTdpConfiguration? TryBuildCompleteConfiguration(bool enabled, int? acPl1, int? acPl2, int? dcPl1, int? dcPl2)
         {
+            return acPl1 is null || acPl2 is null || dcPl1 is null || dcPl2 is null
+                ? null : new(enabled, new(acPl1.Value, acPl2.Value), new(dcPl1.Value, dcPl2.Value));
+        }
+
+        internal static FrontendTdpConfiguration? TryBuildToggleConfiguration(bool enabled, int? acPl1, int? acPl2, int? dcPl1, int? dcPl2, FrontendTdpConfiguration? saved)
+        {
+            if (TryBuildCompleteConfiguration(enabled, acPl1, acPl2, dcPl1, dcPl2) is { } complete) return complete;
+            if (enabled || saved is null) return null;
             acPl1 ??= saved?.Ac.Pl1Watts; acPl2 ??= saved?.Ac.Pl2Watts;
             dcPl1 ??= saved?.Dc.Pl1Watts; dcPl2 ??= saved?.Dc.Pl2Watts;
             return acPl1 is null || acPl2 is null || dcPl1 is null || dcPl2 is null

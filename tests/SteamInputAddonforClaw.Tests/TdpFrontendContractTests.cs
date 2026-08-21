@@ -58,12 +58,20 @@ public sealed class TdpFrontendContractTests
     public void Disable_falls_back_to_saved_pairs_when_a_number_box_is_temporarily_blank()
     {
         var saved = new FrontendTdpConfiguration(true, new(20, 30), new(10, 20));
-        var result = DevicePage.TdpDraftPolicy.TryBuildConfiguration(false, null, 30, 10, 20, saved);
+        var result = DevicePage.TdpDraftPolicy.TryBuildToggleConfiguration(false, null, 30, 10, 20, saved);
 
         Assert.NotNull(result);
         Assert.False(result!.Enabled);
         Assert.Equal(new FrontendTdpPowerPair(20, 30), result.Ac);
         Assert.Equal(new FrontendTdpPowerPair(10, 20), result.Dc);
+    }
+
+    [Fact]
+    public void Debounced_edit_does_not_fall_back_to_saved_value_when_draft_is_invalid()
+    {
+        var result = DevicePage.TdpDraftPolicy.TryBuildCompleteConfiguration(true, null, 30, 10, 20);
+
+        Assert.Null(result);
     }
 
     [Fact]
