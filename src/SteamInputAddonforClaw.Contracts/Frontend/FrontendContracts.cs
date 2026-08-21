@@ -89,7 +89,9 @@ public sealed record FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutc
 }
 
 public enum FrontendTdpMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
+public enum FrontendTdpPowerSource { AC, DC }
 public sealed record FrontendTdpPowerPair(int Pl1Watts, int Pl2Watts);
+public sealed record FrontendTdpHardwareApplyResult(FrontendTdpPowerSource Source, int Pl1Watts, int Pl2Watts, bool Attempted, bool Succeeded);
 public sealed record FrontendTdpLimits(int Pl1MinimumWatts, int Pl1MaximumWatts, int Pl2MinimumWatts, int Pl2MaximumWatts);
 public sealed record FrontendTdpConfiguration(bool Enabled, FrontendTdpPowerPair Ac, FrontendTdpPowerPair Dc);
 public sealed record FrontendTdpSnapshot(bool Available, bool PersistenceWritable, FrontendTdpConfiguration? Configuration, FrontendTdpLimits? Limits)
@@ -97,7 +99,7 @@ public sealed record FrontendTdpSnapshot(bool Available, bool PersistenceWritabl
     public bool Initialized => Configuration is not null;
     public static readonly FrontendTdpSnapshot Unavailable = new(false, false, null, null);
 }
-public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcome, string? FailureMessage, FrontendTdpSnapshot Snapshot)
+public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcome, string? FailureMessage, FrontendTdpSnapshot Snapshot, FrontendTdpHardwareApplyResult? HardwareApply = null)
 {
     public bool Succeeded => Outcome == FrontendTdpMutationOutcome.Succeeded;
 }

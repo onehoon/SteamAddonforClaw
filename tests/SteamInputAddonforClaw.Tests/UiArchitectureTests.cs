@@ -95,7 +95,7 @@ public sealed class UiArchitectureTests
 
         Assert.Contains("SetTdpMutationBusy(true)", page, StringComparison.Ordinal);
         Assert.Contains("finally { SetTdpMutationBusy(false); }", page, StringComparison.Ordinal);
-        Assert.Contains("if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit();", page, StringComparison.Ordinal);
+        Assert.Contains("if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit(isAc);", page, StringComparison.Ordinal);
     }
 
     [Fact]

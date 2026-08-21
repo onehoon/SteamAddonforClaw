@@ -711,12 +711,12 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(_tdpRuntime is null ? FrontendTdpSnapshot.Unavailable : MapTdpSnapshot(_tdpRuntime.CaptureSnapshot()));
     }
 
-    public Task<FrontendTdpMutationResult> SetDeviceTdpAsync(FrontendTdpConfiguration configuration, CancellationToken cancellationToken = default)
+    public async Task<FrontendTdpMutationResult> SetDeviceTdpAsync(FrontendTdpConfiguration configuration, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ThrowIfShuttingDown();
         if (_tdpRuntime is null)
-            return Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
+            return new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable);
 
         var result = _tdpRuntime.CommitGlobalTdp(new DeviceTdpSettings
         {
@@ -726,13 +726,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         });
         var snapshot = MapTdpSnapshot(_tdpRuntime.CaptureSnapshot());
         StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return Task.FromResult(new FrontendTdpMutationResult(result.Outcome switch
+        var hardware = result.Completion is null ? null : await result.Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return new FrontendTdpMutationResult(result.Outcome switch
         {
             TdpCommitOutcome.Succeeded => FrontendTdpMutationOutcome.Succeeded,
             TdpCommitOutcome.InvalidTarget => FrontendTdpMutationOutcome.InvalidTarget,
             TdpCommitOutcome.PersistenceFailed => FrontendTdpMutationOutcome.PersistenceFailed,
             _ => FrontendTdpMutationOutcome.Unavailable
-        }, result.FailureMessage, snapshot));
+        }, result.FailureMessage, snapshot, hardware is null ? null : new(hardware.Source == TdpPowerSource.AC ? FrontendTdpPowerSource.AC : FrontendTdpPowerSource.DC, hardware.Pl1Watts, hardware.Pl2Watts, hardware.Attempted, hardware.Succeeded));
     }
 
     public Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
