@@ -46,6 +46,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly QamHostProcessController _qamHostController;
     private readonly GameBarForegroundWatcher _gameBarForegroundWatcher;
     private readonly GameBarForegroundPresentationDelivery _gameBarDelivery;
+    private readonly WinGSuppressionGuard _winGSuppressionGuard = new();
 
     // Device/Profile Runtime -- a sibling capability of the routing/OEM1 composition above, not a
     // member of it (work order PR276 sections 0/2/12): CPU Boost must remain fully usable even with
@@ -199,6 +200,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     internal void StartRuntimeEventWatchers()
     {
+        _winGSuppressionGuard.Start();
         _gameBarForegroundWatcher.StateChanged += OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Start();
     }
@@ -268,6 +270,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _gameBarDelivery.StopAccepting();
         _gameBarForegroundWatcher.StateChanged -= OnGameBarForegroundChanged;
         _gameBarForegroundWatcher.Dispose();
+        _winGSuppressionGuard.Dispose();
         _qamHostController.BeginShutdown();
         _tdpRuntime?.BeginShutdown();
         _tdpCenterMRegistryWatcher?.Dispose();
