@@ -393,6 +393,10 @@
       const refreshDirty = React.useRef(false);
       const settleTimers = React.useRef({ ac: null, dc: null });
 
+      const failClosed = React.useCallback(message => {
+        setStatus(null); setCpu(null); setPreviewAc(null); setPreviewDc(null); setError(message);
+      }, []);
+
       const refresh = React.useCallback(async () => {
         if (refreshInFlight.current) { refreshDirty.current = true; return; }
         refreshInFlight.current = true;
@@ -400,12 +404,12 @@
           const nextStatus = await request("captureStatus");
           const nextCpu = await request("captureCpuBoost");
           setStatus(nextStatus); setCpu(nextCpu); setPreviewAc(null); setPreviewDc(null); setError(null);
-        } catch (_) { setError("QAM bridge unavailable"); }
+        } catch (_) { failClosed("QAM bridge unavailable"); }
         finally {
           refreshInFlight.current = false;
           if (refreshDirty.current) { refreshDirty.current = false; void refresh(); }
         }
-      }, []);
+      }, [failClosed]);
 
       React.useEffect(() => { void refresh(); return () => {
         for (const key of ["ac", "dc"]) if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
@@ -418,45 +422,51 @@
       }, [refresh]);
 
       const unavailable = !status || status.steam?.appId !== 0 || !status.steam?.active || status.steam?.source !== 1;
-      const writable = !!cpu && cpu.persistenceWritable && !unavailable && !busy;
+      const mutationAvailable = !!cpu && cpu.persistenceWritable && !unavailable && !busy;
+      const modeWritable = mutationAvailable && cpu.enabled;
+      const snapshotMessage = !cpu ? null : !cpu.persistenceWritable
+        ? "CPU Boost settings could not be loaded, so changes are disabled."
+        : cpu.lastFailure ? `The last CPU Boost change could not be applied to Windows: ${cpu.lastFailure}` : null;
+      const displayError = error || snapshotMessage;
       const sideValue = (side, preview) => preview ?? side?.desired ?? (side?.currentStatus === 0 ? side.current : null);
       const labelFor = value => modes.find(item => item[0] === value)?.[1] || "Unknown / unset";
       const scheduleMode = (side, value) => {
         const key = side === "ac" ? "ac" : "dc";
         side === "ac" ? setPreviewAc(value) : setPreviewDc(value);
+        if (!modeWritable) return;
         if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
         settleTimers.current[key] = setTimeout(async () => {
-          if (!writable) return;
+          if (!modeWritable) return;
           setBusy(true); setError(null);
           try {
             const result = await request(side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value });
             setCpu(result.snapshot); side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
             if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
-          } catch (_) { setError("CPU Boost update failed"); }
+          } catch (_) { failClosed("CPU Boost update failed"); }
           finally { setBusy(false); }
         }, 250);
       };
       const setEnabled = async value => {
-        if (!writable) return;
+        if (!mutationAvailable) return;
         setBusy(true); setError(null);
         try {
           const result = await request("setDeviceCpuBoostEnabled", { enabled: value });
           setCpu(result.snapshot); if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
-        } catch (_) { setError("CPU Boost update failed"); }
+        } catch (_) { failClosed("CPU Boost update failed"); }
         finally { setBusy(false); }
       };
       const slider = (title, side, value) => React.createElement("label", { style: { display: "block", marginTop: "14px" } },
         React.createElement("span", { style: { display: "block", marginBottom: "5px" } }, `${title}: ${labelFor(value)}`),
-        React.createElement("input", { type: "range", min: 0, max: 6, step: 1, value: value == null ? 0 : value, disabled: !writable || value == null,
+        React.createElement("input", { type: "range", min: 0, max: 6, step: 1, value: value == null ? 0 : value, disabled: !modeWritable || value == null,
           "aria-label": title, onChange: event => scheduleMode(side, Number(event.target.value)) }));
 
       return React.createElement("div", { style: { padding: "18px", color: "white", fontFamily: "sans-serif", minWidth: "300px" } },
         React.createElement("h3", { style: { margin: "0 0 14px" } }, "CPU Boost"),
         unavailable ? React.createElement("p", null, status?.steam?.appId ? "Unavailable while a game is running" : "CPU Boost unavailable") : null,
-        error ? React.createElement("p", { style: { color: "#ffb4ab" } }, error) : null,
+        displayError ? React.createElement("p", { style: { color: "#ffb4ab" } }, displayError) : null,
         React.createElement("label", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
           React.createElement("span", null, "Enabled"),
-          React.createElement("input", { type: "checkbox", checked: !!cpu?.enabled, disabled: !writable, "aria-label": "Enabled", onChange: event => void setEnabled(event.target.checked) })),
+          React.createElement("input", { type: "checkbox", checked: !!cpu?.enabled, disabled: !mutationAvailable, "aria-label": "Enabled", onChange: event => void setEnabled(event.target.checked) })),
         slider("AC Mode", "ac", sideValue(cpu?.ac, previewAc)),
         slider("DC Mode", "dc", sideValue(cpu?.dc, previewDc)));
     }

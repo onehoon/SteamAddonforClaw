@@ -219,6 +219,13 @@ public sealed class QamFrontendContractTests
         Assert.Contains("state.onStateInvalidated", source);
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("captureTdp", source[source.IndexOf("function buildAddonTab", StringComparison.Ordinal)..]);
+        Assert.Contains("const mutationAvailable", source);
+        Assert.Contains("const modeWritable = mutationAvailable && cpu.enabled", source);
+        Assert.Contains("disabled: !modeWritable || value == null", source);
+        Assert.Contains("const failClosed", source);
+        Assert.Contains("setStatus(null); setCpu(null); setPreviewAc(null); setPreviewDc(null)", source);
+        Assert.Contains("cpu.lastFailure", source);
+        Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
     }
 
     private static string ReadSource(params string[] parts)
