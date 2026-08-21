@@ -219,6 +219,22 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// touched by production code.</summary>
     internal CenterMHelperOwnership TestOnly_HelperOwnership => _helperOwnership;
 
+    /// <summary>Atomically releases Routing's final helper demand under the OEM1 lifecycle gate.
+    /// A ready persistent OEM1 owner preserves the exact operational helper; otherwise this method
+    /// performs the final exact-handle stop itself.</summary>
+    internal async Task<bool> ReleaseRoutingHelperAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_helperOwnership.IsOwned) return true;
+            if (_desiredEnabled && _state == CenterMOem1LifecycleState.Armed && _helperOwnership.IsOperationallyOwned)
+                return true;
+            return _helperOwnership.Stop(_helperStopTimeout);
+        }
+        finally { _gate.Release(); }
+    }
+
     internal CenterMOem1LifecycleCoordinator(
         Func<string> publishRootProvider,
         CenterMBackendProbe? backendProbe = null,

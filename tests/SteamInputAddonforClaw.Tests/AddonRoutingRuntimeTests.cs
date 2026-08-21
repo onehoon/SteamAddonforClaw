@@ -655,6 +655,29 @@ public sealed class AddonRoutingRuntimeTests
     }
 
     [Fact]
+    public async Task ReconcileSafelyAsync_cancels_pending_OEM1_activation_barrier()
+    {
+        var runtime = CreateMsiRuntime(new FakeStatusProvider(Snapshot(WaitingForSteam())));
+        Assert.NotNull(runtime);
+        try
+        {
+            var activation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            runtime.TestOnly_SetOem1ActivationTask(activation.Task);
+            var refreshCount = 0;
+
+            await runtime.ReconcileSafelyAsync(() => refreshCount++, new CancellationToken(true));
+
+            Assert.Equal(1, refreshCount);
+            Assert.False(activation.Task.IsCompleted);
+        }
+        finally
+        {
+            await runtime.ShutdownAsync();
+            await runtime.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ReconcileSafelyAsync_cannot_enter_the_routing_coordinator_until_OEM1_activation_resolves()
     {
         // Review fix (BLOCKER): InitializeRuntimeAsync's await of Oem1ActivationTask only orders the

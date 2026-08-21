@@ -575,7 +575,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 // not just the startup one -- must wait behind the same one-shot activation task before
                 // the routing coordinator/pipeline can run, or the two owners can still race the shared
                 // helper's creation.
-                await Oem1ActivationTask.ConfigureAwait(false);
+                await Oem1ActivationTask.WaitAsync(cancellationToken).ConfigureAwait(false);
 
                 if (ShouldSkipNewForwardRouting)
                 {
