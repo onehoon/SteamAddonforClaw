@@ -67,6 +67,17 @@ public class QamHostCdpCommandCorrelatorTests
     }
 
     [Fact]
+    public async Task RegisterAfterFailConnectionFailsImmediately()
+    {
+        var correlator = new CdpCommandCorrelator();
+        correlator.FailConnection(new IOException("closed"));
+
+        var responseTask = correlator.RegisterAsync(correlator.NextId(), CancellationToken.None);
+
+        await Assert.ThrowsAsync<IOException>(() => responseTask);
+    }
+
+    [Fact]
     public void RecognizesDocumentContentLoadedEvent()
     {
         using var document = JsonDocument.Parse("{\"method\":\"Page.domContentEventFired\",\"params\":{}} ");
