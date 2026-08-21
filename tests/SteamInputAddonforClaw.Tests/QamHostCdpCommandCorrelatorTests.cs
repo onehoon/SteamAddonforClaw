@@ -73,4 +73,14 @@ public class QamHostCdpCommandCorrelatorTests
 
         Assert.True(SteamGamepadUiCdpClient.IsDocumentLoadedEvent(document.RootElement));
     }
+
+    [Fact]
+    public void RecoveryWindowStopsRetryingAfterItsSingleDeadline()
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+
+        Assert.True(QamHostRecovery.IsOpen(deadline - TimeSpan.FromMilliseconds(1), deadline));
+        Assert.False(QamHostRecovery.IsOpen(deadline, deadline));
+        Assert.False(QamHostRecovery.IsOpen(deadline + TimeSpan.FromMinutes(1), deadline));
+    }
 }
