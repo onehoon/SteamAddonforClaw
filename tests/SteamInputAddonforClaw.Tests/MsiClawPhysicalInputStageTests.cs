@@ -89,7 +89,7 @@ public sealed class MsiClawPhysicalInputStageTests
     }
 
     [Fact]
-    public async Task Rollback_uses_retirement_barrier_before_stopping_input_source()
+    public async Task Rollback_does_not_wait_for_rumble_before_stopping_input_source()
     {
         var input = new FakeInput();
         var stage = new MsiClawPhysicalInputStage(() => new FakeEnumerator([Device()]), input);

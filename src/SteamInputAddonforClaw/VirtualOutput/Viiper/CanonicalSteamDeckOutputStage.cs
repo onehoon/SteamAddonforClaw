@@ -228,7 +228,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 if (!_canonicalSession.SetOutputCallback(_feedbackBridge.Callback))
                 {
                     AppLog.Warn("Rumble", "Steam Deck feedback callback registration unavailable; routing continues without feedback.", null, ("Source", "SteamDeck"));
-                    _feedbackBridge.Retire();
+                    _feedbackBridge.Dispose();
                     _feedbackCallbackRegistered = false;
                     _feedbackArmed = false;
                 }

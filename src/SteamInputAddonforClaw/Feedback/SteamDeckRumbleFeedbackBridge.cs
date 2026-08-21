@@ -252,6 +252,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
         private Request? _pending;
         private long _latestGeneration;
         private bool _retired;
+        private CancellationTokenSource? _safetyDeadline;
 
         internal LatestWinsRumbleWriter(IPhysicalRumbleSink sink)
         {
@@ -295,6 +296,7 @@ internal sealed class SteamDeckRumbleFeedbackBridge
                     pending.TrySetResult(new(PhysicalRumbleWriteStatus.Unavailable, "Retired"));
                 _pending = new Request(long.MaxValue, TwoMotorRumble.Stopped, TimeSpan.Zero);
                 _latestGeneration = long.MaxValue;
+                _safetyDeadline?.Cancel();
                 _lifetime.Cancel();
             }
             try { _sink.CancelPendingWrite(); }
@@ -321,29 +323,44 @@ internal sealed class SteamDeckRumbleFeedbackBridge
                     try { result = _sink.SetRumble(request.Value.Rumble); }
                     catch (Exception exception) { result = new(PhysicalRumbleWriteStatus.Failed, exception.GetType().Name); }
                     request.Value.Completion?.TrySetResult(result);
-                    if (request.Value.SafetyDuration > TimeSpan.Zero && !retired)
-                        _ = StopAfterSafetyDeadlineAsync(request.Value);
+                    ReplaceSafetyDeadline(request.Value, retired);
                     if (retired) return;
                 }
             }
             finally { _wake.Dispose(); _lifetime.Dispose(); }
         }
 
-        private async Task StopAfterSafetyDeadlineAsync(Request request)
+        private void ReplaceSafetyDeadline(Request request, bool retired)
+        {
+            var previous = Interlocked.Exchange(ref _safetyDeadline, null);
+            previous?.Cancel();
+            previous?.Dispose();
+            if (retired || request.SafetyDuration <= TimeSpan.Zero) return;
+            var next = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            Interlocked.Exchange(ref _safetyDeadline, next);
+            _ = StopAfterSafetyDeadlineAsync(request, next);
+        }
+
+        private async Task StopAfterSafetyDeadlineAsync(Request request, CancellationTokenSource deadline)
         {
             try
             {
-                var token = _lifetime.Token;
-                await Task.Delay(request.SafetyDuration, token).ConfigureAwait(false);
+                await Task.Delay(request.SafetyDuration, deadline.Token).ConfigureAwait(false);
                 lock (_gate)
                 {
-                    if (_retired) return;
+                    if (_retired || deadline.IsCancellationRequested) return;
                     if (_latestGeneration == request.Generation)
                         _pending = new Request(request.Generation, TwoMotorRumble.Stopped, TimeSpan.Zero);
                 }
                 _wake.Set();
             }
             catch (OperationCanceledException) { }
+            finally
+            {
+                if (ReferenceEquals(Volatile.Read(ref _safetyDeadline), deadline))
+                    Interlocked.CompareExchange(ref _safetyDeadline, null, deadline);
+                deadline.Dispose();
+            }
         }
 
         private readonly record struct Request(long Generation, TwoMotorRumble Rumble, TimeSpan SafetyDuration, TaskCompletionSource<PhysicalRumbleWriteResult>? Completion = null);
