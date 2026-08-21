@@ -69,6 +69,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private readonly IProcessSnapshotSource _processSnapshotSource;
     private readonly CenterMHelperOwnership _helperOwnership;
     private readonly Func<bool>? _externalHelperDemand;
+    private readonly Action<string>? _sharedHelperSafetyFault;
     private readonly MainUiLifecycleObserver _mainUiObserver;
     private readonly SafeMainUiTerminator _terminator;
     private readonly IProcessHandleOpener? _handleOpener;
@@ -248,6 +249,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         Func<bool>? environmentEligibility = null,
         Func<bool>? externalHelperDemand = null,
+        Action<string>? sharedHelperSafetyFault = null,
         TimeSpan? hiddenDebounce = null,
         TimeSpan? helperStopTimeout = null,
         TimeSpan? mainUiTerminateTimeout = null,
@@ -264,6 +266,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         // caller-injected `helperOwnership` parameter) without making any real Win32 calls.
         _helperOwnership = helperOwnership ?? new CenterMHelperOwnership(testOnlyDefaultHelperNativeApi);
         _externalHelperDemand = externalHelperDemand;
+        _sharedHelperSafetyFault = sharedHelperSafetyFault;
         _mainUiObserver = mainUiObserver ?? new MainUiLifecycleObserver();
         _terminator = terminator ?? new SafeMainUiTerminator();
         _handleOpener = handleOpener;
@@ -419,6 +422,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     AppLog.Warn("CenterM.Oem1", "Owned helper exited unexpectedly; retiring.", null, ("ProcessId", _helperOwnership.ProcessId));
                     _helperOwnership.RetireConfirmedExited();
                     BumpGeneration();
+                    if (HasExternalHelperDemand())
+                    {
+                        _lastReason = "HelperExited:RoutingFailCloseRequested";
+                        SetState(CenterMOem1LifecycleState.FaultedNative);
+                        NotifySharedHelperSafetyFault("CenterMSharedHelperExited");
+                        return;
+                    }
                     if (IsSuspendBarrierActive)
                     {
                         // Suspended barrier (finding #1): retiring the now-stale ownership record is
@@ -446,6 +456,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     // _state while the exact owned helper may still be running. Never falls back to
                     // process-name/PID rediscovery; never respawns from this same tick.
                     {
+                        if (HasExternalHelperDemand())
+                        {
+                            _lastReason = "HelperLivenessUncertain:RoutingFailCloseRequested";
+                            SetState(CenterMOem1LifecycleState.FaultedNative);
+                            NotifySharedHelperSafetyFault("CenterMSharedHelperLivenessUncertain");
+                            return;
+                        }
                         var disarmed = DisarmOwnedHelperForFailOpen();
                         _lastReason = disarmed ? "HelperLivenessUncertain:Disarmed" : "HelperLivenessUncertain:DisarmCleanupUnconfirmed";
                         SetState(CenterMOem1LifecycleState.FaultedNative);
@@ -573,6 +590,13 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                     // normal poll path -- an uncertain retained helper must not survive
                     // ReconcileAfterResumeAsync merely because this method returns before
                     // ReconcileCore's own invalid-helper cleanup would otherwise apply.
+                    if (HasExternalHelperDemand())
+                    {
+                        _lastReason = "ResumeHelperLivenessUncertain:RoutingFailCloseRequested";
+                        SetState(CenterMOem1LifecycleState.FaultedNative);
+                        NotifySharedHelperSafetyFault("CenterMSharedHelperLivenessUncertain");
+                        return;
+                    }
                     var disarmed = DisarmOwnedHelperForFailOpen();
                     _lastReason = disarmed ? "ResumeHelperLivenessUncertain:Disarmed" : "ResumeHelperLivenessUncertain:DisarmCleanupUnconfirmed";
                     SetState(CenterMOem1LifecycleState.FaultedNative);
@@ -975,6 +999,16 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         {
             AppLog.Warn("CenterM.Oem1", "External helper demand could not be confirmed; OEM1 retains fail-open cleanup authority.", exception);
             return false;
+        }
+    }
+
+    private void NotifySharedHelperSafetyFault(string reason)
+    {
+        try { _sharedHelperSafetyFault?.Invoke(reason); }
+        catch (Exception exception)
+        {
+            AppLog.Error("CenterM.Oem1", "Shared-helper safety fault could not be forwarded to Routing.", exception,
+                ("Reason", reason));
         }
     }
 
