@@ -140,11 +140,15 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 ? Task.FromResult(true)
                 : runtime.RetireXbox360BeforeOuterRouteExitAsync(cancellationToken));
         deckStage.SetOutputFaultHandler(async () => { await coordinator.FailClosedAsync().ConfigureAwait(false); });
-        handheldRoutingComposition.SetRuntimeFaultHandler(async (reason, yieldCurrentSteamSession) =>
+        handheldRoutingComposition.SetRuntimeFaultHandler((reason, yieldCurrentSteamSession) => HandleBackendRuntimeFaultAsync(reason, yieldCurrentSteamSession));
+
+        async ValueTask HandleBackendRuntimeFaultAsync(string reason, bool yieldCurrentSteamSession)
         {
-            // Latch before fail-close: otherwise a still-eligible Steam session could immediately
-            // re-enter routing right after this rollback completes, and if the physical device was
-            // externally changed underneath us that would tug-of-war with whatever put it there.
+            var yieldRequest = yieldCurrentSteamSession ? coordinator.RequestCurrentSessionYield() : null;
+            await Task.Yield();
+            if (yieldCurrentSteamSession && (yieldRequest is null || !coordinator.IsCurrentSessionYieldRequest(yieldRequest.Value)))
+                return;
+
             if (safetySession is not null)
                 await safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);
 
@@ -153,7 +157,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
             else if (runtime is not null)
                 await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault");
-        });
+        }
 
         runtime = new AddonRoutingRuntime(handheldRoutingComposition, safetySession, coordinator, deckStage, viiperRuntime);
 

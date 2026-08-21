@@ -42,6 +42,30 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task Yield_request_retired_by_old_session_cannot_poison_next_session()
+    {
+        var executor = new FakeExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(Eligible(), Software()),
+                Snapshot(WaitingForSteam(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(request);
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        Assert.False(bridge.Bridge.IsCurrentSessionYieldRequest(request!.Value));
+
+        var nextSession = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(nextSession.Succeeded);
+        Assert.Equal(RoutingActionKind.EnterOverride, nextSession.Action);
+        Assert.Equal(2, executor.ExecutedPlans.Count);
+    }
+
+    [Fact]
     public async Task Yielded_session_retries_pending_cleanup_without_forward_entry()
     {
         var executor = new FakeExecutor();

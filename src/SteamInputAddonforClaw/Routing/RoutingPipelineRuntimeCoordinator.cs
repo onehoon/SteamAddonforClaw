@@ -9,6 +9,8 @@ internal readonly record struct RoutingRuntimeTerminationSnapshot(
     bool HasPendingCleanup,
     bool ShutdownRequested);
 
+internal readonly record struct RoutingSessionYieldRequest(ActiveRoutingPipelineSession Session);
+
 internal interface IRoutingRuntimeSessionBoundaryParticipant
 {
     ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken);
@@ -161,6 +163,19 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             Interlocked.Decrement(ref _transitionOperationCount);
         }
     }
+
+    internal RoutingSessionYieldRequest? RequestCurrentSessionYield()
+    {
+        var session = _sessionCoordinator.ActiveSession;
+        if (session is null) return null;
+        Volatile.Write(ref _sessionYieldRequested, 1);
+        CancelInFlightTransition();
+        return new RoutingSessionYieldRequest(session);
+    }
+
+    internal bool IsCurrentSessionYieldRequest(RoutingSessionYieldRequest request) =>
+        (_sessionCoordinator.ActiveSession is { } active && ReferenceEquals(active, request.Session))
+        || (_sessionCoordinator.PendingCleanup is { } pending && ReferenceEquals(pending.Session, request.Session));
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ShutdownAsync()
     {
@@ -381,11 +396,13 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
                 return new(false, result.State, result.Action, "SteamSessionBoundaryFailed");
             }
         }
-        if (_sessionYieldReason is not null)
+        if (IsSessionYieldAdmissionClosed)
         {
+            var hadCommittedYield = _sessionYieldReason is not null;
             _sessionYieldReason = null;
             Volatile.Write(ref _sessionYieldRequested, 0);
-            AppLog.Info("Routing.Runtime", "ExternalNativeTakeoverYieldCleared", ("Reason", "SteamSessionEnded"));
+            if (hadCommittedYield)
+                AppLog.Info("Routing.Runtime", "ExternalNativeTakeoverYieldCleared", ("Reason", "SteamSessionEnded"));
         }
         return result;
     }

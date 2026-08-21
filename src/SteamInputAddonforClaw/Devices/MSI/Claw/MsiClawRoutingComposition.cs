@@ -672,19 +672,19 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         if (_runtimeFaultHandler is not { } handler)
             return;
 
-        // Do not synchronously await the handler here: it eventually rolls back this same physical
-        // input stage, which awaits the polling task raising this very event -- a self-await
-        // deadlock. Detach onto a background task instead, matching the existing Steam output
-        // fault-forwarding pattern (CanonicalSteamDeckOutputStage.ReportOutputFault).
-        _ = Task.Run(() => RunRuntimeFaultHandlerAsync(handler, reason, yieldCurrentSteamSession));
+        ValueTask operation;
+        try { operation = handler(reason, yieldCurrentSteamSession); }
+        catch (Exception exception)
+        {
+            AppLog.Error("Routing.Runtime", "Backend runtime fault handler failed.", exception, ("Reason", reason));
+            return;
+        }
+        _ = ObserveRuntimeFaultAsync(operation, reason);
     }
 
-    private static async Task RunRuntimeFaultHandlerAsync(Func<string, bool, ValueTask> handler, string reason, bool yieldCurrentSteamSession)
+    private static async Task ObserveRuntimeFaultAsync(ValueTask operation, string reason)
     {
-        try
-        {
-            await handler(reason, yieldCurrentSteamSession).ConfigureAwait(false);
-        }
+        try { await operation.ConfigureAwait(false); }
         catch (Exception exception)
         {
             AppLog.Error("Routing.Runtime", "Backend runtime fault handler failed.", exception, ("Reason", reason));
