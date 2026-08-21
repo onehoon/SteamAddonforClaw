@@ -17,6 +17,11 @@ internal readonly record struct TdpCommitResult(TdpCommitOutcome Outcome, string
     public bool Succeeded => Outcome == TdpCommitOutcome.Succeeded;
 }
 
+internal sealed record TdpRuntimeSnapshot(bool Available, bool PersistenceWritable, DeviceTdpSettings? Configuration, MsiClawTdpPolicy? Policy)
+{
+    internal static readonly TdpRuntimeSnapshot Unavailable = new(false, false, null, null);
+}
+
 internal sealed class TdpRuntime : IAsyncDisposable
 {
     private readonly ProfileStore _profileStore;
@@ -46,6 +51,19 @@ internal sealed class TdpRuntime : IAsyncDisposable
     internal void StartupReconcile()
     {
         ReconcileCurrent(forceApply: true, invalidateHardwareCache: false, "Startup");
+    }
+
+    internal TdpRuntimeSnapshot CaptureSnapshot()
+    {
+        if (_modelId is not { } modelId || !MsiClawTdpPolicy.TryResolve(modelId, out var policy))
+            return TdpRuntimeSnapshot.Unavailable;
+
+        lock (_mutationGate.Sync)
+        {
+            var loaded = _profileStore.Load();
+            return new(true, loaded.CanSafelyReplace,
+                loaded.CanSafelyReplace ? loaded.Document.Device.Performance.Tdp : null, policy);
+        }
     }
 
     internal void ReconcileCurrent(bool forceApply, bool invalidateHardwareCache, string reason)

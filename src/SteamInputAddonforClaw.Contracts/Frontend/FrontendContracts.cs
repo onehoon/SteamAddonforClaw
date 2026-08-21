@@ -88,6 +88,20 @@ public sealed record FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutc
     public bool Succeeded => Outcome == FrontendCpuBoostMutationOutcome.Succeeded;
 }
 
+public enum FrontendTdpMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
+public sealed record FrontendTdpPowerPair(int Pl1Watts, int Pl2Watts);
+public sealed record FrontendTdpLimits(int Pl1MinimumWatts, int Pl1MaximumWatts, int Pl2MinimumWatts, int Pl2MaximumWatts);
+public sealed record FrontendTdpConfiguration(bool Enabled, FrontendTdpPowerPair Ac, FrontendTdpPowerPair Dc);
+public sealed record FrontendTdpSnapshot(bool Available, bool PersistenceWritable, FrontendTdpConfiguration? Configuration, FrontendTdpLimits? Limits)
+{
+    public bool Initialized => Configuration is not null;
+    public static readonly FrontendTdpSnapshot Unavailable = new(false, false, null, null);
+}
+public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcome, string? FailureMessage, FrontendTdpSnapshot Snapshot)
+{
+    public bool Succeeded => Outcome == FrontendTdpMutationOutcome.Succeeded;
+}
+
 /// <remarks><see cref="Oem1Mapping"/> is the settings-layer projection of the persisted OEM1 mapping.
 /// The frontend deliberately carries the SAME <see cref="Oem1MappingSettings"/> the runtime persists
 /// and the dispatcher validates against, rather than a parallel frontend-shaped copy -- the settings
@@ -226,6 +240,10 @@ public interface IAddonFrontendControl
     /// them.</summary>
     Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendCpuBoostMutationResult(FrontendCpuBoostMutationOutcome.PersistenceFailed, "CPU Boost is unavailable.", FrontendCpuBoostSnapshot.Unavailable));
+    Task<FrontendTdpSnapshot> CaptureTdpAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FrontendTdpSnapshot.Unavailable);
+    Task<FrontendTdpMutationResult> SetDeviceTdpAsync(FrontendTdpConfiguration configuration, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
 
     // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
     /// <summary>Opens (or re-opens, if the previous session Completed/Failed) the diagnostic session:

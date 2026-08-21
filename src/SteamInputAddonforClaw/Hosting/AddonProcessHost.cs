@@ -173,7 +173,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // Device/Profile CPU Boost is a sibling capability of Routing/OEM1, not a member of the
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
-            cpuBoostRuntime: _cpuBoostRuntime);
+            cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime);
         var pipeName = FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         try

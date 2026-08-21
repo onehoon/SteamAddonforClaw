@@ -20,6 +20,10 @@ public sealed partial class DevicePage : UserControl
     // SelectionChanged does not treat that render as a user edit and write it back out (work order
     // section 17 -- the same feedback-loop-prevention shape already used elsewhere in this UI).
     private bool _suppressSelectionEvents;
+    private bool _suppressTdpEvents;
+    private FrontendTdpSnapshot _tdpSnapshot = FrontendTdpSnapshot.Unavailable;
+    private int? _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft;
+    private CancellationTokenSource? _tdpEditDebounce;
 
     private static readonly CpuBoostModeItem[] Modes =
     [
@@ -65,14 +69,21 @@ public sealed partial class DevicePage : UserControl
     internal async Task RefreshAsync()
     {
         if (_frontend is null) return;
-        FrontendCpuBoostSnapshot snapshot;
+        FrontendCpuBoostSnapshot snapshot = FrontendCpuBoostSnapshot.Unavailable;
         try { snapshot = await _frontend.CaptureCpuBoostAsync(); }
         catch (Exception exception)
         {
             AppLog.Warn("Device", "CPU Boost snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
-            return;
         }
         Render(snapshot);
+        try { RenderTdp(await _frontend.CaptureTdpAsync()); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "TDP snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
+            TdpInfoBar.Severity = InfoBarSeverity.Error;
+            TdpInfoBar.Message = "TDP settings could not be loaded.";
+            TdpInfoBar.IsOpen = true;
+        }
     }
 
     private void Render(FrontendCpuBoostSnapshot snapshot)
@@ -176,6 +187,72 @@ public sealed partial class DevicePage : UserControl
             // Restore controls from Runtime authority when the connection is still usable.
             await RefreshAsync();
         }
+    }
+
+    private void RenderTdp(FrontendTdpSnapshot snapshot)
+    {
+        _tdpSnapshot = snapshot;
+        if (snapshot.Configuration is { } configuration)
+        {
+            _acPl1Draft = configuration.Ac.Pl1Watts; _acPl2Draft = configuration.Ac.Pl2Watts;
+            _dcPl1Draft = configuration.Dc.Pl1Watts; _dcPl2Draft = configuration.Dc.Pl2Watts;
+        }
+        _suppressTdpEvents = true;
+        try
+        {
+            TdpEnabledToggleSwitch.IsOn = snapshot.Configuration?.Enabled == true;
+            SetNumberBox(TdpAcPl1NumberBox, _acPl1Draft); SetNumberBox(TdpAcPl2NumberBox, _acPl2Draft);
+            SetNumberBox(TdpDcPl1NumberBox, _dcPl1Draft); SetNumberBox(TdpDcPl2NumberBox, _dcPl2Draft);
+        }
+        finally { _suppressTdpEvents = false; }
+        var editable = snapshot.Available && snapshot.PersistenceWritable && (snapshot.Configuration is null || snapshot.Configuration.Enabled);
+        TdpEnabledToggleSwitch.IsEnabled = snapshot.Available && snapshot.PersistenceWritable;
+        foreach (var box in new[] { TdpAcPl1NumberBox, TdpAcPl2NumberBox, TdpDcPl1NumberBox, TdpDcPl2NumberBox }) box.IsEnabled = editable;
+        if (snapshot.Limits is { } limits)
+        {
+            foreach (var box in new[] { TdpAcPl1NumberBox, TdpDcPl1NumberBox }) { box.Minimum = limits.Pl1MinimumWatts; box.Maximum = limits.Pl1MaximumWatts; }
+            foreach (var box in new[] { TdpAcPl2NumberBox, TdpDcPl2NumberBox }) { box.Minimum = limits.Pl2MinimumWatts; box.Maximum = limits.Pl2MaximumWatts; }
+        }
+        if (!snapshot.Available) { TdpInfoBar.Message = "TDP Control is unavailable on this device."; TdpInfoBar.IsOpen = true; }
+        else if (!snapshot.PersistenceWritable) { TdpInfoBar.Message = "TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."; TdpInfoBar.Severity = InfoBarSeverity.Error; TdpInfoBar.IsOpen = true; }
+        else if (snapshot.Available) TdpInfoBar.IsOpen = false;
+    }
+
+    private static void SetNumberBox(NumberBox box, int? value) => box.Value = value ?? double.NaN;
+    private void TdpNumberBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_suppressTdpEvents) return;
+        var value = double.IsFinite(args.NewValue) && args.NewValue == Math.Truncate(args.NewValue) ? (int)args.NewValue : (int?)null;
+        if (sender == TdpAcPl1NumberBox) _acPl1Draft = value;
+        else if (sender == TdpAcPl2NumberBox) _acPl2Draft = value;
+        else if (sender == TdpDcPl1NumberBox) _dcPl1Draft = value;
+        else _dcPl2Draft = value;
+        if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit();
+    }
+
+    private async void TdpEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressTdpEvents || _frontend is null) return;
+        _tdpEditDebounce?.Cancel();
+        if (TdpEnabledToggleSwitch.IsOn && !CompleteTdpDraft())
+        {
+            _suppressTdpEvents = true; TdpEnabledToggleSwitch.IsOn = false; _suppressTdpEvents = false;
+            TdpInfoBar.Message = "Set valid PL1 and PL2 values for Plugged in and On battery before enabling TDP Control."; TdpInfoBar.IsOpen = true; return;
+        }
+        await RunTdpMutationAsync(BuildTdpConfiguration(TdpEnabledToggleSwitch.IsOn));
+    }
+
+    private void ScheduleTdpEdit()
+    {
+        _tdpEditDebounce?.Cancel(); var cts = _tdpEditDebounce = new CancellationTokenSource();
+        _ = Task.Run(async () => { try { await Task.Delay(300, cts.Token); DispatcherQueue.TryEnqueue(() => _ = RunTdpMutationAsync(BuildTdpConfiguration(true))); } catch (OperationCanceledException) { } });
+    }
+    private bool CompleteTdpDraft() => _acPl1Draft is not null && _acPl2Draft is not null && _dcPl1Draft is not null && _dcPl2Draft is not null;
+    private FrontendTdpConfiguration BuildTdpConfiguration(bool enabled) => new(enabled, new(_acPl1Draft ?? 0, _acPl2Draft ?? 0), new(_dcPl1Draft ?? 0, _dcPl2Draft ?? 0));
+    private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration)
+    {
+        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); RenderTdp(result.Snapshot); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
+        catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = "TDP could not be updated because the Runtime connection was interrupted."; TdpInfoBar.Severity = InfoBarSeverity.Error; TdpInfoBar.IsOpen = true; await RefreshAsync(); }
     }
 
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);

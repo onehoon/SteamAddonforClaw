@@ -7,6 +7,7 @@ using SteamInputAddonforClaw.Diagnostics.ClawSensorProbe;
 using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Profiles.Performance;
+using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Settings;
@@ -54,6 +55,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     // PR277 section 1): this projection deliberately has NO dependency on _runtime/routing status
     // and must keep working when _runtime is null (no routing composition at all).
     private readonly CpuBoostRuntime? _cpuBoostRuntime;
+    private readonly TdpRuntime? _tdpRuntime;
 
     /// <param name="oem1MappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -64,10 +66,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
         _cpuBoostRuntime = cpuBoostRuntime;
+        _tdpRuntime = tdpRuntime;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -705,5 +708,43 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         },
         current.Mode,
         desired);
+
+    public Task<FrontendTdpSnapshot> CaptureTdpAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return Task.FromResult(_tdpRuntime is null ? FrontendTdpSnapshot.Unavailable : MapTdpSnapshot(_tdpRuntime.CaptureSnapshot()));
+    }
+
+    public Task<FrontendTdpMutationResult> SetDeviceTdpAsync(FrontendTdpConfiguration configuration, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ThrowIfShuttingDown();
+        if (_tdpRuntime is null)
+            return Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
+
+        var result = _tdpRuntime.CommitGlobalTdp(new DeviceTdpSettings
+        {
+            Enabled = configuration.Enabled,
+            Ac = new TdpPowerPair { Pl1Watts = configuration.Ac.Pl1Watts, Pl2Watts = configuration.Ac.Pl2Watts },
+            Dc = new TdpPowerPair { Pl1Watts = configuration.Dc.Pl1Watts, Pl2Watts = configuration.Dc.Pl2Watts }
+        });
+        var snapshot = MapTdpSnapshot(_tdpRuntime.CaptureSnapshot());
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(new FrontendTdpMutationResult(result.Outcome switch
+        {
+            TdpCommitOutcome.Succeeded => FrontendTdpMutationOutcome.Succeeded,
+            TdpCommitOutcome.InvalidTarget => FrontendTdpMutationOutcome.InvalidTarget,
+            TdpCommitOutcome.PersistenceFailed => FrontendTdpMutationOutcome.PersistenceFailed,
+            _ => FrontendTdpMutationOutcome.Unavailable
+        }, result.FailureMessage, snapshot));
+    }
+
+    private static FrontendTdpSnapshot MapTdpSnapshot(TdpRuntimeSnapshot snapshot) => new(
+        snapshot.Available,
+        snapshot.PersistenceWritable,
+        snapshot.Configuration is { } configuration ? new(configuration.Enabled,
+            new(configuration.Ac.Pl1Watts, configuration.Ac.Pl2Watts),
+            new(configuration.Dc.Pl1Watts, configuration.Dc.Pl2Watts)) : null,
+        snapshot.Policy is { } policy ? new(policy.Pl1MinimumWatts, policy.Pl1MaximumWatts, policy.Pl2MinimumWatts, policy.Pl2MaximumWatts) : null);
 
 }
