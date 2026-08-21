@@ -255,6 +255,13 @@ being acquired. Game Bar foreground/X360 production switching remains
 disabled. Real MSI Claw WING and Steam-button hardware validation is pending;
 SD3/SD7 are not complete.
 
+PR4 WING settings step: Event88 runtime mapping now has persisted Single/Double
+settings and the Controller page exposes `Gamebar Widget Button` under the
+Steam Input Routing expander. Defaults remain Single=SteamButton and
+Double=None; there is no independent WING enable switch. Game Bar/X360
+foreground switching remains disabled and real WING/Steam-button hardware
+validation remains pending.
+
 ### SD6 — gyro and accelerometer
 
 Status: **SEPARATE FEATURE TRACK**

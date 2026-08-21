@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.Wing;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -21,6 +22,8 @@ public sealed partial class ControllerPage : UserControl
     /// Steam, BPM, or the persisted remapping switch. False until Initialize runs, so the card can
     /// never briefly offer a feature this machine does not have.</summary>
     private bool _oem1MappingAvailable;
+    private bool _wingMappingAvailable;
+    private WingMappingSettings _wingMapping = WingMappingSettings.Default;
 
     public ControllerPage()
     {
@@ -47,10 +50,45 @@ public sealed partial class ControllerPage : UserControl
         SteamInputRoutingToggleSwitch.IsOn = bootstrap.Settings.SteamInputRoutingEnabled;
         _lastKnownSteamInputRoutingEnabled = bootstrap.Settings.SteamInputRoutingEnabled;
         _oem1MappingAvailable = bootstrap.Oem1MappingAvailable;
+        _wingMappingAvailable = bootstrap.WingMappingAvailable;
         ApplyOem1MappingAvailability();
         ApplyOem1Mapping(bootstrap.Settings.Oem1Mapping);
+        ApplyWingMapping(bootstrap.Settings.WingMapping ?? WingMappingSettings.Default);
         _isLoading = false;
     }
+
+    private void ApplyWingMapping(WingMappingSettings mapping)
+    {
+        _wingMapping = mapping;
+        WingSingleActionComboBox.ItemsSource = Enum.GetValues<WingAction>();
+        WingDoubleActionComboBox.ItemsSource = Enum.GetValues<WingAction>();
+        WingSingleActionComboBox.SelectedItem = mapping.Single.Action;
+        WingDoubleActionComboBox.SelectedItem = mapping.Double.Action;
+        WingSingleExecutableTextBox.Text = mapping.Single.Launch.ExecutablePath;
+        WingSingleArgumentsTextBox.Text = mapping.Single.Launch.Arguments;
+        WingDoubleExecutableTextBox.Text = mapping.Double.Launch.ExecutablePath;
+        WingDoubleArgumentsTextBox.Text = mapping.Double.Launch.Arguments;
+        ApplyWingDetails();
+    }
+
+    private void ApplyWingDetails()
+    {
+        WingSingleDetails.Visibility = WingSingleActionComboBox.SelectedItem is WingAction.LaunchApplication ? Visibility.Visible : Visibility.Collapsed;
+        WingDoubleDetails.Visibility = WingDoubleActionComboBox.SelectedItem is WingAction.LaunchApplication ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void WingAction_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_isLoading || _frontend is null || !_wingMappingAvailable) return;
+        ApplyWingDetails();
+        var single = BuildWingBinding(_wingMapping.Single, WingSingleActionComboBox.SelectedItem is WingAction action ? action : WingAction.None, WingSingleExecutableTextBox, WingSingleArgumentsTextBox);
+        var doubled = BuildWingBinding(_wingMapping.Double, WingDoubleActionComboBox.SelectedItem is WingAction doubleAction ? doubleAction : WingAction.None, WingDoubleExecutableTextBox, WingDoubleArgumentsTextBox);
+        try { var result = await _frontend.SetWingMappingAsync(_wingMapping with { Single = single, Double = doubled }); ApplyWingMapping(result.WingMapping ?? WingMappingSettings.Default); }
+        catch (Exception exception) { AppLog.Warn("Controller", "WING mapping update failed.", exception); ApplyWingMapping(_wingMapping); }
+    }
+
+    private static WingSlotBinding BuildWingBinding(WingSlotBinding previous, WingAction action, TextBox executable, TextBox arguments) =>
+        previous with { Action = action, Launch = new WingLaunchApplicationBinding(executable.Text, arguments.Text) };
 
     /// <summary>
     /// Unsupported-hardware presentation, composed from the patterns already in this app: the card

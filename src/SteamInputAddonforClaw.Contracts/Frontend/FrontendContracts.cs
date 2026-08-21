@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.Wing;
 
 namespace SteamInputAddonforClaw.Contracts.Frontend;
 
@@ -108,7 +109,10 @@ public sealed record FrontendTdpMutationResult(FrontendTdpMutationOutcome Outcom
 /// The frontend deliberately carries the SAME <see cref="Oem1MappingSettings"/> the runtime persists
 /// and the dispatcher validates against, rather than a parallel frontend-shaped copy -- the settings
 /// UI and runtime capability validation must never be able to disagree.</remarks>
-public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SteamInputRoutingEnabled, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping);
+public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SteamInputRoutingEnabled, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping)
+{
+    public WingMappingSettings WingMapping { get; init; } = WingMappingSettings.Default;
+}
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);
 public sealed record FrontendVibrationTestResult(bool Succeeded, string Reason, string? LogFilePath);
 /// <param name="Oem1MappingAvailable">Whether the Center M (OEM1) mapping feature exists at all on
@@ -116,7 +120,7 @@ public sealed record FrontendVibrationTestResult(bool Succeeded, string Reason, 
 /// NOT a routing/Steam/BPM/runtime condition, and NOT the persisted remapping switch -- a machine
 /// that is not a recognized Claw reports false while its saved mapping stays untouched. A startup
 /// fact, so it lives on bootstrap rather than on the settings snapshot every setter returns.</param>
-public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, string StartupRegistrationMessage, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool Oem1MappingAvailable);
+public sealed record FrontendBootstrapSnapshot(FrontendSettingsSnapshot Settings, string StartupRegistrationMessage, FrontendDeveloperSnapshot Developer, string LogDirectoryPath, bool Oem1MappingAvailable, bool WingMappingAvailable = false);
 public sealed record FrontendLaunchAtStartupResult(FrontendSettingsSnapshot Settings, string RegistrationMessage);
 public sealed record FrontendPrerequisiteSetupResult(FrontendPrerequisiteSetupResultKind Result, FrontendStatusSnapshot? Status);
 public sealed record FrontendEnvironmentReportResult(bool Succeeded, string? Error);
@@ -205,6 +209,8 @@ public interface IAddonFrontendControl
     /// Whole-record, not per-slot: it is what makes "turning remapping off never erases the mappings"
     /// structural rather than a rule each caller has to remember.</summary>
     Task<FrontendSettingsSnapshot> SetOem1MappingAsync(Oem1MappingSettings mapping, CancellationToken cancellationToken = default);
+    Task<FrontendSettingsSnapshot> SetWingMappingAsync(WingMappingSettings mapping, CancellationToken cancellationToken = default) =>
+        Task.FromException<FrontendSettingsSnapshot>(new NotSupportedException("WING mapping is unavailable."));
     Task<FrontendSettingsSnapshot> SuppressDeveloperMenuWarningAsync(CancellationToken cancellationToken = default);
     Task<FrontendDeveloperSnapshot> SetDeveloperTestModeAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<FrontendVibrationTestResult> RunVibrationTestAsync(FrontendVibrationTestCommand command, CancellationToken cancellationToken = default) =>

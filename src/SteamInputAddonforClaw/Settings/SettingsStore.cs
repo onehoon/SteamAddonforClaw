@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.Wing;
 using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Settings;
@@ -42,7 +43,8 @@ public sealed class SettingsStore
             var suppressDeveloperMenuWarning = root.TryGetProperty("SuppressDeveloperMenuWarning", out var warningProperty) && warningProperty.ValueKind == JsonValueKind.True && warningProperty.GetBoolean();
             var settings = new AppSettings(startup, logLevel, steamInputRoutingEnabled, suppressDeveloperMenuWarning)
             {
-                Oem1Mapping = ReadOem1Mapping(root)
+                Oem1Mapping = ReadOem1Mapping(root),
+                WingMapping = ReadWingMapping(root)
             };
             AppLog.Debug("Settings", "Settings loaded.", ("LaunchAtWindowsStartup", settings.LaunchAtWindowsStartup), ("LogLevel", settings.LogLevel));
             return settings;
@@ -56,6 +58,24 @@ public sealed class SettingsStore
         {
             AppLog.Warn("Settings", "Settings read failed. Using defaults.", exception, ("Action", "Defaults"));
             return new AppSettings();
+        }
+    }
+
+    private static WingMappingSettings ReadWingMapping(JsonElement root)
+    {
+        if (!root.TryGetProperty("WingMapping", out var property) || property.ValueKind != JsonValueKind.Object)
+            return WingMappingSettings.Default;
+        try
+        {
+            var mapping = property.Deserialize<WingMappingSettings>(SerializerOptions) ?? throw new JsonException("WING mapping was null.");
+            if (mapping.Single is null || mapping.Double is null || !WingActionCapabilities.Supports(mapping.Single.Action) || !WingActionCapabilities.Supports(mapping.Double.Action))
+                throw new JsonException("WING mapping contains an invalid action or slot.");
+            return mapping;
+        }
+        catch (JsonException exception)
+        {
+            AppLog.Warn("Settings", "WING mapping settings could not be parsed; using defaults.", exception);
+            return WingMappingSettings.Default;
         }
     }
 
@@ -139,7 +159,7 @@ public sealed class SettingsStore
         var directory = Path.GetDirectoryName(_settingsPath) ?? throw new InvalidOperationException("The settings path does not have a parent directory.");
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{_settingsPath}.tmp";
-        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning, settings.Oem1Mapping };
+        var payload = new { settings.LaunchAtWindowsStartup, LogLevel = settings.LogLevel.ToString(), settings.SteamInputRoutingEnabled, settings.SuppressDeveloperMenuWarning, settings.Oem1Mapping, settings.WingMapping };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, SerializerOptions));
         File.Move(temporaryPath, _settingsPath, overwrite: true);
         AppLog.Debug("Settings", "Settings save completed.");

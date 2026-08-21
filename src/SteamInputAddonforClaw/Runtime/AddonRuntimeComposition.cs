@@ -85,7 +85,8 @@ internal static class AddonRuntimeCompositionFactory
             recoverySafetyState,
             startupSettings,
             hardwareSupported,
-            winGSuppressionGuard);
+            winGSuppressionGuard,
+            wingMappingPreference: startupSettings);
 
         Func<CancellationToken, Task<bool>> establishBaseline = stockCenterMBaseline is null
             ? _ => Task.FromResult(false)

@@ -21,6 +21,7 @@ internal sealed class WingActionDispatcher
             var mapping = _mapping();
             var binding = gesture == WingGesture.Single ? mapping.Single : mapping.Double;
             action = binding.Action;
+            if (!Enum.IsDefined(action)) { AppLog.Warn("Wing.Action", "Unknown persisted action rejected."); return; }
             AppLog.Debug("Wing.Action", "MappingResolved", ("Gesture", gesture), ("Action", binding.Action));
             switch (binding.Action)
             {

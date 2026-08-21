@@ -101,9 +101,11 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         RecoverySafetyState recoverySafety,
         Settings.IOem1MappingPreference oem1MappingPreference,
         bool hardwareSupported,
-        WinGSuppressionGuard winGSuppressionGuard)
+        WinGSuppressionGuard winGSuppressionGuard,
+        Settings.IWingMappingPreference? wingMappingPreference = null)
     {
         ArgumentNullException.ThrowIfNull(oem1MappingPreference);
+        wingMappingPreference ??= new DefaultWingMappingPreference();
         ArgumentNullException.ThrowIfNull(winGSuppressionGuard);
         // Forwarded, never recomputed: the startup hardware-support result is the single authority
         // both routing and the device composition's OEM1 availability gate read.
@@ -176,9 +178,16 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             mappingPreference: oem1MappingPreference);
         _ = handheldRoutingComposition.ConfigureWingActionPath(
             captureAuthority: winGProtectionStage.CaptureAuthority,
-            tryRequestSteamPulse: deckStage.TryRequestSteamPulse);
+            tryRequestSteamPulse: deckStage.TryRequestSteamPulse,
+            mappingPreference: wingMappingPreference);
 
         return runtime;
+    }
+
+    private sealed class DefaultWingMappingPreference : Settings.IWingMappingPreference
+    {
+        public SteamInputAddonforClaw.Contracts.Wing.WingMappingSettings WingMapping => SteamInputAddonforClaw.Contracts.Wing.WingMappingSettings.Default;
+        public event EventHandler? WingMappingChanged { add { } remove { } }
     }
 
     // Invoked as RoutingPipelineRuntimeCoordinator's beforeActiveSessionExit callback -- i.e.

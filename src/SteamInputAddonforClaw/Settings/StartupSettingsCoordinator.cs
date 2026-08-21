@@ -1,9 +1,10 @@
 using SteamInputAddonforClaw.Contracts.Oem1;
+using SteamInputAddonforClaw.Contracts.Wing;
 using SteamInputAddonforClaw.Install;
 
 namespace SteamInputAddonforClaw.Settings;
 
-public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference, IOem1MappingPreference
+public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference, IOem1MappingPreference, IWingMappingPreference
 {
     private readonly SettingsStore _settingsStore;
     private readonly IWindowsStartupManager _startupManager;
@@ -19,8 +20,10 @@ public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference, I
     public bool SteamInputRoutingEnabled => Settings.SteamInputRoutingEnabled;
     public bool SuppressDeveloperMenuWarning => Settings.SuppressDeveloperMenuWarning;
     public Oem1MappingSettings Oem1Mapping => Settings.Oem1Mapping;
+    public WingMappingSettings WingMapping => Settings.WingMapping;
     public event EventHandler? SteamInputRoutingEnabledChanged;
     public event EventHandler? Oem1MappingChanged;
+    public event EventHandler? WingMappingChanged;
 
     public StartupRegistrationResult ChangeLaunchAtWindowsStartup(bool enabled)
     {
@@ -69,6 +72,16 @@ public sealed class StartupSettingsCoordinator : ISteamInputRoutingPreference, I
         Oem1MappingChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    public void ChangeWingMapping(WingMappingSettings mapping)
+    {
+        ArgumentNullException.ThrowIfNull(mapping);
+        if (Settings.WingMapping == mapping) return;
+        var next = Settings with { WingMapping = mapping };
+        _settingsStore.Save(next);
+        Settings = next;
+        WingMappingChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public void SuppressDeveloperMenuWarningPermanently()
     {
         if (Settings.SuppressDeveloperMenuWarning) return;
@@ -100,4 +113,10 @@ public interface IOem1MappingPreference
 {
     Oem1MappingSettings Oem1Mapping { get; }
     event EventHandler? Oem1MappingChanged;
+}
+
+public interface IWingMappingPreference
+{
+    WingMappingSettings WingMapping { get; }
+    event EventHandler? WingMappingChanged;
 }
