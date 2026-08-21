@@ -283,6 +283,22 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     }
 
     [Fact]
+    public async Task Initial_OEM1_activation_is_deferred_until_after_composition_returns()
+    {
+        var (composition, eventSource, mapping) = BuildArmable();
+        IHandheldRoutingComposition handheld = composition;
+
+        var activation = handheld.ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+
+        Assert.False(eventSource.StartCalled);
+        Assert.False(activation.IsCompleted);
+
+        await activation;
+        Assert.True(eventSource.StartCalled);
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
     public async Task Turning_remapping_off_disables_suppression_and_turning_it_on_again_re_arms()
     {
         var (composition, _, mapping) = BuildArmable();
