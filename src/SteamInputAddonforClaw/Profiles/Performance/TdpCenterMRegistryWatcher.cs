@@ -14,6 +14,7 @@ internal sealed class TdpCenterMRegistryWatcher : IDisposable
 {
     private readonly IReadOnlyList<ITdpCenterMRegistryEventSource> _sources;
     private readonly Action _onChanged;
+    private readonly Dictionary<ITdpCenterMRegistryEventSource, Action> _handlers = [];
     private int _disposed;
 
     internal TdpCenterMRegistryWatcher(Action onChanged, IReadOnlyList<ITdpCenterMRegistryEventSource>? sources = null)
@@ -27,7 +28,9 @@ internal sealed class TdpCenterMRegistryWatcher : IDisposable
         var started = false;
         foreach (var source in _sources)
         {
-            source.Changed += OnChanged;
+            Action handler = () => OnChanged(source.ValueName);
+            _handlers[source] = handler;
+            source.Changed += handler;
             try
             {
                 if (source.TryStart(out var error))
@@ -36,13 +39,13 @@ internal sealed class TdpCenterMRegistryWatcher : IDisposable
                     continue;
                 }
 
-                source.Changed -= OnChanged;
+                source.Changed -= handler;
                 AppLog.Warn("Profiles.Tdp", "Center M registry watcher failed to start; other values remain active.",
                     error, ("ValueName", source.ValueName));
             }
             catch (Exception exception)
             {
-                source.Changed -= OnChanged;
+                source.Changed -= handler;
                 AppLog.Warn("Profiles.Tdp", "Center M registry watcher registration threw; other values remain active.",
                     exception, ("ValueName", source.ValueName));
             }
@@ -53,11 +56,15 @@ internal sealed class TdpCenterMRegistryWatcher : IDisposable
         return started;
     }
 
-    private void OnChanged()
+    private void OnChanged(string valueName)
     {
         if (Volatile.Read(ref _disposed) == 0)
         {
-            try { _onChanged(); }
+            try
+            {
+                AppLog.Debug("Profiles.Tdp", "Center M change detected", ("ValueName", valueName));
+                _onChanged();
+            }
             catch (Exception exception) { AppLog.Error("Profiles.Tdp", "Center M registry change handling failed.", exception); }
         }
     }
@@ -67,7 +74,7 @@ internal sealed class TdpCenterMRegistryWatcher : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         foreach (var source in _sources)
         {
-            source.Changed -= OnChanged;
+            if (_handlers.TryGetValue(source, out var handler)) source.Changed -= handler;
             try { source.Dispose(); } catch (Exception exception) { AppLog.Warn("Profiles.Tdp", "Center M registry watcher disposal failed.", exception, ("ValueName", source.ValueName)); }
         }
     }

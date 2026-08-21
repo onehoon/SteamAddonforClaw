@@ -60,6 +60,7 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
 
     internal void Observe(TdpPowerNotification notification)
     {
+        AppLog.Debug("Profiles.Tdp", "Lifecycle notification", ("Event", notification));
         lock (_sync)
         {
             if (_disposed) return;
@@ -73,7 +74,11 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
 
             if (notification is TdpPowerNotification.ResumeAutomatic or TdpPowerNotification.ResumeSuspend)
             {
-                if (_resumeSeen) return;
+                if (_resumeSeen)
+                {
+                    AppLog.Debug("Profiles.Tdp", "Lifecycle notification", ("Event", notification), ("Action", "IgnoredDuplicate"));
+                    return;
+                }
                 _resumeSeen = true;
                 _suspended = false;
                 ScheduleUnderLock(force: true, invalidate: true, "Resume");
@@ -125,6 +130,7 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
                 _pendingForce = false;
                 _pendingInvalidate = false;
             }
+            AppLog.Debug("Profiles.Tdp", "Lifecycle reconcile settled", ("Reason", reason), ("Force", force), ("Invalidate", invalidate));
             _runtime.ReconcileCurrent(force, invalidate, reason);
         }
         catch (OperationCanceledException) when (pending.IsCancellationRequested) { }
