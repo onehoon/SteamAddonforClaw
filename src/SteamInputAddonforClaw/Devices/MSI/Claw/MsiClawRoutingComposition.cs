@@ -527,7 +527,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         try { await previous.ConfigureAwait(false); }
         catch { /* observed above */ }
 
-        await ApplyOem1RemappingEnabledAsync(enabled).ConfigureAwait(false);
+        await ApplyOem1RemappingEnabledAsync(enabled, _oem1LifetimeCancellation.Token).ConfigureAwait(false);
     }
 
     /// <summary>Test-only observability: awaits the fire-and-forget startup activation

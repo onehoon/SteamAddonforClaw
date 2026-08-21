@@ -307,6 +307,32 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     }
 
     [Fact]
+    public async Task Dispose_does_not_dispose_event_source_before_blocked_activation_join_boundary()
+    {
+        var (composition, eventSource, mapping) = BuildArmable();
+        using var startEntered = new ManualResetEventSlim(false);
+        using var releaseStart = new ManualResetEventSlim(false);
+        eventSource.BeforeStart = () =>
+        {
+            startEntered.Set();
+            releaseStart.Wait();
+        };
+
+        _ = ((IHandheldRoutingComposition)composition)
+            .ConfigureOem1ActionPath(() => Status(false), () => { }, mapping);
+
+        Assert.True(startEntered.Wait(TimeSpan.FromSeconds(5)));
+        var dispose = ((IAsyncDisposable)composition).DisposeAsync().AsTask();
+
+        await Task.Delay(50);
+        Assert.False(eventSource.DisposeCalled);
+
+        releaseStart.Set();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(eventSource.DisposeCalled);
+    }
+
+    [Fact]
     public async Task Turning_remapping_off_disables_suppression_and_turning_it_on_again_re_arms()
     {
         var (composition, _, mapping) = BuildArmable();
@@ -517,6 +543,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         /// <summary>Proves whether Event41 WMI observation was ever actually started -- the exact
         /// thing unsupported hardware must never reach.</summary>
         internal bool StartCalled { get; private set; }
+        internal bool DisposeCalled { get; private set; }
         internal Action? BeforeStart { get; set; }
         public bool Start()
         {
@@ -525,7 +552,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
             return startSucceeds;
         }
         internal void Emit(MsiOemEvent value) => EventReceived?.Invoke(value);
-        public void Dispose() { }
+        public void Dispose() => DisposeCalled = true;
     }
 
     /// <summary>Resolves the gesture recognizer's single/double-click debounce delay immediately --
