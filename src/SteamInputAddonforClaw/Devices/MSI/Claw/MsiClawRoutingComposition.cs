@@ -620,17 +620,17 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             if (_oem1Stopping || _oem1FailOpenTask is not null)
                 return;
 
-            _oem1FailOpenTask = DisableOem1AfterActionFailureAsync();
+            _oem1FailOpenTask = DisableOem1AfterActionFailureAsync(_oem1LifetimeCancellation.Token);
         }
     }
 
-    private async Task DisableOem1AfterActionFailureAsync()
+    private async Task DisableOem1AfterActionFailureAsync(CancellationToken cancellationToken)
     {
         try
         {
             // Replacement-action failure is feature-local. Revoke OEM1 authority and let the
             // existing shared-demand policy keep Routing alive until its own teardown.
-            await CenterMOem1Coordinator.SetDesiredEnabledAsync(false).ConfigureAwait(false);
+            await CenterMOem1Coordinator.SetDesiredEnabledAsync(false, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -753,10 +753,17 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         }
         catch (OperationCanceledException) when (_oem1LifetimeCancellation.IsCancellationRequested) { }
         catch (Exception exception) { AppLog.Error("CenterM.Oem1", "OEM1 startup activation did not complete cleanly during shutdown.", exception); }
-        try { await oem1FailOpenTask.ConfigureAwait(false); }
+        var failOpenDrained = true;
+        try { await oem1FailOpenTask.WaitAsync(Oem1ShutdownJoinTimeout).ConfigureAwait(false); }
+        catch (TimeoutException exception)
+        {
+            failOpenDrained = false;
+            AppLog.Error("CenterM.Oem1", "OEM1 action-failure fail-open did not drain during shutdown; retaining its coordinator and helper authority.", exception);
+        }
+        catch (OperationCanceledException) when (_oem1LifetimeCancellation.IsCancellationRequested) { }
         catch (Exception exception) { AppLog.Error("CenterM.Oem1", "OEM1 action-failure fail-open did not complete cleanly during shutdown.", exception); }
 
-        if (!activationDrained)
+        if (!activationDrained || !failOpenDrained)
             return;
 
         // Shutdown ordering (work order requirement 14): stop the OEM1 periodic driver and dispose
