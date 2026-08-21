@@ -676,10 +676,11 @@ public sealed class AddonRuntimeHostTests
         public void Delete() => _journal = null;
     }
 
-    /// <summary>Default OEM1 mapping; these tests are about routing/host lifecycle, not mapping.</summary>
+    /// <summary>Host tests need the OEM1 power participant, not production WMI/remapping activation.</summary>
     private sealed class DefaultOem1MappingPreference : SteamInputAddonforClaw.Settings.IOem1MappingPreference
     {
-        public SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Oem1Mapping => SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings.Default;
+        public SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings Oem1Mapping =>
+            SteamInputAddonforClaw.Contracts.Oem1.Oem1MappingSettings.Default with { RemappingEnabled = false };
         public event EventHandler? Oem1MappingChanged { add { } remove { } }
     }
 }
