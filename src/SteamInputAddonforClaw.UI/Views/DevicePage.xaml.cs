@@ -20,6 +20,12 @@ public sealed partial class DevicePage : UserControl
     // SelectionChanged does not treat that render as a user edit and write it back out (work order
     // section 17 -- the same feedback-loop-prevention shape already used elsewhere in this UI).
     private bool _suppressSelectionEvents;
+    private bool _suppressTdpEvents;
+    private FrontendTdpSnapshot _tdpSnapshot = FrontendTdpSnapshot.Unavailable;
+    private int? _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft;
+    private CancellationTokenSource? _tdpEditDebounce;
+    private long _tdpEditGeneration;
+    private bool _tdpDraftDirty;
 
     private static readonly CpuBoostModeItem[] Modes =
     [
@@ -65,14 +71,21 @@ public sealed partial class DevicePage : UserControl
     internal async Task RefreshAsync()
     {
         if (_frontend is null) return;
-        FrontendCpuBoostSnapshot snapshot;
+        FrontendCpuBoostSnapshot snapshot = FrontendCpuBoostSnapshot.Unavailable;
         try { snapshot = await _frontend.CaptureCpuBoostAsync(); }
         catch (Exception exception)
         {
             AppLog.Warn("Device", "CPU Boost snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
-            return;
         }
         Render(snapshot);
+        try { RenderTdp(await _frontend.CaptureTdpAsync()); }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Device", "TDP snapshot capture failed.", exception, ("Reason", exception.GetType().Name));
+            TdpInfoBar.Severity = InfoBarSeverity.Error;
+            TdpInfoBar.Message = "TDP settings could not be loaded.";
+            TdpInfoBar.IsOpen = true;
+        }
     }
 
     private void Render(FrontendCpuBoostSnapshot snapshot)
@@ -175,6 +188,133 @@ public sealed partial class DevicePage : UserControl
 
             // Restore controls from Runtime authority when the connection is still usable.
             await RefreshAsync();
+        }
+    }
+
+    private void RenderTdp(FrontendTdpSnapshot snapshot, bool preserveDirtyDraft = true)
+    {
+        var keepDraft = preserveDirtyDraft && _tdpDraftDirty;
+        _tdpSnapshot = snapshot;
+        if (!keepDraft && snapshot.Configuration is { } configuration)
+        {
+            _acPl1Draft = configuration.Ac.Pl1Watts; _acPl2Draft = configuration.Ac.Pl2Watts;
+            _dcPl1Draft = configuration.Dc.Pl1Watts; _dcPl2Draft = configuration.Dc.Pl2Watts;
+        }
+        _suppressTdpEvents = true;
+        try
+        {
+            TdpEnabledToggleSwitch.IsOn = snapshot.Configuration?.Enabled == true;
+            SetNumberBox(TdpAcPl1NumberBox, _acPl1Draft); SetNumberBox(TdpAcPl2NumberBox, _acPl2Draft);
+            SetNumberBox(TdpDcPl1NumberBox, _dcPl1Draft); SetNumberBox(TdpDcPl2NumberBox, _dcPl2Draft);
+        }
+        finally { _suppressTdpEvents = false; }
+        var editable = snapshot.Available && snapshot.PersistenceWritable && (snapshot.Configuration is null || snapshot.Configuration.Enabled);
+        TdpEnabledToggleSwitch.IsEnabled = snapshot.Available && snapshot.PersistenceWritable;
+        foreach (var box in new[] { TdpAcPl1NumberBox, TdpAcPl2NumberBox, TdpDcPl1NumberBox, TdpDcPl2NumberBox }) box.IsEnabled = editable;
+        if (snapshot.Limits is { } limits)
+        {
+            foreach (var box in new[] { TdpAcPl1NumberBox, TdpDcPl1NumberBox }) { box.Minimum = limits.Pl1MinimumWatts; box.Maximum = limits.Pl1MaximumWatts; }
+            foreach (var box in new[] { TdpAcPl2NumberBox, TdpDcPl2NumberBox }) { box.Minimum = limits.Pl2MinimumWatts; box.Maximum = limits.Pl2MaximumWatts; }
+        }
+        if (!snapshot.Available) { TdpInfoBar.Message = "TDP Control is unavailable on this device."; TdpInfoBar.IsOpen = true; }
+        else if (!snapshot.PersistenceWritable) { TdpInfoBar.Message = "TDP settings could not be loaded, so changes are disabled to avoid overwriting the existing profile."; TdpInfoBar.Severity = InfoBarSeverity.Error; TdpInfoBar.IsOpen = true; }
+        else if (snapshot.Available) TdpInfoBar.IsOpen = false;
+    }
+
+    private static void SetNumberBox(NumberBox box, int? value) => box.Value = value ?? double.NaN;
+    private void TdpNumberBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_suppressTdpEvents) return;
+        var value = double.IsFinite(args.NewValue) && args.NewValue == Math.Truncate(args.NewValue) ? (int)args.NewValue : (int?)null;
+        if (sender == TdpAcPl1NumberBox) _acPl1Draft = value;
+        else if (sender == TdpAcPl2NumberBox) _acPl2Draft = value;
+        else if (sender == TdpDcPl1NumberBox) _dcPl1Draft = value;
+        else _dcPl2Draft = value;
+        _tdpDraftDirty = true;
+        if (_tdpSnapshot.Configuration?.Enabled == true) ScheduleTdpEdit();
+    }
+
+    private async void TdpEnabledToggleSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressTdpEvents || _frontend is null) return;
+        CancelPendingTdpEdit();
+        if (TdpEnabledToggleSwitch.IsOn && !CompleteTdpDraft())
+        {
+            _suppressTdpEvents = true; TdpEnabledToggleSwitch.IsOn = false; _suppressTdpEvents = false;
+            TdpInfoBar.Message = "Set valid PL1 and PL2 values for Plugged in and On battery before enabling TDP Control."; TdpInfoBar.IsOpen = true; return;
+        }
+        var configuration = BuildTdpToggleConfiguration(TdpEnabledToggleSwitch.IsOn);
+        if (configuration is not null)
+        {
+            SetTdpMutationBusy(true);
+            try { await RunTdpMutationAsync(configuration, Volatile.Read(ref _tdpEditGeneration)); }
+            finally { SetTdpMutationBusy(false); }
+        }
+    }
+
+    private void ScheduleTdpEdit()
+    {
+        _tdpEditDebounce?.Cancel();
+        var generation = Interlocked.Increment(ref _tdpEditGeneration);
+        var cts = _tdpEditDebounce = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(300, cts.Token);
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!TdpDraftPolicy.CanSubmitDebouncedEdit(generation, Volatile.Read(ref _tdpEditGeneration), TdpEnabledToggleSwitch.IsOn)) return;
+                    var configuration = BuildTdpConfiguration(true);
+                    if (configuration is not null) _ = RunTdpMutationAsync(configuration, generation);
+                });
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+    private void CancelPendingTdpEdit() { Interlocked.Increment(ref _tdpEditGeneration); _tdpEditDebounce?.Cancel(); }
+    private void SetTdpMutationBusy(bool busy)
+    {
+        TdpEnabledToggleSwitch.IsEnabled = !busy && _tdpSnapshot.Available && _tdpSnapshot.PersistenceWritable;
+        foreach (var box in new[] { TdpAcPl1NumberBox, TdpAcPl2NumberBox, TdpDcPl1NumberBox, TdpDcPl2NumberBox })
+            box.IsEnabled = !busy && _tdpSnapshot.Available && _tdpSnapshot.PersistenceWritable
+                && (_tdpSnapshot.Configuration is null || _tdpSnapshot.Configuration.Enabled);
+    }
+    private bool CompleteTdpDraft() => _acPl1Draft is not null && _acPl2Draft is not null && _dcPl1Draft is not null && _dcPl2Draft is not null;
+    private FrontendTdpConfiguration? BuildTdpConfiguration(bool enabled)
+    {
+        return TdpDraftPolicy.TryBuildCompleteConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft);
+    }
+    private FrontendTdpConfiguration? BuildTdpToggleConfiguration(bool enabled) =>
+        TdpDraftPolicy.TryBuildToggleConfiguration(enabled, _acPl1Draft, _acPl2Draft, _dcPl1Draft, _dcPl2Draft, _tdpSnapshot.Configuration);
+    private async Task RunTdpMutationAsync(FrontendTdpConfiguration configuration, long submittedGeneration)
+    {
+        try { var result = await _frontend!.SetDeviceTdpAsync(configuration); var newerEditExists = TdpDraftPolicy.ShouldPreserveDirtyDraft(_tdpDraftDirty, submittedGeneration, Volatile.Read(ref _tdpEditGeneration)); if (!newerEditExists) _tdpDraftDirty = false; RenderTdp(result.Snapshot, preserveDirtyDraft: newerEditExists); if (!result.Succeeded) { TdpInfoBar.Message = result.FailureMessage ?? "The TDP change failed."; TdpInfoBar.Severity = result.Outcome == FrontendTdpMutationOutcome.PersistenceFailed ? InfoBarSeverity.Error : InfoBarSeverity.Warning; TdpInfoBar.IsOpen = true; } }
+        catch (Exception exception) { AppLog.Warn("Device", "TDP mutation failed.", exception); TdpInfoBar.Message = "TDP could not be updated because the Runtime connection was interrupted."; TdpInfoBar.Severity = InfoBarSeverity.Error; TdpInfoBar.IsOpen = true; await RefreshAsync(); }
+    }
+
+    internal static class TdpDraftPolicy
+    {
+        internal static bool CanSubmitDebouncedEdit(long generation, long currentGeneration, bool enabled) =>
+            generation == currentGeneration && enabled;
+
+        internal static bool ShouldPreserveDirtyDraft(bool dirty, long submittedGeneration, long currentGeneration) =>
+            dirty && submittedGeneration != currentGeneration;
+
+        internal static FrontendTdpConfiguration? TryBuildCompleteConfiguration(bool enabled, int? acPl1, int? acPl2, int? dcPl1, int? dcPl2)
+        {
+            return acPl1 is null || acPl2 is null || dcPl1 is null || dcPl2 is null
+                ? null : new(enabled, new(acPl1.Value, acPl2.Value), new(dcPl1.Value, dcPl2.Value));
+        }
+
+        internal static FrontendTdpConfiguration? TryBuildToggleConfiguration(bool enabled, int? acPl1, int? acPl2, int? dcPl1, int? dcPl2, FrontendTdpConfiguration? saved)
+        {
+            if (TryBuildCompleteConfiguration(enabled, acPl1, acPl2, dcPl1, dcPl2) is { } complete) return complete;
+            if (enabled || saved is null) return null;
+            acPl1 ??= saved?.Ac.Pl1Watts; acPl2 ??= saved?.Ac.Pl2Watts;
+            dcPl1 ??= saved?.Dc.Pl1Watts; dcPl2 ??= saved?.Dc.Pl2Watts;
+            return acPl1 is null || acPl2 is null || dcPl1 is null || dcPl2 is null
+                ? null : new(enabled, new(acPl1.Value, acPl2.Value), new(dcPl1.Value, dcPl2.Value));
         }
     }
 
