@@ -42,6 +42,44 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task Yielded_session_retries_pending_cleanup_without_forward_entry()
+    {
+        var executor = new FakeExecutor();
+        executor.RollbackResults.Enqueue(new RoutingPipelineRollbackResult(false, RoutingStageKind.SteamOutput, "blocked"));
+        executor.RollbackResults.Enqueue(new RoutingPipelineRollbackResult(true, null, "recovered"));
+        var bridge = Create(new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software())), executor);
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        Assert.False((await bridge.Bridge.FailClosedAsync(yieldCurrentSteamSession: true)).Succeeded);
+        var retry = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(retry.Succeeded);
+        Assert.Single(executor.ExecutedPlans);
+        Assert.Equal(2, executor.RollbackPlans.Count);
+        Assert.Null(bridge.Session.PendingCleanup);
+    }
+
+    [Fact]
+    public async Task Yield_request_closes_admission_before_fail_close_gate_is_released()
+    {
+        var executor = new FakeExecutor { BlockNextExecute = true };
+        var bridge = Create(new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software())), executor);
+        var first = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteStarted.Task;
+
+        var failClose = bridge.Bridge.FailClosedAsync(yieldCurrentSteamSession: true).AsTask();
+        var queued = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteCancellationObserved.Task;
+        await failClose;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+        var result = await queued;
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("ExternalNativeTakeoverLatched", result.Reason);
+        Assert.Single(executor.ExecutedPlans);
+    }
+
+    [Fact]
     public async Task SyntheticTestModeSessionBoundaryEntersAndRollsBackTheProductionPipeline()
     {
         var executor = new FakeExecutor();

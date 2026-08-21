@@ -1,7 +1,6 @@
 using SteamInputAddonforClaw.Controllers.Detection;
 using SteamInputAddonforClaw.Devices;
 using SteamInputAddonforClaw.Devices.Abstractions;
-using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Power;
@@ -141,7 +140,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 ? Task.FromResult(true)
                 : runtime.RetireXbox360BeforeOuterRouteExitAsync(cancellationToken));
         deckStage.SetOutputFaultHandler(async () => { await coordinator.FailClosedAsync().ConfigureAwait(false); });
-        handheldRoutingComposition.SetRuntimeFaultHandler(async reason =>
+        handheldRoutingComposition.SetRuntimeFaultHandler(async (reason, yieldCurrentSteamSession) =>
         {
             // Latch before fail-close: otherwise a still-eligible Steam session could immediately
             // re-enter routing right after this rollback completes, and if the physical device was
@@ -149,8 +148,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             if (safetySession is not null)
                 await safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);
 
-            var rollback = await coordinator.FailClosedAsync(
-                yieldCurrentSteamSession: reason == MsiClawPhysicalInputFaultPolicy.ExternalNativeTakeoverReason).ConfigureAwait(false);
+            var rollback = await coordinator.FailClosedAsync(yieldCurrentSteamSession).ConfigureAwait(false);
             if (!rollback.Succeeded)
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
             else if (runtime is not null)

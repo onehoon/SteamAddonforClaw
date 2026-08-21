@@ -74,6 +74,18 @@ input loss remains fail-close, Game Bar/X360 foreground switching remains
 dormant, and real hardware validation of this policy remains pending. This does
 not mark SD3 complete.
 
+### Routing-time native UI policy
+
+- Outside an active Steam route, WING remains stock Win+G / Xbox Game Bar.
+- During an active Steam route, Win+G/Game Bar is suppressed; WING mapping is
+  a separate action policy whose default is Steam Button.
+- OEM1 remapping remains independent of the routing master setting. The
+  route-bound Center M guard prevents the native Center M MainUI path from
+  becoming operational while routing owns the route; the default routing action
+  remains Steam Quick Access.
+- MSI Center M MainUI is unavailable while the Addon owns the active Steam
+  route.
+
 A routing-time MSI Center M MainUI launch guard (Phase 1) now arms/disarms
 around routing entry/exit -- `Local\MSI Center M.exe` mutex ownership plus the
 existing staged same-name helper, gating native-mode/PID1902 mutation on the

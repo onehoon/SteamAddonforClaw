@@ -90,7 +90,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// passes it explicitly; direct test constructions opt out by passing false.</summary>
     private readonly bool _hardwareSupported;
 
-    private Func<string, ValueTask>? _runtimeFaultHandler;
+    private Func<string, bool, ValueTask>? _runtimeFaultHandler;
 
     // PR3: development-only OEM1 production E2E POC action path -- Event41 observation, gesture
     // recognition/bridge, and dispatch. Never constructed until ConfigureOem1ActionPath is called
@@ -256,7 +256,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
             helperOwnership: CenterMHelperOwnership,
             environmentEligibility: () => true,
             externalHelperDemand: () => CenterMGuard.HasHelperDemand,
-            sharedHelperSafetyFault: ReportRuntimeFault);
+            sharedHelperSafetyFault: reason => ReportRuntimeFault(reason));
         // PR3: the two narrow callbacks below let the OEM1 action path (wired later, only by
         // ConfigureOem1ActionPath) refresh custom gesture-bridge authority from the coordinator's own
         // freshly reconciled SuppressionReady snapshot after every tick/resume -- see
@@ -296,7 +296,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     IPowerSuspendParticipant? IHandheldRoutingComposition.AuxiliaryPowerParticipant => CenterMOem1Runtime;
     IRuntimeResumeParticipant? IHandheldRoutingComposition.AuxiliaryResumeParticipant => CenterMOem1Runtime;
 
-    void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, ValueTask> handler) =>
+    void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, bool, ValueTask> handler) =>
         _runtimeFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
 
     /// <summary>
@@ -659,7 +659,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         if (reason == MsiClawPhysicalInputFaultPolicy.PhysicalInputSessionLostReason)
             AppLog.Warn("Routing.Runtime", "Owned physical-input session terminated unexpectedly; requesting routing fail-close.", null,
                 ("Event", "PhysicalInputSessionLost"), ("StopReason", summary.StopReason), ("Action", "FailClosed"));
-        ReportRuntimeFault(reason);
+        ReportRuntimeFault(reason, reason == MsiClawPhysicalInputFaultPolicy.ExternalNativeTakeoverReason);
     }
 
     /// <summary>
@@ -667,7 +667,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// exercised directly in tests without needing committed physical-input ownership, which
     /// requires real DirectInput hardware.
     /// </summary>
-    internal void ReportRuntimeFault(string reason)
+    internal void ReportRuntimeFault(string reason, bool yieldCurrentSteamSession = false)
     {
         if (_runtimeFaultHandler is not { } handler)
             return;
@@ -676,14 +676,14 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // input stage, which awaits the polling task raising this very event -- a self-await
         // deadlock. Detach onto a background task instead, matching the existing Steam output
         // fault-forwarding pattern (CanonicalSteamDeckOutputStage.ReportOutputFault).
-        _ = Task.Run(() => RunRuntimeFaultHandlerAsync(handler, reason));
+        _ = Task.Run(() => RunRuntimeFaultHandlerAsync(handler, reason, yieldCurrentSteamSession));
     }
 
-    private static async Task RunRuntimeFaultHandlerAsync(Func<string, ValueTask> handler, string reason)
+    private static async Task RunRuntimeFaultHandlerAsync(Func<string, bool, ValueTask> handler, string reason, bool yieldCurrentSteamSession)
     {
         try
         {
-            await handler(reason).ConfigureAwait(false);
+            await handler(reason, yieldCurrentSteamSession).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
