@@ -13,6 +13,7 @@ internal sealed class CanonicalSteamDeckSession : ICanonicalSteamDeckSession
     CanonicalPendingCleanupPhase ICanonicalSteamDeckSession.PendingCleanupPhase => PendingCleanupPhase;
     uint? ICanonicalSteamDeckSession.BusId => BusId; uint? ICanonicalSteamDeckSession.LogicalDeviceId => LogicalDeviceId;
     bool ICanonicalSteamDeckSession.Start() => Start(); bool ICanonicalSteamDeckSession.SetNeutral() => SetNeutral();
+    bool ICanonicalSteamDeckSession.TryGetTrackedAttachmentState(out USBDeviceAttachmentState state) => TryGetTrackedAttachmentState(out state);
     bool ICanonicalSteamDeckSession.SetOutputCallback(SteamDeckOutputCallback callback) => SetOutputCallback(callback);
     bool ICanonicalSteamDeckSession.ClearOutputCallback() => ClearOutputCallback(); bool ICanonicalSteamDeckSession.DetachDevice() => DetachDevice();
     bool ICanonicalSteamDeckSession.RetryPendingCleanup() => RetryPendingCleanup();
@@ -26,6 +27,11 @@ internal sealed class CanonicalSteamDeckSession : ICanonicalSteamDeckSession
         State = CanonicalSteamDeckSessionState.Unsafe; return false;
     }
     public bool SetState(SteamDeckDeviceState state) => !_disposed && State == CanonicalSteamDeckSessionState.Active && _runtime.SetDeckState(state);
+    internal bool TryGetTrackedAttachmentState(out USBDeviceAttachmentState state)
+    {
+        if (_disposed || State != CanonicalSteamDeckSessionState.Active) { state = default; return false; }
+        return _runtime.TryGetDeckAttachmentState(out state);
+    }
     internal bool SetNeutral() => SetState(default);
     internal bool SetOutputCallback(SteamDeckOutputCallback callback) => !_disposed && State == CanonicalSteamDeckSessionState.Active && _runtime.SetDeckOutputCallback(callback);
     internal bool ClearOutputCallback() => !_disposed && State == CanonicalSteamDeckSessionState.Active && _runtime.SetDeckOutputCallback(null);
@@ -45,7 +51,7 @@ internal interface ICanonicalSteamDeckStateSink { bool SetState(SteamDeckDeviceS
 internal interface ICanonicalSteamDeckSession : ICanonicalSteamDeckStateSink, IDisposable
 {
     CanonicalSteamDeckSessionState State { get; } CanonicalPendingCleanupPhase PendingCleanupPhase { get; } uint? BusId { get; } uint? LogicalDeviceId { get; }
-    bool Start(); bool SetNeutral(); bool SetOutputCallback(SteamDeckOutputCallback callback); bool ClearOutputCallback(); bool DetachDevice(); bool RetryPendingCleanup();
+    bool Start(); bool SetNeutral(); bool SetOutputCallback(SteamDeckOutputCallback callback); bool ClearOutputCallback(); bool DetachDevice(); bool RetryPendingCleanup(); bool TryGetTrackedAttachmentState(out USBDeviceAttachmentState state);
 }
 
 internal sealed class UnavailableCanonicalSteamDeckSession : ICanonicalSteamDeckSession
@@ -54,6 +60,7 @@ internal sealed class UnavailableCanonicalSteamDeckSession : ICanonicalSteamDeck
     public CanonicalPendingCleanupPhase PendingCleanupPhase => CanonicalPendingCleanupPhase.None;
     public uint? BusId => null; public uint? LogicalDeviceId => null;
     public bool Start() => false; public bool SetState(SteamDeckDeviceState state) => false; public bool SetNeutral() => false;
+    public bool TryGetTrackedAttachmentState(out USBDeviceAttachmentState state) { state = default; return false; }
     public bool SetOutputCallback(SteamDeckOutputCallback callback) => false; public bool ClearOutputCallback() => false;
     public bool DetachDevice() => false; public bool RetryPendingCleanup() => false;
     public void Dispose() { }

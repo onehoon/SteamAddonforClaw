@@ -26,6 +26,130 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     private readonly Guid _session = Guid.NewGuid();
 
     [Fact]
+    public async Task ReconcileOwnedState_healthy_canonical_route_is_strict_noop()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")]]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        var traceCount = session.Trace.Count;
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Healthy", result.Reason);
+        Assert.Equal(traceCount, session.Trace.Count);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_unexpected_stopped_publisher_fails_closed()
+    {
+        var session = new FakeCanonicalSession { InputAccepted = false };
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")]]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        var fault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stage.SetOutputFaultHandler(() => { fault.TrySetResult(); return ValueTask.CompletedTask; });
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        ticks.Tick();
+        await fault.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(10);
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("SteamDeckPublisherNotRunning", result.Reason);
+        Assert.Equal(1, session.Trace.Count(value => value == "Start"));
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_attached_without_owned_pnp_fails_without_mutation()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        var traceCount = session.Trace.Count;
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("SteamDeckOwnedPnPAbsent", result.Reason);
+        Assert.Equal(traceCount, session.Trace.Count);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_pnp_presence_without_viiper_attachment_fails_closed()
+    {
+        var session = new FakeCanonicalSession { AttachmentState = USBDeviceAttachmentState.Detached };
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")]]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("SteamDeckAttachmentNotAttached", result.Reason);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_does_not_adopt_foreign_matching_pnp()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), Device("foreign")]]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("SteamDeckPnPOwnershipAmbiguous", result.Reason);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_allows_exact_preexisting_matching_pnp()
+    {
+        var preExisting = Device("preexisting");
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([
+            [UsbIpHost(), preExisting],
+            [UsbIpHost(), preExisting, Device("owned")],
+            [UsbIpHost(), preExisting, Device("owned")],
+            [UsbIpHost(), preExisting, Device("owned")],
+            [UsbIpHost(), preExisting, Device("owned")]
+        ]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Healthy", result.Reason);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_resumes_paused_presentation_without_recreating_session()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")]]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await stage.PausePresentationAsync());
+        var bus = session.BusId; var logical = session.LogicalDeviceId;
+        session.Trace.Clear();
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Repaired", result.Reason);
+        Assert.Equal(bus, session.BusId);
+        Assert.Equal(logical, session.LogicalDeviceId);
+        Assert.DoesNotContain("Start", session.Trace);
+        Assert.DoesNotContain("Remove", session.Trace);
+    }
+
+    [Fact]
     public void Steam_pulse_is_rejected_when_output_stage_is_inactive()
     {
         var stage = Create(new FakeCanonicalSession(), new FakeEnumerator([[]]), new FakeHidHide());
@@ -1175,11 +1299,13 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         public TaskCompletionSource ReleaseInput { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public CanonicalSteamDeckSessionState State { get; private set; } = CanonicalSteamDeckSessionState.Clean;
+        public USBDeviceAttachmentState AttachmentState { get; set; } = USBDeviceAttachmentState.Attached;
         public CanonicalPendingCleanupPhase PendingCleanupPhase { get; private set; }
         public uint? BusId => State == CanonicalSteamDeckSessionState.Clean ? null : 1u;
         public uint? LogicalDeviceId => State == CanonicalSteamDeckSessionState.Clean ? null : 7u;
 
         public bool Start() { Trace.Add("Start"); if (!StartResult) return false; State = CanonicalSteamDeckSessionState.Active; return true; }
+        public bool TryGetTrackedAttachmentState(out USBDeviceAttachmentState state) { state = AttachmentState; return true; }
 
         // The stage calls SetNeutral() directly for its one-time neutral report before starting the
         // publisher; the publisher (constructed with this session as its sink) calls SetState()
@@ -1241,6 +1367,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
                 return false;
             }
             State = CanonicalSteamDeckSessionState.Clean;
+            AttachmentState = USBDeviceAttachmentState.Detached;
             return true;
         }
 

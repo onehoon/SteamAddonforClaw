@@ -362,8 +362,12 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     internal async Task<bool> ResumePresentationAsync(CancellationToken cancellationToken = default)
     {
         await _serial.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
+        try { return await ResumePresentationCoreAsync(cancellationToken).ConfigureAwait(false); }
+        finally { _serial.Release(); }
+    }
+
+    private async Task<bool> ResumePresentationCoreAsync(CancellationToken cancellationToken)
+    {
             if (_state != LifecycleState.Active || !_presentationPaused || _canonicalSession is null ||
                 _canonicalSession.State != CanonicalSteamDeckSessionState.Active || _publisher is null)
                 return false;
@@ -382,6 +386,53 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
 
             _presentationPaused = false;
             return true;
+    }
+
+    internal async ValueTask<RoutingStageOperationResult> ReconcileOwnedStateAsync(CancellationToken cancellationToken = default)
+    {
+        await _serial.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_state != LifecycleState.Active || _canonicalSession is null)
+                return RoutingStageOperationResult.Failure("SteamDeckSessionNotActive");
+            if (_canonicalSession.State != CanonicalSteamDeckSessionState.Active ||
+                _canonicalSession.PendingCleanupPhase != CanonicalPendingCleanupPhase.None ||
+                _busId == 0 || _deviceId == 0 || _owned is null || _owned.Count == 0)
+                return RoutingStageOperationResult.Failure("SteamDeckStructuralStateUnsafe");
+            if (!_canonicalSession.TryGetTrackedAttachmentState(out var attachment) || attachment != USBDeviceAttachmentState.Attached)
+                return RoutingStageOperationResult.Failure("SteamDeckAttachmentNotAttached");
+
+            var current = _enumerator.EnumeratePresentDevices();
+            var index = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(current);
+            var policy = new SteamDeckVirtualDeviceIdentityPolicy();
+            var ownedIds = _owned.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var before = _before ?? [];
+            var beforeIndex = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(before);
+            var preExistingIds = before.Where(device => policy.IsMatchingCandidate(device, beforeIndex))
+                .Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var candidates = current.Where(device => policy.IsMatchingCandidate(device, index)).ToArray();
+            if (_owned.Any(device => !index.TryGetValue(device.InstanceId, out var present) || !policy.IsMatchingCandidate(present, index)))
+                return RoutingStageOperationResult.Failure("SteamDeckOwnedPnPAbsent");
+            if (candidates.Any(device => !ownedIds.Contains(device.InstanceId) && !preExistingIds.Contains(device.InstanceId)))
+                return RoutingStageOperationResult.Failure("SteamDeckPnPOwnershipAmbiguous");
+            if (_publisher is null)
+                return RoutingStageOperationResult.Failure("SteamDeckPublisherMissing");
+            if (!_presentationPaused && !_publisher.IsRunning)
+                return RoutingStageOperationResult.Failure("SteamDeckPublisherNotRunning");
+
+            if (_presentationPaused)
+            {
+                if (!await ResumePresentationCoreAsync(cancellationToken).ConfigureAwait(false))
+                    return RoutingStageOperationResult.Failure("SteamDeckPresentationResumeFailed");
+                AppLog.Info("SteamDeckHealth", "Canonical Steam Deck presentation repaired.",
+                    ("Event", "SteamDeckHealthRepaired"), ("BusId", _busId), ("LogicalDeviceId", _deviceId),
+                    ("AttachmentState", attachment), ("RepairAction", "ResumePresentation"));
+                return RoutingStageOperationResult.Success("Repaired");
+            }
+            AppLog.Info("SteamDeckHealth", "Canonical Steam Deck state is healthy.",
+                ("Event", "SteamDeckHealthHealthy"), ("BusId", _busId), ("LogicalDeviceId", _deviceId),
+                ("AttachmentState", attachment), ("PnPOwned", true));
+            return RoutingStageOperationResult.Success("Healthy");
         }
         finally { _serial.Release(); }
     }
