@@ -16,6 +16,7 @@ internal static class CenterMHelperStaging
     /// can never drift out of sync with each other.</summary>
     private static readonly string SourceRelativePath = Path.Combine("CenterMHelperSource", "CenterMHelper.exe");
     private const string StagedBinaryName = "MSI Center M.exe";
+    private static readonly object StagingSync = new();
 
     internal static string RuntimeDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonForClaw", "Runtime", "CenterM");
@@ -26,6 +27,9 @@ internal static class CenterMHelperStaging
     /// (staging failed) rather than throwing -- callers must treat that as "helper start not
     /// permitted", not attempt to run it anyway.</summary>
     internal static string? StageFromPublishRoot(string publishRoot)
+        => StageFromPublishRoot(publishRoot, RuntimeDirectory);
+
+    internal static string? StageFromPublishRoot(string publishRoot, string runtimeDirectory)
     {
         try
         {
@@ -36,24 +40,41 @@ internal static class CenterMHelperStaging
                 return null;
             }
 
-            Directory.CreateDirectory(RuntimeDirectory);
-            var stagedPath = Path.Combine(RuntimeDirectory, StagedBinaryName);
-            File.Copy(sourcePath, stagedPath, overwrite: true);
+            lock (StagingSync)
+            {
+                Directory.CreateDirectory(runtimeDirectory);
+                var stagedPath = Path.Combine(runtimeDirectory, StagedBinaryName);
 
-            // A freshly written self-contained single-file executable, when created suspended
-            // immediately afterward, was observed to intermittently fail its own bundle
-            // self-extraction (falling back to an invalid framework-dependent-style DLL lookup) --
-            // reproducibly fixed by forcing one full read of the file here, before the caller ever
-            // creates it suspended, so any on-access scan/cache settles while the process is not
-            // yet held stationary. See PR review discussion for the reproduction.
-            _ = File.ReadAllBytes(stagedPath);
+                if (File.Exists(stagedPath) && FilesHaveIdenticalContent(sourcePath, stagedPath))
+                {
+                    AppLog.Debug("CenterM.Helper", "Existing staged helper matches current source; reusing staged binary.");
+                    return stagedPath;
+                }
 
-            return stagedPath;
+                File.Copy(sourcePath, stagedPath, overwrite: true);
+
+                // A freshly written self-contained single-file executable, when created suspended
+                // immediately afterward, was observed to intermittently fail its own bundle
+                // self-extraction (falling back to an invalid framework-dependent-style DLL lookup) --
+                // reproducibly fixed by forcing one full read of the file here, before the caller ever
+                // creates it suspended, so any on-access scan/cache settles while the process is not
+                // yet held stationary. See PR review discussion for the reproduction.
+                _ = File.ReadAllBytes(stagedPath);
+
+                return stagedPath;
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
             AppLog.Warn("CenterM.Helper", "Helper staging failed.", ex);
             return null;
         }
+    }
+
+    private static bool FilesHaveIdenticalContent(string firstPath, string secondPath)
+    {
+        var first = File.ReadAllBytes(firstPath);
+        var second = File.ReadAllBytes(secondPath);
+        return first.AsSpan().SequenceEqual(second);
     }
 }

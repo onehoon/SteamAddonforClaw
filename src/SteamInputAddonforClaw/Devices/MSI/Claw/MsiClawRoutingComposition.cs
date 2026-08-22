@@ -684,7 +684,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
 
     private static async Task ObserveRuntimeFaultAsync(ValueTask operation, string reason)
     {
-        try { await operation.ConfigureAwait(false); }
+        try
+        {
+            await operation.ConfigureAwait(false);
+        }
         catch (Exception exception)
         {
             AppLog.Error("Routing.Runtime", "Backend runtime fault handler failed.", exception, ("Reason", reason));
