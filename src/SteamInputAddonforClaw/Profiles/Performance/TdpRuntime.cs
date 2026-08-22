@@ -31,6 +31,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private readonly MsiClawTdpHardware _hardware;
     private readonly Func<TdpPowerSource?> _powerSource;
     private readonly Func<DeviceTdpSettings?> _centerMManualSeed;
+    private Func<uint> _actualAppIdSource = static () => 0;
     private readonly Lock _sync = new();
     private Task _tail = Task.CompletedTask;
     private long _authorityVersion;
@@ -42,7 +43,8 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private bool _accepting = true;
 
     internal TdpRuntime(ProfileStore profileStore, ProfileMutationGate mutationGate, HandheldDeviceModelId? modelId,
-        MsiClawTdpHardware hardware, Func<TdpPowerSource?>? powerSource = null, Func<DeviceTdpSettings?>? centerMManualSeed = null)
+        MsiClawTdpHardware hardware, Func<TdpPowerSource?>? powerSource = null, Func<DeviceTdpSettings?>? centerMManualSeed = null,
+        Func<uint>? actualAppIdSource = null)
     {
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _mutationGate = mutationGate ?? throw new ArgumentNullException(nameof(mutationGate));
@@ -50,7 +52,10 @@ internal sealed class TdpRuntime : IAsyncDisposable
         _hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
         _powerSource = powerSource ?? WindowsTdpPowerSource.Read;
         _centerMManualSeed = centerMManualSeed ?? (() => _modelId is { } id ? WindowsTdpCenterMManualSettings.Read(id) : null);
+        _actualAppIdSource = actualAppIdSource ?? (() => 0);
     }
+
+    internal void SetActualAppIdSource(Func<uint> source) => _actualAppIdSource = source ?? throw new ArgumentNullException(nameof(source));
 
     internal TdpCommitResult SetEnabled(bool enabled)
     {
@@ -116,14 +121,27 @@ internal sealed class TdpRuntime : IAsyncDisposable
         lock (_mutationGate.Sync)
         {
             var loaded = _profileStore.Load();
-            if (!loaded.CanSafelyReplace || loaded.Document.Device.Performance.Tdp is not { Enabled: true } tdp)
+            if (!loaded.CanSafelyReplace)
                 return;
+
+            var tdp = ResolveEffectiveTdp(loaded.Document, _actualAppIdSource());
 
             lock (_sync)
             {
                 if (!_accepting) return;
                 if (invalidateHardwareCache)
                     RequestCacheInvalidationUnderLock(reason);
+                if (tdp is null)
+                {
+                    _authorityVersion++;
+                    _reconcileVersion++;
+                    _reconcileRequired = false;
+                    RequestCacheInvalidationUnderLock("EffectiveTdpUnavailable");
+                    AppLog.Debug("Profiles.Tdp", "TDP effective authority revoked",
+                        ("Reason", reason), ("Action", "StopManaging"));
+                    return;
+                }
+
                 var source = _powerSource();
                 if (source is not { } currentSource)
                 {
@@ -141,6 +159,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 if (realPowerBoundary)
                     RequestCacheInvalidationUnderLock("PowerSourceBoundary");
                 var effectiveInvalidation = _invalidateHardwareCacheBeforeNextApply;
+
                 AppLog.Debug("Profiles.Tdp", "TDP reconcile admitted", ("Reason", reason), ("Source", currentSource), ("PL1", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl1Watts), ("PL2", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl2Watts), ("Force", forceApply), ("Invalidate", effectiveInvalidation));
                 EnqueueSnapshotUnderLock(currentSource, tdp, reason);
             }
@@ -189,7 +208,8 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     ("Enabled", settings.Enabled), ("AcPL1", settings.Ac.Pl1Watts), ("AcPL2", settings.Ac.Pl2Watts),
                     ("DcPL1", settings.Dc.Pl1Watts), ("DcPL2", settings.Dc.Pl2Watts));
 
-                if (!settings.Enabled)
+                var effective = ResolveEffectiveTdp(updated, _actualAppIdSource());
+                if (effective is null)
                 {
                     _authorityVersion++;
                     _reconcileVersion++;
@@ -212,7 +232,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
                     return new(TdpCommitOutcome.Succeeded, null);
                 }
                 var completion = new TaskCompletionSource<TdpApplyCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
-                EnqueueSnapshotUnderLock(currentSource, settings, "ConfigurationCommit", completion);
+                EnqueueSnapshotUnderLock(currentSource, effective, "ConfigurationCommit", completion);
                 return new(TdpCommitOutcome.Succeeded, null, completion.Task);
             }
         }
@@ -278,6 +298,25 @@ internal sealed class TdpRuntime : IAsyncDisposable
             Ac = previous.Ac with { Pl1Watts = requested.Ac.Pl1Watts, Pl2Watts = requested.Ac.Pl2Watts },
             Dc = previous.Dc with { Pl1Watts = requested.Dc.Pl1Watts, Pl2Watts = requested.Dc.Pl2Watts }
         };
+    }
+
+    private DeviceTdpSettings? ResolveEffectiveTdp(ProfileDocument document, uint actualAppId)
+    {
+        if (actualAppId > 0 && document.Games.TryGetValue(actualAppId.ToString(), out var game)
+            && game.Enabled && game.Performance.Tdp is { } gameTdp)
+        {
+            if (!MsiClawTdpPolicy.TryResolve(_modelId!.Value, out var policy)
+                || !policy.IsValid(gameTdp.Ac) || !policy.IsValid(gameTdp.Dc))
+            {
+                AppLog.Warn("Profiles.Tdp", "Active Game TDP is outside the current model ranges; no target was queued.", null,
+                    ("RunningAppID", actualAppId), ("Action", "Deferred"));
+                return null;
+            }
+
+            return new DeviceTdpSettings { Enabled = true, Ac = gameTdp.Ac, Dc = gameTdp.Dc };
+        }
+
+        return document.Device.Performance.Tdp is { Enabled: true } deviceTdp ? deviceTdp : null;
     }
 
     private async Task ExecuteAsync(TdpApplySnapshot snapshot)

@@ -181,6 +181,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _tdpTransport = new();
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel,
                 new MsiClawTdpHardware(_tdpTransport));
+            _tdpRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
         }
@@ -417,6 +418,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Error("Profiles.CpuBoost", "CPU Boost game-profile reconcile failed after Actual RunningAppID changed.", exception,
+                ("RunningAppID", appId));
+        }
+
+        try
+        {
+            _tdpRuntime?.ReconcileCurrent(forceApply: true, invalidateHardwareCache: false, "ActualRunningAppIdChanged");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Tdp", "TDP game-profile reconcile failed after Actual RunningAppID changed.", exception,
                 ("RunningAppID", appId));
         }
     }
