@@ -119,7 +119,7 @@ try
             await currentClient.ConnectAsync(target, lifetimeToken);
             log.Info("CDP connected.");
             installationSucceeded = true; // cleanup is eligible once the remote install may execute
-            await InstallAsync(currentClient);
+            await InstallForCurrentDocumentAsync(currentClient);
             recoveryDeadline = null;
 
             while (!lifetimeToken.IsCancellationRequested)
@@ -134,7 +134,7 @@ try
                 {
                     log.Info("GamepadUI document reloaded; reinjecting QAM.");
                     reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                    await InstallAsync(currentClient);
+                    await InstallForCurrentDocumentAsync(currentClient);
                     continue;
                 }
                 log.Warn("CDP connection lost.");
@@ -197,8 +197,26 @@ async Task InstallAsync(SteamGamepadUiCdpClient client)
     installMayExist = true;
     var result = CdpEvaluateResult.Parse(await client.EvaluateAsync(frontendScript, lifetimeToken));
     if (!result.Succeeded) throw new InvalidOperationException($"qam.js evaluation exception: {result.ErrorText}");
-    if (result.BooleanValue != true) throw new InvalidOperationException("install() returned false.");
+    if (result.BooleanValue != true)
+    {
+        var failure = CdpEvaluateResult.Parse(await client.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.installFailureKind ?? null", lifetimeToken));
+        if (failure.StringValue == "native-components")
+            throw new DeterministicQamInstallException("native Steam CommonUI controls were unavailable.");
+        throw new InvalidOperationException("install() returned false.");
+    }
     log.Info("QAM injection succeeded.");
+}
+
+async Task InstallForCurrentDocumentAsync(SteamGamepadUiCdpClient client)
+{
+    try
+    {
+        await InstallAsync(client);
+    }
+    catch (DeterministicQamInstallException ex)
+    {
+        log.Warn($"QAM installation is unavailable for the current GamepadUI document; waiting for document replacement. {ex.Message}");
+    }
 }
 
 async Task TeardownAsync(SteamGamepadUiCdpClient client)

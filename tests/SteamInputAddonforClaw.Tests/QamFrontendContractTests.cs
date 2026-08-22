@@ -50,6 +50,19 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Deterministic_native_install_failure_waits_for_document_reload_without_terminating_host()
+    {
+        var program = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Program.cs");
+
+        Assert.Contains("async Task InstallForCurrentDocumentAsync(SteamGamepadUiCdpClient client)", program);
+        Assert.Contains("waiting for document replacement", program);
+        Assert.Contains("await InstallForCurrentDocumentAsync(currentClient);", program);
+        var wrapperStart = program.IndexOf("async Task InstallForCurrentDocumentAsync", StringComparison.Ordinal);
+        var wrapper = program[wrapperStart..program.IndexOf("async Task TeardownAsync", wrapperStart, StringComparison.Ordinal)];
+        Assert.DoesNotContain("stopRequested = true", wrapper);
+    }
+
+    [Fact]
     public void Qam_cdp_bridge_serializes_sends_and_drops_old_document_responses()
     {
         var cdp = ReadSource("src", "SteamInputAddonforClaw.QamHost", "SteamGamepadUiCdpClient.cs");
@@ -240,11 +253,18 @@ public sealed class QamFrontendContractTests
         Assert.Contains("function renderTarget(candidate)", source);
         Assert.Contains("typeof candidate.render === \"function\"", source);
         Assert.Contains("typeof candidate.type === \"function\"", source);
-        Assert.Contains("function findUniqueNativeComponent(modules, signatures, requiredProps, name)", source);
-        Assert.Contains("new Map(matches.map(match => [match.render, match.candidate]))", source);
-        Assert.Contains("if (unique.length !== 1)", source);
-        Assert.Contains("findUniqueNativeComponent(modules, [\"ToggleField,fallback\"", source);
-        Assert.Contains("findUniqueNativeComponent(modules, [\"SliderField,fallback\"", source);
+        Assert.Contains("function findCommonUiModule(modules)", source);
+        Assert.Contains("Object.keys(moduleExports).length <= 60", source);
+        Assert.Contains("value?.contextType?._currentValue", source);
+        Assert.Contains("function findNativeComponent(commonUiModule, signatures, name)", source);
+        Assert.Contains("Object.values(commonUiModule)", source);
+        Assert.Contains("findNativeComponent(commonUiModule, [\"ToggleField,fallback\"", source);
+        Assert.Contains("findNativeComponent(commonUiModule, [\"SliderField,fallback\"", source);
+        Assert.DoesNotContain("findUniqueNativeComponent", source);
+        Assert.DoesNotContain("requiredProps", source);
+        Assert.Contains("Steam CommonUIModule unavailable.", source);
+        Assert.Contains("unavailable in Steam CommonUIModule", source);
+        Assert.Contains("state.installFailureKind = \"native-components\"", source);
         Assert.Contains("native.ToggleField", source);
         Assert.Contains("native.SliderField", source);
         Assert.Contains("notchCount: modes.length", source);
@@ -268,7 +288,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("setStatus(null); setCpu(null); setTdp(null); setTdpDraft(null)", source);
         Assert.Contains("cpu.lastFailure", source);
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
-        Assert.Contains("native ToggleField/SliderField could not be resolved", source);
+        Assert.Contains("native ToggleField/SliderField unavailable", source);
     }
 
     [Fact]
