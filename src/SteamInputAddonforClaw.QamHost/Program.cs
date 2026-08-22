@@ -119,7 +119,7 @@ try
             await currentClient.ConnectAsync(target, lifetimeToken);
             log.Info("CDP connected.");
             installationSucceeded = true; // cleanup is eligible once the remote install may execute
-            await InstallAsync(currentClient);
+            await InstallForCurrentDocumentAsync(currentClient);
             recoveryDeadline = null;
 
             while (!lifetimeToken.IsCancellationRequested)
@@ -134,7 +134,7 @@ try
                 {
                     log.Info("GamepadUI document reloaded; reinjecting QAM.");
                     reload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                    await InstallAsync(currentClient);
+                    await InstallForCurrentDocumentAsync(currentClient);
                     continue;
                 }
                 log.Warn("CDP connection lost.");
@@ -155,11 +155,6 @@ try
         {
             log.Info($"QamHost stop requested. {ex.GetType().Name}: {ex.Message}");
             break;
-        }
-        catch (DeterministicQamInstallException ex)
-        {
-            log.Warn($"QAM installation is unavailable for the current GamepadUI document; recovery is suppressed. {ex.Message}");
-            stopRequested = true;
         }
         catch (Exception ex)
         {
@@ -210,6 +205,18 @@ async Task InstallAsync(SteamGamepadUiCdpClient client)
         throw new InvalidOperationException("install() returned false.");
     }
     log.Info("QAM injection succeeded.");
+}
+
+async Task InstallForCurrentDocumentAsync(SteamGamepadUiCdpClient client)
+{
+    try
+    {
+        await InstallAsync(client);
+    }
+    catch (DeterministicQamInstallException ex)
+    {
+        log.Warn($"QAM installation is unavailable for the current GamepadUI document; waiting for document replacement. {ex.Message}");
+    }
 }
 
 async Task TeardownAsync(SteamGamepadUiCdpClient client)

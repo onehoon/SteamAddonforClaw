@@ -50,6 +50,19 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Deterministic_native_install_failure_waits_for_document_reload_without_terminating_host()
+    {
+        var program = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Program.cs");
+
+        Assert.Contains("async Task InstallForCurrentDocumentAsync(SteamGamepadUiCdpClient client)", program);
+        Assert.Contains("waiting for document replacement", program);
+        Assert.Contains("await InstallForCurrentDocumentAsync(currentClient);", program);
+        var wrapperStart = program.IndexOf("async Task InstallForCurrentDocumentAsync", StringComparison.Ordinal);
+        var wrapper = program[wrapperStart..program.IndexOf("async Task TeardownAsync", wrapperStart, StringComparison.Ordinal)];
+        Assert.DoesNotContain("stopRequested = true", wrapper);
+    }
+
+    [Fact]
     public void Qam_cdp_bridge_serializes_sends_and_drops_old_document_responses()
     {
         var cdp = ReadSource("src", "SteamInputAddonforClaw.QamHost", "SteamGamepadUiCdpClient.cs");
