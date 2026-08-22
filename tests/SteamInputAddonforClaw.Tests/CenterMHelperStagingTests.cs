@@ -36,6 +36,78 @@ public sealed class CenterMHelperStagingTests
     }
 
     [Fact]
+    public void StageFromPublishRoot_reuses_identical_locked_staged_binary()
+    {
+        var (publishRoot, runtimeDirectory, sourceBinary, stagedPath) = CreateFixture([1, 2, 3, 4]);
+        try
+        {
+            using var stagedFile = new FileStream(stagedPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+            var result = CenterMHelperStaging.StageFromPublishRoot(publishRoot, runtimeDirectory);
+
+            Assert.Equal(stagedPath, result);
+            Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(stagedPath));
+            Assert.Equal(File.ReadAllBytes(sourceBinary), File.ReadAllBytes(stagedPath));
+        }
+        finally
+        {
+            Directory.Delete(publishRoot, recursive: true);
+            Directory.Delete(runtimeDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void StageFromPublishRoot_fails_closed_for_different_locked_staged_binary()
+    {
+        var (publishRoot, runtimeDirectory, _, stagedPath) = CreateFixture([1, 2, 3, 4], [9, 8, 7]);
+        try
+        {
+            using var stagedFile = new FileStream(stagedPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+            Assert.Null(CenterMHelperStaging.StageFromPublishRoot(publishRoot, runtimeDirectory));
+            Assert.Equal([9, 8, 7], File.ReadAllBytes(stagedPath));
+        }
+        finally
+        {
+            Directory.Delete(publishRoot, recursive: true);
+            Directory.Delete(runtimeDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void StageFromPublishRoot_replaces_different_unlocked_staged_binary()
+    {
+        var (publishRoot, runtimeDirectory, _, stagedPath) = CreateFixture([1, 2, 3, 4], [9, 8, 7]);
+        try
+        {
+            var result = CenterMHelperStaging.StageFromPublishRoot(publishRoot, runtimeDirectory);
+
+            Assert.Equal(stagedPath, result);
+            Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(stagedPath));
+        }
+        finally
+        {
+            Directory.Delete(publishRoot, recursive: true);
+            Directory.Delete(runtimeDirectory, recursive: true);
+        }
+    }
+
+    private static (string PublishRoot, string RuntimeDirectory, string SourceBinary, string StagedPath)
+        CreateFixture(byte[] sourceBytes, byte[]? stagedBytes = null)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CenterMHelperStagingTests-" + Guid.NewGuid());
+        var publishRoot = Path.Combine(root, "publish");
+        var runtimeDirectory = Path.Combine(root, "runtime");
+        Directory.CreateDirectory(Path.Combine(publishRoot, "CenterMHelperSource"));
+        Directory.CreateDirectory(runtimeDirectory);
+        var sourceBinary = Path.Combine(publishRoot, "CenterMHelperSource", "CenterMHelper.exe");
+        var stagedPath = Path.Combine(runtimeDirectory, "MSI Center M.exe");
+        File.WriteAllBytes(sourceBinary, sourceBytes);
+        File.WriteAllBytes(stagedPath, stagedBytes ?? sourceBytes);
+        return (publishRoot, runtimeDirectory, sourceBinary, stagedPath);
+    }
+
+    [Fact]
     public void StageFromPublishRoot_publishRootWithoutCenterMHelperSourceSubfolder_failsClosed()
     {
         // Regression: passing the CenterMHelperSource subdirectory itself (or any root that
