@@ -143,26 +143,33 @@
     return null;
   }
 
-  function findNativeComponent(modules, marker, requiredProps) {
+  function findUniqueNativeComponent(modules, signatures, requiredProps, name) {
+    const matches = [];
     for (const moduleExports of modules) {
       for (const candidate of Object.values(moduleExports)) {
         const render = renderTarget(candidate);
         if (!render) continue;
         let source;
         try { source = Function.prototype.toString.call(render); } catch (_) { continue; }
-        if (!source.includes(marker)) continue;
+        if (!signatures.some(signature => source.includes(signature))) continue;
         if (!requiredProps.every(prop => source.includes(prop))) continue;
-        return candidate;
+        matches.push({ candidate, render });
       }
     }
-    return null;
+
+    const unique = [...new Map(matches.map(match => [match.render, match.candidate])).values()];
+    if (unique.length !== 1) {
+      logOnce(`native-${name}`, `QAM native ${name} resolution was ambiguous/unavailable. Matches=${unique.length}`);
+      return null;
+    }
+    return unique[0];
   }
 
   function findNativeQamComponents(webpackRequire) {
     const modules = collectSearchableModules(webpackRequire);
     const components = {
-      ToggleField: findNativeComponent(modules, "ToggleField", ["checked", "onChange"]),
-      SliderField: findNativeComponent(modules, "SliderField", ["min", "max", "step", "value", "onChange"]),
+      ToggleField: findUniqueNativeComponent(modules, ["ToggleField,fallback", "ToggleField\\\","], ["checked", "onChange"], "ToggleField"),
+      SliderField: findUniqueNativeComponent(modules, ["SliderField,fallback", "SliderField\\\","], ["min", "max", "step", "value", "onChange"], "SliderField"),
     };
 
     if (!components.ToggleField || !components.SliderField) {

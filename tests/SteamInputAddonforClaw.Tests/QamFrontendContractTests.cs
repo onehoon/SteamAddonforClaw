@@ -240,9 +240,11 @@ public sealed class QamFrontendContractTests
         Assert.Contains("function renderTarget(candidate)", source);
         Assert.Contains("typeof candidate.render === \"function\"", source);
         Assert.Contains("typeof candidate.type === \"function\"", source);
-        Assert.Contains("function findNativeComponent(modules, marker, requiredProps)", source);
-        Assert.Contains("findNativeComponent(modules, \"ToggleField\", [\"checked\", \"onChange\"])", source);
-        Assert.Contains("findNativeComponent(modules, \"SliderField\", [\"min\", \"max\", \"step\", \"value\", \"onChange\"])", source);
+        Assert.Contains("function findUniqueNativeComponent(modules, signatures, requiredProps, name)", source);
+        Assert.Contains("new Map(matches.map(match => [match.render, match.candidate]))", source);
+        Assert.Contains("if (unique.length !== 1)", source);
+        Assert.Contains("findUniqueNativeComponent(modules, [\"ToggleField,fallback\"", source);
+        Assert.Contains("findUniqueNativeComponent(modules, [\"SliderField,fallback\"", source);
         Assert.Contains("native.ToggleField", source);
         Assert.Contains("native.SliderField", source);
         Assert.Contains("notchCount: modes.length", source);
