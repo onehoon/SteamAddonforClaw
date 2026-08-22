@@ -17,12 +17,21 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\SteamInputAddonforClaw.TdpHelper\SteamInputAddonforClaw.TdpHelper.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\SteamInputAddonforClaw.Contracts\SteamInputAddonforClaw.Contracts.csproj" />
     <ProjectReference Include="..\SteamInputAddonforClaw.FrontendTransport\SteamInputAddonforClaw.FrontendTransport.csproj" />
     <!-- Dormant OEM1 helper binary: not linked, just built and copied alongside this app's output
          so CenterMHelperStaging can find and stage it at runtime. See CopyCenterMHelperOutput. -->
     <ProjectReference Include="..\SteamInputAddonforClaw.CenterMHelper\SteamInputAddonforClaw.CenterMHelper.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
+
+  <Target Name="PublishTdpHelper" BeforeTargets="CopyTdpHelperOutput">
+    <MSBuild Projects="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\SteamInputAddonforClaw.TdpHelper.csproj" Targets="Publish" Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\" />
+  </Target>
+
+  <Target Name="CopyTdpHelperOutput" AfterTargets="Build;Publish">
+    <Copy SourceFiles="..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\SteamInputAddonforClaw.TdpHelper.exe" DestinationFolder="$(OutDir)" Condition="Exists('..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\SteamInputAddonforClaw.TdpHelper.exe')" />
+  </Target>
 
   <!-- The staged/renamed helper must be genuinely self-contained at its final path (no separate
        runtimeconfig/deps/managed payload it depends on next to it), so it is built here via its

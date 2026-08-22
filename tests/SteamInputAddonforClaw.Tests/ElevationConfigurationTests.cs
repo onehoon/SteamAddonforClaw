@@ -6,9 +6,10 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class ElevationConfigurationTests
 {
     [Theory]
-    [InlineData("SteamInputAddonforClaw", "SteamInputAddonforClaw.app")]
-    [InlineData("SteamInputAddonforClaw.UI", "SteamInputAddonforClaw.UI.app")]
-    public void Application_manifest_requires_administrator_without_ui_access(string project, string assemblyName)
+    [InlineData("SteamInputAddonforClaw", "SteamInputAddonforClaw.app", "asInvoker")]
+    [InlineData("SteamInputAddonforClaw.UI", "SteamInputAddonforClaw.UI.app", "asInvoker")]
+    [InlineData("SteamInputAddonforClaw.TdpHelper", "SteamInputAddonforClaw.TdpHelper.app", "requireAdministrator")]
+    public void Application_manifest_has_expected_execution_level(string project, string assemblyName, string executionLevel)
     {
         var manifest = XDocument.Load(Path.Combine(RepositoryRoot(), "src", project, "app.manifest"));
         var trustInfo = manifest.Root!.Element(XName.Get("trustInfo", "urn:schemas-microsoft-com:asm.v3"));
@@ -18,7 +19,7 @@ public sealed class ElevationConfigurationTests
             .Element(XName.Get("requestedExecutionLevel", "urn:schemas-microsoft-com:asm.v3"));
 
         Assert.Equal(assemblyName, manifest.Root.Element(XName.Get("assemblyIdentity", "urn:schemas-microsoft-com:asm.v1"))!.Attribute("name")!.Value);
-        Assert.Equal("requireAdministrator", requestedLevel!.Attribute("level")!.Value);
+        Assert.Equal(executionLevel, requestedLevel!.Attribute("level")!.Value);
         Assert.Equal("false", requestedLevel.Attribute("uiAccess")!.Value);
         Assert.Equal("PerMonitorV2", manifest.Descendants(XName.Get("dpiAwareness", "http://schemas.microsoft.com/SMI/2016/WindowsSettings")).Single().Value);
     }
@@ -29,7 +30,7 @@ public sealed class ElevationConfigurationTests
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Install", "StartupRegistration.cs"));
 
         Assert.Contains("taskDefinition.Principal.LogonType = TaskLogonInteractiveToken;", source);
-        Assert.Contains("taskDefinition.Principal.RunLevel = 1;", source);
+        Assert.Contains("taskDefinition.Principal.RunLevel = 0;", source);
         Assert.Contains("action.Arguments = \"--background\";", source);
     }
 
@@ -41,6 +42,24 @@ public sealed class ElevationConfigurationTests
         Assert.Contains("MSI_ACPI compatibility fallback started", source);
         Assert.Contains("MSI_ACPI compatibility fallback succeeded", source);
         Assert.Contains("LogFailure(method, \"GetWmiFallback\"", source);
+    }
+
+    [Fact]
+    public void Tdp_helper_preserves_the_wmi_compatibility_fallback_and_narrow_protocol()
+    {
+        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
+        Assert.Contains("obj.InvokeMethod(\"Get_WMI\", null, null)", source);
+        Assert.Contains("request.Operation is not (\"GetAp\" or \"SetData\")", source);
+        Assert.Contains("new Response(false, null)", source);
+    }
+
+    [Fact]
+    public void Runtime_uses_one_owned_helper_transport_for_the_tdp_runtime()
+    {
+        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Hosting", "AddonProcessHost.cs"));
+        Assert.Contains("_tdpTransport = new();", source);
+        Assert.Contains("new MsiClawTdpHardware(_tdpTransport)", source);
+        Assert.Contains("await _tdpTransport.DisposeAsync()", source);
     }
 
     private static string RepositoryRoot()
