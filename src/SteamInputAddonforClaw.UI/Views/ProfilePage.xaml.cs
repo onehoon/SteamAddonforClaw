@@ -109,7 +109,7 @@ public sealed partial class ProfilePage : UserControl
     {
         ShowError(message, exception);
         if (_frontend is null || _selectedGame?.AppId != appId) return;
-        try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (_selectedGame?.AppId == appId) Render(snapshot); } catch { }
+        try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (_selectedGame?.AppId == appId) { Render(snapshot); ShowError(message, null); } } catch { }
     }
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
 }
