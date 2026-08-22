@@ -406,10 +406,14 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             var index = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(current);
             var policy = new SteamDeckVirtualDeviceIdentityPolicy();
             var ownedIds = _owned.Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var before = _before ?? [];
+            var beforeIndex = SteamDeckVirtualDeviceIdentityPolicy.BuildInstanceIndex(before);
+            var preExistingIds = before.Where(device => policy.IsMatchingCandidate(device, beforeIndex))
+                .Select(device => device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var candidates = current.Where(device => policy.IsMatchingCandidate(device, index)).ToArray();
             if (_owned.Any(device => !index.TryGetValue(device.InstanceId, out var present) || !policy.IsMatchingCandidate(present, index)))
                 return RoutingStageOperationResult.Failure("SteamDeckOwnedPnPAbsent");
-            if (candidates.Any(device => !ownedIds.Contains(device.InstanceId)))
+            if (candidates.Any(device => !ownedIds.Contains(device.InstanceId) && !preExistingIds.Contains(device.InstanceId)))
                 return RoutingStageOperationResult.Failure("SteamDeckPnPOwnershipAmbiguous");
 
             if (_presentationPaused)

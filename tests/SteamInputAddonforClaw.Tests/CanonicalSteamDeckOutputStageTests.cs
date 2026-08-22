@@ -86,6 +86,27 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task ReconcileOwnedState_allows_exact_preexisting_matching_pnp()
+    {
+        var preExisting = Device("preexisting");
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([
+            [UsbIpHost(), preExisting],
+            [UsbIpHost(), preExisting, Device("owned")],
+            [UsbIpHost(), preExisting, Device("owned")],
+            [UsbIpHost(), preExisting, Device("owned")],
+            [UsbIpHost(), preExisting, Device("owned")]
+        ]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Healthy", result.Reason);
+    }
+
+    [Fact]
     public async Task ReconcileOwnedState_resumes_paused_presentation_without_recreating_session()
     {
         var session = new FakeCanonicalSession();
