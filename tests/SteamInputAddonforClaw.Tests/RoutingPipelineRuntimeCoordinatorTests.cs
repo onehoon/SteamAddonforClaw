@@ -1342,6 +1342,34 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resume);
     }
 
+    [Fact]
+    public async Task Preserved_resume_owner_failure_runs_auxiliary_callback_after_cleanup()
+    {
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var auxiliaryCalls = 0;
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Success("Paused")),
+            reconcileOwnedRouteState: _ => Task.FromResult(RoutingStageOperationResult.Failure("OwnerUnhealthy")));
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+
+        Assert.True(await bridge.ReconcilePreservedSessionAsync(
+            _ => Task.CompletedTask,
+            _ =>
+            {
+                auxiliaryCalls++;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None));
+        Assert.Equal(1, auxiliaryCalls);
+        Assert.Null(session.ActiveSession);
+    }
+
     private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(
         FakeStatusProvider provider,
         IRoutingPipelineExecutor executor,
