@@ -40,6 +40,10 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
                 "captureStatus" => await _client.CaptureStatusAsync(token),
                 "captureCpuBoost" => await _client.CaptureCpuBoostAsync(token),
                 "captureTdp" => await _client.CaptureTdpAsync(token),
+                "captureActiveGameProfile" => await _client.CaptureActiveGameProfileAsync(token),
+                "setActiveGameProfileEnabled" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileEnabledAsync(id, p.GetProperty("enabled").GetBoolean(), p.TryGetProperty("displayName", out var name) ? name.GetString() : null, t)),
+                "setActiveGameCpuBoost" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileCpuBoostAsync(id, p.GetProperty("ac").Deserialize<CpuBoostMode>(), p.GetProperty("dc").Deserialize<CpuBoostMode>(), t)),
+                "setActiveGameTdp" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileTdpAsync(id, p.GetProperty("configuration").Deserialize<FrontendGameTdpConfiguration>(BridgeJson)!, t)),
                 "setDeviceCpuBoostEnabled" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostEnabledAsync(p.GetProperty("enabled").GetBoolean(), t)),
                 "setDeviceCpuBoostAc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostAcAsync(p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
                 "setDeviceCpuBoostDc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostDcAsync(p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
@@ -58,6 +62,12 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
         if (!status.Steam.Active || status.Steam.AppId != 0 || status.Steam.Source != FrontendSteamSource.BigPicture)
             throw new InvalidOperationException("Device QAM mutation is available only in Big Picture with no running game.");
         return await mutation(_client, root.GetProperty("payload"), token).ConfigureAwait(false);
+    }
+    private async Task<object> ActiveMutationAsync(JsonElement root, CancellationToken token, Func<NamedPipeAddonFrontendClient, uint, JsonElement, CancellationToken, Task<object>> mutation)
+    {
+        var active = await _client.CaptureActiveGameProfileAsync(token).ConfigureAwait(false);
+        if (active.AppId == 0 || !active.Exists && active.Enabled) throw new InvalidOperationException("No active game.");
+        return await mutation(_client, active.AppId, root.GetProperty("payload"), token).ConfigureAwait(false);
     }
     internal static FrontendTdpConfiguration DecodeTdpConfiguration(JsonElement payload) =>
         payload.GetProperty("configuration").Deserialize<FrontendTdpConfiguration>(BridgeJson)

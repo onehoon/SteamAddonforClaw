@@ -91,6 +91,27 @@ public sealed class FrontendNamedPipeTransportTests
         Assert.Equal(false, fake.LastEnabled);
     }
 
+    [Fact]
+    public async Task Game_profile_operations_round_trip_through_the_named_pipe()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+
+        var games = await client.ScanProfileGamesAsync();
+        Assert.Single(games);
+        Assert.Equal((uint)12345, games[0].AppId);
+        Assert.Equal(fake.GameProfile, await client.CaptureGameProfileAsync(12345));
+        Assert.Equal(fake.GameMutationResult, await client.SetGameProfileEnabledAsync(12345, true, "Test Game"));
+        Assert.Equal(fake.GameMutationResult, await client.SetGameProfileCpuBoostAsync(12345, CpuBoostMode.EfficientAggressive, CpuBoostMode.Disabled));
+        Assert.Equal(fake.GameMutationResult, await client.SetGameProfileTdpAsync(12345, fake.GameTdp));
+
+        Assert.Equal((uint)12345, fake.LastGameProfileAppId);
+        Assert.Equal((CpuBoostMode.EfficientAggressive, CpuBoostMode.Disabled), fake.LastGameCpu);
+        Assert.Equal(fake.GameTdp, fake.LastGameTdp);
+    }
+
     [Theory]
     [InlineData(CpuBoostMode.Disabled)]
     [InlineData(CpuBoostMode.Enabled)]
@@ -936,9 +957,9 @@ public sealed class FrontendNamedPipeTransportTests
     // by hand. A stale value here would make the frame rejected at the version check instead of
     // reaching the method-shape validation this test actually targets.
     [Theory]
-    [InlineData("{\"ProtocolVersion\":6,\"Kind\":\"Request\",\"RequestId\":1}")]
-    [InlineData("{\"ProtocolVersion\":6,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
-    [InlineData("{\"ProtocolVersion\":6,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
+    [InlineData("{\"ProtocolVersion\":7,\"Kind\":\"Request\",\"RequestId\":1}")]
+    [InlineData("{\"ProtocolVersion\":7,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":null}")]
+    [InlineData("{\"ProtocolVersion\":7,\"Kind\":\"Request\",\"RequestId\":1,\"Method\":123}")]
     public async Task Invalid_method_shapes_return_invalid_message_without_invoking_frontend(string json)
     {
         var fake = new RecordingFrontendControl();
@@ -1148,11 +1169,23 @@ public sealed class FrontendNamedPipeTransportTests
         public CpuBoostMode? LastAcMode { get; private set; }
         public CpuBoostMode? LastDcMode { get; private set; }
         public bool? LastEnabled { get; private set; }
-        public RecordingFrontendControl() => CpuBoostMutationResult = new(FrontendCpuBoostMutationOutcome.Succeeded, null, CpuBoostSnapshot);
+        public FrontendGameProfileSnapshot GameProfile { get; } = new(12345, "Test Game", true, true,
+            new(CpuBoostMode.Enabled, CpuBoostMode.Disabled), new(new(20, 22), new(18, 20)), true, new(8, 30, 8, 40));
+        public FrontendGameTdpConfiguration GameTdp { get; } = new(new(21, 31), new(11, 21));
+        public FrontendGameProfileMutationResult GameMutationResult { get; private set; }
+        public uint? LastGameProfileAppId { get; private set; }
+        public (CpuBoostMode Ac, CpuBoostMode Dc)? LastGameCpu { get; private set; }
+        public FrontendGameTdpConfiguration? LastGameTdp { get; private set; }
+        public RecordingFrontendControl() { CpuBoostMutationResult = new(FrontendCpuBoostMutationOutcome.Succeeded, null, CpuBoostSnapshot); GameMutationResult = new(FrontendGameProfileMutationOutcome.Succeeded, null, GameProfile); }
         public Task<FrontendCpuBoostSnapshot> CaptureCpuBoostAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult(CpuBoostSnapshot); }
         public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostAcAsync(CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastAcMode = mode; return Task.FromResult(CpuBoostMutationResult); }
         public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostDcAsync(CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastDcMode = mode; return Task.FromResult(CpuBoostMutationResult); }
         public Task<FrontendCpuBoostMutationResult> SetDeviceCpuBoostEnabledAsync(bool enabled, CancellationToken t = default) { TotalCalls++; LastEnabled = enabled; return Task.FromResult(CpuBoostMutationResult); }
+        public Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken t = default) { TotalCalls++; return Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([new(12345, "Test Game", FrontendProfileGameSource.Steam)]); }
+        public Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; return Task.FromResult(GameProfile with { AppId = appId }); }
+        public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; return Task.FromResult(GameMutationResult); }
+        public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAsync(uint appId, CpuBoostMode ac, CpuBoostMode dc, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; LastGameCpu = (ac, dc); return Task.FromResult(GameMutationResult); }
+        public Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; LastGameTdp = configuration; return Task.FromResult(GameMutationResult); }
 
         public FrontendClawSensorProbeSnapshot ClawSensorProbeSnapshot { get; } = new(
             true, FrontendClawSensorProbeState.RecordingPhase, FrontendClawSensorProbePhase.RollLeft, 1, 7,

@@ -244,6 +244,22 @@ public sealed class CpuBoostFrontendTests : IDisposable
         Assert.Equal(0, policy.DcWriteCount);
     }
 
+    [Fact]
+    public async Task Shutdown_barrier_rejects_game_profile_mutation_without_persistence()
+    {
+        var policy = new FakeCpuBoostPowerPolicy { Ac = CpuBoostSideReading.Known(CpuBoostMode.Aggressive), Dc = CpuBoostSideReading.Known(CpuBoostMode.Disabled) };
+        var runtime = CreateReconciledRuntime(policy);
+        var profilesPath = Path.Combine(_testDirectory, "profiles.json");
+        var control = CreateControl(runtime, new GameProfileMutations(new ProfileStore(profilesPath)));
+        var contentsBeforeShutdown = File.ReadAllText(profilesPath);
+
+        control.BeginProcessShutdown();
+
+        var exception = await Assert.ThrowsAsync<FrontendProtocolException>(() => control.SetGameProfileEnabledAsync(12345, true, "Game"));
+        Assert.Contains("shutting down", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(contentsBeforeShutdown, File.ReadAllText(profilesPath));
+    }
+
     private CpuBoostRuntime CreateReconciledRuntime(ICpuBoostPowerPolicy policy)
     {
         var runtime = new CpuBoostRuntime(new ProfileStore(Path.Combine(_testDirectory, "profiles.json")), policy);
@@ -252,6 +268,9 @@ public sealed class CpuBoostFrontendTests : IDisposable
     }
 
     private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime cpuBoostRuntime)
+        => CreateControl(cpuBoostRuntime, null);
+
+    private InProcessAddonFrontendControl CreateControl(CpuBoostRuntime cpuBoostRuntime, GameProfileMutations? gameProfileMutations)
     {
         SteamInputAddonforClaw.Diagnostics.AppLog.DirectoryOverride = _testDirectory;
         var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
@@ -263,7 +282,7 @@ public sealed class CpuBoostFrontendTests : IDisposable
             new DeveloperTestModeState(),
             "",
             captureRoutingStatus: () => new(true, RoutingOperationalState.Passive, false, false),
-            cpuBoostRuntime: cpuBoostRuntime);
+            cpuBoostRuntime: cpuBoostRuntime, gameProfileMutations: gameProfileMutations);
     }
 
     public void Dispose()

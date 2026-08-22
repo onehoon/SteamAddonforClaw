@@ -56,6 +56,9 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     // and must keep working when _runtime is null (no routing composition at all).
     private readonly CpuBoostRuntime? _cpuBoostRuntime;
     private readonly TdpRuntime? _tdpRuntime;
+    private readonly GameProfileMutations? _gameProfileMutations;
+    private readonly Func<uint> _actualRunningAppIdSource;
+    private readonly Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>> _scanProfileGames;
 
     /// <param name="oem1MappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -66,11 +69,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
         _cpuBoostRuntime = cpuBoostRuntime;
         _tdpRuntime = tdpRuntime;
+        _gameProfileMutations = gameProfileMutations;
+        _actualRunningAppIdSource = actualRunningAppIdSource ?? (() => _runtime?.ActualRunningAppId ?? 0);
+        _scanProfileGames = scanProfileGames ?? (token => new ProfileGameCatalogScanner().ScanAsync(token));
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -87,6 +93,72 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     public event EventHandler? StateInvalidated;
+
+    public async Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) =>
+        (await _scanProfileGames(cancellationToken).ConfigureAwait(false)).Select(x => new FrontendProfileGameCatalogEntry(x.AppId, x.Name, x.Source == ProfileGameSource.Steam ? FrontendProfileGameSource.Steam : FrontendProfileGameSource.NonSteam)).ToArray();
+
+    public Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(CaptureGameProfile(appId));
+    public Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default)
+    {
+        var appId = _actualRunningAppIdSource();
+        return Task.FromResult(appId == 0 ? UnavailableGameProfile(0) : CaptureGameProfile(appId));
+    }
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var outcome = _gameProfileMutations?.SetEnabled(appId, enabled, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable;
+        return Task.FromResult(MutateGame(appId, outcome, cpu: true, tdp: true));
+    }
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAsync(uint appId, CpuBoostMode ac, CpuBoostMode dc, CancellationToken cancellationToken = default) =>
+        MutateCpuBoostAfterShutdownCheck(appId, ac, dc);
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) =>
+        MutateTdpAfterShutdownCheck(appId, configuration);
+
+    private Task<FrontendGameProfileMutationResult> MutateCpuBoostAfterShutdownCheck(uint appId, CpuBoostMode ac, CpuBoostMode dc)
+    {
+        ThrowIfShuttingDown();
+        return Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetCpuBoost(appId, ac, dc) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: true, tdp: false));
+    }
+
+    private Task<FrontendGameProfileMutationResult> MutateTdpAfterShutdownCheck(uint appId, FrontendGameTdpConfiguration configuration)
+    {
+        ThrowIfShuttingDown();
+        return Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetTdp(appId, new() { Pl1Watts = configuration.Ac.Pl1Watts, Pl2Watts = configuration.Ac.Pl2Watts }, new() { Pl1Watts = configuration.Dc.Pl1Watts, Pl2Watts = configuration.Dc.Pl2Watts }) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: true));
+    }
+
+    private FrontendGameProfileSnapshot CaptureGameProfile(uint appId)
+    {
+        var captured = _gameProfileMutations?.CaptureProfile(appId);
+        if (captured is null) return UnavailableGameProfile(appId);
+        var profile = captured.Profile;
+        var limits = _tdpRuntime?.CaptureSnapshot().Policy is { } policy ? new FrontendTdpLimits(policy.Pl1MinimumWatts, policy.Pl1MaximumWatts, policy.Pl2MinimumWatts, policy.Pl2MaximumWatts) : null;
+        return new(appId, profile.DisplayName, captured.Exists, captured.Exists && profile.Enabled,
+            new(profile.Performance.CpuBoost!.Ac, profile.Performance.CpuBoost.Dc),
+            new(new(profile.Performance.Tdp!.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts), new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)), captured.PersistenceWritable, limits);
+    }
+
+    private FrontendGameProfileMutationResult MutateGame(uint appId, GameProfileMutations.MutationOutcome outcome, bool cpu, bool tdp)
+    {
+        var mapped = outcome switch { GameProfileMutations.MutationOutcome.Succeeded => FrontendGameProfileMutationOutcome.Succeeded, GameProfileMutations.MutationOutcome.InvalidTarget => FrontendGameProfileMutationOutcome.InvalidTarget, GameProfileMutations.MutationOutcome.PersistenceFailed => FrontendGameProfileMutationOutcome.PersistenceFailed, _ => FrontendGameProfileMutationOutcome.Unavailable };
+        if (outcome == GameProfileMutations.MutationOutcome.Succeeded)
+        {
+            ReconcileGame(appId, cpu, tdp); StateInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+        return new(mapped, mapped == FrontendGameProfileMutationOutcome.Succeeded ? null : "Game Profile mutation failed.", CaptureGameProfile(appId));
+    }
+
+    private void ReconcileGame(uint appId, bool cpu, bool tdp)
+    {
+        if (appId != _actualRunningAppIdSource()) return;
+        if (cpu) try { _cpuBoostRuntime?.Reconcile(appId); } catch (Exception ex) { AppLog.Error("Profiles.CpuBoost", "Game Profile CPU reconcile failed.", ex); }
+        if (tdp) try { _tdpRuntime?.ReconcileCurrent(true, false, "GameProfileMutation"); } catch (Exception ex) { AppLog.Error("Profiles.Tdp", "Game Profile TDP reconcile failed.", ex); }
+    }
+
+    private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(new(20, 22), new(20, 22)), false, null);
+    private FrontendGameProfileMutationResult UnavailableMutation(uint appId, string message) => new(FrontendGameProfileMutationOutcome.Unavailable, message, CaptureGameProfile(appId));
 
     public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), _registrationMessage, new(_developer.IsEnabled), AppLog.DirectoryPath, _oem1MappingAvailable, _oem1MappingAvailable));
 

@@ -386,6 +386,21 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_bridge_exposes_active_game_profile_path_separate_from_device_mutation_gate()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "QamFrontendBridge.cs");
+
+        Assert.Contains("captureActiveGameProfile", source);
+        Assert.Contains("setActiveGameProfileEnabled", source);
+        Assert.Contains("setActiveGameCpuBoost", source);
+        Assert.Contains("setActiveGameTdp", source);
+        var activePath = source[source.IndexOf("private async Task<object> ActiveMutationAsync", StringComparison.Ordinal)..];
+        Assert.Contains("CaptureActiveGameProfileAsync", activePath);
+        Assert.DoesNotContain("CaptureStatusAsync", activePath);
+        Assert.DoesNotContain("MutateAsync", activePath);
+    }
+
+    [Fact]
     public void Qam_cpu_boost_panel_reuses_its_descriptor_and_retires_settled_mode_work()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");

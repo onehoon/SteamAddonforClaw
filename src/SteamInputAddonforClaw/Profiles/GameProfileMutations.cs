@@ -1,4 +1,6 @@
 using SteamInputAddonforClaw.Contracts.DeviceProfiles;
+using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Devices.Abstractions;
 
 namespace SteamInputAddonforClaw.Profiles;
 
@@ -10,46 +12,87 @@ internal sealed class GameProfileMutations
     private readonly ProfileStore _store;
     private readonly ProfileMutationGate _gate;
 
-    internal GameProfileMutations(ProfileStore store, ProfileMutationGate? gate = null)
+    private HandheldDeviceModelId? _modelId;
+    internal GameProfileMutations(ProfileStore store, ProfileMutationGate? gate = null, HandheldDeviceModelId? modelId = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _gate = gate ?? new ProfileMutationGate();
+        _modelId = modelId;
+    }
+
+    internal void SetModelId(HandheldDeviceModelId modelId) => _modelId = modelId;
+
+    internal enum MutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
+    internal sealed record Capture(uint AppId, GameProfile Profile, bool Exists, bool PersistenceWritable);
+
+    internal Capture? CaptureProfile(uint appId)
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return new(appId, Complete(new GameProfile(), loaded.Document.Device), false, false);
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return loaded.Document.Games.TryGetValue(key, out var profile)
+                ? new(appId, Complete(profile, loaded.Document.Device), true, true)
+                : new(appId, Complete(new GameProfile(), loaded.Document.Device), false, true);
+        }
+    }
+
+    internal MutationOutcome SetEnabled(uint appId, bool enabled, string? displayName)
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            GameProfile profile;
+            if (enabled)
+            {
+                var existing = loaded.Document.Games.TryGetValue(key, out var current) ? current : new GameProfile();
+                var completed = Complete(existing, loaded.Document.Device);
+                profile = completed with { Enabled = true, DisplayName = displayName ?? completed.DisplayName };
+            }
+            else
+            {
+                if (!loaded.Document.Games.TryGetValue(key, out var disabledProfile)) return MutationOutcome.Succeeded;
+                profile = disabledProfile with { Enabled = false };
+            }
+            loaded.Document.Games[key] = profile;
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; }
+            catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
+
+    internal MutationOutcome SetCpuBoost(uint appId, CpuBoostMode ac, CpuBoostMode dc)
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var profile)) return MutationOutcome.Unavailable;
+            loaded.Document.Games[key] = profile with { Performance = profile.Performance with { CpuBoost = new GameCpuBoostSettings { Ac = ac, Dc = dc } } };
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
+
+    internal MutationOutcome SetTdp(uint appId, TdpPowerPair ac, TdpPowerPair dc)
+    {
+        if (_modelId is not { } model || !MsiClawTdpPolicy.TryResolve(model, out var policy) || !policy.IsValid(ac) || !policy.IsValid(dc)) return MutationOutcome.InvalidTarget;
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var profile)) return MutationOutcome.Unavailable;
+            loaded.Document.Games[key] = profile with { Performance = profile.Performance with { Tdp = new GameTdpSettings { Ac = ac, Dc = dc } } };
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
+        }
     }
 
     internal bool Enable(uint appId, string? displayName)
-    {
-        lock (_gate.Sync)
-        {
-            var loaded = _store.Load();
-            if (!loaded.CanSafelyReplace)
-                return false;
-
-            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            var existing = loaded.Document.Games.TryGetValue(key, out var profile) ? profile : new GameProfile();
-            var completed = Complete(existing, loaded.Document.Device);
-            loaded.Document.Games[key] = completed with { Enabled = true, DisplayName = displayName ?? completed.DisplayName };
-            _store.Save(loaded.Document);
-            return true;
-        }
-    }
+        => SetEnabled(appId, true, displayName) == MutationOutcome.Succeeded;
 
     internal bool Disable(uint appId)
-    {
-        lock (_gate.Sync)
-        {
-            var loaded = _store.Load();
-            if (!loaded.CanSafelyReplace)
-                return false;
-
-            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            if (!loaded.Document.Games.TryGetValue(key, out var profile))
-                return true;
-
-            loaded.Document.Games[key] = profile with { Enabled = false };
-            _store.Save(loaded.Document);
-            return true;
-        }
-    }
+        => SetEnabled(appId, false, null) == MutationOutcome.Succeeded;
 
     private static GameProfile Complete(GameProfile profile, DeviceSettings device)
     {
