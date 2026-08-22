@@ -169,7 +169,10 @@ public sealed class ProfileStore
         && document.Games.Values.All(game =>
             game is not null
             && game.Performance is not null
-            && game.Display is not null);
+            && game.Display is not null
+            && (!game.Enabled
+                || (game.Performance.CpuBoost is not null
+                    && game.Performance.Tdp is { Ac: not null, Dc: not null })));
 
     /// <summary>Crash-resistant replace: serialize to a same-directory temporary file, then
     /// atomically move it over the canonical path -- mirrors <see cref="SteamInputAddonforClaw.Settings.SettingsStore.Save"/>.

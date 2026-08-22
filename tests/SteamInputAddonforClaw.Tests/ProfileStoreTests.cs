@@ -377,6 +377,33 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(json, File.ReadAllText(path));
     }
 
+    [Fact]
+    public void Load_EnabledIncompleteGameProfile_ReturnsMalformedAndPreservesTheFile()
+    {
+        var json = "{\"schemaVersion\":1,\"device\":{},\"games\":{\"123\":{\"enabled\":true}}}";
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, json);
+
+        var result = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Equal(ProfileLoadStatus.Malformed, result.Status);
+        Assert.False(result.CanSafelyReplace);
+        Assert.Equal(json, File.ReadAllText(ProfilesPath));
+    }
+
+    [Fact]
+    public void Load_DisabledIncompleteGameProfile_RemainsLoadable()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(ProfilesPath, "{\"schemaVersion\":1,\"device\":{},\"games\":{\"123\":{\"displayName\":\"Legacy\"}}}");
+
+        var result = new ProfileStore(ProfilesPath).Load();
+
+        Assert.Equal(ProfileLoadStatus.Loaded, result.Status);
+        Assert.False(result.Document.Games["123"].Enabled);
+        Assert.Equal("Legacy", result.Document.Games["123"].DisplayName);
+    }
+
     // ---- Atomic save: failure before replacement must not destroy the existing document ----
 
     [Fact]
