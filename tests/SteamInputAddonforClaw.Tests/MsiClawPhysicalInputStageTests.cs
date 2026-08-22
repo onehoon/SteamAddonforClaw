@@ -272,6 +272,47 @@ public sealed class MsiClawPhysicalInputStageTests
         Assert.False(input.IsRunning);
     }
 
+    [Fact]
+    public async Task ReconcileOwnedInput_when_running_is_noop()
+    {
+        var descriptor = Device();
+        var enumerator = new FakeEnumerator([descriptor]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerator, input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        var generation = stage.CurrentSessionGeneration;
+
+        var result = await stage.ReconcileOwnedInputAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Healthy", result.Reason);
+        Assert.Equal(generation, stage.CurrentSessionGeneration);
+        Assert.Equal(1, enumerator.EnumerateCount);
+        Assert.Equal(1, input.StartPreparedCount);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedInput_when_owned_but_stopped_reacquires_same_physical_device()
+    {
+        var descriptor = Device();
+        var enumerators = new Queue<FakeEnumerator>([new([descriptor]), new([descriptor])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        var generation = stage.CurrentSessionGeneration;
+        await input.StopAsync();
+
+        var result = await stage.ReconcileOwnedInputAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(input.IsRunning);
+        Assert.Equal(2, input.StartPreparedCount);
+        Assert.True(stage.CurrentSessionGeneration > generation);
+        Assert.Equal(descriptor.PhysicalIdentity, stage.CurrentIdentity!.PhysicalIdentity);
+    }
+
     private static DirectInputDeviceDescriptor Device() => new(
         Guid.NewGuid(), Guid.NewGuid(), "test", 0x0DB0, 0x1902,
         "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST", "HID\\INSTANCE", "USB\\MSI_ROOT", 0x0001, 0x0005, 17, 6, "Verified");

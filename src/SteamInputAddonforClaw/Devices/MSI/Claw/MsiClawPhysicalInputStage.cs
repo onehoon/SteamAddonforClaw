@@ -213,80 +213,121 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            MsiClawPhysicalInputIdentity? identity;
             lock (_sync)
             {
                 if (!_ownsInputSession) return RoutingStageOperationResult.Failure("PhysicalInputNotOwned");
-                if (!_suspendPaused) return RoutingStageOperationResult.Success("AlreadyRunning");
-                identity = _currentIdentity;
             }
 
-            AppLog.Info("PhysicalInput", "Physical input resume reacquire started.",
-                ("Event", "PhysicalInputResumeReacquireStarted"), ("SessionGeneration", CurrentSessionGeneration),
-                ("PhysicalIdentity", identity!.PhysicalIdentity));
-            var deadline = Stopwatch.GetTimestamp() + (long)(ResumeRetryWindow.TotalSeconds * Stopwatch.Frequency);
-            var attempt = 0;
-            while (attempt < 30 && Stopwatch.GetTimestamp() <= deadline)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                attempt++;
-                IDirectInputDeviceEnumerator? enumerator = null;
-                try
-                {
-                    enumerator = _enumeratorFactory();
-                    var candidates = enumerator.EnumerateGameControllers();
-                    var selection = MsiClawDirectInputDeviceSelector.Select(candidates);
-                    if (selection.IsSelected && string.Equals(selection.Descriptor!.PhysicalIdentity, identity!.PhysicalIdentity, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var result = _inputSource.StartPrepared(selection.Descriptor);
-                        if (result.Started)
-                        {
-                            try
-                            {
-                                var ready = await _inputSource.WaitForFirstValidStateAsync(cancellationToken).ConfigureAwait(false);
-                                cancellationToken.ThrowIfCancellationRequested();
-                                if (ready && _inputSource.IsRunning)
-                                {
-                                    lock (_sync)
-                                    {
-                                        _currentIdentity = new(selection.Descriptor.InstanceGuid, selection.Descriptor.DevicePath!, selection.Descriptor.PnpInstanceId!, selection.Descriptor.PhysicalIdentity!);
-                                        _sessionGeneration++;
-                                        _suspendPaused = false;
-                                    }
-                                    AppLog.Info("PhysicalInput", "Physical input resume reacquired.",
-                                        ("Event", "PhysicalInputResumeReacquired"), ("SessionGeneration", CurrentSessionGeneration),
-                                        ("InstanceGuid", selection.Descriptor.InstanceGuid), ("PnpInstanceId", selection.Descriptor.PnpInstanceId), ("Attempt", attempt));
-                                    return RoutingStageOperationResult.Success("Resumed");
-                                }
-                            }
-                            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                            {
-                                await _inputSource.StopAsync().ConfigureAwait(false);
-                                throw;
-                            }
-                            await _inputSource.StopAsync().ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            AppLog.Debug("PhysicalInput", "Physical input resume is waiting for a usable topology.",
-                                ("Event", "PhysicalInputResumeWaitingForTopology"), ("Attempt", attempt), ("Reason", result.Status));
-                        }
-                    }
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    AppLog.Debug("PhysicalInput", "Physical input resume probe failed.", ("Attempt", attempt), ("ExceptionType", exception.GetType().Name));
-                }
-                finally { enumerator?.Dispose(); }
-
-                await _resumeDelay(ResumeRetryInterval, cancellationToken).ConfigureAwait(false);
-            }
-
-            AppLog.Warn("PhysicalInput", "Physical input resume reacquire failed.", null,
-                ("Event", "PhysicalInputResumeReacquireFailed"), ("SessionGeneration", CurrentSessionGeneration),
-                ("FailureReason", "BoundedTopologyWindowExpired"), ("Attempts", attempt));
-            return RoutingStageOperationResult.Failure("ResumeReacquireFailed");
+            return await ReconcileOwnedInputCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally { _operationGate.Release(); }
+    }
+
+    internal async ValueTask<RoutingStageOperationResult> ReconcileOwnedInputAsync(CancellationToken cancellationToken)
+    {
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (_sync)
+            {
+                if (!_ownsInputSession || _currentIdentity is null)
+                    return RoutingStageOperationResult.Failure("PhysicalInputNotOwned");
+                if (_inputSource.IsRunning)
+                {
+                    _suspendPaused = false;
+                    return RoutingStageOperationResult.Success("Healthy");
+                }
+            }
+
+            return await ReacquireOwnedInputCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _operationGate.Release(); }
+    }
+
+    private async ValueTask<RoutingStageOperationResult> ReconcileOwnedInputCoreAsync(CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (!_ownsInputSession || _currentIdentity is null)
+                return RoutingStageOperationResult.Failure("PhysicalInputNotOwned");
+            if (_inputSource.IsRunning)
+            {
+                _suspendPaused = false;
+                return RoutingStageOperationResult.Success("AlreadyRunning");
+            }
+        }
+
+        return await ReacquireOwnedInputCoreAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<RoutingStageOperationResult> ReacquireOwnedInputCoreAsync(CancellationToken cancellationToken)
+    {
+        MsiClawPhysicalInputIdentity identity;
+        lock (_sync) identity = _currentIdentity!;
+        AppLog.Info("PhysicalInput", "Physical input resume reacquire started.",
+            ("Event", "PhysicalInputResumeReacquireStarted"), ("SessionGeneration", CurrentSessionGeneration),
+            ("PhysicalIdentity", identity.PhysicalIdentity));
+        var deadline = Stopwatch.GetTimestamp() + (long)(ResumeRetryWindow.TotalSeconds * Stopwatch.Frequency);
+        var attempt = 0;
+        while (attempt < 30 && Stopwatch.GetTimestamp() <= deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            attempt++;
+            IDirectInputDeviceEnumerator? enumerator = null;
+            try
+            {
+                enumerator = _enumeratorFactory();
+                var candidates = enumerator.EnumerateGameControllers();
+                var selection = MsiClawDirectInputDeviceSelector.Select(candidates);
+                if (selection.IsSelected && string.Equals(selection.Descriptor!.PhysicalIdentity, identity.PhysicalIdentity, StringComparison.OrdinalIgnoreCase))
+                {
+                    var result = _inputSource.StartPrepared(selection.Descriptor);
+                    if (result.Started)
+                    {
+                        try
+                        {
+                            var ready = await _inputSource.WaitForFirstValidStateAsync(cancellationToken).ConfigureAwait(false);
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (ready && _inputSource.IsRunning)
+                            {
+                                lock (_sync)
+                                {
+                                    _currentIdentity = new(selection.Descriptor.InstanceGuid, selection.Descriptor.DevicePath!, selection.Descriptor.PnpInstanceId!, selection.Descriptor.PhysicalIdentity!);
+                                    _sessionGeneration++;
+                                    _suspendPaused = false;
+                                }
+                                AppLog.Info("PhysicalInput", "Physical input resume reacquired.",
+                                    ("Event", "PhysicalInputResumeReacquired"), ("SessionGeneration", CurrentSessionGeneration),
+                                    ("InstanceGuid", selection.Descriptor.InstanceGuid), ("PnpInstanceId", selection.Descriptor.PnpInstanceId), ("Attempt", attempt));
+                                return RoutingStageOperationResult.Success("Resumed");
+                            }
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            await _inputSource.StopAsync().ConfigureAwait(false);
+                            throw;
+                        }
+                        await _inputSource.StopAsync().ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        AppLog.Debug("PhysicalInput", "Physical input resume is waiting for a usable topology.",
+                            ("Event", "PhysicalInputResumeWaitingForTopology"), ("Attempt", attempt), ("Reason", result.Status));
+                    }
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                AppLog.Debug("PhysicalInput", "Physical input resume probe failed.", ("Attempt", attempt), ("ExceptionType", exception.GetType().Name));
+            }
+            finally { enumerator?.Dispose(); }
+
+            await _resumeDelay(ResumeRetryInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        AppLog.Warn("PhysicalInput", "Physical input resume reacquire failed.", null,
+            ("Event", "PhysicalInputResumeReacquireFailed"), ("SessionGeneration", CurrentSessionGeneration),
+            ("FailureReason", "BoundedTopologyWindowExpired"), ("Attempts", attempt));
+        return RoutingStageOperationResult.Failure("ResumeReacquireFailed");
     }
 }
