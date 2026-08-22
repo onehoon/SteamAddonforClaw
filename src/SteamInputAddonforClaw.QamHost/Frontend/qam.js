@@ -184,19 +184,30 @@
     return null;
   }
 
-  function findQamTitleClass(modules) {
+  function isSteamClassModule(candidate) {
+    if (!candidate || typeof candidate !== "object" || candidate.__esModule) return false;
+    const keys = Object.keys(candidate);
+    return keys.length > 0 && keys.every(key => {
+      const descriptor = Object.getOwnPropertyDescriptor(candidate, key);
+      return !descriptor?.get && typeof candidate[key] === "string";
+    });
+  }
+
+  function findNativeClassStyles(modules) {
+    const classModules = [];
     for (const module of modules) {
       for (const candidate of [module?.default, module]) {
-        if (!candidate || typeof candidate !== "object") continue;
-        const title = candidate.Title;
-        if (typeof title === "string" && title.length > 0) {
-          logOnce("native-title", "QAM native Title class resolved.");
-          return title;
-        }
+        if (isSteamClassModule(candidate)) classModules.push(candidate);
       }
     }
-    logOnce("native-title", "QAM native Title class unavailable.");
-    return null;
+    const qam = classModules.find(candidate => candidate.Title && candidate.QuickAccessMenu && candidate.BatteryDetailsLabels);
+    const slider = classModules.find(candidate => candidate.SliderControlPanelGroup);
+    if (!qam?.Title || !slider?.DescriptionValue) {
+      logOnce("native-styles", "QAM native title/slider class styles unavailable.");
+      return null;
+    }
+    logOnce("native-styles", "QAM native title/slider class styles resolved.");
+    return { QamTitleClass: qam.Title, SliderDescriptionValueClass: slider.DescriptionValue };
   }
 
   function findNativeQamComponents(webpackRequire) {
@@ -207,7 +218,7 @@
       ToggleField: findToggleField(commonUiModule),
       SliderField: findSliderField(commonUiModule),
       ...findPanelComponents(modules),
-      QamTitleClass: findQamTitleClass(modules),
+      ...findNativeClassStyles(modules),
     };
     if (!components.ToggleField || !components.SliderField || !components.PanelSection || !components.PanelSectionRow || !components.QamTitleClass) {
       logOnce("nativeControls", "QAM required native controls/layout unavailable; Addon tab is disabled.");
@@ -484,7 +495,8 @@
       const tdpWritableRef = React.useRef(false);
       const tdpEditGeneration = React.useRef(0);
       const modeWritableRef = React.useRef(false);
-      const selfMutationInvalidationRef = React.useRef(0);
+      const mutationDepthRef = React.useRef(0);
+      const deferredInvalidationRef = React.useRef(false);
 
       const failClosed = React.useCallback(message => {
         for (const key of ["ac", "dc"]) {
@@ -526,14 +538,25 @@
         }
       }, []);
 
+      const beginMutation = React.useCallback(() => { mutationDepthRef.current++; }, []);
+      const endMutation = React.useCallback(() => {
+        mutationDepthRef.current = Math.max(0, mutationDepthRef.current - 1);
+        if (mutationDepthRef.current === 0 && deferredInvalidationRef.current) {
+          deferredInvalidationRef.current = false;
+          cancelModeTimers();
+          setPreviewAc(null); setPreviewDc(null);
+          void refresh();
+        }
+      }, [cancelModeTimers, refresh]);
+
       React.useEffect(() => { void refresh(); return cancelModeTimers; }, [refresh, cancelModeTimers]);
 
       React.useEffect(() => {
         const previous = state.onStateInvalidated;
         const handler = () => {
           previous?.();
-          if (selfMutationInvalidationRef.current > 0) {
-            selfMutationInvalidationRef.current--;
+          if (mutationDepthRef.current > 0) {
+            deferredInvalidationRef.current = true;
             return;
           }
           cancelModeTimers();
@@ -567,13 +590,12 @@
           if (!state.installed || !modeWritableRef.current) return;
           setBusy(true); setError(null);
           try {
-            selfMutationInvalidationRef.current++;
+            beginMutation();
             const result = await request(side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value });
-            selfMutationInvalidationRef.current = 0;
             setCpu(result.snapshot); side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
             if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
           } catch (_) { failClosed("CPU Boost update failed"); }
-          finally { setBusy(false); }
+          finally { endMutation(); setBusy(false); }
         }, 250);
       };
       const setEnabled = async value => {
@@ -583,12 +605,11 @@
         if (!mutationAvailable) return;
         setBusy(true); setError(null);
         try {
-          selfMutationInvalidationRef.current++;
+          beginMutation();
           const result = await request("setDeviceCpuBoostEnabled", { enabled: value });
-          selfMutationInvalidationRef.current = 0;
           setCpu(result.snapshot); if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
         } catch (_) { failClosed("CPU Boost update failed"); }
-        finally { setBusy(false); }
+        finally { endMutation(); setBusy(false); }
       };
       const tdpLimits = tdp?.limits;
       const adjustTdpPair = (pl1WasEdited, pl1, pl2) => {
@@ -605,15 +626,15 @@
         if (!state.installed || !tdpWritableRef.current || !draft) return;
         setError(null);
         try {
-          selfMutationInvalidationRef.current++;
+          beginMutation();
           const result = await request("setDeviceTdp", { configuration: draft });
-          selfMutationInvalidationRef.current = 0;
           if (generation === tdpEditGeneration.current) {
             tdpEditGeneration.current = 0;
             setTdp(result.snapshot); setTdpDraft(result.snapshot.configuration); tdpDraftRef.current = result.snapshot.configuration;
           }
           if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
         } catch (_) { failClosed("TDP update failed"); }
+        finally { endMutation(); }
       };
       const scheduleTdp = (nextDraft) => {
         if (!tdpWritableRef.current) return;
@@ -627,13 +648,12 @@
         if (tdpTimer.current) clearTimeout(tdpTimer.current);
         tdpTimer.current = null; tdpEditGeneration.current = 0; setBusy(true); setError(null);
         try {
-          selfMutationInvalidationRef.current++;
+          beginMutation();
           const result = await request("setDeviceTdpEnabled", { enabled });
-          selfMutationInvalidationRef.current = 0;
           setTdp(result.snapshot); setTdpDraft(result.snapshot.configuration); tdpDraftRef.current = result.snapshot.configuration;
           if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
         } catch (_) { failClosed("TDP update failed"); }
-        finally { setBusy(false); }
+        finally { endMutation(); setBusy(false); }
       };
       const tdpSlider = (label, source, limit, value, separator) => value == null || !limit ? null : React.createElement(native.SliderField, {
         label,
@@ -658,7 +678,7 @@
       const slider = (title, side, value, bottomSeparator) => value == null ? null : React.createElement(native.SliderField, {
         label: React.createElement(React.Fragment, null,
           React.createElement("span", null, title),
-          React.createElement("span", { className: "DescriptionValue" }, labelFor(value))),
+          React.createElement("span", { className: native.SliderDescriptionValueClass }, labelFor(value))),
         min: 0,
         max: 6,
         step: 1,
@@ -670,44 +690,40 @@
         onChange: next => scheduleMode(side, Number(next)),
       });
 
-      const controls = [
-        React.createElement(native.ToggleField, {
-          key: "enabled",
+      const controls = [{ key: "cpu-toggle", node: React.createElement(native.ToggleField, {
           label: "CPU Boost",
           checked: !!cpu?.enabled,
           disabled: !mutationAvailable,
           bottomSeparator: cpu?.enabled ? "none" : "standard",
           onChange: value => void setEnabled(!!value),
-        }),
-      ];
+        }) }];
       if (cpu?.enabled) {
-        controls.push(slider("Plugged in", "ac", sideValue(cpu.ac, previewAc), "none"));
-        controls.push(slider("On battery", "dc", sideValue(cpu.dc, previewDc), "standard"));
+        controls.push({ key: "cpu-plugged-in", node: slider("Plugged in", "ac", sideValue(cpu.ac, previewAc), "none") });
+        controls.push({ key: "cpu-on-battery", node: slider("On battery", "dc", sideValue(cpu.dc, previewDc), "standard") });
       }
 
-      const tdpControls = [React.createElement(native.ToggleField, {
-        key: "tdp-enabled",
+      const tdpControls = [{ key: "tdp-toggle", node: React.createElement(native.ToggleField, {
         label: "TDP Control",
         checked: !!tdpDraft?.enabled,
         disabled: !tdpMutationAvailable,
         onChange: value => void setTdpEnabled(!!value),
-      })];
+      }) }];
       if (tdpDraft?.enabled && tdpLimits) {
-        tdpControls.push(React.createElement("div", { key: "ac-heading" }, "Plugged in"));
-        tdpControls.push(tdpSlider("PL1", "ac", tdpLimits, tdpDraft.ac?.pl1Watts, "none"));
-        tdpControls.push(tdpSlider("PL2", "ac", tdpLimits, tdpDraft.ac?.pl2Watts, "none"));
-        tdpControls.push(React.createElement("div", { key: "dc-heading" }, "On battery"));
-        tdpControls.push(tdpSlider("PL1", "dc", tdpLimits, tdpDraft.dc?.pl1Watts, "none"));
-        tdpControls.push(tdpSlider("PL2", "dc", tdpLimits, tdpDraft.dc?.pl2Watts, "standard"));
+        tdpControls.push({ key: "tdp-ac-heading", node: React.createElement("div", null, "Plugged in") });
+        tdpControls.push({ key: "tdp-ac-pl1", node: tdpSlider("PL1", "ac", tdpLimits, tdpDraft.ac?.pl1Watts, "none") });
+        tdpControls.push({ key: "tdp-ac-pl2", node: tdpSlider("PL2", "ac", tdpLimits, tdpDraft.ac?.pl2Watts, "none") });
+        tdpControls.push({ key: "tdp-dc-heading", node: React.createElement("div", null, "On battery") });
+        tdpControls.push({ key: "tdp-dc-pl1", node: tdpSlider("PL1", "dc", tdpLimits, tdpDraft.dc?.pl1Watts, "none") });
+        tdpControls.push({ key: "tdp-dc-pl2", node: tdpSlider("PL2", "dc", tdpLimits, tdpDraft.dc?.pl2Watts, "standard") });
       }
 
       return React.createElement(React.Fragment, null,
         unavailable ? React.createElement("p", { key: "unavailable" }, status?.steam?.appId ? "Unavailable while a game is running" : "CPU Boost unavailable") : null,
         displayError ? React.createElement("p", { key: "error" }, displayError) : null,
         React.createElement(native.PanelSection, { key: "cpu-section" },
-          ...controls.filter(Boolean).map((control, index) => React.createElement(native.PanelSectionRow, { key: `cpu-row-${index}` }, control))),
+          ...controls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))),
         React.createElement(native.PanelSection, { key: "tdp-section" },
-          ...tdpControls.filter(Boolean).map((control, index) => React.createElement(native.PanelSectionRow, { key: `tdp-row-${index}` }, control))));
+          ...tdpControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))));
     }
 
     state.addonTabDescriptor = {
