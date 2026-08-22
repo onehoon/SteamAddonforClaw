@@ -104,6 +104,9 @@ public sealed class ElevationConfigurationTests
         Assert.Contains("new NamedPipeClientStream", helper);
         Assert.Contains("await server.ConnectAsync(connectTimeout.Token)", helper);
         Assert.DoesNotContain("new NamedPipeServerStream", helper);
+        Assert.True(client.IndexOf("new NamedPipeServerStream", StringComparison.Ordinal)
+            < client.IndexOf("Process.Start", StringComparison.Ordinal));
+        Assert.Contains("catch\n        {\n            CloseUnderLock();\n            throw;", client);
     }
 
     private static string RepositoryRoot()

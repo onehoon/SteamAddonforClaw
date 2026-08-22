@@ -60,15 +60,23 @@ internal sealed class TdpHelperClient : IAsyncDisposable
     {
         if (_pipe?.IsConnected == true) return;
         CloseUnderLock();
-        var path = Path.Combine(AppContext.BaseDirectory, "SteamInputAddonforClaw.TdpHelper.exe");
-        _process = Process.Start(new ProcessStartInfo(path, _pipeName) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory })
-            ?? throw new InvalidOperationException("TDP helper could not be started.");
         _pipe = new NamedPipeServerStream(_pipeName, PipeDirection.InOut, 1,
             PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        _pipe.WaitForConnectionAsync(connectTimeout.Token).GetAwaiter().GetResult();
-        _reader = new StreamReader(_pipe);
-        _writer = new StreamWriter(_pipe) { AutoFlush = true };
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "SteamInputAddonforClaw.TdpHelper.exe");
+            _process = Process.Start(new ProcessStartInfo(path, _pipeName) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory })
+                ?? throw new InvalidOperationException("TDP helper could not be started.");
+            using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            _pipe.WaitForConnectionAsync(connectTimeout.Token).GetAwaiter().GetResult();
+            _reader = new StreamReader(_pipe);
+            _writer = new StreamWriter(_pipe) { AutoFlush = true };
+        }
+        catch
+        {
+            CloseUnderLock();
+            throw;
+        }
     }
 
     private void CloseUnderLock()
