@@ -21,16 +21,17 @@ namespace SteamInputAddonforClaw.Steam;
 /// </remarks>
 internal sealed class SteamSessionRuntime : IDisposable
 {
-    private readonly SteamRunningAppIdRegistrySource _runningAppIdSource;
+    private readonly IRunningAppIdSource _runningAppIdSource;
     private readonly SteamSessionWatcher _sessionWatcher;
     private readonly SteamBigPictureWatcher _bigPictureWatcher;
     private readonly EffectiveSteamSessionSource _effectiveSource;
     private readonly DiagnosticSessionTracker _diagnosticSessions = new();
+    private bool _actualObservationStarted;
     private bool _disposed;
 
-    internal SteamSessionRuntime(ISteamInputRoutingPreference routingPreference)
+    internal SteamSessionRuntime(ISteamInputRoutingPreference routingPreference, IRunningAppIdSource? runningAppIdSource = null)
     {
-        _runningAppIdSource = new SteamRunningAppIdRegistrySource();
+        _runningAppIdSource = runningAppIdSource ?? new SteamRunningAppIdRegistrySource();
         _sessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
         _bigPictureWatcher = new SteamBigPictureWatcher();
         DeveloperTestModeState = new DeveloperTestModeState();
@@ -38,13 +39,11 @@ internal sealed class SteamSessionRuntime : IDisposable
         _bigPictureWatcher.Start();
         _effectiveSource = new EffectiveSteamSessionSource(_sessionWatcher, _bigPictureWatcher, DeveloperTestModeState, routingPreference);
         _effectiveSource.StateChanged += OnEffectiveStateChanged;
-        // Routing publishes the actual transition before Profile performs I/O or PowrProf work.
-        _sessionWatcher.StateChanged += OnActualRunningAppIdChanged;
     }
 
     internal DeveloperTestModeState DeveloperTestModeState { get; }
     internal SteamSessionState State => _effectiveSource.State;
-    internal uint ActualRunningAppId => _sessionWatcher.State.RunningAppId;
+    internal uint ActualRunningAppId => _runningAppIdSource.GetRunningAppId();
     internal event EventHandler<SteamSessionStateChangedEventArgs>? StateChanged;
     internal event Action<uint>? ActualRunningAppIdChanged;
     internal event Action<bool>? BigPictureStateChanged;
@@ -52,7 +51,16 @@ internal sealed class SteamSessionRuntime : IDisposable
 
     private void OnBigPictureStateChanged(object? sender, EventArgs args) => BigPictureStateChanged?.Invoke(_bigPictureWatcher.IsActive);
 
-    private void OnActualRunningAppIdChanged(object? sender, EventArgs args) => ActualRunningAppIdChanged?.Invoke(_sessionWatcher.State.RunningAppId);
+    private void OnActualRunningAppIdChanged(object? sender, EventArgs args) => ActualRunningAppIdChanged?.Invoke(_runningAppIdSource.GetRunningAppId());
+
+    /// <summary>Starts only the actual AppID fact observation used by Device/Profile. This is
+    /// intentionally independent from the recovery-gated Routing session watcher.</summary>
+    internal void StartActualObservation()
+    {
+        if (_actualObservationStarted) return;
+        _actualObservationStarted = true;
+        _runningAppIdSource.Changed += OnActualRunningAppIdChanged;
+    }
 
     /// <summary>
     /// Starts the primary Steam session watcher and refreshes the effective state. Callers must
@@ -62,6 +70,7 @@ internal sealed class SteamSessionRuntime : IDisposable
     internal void StartRoutingObservation()
     {
         _sessionWatcher.Start();
+        StartActualObservation();
         _effectiveSource.Refresh();
     }
 
@@ -84,10 +93,11 @@ internal sealed class SteamSessionRuntime : IDisposable
         _disposed = true;
         _diagnosticSessions.Complete();
         _effectiveSource.StateChanged -= OnEffectiveStateChanged;
-        _sessionWatcher.StateChanged -= OnActualRunningAppIdChanged;
+        if (_actualObservationStarted)
+            _runningAppIdSource.Changed -= OnActualRunningAppIdChanged;
         _effectiveSource.Dispose();
         _sessionWatcher.Dispose();
         _bigPictureWatcher.Dispose();
-        _runningAppIdSource.Dispose();
+        (_runningAppIdSource as IDisposable)?.Dispose();
     }
 }
