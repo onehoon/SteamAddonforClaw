@@ -5,7 +5,7 @@
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>true</SelfContained>
+    <SelfContained>false</SelfContained>
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64</Platforms>
     <AssemblyName>SteamInputAddonforClaw</AssemblyName>
@@ -17,7 +17,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SteamInputAddonforClaw.TdpHelper\SteamInputAddonforClaw.TdpHelper.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\SteamInputAddonforClaw.Contracts\SteamInputAddonforClaw.Contracts.csproj" />
     <ProjectReference Include="..\SteamInputAddonforClaw.FrontendTransport\SteamInputAddonforClaw.FrontendTransport.csproj" />
     <!-- Dormant OEM1 helper binary: not linked, just built and copied alongside this app's output
@@ -26,7 +25,7 @@
   </ItemGroup>
 
   <Target Name="PublishTdpHelper" BeforeTargets="CopyTdpHelperOutput">
-    <MSBuild Projects="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\SteamInputAddonforClaw.TdpHelper.csproj" Targets="Publish" Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\" />
+    <MSBuild Projects="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\SteamInputAddonforClaw.TdpHelper.csproj" Targets="Publish" Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=false;PublishSingleFile=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\" />
   </Target>
 
   <Target Name="CopyTdpHelperOutput" AfterTargets="Build;Publish">

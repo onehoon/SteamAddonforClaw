@@ -53,7 +53,8 @@ $vpkArguments = @(
     '--packDir', $publishDirectory,
     '--mainExe', 'SteamInputAddonforClaw.exe',
     '--icon', $iconPath,
-    '--outputDir', $releasesDirectory
+    '--outputDir', $releasesDirectory,
+    '--framework', 'net10.0-x64-runtime'
 )
 
 if ($ReleaseNotesPath) {
