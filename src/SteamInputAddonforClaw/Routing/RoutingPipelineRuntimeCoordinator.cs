@@ -158,13 +158,15 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
 
     internal RoutingSessionYieldRequest? RequestCurrentSessionYield()
     {
+        Volatile.Write(ref _sessionYieldRequested, 1);
+        CancelInFlightTransition();
         var session = _sessionCoordinator.ActiveSession;
         session ??= _sessionCoordinator.PendingCleanup?.Session;
         session ??= _sessionCoordinator.EnteringSession;
-        if (session is null) return null;
-        Volatile.Write(ref _sessionYieldRequested, 1);
-        CancelInFlightTransition();
-        return new RoutingSessionYieldRequest(session);
+        if (session is not null) return new RoutingSessionYieldRequest(session);
+        if (_sessionYieldReason is null)
+            Volatile.Write(ref _sessionYieldRequested, 0);
+        return null;
     }
 
     internal bool IsCurrentSessionYieldRequest(RoutingSessionYieldRequest request) =>
@@ -183,8 +185,12 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
-            if (!IsCurrentSessionYieldRequest(request))
+            if (!IsCurrentSessionYieldRequest(request) && Volatile.Read(ref _sessionYieldRequested) == 0)
+            {
+                if (_sessionYieldReason is null)
+                    Volatile.Write(ref _sessionYieldRequested, 0);
                 return new(true, _sessionCoordinator.CurrentState, RoutingActionKind.None, "SessionYieldRequestRetired");
+            }
 
             _sessionYieldReason = "ExternalNativeTakeover";
             AppLog.Warn("Routing.Runtime", "ExternalNativeTakeoverDetected", null,

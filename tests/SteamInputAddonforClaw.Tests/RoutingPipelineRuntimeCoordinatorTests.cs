@@ -116,6 +116,24 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task Yield_request_without_owned_session_does_not_close_next_session_admission()
+    {
+        var executor = new FakeExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(WaitingForSteam(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+
+        Assert.Null(bridge.Bridge.RequestCurrentSessionYield());
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var nextSession = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(nextSession.Succeeded);
+        Assert.Equal(RoutingActionKind.EnterOverride, nextSession.Action);
+    }
+
+    [Fact]
     public async Task Yielded_session_retries_pending_cleanup_without_forward_entry()
     {
         var executor = new FakeExecutor();
