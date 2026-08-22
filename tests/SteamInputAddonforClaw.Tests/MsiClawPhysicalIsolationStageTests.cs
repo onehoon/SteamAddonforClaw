@@ -38,6 +38,46 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
+    public async Task ReconcileOwnedState_repairs_only_owned_hidhide_drift()
+    {
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        hid.Trace.Clear();
+        hid.Applications.Clear();
+        hid.HiddenDevices.Clear();
+        hid.Active = false;
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Repaired", result.Reason);
+        Assert.Equal(["AddApplication", "AddDevice:HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", "SetActive:True"], hid.Trace);
+        Assert.Contains("C:\\addon.exe", hid.Applications);
+        Assert.Contains("HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD", hid.HiddenDevices);
+        Assert.True(hid.Active);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_preserves_foreign_hidhide_entries()
+    {
+        var hid = new FakeHidHide();
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        hid.Trace.Clear();
+        hid.HiddenDevices.Add("HID\\FOREIGN");
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Healthy", result.Reason);
+        Assert.Empty(hid.Trace);
+        Assert.Contains("HID\\FOREIGN", hid.HiddenDevices);
+    }
+
+    [Fact]
     public async Task InactiveHidHideIsEnabledLastAndRestoredFirst()
     {
         var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };

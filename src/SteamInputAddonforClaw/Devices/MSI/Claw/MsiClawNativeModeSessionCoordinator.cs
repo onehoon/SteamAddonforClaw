@@ -41,6 +41,46 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
     public bool HasOwnedRecoveryBoundary { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned; } }
     public Guid? CurrentRecoverySessionId { get { lock (_recoveryStateSync) return _recoveryBoundaryOwned ? _recoverySessionId : null; } }
 
+    internal async Task<RoutingStageOperationResult> ReconcileOwnedStateAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_active || _snapshot is null)
+                return RoutingStageOperationResult.Failure("NativeModeNotOwned");
+
+            var original = _snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
+            if (original is null || original.IdentityConfidence != MsiClawIdentityConfidence.Strong)
+                return RoutingStageOperationResult.Failure("OriginalIdentityUnavailable");
+
+            var current = await _nativeState.CaptureStableCurrentSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            var currentPayload = current.Snapshot?.Payload.Deserialize<MsiClawNativeStatePayload>();
+            if (!current.AllowsMutation || currentPayload is null)
+                return RoutingStageOperationResult.Failure(current.Reason);
+
+            var expectedIdentity = MsiClawPhysicalIdentity.FromPayload(original);
+            var actualIdentity = MsiClawPhysicalIdentity.FromPayload(currentPayload);
+            var samePhysicalDevice = expectedIdentity.Confidence == MsiClawIdentityConfidence.Strong
+                && actualIdentity.Confidence == MsiClawIdentityConfidence.Strong
+                && ((MsiClawPhysicalIdentity.IsUsableContainer(expectedIdentity.ContainerId)
+                    && MsiClawPhysicalIdentity.IsUsableContainer(actualIdentity.ContainerId)
+                    && expectedIdentity.ContainerId == actualIdentity.ContainerId)
+                    || (!string.IsNullOrWhiteSpace(expectedIdentity.PhysicalDeviceKey)
+                        && string.Equals(expectedIdentity.PhysicalDeviceKey, actualIdentity.PhysicalDeviceKey, StringComparison.OrdinalIgnoreCase)));
+            if (!samePhysicalDevice)
+                return RoutingStageOperationResult.Failure("PhysicalIdentityMismatch");
+            if (currentPayload.Mode != MsiClawNativeMode.DirectInput || currentPayload.ProductId != MsiClawHardware.DirectInputProductId)
+                return RoutingStageOperationResult.Failure("NativeModeDrifted");
+
+            AppLog.Info("NativeMode", "Owned native mode is healthy.",
+                ("Event", "NativeModeHealthHealthy"), ("PhysicalIdentity", actualIdentity.PhysicalDeviceKey),
+                ("ProductId", currentPayload.ProductId));
+            return RoutingStageOperationResult.Success("Healthy");
+        }
+        catch (JsonException) { return RoutingStageOperationResult.Failure("NativePayloadInvalid"); }
+        finally { _gate.Release(); }
+    }
+
     internal async Task LatchRoutingFaultAsync(string reason, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

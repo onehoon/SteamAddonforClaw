@@ -39,6 +39,47 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
 
     public RoutingStageKind Kind => RoutingStageKind.PhysicalIsolation;
 
+    internal ValueTask<RoutingStageOperationResult> ReconcileOwnedStateAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_input.CurrentIdentity is not { } identity)
+            return ValueTask.FromResult(Failure("PhysicalInputIdentityMissing"));
+        if (_session.CurrentRecoverySessionId != _sessionId || _entries.Length == 0)
+            return ValueTask.FromResult(Failure("PhysicalIsolationNotOwned"));
+        if (!string.Equals(_entries[0].Value, identity.PnpInstanceId, StringComparison.OrdinalIgnoreCase))
+            return ValueTask.FromResult(Failure("PhysicalIsolationIdentityDrift"));
+
+        var inspection = _hidHide.Inspect();
+        if (!inspection.IsConfigurationReadable || inspection.IsInverseWhitelist)
+            return ValueTask.FromResult(Failure("HidHideConfigurationUnsafe"));
+        if (_ambiguousWhitelist || _entries.Any(entry => entry.Ambiguous))
+            return ValueTask.FromResult(Failure("AmbiguousMutationPending"));
+
+        var repaired = false;
+        if (_ownedWhitelist && !inspection.ApplicationWhitelist.Contains(_executablePath!, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!Try(() => _hidHide.AddApplication(_executablePath!))) return ValueTask.FromResult(Failure("WhitelistRepairFailed"));
+            repaired = true;
+        }
+        foreach (var entry in _entries.Where(entry => entry.Owned))
+        {
+            if ((inspection.HiddenDeviceEntries ?? []).Any(value => string.Equals(value, entry.Value, StringComparison.OrdinalIgnoreCase))) continue;
+            if (!Try(() => _hidHide.AddHiddenDevice(entry.Value))) return ValueTask.FromResult(Failure("DeviceRepairFailed"));
+            repaired = true;
+        }
+        if (_activeMutationOwned && !inspection.IsActive)
+        {
+            if (!Try(() => _hidHide.SetActive(true))) return ValueTask.FromResult(Failure("ActiveStateRepairFailed"));
+            repaired = true;
+        }
+
+        AppLog.Info("PhysicalIsolation", repaired ? "Owned HidHide state repaired." : "Owned HidHide state is healthy.",
+            ("Event", repaired ? "PhysicalIsolationHealthRepaired" : "PhysicalIsolationHealthHealthy"),
+            ("PhysicalIdentity", identity.PhysicalIdentity), ("SessionId", _sessionId),
+            ("Repaired", repaired));
+        return ValueTask.FromResult(Success(repaired ? "Repaired" : "Healthy"));
+    }
+
     public ValueTask<RoutingStageOperationResult> ObserveAsync(CancellationToken cancellationToken)
     { cancellationToken.ThrowIfCancellationRequested(); return ValueTask.FromResult(Inspect(requireAvailable: false)); }
 
