@@ -274,15 +274,16 @@ software-wired to the canonical WinGProtection authority epoch. The default
 Single action is SteamButton and Double is None; SteamButton uses the existing
 canonical Steam Deck publisher and cleanly no-ops while Steam output is still
 being acquired. Game Bar foreground/X360 production switching remains
-disabled. Real MSI Claw WING and Steam-button hardware validation is pending;
-SD3/SD7 are not complete.
+disabled. Real MSI Claw WING and Steam-button hardware validation remains
+pending. This validation belongs to the active routing/WING track; it does not
+reopen the dropped SD7 product direction.
 
 PR4 WING settings step: Event88 runtime mapping now has persisted Single/Double
 settings and the Controller page exposes `Gamebar Widget Button` under the
 Steam Input Routing expander. Defaults remain Single=SteamButton and
 Double=None; there is no independent WING enable switch. Game Bar/X360
-foreground switching remains disabled and real WING/Steam-button hardware
-validation remains pending.
+foreground switching remains disabled, and real WING/Steam-button hardware
+validation remains pending. SD7 is historical provenance only.
 
 ### SD6 — gyro and accelerometer
 
@@ -353,7 +354,7 @@ Preparatory runtime primitive step (PR2c): `CanonicalViiperRuntime` now
 exposes classified Xbox360 attachment-state query, attach, neutral-before-
 detach, and state-write primitives over the already persistent
 detached-ready Xbox360 handle. No production caller exists yet; Xbox360
-remains detached/unpublished and Game Bar switching remains PLANNED.
+remains detached/unpublished. At that historical stage, Game Bar switching remained planned.
 
 Publisher foundation step: the persistent Xbox360 logical handle, the
 classified runtime primitives (`TryGetXbox360AttachmentState`,
@@ -372,8 +373,8 @@ instantiated or started from `AddonRoutingRuntime`, `AddonProcessHost`,
 `GameBarForegroundWatcher`, power/resume logic, or OEM1, and it makes zero
 calls to `TryGetXbox360AttachmentState`/`AttachXbox360`/`DetachXbox360`.
 Xbox360 remains detached/unpublished during normal Runtime behavior, and
-Game Bar presentation switching remains PLANNED. SD7 is not complete and no
-hardware validation of this publisher has been performed.
+At that historical stage, Game Bar presentation switching remained planned and
+no hardware validation of this publisher had been performed.
 
 Deck presentation pause/resume foundation step: `CanonicalSteamDeckOutputStage`
 (`src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalSteamDeckOutputStage.cs`)
@@ -423,7 +424,7 @@ remains owned by the Deck stage and does not trigger a second X360 fail-close.
 Both directions remain foundation-only: there is **no Game Bar production
 consumer, no automatic switching, no foreground event wiring, no X360
 PnP/XInput readiness claim, no power/suspend/shutdown integration, and no
-hardware validation claim**. At that historical stage, SD7 remained PLANNED.
+hardware validation claim**. At that historical stage, SD7 remained planned.
 
 Game Bar presentation policy seam step: `AddonRoutingRuntime` now exposes an
 internal boolean policy seam. `foreground=true` selects the existing
@@ -434,9 +435,9 @@ The seam adds no presentation state or duplicate recovery policy and forwards
 cancellation to the selected primitive. There is still **no
 `GameBarForegroundWatcher` production subscription, no automatic switching, no
 power/suspend/shutdown integration, no production lifecycle race handling, no
-X360 PnP/XInput readiness claim, and no hardware validation claim**. SD7 remains
-PLANNED; normal Runtime behavior and `SteamOutputActive` semantics are
-unchanged.
+X360 PnP/XInput readiness claim, and no hardware validation claim**. At that
+historical stage, SD7 remained planned; normal Runtime behavior and
+`SteamOutputActive` semantics were unchanged.
 
 X360 presentation retirement and shutdown integration step: the existing
 publisher owner now has a shared no-resume retirement path that proves
@@ -447,7 +448,7 @@ blocks that coordinator shutdown and preserves the owner. Normal Game Bar
 exit still resumes Deck after successful retirement, while shutdown never
 resumes Deck. The GameBarForegroundWatcher remains unsubscribed, normal Steam
 route exit and suspend/resume remain unchanged, no X360 readiness claim is
-added, and no hardware validation is claimed. At that historical stage, SD7 remained PLANNED.
+added, and no hardware validation is claimed. At that historical stage, SD7 remained planned.
 
 Normal active-route exit boundary step: `RoutingPipelineRuntimeCoordinator`
 now invokes the existing no-resume X360 retirement path immediately before
@@ -459,7 +460,7 @@ shutdown, fail-close, suspend/resume cleanup, or pending cleanup paths. There
 is still no `GameBarForegroundWatcher` production subscription, no automatic
 Game Bar switching, no suspend/hibernate X360 retirement, no finalized
 publisher-fault cleanup, no X360 PnP/XInput readiness claim, and no hardware
-validation claim. At that historical stage, SD7 remained PLANNED.
+validation claim. At that historical stage, SD7 remained planned.
 
 Suspend/hibernate retirement boundary step: while quiescing an owned outer
 routing session, `RoutingPipelineRuntimeCoordinator` now invokes the same
@@ -471,7 +472,7 @@ restore X360 presentation automatically; current-world recovery and fresh
 routing reconciliation remain authoritative. `GameBarForegroundWatcher`
 production subscription and automatic switching remain unimplemented,
 publisher-fault X360 cleanup is not finalized, X360 PnP/XInput readiness is
-not claimed, and no hardware validation is claimed. At that historical stage, SD7 remained PLANNED.
+not claimed, and no hardware validation is claimed. At that historical stage, SD7 remained planned.
 
 Outer fail-close retirement boundary step: `RoutingPipelineRuntimeCoordinator
 .FailClosedAsync()` now invokes the same no-resume X360 retirement callback,
@@ -491,7 +492,7 @@ publisher-fault outer fail-close retirement ordering is implemented.
 `GameBarForegroundWatcher` production subscription and automatic switching
 remain unimplemented, presentation event serialization is not
 implemented/finalized, X360 PnP/XInput readiness is not claimed, and no
-hardware validation is claimed. At that historical stage, SD7 remained PLANNED.
+hardware validation is claimed. At that historical stage, SD7 remained planned.
 
 Presentation mutation serialization step: `AddonRoutingRuntime` now owns one
 `SemaphoreSlim(1, 1)` (`_presentationGate`) that serializes only Deck/X360
@@ -525,8 +526,8 @@ Game Bar switching, latest-foreground-state-wins / event coalescing, ordered
 asynchronous event dispatch, and shutdown event-drain integration -- those
 belong to the later watcher production-wiring step. No new presentation
 state machine, coordinator, or interface was added. X360 PnP/XInput
-readiness is not claimed, and no hardware validation is claimed. SD7 remains
-PLANNED.
+readiness is not claimed, and no hardware validation is claimed. At that
+historical stage, SD7 remained planned.
 
 Interactive Game Bar presentation mutations are now denied while the
 authoritative outer routing coordinator has an in-flight/queued routing
@@ -536,7 +537,7 @@ now participates in the coordinator's existing transition-operation
 accounting. `GameBarForegroundWatcher` production subscription, latest-state
 delivery/coalescing, routing-completion foreground re-evaluation, and shutdown
 watcher/event drain remain NOT implemented. PnP/XInput readiness and hardware
-validation are NOT claimed. At that historical stage, SD7 remained PLANNED.
+validation are NOT claimed. At that historical stage, SD7 remained planned.
 
 Game Bar production wiring step: `AddonProcessHost` now subscribes the existing
 `GameBarForegroundWatcher` to a serialized latest-state delivery path that
@@ -554,13 +555,15 @@ foreground state and does not restore remembered X360 presentation. X360
 PnP/XInput readiness and hardware validation are not claimed. This is a
 historical implementation stage; SD7 is no longer an active roadmap item.
 
-Current PR2 status: Game Bar foreground production switching is intentionally
+Current status: Game Bar foreground production switching is intentionally
 disabled while the existing watcher, typed Xbox360 device, publisher, and
-Deck/Xbox360 presentation primitives remain dormant foundations. Route-bound
-Win+G protection is software-integrated as the first mandatory
-`StockCenterM` routing stage and is disarmed only after route rollback reaches
-the final protection stage. Real MSI Claw Win+G/Game Bar hardware validation
-remains pending; this does not complete SD7.
+Deck/Xbox360 presentation primitives remain dormant foundations. Production
+startup does not subscribe `GameBarForegroundWatcher`. Route-bound Win+G
+protection is software-integrated as the mandatory routing policy, and the
+canonical Steam Deck remains the sole production virtual-controller
+presentation throughout the active route. Real MSI Claw WING/Steam-button and
+route-bound Win+G behavior still require their own hardware evidence. That
+validation belongs to the active routing/WING track and does not reopen SD7.
 
 ## Separate feature tracks
 
