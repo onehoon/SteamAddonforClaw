@@ -66,6 +66,14 @@ if ($missingAssets) {
     throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
 }
 
+$centerMHelperSource = Join-Path $PublishDirectory 'CenterMHelperSource'
+$centerMHelperSidecars = @(Get-ChildItem -LiteralPath $centerMHelperSource -File | Where-Object {
+    $_.Extension -in @('.dll', '.deps.json', '.runtimeconfig.json')
+})
+if ($centerMHelperSidecars.Count -gt 0) {
+    throw "CenterMHelperSource contains NativeAOT-forbidden sidecar payload: $($centerMHelperSidecars.Name -join ', ')"
+}
+
 $uiDirectory = Join-Path $PublishDirectory 'ui'
 $uiManagedPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.dll')
 $uiPriPayload = @(Get-ChildItem -LiteralPath $uiDirectory -Recurse -File -Filter '*.pri')
