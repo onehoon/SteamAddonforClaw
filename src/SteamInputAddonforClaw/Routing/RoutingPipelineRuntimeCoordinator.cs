@@ -382,11 +382,13 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             if (preserved is null || !ReferenceEquals(_sessionCoordinator.ActiveSession, preserved) ||
                 _sessionCoordinator.PendingCleanup is not null || _reconcileOwnedRouteState is null)
                 return false;
-            var owned = await _reconcileOwnedRouteState(cancellationToken).ConfigureAwait(false);
+            using var transition = CreateTransitionCancellation(cancellationToken);
+            var token = transition.Token;
+            var owned = await _reconcileOwnedRouteState(token).ConfigureAwait(false);
             if (!owned.Succeeded)
-                return await RetireResidualSessionCoreAsync(cancellationToken).ConfigureAwait(false);
-            await refreshBeforeDecision(cancellationToken).ConfigureAwait(false);
-            var result = await ReconcileCoreAsync(cancellationToken).ConfigureAwait(false);
+                return await RetireResidualSessionCoreAsync(token).ConfigureAwait(false);
+            await refreshBeforeDecision(token).ConfigureAwait(false);
+            var result = await ReconcileCoreAsync(token).ConfigureAwait(false);
             return result.Succeeded;
         }
         finally
