@@ -246,8 +246,6 @@ public sealed class QamFrontendContractTests
         Assert.Contains("PanelSectionRow", source);
         Assert.Contains("function isSteamClassModule(candidate)", source);
         Assert.Contains("candidate.Title && candidate.QuickAccessMenu && candidate.BatteryDetailsLabels", source);
-        Assert.Contains("candidate.SliderControlPanelGroup", source);
-        Assert.Contains("SliderDescriptionValueClass", source);
         Assert.Contains("candidate.FieldLabelRow && candidate.FieldLabel && candidate.FieldLabelValue", source);
         Assert.Contains("FieldLabelRowClass", source);
         Assert.Contains("FieldLabelClass", source);
@@ -279,6 +277,10 @@ public sealed class QamFrontendContractTests
         Assert.Contains("setTimeout(async () =>", cpuModeMutation);
         Assert.Contains("setPreviewAc", cpuModeMutation);
         Assert.Contains("setPreviewDc", cpuModeMutation);
+        Assert.Contains("const modeEditGeneration = React.useRef({ ac: 0, dc: 0 })", source);
+        Assert.Contains("const generation = ++modeEditGeneration.current[key]", source);
+        Assert.Contains("generation === modeEditGeneration.current[key]", source);
+        Assert.Contains("const modeEditPending", source);
         Assert.Contains("setTimeout(async () =>", source);
         Assert.Contains("state.onStateInvalidated", source);
         Assert.DoesNotContain("setInterval", source);

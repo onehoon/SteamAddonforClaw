@@ -226,16 +226,14 @@
       }
     }
     const qam = classModules.find(candidate => candidate.Title && candidate.QuickAccessMenu && candidate.BatteryDetailsLabels);
-    const slider = classModules.find(candidate => candidate.SliderControlPanelGroup);
     const field = classModules.find(candidate => candidate.FieldLabelRow && candidate.FieldLabel && candidate.FieldLabelValue);
-    if (!qam?.Title || !slider?.DescriptionValue || !field) {
+    if (!qam?.Title || !field) {
       logOnce("native-styles", "QAM native title/slider class styles unavailable.");
       return null;
     }
     logOnce("native-styles", "QAM native title/slider class styles resolved.");
     return {
       QamTitleClass: qam.Title,
-      SliderDescriptionValueClass: slider.DescriptionValue,
       FieldLabelRowClass: field.FieldLabelRow,
       FieldLabelClass: field.FieldLabel,
       FieldLabelValueClass: field.FieldLabelValue,
@@ -529,6 +527,8 @@
       const modeWritableRef = React.useRef(false);
       const mutationDepthRef = React.useRef(0);
       const deferredInvalidationRef = React.useRef(false);
+      const modeEditGeneration = React.useRef({ ac: 0, dc: 0 });
+      const modeMutationInFlight = React.useRef({ ac: false, dc: false });
 
       const failClosed = React.useCallback(message => {
         for (const key of ["ac", "dc"]) {
@@ -573,7 +573,8 @@
       const beginMutation = React.useCallback(() => { mutationDepthRef.current++; }, []);
       const endMutation = React.useCallback(() => {
         mutationDepthRef.current = Math.max(0, mutationDepthRef.current - 1);
-        if (mutationDepthRef.current === 0 && deferredInvalidationRef.current) {
+        const modeEditPending = Object.values(settleTimers.current).some(Boolean) || Object.values(modeMutationInFlight.current).some(Boolean);
+        if (mutationDepthRef.current === 0 && deferredInvalidationRef.current && !modeEditPending) {
           deferredInvalidationRef.current = false;
           cancelModeTimers();
           setPreviewAc(null); setPreviewDc(null);
@@ -615,6 +616,7 @@
       const scheduleMode = (side, value) => {
         if (!state.installed || !modeWritableRef.current) return;
         const key = side === "ac" ? "ac" : "dc";
+        const generation = ++modeEditGeneration.current[key];
         side === "ac" ? setPreviewAc(value) : setPreviewDc(value);
         if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
         settleTimers.current[key] = setTimeout(async () => {
@@ -622,12 +624,15 @@
           if (!state.installed || !modeWritableRef.current) return;
           setError(null);
           try {
+            modeMutationInFlight.current[key] = true;
             beginMutation();
             const result = await request(side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value });
-            setCpu(result.snapshot); side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
+            if (generation === modeEditGeneration.current[key]) {
+              setCpu(result.snapshot); side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
+            }
             if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
           } catch (_) { failClosed("CPU Boost update failed"); }
-          finally { endMutation(); }
+          finally { modeMutationInFlight.current[key] = false; endMutation(); }
         }, 250);
       };
       const setEnabled = async value => {
