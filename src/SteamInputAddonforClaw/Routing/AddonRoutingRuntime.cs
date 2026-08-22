@@ -160,7 +160,7 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             if (safetySession is not null)
                 await safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);
 
-            var rollback = await coordinator.FailClosedAsync(yieldCurrentSteamSession).ConfigureAwait(false);
+            var rollback = await coordinator.FailClosedAsync().ConfigureAwait(false);
             if (!rollback.Succeeded)
                 AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(rollback.Reason), ("Reason", reason));
             else if (runtime is not null)

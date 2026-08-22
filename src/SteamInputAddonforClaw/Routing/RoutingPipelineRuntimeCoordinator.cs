@@ -128,10 +128,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         }
     }
 
-    internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedAsync(bool yieldCurrentSteamSession = false)
+    internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedAsync()
     {
-        if (yieldCurrentSteamSession)
-            Volatile.Write(ref _sessionYieldRequested, 1);
         // Fail-close must stop any in-flight forward transition before waiting for the gate --
         // otherwise a caller reporting a fault that already invalidates the active session (e.g.
         // an owned physical-input session that just died) would sit behind a routing Enter that is
@@ -147,12 +145,6 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
-            if (yieldCurrentSteamSession)
-            {
-                _sessionYieldReason = "ExternalNativeTakeover";
-                AppLog.Warn("Routing.Runtime", "ExternalNativeTakeoverDetected", null,
-                    ("Action", "YieldUntilSteamSessionEnd"));
-            }
             using var transition = CreateTransitionCancellation(CancellationToken.None);
 
             return await RetireForFailCloseCoreAsync(transition.Token).ConfigureAwait(false);

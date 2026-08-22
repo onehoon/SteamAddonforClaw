@@ -23,7 +23,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
             executor);
 
         Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
-        var yielded = await bridge.Bridge.FailClosedAsync(yieldCurrentSteamSession: true);
+        var yieldRequest = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(yieldRequest);
+        var yielded = await bridge.Bridge.FailClosedForSessionYieldAsync(yieldRequest!.Value);
         Assert.True(yielded.Succeeded);
         var ignored = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
 
@@ -122,7 +124,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var bridge = Create(new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software())), executor);
 
         Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
-        Assert.False((await bridge.Bridge.FailClosedAsync(yieldCurrentSteamSession: true)).Succeeded);
+        var yieldRequest = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(yieldRequest);
+        Assert.False((await bridge.Bridge.FailClosedForSessionYieldAsync(yieldRequest!.Value)).Succeeded);
         var retry = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
 
         Assert.True(retry.Succeeded);
@@ -139,7 +143,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var first = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
         await executor.ExecuteStarted.Task;
 
-        var failClose = bridge.Bridge.FailClosedAsync(yieldCurrentSteamSession: true).AsTask();
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(request);
+        var failClose = bridge.Bridge.FailClosedForSessionYieldAsync(request!.Value).AsTask();
         var queued = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
         await executor.ExecuteCancellationObserved.Task;
         await failClose;
