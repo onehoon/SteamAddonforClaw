@@ -134,6 +134,36 @@
     return null;
   }
 
+  function findNativeQamComponents(webpackRequire) {
+    const components = {};
+    const required = {
+      ToggleField: ["checked", "onChange"],
+      SliderField: ["min", "max", "step", "value", "onChange"],
+    };
+
+    for (const moduleExports of collectSearchableModules(webpackRequire)) {
+      for (const [name, requiredProps] of Object.entries(required)) {
+        if (components[name]) continue;
+        const candidate = moduleExports[name];
+        const render = candidate && typeof candidate === "object" && typeof candidate.type === "function"
+          ? candidate.type
+          : candidate;
+        if (typeof render !== "function") continue;
+        let source;
+        try { source = Function.prototype.toString.call(render); } catch (_) { continue; }
+        if (!requiredProps.every(prop => source.includes(prop))) continue;
+        components[name] = candidate;
+      }
+    }
+
+    if (!components.ToggleField || !components.SliderField) {
+      logOnce("nativeControls", "QAM native ToggleField/SliderField could not be resolved; CPU Boost controls are disabled.");
+      return null;
+    }
+    logOnce("nativeControls", "QAM native ToggleField and SliderField resolved.");
+    return components;
+  }
+
   // Purpose-built, bounded walker for the specific React node shapes Steam exposes for QAM: plain
   // React elements and Fiber-like nodes. Not a generic object
   // graph crawler -- it only descends through these four named links, with a visited set and a
@@ -197,7 +227,7 @@
     return null;
   }
 
-  function patchTabsProducer(outerResult, React) {
+  function patchTabsProducer(outerResult, React, native) {
     // Discovery signal: presence of the QAM lifecycle prop, nothing else. Component shape
     // (function vs. object wrapper) is handled separately below -- it is not part of discovery.
     const producerSearch = findReactNode(
@@ -251,7 +281,7 @@
           record.tabs = owner.props.tabs;
           logOnce("tabsOwner", `tabs owner found. ExistingTabs=${owner.props.tabs.length}`);
           if (!owner.props.tabs.some((tab) => tab && tab[TAB_MARKER])) {
-            owner.props.tabs.push(buildAddonTab(React));
+            owner.props.tabs.push(buildAddonTab(React, native));
             logOnce("tabInserted", "Steam Input Addon tab inserted.");
           } else {
             logOnce("duplicateTab", "Duplicate tab already present; insertion skipped.");
@@ -369,7 +399,7 @@
     state.liveFibers = [];
   }
 
-  function buildAddonTab(React) {
+  function buildAddonTab(React, native) {
     if (state.addonTabDescriptor) return state.addonTabDescriptor;
 
     const icon = React.createElement(
@@ -478,31 +508,43 @@
         } catch (_) { failClosed("CPU Boost update failed"); }
         finally { setBusy(false); }
       };
-      const slider = (title, side, value) => React.createElement("div", { style: { display: "block", marginTop: "14px" } },
-        React.createElement("div", { style: { marginBottom: "5px" } }, title),
-        React.createElement("div", { style: { marginBottom: "6px", minHeight: "2.4em" } }, labelFor(value)),
-        value == null
-          ? React.createElement("div", { "aria-hidden": "true", style: { width: "100%", minHeight: "1.2em" } })
-          : React.createElement("input", { type: "range", min: 0, max: 6, step: 1, value, disabled: !modeWritable,
-            "aria-label": title, style: { width: "100%" }, onChange: event => scheduleMode(side, Number(event.target.value)) }),
-        React.createElement("div", { "aria-hidden": "true", style: { display: "flex", justifyContent: "space-between", padding: "0 2px", lineHeight: 1 } },
-          modes.map(([mode]) => React.createElement("span", { key: mode }, "•"))));
+      const slider = (title, side, value) => value == null ? null : React.createElement(native.SliderField, {
+        label: title,
+        description: labelFor(value),
+        min: 0,
+        max: 6,
+        step: 1,
+        value,
+        disabled: !modeWritable,
+        notchTicksVisible: true,
+        showValue: true,
+        onChange: next => scheduleMode(side, Number(next)),
+      });
 
-      return React.createElement("div", { style: { padding: "18px", color: "white", fontFamily: "sans-serif", minWidth: "300px" } },
-        React.createElement("h3", { style: { margin: "0 0 14px" } }, "CPU Boost"),
-        unavailable ? React.createElement("p", null, status?.steam?.appId ? "Unavailable while a game is running" : "CPU Boost unavailable") : null,
-        displayError ? React.createElement("p", { style: { color: "#ffb4ab" } }, displayError) : null,
-        React.createElement("label", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-          React.createElement("span", null, "Enabled"),
-          React.createElement("input", { type: "checkbox", checked: !!cpu?.enabled, disabled: !mutationAvailable, "aria-label": "Enabled", onChange: event => void setEnabled(event.target.checked) })),
-        slider("AC Mode", "ac", sideValue(cpu?.ac, previewAc)),
-        slider("DC Mode", "dc", sideValue(cpu?.dc, previewDc)));
+      const controls = [
+        React.createElement(native.ToggleField, {
+          key: "enabled",
+          label: "CPU Boost",
+          checked: !!cpu?.enabled,
+          disabled: !mutationAvailable,
+          onChange: value => void setEnabled(!!value),
+        }),
+      ];
+      if (cpu?.enabled) {
+        controls.push(slider("AC Mode", "ac", sideValue(cpu.ac, previewAc)));
+        controls.push(slider("DC Mode", "dc", sideValue(cpu.dc, previewDc)));
+      }
+
+      return React.createElement(React.Fragment, null,
+        unavailable ? React.createElement("p", { key: "unavailable" }, status?.steam?.appId ? "Unavailable while a game is running" : "CPU Boost unavailable") : null,
+        displayError ? React.createElement("p", { key: "error" }, displayError) : null,
+        ...controls.filter(Boolean));
     }
 
     state.addonTabDescriptor = {
       [TAB_MARKER]: true,
       key: "steam-input-addon",
-      title: "Steam Input Addon",
+      title: "Steam Addon for Claw",
       tab: icon,
       panel: React.createElement(CpuBoostPanel),
     };
@@ -570,6 +612,9 @@
       return false;
     }
 
+    const native = findNativeQamComponents(webpackRequire);
+    if (!native) return false;
+
     for (const patch of patches) {
       const originalType = patch.originalType;
 
@@ -580,7 +625,7 @@
         // "never invoked" from every failure mode further down the augmentation chain.
         logOnce("outerRendererInvoked", "QAM outer renderer invoked.");
         try {
-          patchTabsProducer(result, React);
+          patchTabsProducer(result, React, native);
         } catch (err) {
           logOnce("outerAugmentationFailed", `QAM outer augmentation failed: ${String(err)}`);
         }
