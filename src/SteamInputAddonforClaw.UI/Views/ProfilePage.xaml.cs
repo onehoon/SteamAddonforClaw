@@ -26,7 +26,7 @@ public sealed partial class ProfilePage : UserControl
 
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
     internal void Activate() { _active = true; if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated; if (_selectedGame is not null) _ = CaptureSelectedAsync(_selectedGame.AppId); }
-    internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; CancelTdpDebounce(); }
+    internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; CancelTdpDebounce(); _tdpDraftDirty = false; }
     private void OnStateInvalidated(object? sender, EventArgs e) { if (_active && _selectedGame is not null) DispatcherQueue.TryEnqueue(() => _ = CaptureSelectedAsync(_selectedGame.AppId)); }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
@@ -48,8 +48,9 @@ public sealed partial class ProfilePage : UserControl
     }
     private void GameSelector_SuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args) { if (args.SelectedItem is FrontendProfileGameCatalogEntry game) _ = SelectGameAsync(game); }
     private void GameSelector_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { if (args.ChosenSuggestion is FrontendProfileGameCatalogEntry game) _ = SelectGameAsync(game); else if (_catalog.FirstOrDefault(x => string.Equals(x.Name, sender.Text, StringComparison.OrdinalIgnoreCase) || x.AppId.ToString() == sender.Text) is { } exact) _ = SelectGameAsync(exact); }
-    private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); _selectedGame = game; GameSelector.Text = game.Name; await CaptureSelectedAsync(game.AppId); }
-    private async Task CaptureSelectedAsync(uint appId) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot); if (snapshot.PersistenceWritable) ClearError(); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) ShowError("Profile settings could not be loaded.", exception); } }
+    private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = game; GameSelector.Text = game.Name; BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
+    private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = true; try { SelectedGameText.Text = $"{game.Name} ({game.AppId})"; ProfileEnabledToggle.Visibility = Visibility.Visible; ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = false; } SetEditorsEnabled(false); }
+    private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty); if (snapshot.PersistenceWritable) ClearError(); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) ShowError("Profile settings could not be loaded.", exception); } }
     private void ClearSelection() { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; GameSelector.Text = string.Empty; SelectedGameText.Text = "Click Refresh, then select a game."; ProfileEnabledToggle.Visibility = Visibility.Collapsed; SetEditorsEnabled(false); }
 
     private void Render(FrontendGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false)
@@ -62,7 +63,7 @@ public sealed partial class ProfilePage : UserControl
             if (!preserveDirtyTdpDraft || !_tdpDraftDirty)
             {
                 _acPl1 = snapshot.Tdp.Ac.Pl1Watts; _acPl2 = snapshot.Tdp.Ac.Pl2Watts; _dcPl1 = snapshot.Tdp.Dc.Pl1Watts; _dcPl2 = snapshot.Tdp.Dc.Pl2Watts;
-                ConfigureSlider(AcPl1Slider, snapshot.Limits?.Pl1MinimumWatts, snapshot.Limits?.Pl1MaximumWatts, _acPl1.Value); ConfigureSlider(AcPl2Slider, snapshot.Limits?.Pl2MinimumWatts, snapshot.Limits?.Pl2MaximumWatts, _acPl2.Value); ConfigureSlider(DcPl1Slider, snapshot.Limits?.Pl1MinimumWatts, snapshot.Limits?.Pl1MaximumWatts, _dcPl1.Value); ConfigureSlider(DcPl2Slider, snapshot.Limits?.Pl1MinimumWatts, snapshot.Limits?.Pl1MaximumWatts, _dcPl2.Value);
+                ConfigureSlider(AcPl1Slider, snapshot.Limits?.Pl1MinimumWatts, snapshot.Limits?.Pl1MaximumWatts, _acPl1.Value); ConfigureSlider(AcPl2Slider, snapshot.Limits?.Pl2MinimumWatts, snapshot.Limits?.Pl2MaximumWatts, _acPl2.Value); ConfigureSlider(DcPl1Slider, snapshot.Limits?.Pl1MinimumWatts, snapshot.Limits?.Pl1MaximumWatts, _dcPl1.Value); ConfigureSlider(DcPl2Slider, snapshot.Limits?.Pl2MinimumWatts, snapshot.Limits?.Pl2MaximumWatts, _dcPl2.Value);
                 SetTdpText();
             }
         }

@@ -3,7 +3,13 @@
         <TextBlock FontSize="24" FontWeight="SemiBold" Text="Profile" />
         <InfoBar x:Name="ProfileInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
         <ctcontrols:SettingsCard><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <AutoSuggestBox x:Name="GameSelector" PlaceholderText="Select a game" QueryIcon="Find" TextChanged="GameSelector_TextChanged" SuggestionChosen="GameSelector_SuggestionChosen" QuerySubmitted="GameSelector_QuerySubmitted" />
+            <AutoSuggestBox x:Name="GameSelector" PlaceholderText="Select a game" QueryIcon="Find" TextMemberPath="Name" TextChanged="GameSelector_TextChanged" SuggestionChosen="GameSelector_SuggestionChosen" QuerySubmitted="GameSelector_QuerySubmitted">
+                <AutoSuggestBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                </AutoSuggestBox.ItemTemplate>
+            </AutoSuggestBox>
             <Button Grid.Column="1" x:Name="RefreshGamesButton" Content="Refresh" Click="RefreshGamesButton_Click" />
         </Grid></ctcontrols:SettingsCard>
         <ctcontrols:SettingsCard><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
