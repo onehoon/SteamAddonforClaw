@@ -86,6 +86,20 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_enabled_mutation_is_retired_with_the_installed_panel_and_clears_mode_previews()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+        var enabledIndex = source.IndexOf("const setEnabled = async value =>", StringComparison.Ordinal);
+        Assert.True(enabledIndex >= 0);
+        var enabledPath = source[enabledIndex..];
+
+        Assert.Contains("cancelModeTimers();", enabledPath);
+        Assert.Contains("setPreviewAc(null); setPreviewDc(null);", enabledPath);
+        Assert.Contains("if (!state.installed) return;", enabledPath);
+        Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", enabledPath);
+    }
+
+    [Fact]
     public void Nested_react_walker_traverses_props_children_child_and_sibling()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
@@ -194,6 +208,61 @@ public sealed class QamFrontendContractTests
         Assert.Contains("return { kind: \"function\", target: type };", source);
         Assert.Contains("return { kind: \"object.render\", target: type.render };", source);
         Assert.Contains("return { kind: \"object.type\", target: type.type };", source);
+    }
+
+    [Fact]
+    public void Qam_cpu_boost_panel_uses_the_existing_seven_mode_contract_and_bridge_allowlist()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.DoesNotContain("QAM integration test", source);
+        Assert.Contains("title: \"Steam Input Addon\"", source);
+        Assert.Contains("fill: \"currentColor\"", source);
+        Assert.Contains("[0, \"Disabled\"]", source);
+        Assert.Contains("[1, \"Enabled\"]", source);
+        Assert.Contains("[2, \"Aggressive\"]", source);
+        Assert.Contains("[3, \"Efficient Enabled\"]", source);
+        Assert.Contains("[4, \"Efficient Aggressive\"]", source);
+        Assert.Contains("[5, \"Aggressive at Guaranteed\"]", source);
+        Assert.Contains("[6, \"Efficient Aggressive at Guaranteed\"]", source);
+        Assert.Contains("request(\"captureStatus\")", source);
+        Assert.Contains("request(\"captureCpuBoost\")", source);
+        Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", source);
+        Assert.Contains("request(side === \"ac\" ? \"setDeviceCpuBoostAc\" : \"setDeviceCpuBoostDc\"", source);
+        Assert.Contains("setTimeout(async () =>", source);
+        Assert.Contains("state.onStateInvalidated", source);
+        Assert.DoesNotContain("setInterval", source);
+        Assert.DoesNotContain("captureTdp", source[source.IndexOf("function buildAddonTab", StringComparison.Ordinal)..]);
+        Assert.Contains("cancelModeTimers();", source);
+        Assert.Contains("setPreviewAc(null); setPreviewDc(null);", source);
+        Assert.Contains("state.onStateInvalidated === handler", source);
+        Assert.Contains("style: { width: \"100%\" }", source);
+        Assert.Contains("\"aria-hidden\": \"true\"", source);
+        Assert.Contains("modes.map(([mode])", source);
+        Assert.Contains("const mutationAvailable", source);
+        Assert.Contains("const modeWritable = mutationAvailable && cpu.enabled", source);
+        Assert.Contains("disabled: !modeWritable", source);
+        Assert.Contains("minHeight: \"1.2em\"", source);
+        Assert.DoesNotContain("value: value == null ? 0 : value", source);
+        Assert.Contains("const failClosed", source);
+        Assert.Contains("setStatus(null); setCpu(null); setPreviewAc(null); setPreviewDc(null)", source);
+        Assert.Contains("cpu.lastFailure", source);
+        Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
+    }
+
+    [Fact]
+    public void Qam_cpu_boost_panel_reuses_its_descriptor_and_retires_settled_mode_work()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("if (state.addonTabDescriptor) return state.addonTabDescriptor;", source);
+        Assert.Contains("state.addonTabDescriptor = {", source);
+        Assert.Contains("const modeWritableRef = React.useRef(false);", source);
+        Assert.Contains("modeWritableRef.current = modeWritable;", source);
+        Assert.Contains("if (!state.installed || !modeWritableRef.current) return;", source);
+        Assert.Contains("const cancelModeTimers = React.useCallback", source);
+        Assert.Contains("cancelModeTimers();", source);
+        Assert.Contains("settleTimers.current[key] = null;", source);
     }
 
     private static string ReadSource(params string[] parts)
