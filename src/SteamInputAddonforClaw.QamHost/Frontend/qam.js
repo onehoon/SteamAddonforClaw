@@ -66,35 +66,18 @@
 
   function collectSearchableModules(webpackRequire) {
     const modules = [];
-    const seen = new Set();
     let loadFailures = 0;
-
-    const add = (moduleExports) => {
-      if (!moduleExports || typeof moduleExports !== "object" || seen.has(moduleExports)) return;
-      const candidates = moduleExports.default && typeof moduleExports.default === "object"
-        ? [[moduleExports.default, "default"], [moduleExports, "root"]]
-        : [[moduleExports, "root"]];
-      for (const [candidate, source] of candidates) {
-        if (seen.has(candidate)) continue;
-        seen.add(candidate);
-        modules.push({ exports: candidate, source });
-      }
-    };
-
-    for (const moduleRecord of Object.values(webpackRequire.c || {})) {
-      add(moduleRecord && moduleRecord.exports);
-    }
 
     for (const id of Object.keys(webpackRequire.m || {})) {
       try {
-        add(webpackRequire(id));
+        const module = webpackRequire(id);
+        if (module) modules.push(module);
       } catch (err) {
-        // Some Steam modules have side effects or unmet prerequisites; skip only that module.
         loadFailures++;
       }
     }
 
-    logOnce("moduleDiscovery", `webpack modules: cached=${Object.keys(webpackRequire.c || {}).length} registered=${Object.keys(webpackRequire.m || {}).length} loaded=${modules.length} loadFailures=${loadFailures}`);
+    logOnce("moduleDiscovery", `webpack modules: registered=${Object.keys(webpackRequire.m || {}).length} loaded=${modules.length} loadFailures=${loadFailures}`);
 
     return modules;
   }
@@ -105,8 +88,7 @@
   // patched because enumeration order does not tell us which one the current Steam build renders.
   function findQamRenderers(webpackRequire) {
     const matches = [];
-    for (const module of collectSearchableModules(webpackRequire)) {
-      const moduleExports = module.exports;
+    for (const moduleExports of collectSearchableModules(webpackRequire)) {
       for (const candidate of Object.values(moduleExports)) {
         const render = candidate && typeof candidate.type === "function" ? candidate.type : null;
         if (!render) continue;
@@ -128,8 +110,7 @@
   }
 
   function findReact(webpackRequire) {
-    for (const module of collectSearchableModules(webpackRequire)) {
-      const mod = module.exports;
+    for (const mod of collectSearchableModules(webpackRequire)) {
       if (mod && mod.createElement && mod.Component) {
         logOnce("react", "React export found.");
         return mod;
@@ -147,13 +128,23 @@
     return null;
   }
 
+  function isCommonUiModule(candidate) {
+    if (!candidate || typeof candidate !== "object") return false;
+    for (const prop in candidate) {
+      if (candidate[prop]?.contextType?._currentValue && Object.keys(candidate).length > 60) return true;
+    }
+    return false;
+  }
+
   function findCommonUiModule(modules) {
     for (const module of modules) {
-      const moduleExports = module.exports;
-      if (!moduleExports || typeof moduleExports !== "object" || Object.keys(moduleExports).length <= 60) continue;
-      if (Object.values(moduleExports).some(value => value?.contextType?._currentValue)) {
-        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(moduleExports).length} Source=${module.source}`);
-        return moduleExports;
+      if (module?.default && isCommonUiModule(module.default)) {
+        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(module.default).length} Source=default`);
+        return module.default;
+      }
+      if (isCommonUiModule(module)) {
+        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(module).length} Source=root`);
+        return module;
       }
     }
     logOnce("commonUi", "Steam CommonUIModule unavailable.");
