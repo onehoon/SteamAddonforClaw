@@ -37,7 +37,9 @@ public sealed class ProfileGameCatalogScannerTests : IDisposable
     public async Task ScanAsync_RespectsCancellation()
     {
         using var cts = new CancellationTokenSource(); cts.Cancel();
-        await Assert.ThrowsAsync<OperationCanceledException>(() => new ProfileGameCatalogScanner(() => _root).ScanAsync(cts.Token));
+        var task = new ProfileGameCatalogScanner(() => _root).ScanAsync(cts.Token);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        Assert.True(task.IsCanceled);
     }
 
     [Fact]

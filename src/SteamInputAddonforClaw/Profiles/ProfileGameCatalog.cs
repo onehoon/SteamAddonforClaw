@@ -15,7 +15,7 @@ public sealed class ProfileGameCatalogScanner
         _steamRootProvider = steamRootProvider ?? LocateSteamRoot;
 
     public Task<IReadOnlyList<ProfileGameCatalogEntry>> ScanAsync(CancellationToken cancellationToken = default) =>
-        Task.Run(() => Scan(cancellationToken), CancellationToken.None);
+        Task.Run(() => Scan(cancellationToken), cancellationToken);
 
     private IReadOnlyList<ProfileGameCatalogEntry> Scan(CancellationToken cancellationToken)
     {
