@@ -8,7 +8,7 @@
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Status" />
-                <Button x:Name="RefreshStatusButton" Grid.Column="1" Click="RefreshStatusButton_Click" Content="↻ Refresh" VerticalAlignment="Center" />
+                <Button x:Name="RefreshStatusButton" Grid.Column="1" Click="RefreshStatusButton_Click" Content="↻ Refresh" Style="{StaticResource AccentButtonStyle}" VerticalAlignment="Center" />
             </Grid>
 
             <TextBlock FontSize="20" FontWeight="SemiBold" Text="Device" />
