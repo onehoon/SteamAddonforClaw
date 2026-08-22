@@ -317,7 +317,11 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             if (_state != LifecycleState.Active || _canonicalSession is null ||
                 _canonicalSession.State != CanonicalSteamDeckSessionState.Active || _publisher is null)
                 return false;
-            if (_presentationPaused) return false;
+            // A newer Suspend may arrive after Resume was cancelled while the
+            // presentation was still deliberately paused. The desired suspend
+            // state is already established, so preserve ownership idempotently
+            // without repeating publisher stop or neutral output.
+            if (_presentationPaused) return true;
 
             try
             {
