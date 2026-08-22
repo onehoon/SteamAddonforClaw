@@ -131,6 +131,17 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 if (!_accepting) return;
                 if (invalidateHardwareCache)
                     RequestCacheInvalidationUnderLock(reason);
+                if (tdp is null)
+                {
+                    _authorityVersion++;
+                    _reconcileVersion++;
+                    _reconcileRequired = false;
+                    RequestCacheInvalidationUnderLock("EffectiveTdpUnavailable");
+                    AppLog.Debug("Profiles.Tdp", "TDP effective authority revoked",
+                        ("Reason", reason), ("Action", "StopManaging"));
+                    return;
+                }
+
                 var source = _powerSource();
                 if (source is not { } currentSource)
                 {
@@ -148,8 +159,6 @@ internal sealed class TdpRuntime : IAsyncDisposable
                 if (realPowerBoundary)
                     RequestCacheInvalidationUnderLock("PowerSourceBoundary");
                 var effectiveInvalidation = _invalidateHardwareCacheBeforeNextApply;
-                if (tdp is null)
-                    return;
 
                 AppLog.Debug("Profiles.Tdp", "TDP reconcile admitted", ("Reason", reason), ("Source", currentSource), ("PL1", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl1Watts), ("PL2", (currentSource == TdpPowerSource.AC ? tdp.Ac : tdp.Dc).Pl2Watts), ("Force", forceApply), ("Invalidate", effectiveInvalidation));
                 EnqueueSnapshotUnderLock(currentSource, tdp, reason);

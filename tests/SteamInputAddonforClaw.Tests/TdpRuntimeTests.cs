@@ -440,6 +440,26 @@ public sealed class TdpRuntimeTests : IDisposable
         Assert.DoesNotContain(transport.Operations, operation => operation.StartsWith("SetData(", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task GameExitRevokesQueuedGameTdpWhenDeviceIsDisabled()
+    {
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4], BlockFirstApply = true };
+        uint appId = 12345;
+        SaveProfile(new DeviceTdpSettings { Enabled = false, Ac = Pair(20, 30), Dc = Pair(10, 20) },
+            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = Pair(21, 31), Dc = Pair(11, 21) } } });
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, actualAppIdSource: () => appId);
+
+        runtime.ReconcileCurrent(true, false, "GameStart");
+        await transport.FirstApplyStarted.Task;
+        runtime.ReconcileCurrent(true, false, "GameRefresh");
+        appId = 0;
+        runtime.ReconcileCurrent(true, false, "GameExit");
+        transport.ReleaseFirstApply.Set();
+        await runtime.DrainAsync();
+
+        Assert.Equal(1, transport.Operations.Count(operation => operation == "SetData(81,31)"));
+    }
+
     private TdpRuntime Create(ProfileStore store, FakeTransport transport, TdpPowerSource? source, Func<DeviceTdpSettings?>? seed = null, Func<uint>? actualAppIdSource = null) =>
         new(store, new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport), () => source, seed, actualAppIdSource);
 
