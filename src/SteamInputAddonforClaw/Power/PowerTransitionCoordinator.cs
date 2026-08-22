@@ -110,7 +110,18 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             }
             if (observation.Signal is not (PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend)) return;
             if (State == PowerTransitionState.Recovering || (_cycle != 0 && _resumeCycle == _cycle)) { AppLog.Debug("Power.Coordinator", "Duplicate resume ignored.", ("Cycle", _cycle), ("Epoch", _gate.Epoch)); return; }
-            if (!observation.BarrierApplied) _gate.TryEnterBarrier(out _, out _);
+            // A queued resume is authoritative only for the epoch recorded when the
+            // observation was created. Check before applying a fallback barrier so a newer
+            // suspend cannot be adopted by this stale handler.
+            var recoveryEpoch = observation.EpochAfter;
+            if (_gate.Epoch != recoveryEpoch)
+            {
+                AppLog.Warn("Power.Recovery", "Stale resume ignored because a newer power barrier is authoritative.", null,
+                    ("ObservedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch));
+                return;
+            }
+            if (!observation.BarrierApplied)
+                _gate.TryEnterBarrier(out _, out recoveryEpoch);
             if (!_recoveryEnabled)
             {
                 State = PowerTransitionState.Unsafe;
@@ -121,7 +132,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             State = PowerTransitionState.Recovering; _recovery.Set(RecoverySafety.Indeterminate);
             var cycleForResume = _cycle == 0 ? Interlocked.Increment(ref _cycle) : _cycle;
             _resumeCycle = cycleForResume;
-            var recoveryEpoch = _gate.Epoch;
             var resumeStartedUtc = DateTimeOffset.UtcNow;
             var recoveryManagerStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var recoveryElapsedMs = 0d;
