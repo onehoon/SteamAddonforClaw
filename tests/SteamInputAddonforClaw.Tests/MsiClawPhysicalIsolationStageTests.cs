@@ -78,6 +78,26 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
+    public async Task ReconcileOwnedState_does_not_reenable_owned_active_with_foreign_blocked_entry()
+    {
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        hid.Trace.Clear();
+        hid.HiddenDevices.Add("HID\\FOREIGN");
+        hid.Active = false;
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("ActiveStateRepairUnsafeForeignBlockedEntries", result.Reason);
+        Assert.DoesNotContain("SetActive:True", hid.Trace);
+        Assert.Contains("HID\\FOREIGN", hid.HiddenDevices);
+    }
+
+    [Fact]
     public async Task InactiveHidHideIsEnabledLastAndRestoredFirst()
     {
         var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };

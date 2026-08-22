@@ -67,9 +67,17 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             if (!Try(() => _hidHide.AddHiddenDevice(entry.Value))) return ValueTask.FromResult(Failure("DeviceRepairFailed"));
             repaired = true;
         }
+        inspection = _hidHide.Inspect();
+        if (!inspection.IsConfigurationReadable || inspection.IsInverseWhitelist)
+            return ValueTask.FromResult(Failure("HidHideConfigurationUnsafe"));
+        if (_activeMutationOwned && !ContainsOnlySessionOwnedEntries(inspection))
+            return ValueTask.FromResult(Failure("ActiveStateRepairUnsafeForeignBlockedEntries"));
         if (_activeMutationOwned && !inspection.IsActive)
         {
             if (!Try(() => _hidHide.SetActive(true))) return ValueTask.FromResult(Failure("ActiveStateRepairFailed"));
+            var verification = _hidHide.Inspect();
+            if (!verification.IsConfigurationReadable || verification.IsInverseWhitelist || !verification.IsActive || !ContainsOnlySessionOwnedEntries(verification))
+                return ValueTask.FromResult(Failure("ActiveStateRepairUnverified"));
             repaired = true;
         }
 
