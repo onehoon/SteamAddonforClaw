@@ -59,6 +59,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly ProfileMutationGate _profileMutationGate = new();
     private readonly CpuBoostRuntime _cpuBoostRuntime;
     private TdpRuntime? _tdpRuntime;
+    private HelperMsiClawTdpTransport? _tdpTransport;
     private TdpPowerLifecycleWatcher? _tdpPowerLifecycleWatcher;
     private TdpCenterMRegistryWatcher? _tdpCenterMRegistryWatcher;
 
@@ -175,8 +176,9 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             && startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
         {
+            _tdpTransport = new();
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel,
-                new MsiClawTdpHardware(new MsiClawWmiTdpTransport()));
+                new MsiClawTdpHardware(_tdpTransport));
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
         }
@@ -373,6 +375,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             await _tdpRuntime.DisposeAsync().ConfigureAwait(false);
             _tdpRuntime = null;
+        }
+        if (_tdpTransport is not null)
+        {
+            await _tdpTransport.DisposeAsync().ConfigureAwait(false);
+            _tdpTransport = null;
         }
         await _qamHostController.DisposeAsync().ConfigureAwait(false);
         _startupComposition = null;

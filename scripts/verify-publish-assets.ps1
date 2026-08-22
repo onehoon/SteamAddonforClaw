@@ -14,6 +14,7 @@ if (-not (Test-Path -LiteralPath $PublishDirectory -PathType Container)) {
 
 $requiredAssets = @(
     'SteamInputAddonforClaw.exe',
+    'SteamInputAddonforClaw.TdpHelper.exe',
     'CenterMHelperSource\CenterMHelper.exe',
     'Dependencies\HidHide\HidHide_1.5.230_x64.exe',
     'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe',

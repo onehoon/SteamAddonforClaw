@@ -83,7 +83,6 @@ internal sealed class SteamDeckRumbleFeedbackBridge : IDisposable
             _disposed = true;
             _sequence++;
             _developerTest?.Cancel();
-            _developerTest?.Dispose();
             _developerTest = null;
         }
         _writer.Retire();
@@ -97,7 +96,6 @@ internal sealed class SteamDeckRumbleFeedbackBridge : IDisposable
         lock (_gate)
         {
             _developerTest?.Cancel();
-            _developerTest?.Dispose();
             linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _developerTest = linked;
         }
@@ -157,7 +155,6 @@ internal sealed class SteamDeckRumbleFeedbackBridge : IDisposable
             developerSequence = _developerSequence;
             _developerSequence = 0;
             _developerTest?.Cancel();
-            _developerTest?.Dispose();
             _developerTest = null;
         }
         if (developerSequence == 0) return null;
