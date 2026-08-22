@@ -66,6 +66,14 @@ if ($missingAssets) {
     throw "Publish output is missing required Runtime assets: $($missingAssets -join ', ')"
 }
 
+$runtimePayloadNames = @('System.Private.CoreLib.dll', 'coreclr.dll', 'hostpolicy.dll')
+foreach ($directory in @($PublishDirectory, (Join-Path $PublishDirectory 'qam'))) {
+    $runtimePayload = @(Get-ChildItem -LiteralPath $directory -File | Where-Object { $_.Name -in $runtimePayloadNames })
+    if ($runtimePayload.Count -gt 0) {
+        throw "Framework-dependent publish contains runtime payload in '$directory': $($runtimePayload.Name -join ', ')"
+    }
+}
+
 $centerMHelperSource = Join-Path $PublishDirectory 'CenterMHelperSource'
 $centerMHelperSidecars = @(Get-ChildItem -LiteralPath $centerMHelperSource -File | Where-Object {
     $_.Name -match '\.(dll|deps\.json|runtimeconfig\.json)$'

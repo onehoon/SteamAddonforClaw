@@ -87,6 +87,22 @@ try {
 
     $root = New-Fixture
     $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'coreclr.dll') -Value 'forbidden runtime payload'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'runtime payload') {
+        throw 'Expected a root self-contained runtime payload to be rejected.'
+    }
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Set-Content -LiteralPath (Join-Path $root 'qam\hostpolicy.dll') -Value 'forbidden runtime payload'
+    $result = Invoke-Verify -PublishDirectory $root
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'runtime payload') {
+        throw 'Expected a QAM self-contained runtime payload to be rejected.'
+    }
+
+    $root = New-Fixture
+    $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'ui\SteamInputAddonforClaw.UI.pri')
     Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'dependency PRI without application PRI' -Asset 'ui\SteamInputAddonforClaw.UI.pri'
 
