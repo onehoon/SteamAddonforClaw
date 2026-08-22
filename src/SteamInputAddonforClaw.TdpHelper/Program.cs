@@ -5,9 +5,9 @@ using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.TdpHelper;
 
 if (args.Length != 1) return;
-using var server = new NamedPipeServerStream(args[0], PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+using var server = new NamedPipeClientStream(".", args[0], PipeDirection.InOut, PipeOptions.Asynchronous);
 using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-try { await server.WaitForConnectionAsync(connectTimeout.Token); }
+try { await server.ConnectAsync(connectTimeout.Token); }
 catch (OperationCanceledException) when (connectTimeout.IsCancellationRequested) { return; }
 using var reader = new StreamReader(server);
 using var writer = new StreamWriter(server) { AutoFlush = true };

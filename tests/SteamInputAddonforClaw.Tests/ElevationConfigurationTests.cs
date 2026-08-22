@@ -90,6 +90,18 @@ public sealed class ElevationConfigurationTests
         Assert.Contains("return;", helper);
     }
 
+    [Fact]
+    public void Runtime_owns_the_medium_integrity_pipe_and_helper_only_connects()
+    {
+        var client = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Devices", "MSI", "Claw", "TdpHelperClient.cs"));
+        var helper = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
+        Assert.Contains("new NamedPipeServerStream", client);
+        Assert.Contains("PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly", client);
+        Assert.Contains("new NamedPipeClientStream", helper);
+        Assert.Contains("await server.ConnectAsync(connectTimeout.Token)", helper);
+        Assert.DoesNotContain("new NamedPipeServerStream", helper);
+    }
+
     private static string RepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

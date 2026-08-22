@@ -9,7 +9,7 @@ internal sealed class TdpHelperClient : IAsyncDisposable
 {
     private static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(15);
     private readonly Lock _sync = new();
-    private NamedPipeClientStream? _pipe;
+    private NamedPipeServerStream? _pipe;
     private StreamReader? _reader;
     private StreamWriter? _writer;
     private Process? _process;
@@ -58,8 +58,10 @@ internal sealed class TdpHelperClient : IAsyncDisposable
         var path = Path.Combine(AppContext.BaseDirectory, "SteamInputAddonforClaw.TdpHelper.exe");
         _process = Process.Start(new ProcessStartInfo(path, _pipeName) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory })
             ?? throw new InvalidOperationException("TDP helper could not be started.");
-        _pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-        _pipe.Connect(5000);
+        _pipe = new NamedPipeServerStream(_pipeName, PipeDirection.InOut, 1,
+            PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        _pipe.WaitForConnectionAsync(connectTimeout.Token).GetAwaiter().GetResult();
         _reader = new StreamReader(_pipe);
         _writer = new StreamWriter(_pipe) { AutoFlush = true };
     }
