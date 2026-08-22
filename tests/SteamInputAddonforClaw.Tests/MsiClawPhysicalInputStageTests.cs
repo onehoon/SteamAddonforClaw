@@ -224,6 +224,32 @@ public sealed class MsiClawPhysicalInputStageTests
     }
 
     [Fact]
+    public async Task ResumeAfterSuspend_advances_generation_and_invalidates_cached_rumble_endpoint()
+    {
+        var original = Device();
+        var fresh = original with { InstanceGuid = Guid.NewGuid(), DevicePath = "HID\\RUMBLE_AFTER_RESUME", PnpInstanceId = "HID\\FRESH" };
+        var enumerators = new Queue<FakeEnumerator>([new([original]), new([fresh])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        var resolver = new CountingRumbleResolver();
+        var transport = new RecordingRumbleTransport();
+        using var sink = new MsiClawRumbleSink(stage, transport, resolver);
+        sink.BeginPhysicalSession();
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(new(1, 2)).Status);
+        var generation = stage.CurrentSessionGeneration;
+
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+        Assert.True((await stage.ResumeAfterSuspendAsync(CancellationToken.None)).Succeeded);
+
+        Assert.True(stage.CurrentSessionGeneration > generation);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(new(2, 3)).Status);
+        Assert.Equal(2, resolver.Calls);
+        Assert.Equal(fresh.DevicePath, transport.LastPath);
+    }
+
+    [Fact]
     public async Task ResumeAfterSuspend_cancellation_stops_new_input_and_remains_paused()
     {
         var descriptor = Device();
@@ -298,6 +324,28 @@ public sealed class MsiClawPhysicalInputStageTests
     private sealed class TestResolver : IMsiClawRumbleEndpointResolver
     {
         public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity) => new(identity.DevicePath, "Test");
+    }
+
+    private sealed class CountingRumbleResolver : IMsiClawRumbleEndpointResolver
+    {
+        public int Calls { get; private set; }
+        public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity)
+        {
+            Calls++;
+            return new(identity.DevicePath, "Verified", 32);
+        }
+    }
+
+    private sealed class RecordingRumbleTransport : IMsiClawRumbleTransport
+    {
+        public string? LastPath { get; private set; }
+        public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> packet, int outputReportLength)
+        {
+            LastPath = devicePath;
+            return new(true, "OK");
+        }
+        public void InvalidatePhysicalSession() { }
+        public void Dispose() { }
     }
 
     private sealed class BlockingTransport : IMsiClawRumbleTransport

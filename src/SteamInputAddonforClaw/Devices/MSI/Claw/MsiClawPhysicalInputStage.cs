@@ -250,6 +250,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
                                     lock (_sync)
                                     {
                                         _currentIdentity = new(selection.Descriptor.InstanceGuid, selection.Descriptor.DevicePath!, selection.Descriptor.PnpInstanceId!, selection.Descriptor.PhysicalIdentity!);
+                                        _sessionGeneration++;
                                         _suspendPaused = false;
                                     }
                                     AppLog.Info("PhysicalInput", "Physical input resume reacquired.",
