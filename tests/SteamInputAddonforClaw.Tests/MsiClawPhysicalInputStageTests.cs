@@ -119,6 +119,110 @@ public sealed class MsiClawPhysicalInputStageTests
         Assert.Null(stage.CurrentIdentity);
     }
 
+    [Fact]
+    public async Task SuspendPause_stops_input_but_preserves_owned_identity_without_retirement()
+    {
+        var descriptor = Device();
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => new FakeEnumerator([descriptor]), input);
+        var retiring = 0;
+        var retired = 0;
+        stage.PhysicalSessionRetiring += () => retiring++;
+        stage.PhysicalSessionRetired += () => retired++;
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        var identity = stage.CurrentIdentity;
+        var result = await stage.PauseForSuspendAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.False(input.IsRunning);
+        Assert.Equal(identity, stage.CurrentIdentity);
+        Assert.Equal(0, retiring);
+        Assert.Equal(0, retired);
+    }
+
+    [Fact]
+    public async Task ResumeAfterSuspend_retries_missing_topology_and_uses_fresh_descriptor()
+    {
+        var original = Device();
+        var fresh = original with { InstanceGuid = Guid.NewGuid(), DevicePath = "HID\\FRESH", PnpInstanceId = "HID\\FRESH" };
+        var enumerators = new Queue<FakeEnumerator>([
+            new([original]), new([]), new([]), new([fresh]), new([fresh])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+
+        var result = await stage.ResumeAfterSuspendAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(input.IsRunning);
+        Assert.Equal(fresh, input.PreparedDescriptor);
+        Assert.Equal(fresh.PhysicalIdentity, stage.CurrentIdentity!.PhysicalIdentity);
+        Assert.Equal(fresh.InstanceGuid, stage.CurrentIdentity.InstanceGuid);
+    }
+
+    [Fact]
+    public async Task ResumeAfterSuspend_rejects_different_physical_controller_without_mutation()
+    {
+        var original = Device();
+        var foreign = original with { PhysicalIdentity = "USB\\FOREIGN" };
+        var enumerators = new Queue<FakeEnumerator>([
+            new([original]), new([foreign])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+
+        var result = await stage.ResumeAfterSuspendAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(input.IsRunning);
+        Assert.Equal(original.PhysicalIdentity, stage.CurrentIdentity!.PhysicalIdentity);
+        Assert.Equal(original, input.PreparedDescriptor);
+    }
+
+    [Fact]
+    public async Task Rollback_from_suspend_pause_retires_owned_session_and_clears_identity()
+    {
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => new FakeEnumerator([Device()]), input);
+        var retired = 0;
+        stage.PhysicalSessionRetired += () => retired++;
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+
+        var result = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Null(stage.CurrentIdentity);
+        Assert.Equal(1, retired);
+        Assert.False(input.IsRunning);
+    }
+
+    [Fact]
+    public async Task ResumeAfterSuspend_requires_first_valid_state_and_stays_paused_on_failure()
+    {
+        var original = Device();
+        var enumerators = new Queue<FakeEnumerator>([new([original]), new([original])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+        input.FirstValidStateObserved = false;
+
+        var result = await stage.ResumeAfterSuspendAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(input.IsRunning);
+        Assert.Equal(original.PhysicalIdentity, stage.CurrentIdentity!.PhysicalIdentity);
+    }
+
     private static DirectInputDeviceDescriptor Device() => new(
         Guid.NewGuid(), Guid.NewGuid(), "test", 0x0DB0, 0x1902,
         "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST", "HID\\INSTANCE", "USB\\MSI_ROOT", 0x0001, 0x0005, 17, 6, "Verified");

@@ -1,6 +1,7 @@
 using SteamInputAddonforClaw.Input.DirectInput;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Diagnostics;
+using System.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -10,17 +11,24 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
     internal event Action? PhysicalSessionRetiring;
     internal event Action? PhysicalSessionStarted;
     private readonly Func<IDirectInputDeviceEnumerator> _enumeratorFactory;
+    private readonly Func<TimeSpan, CancellationToken, Task> _resumeDelay;
     private readonly IMsiClawPreparedInputSource _inputSource;
     private readonly Lock _sync = new();
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
     private DirectInputDeviceDescriptor? _preparedDescriptor;
     private bool _ownsInputSession;
     private MsiClawPhysicalInputIdentity? _currentIdentity;
     private long _sessionGeneration;
+    private bool _suspendPaused;
 
-    internal MsiClawPhysicalInputStage(Func<IDirectInputDeviceEnumerator> enumeratorFactory, IMsiClawPreparedInputSource inputSource)
+    private static readonly TimeSpan ResumeRetryWindow = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ResumeRetryInterval = TimeSpan.FromMilliseconds(100);
+
+    internal MsiClawPhysicalInputStage(Func<IDirectInputDeviceEnumerator> enumeratorFactory, IMsiClawPreparedInputSource inputSource, Func<TimeSpan, CancellationToken, Task>? resumeDelay = null)
     {
         _enumeratorFactory = enumeratorFactory ?? throw new ArgumentNullException(nameof(enumeratorFactory));
         _inputSource = inputSource ?? throw new ArgumentNullException(nameof(inputSource));
+        _resumeDelay = resumeDelay ?? Task.Delay;
     }
 
     public RoutingStageKind Kind => RoutingStageKind.PhysicalInput;
@@ -82,6 +90,16 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
 
     public async ValueTask<RoutingStageOperationResult> ExecuteMutationAsync(CancellationToken cancellationToken)
     {
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await ExecuteMutationCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _operationGate.Release(); }
+    }
+
+    private async ValueTask<RoutingStageOperationResult> ExecuteMutationCoreAsync(CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         DirectInputDeviceDescriptor? descriptor;
         lock (_sync) descriptor = _preparedDescriptor;
@@ -113,6 +131,7 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
         lock (_sync)
         {
             _ownsInputSession = true;
+            _suspendPaused = false;
             _sessionGeneration++;
             _currentIdentity = new(descriptor.InstanceGuid, descriptor.DevicePath!, descriptor.PnpInstanceId!, descriptor.PhysicalIdentity!);
         }
@@ -122,6 +141,16 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
     }
 
     public async ValueTask<RoutingStageOperationResult> RollbackMutationAsync(CancellationToken cancellationToken)
+    {
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await RollbackMutationCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _operationGate.Release(); }
+    }
+
+    private async ValueTask<RoutingStageOperationResult> RollbackMutationCoreAsync(CancellationToken cancellationToken)
     {
         bool ownsSession;
         lock (_sync) ownsSession = _ownsInputSession;
@@ -144,10 +173,110 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
         {
             _preparedDescriptor = null;
             _ownsInputSession = false;
+            _suspendPaused = false;
             _currentIdentity = null;
             _sessionGeneration++;
         }
         PhysicalSessionRetired?.Invoke();
         return RoutingStageOperationResult.Success("Stopped");
+    }
+
+    internal async ValueTask<RoutingStageOperationResult> PauseForSuspendAsync(CancellationToken cancellationToken)
+    {
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (_sync)
+            {
+                if (!_ownsInputSession)
+                    return RoutingStageOperationResult.Failure("PhysicalInputNotOwned");
+                if (_suspendPaused)
+                    return RoutingStageOperationResult.Success("AlreadyPaused");
+            }
+
+            AppLog.Info("PhysicalInput", "Physical input suspend pause started.",
+                ("Event", "PhysicalInputSuspendPauseStarted"), ("SessionGeneration", CurrentSessionGeneration));
+            await _inputSource.StopAsync().ConfigureAwait(false);
+            if (_inputSource.IsRunning)
+                return RoutingStageOperationResult.Failure("InputSourceStillRunning");
+
+            lock (_sync) _suspendPaused = true;
+            AppLog.Info("PhysicalInput", "Physical input suspend pause completed.",
+                ("Event", "PhysicalInputSuspendPaused"), ("SessionGeneration", CurrentSessionGeneration));
+            return RoutingStageOperationResult.Success("Paused");
+        }
+        finally { _operationGate.Release(); }
+    }
+
+    internal async ValueTask<RoutingStageOperationResult> ResumeAfterSuspendAsync(CancellationToken cancellationToken)
+    {
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            MsiClawPhysicalInputIdentity? identity;
+            lock (_sync)
+            {
+                if (!_ownsInputSession) return RoutingStageOperationResult.Failure("PhysicalInputNotOwned");
+                if (!_suspendPaused) return RoutingStageOperationResult.Success("AlreadyRunning");
+                identity = _currentIdentity;
+            }
+
+            AppLog.Info("PhysicalInput", "Physical input resume reacquire started.",
+                ("Event", "PhysicalInputResumeReacquireStarted"), ("SessionGeneration", CurrentSessionGeneration),
+                ("PhysicalIdentity", identity!.PhysicalIdentity));
+            var deadline = Stopwatch.GetTimestamp() + (long)(ResumeRetryWindow.TotalSeconds * Stopwatch.Frequency);
+            var attempt = 0;
+            while (attempt < 30 && Stopwatch.GetTimestamp() <= deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                attempt++;
+                IDirectInputDeviceEnumerator? enumerator = null;
+                try
+                {
+                    enumerator = _enumeratorFactory();
+                    var candidates = enumerator.EnumerateGameControllers();
+                    var selection = MsiClawDirectInputDeviceSelector.Select(candidates);
+                    if (selection.IsSelected && string.Equals(selection.Descriptor!.PhysicalIdentity, identity!.PhysicalIdentity, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var result = _inputSource.StartPrepared(selection.Descriptor);
+                        if (result.Started)
+                        {
+                            var ready = await _inputSource.WaitForFirstValidStateAsync(cancellationToken).ConfigureAwait(false);
+                            if (ready && _inputSource.IsRunning)
+                            {
+                                lock (_sync)
+                                {
+                                    _currentIdentity = new(selection.Descriptor.InstanceGuid, selection.Descriptor.DevicePath!, selection.Descriptor.PnpInstanceId!, selection.Descriptor.PhysicalIdentity!);
+                                    _suspendPaused = false;
+                                }
+                                AppLog.Info("PhysicalInput", "Physical input resume reacquired.",
+                                    ("Event", "PhysicalInputResumeReacquired"), ("SessionGeneration", CurrentSessionGeneration),
+                                    ("InstanceGuid", selection.Descriptor.InstanceGuid), ("PnpInstanceId", selection.Descriptor.PnpInstanceId), ("Attempt", attempt));
+                                return RoutingStageOperationResult.Success("Resumed");
+                            }
+                            await _inputSource.StopAsync().ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            AppLog.Debug("PhysicalInput", "Physical input resume is waiting for a usable topology.",
+                                ("Event", "PhysicalInputResumeWaitingForTopology"), ("Attempt", attempt), ("Reason", result.Status));
+                        }
+                    }
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    AppLog.Debug("PhysicalInput", "Physical input resume probe failed.", ("Attempt", attempt), ("ExceptionType", exception.GetType().Name));
+                }
+                finally { enumerator?.Dispose(); }
+
+                await _resumeDelay(ResumeRetryInterval, cancellationToken).ConfigureAwait(false);
+            }
+
+            AppLog.Warn("PhysicalInput", "Physical input resume reacquire failed.", null,
+                ("Event", "PhysicalInputResumeReacquireFailed"), ("SessionGeneration", CurrentSessionGeneration),
+                ("FailureReason", "BoundedTopologyWindowExpired"), ("Attempts", attempt));
+            return RoutingStageOperationResult.Failure("ResumeReacquireFailed");
+        }
+        finally { _operationGate.Release(); }
     }
 }
