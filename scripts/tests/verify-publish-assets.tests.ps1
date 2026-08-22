@@ -19,6 +19,7 @@ function New-Fixture {
 
     $files = @{
         'SteamInputAddonforClaw.exe' = 'runtime'
+        'SteamInputAddonforClaw.TdpHelper.exe' = 'tdp helper'
         'CenterMHelperSource\CenterMHelper.exe' = 'dormant oem1 helper'
         'Dependencies\HidHide\HidHide_1.5.230_x64.exe' = (Join-Path $dependencyRoot 'HidHide\HidHide_1.5.230_x64.exe')
         'Dependencies\UsbIpWin2\USBip-0.9.7.7-x64.exe' = (Join-Path $dependencyRoot 'UsbIpWin2\USBip-0.9.7.7-x64.exe')
@@ -103,6 +104,11 @@ try {
     $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'CenterMHelperSource\CenterMHelper.exe')
     Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing CenterM helper artifact' -Asset 'CenterMHelperSource\CenterMHelper.exe'
+
+    $root = New-Fixture
+    $fixturesToClean += $root
+    Remove-Item -LiteralPath (Join-Path $root 'SteamInputAddonforClaw.TdpHelper.exe')
+    Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing TDP helper artifact' -Asset 'SteamInputAddonforClaw.TdpHelper.exe'
 
     Write-Host 'Publish asset verification tests passed.'
 }
