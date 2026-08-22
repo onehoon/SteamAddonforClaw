@@ -48,7 +48,7 @@ public sealed partial class ProfilePage : UserControl
     private void GameSelector_SuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args) { if (args.SelectedItem is FrontendProfileGameCatalogEntry game) _ = SelectGameAsync(game); }
     private void GameSelector_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { if (args.ChosenSuggestion is FrontendProfileGameCatalogEntry game) _ = SelectGameAsync(game); else if (_catalog.FirstOrDefault(x => string.Equals(x.Name, sender.Text, StringComparison.OrdinalIgnoreCase) || x.AppId.ToString() == sender.Text) is { } exact) _ = SelectGameAsync(exact); }
     private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); _selectedGame = game; GameSelector.Text = game.Name; await CaptureSelectedAsync(game.AppId); }
-    private async Task CaptureSelectedAsync(uint appId) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (_selectedGame?.AppId != appId) return; Render(snapshot); if (snapshot.PersistenceWritable) ClearError(); } catch (Exception exception) { if (_selectedGame?.AppId == appId) ShowError("Profile settings could not be loaded.", exception); } }
+    private async Task CaptureSelectedAsync(uint appId) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot); if (snapshot.PersistenceWritable) ClearError(); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) ShowError("Profile settings could not be loaded.", exception); } }
     private void ClearSelection() { CancelTdpDebounce(); _selectedGame = null; _snapshot = null; GameSelector.Text = string.Empty; SelectedGameText.Text = "Click Refresh, then select a game."; ProfileEnabledToggle.Visibility = Visibility.Collapsed; SetEditorsEnabled(false); }
 
     private void Render(FrontendGameProfileSnapshot snapshot)
@@ -72,7 +72,7 @@ public sealed partial class ProfilePage : UserControl
     {
         if (_suppressEvents || _frontend is null || _selectedGame is null) return;
         var appId = _selectedGame.AppId;
-        try { var result = await _frontend.SetGameProfileEnabledAsync(appId, ProfileEnabledToggle.IsOn, _selectedGame.Name); if (_selectedGame?.AppId != appId) return; Render(result.Snapshot); if (result.Succeeded) ClearError(); else ShowError(result.FailureMessage ?? "Profile could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "Profile could not be updated because the Runtime connection was interrupted.", exception); }
+        try { var result = await _frontend.SetGameProfileEnabledAsync(appId, ProfileEnabledToggle.IsOn, _selectedGame.Name); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (result.Succeeded) ClearError(); else ShowError(result.FailureMessage ?? "Profile could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "Profile could not be updated because the Runtime connection was interrupted.", exception); }
     }
     private async void CpuBoostAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync();
     private async void CpuBoostDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync();
@@ -80,7 +80,7 @@ public sealed partial class ProfilePage : UserControl
     {
         if (_suppressEvents || _frontend is null || _selectedGame is null || CpuBoostAcComboBox.SelectedItem is not CpuBoostModeItem ac || CpuBoostDcComboBox.SelectedItem is not CpuBoostModeItem dc) return;
         var appId = _selectedGame.AppId;
-        try { var result = await _frontend.SetGameProfileCpuBoostAsync(appId, ac.Mode, dc.Mode); if (_selectedGame?.AppId != appId) return; Render(result.Snapshot); if (result.Succeeded) ClearError(); else ShowError(result.FailureMessage ?? "CPU Boost could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "CPU Boost could not be updated.", exception); }
+        try { var result = await _frontend.SetGameProfileCpuBoostAsync(appId, ac.Mode, dc.Mode); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (result.Succeeded) ClearError(); else ShowError(result.FailureMessage ?? "CPU Boost could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "CPU Boost could not be updated.", exception); }
     }
     private void TdpSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
@@ -91,12 +91,13 @@ public sealed partial class ProfilePage : UserControl
     private async Task SubmitTdpAfterDelayAsync(long generation, CancellationToken token)
     {
         uint? appId = null;
-        try { await Task.Delay(300, token); if (generation != _tdpGeneration || _frontend is null || _selectedGame is null || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2) return; appId = _selectedGame.AppId; var result = await _frontend.SetGameProfileTdpAsync(appId.Value, new(new(ac1, ac2), new(dc1, dc2))); if (_selectedGame?.AppId != appId) return; Render(result.Snapshot); if (result.Succeeded) ClearError(); else ShowError(result.FailureMessage ?? "TDP could not be updated.", null); } catch (OperationCanceledException) { } catch (Exception exception) { if (appId is { } targetAppId) await RestoreSelectedAfterMutationFailureAsync(targetAppId, "TDP could not be updated.", exception); }
+        try { await Task.Delay(300, token); if (generation != _tdpGeneration || _frontend is null || _selectedGame is null || _acPl1 is not { } ac1 || _acPl2 is not { } ac2 || _dcPl1 is not { } dc1 || _dcPl2 is not { } dc2) return; appId = _selectedGame.AppId; var result = await _frontend.SetGameProfileTdpAsync(appId.Value, new(new(ac1, ac2), new(dc1, dc2))); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId.Value)) return; Render(result.Snapshot); if (result.Succeeded) ClearError(); else ShowError(result.FailureMessage ?? "TDP could not be updated.", null); } catch (OperationCanceledException) { } catch (Exception exception) { if (appId is { } targetAppId) await RestoreSelectedAfterMutationFailureAsync(targetAppId, "TDP could not be updated.", exception); }
     }
     private void SetTdpText() { AcPl1Value.Text = _acPl1 is { } x ? $"{x} W" : "— W"; AcPl2Value.Text = _acPl2 is { } y ? $"{y} W" : "— W"; DcPl1Value.Text = _dcPl1 is { } z ? $"{z} W" : "— W"; DcPl2Value.Text = _dcPl2 is { } w ? $"{w} W" : "— W"; }
     private void CancelTdpDebounce() { _tdpGeneration++; _tdpDebounce?.Cancel(); _tdpDebounce = null; }
     private void ShowError(string message, Exception? exception) { ProfileInfoBar.Severity = InfoBarSeverity.Error; ProfileInfoBar.Message = message; ProfileInfoBar.IsOpen = true; if (exception is not null) AppLog.Warn("Profile", message, exception); }
     private void ClearError() => ProfileInfoBar.IsOpen = false;
+    internal static bool IsCurrentProfileResponse(uint? selectedAppId, uint responseAppId) => selectedAppId == responseAppId;
     private async Task RestoreSelectedAfterMutationFailureAsync(uint appId, string message, Exception exception)
     {
         ShowError(message, exception);
