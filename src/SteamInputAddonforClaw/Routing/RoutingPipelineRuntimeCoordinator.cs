@@ -106,7 +106,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     /// </summary>
     internal bool HasResidualSessionState =>
         Volatile.Read(ref _transitionOperationCount) > 0
-        || _sessionCoordinator.PendingCleanup is not null;
+        || _sessionCoordinator.PendingCleanup is not null
+        || (_sessionCoordinator.ActiveSession is not null && !HasPreservedSession);
 
     internal bool HasPreservedSession => _suspendPreservedSession is { } preserved &&
         ReferenceEquals(_sessionCoordinator.ActiveSession, preserved) &&
@@ -367,7 +368,9 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         }
     }
 
-    internal async ValueTask<bool> ReconcilePreservedSessionAsync(CancellationToken cancellationToken)
+    internal async ValueTask<bool> ReconcilePreservedSessionAsync(
+        Func<CancellationToken, Task> refreshBeforeDecision,
+        CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _transitionOperationCount);
         var acquired = false;
@@ -382,6 +385,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             var owned = await _reconcileOwnedRouteState(cancellationToken).ConfigureAwait(false);
             if (!owned.Succeeded)
                 return await RetireResidualSessionCoreAsync(cancellationToken).ConfigureAwait(false);
+            await refreshBeforeDecision(cancellationToken).ConfigureAwait(false);
             var result = await ReconcileCoreAsync(cancellationToken).ConfigureAwait(false);
             return result.Succeeded;
         }

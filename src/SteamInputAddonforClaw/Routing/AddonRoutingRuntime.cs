@@ -588,9 +588,11 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         return succeeded;
     }
 
-    internal async Task<bool> ReconcilePreservedSessionAfterResumeAsync(CancellationToken cancellationToken)
+    internal async Task<bool> ReconcilePreservedSessionAfterResumeAsync(
+        Func<CancellationToken, Task> refreshBeforeDecision,
+        CancellationToken cancellationToken)
     {
-        var succeeded = await _coordinator.ReconcilePreservedSessionAsync(cancellationToken).ConfigureAwait(false);
+        var succeeded = await _coordinator.ReconcilePreservedSessionAsync(refreshBeforeDecision, cancellationToken).ConfigureAwait(false);
         if (succeeded) await TryConvergeSafetyAfterCleanupAsync("PreservedResumeReconcile").ConfigureAwait(false);
         return succeeded;
     }

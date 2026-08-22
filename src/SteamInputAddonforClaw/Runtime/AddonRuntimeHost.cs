@@ -240,12 +240,34 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private async Task<bool> ReconcilePreservedRoutingSessionAsync(CancellationToken cancellationToken)
     {
         if (_routingRuntime is null) return true;
-        var succeeded = await _routingRuntime.ReconcilePreservedSessionAfterResumeAsync(cancellationToken).ConfigureAwait(false);
+        _resumeFreshReconcileSuppression.Begin();
+        var succeeded = false;
+        try
+        {
+            succeeded = await _routingRuntime.ReconcilePreservedSessionAfterResumeAsync(
+                token =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() =>
+                    {
+                        lock (_steamLifecycleLock)
+                        {
+                            if (!_steamStopped) _steamRuntime.Refresh();
+                        }
+                    });
+                    return Task.CompletedTask;
+                }, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (_resumeFreshReconcileSuppression.Complete(succeeded))
+                _ = QueueDeferredRoutingReconcile();
+        }
         if (_routingRuntime.AuxiliaryResumeParticipant is { } auxiliary)
         {
             try { await auxiliary.ReconcileAfterResumeAsync(cancellationToken).ConfigureAwait(false); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception exception) { AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception); succeeded = false; }
+            catch (Exception exception) { AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception); }
         }
         return succeeded;
     }
