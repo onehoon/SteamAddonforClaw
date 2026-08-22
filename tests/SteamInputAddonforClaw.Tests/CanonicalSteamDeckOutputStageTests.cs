@@ -42,6 +42,28 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task ReconcileOwnedState_unexpected_stopped_publisher_fails_closed()
+    {
+        var session = new FakeCanonicalSession { InputAccepted = false };
+        var ticks = new ManualTicks();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")]]), new FakeHidHide(), snapshot: new FakeSnapshot(), reportTicks: ticks);
+        var fault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stage.SetOutputFaultHandler(() => { fault.TrySetResult(); return ValueTask.CompletedTask; });
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        ticks.Tick();
+        await fault.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(10);
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("SteamDeckPublisherNotRunning", result.Reason);
+        Assert.Equal(1, session.Trace.Count(value => value == "Start"));
+    }
+
+    [Fact]
     public async Task ReconcileOwnedState_attached_without_owned_pnp_fails_without_mutation()
     {
         var session = new FakeCanonicalSession();

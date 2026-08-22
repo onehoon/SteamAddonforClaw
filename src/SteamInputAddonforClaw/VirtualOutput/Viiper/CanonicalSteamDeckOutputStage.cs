@@ -415,6 +415,10 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 return RoutingStageOperationResult.Failure("SteamDeckOwnedPnPAbsent");
             if (candidates.Any(device => !ownedIds.Contains(device.InstanceId) && !preExistingIds.Contains(device.InstanceId)))
                 return RoutingStageOperationResult.Failure("SteamDeckPnPOwnershipAmbiguous");
+            if (_publisher is null)
+                return RoutingStageOperationResult.Failure("SteamDeckPublisherMissing");
+            if (!_presentationPaused && !_publisher.IsRunning)
+                return RoutingStageOperationResult.Failure("SteamDeckPublisherNotRunning");
 
             if (_presentationPaused)
             {
