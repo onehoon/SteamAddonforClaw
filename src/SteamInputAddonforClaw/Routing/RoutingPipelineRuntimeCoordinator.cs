@@ -180,6 +180,33 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         || (_sessionCoordinator.PendingCleanup is { } pending && ReferenceEquals(pending.Session, request.Session))
         || (_sessionCoordinator.EnteringSession is { } entering && ReferenceEquals(entering, request.Session));
 
+    internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedForSessionYieldAsync(
+        RoutingSessionYieldRequest request)
+    {
+        CancelInFlightTransition();
+        Interlocked.Increment(ref _transitionOperationCount);
+        var acquired = false;
+        try
+        {
+            await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            acquired = true;
+            if (IsShutdownRequested) return RuntimeStoppedResult();
+            if (!IsCurrentSessionYieldRequest(request))
+                return new(true, _sessionCoordinator.CurrentState, RoutingActionKind.None, "SessionYieldRequestRetired");
+
+            _sessionYieldReason = "ExternalNativeTakeover";
+            AppLog.Warn("Routing.Runtime", "ExternalNativeTakeoverDetected", null,
+                ("Action", "YieldUntilSteamSessionEnd"));
+            using var transition = CreateTransitionCancellation(CancellationToken.None);
+            return await RetireForFailCloseCoreAsync(transition.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (acquired) _transitionGate.Release();
+            Interlocked.Decrement(ref _transitionOperationCount);
+        }
+    }
+
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ShutdownAsync()
     {
         Interlocked.Exchange(ref _shutdownRequested, 1);

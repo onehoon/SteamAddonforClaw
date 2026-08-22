@@ -144,10 +144,18 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
 
         async ValueTask HandleBackendRuntimeFaultAsync(string reason, bool yieldCurrentSteamSession)
         {
-            var yieldRequest = yieldCurrentSteamSession ? coordinator.RequestCurrentSessionYield() : null;
-            await Task.Yield();
-            if (yieldCurrentSteamSession && (yieldRequest is null || !coordinator.IsCurrentSessionYieldRequest(yieldRequest.Value)))
+            if (yieldCurrentSteamSession)
+            {
+                var yieldRequest = coordinator.RequestCurrentSessionYield();
+                if (yieldRequest is null) return;
+                await Task.Yield();
+                var takeoverRollback = await coordinator.FailClosedForSessionYieldAsync(yieldRequest.Value).ConfigureAwait(false);
+                if (!takeoverRollback.Succeeded)
+                    AppLog.Error("Routing.Runtime", "Backend runtime fault fail-close did not complete.", new InvalidOperationException(takeoverRollback.Reason), ("Reason", reason));
+                else if (runtime is not null)
+                    await runtime.TryConvergeSafetyAfterCleanupAsync("BackendRuntimeFault");
                 return;
+            }
 
             if (safetySession is not null)
                 await safetySession.LatchRoutingFaultAsync(reason, CancellationToken.None).ConfigureAwait(false);

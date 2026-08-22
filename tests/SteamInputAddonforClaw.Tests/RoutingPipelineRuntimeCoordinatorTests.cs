@@ -90,6 +90,30 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task Retired_yield_request_is_noop_and_next_session_enters()
+    {
+        var executor = new FakeExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(Eligible(), Software()),
+                Snapshot(WaitingForSteam(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(request);
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+
+        var delayed = await bridge.Bridge.FailClosedForSessionYieldAsync(request!.Value);
+        Assert.True(delayed.Succeeded);
+        Assert.Equal("SessionYieldRequestRetired", delayed.Reason);
+
+        var nextSession = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        Assert.Equal(RoutingActionKind.EnterOverride, nextSession.Action);
+    }
+
+    [Fact]
     public async Task Yielded_session_retries_pending_cleanup_without_forward_entry()
     {
         var executor = new FakeExecutor();
