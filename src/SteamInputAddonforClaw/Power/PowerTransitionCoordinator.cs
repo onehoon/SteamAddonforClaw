@@ -138,13 +138,22 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                     finally { sealedCleanup = _gate.TrySealResumeCleanup(recoveryEpoch); }
                     if (!sealedCleanup || _gate.Epoch != recoveryEpoch) return;
                     safe = preserved;
-                    _gate.TryCommitRecovery(recoveryEpoch, safe, () =>
+                    var committed = _gate.TryCommitRecovery(recoveryEpoch, safe, () =>
                     {
                         _recovery.Set(safe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
                         State = safe ? PowerTransitionState.Awake : PowerTransitionState.Unsafe;
                     });
+                    if (!committed) return;
                     if (safe && _afterPreservedRecoveryCommit is not null)
-                        await _afterPreservedRecoveryCommit().ConfigureAwait(false);
+                    {
+                        try { await _afterPreservedRecoveryCommit().ConfigureAwait(false); }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+                        catch (Exception exception)
+                        {
+                            AppLog.Error("Power.Recovery", "Post-commit deferred routing reconciliation failed.", exception,
+                                ("Cycle", cycleForResume), ("Epoch", recoveryEpoch));
+                        }
+                    }
                     return;
                 }
                 if (_hasResidualRoutingCleanup())
