@@ -55,7 +55,10 @@ public sealed class SteamDeckSystemButtonOverlayTests
         overlay.RequestQuickAccessPulse();
         Assert.Equal((byte)1, overlay.Apply(SampleMappedState()).QuickAccess);
 
-        time.Advance(TimeSpan.FromMilliseconds(51));
+        time.Advance(TimeSpan.FromMilliseconds(99));
+        Assert.Equal((byte)1, overlay.Apply(SampleMappedState()).QuickAccess);
+
+        time.Advance(TimeSpan.FromMilliseconds(2));
         Assert.Equal((byte)0, overlay.Apply(SampleMappedState()).QuickAccess);
     }
 
@@ -66,10 +69,10 @@ public sealed class SteamDeckSystemButtonOverlayTests
         var overlay = new SteamDeckSystemButtonOverlay(time);
 
         overlay.RequestQuickAccessPulse();
-        time.Advance(TimeSpan.FromMilliseconds(30));
-        overlay.RequestQuickAccessPulse(); // restarts the 50ms window from here
+        time.Advance(TimeSpan.FromMilliseconds(76));
+        overlay.RequestQuickAccessPulse(); // restarts the 100ms window from here
 
-        time.Advance(TimeSpan.FromMilliseconds(30)); // 30ms after the 2nd request, 60ms after the 1st
+        time.Advance(TimeSpan.FromMilliseconds(60)); // 60ms after the 2nd request, 90ms after the 1st
         Assert.Equal((byte)1, overlay.Apply(SampleMappedState()).QuickAccess);
     }
 
@@ -97,7 +100,7 @@ public sealed class SteamDeckSystemButtonOverlayTests
         Assert.Equal((byte)1, both.Steam);
         Assert.Equal((byte)1, both.QuickAccess);
 
-        time.Advance(TimeSpan.FromMilliseconds(30));
+        time.Advance(TimeSpan.FromMilliseconds(76));
         var quickOnly = overlay.Apply(SampleMappedState());
         Assert.Equal((byte)0, quickOnly.Steam);
         Assert.Equal((byte)1, quickOnly.QuickAccess);

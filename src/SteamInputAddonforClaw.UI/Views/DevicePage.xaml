@@ -15,7 +15,7 @@
                 Description="Processor performance boost mode."
                 IsExpanded="True">
                 <ctcontrols:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE945;" />
+                    <FontIcon Glyph="&#xEEA1;" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch
                     x:Name="CpuBoostEnabledToggleSwitch"
@@ -42,7 +42,8 @@
 
             <InfoBar x:Name="TdpInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
             <ctcontrols:SettingsExpander x:Name="TdpExpander" Header="TDP Control"
-                Description="Configure processor power limits for plugged-in and battery operation.">
+                Description="Configure processor power limits for plugged-in and battery operation."
+                IsExpanded="True">
                 <ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE945;" /></ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch x:Name="TdpEnabledToggleSwitch" OffContent="" OnContent="" Toggled="TdpEnabledToggleSwitch_Toggled" />
                 <ctcontrols:SettingsExpander.Items>
