@@ -52,6 +52,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private readonly Func<ValueTask>? _routingDisposeOverride;
     private readonly Action? _routingReconcileCompleted;
     private readonly ConcurrentDictionary<Task, byte> _backgroundTasks = new();
+    private int _preservedResumeDeferredReconcile;
     private readonly CancellationTokenSource _shutdownCancellation = new();
 
     // Guards against a resume notification that was already queued in PowerTransitionCoordinator
@@ -119,7 +120,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
             retryResidualRoutingCleanup: async token =>
                 _routingRuntime is null || await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false),
             hasPreservedRoutingSession: () => _routingRuntime?.HasPreservedSession == true,
-            reconcilePreservedRoutingSession: token => ReconcilePreservedRoutingSessionAsync(token));
+            reconcilePreservedRoutingSession: token => ReconcilePreservedRoutingSessionAsync(token),
+            afterPreservedRecoveryCommit: DrainPreservedResumeDeferredReconcileAsync);
         _powerWatcher = new PowerTransitionWatcher(notificationSource ?? new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
             () => _routingRuntime?.CancelInFlightTransition());
 
@@ -271,9 +273,16 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         finally
         {
             if (_resumeFreshReconcileSuppression.Complete(succeeded))
-                _ = QueueDeferredRoutingReconcile();
+                Interlocked.Exchange(ref _preservedResumeDeferredReconcile, 1);
         }
         return succeeded;
+    }
+
+    private Task DrainPreservedResumeDeferredReconcileAsync()
+    {
+        if (Interlocked.Exchange(ref _preservedResumeDeferredReconcile, 0) == 0)
+            return Task.CompletedTask;
+        return QueueDeferredRoutingReconcile();
     }
 
     /// <summary>

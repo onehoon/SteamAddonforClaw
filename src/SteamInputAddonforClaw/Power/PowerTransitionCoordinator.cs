@@ -17,6 +17,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly Func<CancellationToken, Task<bool>> _retryResidualRoutingCleanup;
     private readonly Func<bool> _hasPreservedRoutingSession;
     private readonly Func<CancellationToken, Task<bool>> _reconcilePreservedRoutingSession;
+    private readonly Func<Task>? _afterPreservedRecoveryCommit;
     private readonly SemaphoreSlim _serial = new(1, 1);
     private readonly Channel<QueuedNotification> _notifications = Channel.CreateUnbounded<QueuedNotification>(new() { SingleReader = true, SingleWriter = false });
     private readonly CancellationTokenSource _shutdown = new();
@@ -26,7 +27,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
-    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, IEnumerable<IPowerSuspendParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Func<bool>? hasResidualRoutingCleanup = null, Func<CancellationToken, Task<bool>>? retryResidualRoutingCleanup = null, Func<bool>? hasPreservedRoutingSession = null, Func<CancellationToken, Task<bool>>? reconcilePreservedRoutingSession = null)
+    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, IEnumerable<IPowerSuspendParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Func<bool>? hasResidualRoutingCleanup = null, Func<CancellationToken, Task<bool>>? retryResidualRoutingCleanup = null, Func<bool>? hasPreservedRoutingSession = null, Func<CancellationToken, Task<bool>>? reconcilePreservedRoutingSession = null, Func<Task>? afterPreservedRecoveryCommit = null)
     {
         (_gate, _recovery, _participants, _afterRecovery) = (gate, recovery, participants.ToArray(), afterRecovery);
         _recoveryEnabled = recoveryEnabled;
@@ -41,6 +42,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
         _retryResidualRoutingCleanup = retryResidualRoutingCleanup ?? (_ => Task.FromResult(true));
         _hasPreservedRoutingSession = hasPreservedRoutingSession ?? (() => false);
         _reconcilePreservedRoutingSession = reconcilePreservedRoutingSession ?? (_ => Task.FromResult(false));
+        _afterPreservedRecoveryCommit = afterPreservedRecoveryCommit;
         _reader = Task.Run(ProcessNotificationsAsync);
     }
     internal long NextSequence() => Interlocked.Increment(ref _sequence);
@@ -141,6 +143,8 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
                         _recovery.Set(safe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
                         State = safe ? PowerTransitionState.Awake : PowerTransitionState.Unsafe;
                     });
+                    if (safe && _afterPreservedRecoveryCommit is not null)
+                        await _afterPreservedRecoveryCommit().ConfigureAwait(false);
                     return;
                 }
                 if (_hasResidualRoutingCleanup())
