@@ -172,6 +172,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         AppLog.Info("CenterM.Oem1", "OEM1 activation pending; Frontend transport will initialize independently.");
 
         _runtimeHost = composition.RuntimeHost;
+        _cpuBoostRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
+        _runtimeHost.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
         if (startupResult.EnvironmentMode == ControllerEnvironmentMode.StockCenterM
             && startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
@@ -271,7 +273,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     {
         try
         {
-            _cpuBoostRuntime.StartupReconcile();
+            _cpuBoostRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0);
         }
         catch (Exception exception)
         {
@@ -399,9 +401,24 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private void PrepareRuntimeForShutdown()
     {
         if (Interlocked.Exchange(ref _runtimeShutdownPrepared, 1) != 0) return;
+        if (_runtimeHost is not null)
+            _runtimeHost.ActualRunningAppIdChanged -= OnActualRunningAppIdChanged;
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.BeginProcessShutdown();
         _runtimeHost?.PrepareForShutdown();
+    }
+
+    private void OnActualRunningAppIdChanged(uint appId)
+    {
+        try
+        {
+            _cpuBoostRuntime.Reconcile(appId);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.CpuBoost", "CPU Boost game-profile reconcile failed after Actual RunningAppID changed.", exception,
+                ("RunningAppID", appId));
+        }
     }
 
     private void OnGameBarForegroundChanged(object? sender, EventArgs args) =>

@@ -85,6 +85,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         _powerGate = powerGate;
         _recoverySafetyState = recoverySafetyState;
         _steamRuntime.StateChanged += OnSteamSessionStateChanged;
+        _steamRuntime.ActualRunningAppIdChanged += OnActualRunningAppIdChanged;
         _routingShutdownOverride = routingShutdownOverride;
         _routingDisposeOverride = routingDisposeOverride;
         _routingReconcileCompleted = routingReconcileCompleted;
@@ -135,7 +136,10 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     internal DeveloperTestModeState DeveloperTestModeState => _steamRuntime.DeveloperTestModeState;
 
     internal event EventHandler<SteamSessionStateChangedEventArgs>? SteamSessionStateChanged;
+    internal event Action<uint>? ActualRunningAppIdChanged;
     internal event EventHandler? StatusRefreshRequested;
+
+    internal uint ActualRunningAppId => _steamRuntime.ActualRunningAppId;
 
     internal RoutingRuntimeStatusSnapshot CaptureRoutingStatus() => _routingRuntime?.CaptureStatus() ?? RoutingRuntimeStatusSnapshot.Unavailable;
     internal Task<bool> HandleGameBarForegroundChangedAsync(bool isForeground, CancellationToken cancellationToken = default) =>
@@ -301,6 +305,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
             if (_steamStopped) return;
             _steamStopped = true;
             _steamRuntime.StateChanged -= OnSteamSessionStateChanged;
+            _steamRuntime.ActualRunningAppIdChanged -= OnActualRunningAppIdChanged;
             _steamRuntime.Dispose();
         }
     }
@@ -310,6 +315,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         SteamSessionStateChanged?.Invoke(this, args);
         if (!_resumeFreshReconcileSuppression.TrySuppressStateChange()) TrackBackgroundTask(ReconcileAsync(_shutdownCancellation.Token));
     }
+
+    private void OnActualRunningAppIdChanged(uint appId) => ActualRunningAppIdChanged?.Invoke(appId);
 
     private Task QueueDeferredRoutingReconcile()
     {

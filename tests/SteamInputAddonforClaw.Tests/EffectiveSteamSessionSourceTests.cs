@@ -8,6 +8,32 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class EffectiveSteamSessionSourceTests
 {
     [Fact]
+    public async Task ActualTransition_PublishesRoutingBeforeLaterProfileSubscriberRuns()
+    {
+        var actual = new FakeRunningAppIdSource(0);
+        using var watcher = new SteamSessionWatcher(actual);
+        using var bigPicture = new SteamBigPictureWatcher(new FakeBigPictureProbe(false), new FakeBigPictureEventHook());
+        using var effective = new EffectiveSteamSessionSource(watcher, bigPicture, new DeveloperTestModeState(), new FakeSteamInputRoutingPreference(true));
+        watcher.Start();
+        bigPicture.Start();
+        using var routingPublished = new ManualResetEventSlim();
+        using var releaseProfile = new ManualResetEventSlim();
+        var profileSawRoutingPublished = false;
+        effective.StateChanged += (_, _) => routingPublished.Set();
+        watcher.StateChanged += (_, _) =>
+        {
+            profileSawRoutingPublished = routingPublished.IsSet;
+            releaseProfile.Wait();
+        };
+
+        var transition = Task.Run(() => actual.SetRunningAppId(123));
+        Assert.True(routingPublished.Wait(TimeSpan.FromSeconds(5)));
+        releaseProfile.Set();
+        await transition;
+        Assert.True(profileSawRoutingPublished);
+    }
+
+    [Fact]
     public void TestMode_UsesDeveloperSourceWithoutChangingActualState()
     {
         var actual = new FakeRunningAppIdSource(0);

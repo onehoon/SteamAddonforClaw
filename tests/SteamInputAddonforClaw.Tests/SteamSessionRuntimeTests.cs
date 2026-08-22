@@ -31,9 +31,37 @@ public sealed class SteamSessionRuntimeTests
         runtime.Dispose();
     }
 
+    [Fact]
+    public void ActualObservation_tracksAppId_withoutStartingRoutingObservation()
+    {
+        var source = new FakeRunningAppIdSource();
+        using var runtime = new SteamSessionRuntime(new FakeSteamInputRoutingPreference(), source);
+        var observed = new List<uint>();
+        runtime.ActualRunningAppIdChanged += appId => observed.Add(appId);
+
+        runtime.StartActualObservation();
+        source.SetRunningAppId(123);
+
+        Assert.Equal([123u], observed);
+        Assert.Equal(123u, runtime.ActualRunningAppId);
+        Assert.False(runtime.State.IsActive);
+    }
+
     private sealed class FakeSteamInputRoutingPreference : ISteamInputRoutingPreference
     {
         public bool SteamInputRoutingEnabled => true;
         public event EventHandler? SteamInputRoutingEnabledChanged { add { } remove { } }
+    }
+
+    private sealed class FakeRunningAppIdSource : IRunningAppIdSource
+    {
+        private uint _appId;
+        public event EventHandler? Changed;
+        public uint GetRunningAppId() => _appId;
+        public void SetRunningAppId(uint appId)
+        {
+            _appId = appId;
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
     }
 }

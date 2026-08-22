@@ -58,6 +58,7 @@ internal static class AddonRuntimeCompositionFactory
         }
         else
         {
+            steamRuntime.StartActualObservation();
             AppLog.Warn("Recovery", "Steam/controller routing remains stopped because recovery is unsafe.", null, ("Action", "Passive"));
         }
 
