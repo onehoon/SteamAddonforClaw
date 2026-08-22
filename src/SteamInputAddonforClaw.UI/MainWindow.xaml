@@ -33,14 +33,14 @@
                     <SymbolIcon Symbol="Repair" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Profile" Tag="Profile">
-                <NavigationViewItem.Icon>
-                    <SymbolIcon Symbol="Contact" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
             <NavigationViewItem Content="Device" Tag="Device">
                 <NavigationViewItem.Icon>
                     <SymbolIcon Symbol="AllApps" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem Content="Profile" Tag="Profile">
+                <NavigationViewItem.Icon>
+                    <SymbolIcon Symbol="Contact" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
         </NavigationView.MenuItems>

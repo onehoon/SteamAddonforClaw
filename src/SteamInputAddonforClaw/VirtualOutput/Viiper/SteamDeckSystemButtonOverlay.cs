@@ -11,7 +11,7 @@ namespace SteamInputAddonforClaw.VirtualOutput.Viiper;
 /// </summary>
 internal sealed class SteamDeckSystemButtonOverlay
 {
-    private static readonly TimeSpan PulseDuration = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan PulseDuration = TimeSpan.FromMilliseconds(100);
 
     private readonly TimeProvider _time;
     private readonly object _gate = new();

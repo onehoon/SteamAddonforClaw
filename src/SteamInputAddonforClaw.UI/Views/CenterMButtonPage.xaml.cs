@@ -3,7 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.Contracts.Oem1;
-using Windows.Storage.Pickers;
+using Microsoft.Windows.Storage.Pickers;
 
 namespace SteamInputAddonforClaw.Views;
 
@@ -126,9 +126,10 @@ public sealed partial class CenterMButtonPage : UserControl
             // .lnk/any-file here would let the user pick a target that resolves through the shell's
             // own file-type handler instead of running as a plain process, which is the exact
             // scripting/arbitrary-shell-action surface Oem1ApplicationLauncher now refuses.
-            var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
+            var hwnd = handleProvider();
+            var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+            var picker = new FileOpenPicker(windowId) { SuggestedStartLocation = PickerLocationId.ComputerFolder };
             picker.FileTypeFilter.Add(".exe");
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, handleProvider());
             var file = await picker.PickSingleFileAsync();
             if (file is null) return;
             slot.SetExecutablePath(file.Path);
@@ -217,10 +218,10 @@ public sealed partial class CenterMButtonPage : UserControl
                 modifier.Unchecked += (_, _) => page.OnSlotConfigurationChanged(this);
             }
             _key.SelectionChanged += (_, _) => page.OnSlotConfigurationChanged(this);
-            // LostFocus, not TextChanged: saving on every keystroke would write the settings file
-            // once per character.
-            _path.LostFocus += (_, _) => page.OnSlotConfigurationChanged(this);
-            _arguments.LostFocus += (_, _) => page.OnSlotConfigurationChanged(this);
+            // Commit edits while they are typed so a physical OEM1 request cannot race a pending
+            // LostFocus event and launch a previously persisted executable or argument string.
+            _path.TextChanged += (_, _) => page.OnSlotConfigurationChanged(this);
+            _arguments.TextChanged += (_, _) => page.OnSlotConfigurationChanged(this);
         }
 
         internal Oem1BindingSlot Slot { get; }

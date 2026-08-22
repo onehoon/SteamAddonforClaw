@@ -70,7 +70,7 @@ public sealed class CanonicalSteamDeckInputPublisherTests : IDisposable
         Assert.Equal((byte)1, sink.States[1].QuickAccess);
 
         // After the pulse duration elapses, normal publication continues with QuickAccess neutral.
-        time.Advance(TimeSpan.FromMilliseconds(51));
+        time.Advance(TimeSpan.FromMilliseconds(101));
         await ticks.TickAsync(); await sink.WaitForCountAsync(3);
         Assert.Equal((byte)1, sink.States[2].A);
         Assert.Equal((byte)0, sink.States[2].QuickAccess);
