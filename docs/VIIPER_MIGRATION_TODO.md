@@ -367,14 +367,14 @@ which publishes `IControllerStateSnapshotSource.LatestState`, mapped through
 ~250 Hz absolute-deadline schedule already proven by
 `CanonicalSteamDeckInputPublisher`. It owns publication only -- not
 attachment, detachment, VIIPER logical-device lifetime, Game Bar policy, or
-Deck neutral/live policy. There is still **no production caller**: it is not
+There is still **no production caller**: it is not
 instantiated or started from `AddonRoutingRuntime`, `AddonProcessHost`,
 `CanonicalSteamDeckOutputStage`, `RoutingPipelineRuntimeCoordinator`,
 `GameBarForegroundWatcher`, power/resume logic, or OEM1, and it makes zero
 calls to `TryGetXbox360AttachmentState`/`AttachXbox360`/`DetachXbox360`.
-Xbox360 remains detached/unpublished during normal Runtime behavior, and
-At that historical stage, Game Bar presentation switching remained planned and
-no hardware validation of this publisher had been performed.
+Xbox360 remains detached/unpublished during normal Runtime behavior.
+At that historical stage, Game Bar presentation switching remained planned,
+and no hardware validation of this publisher had been performed.
 
 Deck presentation pause/resume foundation step: `CanonicalSteamDeckOutputStage`
 (`src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalSteamDeckOutputStage.cs`)
@@ -396,8 +396,8 @@ There is still **no normal Runtime caller**: it is not invoked by
 `AddonProcessHost`, `GameBarForegroundWatcher`, OEM1,
 or any automatic routing path, so normal Runtime behavior and `RoutingRuntimeStatusSnapshot
 .SteamOutputActive` semantics are unchanged. No Xbox360 attach, no Xbox360
-publisher start, and no Deck/Xbox360 switching are implemented here. SD7
-remains PLANNED and no hardware validation is claimed.
+publisher start, and no Deck/Xbox360 switching are implemented here. At that
+historical stage, SD7 remained planned and no hardware validation was claimed.
 
 One-way Xbox360 presentation-entry foundation step: `AddonRoutingRuntime` now
 has an internal `EnterXbox360PresentationAsync` seam that, when invoked
@@ -411,8 +411,8 @@ automatic invocation, and no Game Bar leave handling. The reverse
 Xbox360-to-Deck transition is now available only as an internal foundation
 seam; it has no production caller. There is still no Xbox360 PnP/XInput
 readiness claim**. Normal Runtime behavior
-and `RoutingRuntimeStatusSnapshot.SteamOutputActive` remain unchanged. SD7
-remains PLANNED and no hardware validation is claimed.
+and `RoutingRuntimeStatusSnapshot.SteamOutputActive` remain unchanged. At that
+historical stage, SD7 remained planned and no hardware validation was claimed.
 
 Reverse Xbox360 presentation-exit foundation step: `AddonRoutingRuntime` now
 has an internal `ExitXbox360PresentationAsync` seam that stops and drains the
