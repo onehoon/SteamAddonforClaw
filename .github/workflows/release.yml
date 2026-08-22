@@ -65,7 +65,7 @@ jobs:
           name: test-hang-diagnostics
           path: artifacts/TestResults
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 1
 
       - name: Test release metadata
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/release-metadata.tests.ps1
