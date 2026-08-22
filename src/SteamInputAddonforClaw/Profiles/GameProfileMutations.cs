@@ -38,6 +38,31 @@ internal sealed class GameProfileMutations
         }
     }
 
+    internal MutationOutcome SetEnabled(uint appId, bool enabled, string? displayName)
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            GameProfile profile;
+            if (enabled)
+            {
+                var existing = loaded.Document.Games.TryGetValue(key, out var current) ? current : new GameProfile();
+                var completed = Complete(existing, loaded.Document.Device);
+                profile = completed with { Enabled = true, DisplayName = displayName ?? completed.DisplayName };
+            }
+            else
+            {
+                if (!loaded.Document.Games.TryGetValue(key, out var disabledProfile)) return MutationOutcome.Succeeded;
+                profile = disabledProfile with { Enabled = false };
+            }
+            loaded.Document.Games[key] = profile;
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; }
+            catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
+
     internal MutationOutcome SetCpuBoost(uint appId, CpuBoostMode ac, CpuBoostMode dc)
     {
         lock (_gate.Sync)
@@ -64,37 +89,10 @@ internal sealed class GameProfileMutations
     }
 
     internal bool Enable(uint appId, string? displayName)
-    {
-        lock (_gate.Sync)
-        {
-            var loaded = _store.Load();
-            if (!loaded.CanSafelyReplace)
-                return false;
-
-            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            var existing = loaded.Document.Games.TryGetValue(key, out var profile) ? profile : new GameProfile();
-            var completed = Complete(existing, loaded.Document.Device);
-            loaded.Document.Games[key] = completed with { Enabled = true, DisplayName = displayName ?? completed.DisplayName };
-            try { _store.Save(loaded.Document); return true; } catch { return false; }
-        }
-    }
+        => SetEnabled(appId, true, displayName) == MutationOutcome.Succeeded;
 
     internal bool Disable(uint appId)
-    {
-        lock (_gate.Sync)
-        {
-            var loaded = _store.Load();
-            if (!loaded.CanSafelyReplace)
-                return false;
-
-            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            if (!loaded.Document.Games.TryGetValue(key, out var profile))
-                return true;
-
-            loaded.Document.Games[key] = profile with { Enabled = false };
-            try { _store.Save(loaded.Document); return true; } catch { return false; }
-        }
-    }
+        => SetEnabled(appId, false, null) == MutationOutcome.Succeeded;
 
     private static GameProfile Complete(GameProfile profile, DeviceSettings device)
     {

@@ -107,12 +107,8 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
-        if (_gameProfileMutations is null) return Task.FromResult(UnavailableMutation(appId, "Game Profile is unavailable."));
-        var ok = enabled ? _gameProfileMutations.Enable(appId, displayName) : _gameProfileMutations.Disable(appId);
-        if (!ok) return Task.FromResult(UnavailableMutation(appId, "Profile persistence is unavailable."));
-        ReconcileGame(appId, cpu: true, tdp: true);
-        StateInvalidated?.Invoke(this, EventArgs.Empty);
-        return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Succeeded, null, CaptureGameProfile(appId)));
+        var outcome = _gameProfileMutations?.SetEnabled(appId, enabled, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable;
+        return Task.FromResult(MutateGame(appId, outcome, cpu: true, tdp: true));
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAsync(uint appId, CpuBoostMode ac, CpuBoostMode dc, CancellationToken cancellationToken = default) =>
