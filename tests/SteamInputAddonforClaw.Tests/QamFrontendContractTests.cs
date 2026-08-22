@@ -231,6 +231,7 @@ public sealed class QamFrontendContractTests
         Assert.DoesNotContain("QAM integration test", source);
         Assert.Contains("title: null", source);
         Assert.Contains("className: native.QamTitleClass", source);
+        Assert.Contains("style: { paddingTop: \"16px\" }", source);
         Assert.Contains("function findPanelComponents(modules)", source);
         Assert.Contains("let defaultCandidate = null", source);
         Assert.Contains("try { defaultCandidate = module?.default ?? null; } catch (_) { }", source);
@@ -263,6 +264,12 @@ public sealed class QamFrontendContractTests
         Assert.Contains("request(\"captureCpuBoost\")", source);
         Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", source);
         Assert.Contains("request(side === \"ac\" ? \"setDeviceCpuBoostAc\" : \"setDeviceCpuBoostDc\"", source);
+        var cpuModeMutation = source[source.IndexOf("const scheduleMode", StringComparison.Ordinal)..source.IndexOf("const setEnabled", StringComparison.Ordinal)];
+        Assert.DoesNotContain("setBusy(true)", cpuModeMutation);
+        Assert.DoesNotContain("setBusy(false)", cpuModeMutation);
+        Assert.Contains("setTimeout(async () =>", cpuModeMutation);
+        Assert.Contains("setPreviewAc", cpuModeMutation);
+        Assert.Contains("setPreviewDc", cpuModeMutation);
         Assert.Contains("setTimeout(async () =>", source);
         Assert.Contains("state.onStateInvalidated", source);
         Assert.DoesNotContain("setInterval", source);

@@ -613,14 +613,14 @@
         settleTimers.current[key] = setTimeout(async () => {
           settleTimers.current[key] = null;
           if (!state.installed || !modeWritableRef.current) return;
-          setBusy(true); setError(null);
+          setError(null);
           try {
             beginMutation();
             const result = await request(side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value });
             setCpu(result.snapshot); side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
             if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
           } catch (_) { failClosed("CPU Boost update failed"); }
-          finally { endMutation(); setBusy(false); }
+          finally { endMutation(); }
         }, 250);
       };
       const setEnabled = async value => {
@@ -758,7 +758,8 @@
       tab: icon,
       panel: React.createElement(React.Fragment, null,
         React.createElement("div", { className: native.QamTitleClass }, "Steam Addon for Claw"),
-        React.createElement(CpuBoostPanel)),
+        React.createElement("div", { style: { paddingTop: "16px" } },
+          React.createElement(CpuBoostPanel))),
     };
     return state.addonTabDescriptor;
   }
