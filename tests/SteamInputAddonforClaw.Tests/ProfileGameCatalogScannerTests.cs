@@ -56,6 +56,34 @@ public sealed class ProfileGameCatalogScannerTests : IDisposable
         Assert.Contains(entries, entry => entry.AppId == 50);
     }
 
+    [Fact]
+    public async Task ScanAsync_ReadsEveryExternalLibraryPath()
+    {
+        var libraryA = Path.Combine(_root, "LibraryA");
+        var libraryB = Path.Combine(_root, "LibraryB");
+        WriteManifest(libraryA, 101, "Game A");
+        WriteManifest(libraryB, 202, "Game B");
+        File.WriteAllText(Path.Combine(_root, "steamapps", "libraryfolders.vdf"),
+            $"\"libraryfolders\" {{ \"1\" {{ \"path\" \"{Escape(libraryA)}\" }} \"2\" {{ \"path\" \"{Escape(libraryB)}\" }} }}");
+
+        var entries = await new ProfileGameCatalogScanner(() => _root).ScanAsync();
+
+        Assert.Contains(entries, entry => entry.AppId == 101);
+        Assert.Contains(entries, entry => entry.AppId == 202);
+    }
+
+    [Fact]
+    public async Task ScanAsync_IgnoresTruncatedShortcutFile()
+    {
+        var path = Path.Combine(_root, "userdata", "123", "config");
+        Directory.CreateDirectory(path);
+        File.WriteAllBytes(Path.Combine(path, "shortcuts.vdf"), [0, (byte)'s', (byte)'h', (byte)'o', (byte)'r', (byte)'t', (byte)'c', (byte)'u', (byte)'t', (byte)'s', 0, 0, (byte)'0', 0]);
+
+        var entries = await new ProfileGameCatalogScanner(() => _root).ScanAsync();
+
+        Assert.Empty(entries);
+    }
+
     private void WriteManifest(string library, uint id, string name)
     {
         Directory.CreateDirectory(Path.Combine(library, "steamapps"));
@@ -75,5 +103,6 @@ public sealed class ProfileGameCatalogScannerTests : IDisposable
         writer.Write((byte)8);
     }
     private static void WriteString(BinaryWriter writer, string value) { writer.Write(Encoding.UTF8.GetBytes(value)); writer.Write((byte)0); }
+    private static string Escape(string value) => value.Replace("\\", "\\\\");
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

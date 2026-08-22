@@ -53,8 +53,14 @@ public sealed class ProfileGameCatalogScanner
         }
 
         var userdata = Path.Combine(root, "userdata");
+        string[] accounts = [];
         if (Directory.Exists(userdata))
-            foreach (var account in Directory.EnumerateDirectories(userdata))
+        {
+            try { accounts = Directory.EnumerateDirectories(userdata).ToArray(); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        foreach (var account in accounts)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var shortcuts = Path.Combine(account, "config", "shortcuts.vdf");
@@ -125,7 +131,18 @@ public sealed class ProfileGameCatalogScanner
             var stack = new Stack<Dictionary<string, object>>(); stack.Push(root);
             while (true)
             {
-                var type = stream.ReadByte(); if (type < 0 || type == 8) { if (stack.Count == 1) return root; stack.Pop(); continue; }
+                var type = stream.ReadByte();
+                if (type < 0)
+                {
+                    if (stack.Count != 1) throw new FormatException("Unexpected end of binary VDF.");
+                    return root;
+                }
+                if (type == 8)
+                {
+                    if (stack.Count == 1) return root;
+                    stack.Pop();
+                    continue;
+                }
                 var key = ReadCString(stream); var current = stack.Peek();
                 switch (type)
                 {
