@@ -15,6 +15,9 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private readonly TimeSpan _suspendQuiesceBudget;
     private readonly Func<bool> _hasResidualRoutingCleanup;
     private readonly Func<CancellationToken, Task<bool>> _retryResidualRoutingCleanup;
+    private readonly Func<bool> _hasPreservedRoutingSession;
+    private readonly Func<CancellationToken, Task<bool>> _reconcilePreservedRoutingSession;
+    private readonly Func<Task>? _afterPreservedRecoveryCommit;
     private readonly SemaphoreSlim _serial = new(1, 1);
     private readonly Channel<QueuedNotification> _notifications = Channel.CreateUnbounded<QueuedNotification>(new() { SingleReader = true, SingleWriter = false });
     private readonly CancellationTokenSource _shutdown = new();
@@ -24,7 +27,7 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
     private long _resumeCycle = -1;
     private int _disposed;
     internal PowerTransitionState State { get; private set; } = PowerTransitionState.Awake;
-    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, IEnumerable<IPowerSuspendParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Func<bool>? hasResidualRoutingCleanup = null, Func<CancellationToken, Task<bool>>? retryResidualRoutingCleanup = null)
+    internal PowerTransitionCoordinator(PowerMutationGate gate, RecoverySafetyState recovery, IEnumerable<IPowerSuspendParticipant> participants, Func<CancellationToken, Task<bool>>? afterRecovery = null, bool recoveryEnabled = true, Func<bool>? hasIncompleteRecovery = null, Func<CancellationToken, Task<bool>>? establishBaseline = null, TimeSpan? suspendQuiesceBudget = null, Func<bool>? hasResidualRoutingCleanup = null, Func<CancellationToken, Task<bool>>? retryResidualRoutingCleanup = null, Func<bool>? hasPreservedRoutingSession = null, Func<CancellationToken, Task<bool>>? reconcilePreservedRoutingSession = null, Func<Task>? afterPreservedRecoveryCommit = null)
     {
         (_gate, _recovery, _participants, _afterRecovery) = (gate, recovery, participants.ToArray(), afterRecovery);
         _recoveryEnabled = recoveryEnabled;
@@ -37,6 +40,9 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
         _suspendQuiesceBudget = suspendQuiesceBudget ?? TimeSpan.FromMilliseconds(1200);
         _hasResidualRoutingCleanup = hasResidualRoutingCleanup ?? (() => false);
         _retryResidualRoutingCleanup = retryResidualRoutingCleanup ?? (_ => Task.FromResult(true));
+        _hasPreservedRoutingSession = hasPreservedRoutingSession ?? (() => false);
+        _reconcilePreservedRoutingSession = reconcilePreservedRoutingSession ?? (_ => Task.FromResult(false));
+        _afterPreservedRecoveryCommit = afterPreservedRecoveryCommit;
         _reader = Task.Run(ProcessNotificationsAsync);
     }
     internal long NextSequence() => Interlocked.Increment(ref _sequence);
@@ -104,7 +110,18 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             }
             if (observation.Signal is not (PowerSignal.ResumeAutomatic or PowerSignal.ResumeSuspend)) return;
             if (State == PowerTransitionState.Recovering || (_cycle != 0 && _resumeCycle == _cycle)) { AppLog.Debug("Power.Coordinator", "Duplicate resume ignored.", ("Cycle", _cycle), ("Epoch", _gate.Epoch)); return; }
-            if (!observation.BarrierApplied) _gate.TryEnterBarrier(out _, out _);
+            // A queued resume is authoritative only for the epoch recorded when the
+            // observation was created. Check before applying a fallback barrier so a newer
+            // suspend cannot be adopted by this stale handler.
+            var recoveryEpoch = observation.EpochAfter;
+            if (_gate.Epoch != recoveryEpoch)
+            {
+                AppLog.Warn("Power.Recovery", "Stale resume ignored because a newer power barrier is authoritative.", null,
+                    ("ObservedEpoch", recoveryEpoch), ("CurrentEpoch", _gate.Epoch));
+                return;
+            }
+            if (!observation.BarrierApplied)
+                _gate.TryEnterBarrier(out _, out recoveryEpoch);
             if (!_recoveryEnabled)
             {
                 State = PowerTransitionState.Unsafe;
@@ -115,7 +132,6 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             State = PowerTransitionState.Recovering; _recovery.Set(RecoverySafety.Indeterminate);
             var cycleForResume = _cycle == 0 ? Interlocked.Increment(ref _cycle) : _cycle;
             _resumeCycle = cycleForResume;
-            var recoveryEpoch = _gate.Epoch;
             var resumeStartedUtc = DateTimeOffset.UtcNow;
             var recoveryManagerStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var recoveryElapsedMs = 0d;
@@ -123,6 +139,33 @@ internal sealed class PowerTransitionCoordinator : IAsyncDisposable
             var safe = false;
             try
             {
+                if (_hasPreservedRoutingSession())
+                {
+                    if (!_gate.TryOpenResumeCleanup(recoveryEpoch)) return;
+                    var preserved = false;
+                    var sealedCleanup = false;
+                    try { preserved = await _reconcilePreservedRoutingSession(cancellationToken).ConfigureAwait(false); }
+                    finally { sealedCleanup = _gate.TrySealResumeCleanup(recoveryEpoch); }
+                    if (!sealedCleanup || _gate.Epoch != recoveryEpoch) return;
+                    safe = preserved;
+                    var committed = _gate.TryCommitRecovery(recoveryEpoch, safe, () =>
+                    {
+                        _recovery.Set(safe ? RecoverySafety.Safe : RecoverySafety.Unsafe);
+                        State = safe ? PowerTransitionState.Awake : PowerTransitionState.Unsafe;
+                    });
+                    if (!committed) return;
+                    if (safe && _afterPreservedRecoveryCommit is not null)
+                    {
+                        try { await _afterPreservedRecoveryCommit().ConfigureAwait(false); }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+                        catch (Exception exception)
+                        {
+                            AppLog.Error("Power.Recovery", "Post-commit deferred routing reconciliation failed.", exception,
+                                ("Cycle", cycleForResume), ("Epoch", recoveryEpoch));
+                        }
+                    }
+                    return;
+                }
                 if (_hasResidualRoutingCleanup())
                 {
                     if (!_gate.TryOpenResumeCleanup(recoveryEpoch))

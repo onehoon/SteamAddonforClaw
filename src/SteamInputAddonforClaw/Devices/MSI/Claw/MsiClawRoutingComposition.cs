@@ -299,6 +299,18 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, bool, ValueTask> handler) =>
         _runtimeFaultHandler = handler ?? throw new ArgumentNullException(nameof(handler));
 
+    Task<RoutingStageOperationResult> IHandheldRoutingComposition.PauseOwnedRouteForSuspendAsync(CancellationToken cancellationToken) =>
+        PhysicalInputStage.PauseForSuspendAsync(cancellationToken).AsTask();
+
+    async Task<RoutingStageOperationResult> IHandheldRoutingComposition.ReconcileOwnedRouteStateAsync(CancellationToken cancellationToken)
+    {
+        var result = await NativeModeSession.ReconcileOwnedStateAsync(cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded) return result;
+        result = await PhysicalInputStage.ReconcileOwnedInputAsync(cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded) return result;
+        return await PhysicalIsolationStage.ReconcileOwnedStateAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// PR3: development-only OEM1 production E2E POC. Production-composes the already-existing
     /// Event41 chain (<see cref="WmiMsiEventSource"/> -&gt; <see cref="Oem1EventGestureBridge"/> -&gt;

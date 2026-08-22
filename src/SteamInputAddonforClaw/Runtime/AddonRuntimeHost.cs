@@ -52,6 +52,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     private readonly Func<ValueTask>? _routingDisposeOverride;
     private readonly Action? _routingReconcileCompleted;
     private readonly ConcurrentDictionary<Task, byte> _backgroundTasks = new();
+    private int _preservedResumeDeferredReconcile;
     private readonly CancellationTokenSource _shutdownCancellation = new();
 
     // Guards against a resume notification that was already queued in PowerTransitionCoordinator
@@ -117,7 +118,10 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
             establishBaseline: token => EstablishResumeBaselineAsync(establishBaseline, token),
             hasResidualRoutingCleanup: () => _routingRuntime?.HasResidualSessionState == true,
             retryResidualRoutingCleanup: async token =>
-                _routingRuntime is null || await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false));
+                _routingRuntime is null || await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false),
+            hasPreservedRoutingSession: () => _routingRuntime?.HasPreservedSession == true,
+            reconcilePreservedRoutingSession: token => ReconcilePreservedRoutingSessionAsync(token),
+            afterPreservedRecoveryCommit: DrainPreservedResumeDeferredReconcileAsync);
         _powerWatcher = new PowerTransitionWatcher(notificationSource ?? new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
             () => _routingRuntime?.CancelInFlightTransition());
 
@@ -144,6 +148,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     /// <summary>Normal (non-resume) reconcile, via the safe C5b1 path. No-op when routing is unavailable.</summary>
     internal async Task ReconcileAsync(CancellationToken cancellationToken = default)
     {
+        if (!_powerGate.IsOpen)
+            return;
         if (_routingRuntime is not null &&
             await _routingRuntime.ReconcileSafelyAsync(RequestStatusRefresh, cancellationToken).ConfigureAwait(false))
             _routingReconcileCompleted?.Invoke();
@@ -233,6 +239,53 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         }
 
         return true;
+    }
+
+    private async Task<bool> ReconcilePreservedRoutingSessionAsync(CancellationToken cancellationToken)
+    {
+        if (_routingRuntime is null) return true;
+        _resumeFreshReconcileSuppression.Begin();
+        var succeeded = false;
+        var needsPostCommitFreshReconcile = false;
+        try
+        {
+            succeeded = await _routingRuntime.ReconcilePreservedSessionAfterResumeAsync(
+                token =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    _resumeFreshReconcileSuppression.ExecuteExplicitRefresh(() =>
+                    {
+                        lock (_steamLifecycleLock)
+                        {
+                            if (!_steamStopped) _steamRuntime.Refresh();
+                        }
+                    });
+                    return Task.CompletedTask;
+                },
+                async token =>
+                {
+                    if (_routingRuntime.AuxiliaryResumeParticipant is not { } auxiliary)
+                        return;
+                    try { await auxiliary.ReconcileAfterResumeAsync(token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                    catch (Exception exception) { AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception); }
+                }, cancellationToken).ConfigureAwait(false);
+            needsPostCommitFreshReconcile = succeeded &&
+                _routingRuntime.CaptureStatus().OperationalState == RoutingOperationalState.Passive;
+        }
+        finally
+        {
+            if (_resumeFreshReconcileSuppression.Complete(succeeded) || needsPostCommitFreshReconcile)
+                Interlocked.Exchange(ref _preservedResumeDeferredReconcile, 1);
+        }
+        return succeeded;
+    }
+
+    private Task DrainPreservedResumeDeferredReconcileAsync()
+    {
+        if (Interlocked.Exchange(ref _preservedResumeDeferredReconcile, 0) == 0)
+            return Task.CompletedTask;
+        return QueueDeferredRoutingReconcile();
     }
 
     /// <summary>

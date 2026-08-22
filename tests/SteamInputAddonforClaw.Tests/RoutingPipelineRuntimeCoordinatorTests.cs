@@ -1052,9 +1052,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => quiesce);
-        Assert.False(bridge.Bridge.CanApplyInteractivePresentation);
+        Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
         executor.ReleaseRollback.TrySetResult();
-        Assert.True(await holder);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => holder);
         Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
     }
 
@@ -1276,6 +1276,153 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         provider.ThrowOnNextCapture = true;
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => bridge.Bridge.ReconcileFreshAfterResumeAsync(new CancellationToken(true)).AsTask());
+    }
+
+    [Fact]
+    public async Task Failed_suspend_pause_does_not_publish_preserved_session()
+    {
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(WaitingForSteam(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Failure("PauseFailed")),
+            reconcileOwnedRouteState: _ => Task.FromResult(RoutingStageOperationResult.Success()));
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var active = session.ActiveSession;
+        Assert.False(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+        Assert.Same(active, session.ActiveSession);
+        Assert.False(bridge.HasPreservedSession);
+    }
+
+    [Fact]
+    public async Task Successful_suspend_pause_publishes_the_exact_active_session()
+    {
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Success("Paused")),
+            reconcileOwnedRouteState: _ => Task.FromResult(RoutingStageOperationResult.Success()));
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var active = session.ActiveSession;
+        Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+        Assert.Same(active, session.ActiveSession);
+        Assert.True(bridge.HasPreservedSession);
+    }
+
+    [Fact]
+    public async Task New_suspend_cancels_preserved_resume_owner_reconciliation()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Success("Paused")),
+            reconcileOwnedRouteState: async token =>
+            {
+                started.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return RoutingStageOperationResult.Success("Healthy");
+            });
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+        var resume = bridge.ReconcilePreservedSessionAsync(_ => Task.CompletedTask, CancellationToken.None).AsTask();
+        await started.Task;
+        bridge.CancelInFlightTransition();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resume);
+    }
+
+    [Fact]
+    public async Task Preserved_resume_owner_failure_runs_auxiliary_callback_after_cleanup()
+    {
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var auxiliaryCalls = 0;
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Success("Paused")),
+            reconcileOwnedRouteState: _ => Task.FromResult(RoutingStageOperationResult.Failure("OwnerUnhealthy")));
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+
+        Assert.True(await bridge.ReconcilePreservedSessionAsync(
+            _ => Task.CompletedTask,
+            _ =>
+            {
+                auxiliaryCalls++;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None));
+        Assert.Equal(1, auxiliaryCalls);
+        Assert.Null(session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task Ordinary_reconcile_rechecks_power_permission_at_transition_boundary()
+    {
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(WaitingForSteam(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            ordinaryReconcileAllowed: () => powerGate.IsOpen);
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var active = session.ActiveSession;
+        powerGate.EnterNewCycleBarrier(out _, out _);
+        bridge.CancelInFlightTransition();
+        var result = await bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("PowerBarrierClosed", result.Reason);
+        Assert.Same(active, session.ActiveSession);
+        Assert.Null(session.PendingCleanup);
+    }
+
+    [Fact]
+    public async Task Cancellation_during_final_auxiliary_callback_cannot_commit_preserved_resume()
+    {
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Success("Paused")),
+            reconcileOwnedRouteState: _ => Task.FromResult(RoutingStageOperationResult.Success("Healthy")));
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+
+        var resume = bridge.ReconcilePreservedSessionAsync(
+            _ => Task.CompletedTask,
+            _ =>
+            {
+                bridge.CancelInFlightTransition();
+                return Task.CompletedTask;
+            },
+            CancellationToken.None).AsTask();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resume);
     }
 
     private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(

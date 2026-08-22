@@ -26,6 +26,21 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     private readonly Guid _session = Guid.NewGuid();
 
     [Fact]
+    public async Task PausePresentation_is_idempotent_when_already_paused()
+    {
+        var session = new FakeCanonicalSession();
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await stage.PausePresentationAsync(CancellationToken.None, reportOutputFaultOnFailure: false));
+        var neutralCount = session.Trace.Count(x => x == "Neutral");
+
+        Assert.True(await stage.PausePresentationAsync(CancellationToken.None, reportOutputFaultOnFailure: false));
+
+        Assert.Equal(neutralCount, session.Trace.Count(x => x == "Neutral"));
+    }
+
+    [Fact]
     public async Task ReconcileOwnedState_healthy_canonical_route_is_strict_noop()
     {
         var session = new FakeCanonicalSession();

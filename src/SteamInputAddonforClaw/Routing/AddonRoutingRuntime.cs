@@ -138,7 +138,14 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             handheldRoutingComposition.SessionBoundaryParticipants,
             beforeActiveSessionExit: cancellationToken => runtime is null
                 ? Task.FromResult(true)
-                : runtime.RetireXbox360BeforeOuterRouteExitAsync(cancellationToken));
+                : runtime.RetireXbox360BeforeOuterRouteExitAsync(cancellationToken),
+            pauseOwnedRouteForSuspend: cancellationToken => runtime is null
+                ? Task.FromResult(RoutingStageOperationResult.Failure("RuntimeUnavailable"))
+                : runtime.PauseOwnedRouteForSuspendAsync(cancellationToken),
+            reconcileOwnedRouteState: cancellationToken => runtime is null
+                ? Task.FromResult(RoutingStageOperationResult.Failure("RuntimeUnavailable"))
+                : runtime.ReconcileOwnedRouteStateAsync(cancellationToken),
+            ordinaryReconcileAllowed: () => powerGate.IsOpen);
         deckStage.SetOutputFaultHandler(async () => { await coordinator.FailClosedAsync().ConfigureAwait(false); });
         handheldRoutingComposition.SetRuntimeFaultHandler((reason, yieldCurrentSteamSession) => HandleBackendRuntimeFaultAsync(reason, yieldCurrentSteamSession));
 
@@ -243,6 +250,18 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     internal IHandheldRoutingComposition TestOnly_Composition => _composition;
 
     internal bool HasResidualSessionState => _coordinator.HasResidualSessionState;
+    internal bool HasPreservedSession => _coordinator.HasPreservedSession;
+
+    private async Task<RoutingStageOperationResult> PauseOwnedRouteForSuspendAsync(CancellationToken cancellationToken)
+    {
+        var result = await _composition.PauseOwnedRouteForSuspendAsync(cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded) return result;
+        var deckPaused = await _deckStage.PausePresentationAsync(
+            cancellationToken, reportOutputFaultOnFailure: false).ConfigureAwait(false);
+        return deckPaused
+            ? RoutingStageOperationResult.Success("RoutePausedForSuspend")
+            : RoutingStageOperationResult.Failure("SteamDeckPresentationPauseFailed");
+    }
     internal bool IsSafetySessionActive => _safetySession?.IsActive == true;
     internal bool HasOwnedRecoveryBoundary => _safetySession?.HasOwnedRecoveryBoundary == true;
 
@@ -569,6 +588,23 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
         if (succeeded)
             await TryConvergeSafetyAfterCleanupAsync("ResidualCleanupRetry").ConfigureAwait(false);
         return succeeded;
+    }
+
+    internal async Task<bool> ReconcilePreservedSessionAfterResumeAsync(
+        Func<CancellationToken, Task> refreshBeforeDecision,
+        Func<CancellationToken, Task>? afterRoutingReconcile,
+        CancellationToken cancellationToken)
+    {
+        var succeeded = await _coordinator.ReconcilePreservedSessionAsync(refreshBeforeDecision, afterRoutingReconcile, cancellationToken).ConfigureAwait(false);
+        if (succeeded) await TryConvergeSafetyAfterCleanupAsync("PreservedResumeReconcile").ConfigureAwait(false);
+        return succeeded;
+    }
+
+    private async Task<RoutingStageOperationResult> ReconcileOwnedRouteStateAsync(CancellationToken cancellationToken)
+    {
+        var result = await _composition.ReconcileOwnedRouteStateAsync(cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded) return result;
+        return await _deckStage.ReconcileOwnedStateAsync(cancellationToken).ConfigureAwait(false);
     }
 
     internal void CancelInFlightTransition() => _coordinator.CancelInFlightTransition();

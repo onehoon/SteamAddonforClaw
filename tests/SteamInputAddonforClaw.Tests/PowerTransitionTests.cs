@@ -18,7 +18,7 @@ public sealed class PowerTransitionTests
             hasIncompleteRecovery: () => false,
             establishBaseline: _ => { baselineCalls++; return Task.FromResult(true); });
 
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
 
         Assert.Equal(1, baselineCalls);
         Assert.True(gate.IsOpen);
@@ -52,7 +52,7 @@ public sealed class PowerTransitionTests
                 return Task.FromResult(true);
             });
 
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
 
         Assert.False(gateOpenDuringBaseline);
         Assert.True(gateOpenDuringAfterRecovery);
@@ -71,7 +71,7 @@ public sealed class PowerTransitionTests
             hasIncompleteRecovery: () => true,
             establishBaseline: _ => { baselineCalls++; return Task.FromResult(true); });
 
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
 
         Assert.Equal(0, baselineCalls);
         Assert.Equal(0, afterRecoveryCalls);
@@ -97,7 +97,7 @@ public sealed class PowerTransitionTests
                 return Task.FromResult(true);
             });
 
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
 
         Assert.Equal(["Cleanup", "Baseline"], calls);
         Assert.False(gateOpenDuringCleanup);
@@ -120,7 +120,7 @@ public sealed class PowerTransitionTests
                 return Task.FromResult(true);
             });
 
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
 
         Assert.Equal(["Cleanup", "Baseline"], calls);
     }
@@ -137,7 +137,7 @@ public sealed class PowerTransitionTests
             hasResidualRoutingCleanup: () => true,
             retryResidualRoutingCleanup: _ => Task.FromResult(false));
 
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
 
         Assert.Equal(0, baselineCalls);
         Assert.False(gate.IsOpen);
@@ -155,7 +155,7 @@ public sealed class PowerTransitionTests
             hasResidualRoutingCleanup: () => false,
             retryResidualRoutingCleanup: _ => { calls.Add("Cleanup"); return Task.FromResult(true); });
 
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
 
         Assert.Equal(["Baseline"], calls);
     }
@@ -177,7 +177,7 @@ public sealed class PowerTransitionTests
                 return await release.Task;
             });
 
-        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         await started.Task;
 
         // Simulate a newer suspend cycle (already applied by the watcher's own barrier logic)
@@ -345,7 +345,7 @@ public sealed class PowerTransitionTests
         var gate = new PowerMutationGate(true); var recovery = new RecoverySafetyState(RecoverySafety.Safe);
         // Default hasIncompleteRecovery reports a journal remains, so resume must fail closed.
         var coordinator = new PowerTransitionCoordinator(gate, recovery, []);
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         Assert.Equal(PowerTransitionState.Unsafe, coordinator.State); Assert.Equal(RecoverySafety.Unsafe, recovery.Current); Assert.False(gate.IsOpen);
     }
 
@@ -374,7 +374,7 @@ public sealed class PowerTransitionTests
         var coordinator = new PowerTransitionCoordinator(gate, new RecoverySafetyState(RecoverySafety.Safe), [],
             hasIncompleteRecovery: () => false,
             establishBaseline: _ => { calls++; return Task.FromResult(true); });
-        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        await coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         await coordinator.HandleAsync(new(7, PowerSignal.ResumeSuspend, DateTimeOffset.UtcNow, 2, 1, 1, 1, false));
         Assert.Equal(1, calls);
     }
@@ -417,7 +417,7 @@ public sealed class PowerTransitionTests
         var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
             hasIncompleteRecovery: () => false,
             establishBaseline: _ => pendingBaseline.Task);
-        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(5)));
         gate.EnterNewCycleBarrier(out _, out var newEpoch); coordinator.InvalidateForBarrier(); pendingBaseline.SetResult(true); await resume;
         Assert.False(gate.IsOpen); Assert.Equal(newEpoch, gate.Epoch); Assert.NotEqual(RecoverySafety.Safe, recovery.Current); Assert.NotEqual(PowerTransitionState.Awake, coordinator.State);
@@ -431,7 +431,7 @@ public sealed class PowerTransitionTests
         var coordinator = new PowerTransitionCoordinator(gate, recovery, [],
             hasIncompleteRecovery: () => false,
             establishBaseline: _ => pendingBaseline.Task);
-        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         Assert.True(SpinWait.SpinUntil(() => coordinator.State == PowerTransitionState.Recovering, TimeSpan.FromSeconds(5)));
         gate.EnterNewCycleBarrier(out _, out var newEpoch); coordinator.InvalidateForBarrier(); pendingBaseline.SetResult(false); await resume;
         Assert.Equal(newEpoch, gate.Epoch); Assert.False(gate.IsOpen); Assert.Equal(RecoverySafety.Indeterminate, recovery.Current); Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
@@ -447,7 +447,7 @@ public sealed class PowerTransitionTests
             afterRecovery: _ => afterResume.Task,
             hasIncompleteRecovery: () => false,
             establishBaseline: _ => Task.FromResult(true));
-        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 1, true));
+        var resume = coordinator.HandleAsync(new(18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1, 1, 0, 0, true));
         Assert.True(SpinWait.SpinUntil(() => gate.IsOpen, TimeSpan.FromSeconds(5)));
 
         gate.EnterNewCycleBarrier(out _, out var suspendEpoch);
@@ -461,6 +461,39 @@ public sealed class PowerTransitionTests
         Assert.Equal(RecoverySafety.Indeterminate, recovery.Current);
         Assert.False(gate.IsOpen);
         Assert.True(gate.TryAcquireCleanup(out _));
+    }
+
+    [Fact]
+    public async Task Resume_observation_cannot_adopt_a_newer_suspend_epoch()
+    {
+        var gate = new PowerMutationGate(true);
+        var recovery = new RecoverySafetyState(RecoverySafety.Safe);
+        var reconcileCalls = 0;
+        gate.EnterNewCycleBarrier(out _, out var resumeEpoch);
+        await using var coordinator = new PowerTransitionCoordinator(
+            gate,
+            recovery,
+            [],
+            hasIncompleteRecovery: () => false,
+            hasPreservedRoutingSession: () => true,
+            reconcilePreservedRoutingSession: _ =>
+            {
+                reconcileCalls++;
+                return Task.FromResult(true);
+            });
+        var observation = new PowerNotificationObservation(
+            18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1,
+            Environment.CurrentManagedThreadId, resumeEpoch, resumeEpoch, false);
+
+        gate.EnterNewCycleBarrier(out _, out var newerSuspendEpoch);
+        coordinator.InvalidateForBarrier();
+        await coordinator.HandleAsync(observation);
+
+        Assert.Equal(0, reconcileCalls);
+        Assert.Equal(newerSuspendEpoch, gate.Epoch);
+        Assert.False(gate.IsOpen);
+        Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
+        Assert.Equal(RecoverySafety.Indeterminate, recovery.Current);
     }
 
     [Fact]

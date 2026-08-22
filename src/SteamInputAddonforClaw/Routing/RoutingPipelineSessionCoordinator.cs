@@ -63,14 +63,16 @@ internal sealed class RoutingPipelineSessionCoordinator
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileAsync(
         RoutingDecision decision,
         ControllerManagerClassification classification,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool cancelPendingCleanup = false)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (PendingCleanup is not null)
             {
-                var cleanupResult = await RetryPendingCleanupAsync().ConfigureAwait(false);
+                var cleanupResult = await RetryPendingCleanupAsync(
+                    cancelPendingCleanup ? cancellationToken : CancellationToken.None).ConfigureAwait(false);
                 if (!cleanupResult.Succeeded) return cleanupResult;
                 return cleanupResult;
             }
@@ -203,12 +205,12 @@ internal sealed class RoutingPipelineSessionCoordinator
         lock (_sessionSync) _pendingCleanup = null;
     }
 
-    private async ValueTask<RoutingPipelineSessionReconcileResult> RetryPendingCleanupAsync()
+    private async ValueTask<RoutingPipelineSessionReconcileResult> RetryPendingCleanupAsync(CancellationToken cancellationToken)
     {
         var pending = PendingCleanup;
         if (pending is null) return Success(RoutingActionKind.None, "NoPendingCleanup");
 
-        var rollback = await _pipelineExecutor.RollbackAsync(pending.Session.Plan, CancellationToken.None).ConfigureAwait(false);
+        var rollback = await _pipelineExecutor.RollbackAsync(pending.Session.Plan, cancellationToken).ConfigureAwait(false);
         if (!rollback.Succeeded)
             return Failure(pending.OriginAction, $"PendingCleanupFailed:{rollback.Reason}");
 

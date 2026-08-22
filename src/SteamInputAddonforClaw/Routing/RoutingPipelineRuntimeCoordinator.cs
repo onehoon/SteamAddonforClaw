@@ -27,6 +27,9 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private readonly RoutingPipelineSessionCoordinator _sessionCoordinator;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
     private readonly Func<CancellationToken, Task<bool>>? _beforeActiveSessionExit;
+    private readonly Func<CancellationToken, Task<RoutingStageOperationResult>>? _pauseOwnedRouteForSuspend;
+    private readonly Func<CancellationToken, Task<RoutingStageOperationResult>>? _reconcileOwnedRouteState;
+    private readonly Func<bool> _ordinaryReconcileAllowed;
     private readonly SemaphoreSlim _transitionGate = new(1, 1);
     private readonly Lock _cancellationSync = new();
     private CancellationTokenSource _transitionCancellation = new();
@@ -34,17 +37,24 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private string? _sessionYieldReason;
     private int _shutdownRequested;
     private int _transitionOperationCount;
+    private ActiveRoutingPipelineSession? _suspendPreservedSession;
 
     internal RoutingPipelineRuntimeCoordinator(
         ISystemStatusProvider statusProvider,
         RoutingPipelineSessionCoordinator sessionCoordinator,
         IEnumerable<IRoutingRuntimeSessionBoundaryParticipant>? sessionBoundaryParticipants = null,
-        Func<CancellationToken, Task<bool>>? beforeActiveSessionExit = null)
+        Func<CancellationToken, Task<bool>>? beforeActiveSessionExit = null,
+        Func<CancellationToken, Task<RoutingStageOperationResult>>? pauseOwnedRouteForSuspend = null,
+        Func<CancellationToken, Task<RoutingStageOperationResult>>? reconcileOwnedRouteState = null,
+        Func<bool>? ordinaryReconcileAllowed = null)
     {
         _statusProvider = statusProvider ?? throw new ArgumentNullException(nameof(statusProvider));
         _sessionCoordinator = sessionCoordinator ?? throw new ArgumentNullException(nameof(sessionCoordinator));
         _sessionBoundaryParticipants = (sessionBoundaryParticipants ?? []).ToArray();
         _beforeActiveSessionExit = beforeActiveSessionExit;
+        _pauseOwnedRouteForSuspend = pauseOwnedRouteForSuspend;
+        _reconcileOwnedRouteState = reconcileOwnedRouteState;
+        _ordinaryReconcileAllowed = ordinaryReconcileAllowed ?? (() => true);
     }
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileAsync(CancellationToken cancellationToken)
@@ -58,6 +68,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
             using var transition = CreateTransitionCancellation(cancellationToken);
+            if (!_ordinaryReconcileAllowed() || transition.Token.IsCancellationRequested)
+                return new(true, _sessionCoordinator.CurrentState, RoutingActionKind.None, "PowerBarrierClosed");
             return await ReconcileCoreAsync(transition.Token).ConfigureAwait(false);
         }
         finally
@@ -99,8 +111,12 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     /// </summary>
     internal bool HasResidualSessionState =>
         Volatile.Read(ref _transitionOperationCount) > 0
-        || _sessionCoordinator.ActiveSession is not null
-        || _sessionCoordinator.PendingCleanup is not null;
+        || _sessionCoordinator.PendingCleanup is not null
+        || (_sessionCoordinator.ActiveSession is not null && !HasPreservedSession);
+
+    internal bool HasPreservedSession => _suspendPreservedSession is { } preserved &&
+        ReferenceEquals(_sessionCoordinator.ActiveSession, preserved) &&
+        _sessionCoordinator.PendingCleanup is null;
 
     /// <summary>
     /// Retries the canonical frozen-plan pipeline cleanup for whatever routing session/pending
@@ -119,7 +135,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             acquired = true;
             if (IsShutdownRequested) return false;
-            return await RetireResidualSessionCoreAsync(cancellationToken).ConfigureAwait(false);
+            using var transition = CreateTransitionCancellation(cancellationToken);
+            return await RetireResidualSessionCoreAsync(transition.Token, cancelPendingCleanup: true).ConfigureAwait(false);
         }
         finally
         {
@@ -283,6 +300,27 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         {
             await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             acquired = true;
+            if (_sessionCoordinator.ActiveSession is not null && _sessionCoordinator.PendingCleanup is null &&
+                _pauseOwnedRouteForSuspend is not null)
+            {
+                var active = _sessionCoordinator.ActiveSession;
+                var paused = await _pauseOwnedRouteForSuspend(cancellationToken).ConfigureAwait(false);
+                if (!paused.Succeeded)
+                {
+                    _suspendPreservedSession = null;
+                    return false;
+                }
+                if (!ReferenceEquals(_sessionCoordinator.ActiveSession, active) ||
+                    _sessionCoordinator.PendingCleanup is not null)
+                {
+                    _suspendPreservedSession = null;
+                    return false;
+                }
+                _suspendPreservedSession = active;
+                AppLog.Info("Routing.Power", "Active route preserved for suspend.",
+                    ("Action", "SuspendPreserve"), ("Epoch", epoch));
+                return true;
+            }
             if ((_sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null) &&
                 _beforeActiveSessionExit is not null)
             {
@@ -311,7 +349,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             var result = await _sessionCoordinator.ReconcileAsync(
                 RecoveryResetDecision,
                 IndeterminateClassification,
-                CancellationToken.None).ConfigureAwait(false);
+                cancellationToken,
+                cancelPendingCleanup: true).ConfigureAwait(false);
             var retired = result.Succeeded && _sessionCoordinator.ActiveSession is null && _sessionCoordinator.PendingCleanup is null;
             AppLog.Info("Routing.Power", "Routing suspend teardown completed.",
                 ("Action", "SuspendTeardown"), ("Result", retired ? "Passive" : "Failed"),
@@ -335,6 +374,54 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             Interlocked.Decrement(ref _transitionOperationCount);
         }
     }
+
+    internal async ValueTask<bool> ReconcilePreservedSessionAsync(
+        Func<CancellationToken, Task> refreshBeforeDecision,
+        Func<CancellationToken, Task>? afterRoutingReconcile,
+        CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _transitionOperationCount);
+        var acquired = false;
+        try
+        {
+            await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquired = true;
+            var preserved = _suspendPreservedSession;
+            if (preserved is null || !ReferenceEquals(_sessionCoordinator.ActiveSession, preserved) ||
+                _sessionCoordinator.PendingCleanup is not null || _reconcileOwnedRouteState is null)
+                return false;
+            using var transition = CreateTransitionCancellation(cancellationToken);
+            var token = transition.Token;
+            var owned = await _reconcileOwnedRouteState(token).ConfigureAwait(false);
+            if (!owned.Succeeded)
+            {
+                var cleaned = await RetireResidualSessionCoreAsync(token, cancelPendingCleanup: true).ConfigureAwait(false);
+                if (!cleaned) return false;
+                if (afterRoutingReconcile is not null)
+                    await afterRoutingReconcile(token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                return true;
+            }
+            await refreshBeforeDecision(token).ConfigureAwait(false);
+            var result = await ReconcileCoreAsync(token).ConfigureAwait(false);
+            if (!result.Succeeded) return false;
+            if (afterRoutingReconcile is not null)
+                await afterRoutingReconcile(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            return result.Succeeded;
+        }
+        finally
+        {
+            _suspendPreservedSession = null;
+            if (acquired) _transitionGate.Release();
+            Interlocked.Decrement(ref _transitionOperationCount);
+        }
+    }
+
+    internal ValueTask<bool> ReconcilePreservedSessionAsync(
+        Func<CancellationToken, Task> refreshBeforeDecision,
+        CancellationToken cancellationToken) =>
+        ReconcilePreservedSessionAsync(refreshBeforeDecision, null, cancellationToken);
 
     private CancellationTokenSource CreateTransitionCancellation(CancellationToken cancellationToken)
     {
@@ -410,12 +497,15 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     /// <see cref="ReconcileFreshAfterResumeCoreAsync"/> (post-journal-recovery re-entry) and
     /// <see cref="RetryResidualCleanupForResumeAsync"/> (pre-journal-recovery residual cleanup).
     /// </summary>
-    private async ValueTask<bool> RetireResidualSessionCoreAsync(CancellationToken cancellationToken)
+    private async ValueTask<bool> RetireResidualSessionCoreAsync(
+        CancellationToken cancellationToken,
+        bool cancelPendingCleanup = false)
     {
         var result = await _sessionCoordinator.ReconcileAsync(
             RecoveryResetDecision,
             IndeterminateClassification,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            cancelPendingCleanup: cancelPendingCleanup).ConfigureAwait(false);
         return result.Succeeded && _sessionCoordinator.ActiveSession is null && _sessionCoordinator.PendingCleanup is null;
     }
 
