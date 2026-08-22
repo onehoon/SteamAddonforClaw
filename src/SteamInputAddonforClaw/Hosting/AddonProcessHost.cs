@@ -414,11 +414,20 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         try
         {
             _cpuBoostRuntime.Reconcile(appId);
-            _tdpRuntime?.ReconcileCurrent(forceApply: true, invalidateHardwareCache: false, "ActualRunningAppIdChanged");
         }
         catch (Exception exception)
         {
             AppLog.Error("Profiles.CpuBoost", "CPU Boost game-profile reconcile failed after Actual RunningAppID changed.", exception,
+                ("RunningAppID", appId));
+        }
+
+        try
+        {
+            _tdpRuntime?.ReconcileCurrent(forceApply: true, invalidateHardwareCache: false, "ActualRunningAppIdChanged");
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Tdp", "TDP game-profile reconcile failed after Actual RunningAppID changed.", exception,
                 ("RunningAppID", appId));
         }
     }
