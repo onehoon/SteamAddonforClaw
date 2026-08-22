@@ -12,6 +12,29 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class MsiClawNativeModeSessionCoordinatorTests
 {
     [Fact]
+    public async Task ConfirmExternalNativeTakeover_requires_owned_same_device_xinput()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices));
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        devices.Mode = MsiClawNativeMode.XInput;
+
+        Assert.True(coordinator.ConfirmExternalNativeTakeover());
+    }
+
+    [Fact]
+    public async Task ConfirmExternalNativeTakeover_rejects_current_direct_input()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        await using var coordinator = CreateCoordinator(devices, new FakeModeController(devices));
+
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+
+        Assert.False(coordinator.ConfirmExternalNativeTakeover());
+    }
+
+    [Fact]
     public async Task NewerNonEligibleDecisionRestoresAfterOlderEligibleTransitionCompletes()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);

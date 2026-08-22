@@ -9,6 +9,8 @@ internal readonly record struct RoutingRuntimeTerminationSnapshot(
     bool HasPendingCleanup,
     bool ShutdownRequested);
 
+internal readonly record struct RoutingSessionYieldRequest(ActiveRoutingPipelineSession Session, bool WasEntering);
+
 internal interface IRoutingRuntimeSessionBoundaryParticipant
 {
     ValueTask<bool> OnSteamSessionEndedAsync(CancellationToken cancellationToken);
@@ -28,6 +30,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private readonly SemaphoreSlim _transitionGate = new(1, 1);
     private readonly Lock _cancellationSync = new();
     private CancellationTokenSource _transitionCancellation = new();
+    private int _sessionYieldRequested;
+    private string? _sessionYieldReason;
     private int _shutdownRequested;
     private int _transitionOperationCount;
 
@@ -143,35 +147,66 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             if (IsShutdownRequested) return RuntimeStoppedResult();
             using var transition = CreateTransitionCancellation(CancellationToken.None);
 
-            if ((_sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null) &&
-                _beforeActiveSessionExit is not null)
-            {
-                bool retired;
-                try
-                {
-                    retired = await _beforeActiveSessionExit(transition.Token).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    AppLog.Warn("Routing.Runtime", "X360 presentation retirement blocked outer fail-close rollback.",
-                        exception, fields: [("Action", "FailClosed"), ("Reason", exception.GetType().Name)]);
-                    return new(false, _sessionCoordinator.CurrentState, RoutingActionKind.None,
-                        "Xbox360PresentationRetirementFailed");
-                }
+            return await RetireForFailCloseCoreAsync(transition.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (acquired) _transitionGate.Release();
+            Interlocked.Decrement(ref _transitionOperationCount);
+        }
+    }
 
-                if (!retired)
-                {
-                    AppLog.Warn("Routing.Runtime", "X360 presentation retirement blocked outer fail-close rollback.",
-                        fields: [("Action", "FailClosed"), ("Reason", "Xbox360PresentationRetirementFailed")]);
-                    return new(false, _sessionCoordinator.CurrentState, RoutingActionKind.None,
-                        "Xbox360PresentationRetirementFailed");
-                }
+    internal RoutingSessionYieldRequest? RequestCurrentSessionYield()
+    {
+        Volatile.Write(ref _sessionYieldRequested, 1);
+        var session = _sessionCoordinator.ActiveSession;
+        var wasEntering = false;
+        session ??= _sessionCoordinator.PendingCleanup?.Session;
+        if (session is null)
+        {
+            session = _sessionCoordinator.EnteringSession;
+            wasEntering = session is not null;
+        }
+        if (session is not null)
+        {
+            // Cancellation can synchronously unwind EnterAsync and clear EnteringSession.
+            // Capture the existing session identity before allowing that cancellation.
+            CancelInFlightTransition();
+            return new RoutingSessionYieldRequest(session, wasEntering);
+        }
+        if (_sessionYieldReason is null)
+            Volatile.Write(ref _sessionYieldRequested, 0);
+        return null;
+    }
+
+    internal bool IsCurrentSessionYieldRequest(RoutingSessionYieldRequest request) =>
+        (_sessionCoordinator.ActiveSession is { } active && ReferenceEquals(active, request.Session))
+        || (_sessionCoordinator.PendingCleanup is { } pending && ReferenceEquals(pending.Session, request.Session))
+        || (_sessionCoordinator.EnteringSession is { } entering && ReferenceEquals(entering, request.Session));
+
+    internal async ValueTask<RoutingPipelineSessionReconcileResult> FailClosedForSessionYieldAsync(
+        RoutingSessionYieldRequest request)
+    {
+        CancelInFlightTransition();
+        Interlocked.Increment(ref _transitionOperationCount);
+        var acquired = false;
+        try
+        {
+            await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            acquired = true;
+            if (IsShutdownRequested) return RuntimeStoppedResult();
+            if (!IsCurrentSessionYieldRequest(request) && (!request.WasEntering || Volatile.Read(ref _sessionYieldRequested) == 0))
+            {
+                if (_sessionYieldReason is null)
+                    Volatile.Write(ref _sessionYieldRequested, 0);
+                return new(true, _sessionCoordinator.CurrentState, RoutingActionKind.None, "SessionYieldRequestRetired");
             }
 
-            return await _sessionCoordinator.ReconcileAsync(
-                RecoveryResetDecision,
-                IndeterminateClassification,
-                transition.Token).ConfigureAwait(false);
+            _sessionYieldReason = "ExternalNativeTakeover";
+            AppLog.Warn("Routing.Runtime", "ExternalNativeTakeoverDetected", null,
+                ("Action", "YieldUntilSteamSessionEnd"));
+            using var transition = CreateTransitionCancellation(CancellationToken.None);
+            return await RetireForFailCloseCoreAsync(transition.Token).ConfigureAwait(false);
         }
         finally
         {
@@ -310,6 +345,15 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileCoreAsync(CancellationToken cancellationToken)
     {
         var snapshot = await _statusProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
+        if (IsSessionYieldAdmissionClosed && snapshot.RoutingDecision.Kind == RoutingDecisionKind.Eligible)
+        {
+            if (_sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null)
+                return await RetireForFailCloseCoreAsync(cancellationToken).ConfigureAwait(false);
+            AppLog.Debug("Routing.Runtime", "RouteDemandIgnored",
+                ("Reason", "ExternalNativeTakeoverLatched"), ("Decision", snapshot.RoutingDecision.Kind),
+                ("OperationalState", RoutingOperationalState.Passive), ("Action", "Yield"));
+            return new(true, _sessionCoordinator.CurrentState, RoutingActionKind.None, "ExternalNativeTakeoverLatched");
+        }
         var classification = Classify(snapshot.ControllerSoftware);
         if (_sessionCoordinator.ActiveSession is not null &&
             _sessionCoordinator.PendingCleanup is null &&
@@ -390,8 +434,39 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
                 return new(false, result.State, result.Action, "SteamSessionBoundaryFailed");
             }
         }
+        if (IsSessionYieldAdmissionClosed)
+        {
+            var hadCommittedYield = _sessionYieldReason is not null;
+            _sessionYieldReason = null;
+            Volatile.Write(ref _sessionYieldRequested, 0);
+            if (hadCommittedYield)
+                AppLog.Info("Routing.Runtime", "ExternalNativeTakeoverYieldCleared", ("Reason", "SteamSessionEnded"));
+        }
         return result;
     }
+
+    private async ValueTask<RoutingPipelineSessionReconcileResult> RetireForFailCloseCoreAsync(CancellationToken cancellationToken)
+    {
+        if ((_sessionCoordinator.ActiveSession is not null || _sessionCoordinator.PendingCleanup is not null) &&
+            _beforeActiveSessionExit is not null)
+        {
+            bool retired;
+            try { retired = await _beforeActiveSessionExit(cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Routing.Runtime", "X360 presentation retirement blocked outer fail-close rollback.", exception,
+                    ("Action", "FailClosed"), ("Reason", exception.GetType().Name));
+                return new(false, _sessionCoordinator.CurrentState, RoutingActionKind.None, "Xbox360PresentationRetirementFailed");
+            }
+            if (!retired)
+                return new(false, _sessionCoordinator.CurrentState, RoutingActionKind.None, "Xbox360PresentationRetirementFailed");
+        }
+
+        return await _sessionCoordinator.ReconcileAsync(RecoveryResetDecision, IndeterminateClassification, cancellationToken).ConfigureAwait(false);
+    }
+
+    private bool IsSessionYieldAdmissionClosed =>
+        Volatile.Read(ref _sessionYieldRequested) != 0 || _sessionYieldReason is not null;
 
     private bool IsShutdownRequested => Volatile.Read(ref _shutdownRequested) != 0;
     private static bool IsSteamSessionEnded(RoutingDecision decision) =>

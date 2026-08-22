@@ -11,6 +11,192 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class RoutingPipelineRuntimeCoordinatorTests
 {
     [Fact]
+    public async Task External_takeover_yields_before_forward_pipeline_and_clears_at_session_end()
+    {
+        var executor = new FakeExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(Eligible(), Software()),
+                Snapshot(Eligible(), Software()),
+                Snapshot(WaitingForSteam(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var yieldRequest = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(yieldRequest);
+        var yielded = await bridge.Bridge.FailClosedForSessionYieldAsync(yieldRequest!.Value);
+        Assert.True(yielded.Succeeded);
+        var ignored = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(ignored.Succeeded);
+        Assert.Equal("ExternalNativeTakeoverLatched", ignored.Reason);
+        Assert.Single(executor.ExecutedPlans);
+        Assert.Single(executor.RollbackPlans);
+
+        var ended = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        Assert.True(ended.Succeeded);
+        var nextSession = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(nextSession.Succeeded);
+        Assert.Equal(RoutingActionKind.EnterOverride, nextSession.Action);
+        Assert.Equal(2, executor.ExecutedPlans.Count);
+    }
+
+    [Fact]
+    public async Task Yield_request_retired_by_old_session_cannot_poison_next_session()
+    {
+        var executor = new FakeExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(Eligible(), Software()),
+                Snapshot(WaitingForSteam(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(request);
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        Assert.False(bridge.Bridge.IsCurrentSessionYieldRequest(request!.Value));
+
+        var nextSession = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(nextSession.Succeeded);
+        Assert.Equal(RoutingActionKind.EnterOverride, nextSession.Action);
+        Assert.Equal(2, executor.ExecutedPlans.Count);
+    }
+
+    [Fact]
+    public async Task Yield_request_binds_to_entering_session_and_cancels_forward_entry()
+    {
+        var executor = new FakeExecutor { BlockNextExecute = true };
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(Eligible(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+        var entering = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteStarted.Task;
+
+        Assert.Null(bridge.Session.ActiveSession);
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+
+        Assert.NotNull(request);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => entering);
+        Assert.True(executor.ExecuteCancellationObserved.Task.IsCompletedSuccessfully);
+        var ignored = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.Equal("ExternalNativeTakeoverLatched", ignored.Reason);
+        Assert.Single(executor.ExecutedPlans);
+    }
+
+    [Fact]
+    public async Task Yield_request_captures_entering_session_before_inline_cancellation_retires_it()
+    {
+        var executor = new InlineCancelExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software())),
+            executor);
+        var entering = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.Started.Task;
+
+        Assert.NotNull(bridge.Session.EnteringSession);
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+
+        Assert.NotNull(request);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => entering);
+        var ignored = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.Equal("ExternalNativeTakeoverLatched", ignored.Reason);
+        Assert.Equal(1, executor.ExecuteCount);
+    }
+
+    [Fact]
+    public async Task Retired_yield_request_is_noop_and_next_session_enters()
+    {
+        var executor = new FakeExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(Eligible(), Software()),
+                Snapshot(WaitingForSteam(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(request);
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+
+        var delayed = await bridge.Bridge.FailClosedForSessionYieldAsync(request!.Value);
+        Assert.True(delayed.Succeeded);
+        Assert.Equal("SessionYieldRequestRetired", delayed.Reason);
+
+        var nextSession = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+        Assert.Equal(RoutingActionKind.EnterOverride, nextSession.Action);
+    }
+
+    [Fact]
+    public async Task Yield_request_without_owned_session_does_not_close_next_session_admission()
+    {
+        var executor = new FakeExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(WaitingForSteam(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+
+        Assert.Null(bridge.Bridge.RequestCurrentSessionYield());
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var nextSession = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(nextSession.Succeeded);
+        Assert.Equal(RoutingActionKind.EnterOverride, nextSession.Action);
+    }
+
+    [Fact]
+    public async Task Yielded_session_retries_pending_cleanup_without_forward_entry()
+    {
+        var executor = new FakeExecutor();
+        executor.RollbackResults.Enqueue(new RoutingPipelineRollbackResult(false, RoutingStageKind.SteamOutput, "blocked"));
+        executor.RollbackResults.Enqueue(new RoutingPipelineRollbackResult(true, null, "recovered"));
+        var bridge = Create(new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software())), executor);
+
+        Assert.True((await bridge.Bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var yieldRequest = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(yieldRequest);
+        Assert.False((await bridge.Bridge.FailClosedForSessionYieldAsync(yieldRequest!.Value)).Succeeded);
+        var retry = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(retry.Succeeded);
+        Assert.Single(executor.ExecutedPlans);
+        Assert.Equal(2, executor.RollbackPlans.Count);
+        Assert.Null(bridge.Session.PendingCleanup);
+    }
+
+    [Fact]
+    public async Task Yield_request_closes_admission_before_fail_close_gate_is_released()
+    {
+        var executor = new FakeExecutor { BlockNextExecute = true };
+        var bridge = Create(new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software())), executor);
+        var first = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteStarted.Task;
+
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+        Assert.NotNull(request);
+        var failClose = bridge.Bridge.FailClosedForSessionYieldAsync(request!.Value).AsTask();
+        var queued = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteCancellationObserved.Task;
+        await failClose;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+        var result = await queued;
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("ExternalNativeTakeoverLatched", result.Reason);
+        Assert.Single(executor.ExecutedPlans);
+    }
+
+    [Fact]
     public async Task SyntheticTestModeSessionBoundaryEntersAndRollsBackTheProductionPipeline()
     {
         var executor = new FakeExecutor();
@@ -1094,7 +1280,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
 
     private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(
         FakeStatusProvider provider,
-        FakeExecutor executor,
+        IRoutingPipelineExecutor executor,
         params IRoutingRuntimeSessionBoundaryParticipant[] participants)
     {
         var session = new RoutingPipelineSessionCoordinator(executor);
@@ -1236,6 +1422,28 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
             }
             return RollbackResults.Count == 0 ? new RoutingPipelineRollbackResult(true, null, "Success") : RollbackResults.Dequeue();
         }
+    }
+
+    private sealed class InlineCancelExecutor : IRoutingPipelineExecutor
+    {
+        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int ExecuteCount { get; private set; }
+
+        public async ValueTask<RoutingPipelineExecutionResult> ExecuteAsync(
+            RoutingPipelinePlan plan,
+            CancellationToken cancellationToken)
+        {
+            ExecuteCount++;
+            var blocked = new TaskCompletionSource<RoutingPipelineExecutionResult>();
+            using var registration = cancellationToken.Register(() => blocked.TrySetCanceled(cancellationToken));
+            Started.TrySetResult();
+            return await blocked.Task.ConfigureAwait(false);
+        }
+
+        public ValueTask<RoutingPipelineRollbackResult> RollbackAsync(
+            RoutingPipelinePlan plan,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(new RoutingPipelineRollbackResult(true, null, "Success"));
     }
 
     private sealed class FakeBoundaryParticipant : IRoutingRuntimeSessionBoundaryParticipant

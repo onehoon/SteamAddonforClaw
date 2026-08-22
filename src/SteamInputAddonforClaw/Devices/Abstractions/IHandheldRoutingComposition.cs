@@ -49,7 +49,7 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
     /// the currently active routing pipeline. The reported reason is a short stable string, not a
     /// user-facing message. A backend with nothing to report may simply never invoke it.
     /// </summary>
-    void SetRuntimeFaultHandler(Func<string, ValueTask> handler);
+    void SetRuntimeFaultHandler(Func<string, bool, ValueTask> handler);
 
     /// <summary>
     /// Optional additional power-suspend participant this composition owns, beyond the routing

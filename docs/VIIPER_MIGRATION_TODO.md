@@ -64,6 +64,28 @@ HID/driver failure while Steam routing is active -- not just Center M
 specifically. This is software safety hardening only and does not advance SD3
 hardware validation; real hardware validation of this path remains required.
 
+Confirmed external PID1901 takeover while the Addon owns PID1902 now uses the
+canonical full-yield path. Forward routing remains suppressed only for the
+current routing-demand session and clears at the existing Steam-session
+boundary; the next independent session may route normally. Native restore keeps
+the existing `AlreadyOriginalState` behavior and does not issue another XInput
+mutation when the saved original state is already current. Generic physical
+input loss remains fail-close, Game Bar/X360 foreground switching remains
+dormant, and real hardware validation of this policy remains pending. This does
+not mark SD3 complete.
+
+### Routing-time native UI policy
+
+- Outside an active Steam route, WING remains stock Win+G / Xbox Game Bar.
+- During an active Steam route, Win+G/Game Bar is suppressed; WING mapping is
+  a separate action policy whose default is Steam Button.
+- OEM1 remapping remains independent of the routing master setting. The
+  route-bound Center M guard prevents the native Center M MainUI path from
+  becoming operational while routing owns the route; the default routing action
+  remains Steam Quick Access.
+- MSI Center M MainUI is unavailable while the Addon owns the active Steam
+  route.
+
 A routing-time MSI Center M MainUI launch guard (Phase 1) now arms/disarms
 around routing entry/exit -- `Local\MSI Center M.exe` mutex ownership plus the
 existing staged same-name helper, gating native-mode/PID1902 mutation on the

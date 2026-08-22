@@ -244,7 +244,7 @@ public sealed class MsiClawRoutingCompositionTests
         var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
         await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
         var reasons = new List<string>();
-        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler(reason => { reasons.Add(reason); return ValueTask.CompletedTask; });
+        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler((reason, _) => { reasons.Add(reason); return ValueTask.CompletedTask; });
 
         composition.OnPhysicalInputCompleted(composition, StoppedSummary(MsiClawInputStopReason.Stopped));
         await Task.Delay(50);
@@ -263,7 +263,7 @@ public sealed class MsiClawRoutingCompositionTests
         await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
         Assert.Null(composition.PhysicalInputStage.CurrentIdentity);
         var reasons = new List<string>();
-        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler(reason => { reasons.Add(reason); return ValueTask.CompletedTask; });
+        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler((reason, _) => { reasons.Add(reason); return ValueTask.CompletedTask; });
 
         composition.OnPhysicalInputCompleted(composition, StoppedSummary(MsiClawInputStopReason.ReadStateFailed));
         await Task.Delay(50);
@@ -283,7 +283,7 @@ public sealed class MsiClawRoutingCompositionTests
         var native = new MsiClawNativeStateManager(devices, new FakeModeController(devices));
         await using var composition = new MsiClawRoutingComposition(native, new RecoveryManager(new MemoryJournalStore()), new PowerMutationGate(initiallyOpen: true), new RecoverySafetyState(RecoverySafety.Safe));
         var handlerInvoked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler(_ =>
+        ((IHandheldRoutingComposition)composition).SetRuntimeFaultHandler((_, _) =>
         {
             handlerInvoked.TrySetResult();
             throw new InvalidOperationException("handler bug");
