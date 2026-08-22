@@ -119,6 +119,200 @@ public sealed class MsiClawPhysicalInputStageTests
         Assert.Null(stage.CurrentIdentity);
     }
 
+    [Fact]
+    public async Task SuspendPause_stops_input_but_preserves_owned_identity_without_retirement()
+    {
+        var descriptor = Device();
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => new FakeEnumerator([descriptor]), input);
+        var retiring = 0;
+        var retired = 0;
+        stage.PhysicalSessionRetiring += () => retiring++;
+        stage.PhysicalSessionRetired += () => retired++;
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+
+        var identity = stage.CurrentIdentity;
+        var result = await stage.PauseForSuspendAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.False(input.IsRunning);
+        Assert.Equal(identity, stage.CurrentIdentity);
+        Assert.Equal(0, retiring);
+        Assert.Equal(0, retired);
+    }
+
+    [Fact]
+    public async Task ResumeAfterSuspend_retries_missing_topology_and_uses_fresh_descriptor()
+    {
+        var original = Device();
+        var fresh = original with { InstanceGuid = Guid.NewGuid(), DevicePath = "HID\\FRESH", PnpInstanceId = "HID\\FRESH" };
+        var enumerators = new Queue<FakeEnumerator>([
+            new([original]), new([]), new([]), new([fresh]), new([fresh])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+
+        var result = await stage.ResumeAfterSuspendAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(input.IsRunning);
+        Assert.Equal(fresh, input.PreparedDescriptor);
+        Assert.Equal(fresh.PhysicalIdentity, stage.CurrentIdentity!.PhysicalIdentity);
+        Assert.Equal(fresh.InstanceGuid, stage.CurrentIdentity.InstanceGuid);
+    }
+
+    [Fact]
+    public async Task ResumeAfterSuspend_rejects_different_physical_controller_without_mutation()
+    {
+        var original = Device();
+        var foreign = original with { PhysicalIdentity = "USB\\FOREIGN" };
+        var enumerators = new Queue<FakeEnumerator>([
+            new([original]), new([foreign])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+
+        var result = await stage.ResumeAfterSuspendAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(input.IsRunning);
+        Assert.Equal(original.PhysicalIdentity, stage.CurrentIdentity!.PhysicalIdentity);
+        Assert.Equal(original, input.PreparedDescriptor);
+    }
+
+    [Fact]
+    public async Task Rollback_from_suspend_pause_retires_owned_session_and_clears_identity()
+    {
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => new FakeEnumerator([Device()]), input);
+        var retired = 0;
+        stage.PhysicalSessionRetired += () => retired++;
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+
+        var result = await stage.RollbackMutationAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Null(stage.CurrentIdentity);
+        Assert.Equal(1, retired);
+        Assert.False(input.IsRunning);
+    }
+
+    [Fact]
+    public async Task ResumeAfterSuspend_requires_first_valid_state_and_stays_paused_on_failure()
+    {
+        var original = Device();
+        var enumerators = new Queue<FakeEnumerator>([new([original]), new([original])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+        input.FirstValidStateObserved = false;
+
+        var result = await stage.ResumeAfterSuspendAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.False(input.IsRunning);
+        Assert.Equal(original.PhysicalIdentity, stage.CurrentIdentity!.PhysicalIdentity);
+    }
+
+    [Fact]
+    public async Task ResumeAfterSuspend_advances_generation_and_invalidates_cached_rumble_endpoint()
+    {
+        var original = Device();
+        var fresh = original with { InstanceGuid = Guid.NewGuid(), DevicePath = "HID\\RUMBLE_AFTER_RESUME", PnpInstanceId = "HID\\FRESH" };
+        var enumerators = new Queue<FakeEnumerator>([new([original]), new([fresh])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        var resolver = new CountingRumbleResolver();
+        var transport = new RecordingRumbleTransport();
+        using var sink = new MsiClawRumbleSink(stage, transport, resolver);
+        sink.BeginPhysicalSession();
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(new(1, 2)).Status);
+        var generation = stage.CurrentSessionGeneration;
+
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+        Assert.True((await stage.ResumeAfterSuspendAsync(CancellationToken.None)).Succeeded);
+
+        Assert.True(stage.CurrentSessionGeneration > generation);
+        Assert.Equal(PhysicalRumbleWriteStatus.Succeeded, sink.SetRumble(new(2, 3)).Status);
+        Assert.Equal(2, resolver.Calls);
+        Assert.Equal(fresh.DevicePath, transport.LastPath);
+    }
+
+    [Fact]
+    public async Task ResumeAfterSuspend_cancellation_stops_new_input_and_remains_paused()
+    {
+        var descriptor = Device();
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => new FakeEnumerator([descriptor]), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        await stage.PauseForSuspendAsync(CancellationToken.None);
+        input.FirstValidWait = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+
+        var resume = stage.ResumeAfterSuspendAsync(cancellation.Token).AsTask();
+        await input.FirstValidWaitEntered.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resume);
+        Assert.False(input.IsRunning);
+        Assert.NotNull(stage.CurrentIdentity);
+        Assert.True((await stage.PauseForSuspendAsync(CancellationToken.None)).Succeeded);
+        Assert.False(input.IsRunning);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedInput_when_running_is_noop()
+    {
+        var descriptor = Device();
+        var enumerator = new FakeEnumerator([descriptor]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerator, input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        var generation = stage.CurrentSessionGeneration;
+
+        var result = await stage.ReconcileOwnedInputAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Healthy", result.Reason);
+        Assert.Equal(generation, stage.CurrentSessionGeneration);
+        Assert.Equal(1, enumerator.EnumerateCount);
+        Assert.Equal(1, input.StartPreparedCount);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedInput_when_owned_but_stopped_reacquires_same_physical_device()
+    {
+        var descriptor = Device();
+        var enumerators = new Queue<FakeEnumerator>([new([descriptor]), new([descriptor])]);
+        var input = new FakeInput();
+        var stage = new MsiClawPhysicalInputStage(() => enumerators.Dequeue(), input, (_, _) => Task.CompletedTask);
+        await stage.PrepareMutationAsync(CancellationToken.None);
+        await stage.ExecuteMutationAsync(CancellationToken.None);
+        var generation = stage.CurrentSessionGeneration;
+        await input.StopAsync();
+
+        var result = await stage.ReconcileOwnedInputAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(input.IsRunning);
+        Assert.Equal(2, input.StartPreparedCount);
+        Assert.True(stage.CurrentSessionGeneration > generation);
+        Assert.Equal(descriptor.PhysicalIdentity, stage.CurrentIdentity!.PhysicalIdentity);
+    }
+
     private static DirectInputDeviceDescriptor Device() => new(
         Guid.NewGuid(), Guid.NewGuid(), "test", 0x0DB0, 0x1902,
         "HID\\VID_0DB0&PID_1902&MI_00&COL01\\TEST", "HID\\INSTANCE", "USB\\MSI_ROOT", 0x0001, 0x0005, 17, 6, "Verified");
@@ -149,6 +343,8 @@ public sealed class MsiClawPhysicalInputStageTests
         public int StopCount { get; private set; }
         public Func<bool>? BeforeStop { get; set; }
         public DirectInputDeviceDescriptor? PreparedDescriptor { get; private set; }
+        public TaskCompletionSource<bool>? FirstValidWait { get; set; }
+        public TaskCompletionSource FirstValidWaitEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public MsiClawInputStartResult StartPrepared(DirectInputDeviceDescriptor descriptor)
         {
             StartPreparedCount++;
@@ -156,7 +352,12 @@ public sealed class MsiClawPhysicalInputStageTests
             IsRunning = true;
             return new(MsiClawInputStartStatus.Started, "Started");
         }
-        public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken) => Task.FromResult(FirstValidStateObserved);
+        public Task<bool> WaitForFirstValidStateAsync(CancellationToken cancellationToken)
+        {
+            if (FirstValidWait is null) return Task.FromResult(FirstValidStateObserved);
+            FirstValidWaitEntered.TrySetResult();
+            return FirstValidWait.Task.WaitAsync(cancellationToken);
+        }
         public Task StopAsync() { Assert.True(BeforeStop?.Invoke() ?? true); StopCount++; IsRunning = false; return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
@@ -164,6 +365,28 @@ public sealed class MsiClawPhysicalInputStageTests
     private sealed class TestResolver : IMsiClawRumbleEndpointResolver
     {
         public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity) => new(identity.DevicePath, "Test");
+    }
+
+    private sealed class CountingRumbleResolver : IMsiClawRumbleEndpointResolver
+    {
+        public int Calls { get; private set; }
+        public MsiClawRumbleEndpointResolution Resolve(MsiClawPhysicalInputIdentity identity)
+        {
+            Calls++;
+            return new(identity.DevicePath, "Verified", 32);
+        }
+    }
+
+    private sealed class RecordingRumbleTransport : IMsiClawRumbleTransport
+    {
+        public string? LastPath { get; private set; }
+        public MsiClawRumbleTransportResult Write(string devicePath, ReadOnlySpan<byte> packet, int outputReportLength)
+        {
+            LastPath = devicePath;
+            return new(true, "OK");
+        }
+        public void InvalidatePhysicalSession() { }
+        public void Dispose() { }
     }
 
     private sealed class BlockingTransport : IMsiClawRumbleTransport
