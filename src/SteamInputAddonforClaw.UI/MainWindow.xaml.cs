@@ -60,6 +60,7 @@ public sealed partial class MainWindow : Window
         Closed += OnWindowClosed;
         SettingsContent.Initialize(_frontend, _bootstrap);
         DeviceContent.Initialize(_frontend);
+        ProfileContent.Initialize(_frontend);
         ControllerContent.Initialize(_frontend, _bootstrap);
         CenterMButtonContent.Initialize(_bootstrap, () => WindowNative.GetWindowHandle(this));
         ControllerContent.CenterMButtonRequested += (_, _) => OpenCenterMButton();
@@ -193,6 +194,7 @@ public sealed partial class MainWindow : Window
     {
         var wasVibrationTest = VibrationTestContent.Visibility == Visibility.Visible;
         var wasDevice = DeviceContent.Visibility == Visibility.Visible;
+        var wasProfile = ProfileContent.Visibility == Visibility.Visible;
         var wasClawSensorProbe = ClawSensorProbeContent.Visibility == Visibility.Visible;
         StatusContent.Visibility = page == MainNavigationPage.Status ? Visibility.Visible : Visibility.Collapsed;
         DeviceContent.Visibility = page == MainNavigationPage.Device ? Visibility.Visible : Visibility.Collapsed;
@@ -212,6 +214,8 @@ public sealed partial class MainWindow : Window
         else if (wasVibrationTest) VibrationTestContent.Deactivate();
         if (page == MainNavigationPage.Device) DeviceContent.Activate();
         else if (wasDevice) DeviceContent.Deactivate();
+        if (page == MainNavigationPage.Profile) ProfileContent.Activate();
+        else if (wasProfile) ProfileContent.Deactivate();
         if (page == MainNavigationPage.ClawSensorProbe) ClawSensorProbeContent.Activate();
         else if (wasClawSensorProbe) ClawSensorProbeContent.Deactivate();
     }
