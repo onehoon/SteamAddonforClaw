@@ -9,7 +9,7 @@ internal readonly record struct RoutingRuntimeTerminationSnapshot(
     bool HasPendingCleanup,
     bool ShutdownRequested);
 
-internal readonly record struct RoutingSessionYieldRequest(ActiveRoutingPipelineSession Session);
+internal readonly record struct RoutingSessionYieldRequest(ActiveRoutingPipelineSession Session, bool WasEntering);
 
 internal interface IRoutingRuntimeSessionBoundaryParticipant
 {
@@ -161,9 +161,14 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         Volatile.Write(ref _sessionYieldRequested, 1);
         CancelInFlightTransition();
         var session = _sessionCoordinator.ActiveSession;
+        var wasEntering = false;
         session ??= _sessionCoordinator.PendingCleanup?.Session;
-        session ??= _sessionCoordinator.EnteringSession;
-        if (session is not null) return new RoutingSessionYieldRequest(session);
+        if (session is null)
+        {
+            session = _sessionCoordinator.EnteringSession;
+            wasEntering = session is not null;
+        }
+        if (session is not null) return new RoutingSessionYieldRequest(session, wasEntering);
         if (_sessionYieldReason is null)
             Volatile.Write(ref _sessionYieldRequested, 0);
         return null;
@@ -185,7 +190,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             await _transitionGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
-            if (!IsCurrentSessionYieldRequest(request) && Volatile.Read(ref _sessionYieldRequested) == 0)
+            if (!IsCurrentSessionYieldRequest(request) && (!request.WasEntering || Volatile.Read(ref _sessionYieldRequested) == 0))
             {
                 if (_sessionYieldReason is null)
                     Volatile.Write(ref _sessionYieldRequested, 0);
