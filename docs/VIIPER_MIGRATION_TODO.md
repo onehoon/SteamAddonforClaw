@@ -294,17 +294,31 @@ approved.
 
 ### SD7 — Game Bar and typed Xbox360 route
 
-Status: **FOUNDATION RETAINED — PRODUCTION SWITCHING DISABLED**
+Status: **DROPPED FROM CURRENT PRODUCT DIRECTION — DORMANT FOUNDATION RETAINED**
 
 Current main does not start or subscribe `GameBarForegroundWatcher` in
 production. The typed Xbox360 device/publisher and Deck/Xbox360 presentation
 primitives remain retained as dormant foundations. Route-bound Win+G
-protection is the active production policy; real hardware validation remains
-pending. The historical PR paragraphs below intentionally describe earlier
-incremental states.
+protection is the active production policy. The canonical Steam Deck remains
+the sole production virtual-controller presentation for the full active Steam
+route; Game Bar foreground is not a target-selection event. The historical PR
+paragraphs below intentionally describe earlier incremental states and are
+retained for architectural provenance, not as an active implementation
+roadmap.
 
-Define the Game Bar transition and typed Xbox360 composition without weakening
-the active Deck lifecycle or recovery invariants.
+#### SD7 decision note
+
+The Addon no longer plans to switch the active virtual presentation to Xbox360
+when Game Bar becomes foreground. The production direction is to retain the
+canonical Steam Deck presentation for the full active Steam routing session
+and provide handheld system-button and quick-control behavior through
+Steam-native Steam Button, Quick Access, and QAM integration. The retained
+VIIPER typed Xbox360 capability and Addon foundation are not deprecated; they
+are simply outside the current production presentation policy.
+
+Historical objective: define the Game Bar transition and typed Xbox360
+composition without weakening the active Deck lifecycle or recovery
+invariants. This objective is no longer an active product roadmap item.
 
 Preparatory step: managed ABI foundation only (buttons/D-pad/sticks/triggers;
 no rumble callback bound). `ICanonicalViiperNativeApi`/`CanonicalViiperNativeApi`
@@ -314,7 +328,7 @@ the classified attachment surface (`AttachUSBDeviceEx`, `DetachUSBDeviceEx`,
 `GetUSBDeviceAttachmentState`). Xbox360 production behavior remains
 foundation-only: PR2b creates one detached-ready logical handle but does not
 attach, publish, or use it for Game Bar behavior. OEM1 mapping/domain policy
-is unchanged. Status remains PLANNED.
+is unchanged. Historical status: PLANNED before the product-direction decision.
 
 PR2a (foundation only): `CanonicalViiperRuntime`
 (`src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalViiperRuntime.cs`)
@@ -332,7 +346,7 @@ Deck handle and production no longer creates/removes a server/bus/device per
 route. Ordinary route exit leaves Deck and Xbox360 logical handles alive and
 detached; only final runtime teardown removes the logical devices, bus, and
 server. Initialization failure remains fail-closed and never falls back to
-per-route creation. SD7 remains PLANNED; Xbox360 has no attach, publisher, or
+per-route creation. At that historical stage, SD7 remained PLANNED; Xbox360 had no attach, publisher, or
 Game Bar behavior here.
 
 Preparatory runtime primitive step (PR2c): `CanonicalViiperRuntime` now
@@ -409,7 +423,7 @@ remains owned by the Deck stage and does not trigger a second X360 fail-close.
 Both directions remain foundation-only: there is **no Game Bar production
 consumer, no automatic switching, no foreground event wiring, no X360
 PnP/XInput readiness claim, no power/suspend/shutdown integration, and no
-hardware validation claim**. SD7 remains PLANNED.
+hardware validation claim**. At that historical stage, SD7 remained PLANNED.
 
 Game Bar presentation policy seam step: `AddonRoutingRuntime` now exposes an
 internal boolean policy seam. `foreground=true` selects the existing
@@ -433,7 +447,7 @@ blocks that coordinator shutdown and preserves the owner. Normal Game Bar
 exit still resumes Deck after successful retirement, while shutdown never
 resumes Deck. The GameBarForegroundWatcher remains unsubscribed, normal Steam
 route exit and suspend/resume remain unchanged, no X360 readiness claim is
-added, and no hardware validation is claimed. SD7 remains PLANNED.
+added, and no hardware validation is claimed. At that historical stage, SD7 remained PLANNED.
 
 Normal active-route exit boundary step: `RoutingPipelineRuntimeCoordinator`
 now invokes the existing no-resume X360 retirement path immediately before
@@ -445,7 +459,7 @@ shutdown, fail-close, suspend/resume cleanup, or pending cleanup paths. There
 is still no `GameBarForegroundWatcher` production subscription, no automatic
 Game Bar switching, no suspend/hibernate X360 retirement, no finalized
 publisher-fault cleanup, no X360 PnP/XInput readiness claim, and no hardware
-validation claim. SD7 remains PLANNED.
+validation claim. At that historical stage, SD7 remained PLANNED.
 
 Suspend/hibernate retirement boundary step: while quiescing an owned outer
 routing session, `RoutingPipelineRuntimeCoordinator` now invokes the same
@@ -457,7 +471,7 @@ restore X360 presentation automatically; current-world recovery and fresh
 routing reconciliation remain authoritative. `GameBarForegroundWatcher`
 production subscription and automatic switching remain unimplemented,
 publisher-fault X360 cleanup is not finalized, X360 PnP/XInput readiness is
-not claimed, and no hardware validation is claimed. SD7 remains PLANNED.
+not claimed, and no hardware validation is claimed. At that historical stage, SD7 remained PLANNED.
 
 Outer fail-close retirement boundary step: `RoutingPipelineRuntimeCoordinator
 .FailClosedAsync()` now invokes the same no-resume X360 retirement callback,
@@ -477,7 +491,7 @@ publisher-fault outer fail-close retirement ordering is implemented.
 `GameBarForegroundWatcher` production subscription and automatic switching
 remain unimplemented, presentation event serialization is not
 implemented/finalized, X360 PnP/XInput readiness is not claimed, and no
-hardware validation is claimed. SD7 remains PLANNED.
+hardware validation is claimed. At that historical stage, SD7 remained PLANNED.
 
 Presentation mutation serialization step: `AddonRoutingRuntime` now owns one
 `SemaphoreSlim(1, 1)` (`_presentationGate`) that serializes only Deck/X360
@@ -522,7 +536,7 @@ now participates in the coordinator's existing transition-operation
 accounting. `GameBarForegroundWatcher` production subscription, latest-state
 delivery/coalescing, routing-completion foreground re-evaluation, and shutdown
 watcher/event drain remain NOT implemented. PnP/XInput readiness and hardware
-validation are NOT claimed. SD7 remains PLANNED.
+validation are NOT claimed. At that historical stage, SD7 remained PLANNED.
 
 Game Bar production wiring step: `AddonProcessHost` now subscribes the existing
 `GameBarForegroundWatcher` to a serialized latest-state delivery path that
@@ -537,8 +551,8 @@ teardown. Existing `_presentationGate`, `_xbox360Publisher`, routing
 coordinator, and VIIPER typed ownership remain authoritative; no new
 presentation state machine or authority was added. Resume uses current-world
 foreground state and does not restore remembered X360 presentation. X360
-PnP/XInput readiness and hardware validation are not claimed. SD7 remains
-PLANNED.
+PnP/XInput readiness and hardware validation are not claimed. This is a
+historical implementation stage; SD7 is no longer an active roadmap item.
 
 Current PR2 status: Game Bar foreground production switching is intentionally
 disabled while the existing watcher, typed Xbox360 device, publisher, and
@@ -561,10 +575,9 @@ mapping, lifecycle, and hardware evidence.
 
 ## Non-negotiable rules
 
-- Steam Deck `28DE:1205` is the sole Steam routing target. The persistent
-  Xbox360 device may be attached only as the temporary Game Bar presentation of
-  an already-active Steam route; it is not an independent routing target or
-  fallback.
+- Steam Deck `28DE:1205` is the sole production Steam presentation. Game Bar
+  foreground is not a target-selection event; retained Xbox360 foundation
+  devices are not part of the current production presentation policy.
 - Keep the exact VIIPER source, DLL, generated header, managed ABI, hashes, and
   provenance aligned.
 - Use `lib/viiper` and the typed ABI for new integration work.

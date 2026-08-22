@@ -1,8 +1,8 @@
 # VIIPER Integration Contract
 
 This document defines the current Addon integration with the canonical typed
-VIIPER API. The sole Steam routing target is Steam Deck `28DE:1205`; typed
-Xbox360 is a temporary Game Bar presentation only.
+VIIPER API. The sole production Steam presentation is Steam Deck `28DE:1205`.
+Game Bar foreground does not select another virtual controller.
 
 ## Current status
 
@@ -11,7 +11,7 @@ Xbox360 is a temporary Game Bar presentation only.
 | Canonical embedded API | `lib/viiper` typed ABI |
 | Embedded VIIPER revision | `77a8af547de2253862ede648a212c01d4dd950c1` |
 | Primary Steam routing target | Steam Deck `28DE:1205` |
-| Temporary Game Bar presentation | Persistent typed Xbox360 logical device |
+| Game Bar policy | Native Win+G/Game Bar path protected during active routing; no X360 presentation switch |
 | Addon integration | Session, mapper, publisher, identity resolver, safety stage implemented |
 | Hardware status | EX basic non-gyro input validated; lifecycle evidence remains pending |
 | Rumble | Production callback/authority/STOP wiring implemented; hardware validation pending |
@@ -112,16 +112,31 @@ managed ABI binding for all of these now exists in
 `ICanonicalViiperNativeApi`/`CanonicalViiperNativeApi`. The compatibility
 bool `AttachUSBDevice` / `DetachUSBDevice` compatibility surface remains
 available, but production Deck routing now uses
-the classified attachment/query surface. The persistent runtime creates one
-detached-ready Xbox360 logical handle. While an eligible outer Steam route is
-active, Game Bar foreground presentation may pause the existing Steam Deck
-publisher, keep Deck attached-neutral, classified-attach the persistent
-Xbox360 handle, and start the Xbox360 publisher. Leaving Game Bar retires
-Xbox360 and resumes the same Deck publisher/session. The attachment state
-query is VIIPER ownership evidence only, not Windows PnP, HID, XInput, or
-Steam readiness; Game Bar/X360 hardware readiness validation remains pending.
+the classified attachment/query surface. The current Addon policy keeps the
+same Steam Deck presentation authoritative for the full active route. The
+typed Xbox360 API remains a supported VIIPER capability, and the Addon may
+retain detached-ready Xbox360 handles and publisher primitives as dormant
+foundation; they are not an active Game Bar presentation policy. The
+attachment state query is VIIPER ownership evidence only, not Windows PnP,
+HID, XInput, or Steam readiness.
 The Xbox360 typed API in this PR covers
 buttons/D-pad/sticks/triggers only -- no rumble callback is bound.
+
+## Historical Game Bar / Xbox360 presentation experiment
+
+An earlier Addon design explored pausing and neutralizing the Steam Deck,
+attaching and publishing a typed Xbox360 device while Game Bar was foreground,
+then stopping, detaching, and resuming the same Deck route. The experiment
+retained useful typed-API and publisher foundations, but it was not promoted
+to production hardware-validated switching.
+
+The product direction now keeps one Steam Deck presentation for the complete
+active Steam route. Adding a second presentation lifecycle would have required
+additional serialization, attach/detach and readiness handling, foreground
+event delivery, retirement, recovery, and feedback-authority transitions for
+limited product value. Steam-native Steam Button, Quick Access, and QAM
+integration provide the required handheld interaction with one presentation
+authority. VIIPER's generic typed Xbox360 capability is unchanged.
 
 ## 1. Upstream authority
 
@@ -153,15 +168,20 @@ unknown.
 
 1. Load the pinned `libVIIPER.dll` for process lifetime.
 2. Initialize one `CanonicalViiperRuntime`: one server, one caller-owned bus,
-   one detached-ready Steam Deck handle, and one detached-ready Xbox360 handle.
+   and the process-lifetime typed handles currently composed by the runtime.
+   The Steam Deck handle is the sole production Steam presentation; any
+   Xbox360 handle retained by the current code is dormant foundation.
 3. On Steam route entry, record recovery intent, classified-attach the same
    Deck handle, then resolve/stabilize exact `28DE:1205` PnP ownership.
 4. Verify Addon ownership and HidHide state, then publish neutral and live input.
 5. On route exit, stop publisher/feedback, clear callback, neutralize, perform
    classified Deck detach, verify exact PnP absence, and complete recovery.
-6. Keep both logical handles and the bus/server alive while the Runtime lives.
+6. Keep the runtime-owned logical handles and the bus/server alive while the
+   Runtime lives; only the Steam Deck handle participates in production Steam
+   presentation.
 7. Only after canonical routing shutdown succeeds, final Runtime teardown
-   removes Deck/Xbox360, removes the bus, and closes the server.
+   removes the runtime-owned logical devices, removes the bus, and closes the
+   server.
 8. Restore the physical MSI Claw stock state through the existing rollback and
    recovery path.
 
@@ -171,11 +191,12 @@ later explicit reconciliation.
 
 **PR2a foundation / PR2b production composition:** the process/runtime-
 lifetime persistent owner described in step 1-2 above is implemented as
-`CanonicalViiperRuntime` -- one server, one caller-owned bus, one persistent
-Steam Deck logical device, and one persistent Xbox360 logical device,
-created once and left detached (`autoAttachLocalhost: false`), plus
-classified final teardown of all four resources. It is fully implemented
-and unit-tested. PR2b now composes it once in `AddonRoutingRuntime`.
+`CanonicalViiperRuntime` -- one server, one caller-owned bus, and the
+runtime-owned typed device handles, created once and left detached
+(`autoAttachLocalhost: false`), plus classified final teardown. It is fully
+implemented and unit-tested. PR2b now composes it once in
+`AddonRoutingRuntime`. The Deck handle is the sole production Steam
+presentation; any Xbox360 handle is retained as dormant foundation only.
 `CanonicalSteamDeckSession` borrows the persistent Deck handle and uses
 classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route. Final teardown
 is performed only by the runtime owner after routing shutdown succeeds; no
@@ -184,20 +205,18 @@ second VIIPER server/bus owner exists in production.
 ## PR2b production composition
 
 `AddonRoutingRuntime` owns one `CanonicalViiperRuntime` for its lifetime. It
-owns one server, one caller-owned bus, and persistent detached-ready Deck and
-Xbox360 logical handles. A Steam route creates only a short-lived session
+owns one server, one caller-owned bus, and the runtime's persistent typed
+handles. A Steam route creates only a short-lived session
 wrapper that borrows the Deck handle, verifies `Detached`, then uses
 classified `AttachUSBDeviceEx`. Route exit stops publisher/feedback, writes
 neutral state, and uses classified `DetachUSBDeviceEx`; it does not remove
 the logical device, bus, or server. PnP disappearance and recovery evidence
 remain authoritative. Final runtime shutdown alone invokes the existing
-staged logical-device, bus, and server teardown. Xbox360 remains detached and
-unpublished while Game Bar presentation is inactive. During an active outer
-Steam route, Game Bar foreground stops the Deck publisher, keeps Deck
-attached-neutral, classified-attaches the persistent Xbox360 handle, and
-starts the Xbox360 publisher. Leaving Game Bar stops/neutralizes/detaches
-Xbox360 and resumes the same Deck publisher; Xbox360 is not an independent
-routing target or fallback.
+staged logical-device, bus, and server teardown. The Steam Deck remains the
+authoritative production presentation throughout the active route. Game Bar
+foreground is handled by the route-bound Win+G protection policy and does not
+trigger a Deck-to-Xbox360 switch. Any retained Xbox360 foundation remains
+detached and unpublished by this policy.
 
 ## 4. Steam Deck typed ABI
 

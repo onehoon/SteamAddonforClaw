@@ -26,7 +26,7 @@ Steam Deck `VID=0x28DE`, `PID=0x1205`.
 | Audio / jingle feedback | Unsupported |
 | Gyro / accelerometer | Separate feature track |
 | Quick Access / OEM1 | Production wiring + configurable mappings implemented; hardware validation pending |
-| Game Bar / typed Xbox360 presentation | Production wiring implemented; hardware validation pending |
+| Steam-native routing presentation | Steam Deck `28DE:1205` is the single active virtual-controller presentation |
 
 ## Product goal
 
@@ -34,19 +34,20 @@ Expose the Claw's native controller to Steam while preserving the device's
 normal Windows behavior outside an active Steam routing session. The Addon
 must acquire only the verified MSI controller collection, establish a safe
 native mode boundary, create one owned Steam Deck virtual device, publish
-normalized input, and restore the live stock state during teardown. Its
-process-lifetime VIIPER owner also retains a typed Xbox360 logical handle for
-temporary Game Bar presentation; this is not an additional Steam routing
-target.
+normalized input, and restore the live stock state during teardown.
 
-The sole Steam routing target is the Steam Deck device at `28DE:1205`.
-The process-lifetime VIIPER owner also keeps a persistent typed Xbox360 logical
-device. It is a temporary child presentation of an already-active Steam route,
-not a second routing target or fallback: while Game Bar is foreground, Deck
-becomes attached-neutral and the persistent Xbox360 presentation attaches and
-publishes; when Game Bar leaves, Xbox360 stops/detaches and the same Deck
-publisher resumes. X360 PnP/XInput readiness and the remaining lifecycle
-evidence are still hardware-validation tracks.
+The canonical Steam Deck is the single production virtual-controller
+presentation for an active Steam routing session. Game Bar foreground does not
+select another virtual controller.
+
+During active Steam routing:
+
+- WING defaults to the Steam Button;
+- Center M / OEM1 defaults to Steam Quick Access;
+- Addon quick controls are integrated into Steam Quick Access Menu;
+- native Win+G/Game Bar activation is protected while the route is owned.
+
+Outside routing, native Windows and Game Bar behavior is restored.
 
 ## Initial MSI Claw mapping
 
@@ -102,7 +103,6 @@ SD3      lifecycle, recovery, and failure-path hardware validation
 SD4      production readiness review
 SD5      OEM1 / Quick Access software implemented; hardware validation pending
 SD6      gyro / accelerometer feature track
-SD7      Game Bar / typed Xbox360 software wired; hardware validation pending
 ```
 
 Rumble and haptic commands are translated through the production two-motor
