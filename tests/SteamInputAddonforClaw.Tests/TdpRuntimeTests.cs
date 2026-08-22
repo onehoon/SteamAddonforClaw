@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Devices.Abstractions;
 using SteamInputAddonforClaw.Devices.MSI.Claw;
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Diagnostics;
 using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
@@ -386,13 +387,76 @@ public sealed class TdpRuntimeTests : IDisposable
         Assert.Equal(TdpCommitOutcome.Unavailable, runtime.CommitGlobalTdp(new() { Enabled = true, Ac = Pair(22, 32), Dc = Pair(10, 20) }).Outcome);
     }
 
-    private TdpRuntime Create(ProfileStore store, FakeTransport transport, TdpPowerSource? source, Func<DeviceTdpSettings?>? seed = null) =>
-        new(store, new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport), () => source, seed);
+    [Fact]
+    public async Task EnabledGameTdpOverridesDeviceEvenWhenDeviceIsDisabled()
+    {
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
+        uint appId = 12345;
+        SaveProfile(new DeviceTdpSettings { Enabled = false, Ac = Pair(20, 30), Dc = Pair(10, 20) },
+            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = Pair(21, 31), Dc = Pair(11, 21) } } });
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, actualAppIdSource: () => appId);
+
+        runtime.ReconcileCurrent(true, false, "GameStart");
+        await runtime.DrainAsync();
+
+        Assert.Contains("SetData(81,31)", transport.Operations);
+    }
+
+    [Fact]
+    public async Task GameExitFallsBackToEnabledDeviceAndBothUnmanagedDoesNotWrite()
+    {
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
+        uint appId = 12345;
+        SaveProfile(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) },
+            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = Pair(21, 31), Dc = Pair(11, 21) } } });
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, actualAppIdSource: () => appId);
+
+        runtime.ReconcileCurrent(true, false, "GameStart");
+        await runtime.DrainAsync();
+        transport.Operations.Clear();
+        appId = 0;
+        runtime.ReconcileCurrent(true, false, "GameExit");
+        await runtime.DrainAsync();
+        Assert.Contains("SetData(81,30)", transport.Operations);
+
+        transport.Operations.Clear();
+        SaveProfile(new DeviceTdpSettings { Enabled = false, Ac = Pair(20, 30), Dc = Pair(10, 20) }, null);
+        runtime.ReconcileCurrent(true, false, "Unmanaged");
+        await runtime.DrainAsync();
+        Assert.Empty(transport.Operations);
+    }
+
+    [Fact]
+    public async Task InvalidEnabledGameTdpIsNotSentToHardware()
+    {
+        var transport = new FakeTransport { Ap = [0x00, 0x00, 0xC4] };
+        SaveProfile(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) },
+            new GameProfile { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, Tdp = new GameTdpSettings { Ac = Pair(31, 8), Dc = Pair(10, 20) } } });
+        await using var runtime = Create(new ProfileStore(PathName), transport, TdpPowerSource.AC, actualAppIdSource: () => 12345);
+
+        runtime.ReconcileCurrent(true, false, "InvalidGame");
+        await runtime.DrainAsync();
+
+        Assert.DoesNotContain(transport.Operations, operation => operation.StartsWith("SetData(", StringComparison.Ordinal));
+    }
+
+    private TdpRuntime Create(ProfileStore store, FakeTransport transport, TdpPowerSource? source, Func<DeviceTdpSettings?>? seed = null, Func<uint>? actualAppIdSource = null) =>
+        new(store, new ProfileMutationGate(), new HandheldDeviceModelId("msi.claw.a2vm.7"), new MsiClawTdpHardware(transport), () => source, seed, actualAppIdSource);
 
     private void Save(DeviceTdpSettings tdp)
     {
         Directory.CreateDirectory(_directory);
         new ProfileStore(PathName).Save(new ProfileDocument { Device = new DeviceSettings { Performance = new DevicePerformanceSettings { Tdp = tdp } } });
+    }
+
+    private void SaveProfile(DeviceTdpSettings deviceTdp, GameProfile? game)
+    {
+        Directory.CreateDirectory(_directory);
+        new ProfileStore(PathName).Save(new ProfileDocument
+        {
+            Device = new DeviceSettings { Performance = new DevicePerformanceSettings { Tdp = deviceTdp } },
+            Games = game is null ? [] : new() { ["12345"] = game }
+        });
     }
 
     private static TdpPowerPair Pair(int pl1, int pl2) => new() { Pl1Watts = pl1, Pl2Watts = pl2 };

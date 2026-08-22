@@ -181,6 +181,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _tdpTransport = new();
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel,
                 new MsiClawTdpHardware(_tdpTransport));
+            _tdpRuntime.SetActualAppIdSource(() => _runtimeHost?.ActualRunningAppId ?? 0);
             _tdpPowerLifecycleWatcher = new(_tdpRuntime, new WindowsTdpPowerNotificationSource());
             _tdpCenterMRegistryWatcher = new(() => _tdpPowerLifecycleWatcher?.ScheduleCenterMReconcile());
         }
@@ -413,6 +414,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         try
         {
             _cpuBoostRuntime.Reconcile(appId);
+            _tdpRuntime?.ReconcileCurrent(forceApply: true, invalidateHardwareCache: false, "ActualRunningAppIdChanged");
         }
         catch (Exception exception)
         {
