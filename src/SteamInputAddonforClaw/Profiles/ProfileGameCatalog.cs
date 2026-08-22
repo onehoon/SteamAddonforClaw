@@ -1,5 +1,6 @@
 using Microsoft.Win32;
 using System.Text;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Profiles;
 
@@ -23,10 +24,14 @@ public sealed class ProfileGameCatalogScanner
         var result = new Dictionary<uint, ProfileGameCatalogEntry>();
         var root = _steamRootProvider();
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            AppLog.Warn("Profiles.Catalog", "Steam installation could not be located.");
             return Array.Empty<ProfileGameCatalogEntry>();
+        }
 
         var libraries = ReadLibraries(root);
         libraries.Add(root);
+        var libraryCount = libraries.Distinct(StringComparer.OrdinalIgnoreCase).Count();
         foreach (var library in libraries.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -75,6 +80,13 @@ public sealed class ProfileGameCatalogScanner
                 catch (FormatException) { }
             }
 
+        var steamGameCount = result.Values.Count(x => x.Source == ProfileGameSource.Steam);
+        var nonSteamGameCount = result.Values.Count(x => x.Source == ProfileGameSource.NonSteam);
+        AppLog.Info("Profiles.Catalog", "Profile game catalog scan completed.",
+            ("SteamRoot", root), ("LibraryCount", libraryCount),
+            ("SteamGameCount", steamGameCount), ("NonSteamGameCount", nonSteamGameCount),
+            ("TotalCount", result.Count));
+
         return result.Values
             .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.AppId).ToArray();
     }
@@ -91,13 +103,30 @@ public sealed class ProfileGameCatalogScanner
 
     private static string? LocateSteamRoot()
     {
-        var candidates = new[] {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"),
-            (string?)Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam")?.GetValue("SteamPath"),
-            (string?)Registry.LocalMachine.OpenSubKey(@"Software\WOW6432Node\Valve\Steam")?.GetValue("InstallPath")
-        };
-        return candidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path) &&
-            File.Exists(Path.Combine(path, "steam.exe")));
+        using var currentUserSteam = Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam");
+        using var localMachineSteam = Registry.LocalMachine.OpenSubKey(@"Software\WOW6432Node\Valve\Steam");
+        return SteamInstallPathSelector.SelectValidSteamRoot([
+            currentUserSteam?.GetValue("SteamPath") as string,
+            currentUserSteam?.GetValue("InstallPath") as string,
+            localMachineSteam?.GetValue("InstallPath") as string,
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam")]);
+    }
+
+    internal static class SteamInstallPathSelector
+    {
+        internal static string? SelectValidSteamRoot(IEnumerable<string?> candidates) =>
+            candidates.Select(Normalize).FirstOrDefault(IsValid);
+
+        private static string? Normalize(string? candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) return null;
+            try { return Path.GetFullPath(candidate.Trim().Trim('"')); }
+            catch (ArgumentException) { return null; }
+            catch (NotSupportedException) { return null; }
+        }
+
+        private static bool IsValid(string? candidate) => candidate is not null &&
+            Directory.Exists(candidate) && File.Exists(Path.Combine(candidate, "steam.exe"));
     }
 
     private static class TextVdf
