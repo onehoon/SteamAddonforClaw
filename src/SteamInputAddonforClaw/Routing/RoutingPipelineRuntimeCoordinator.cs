@@ -372,6 +372,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
 
     internal async ValueTask<bool> ReconcilePreservedSessionAsync(
         Func<CancellationToken, Task> refreshBeforeDecision,
+        Func<CancellationToken, Task>? afterRoutingReconcile,
         CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _transitionOperationCount);
@@ -391,6 +392,9 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
                 return await RetireResidualSessionCoreAsync(token, cancelPendingCleanup: true).ConfigureAwait(false);
             await refreshBeforeDecision(token).ConfigureAwait(false);
             var result = await ReconcileCoreAsync(token).ConfigureAwait(false);
+            if (!result.Succeeded) return false;
+            if (afterRoutingReconcile is not null)
+                await afterRoutingReconcile(token).ConfigureAwait(false);
             return result.Succeeded;
         }
         finally
@@ -400,6 +404,11 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             Interlocked.Decrement(ref _transitionOperationCount);
         }
     }
+
+    internal ValueTask<bool> ReconcilePreservedSessionAsync(
+        Func<CancellationToken, Task> refreshBeforeDecision,
+        CancellationToken cancellationToken) =>
+        ReconcilePreservedSessionAsync(refreshBeforeDecision, null, cancellationToken);
 
     private CancellationTokenSource CreateTransitionCancellation(CancellationToken cancellationToken)
     {

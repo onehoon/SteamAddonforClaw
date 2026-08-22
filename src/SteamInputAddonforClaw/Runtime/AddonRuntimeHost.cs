@@ -258,18 +258,20 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
                         }
                     });
                     return Task.CompletedTask;
+                },
+                async token =>
+                {
+                    if (_routingRuntime.AuxiliaryResumeParticipant is not { } auxiliary)
+                        return;
+                    try { await auxiliary.ReconcileAfterResumeAsync(token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                    catch (Exception exception) { AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception); }
                 }, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             if (_resumeFreshReconcileSuppression.Complete(succeeded))
                 _ = QueueDeferredRoutingReconcile();
-        }
-        if (_routingRuntime.AuxiliaryResumeParticipant is { } auxiliary)
-        {
-            try { await auxiliary.ReconcileAfterResumeAsync(cancellationToken).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception exception) { AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception); }
         }
         return succeeded;
     }
