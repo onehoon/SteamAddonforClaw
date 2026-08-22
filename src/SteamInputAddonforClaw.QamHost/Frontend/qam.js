@@ -134,27 +134,36 @@
     return null;
   }
 
-  function findNativeQamComponents(webpackRequire) {
-    const components = {};
-    const required = {
-      ToggleField: ["checked", "onChange"],
-      SliderField: ["min", "max", "step", "value", "onChange"],
-    };
+  function renderTarget(candidate) {
+    if (typeof candidate === "function") return candidate;
+    if (candidate && typeof candidate === "object") {
+      if (typeof candidate.render === "function") return candidate.render;
+      if (typeof candidate.type === "function") return candidate.type;
+    }
+    return null;
+  }
 
-    for (const moduleExports of collectSearchableModules(webpackRequire)) {
-      for (const [name, requiredProps] of Object.entries(required)) {
-        if (components[name]) continue;
-        const candidate = moduleExports[name];
-        const render = candidate && typeof candidate === "object" && typeof candidate.type === "function"
-          ? candidate.type
-          : candidate;
-        if (typeof render !== "function") continue;
+  function findNativeComponent(modules, marker, requiredProps) {
+    for (const moduleExports of modules) {
+      for (const candidate of Object.values(moduleExports)) {
+        const render = renderTarget(candidate);
+        if (!render) continue;
         let source;
         try { source = Function.prototype.toString.call(render); } catch (_) { continue; }
+        if (!source.includes(marker)) continue;
         if (!requiredProps.every(prop => source.includes(prop))) continue;
-        components[name] = candidate;
+        return candidate;
       }
     }
+    return null;
+  }
+
+  function findNativeQamComponents(webpackRequire) {
+    const modules = collectSearchableModules(webpackRequire);
+    const components = {
+      ToggleField: findNativeComponent(modules, "ToggleField", ["checked", "onChange"]),
+      SliderField: findNativeComponent(modules, "SliderField", ["min", "max", "step", "value", "onChange"]),
+    };
 
     if (!components.ToggleField || !components.SliderField) {
       logOnce("nativeControls", "QAM native ToggleField/SliderField could not be resolved; CPU Boost controls are disabled.");
@@ -508,16 +517,20 @@
         } catch (_) { failClosed("CPU Boost update failed"); }
         finally { setBusy(false); }
       };
-      const slider = (title, side, value) => value == null ? null : React.createElement(native.SliderField, {
+      const numericNotches = modes.map(([mode]) => ({ notchIndex: mode, label: String(mode), value: mode }));
+      const slider = (title, side, value, bottomSeparator) => value == null ? null : React.createElement(native.SliderField, {
         label: title,
         description: labelFor(value),
         min: 0,
         max: 6,
         step: 1,
         value,
+        notchCount: modes.length,
+        notchLabels: numericNotches,
         disabled: !modeWritable,
         notchTicksVisible: true,
         showValue: true,
+        bottomSeparator,
         onChange: next => scheduleMode(side, Number(next)),
       });
 
@@ -527,12 +540,13 @@
           label: "CPU Boost",
           checked: !!cpu?.enabled,
           disabled: !mutationAvailable,
+          bottomSeparator: cpu?.enabled ? "none" : "standard",
           onChange: value => void setEnabled(!!value),
         }),
       ];
       if (cpu?.enabled) {
-        controls.push(slider("AC Mode", "ac", sideValue(cpu.ac, previewAc)));
-        controls.push(slider("DC Mode", "dc", sideValue(cpu.dc, previewDc)));
+        controls.push(slider("AC Mode", "ac", sideValue(cpu.ac, previewAc), "none"));
+        controls.push(slider("DC Mode", "dc", sideValue(cpu.dc, previewDc), "standard"));
       }
 
       return React.createElement(React.Fragment, null,
