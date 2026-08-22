@@ -106,6 +106,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default)
     {
+        ThrowIfShuttingDown();
         if (_gameProfileMutations is null) return Task.FromResult(UnavailableMutation(appId, "Game Profile is unavailable."));
         var ok = enabled ? _gameProfileMutations.Enable(appId, displayName) : _gameProfileMutations.Disable(appId);
         if (!ok) return Task.FromResult(UnavailableMutation(appId, "Profile persistence is unavailable."));
@@ -115,10 +116,22 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAsync(uint appId, CpuBoostMode ac, CpuBoostMode dc, CancellationToken cancellationToken = default) =>
-        Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetCpuBoost(appId, ac, dc) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: true, tdp: false));
+        MutateCpuBoostAfterShutdownCheck(appId, ac, dc);
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) =>
-        Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetTdp(appId, new() { Pl1Watts = configuration.Ac.Pl1Watts, Pl2Watts = configuration.Ac.Pl2Watts }, new() { Pl1Watts = configuration.Dc.Pl1Watts, Pl2Watts = configuration.Dc.Pl2Watts }) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: true));
+        MutateTdpAfterShutdownCheck(appId, configuration);
+
+    private Task<FrontendGameProfileMutationResult> MutateCpuBoostAfterShutdownCheck(uint appId, CpuBoostMode ac, CpuBoostMode dc)
+    {
+        ThrowIfShuttingDown();
+        return Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetCpuBoost(appId, ac, dc) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: true, tdp: false));
+    }
+
+    private Task<FrontendGameProfileMutationResult> MutateTdpAfterShutdownCheck(uint appId, FrontendGameTdpConfiguration configuration)
+    {
+        ThrowIfShuttingDown();
+        return Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetTdp(appId, new() { Pl1Watts = configuration.Ac.Pl1Watts, Pl2Watts = configuration.Ac.Pl2Watts }, new() { Pl1Watts = configuration.Dc.Pl1Watts, Pl2Watts = configuration.Dc.Pl2Watts }) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: true));
+    }
 
     private FrontendGameProfileSnapshot CaptureGameProfile(uint appId)
     {
