@@ -394,6 +394,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
                 if (!cleaned) return false;
                 if (afterRoutingReconcile is not null)
                     await afterRoutingReconcile(token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
                 return true;
             }
             await refreshBeforeDecision(token).ConfigureAwait(false);
@@ -401,6 +402,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             if (!result.Succeeded) return false;
             if (afterRoutingReconcile is not null)
                 await afterRoutingReconcile(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
             return result.Succeeded;
         }
         finally

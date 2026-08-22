@@ -1370,6 +1370,33 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         Assert.Null(session.ActiveSession);
     }
 
+    [Fact]
+    public async Task Cancellation_during_final_auxiliary_callback_cannot_commit_preserved_resume()
+    {
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Success("Paused")),
+            reconcileOwnedRouteState: _ => Task.FromResult(RoutingStageOperationResult.Success("Healthy")));
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+
+        var resume = bridge.ReconcilePreservedSessionAsync(
+            _ => Task.CompletedTask,
+            _ =>
+            {
+                bridge.CancelInFlightTransition();
+                return Task.CompletedTask;
+            },
+            CancellationToken.None).AsTask();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resume);
+    }
+
     private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(
         FakeStatusProvider provider,
         IRoutingPipelineExecutor executor,
