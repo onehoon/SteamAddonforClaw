@@ -156,6 +156,11 @@ try
             log.Info($"QamHost stop requested. {ex.GetType().Name}: {ex.Message}");
             break;
         }
+        catch (DeterministicQamInstallException ex)
+        {
+            log.Warn($"QAM installation is unavailable for the current GamepadUI document; recovery is suppressed. {ex.Message}");
+            stopRequested = true;
+        }
         catch (Exception ex)
         {
             recoveryDeadline = QamHostRecovery.BeginAfterSessionFailure(managed, recoveryDeadline, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
@@ -197,7 +202,13 @@ async Task InstallAsync(SteamGamepadUiCdpClient client)
     installMayExist = true;
     var result = CdpEvaluateResult.Parse(await client.EvaluateAsync(frontendScript, lifetimeToken));
     if (!result.Succeeded) throw new InvalidOperationException($"qam.js evaluation exception: {result.ErrorText}");
-    if (result.BooleanValue != true) throw new InvalidOperationException("install() returned false.");
+    if (result.BooleanValue != true)
+    {
+        var failure = CdpEvaluateResult.Parse(await client.EvaluateAsync("window.__STEAM_INPUT_ADDON_QAM__?.installFailureKind ?? null", lifetimeToken));
+        if (failure.StringValue == "native-components")
+            throw new DeterministicQamInstallException("native Steam CommonUI controls were unavailable.");
+        throw new InvalidOperationException("install() returned false.");
+    }
     log.Info("QAM injection succeeded.");
 }
 

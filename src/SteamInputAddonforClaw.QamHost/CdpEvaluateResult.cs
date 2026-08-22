@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace SteamInputAddonforClaw.QamHost;
 
 /// <summary>Interpreted outcome of a <c>Runtime.evaluate</c> response.</summary>
-public sealed record CdpEvaluateResult(bool Succeeded, bool? BooleanValue, string? ErrorText)
+public sealed record CdpEvaluateResult(bool Succeeded, bool? BooleanValue, string? StringValue, string? ErrorText)
 {
     /// <summary>
     /// Parses a raw <c>Runtime.evaluate</c> JSON-RPC response. Treats a CDP-level
@@ -17,24 +17,25 @@ public sealed record CdpEvaluateResult(bool Succeeded, bool? BooleanValue, strin
 
         if (!root.TryGetProperty("result", out var result))
         {
-            return new CdpEvaluateResult(Succeeded: false, BooleanValue: null, ErrorText: "no result field in CDP response");
+            return new CdpEvaluateResult(Succeeded: false, BooleanValue: null, StringValue: null, ErrorText: "no result field in CDP response");
         }
 
         if (result.TryGetProperty("exceptionDetails", out var exceptionDetails))
         {
             var text = exceptionDetails.TryGetProperty("text", out var t) ? t.GetString() : "exception thrown during evaluation";
-            return new CdpEvaluateResult(Succeeded: false, BooleanValue: null, ErrorText: text);
+            return new CdpEvaluateResult(Succeeded: false, BooleanValue: null, StringValue: null, ErrorText: text);
         }
 
         if (!result.TryGetProperty("result", out var valueContainer) || !valueContainer.TryGetProperty("value", out var value))
         {
-            return new CdpEvaluateResult(Succeeded: true, BooleanValue: null, ErrorText: null);
+            return new CdpEvaluateResult(Succeeded: true, BooleanValue: null, StringValue: null, ErrorText: null);
         }
 
         var booleanValue = value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False
             ? value.GetBoolean()
             : (bool?)null;
 
-        return new CdpEvaluateResult(Succeeded: true, BooleanValue: booleanValue, ErrorText: null);
+        var stringValue = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        return new CdpEvaluateResult(Succeeded: true, BooleanValue: booleanValue, StringValue: stringValue, ErrorText: null);
     }
 }
