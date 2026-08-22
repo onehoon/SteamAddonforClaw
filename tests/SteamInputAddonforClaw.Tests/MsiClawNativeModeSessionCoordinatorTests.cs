@@ -35,6 +35,54 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task ReconcileOwnedState_healthy_pid1902_is_noop()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var controller = new FakeModeController(devices);
+        await using var coordinator = CreateCoordinator(devices, controller);
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+
+        var result = await coordinator.ReconcileOwnedStateAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Healthy", result.Reason);
+        Assert.Equal([MsiClawNativeMode.DirectInput], controller.Targets);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_pid1901_does_not_blindly_repair()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var controller = new FakeModeController(devices);
+        await using var coordinator = CreateCoordinator(devices, controller);
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        devices.Mode = MsiClawNativeMode.XInput;
+
+        var result = await coordinator.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("NativeModeDrifted", result.Reason);
+        Assert.Equal([MsiClawNativeMode.DirectInput], controller.Targets);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_transient_missing_device_settles_without_mutation()
+    {
+        var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
+        var controller = new FakeModeController(devices);
+        await using var coordinator = CreateCoordinator(devices, controller);
+        Assert.True((await coordinator.EnterForPipelineAsync(CancellationToken.None)).Succeeded);
+        var writes = controller.Targets.Count;
+        devices.Sequence = new Queue<MsiClawNativeMode?>([null, MsiClawNativeMode.DirectInput]);
+
+        var result = await coordinator.ReconcileOwnedStateAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Healthy", result.Reason);
+        Assert.Equal(writes, controller.Targets.Count);
+    }
+
+    [Fact]
     public async Task NewerNonEligibleDecisionRestoresAfterOlderEligibleTransitionCompletes()
     {
         var devices = new FakeDeviceEnumerator(MsiClawNativeMode.XInput);
@@ -643,10 +691,15 @@ public sealed class MsiClawNativeModeSessionCoordinatorTests
         private readonly Guid _containerId = Guid.NewGuid();
         private readonly string _parent = "PCIROOT\\0";
         public MsiClawNativeMode Mode { get; set; } = initialMode;
+        public Queue<MsiClawNativeMode?>? Sequence { get; set; }
 
-        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() =>
-        [new("HID\\MSI_CLAW", _containerId, _parent, [], "HID", [], [], "HIDClass", null, null,
-            MsiClawHardware.VendorId, Mode == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId, true)];
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            var mode = Sequence is { Count: > 0 } ? Sequence.Dequeue() : Mode;
+            return mode is null ? [] :
+            [new("HID\\MSI_CLAW", _containerId, _parent, [], "HID", [], [], "HIDClass", null, null,
+                MsiClawHardware.VendorId, mode == MsiClawNativeMode.XInput ? MsiClawHardware.XInputProductId : MsiClawHardware.DirectInputProductId, true)];
+        }
     }
 
     private sealed class FakeModeController(FakeDeviceEnumerator devices) : IMsiClawModeController
