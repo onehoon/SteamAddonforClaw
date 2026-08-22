@@ -1,4 +1,4 @@
-# Steam Input Addon for Claw
+# Steam Addon for Claw
 
 > [!WARNING]
 > **This project is still under active development. Do not download or install it yet.**
