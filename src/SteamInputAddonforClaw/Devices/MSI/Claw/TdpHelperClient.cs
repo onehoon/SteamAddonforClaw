@@ -43,7 +43,12 @@ internal sealed class TdpHelperClient : IAsyncDisposable
                     return false;
                 }
                 if (response.UsedFallback)
-                    AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI compatibility fallback succeeded", ("Method", request.Operation), ("Index", request.Index), ("Stage", "GetWmiFallback"));
+                    AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI compatibility fallback succeeded",
+                        ("Method", request.Operation), ("Index", request.Index),
+                        ("Stage", response.Stage ?? "GetWmiFallback"),
+                        ("ExceptionType", response.ExceptionType),
+                        ("HResult", response.HResult is int hr ? $"0x{hr:X8}" : null),
+                        ("ManagementStatus", response.ManagementStatus));
                 payload = response.Payload is null ? [] : Convert.FromBase64String(response.Payload);
                 return request.Operation == "SetData" || payload.Length > 0;
             }

@@ -42,8 +42,12 @@ public sealed class ElevationConfigurationTests
         var client = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Devices", "MSI", "Claw", "TdpHelperClient.cs"));
         Assert.Contains("Failure(\"GetWmiFallback\"", helper);
         Assert.Contains("UsedFallback", helper);
+        Assert.Contains("fallbackCause", helper);
+        Assert.Contains("GetMethodParameters", helper);
         Assert.Contains("Profiles.Tdp.Wmi", client);
         Assert.Contains("GetWmiFallback", client);
+        Assert.Contains("response.ExceptionType", client);
+        Assert.Contains("response.ManagementStatus", client);
     }
 
     [Fact]

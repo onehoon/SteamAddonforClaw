@@ -46,8 +46,9 @@ static WmiResult Invoke(string method, int block, byte value, bool responseRequi
         ManagementBaseObject? input = null;
         ManagementBaseObject? data = null;
         var usedFallback = false;
+        Exception? fallbackCause = null;
         try { input = obj.GetMethodParameters(method); data = input?["Data"] as ManagementBaseObject; }
-        catch (Exception exception) when (IsExpectedWmiException(exception)) { }
+        catch (Exception exception) when (IsExpectedWmiException(exception)) { fallbackCause = exception; }
         if (input is null || data is null)
         {
             usedFallback = true;
@@ -66,11 +67,11 @@ static WmiResult Invoke(string method, int block, byte value, bool responseRequi
             try { data["Bytes"] = BuildPackage(block, value); input["Data"] = data; }
             catch (Exception exception) when (IsExpectedWmiException(exception)) { return Failure("InputSetup", exception, usedFallback); }
             using var output = obj.InvokeMethod(method, input, null);
-            if (!responseRequired) return new(true, null, null, null, null, null, usedFallback);
+            if (!responseRequired) return Success(null, fallbackCause, usedFallback);
             if (output?["Data"] is not ManagementBaseObject response || response["Bytes"] is not byte[] bytes || bytes.Length < 2)
                 return Failure("OutputDataMissing", null, usedFallback);
             if (bytes[0] != 1) return Failure("OutputFlagRejected", null, usedFallback);
-            return new(true, bytes[1..], null, null, null, null, usedFallback);
+            return Success(bytes[1..], fallbackCause, usedFallback);
         }
     }
     catch (Exception exception) when (IsExpectedWmiException(exception)) { return Failure("InvokeMethod", exception); }
@@ -78,6 +79,9 @@ static WmiResult Invoke(string method, int block, byte value, bool responseRequi
 static bool IsExpectedWmiException(Exception exception) =>
     exception is ManagementException or COMException or UnauthorizedAccessException;
 static WmiResult Failure(string stage, Exception? exception, bool usedFallback = false) => new(false, null, stage, exception?.GetType().Name, exception?.HResult, exception is ManagementException management ? (int)management.ErrorCode : null, usedFallback);
+static WmiResult Success(byte[]? payload, Exception? fallbackCause, bool usedFallback) => new(true, payload,
+    fallbackCause is null ? null : "GetMethodParameters", fallbackCause?.GetType().Name, fallbackCause?.HResult,
+    fallbackCause is ManagementException management ? (int)management.ErrorCode : null, usedFallback);
 static byte[] BuildPackage(int block, byte value) { var p = new byte[32]; p[0] = (byte)block; p[1] = value; return p; }
 record Request(string Operation, int Index, byte Value);
 record Response(bool Ok, string? Payload, string? Stage = null, string? ExceptionType = null, int? HResult = null, int? ManagementStatus = null, bool UsedFallback = false);
