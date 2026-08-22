@@ -495,8 +495,7 @@
         const handler = () => {
           previous?.();
           cancelModeTimers();
-          if (tdpTimer.current) clearTimeout(tdpTimer.current);
-          tdpTimer.current = null;
+          // Keep a dirty TDP draft's debounce alive across invalidation; DevicePage does the same.
           setPreviewAc(null); setPreviewDc(null);
           void refresh();
         };
@@ -558,7 +557,7 @@
       };
       const submitTdpDraft = async (draft, generation) => {
         if (!state.installed || !tdpWritableRef.current || !draft) return;
-        setBusy(true); setError(null);
+        setError(null);
         try {
           const result = await request("setDeviceTdp", { configuration: draft });
           if (generation === tdpEditGeneration.current) {
@@ -567,7 +566,6 @@
           }
           if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
         } catch (_) { failClosed("TDP update failed"); }
-        finally { setBusy(false); }
       };
       const scheduleTdp = (nextDraft) => {
         if (!tdpWritableRef.current) return;

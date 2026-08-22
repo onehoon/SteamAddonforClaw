@@ -286,6 +286,10 @@ public sealed class QamFrontendContractTests
         Assert.Contains("const generation = ++tdpEditGeneration.current", source);
         Assert.Contains("generation === tdpEditGeneration.current", source);
         Assert.Contains("setTimeout(() => { tdpTimer.current = null; void submitTdpDraft(nextDraft, generation); }, 300)", source);
+        Assert.Contains("Keep a dirty TDP draft's debounce alive across invalidation", source);
+        var tdpSubmit = source[source.IndexOf("const submitTdpDraft", StringComparison.Ordinal)..source.IndexOf("const scheduleTdp", StringComparison.Ordinal)];
+        Assert.DoesNotContain("setBusy(true)", tdpSubmit);
+        Assert.DoesNotContain("setBusy(false)", tdpSubmit);
         Assert.Contains("if (tdpDraft?.enabled && tdpLimits)", source);
         Assert.DoesNotContain("setTdpAcPl1", source);
         Assert.DoesNotContain("setTdpAcPl2", source);
