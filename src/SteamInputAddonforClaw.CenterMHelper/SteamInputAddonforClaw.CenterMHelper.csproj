@@ -9,6 +9,7 @@
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
+    <PublishAot>true</PublishAot>
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64</Platforms>
     <AssemblyName>CenterMHelper</AssemblyName>
@@ -18,12 +19,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
     <UseWindowsForms>false</UseWindowsForms>
-    <!-- The staged/renamed artifact ("MSI Center M.exe") must be a genuinely standalone,
-         self-contained executable with no dependency on a managed payload/runtimeconfig sitting
-         next to it: PublishSingleFile bundles the runtime and app into the one produced EXE, so
-         copying just that EXE to the runtime staging directory is actually sufficient. -->
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- NativeAOT produces the standalone native CenterMHelper.exe consumed by staging. -->
   </PropertyGroup>
 </Project>

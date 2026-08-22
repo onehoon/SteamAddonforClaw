@@ -38,15 +38,13 @@
     <Copy SourceFiles="@(TdpHelperOutput)" DestinationFolder="$(PublishDir)" Condition="'$(PublishDir)' != ''" />
   </Target>
 
-  <!-- The staged/renamed helper must be genuinely self-contained at its final path (no separate
-       runtimeconfig/deps/managed payload it depends on next to it), so it is built here via its
-       own Publish target (which PublishSingleFile bundles into one EXE) rather than just its
-       ordinary Build output. -->
+  <!-- The staged/renamed helper is built via its own NativeAOT Publish target rather than just
+       its ordinary Build output. -->
   <Target Name="PublishCenterMHelper" BeforeTargets="CopyCenterMHelperOutput">
     <MSBuild
       Projects="$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\SteamInputAddonforClaw.CenterMHelper.csproj"
       Targets="Publish"
-      Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\" />
+      Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishAot=true;PublishDir=$(MSBuildThisFileDirectory)..\SteamInputAddonforClaw.CenterMHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\" />
   </Target>
 
   <Target Name="CopyCenterMHelperOutput" AfterTargets="Build;Publish">
