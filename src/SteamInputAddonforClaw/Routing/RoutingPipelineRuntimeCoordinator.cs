@@ -167,6 +167,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     internal RoutingSessionYieldRequest? RequestCurrentSessionYield()
     {
         var session = _sessionCoordinator.ActiveSession;
+        session ??= _sessionCoordinator.PendingCleanup?.Session;
+        session ??= _sessionCoordinator.EnteringSession;
         if (session is null) return null;
         Volatile.Write(ref _sessionYieldRequested, 1);
         CancelInFlightTransition();
@@ -175,7 +177,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
 
     internal bool IsCurrentSessionYieldRequest(RoutingSessionYieldRequest request) =>
         (_sessionCoordinator.ActiveSession is { } active && ReferenceEquals(active, request.Session))
-        || (_sessionCoordinator.PendingCleanup is { } pending && ReferenceEquals(pending.Session, request.Session));
+        || (_sessionCoordinator.PendingCleanup is { } pending && ReferenceEquals(pending.Session, request.Session))
+        || (_sessionCoordinator.EnteringSession is { } entering && ReferenceEquals(entering, request.Session));
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ShutdownAsync()
     {

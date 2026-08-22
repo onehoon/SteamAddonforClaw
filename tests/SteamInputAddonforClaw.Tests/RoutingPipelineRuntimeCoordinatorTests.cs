@@ -66,6 +66,30 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task Yield_request_binds_to_entering_session_and_cancels_forward_entry()
+    {
+        var executor = new FakeExecutor { BlockNextExecute = true };
+        var bridge = Create(
+            new FakeStatusProvider(
+                Snapshot(Eligible(), Software()),
+                Snapshot(Eligible(), Software())),
+            executor);
+        var entering = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.ExecuteStarted.Task;
+
+        Assert.Null(bridge.Session.ActiveSession);
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+
+        Assert.NotNull(request);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => entering);
+        Assert.True(executor.ExecuteCancellationObserved.Task.IsCompletedSuccessfully);
+        var ignored = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.Equal("ExternalNativeTakeoverLatched", ignored.Reason);
+        Assert.Single(executor.ExecutedPlans);
+    }
+
+    [Fact]
     public async Task Yielded_session_retries_pending_cleanup_without_forward_entry()
     {
         var executor = new FakeExecutor();

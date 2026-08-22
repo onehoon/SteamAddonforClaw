@@ -24,6 +24,7 @@ internal sealed class RoutingPipelineSessionCoordinator
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _sessionSync = new();
     private ActiveRoutingPipelineSession? _activeSession;
+    private ActiveRoutingPipelineSession? _enteringSession;
     private PendingRoutingPipelineCleanup? _pendingCleanup;
 
     internal RoutingPipelineSessionCoordinator(IRoutingPipelineExecutor pipelineExecutor)
@@ -48,6 +49,14 @@ internal sealed class RoutingPipelineSessionCoordinator
         get
         {
             lock (_sessionSync) return _pendingCleanup;
+        }
+    }
+
+    internal ActiveRoutingPipelineSession? EnteringSession
+    {
+        get
+        {
+            lock (_sessionSync) return _enteringSession;
         }
     }
 
@@ -98,36 +107,41 @@ internal sealed class RoutingPipelineSessionCoordinator
             return Failure(RoutingActionKind.EnterOverride, "UnsupportedEnvironmentStrategy");
 
         var candidate = new ActiveRoutingPipelineSession(plan);
+        SetEnteringSession(candidate);
         LogPlan("Enter candidate", classification, plan, RoutingActionKind.EnterOverride);
 
-        RoutingPipelineExecutionResult execution;
         try
         {
-            execution = await _pipelineExecutor.ExecuteAsync(plan, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException exception)
-        {
-            if (RoutingPipelineCancellationMetadata.TryGet(exception, out var rollback) && !rollback.Succeeded)
-                SetPendingCleanup(new(candidate, RoutingActionKind.EnterOverride));
-            else
-                ClearActiveSession();
-            throw;
-        }
+            RoutingPipelineExecutionResult execution;
+            try
+            {
+                execution = await _pipelineExecutor.ExecuteAsync(plan, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException exception)
+            {
+                if (RoutingPipelineCancellationMetadata.TryGet(exception, out var rollback) && !rollback.Succeeded)
+                    SetPendingCleanup(new(candidate, RoutingActionKind.EnterOverride));
+                else
+                    ClearActiveSession();
+                throw;
+            }
 
-        if (!execution.Succeeded)
-        {
-            if (!execution.RollbackSucceeded)
-                SetPendingCleanup(new(candidate, RoutingActionKind.EnterOverride));
-            else
-                ClearActiveSession();
-            return Failure(RoutingActionKind.EnterOverride, $"PipelineEnterFailed:{execution.Reason}");
-        }
+            if (!execution.Succeeded)
+            {
+                if (!execution.RollbackSucceeded)
+                    SetPendingCleanup(new(candidate, RoutingActionKind.EnterOverride));
+                else
+                    ClearActiveSession();
+                return Failure(RoutingActionKind.EnterOverride, $"PipelineEnterFailed:{execution.Reason}");
+            }
 
-        SetActiveSession(candidate);
-        AppLog.Info("Routing.Session", "Routing session entered.",
-            ("Action", RoutingActionKind.EnterOverride), ("Result", "Active"),
-            ("Classification", classification.Kind));
-        return Success(RoutingActionKind.EnterOverride, "EnteredOverride");
+            SetActiveSession(candidate);
+            AppLog.Info("Routing.Session", "Routing session entered.",
+                ("Action", RoutingActionKind.EnterOverride), ("Result", "Active"),
+                ("Classification", classification.Kind));
+            return Success(RoutingActionKind.EnterOverride, "EnteredOverride");
+        }
+        finally { ClearEnteringSession(candidate); }
     }
 
     private async ValueTask<RoutingPipelineSessionReconcileResult> ExitAsync(
@@ -159,6 +173,19 @@ internal sealed class RoutingPipelineSessionCoordinator
     private void SetActiveSession(ActiveRoutingPipelineSession session)
     {
         lock (_sessionSync) _activeSession = session;
+    }
+
+    private void SetEnteringSession(ActiveRoutingPipelineSession session)
+    {
+        lock (_sessionSync) _enteringSession = session;
+    }
+
+    private void ClearEnteringSession(ActiveRoutingPipelineSession session)
+    {
+        lock (_sessionSync)
+        {
+            if (ReferenceEquals(_enteringSession, session)) _enteringSession = null;
+        }
     }
 
     private void SetPendingCleanup(PendingRoutingPipelineCleanup cleanup)
