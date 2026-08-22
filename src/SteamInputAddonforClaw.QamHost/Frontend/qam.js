@@ -227,12 +227,19 @@
     }
     const qam = classModules.find(candidate => candidate.Title && candidate.QuickAccessMenu && candidate.BatteryDetailsLabels);
     const slider = classModules.find(candidate => candidate.SliderControlPanelGroup);
-    if (!qam?.Title || !slider?.DescriptionValue) {
+    const field = classModules.find(candidate => candidate.FieldLabelRow && candidate.FieldLabel && candidate.FieldLabelValue);
+    if (!qam?.Title || !slider?.DescriptionValue || !field) {
       logOnce("native-styles", "QAM native title/slider class styles unavailable.");
       return null;
     }
     logOnce("native-styles", "QAM native title/slider class styles resolved.");
-    return { QamTitleClass: qam.Title, SliderDescriptionValueClass: slider.DescriptionValue };
+    return {
+      QamTitleClass: qam.Title,
+      SliderDescriptionValueClass: slider.DescriptionValue,
+      FieldLabelRowClass: field.FieldLabelRow,
+      FieldLabelClass: field.FieldLabel,
+      FieldLabelValueClass: field.FieldLabelValue,
+    };
   }
 
   function findNativeQamComponents(webpackRequire) {
@@ -702,8 +709,9 @@
       });
       const slider = (title, side, value, bottomSeparator) => value == null ? null : React.createElement(native.SliderField, {
         label: React.createElement(React.Fragment, null,
-          React.createElement("span", null, title),
-          React.createElement("span", { className: native.SliderDescriptionValueClass }, labelFor(value))),
+          React.createElement("div", { className: native.FieldLabelRowClass },
+            React.createElement("span", { className: native.FieldLabelClass }, title),
+            React.createElement("span", { className: native.FieldLabelValueClass }, labelFor(value)))),
         min: 0,
         max: 6,
         step: 1,
@@ -736,10 +744,10 @@
       if (tdpDraft?.enabled && tdpLimits) {
         tdpControls.push({ key: "tdp-ac-heading", node: React.createElement("div", null, "Plugged in") });
         tdpControls.push({ key: "tdp-ac-pl1", node: tdpSlider("PL1", "ac", tdpLimits, tdpDraft.ac?.pl1Watts, "none") });
-        tdpControls.push({ key: "tdp-ac-pl2", node: tdpSlider("PL2", "ac", tdpLimits, tdpDraft.ac?.pl2Watts, "none") });
+        tdpControls.push({ key: "tdp-ac-pl2", compact: true, node: tdpSlider("PL2", "ac", tdpLimits, tdpDraft.ac?.pl2Watts, "none") });
         tdpControls.push({ key: "tdp-dc-heading", node: React.createElement("div", null, "On battery") });
         tdpControls.push({ key: "tdp-dc-pl1", node: tdpSlider("PL1", "dc", tdpLimits, tdpDraft.dc?.pl1Watts, "none") });
-        tdpControls.push({ key: "tdp-dc-pl2", node: tdpSlider("PL2", "dc", tdpLimits, tdpDraft.dc?.pl2Watts, "standard") });
+        tdpControls.push({ key: "tdp-dc-pl2", compact: true, node: tdpSlider("PL2", "dc", tdpLimits, tdpDraft.dc?.pl2Watts, "standard") });
       }
 
       return React.createElement(React.Fragment, null,
@@ -748,7 +756,7 @@
         React.createElement(native.PanelSection, { key: "cpu-section" },
           ...controls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))),
         React.createElement(native.PanelSection, { key: "tdp-section" },
-          ...tdpControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))));
+          ...tdpControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key, style: control.compact ? { marginTop: "-4px" } : undefined }, control.node))));
     }
 
     state.addonTabDescriptor = {

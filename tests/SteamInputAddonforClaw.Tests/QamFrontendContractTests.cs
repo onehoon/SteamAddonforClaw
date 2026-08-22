@@ -248,6 +248,15 @@ public sealed class QamFrontendContractTests
         Assert.Contains("candidate.Title && candidate.QuickAccessMenu && candidate.BatteryDetailsLabels", source);
         Assert.Contains("candidate.SliderControlPanelGroup", source);
         Assert.Contains("SliderDescriptionValueClass", source);
+        Assert.Contains("candidate.FieldLabelRow && candidate.FieldLabel && candidate.FieldLabelValue", source);
+        Assert.Contains("FieldLabelRowClass", source);
+        Assert.Contains("FieldLabelClass", source);
+        Assert.Contains("FieldLabelValueClass", source);
+        Assert.Contains("marginTop: \"-4px\"", source);
+        Assert.Contains("key: \"tdp-ac-pl2\", compact: true", source);
+        Assert.Contains("key: \"tdp-dc-pl2\", compact: true", source);
+        Assert.DoesNotContain("key: \"tdp-ac-pl1\", compact: true", source);
+        Assert.DoesNotContain("key: \"tdp-dc-pl1\", compact: true", source);
         Assert.Contains("fill: \"currentColor\"", source);
         Assert.Contains("[0, \"Disabled\"]", source);
         Assert.Contains("[1, \"Enabled\"]", source);
