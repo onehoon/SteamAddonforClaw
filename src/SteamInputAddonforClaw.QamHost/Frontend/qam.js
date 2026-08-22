@@ -433,6 +433,8 @@
     function CpuBoostPanel() {
       const [status, setStatus] = React.useState(null);
       const [cpu, setCpu] = React.useState(null);
+      const [tdp, setTdp] = React.useState(null);
+      const [tdpDraft, setTdpDraft] = React.useState(null);
       const [previewAc, setPreviewAc] = React.useState(null);
       const [previewDc, setPreviewDc] = React.useState(null);
       const [busy, setBusy] = React.useState(false);
@@ -440,6 +442,10 @@
       const refreshInFlight = React.useRef(false);
       const refreshDirty = React.useRef(false);
       const settleTimers = React.useRef({ ac: null, dc: null });
+      const tdpTimer = React.useRef(null);
+      const tdpDraftRef = React.useRef(null);
+      const tdpWritableRef = React.useRef(false);
+      const tdpEditGeneration = React.useRef(0);
       const modeWritableRef = React.useRef(false);
 
       const failClosed = React.useCallback(message => {
@@ -447,7 +453,10 @@
           if (settleTimers.current[key]) clearTimeout(settleTimers.current[key]);
           settleTimers.current[key] = null;
         }
-        setStatus(null); setCpu(null); setPreviewAc(null); setPreviewDc(null); setError(message);
+        if (tdpTimer.current) clearTimeout(tdpTimer.current);
+        tdpTimer.current = null;
+        tdpEditGeneration.current = 0;
+        setStatus(null); setCpu(null); setTdp(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
       }, []);
 
       const refresh = React.useCallback(async () => {
@@ -456,7 +465,15 @@
         try {
           const nextStatus = await request("captureStatus");
           const nextCpu = await request("captureCpuBoost");
-          setStatus(nextStatus); setCpu(nextCpu); setPreviewAc(null); setPreviewDc(null); setError(null);
+          const nextTdp = await request("captureTdp");
+          const nextDraft = nextTdp.configuration ? {
+            enabled: nextTdp.configuration.enabled,
+            ac: { ...nextTdp.configuration.ac },
+            dc: { ...nextTdp.configuration.dc },
+          } : null;
+          setStatus(nextStatus); setCpu(nextCpu); setTdp(nextTdp);
+          if (tdpEditGeneration.current === 0) { setTdpDraft(nextDraft); tdpDraftRef.current = nextDraft; }
+          setPreviewAc(null); setPreviewDc(null); setError(null);
         } catch (_) { failClosed("QAM bridge unavailable"); }
         finally {
           refreshInFlight.current = false;
@@ -478,6 +495,8 @@
         const handler = () => {
           previous?.();
           cancelModeTimers();
+          if (tdpTimer.current) clearTimeout(tdpTimer.current);
+          tdpTimer.current = null;
           setPreviewAc(null); setPreviewDc(null);
           void refresh();
         };
@@ -488,6 +507,8 @@
       const unavailable = !status || status.steam?.appId !== 0 || !status.steam?.active || status.steam?.source !== 1;
       const mutationAvailable = !!cpu && cpu.persistenceWritable && !unavailable && !busy;
       const modeWritable = mutationAvailable && cpu.enabled;
+      const tdpMutationAvailable = !!tdp && tdp.available && tdp.persistenceWritable && !unavailable && !busy;
+      tdpWritableRef.current = tdpMutationAvailable;
       modeWritableRef.current = modeWritable;
       const snapshotMessage = !cpu ? null : !cpu.persistenceWritable
         ? "CPU Boost settings could not be loaded, so changes are disabled."
@@ -524,6 +545,69 @@
         } catch (_) { failClosed("CPU Boost update failed"); }
         finally { setBusy(false); }
       };
+      const tdpLimits = tdp?.limits;
+      const adjustTdpPair = (pl1WasEdited, pl1, pl2) => {
+        if (!tdpLimits) return { pl1Watts: pl1, pl2Watts: pl2 };
+        const gap = tdpLimits.pl1MinimumWatts === 8 && tdpLimits.pl1MaximumWatts === 30 && tdpLimits.pl2MinimumWatts === 8 && tdpLimits.pl2MaximumWatts === 37
+          ? 1
+          : tdpLimits.pl1MinimumWatts === 8 && tdpLimits.pl1MaximumWatts === 35 && tdpLimits.pl2MinimumWatts === 8 && tdpLimits.pl2MaximumWatts === 45 ? 2 : 0;
+        if (!gap || pl1 == null || pl2 == null) return { pl1Watts: pl1, pl2Watts: pl2 };
+        if (pl1WasEdited && pl2 < pl1 + gap) return pl1 + gap <= tdpLimits.pl2MaximumWatts ? { pl1Watts: pl1, pl2Watts: pl1 + gap } : { pl1Watts: tdpLimits.pl2MaximumWatts - gap, pl2Watts: pl2 };
+        if (!pl1WasEdited && pl1 > pl2 - gap) return pl2 - gap >= tdpLimits.pl1MinimumWatts ? { pl1Watts: pl2 - gap, pl2Watts: pl2 } : { pl1Watts: tdpLimits.pl1MinimumWatts, pl2Watts: tdpLimits.pl1MinimumWatts + gap };
+        return { pl1Watts: pl1, pl2Watts: pl2 };
+      };
+      const submitTdpDraft = async (draft, generation) => {
+        if (!state.installed || !tdpWritableRef.current || !draft) return;
+        setBusy(true); setError(null);
+        try {
+          const result = await request("setDeviceTdp", { configuration: draft });
+          if (generation === tdpEditGeneration.current) {
+            tdpEditGeneration.current = 0;
+            setTdp(result.snapshot); setTdpDraft(result.snapshot.configuration); tdpDraftRef.current = result.snapshot.configuration;
+          }
+          if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
+        } catch (_) { failClosed("TDP update failed"); }
+        finally { setBusy(false); }
+      };
+      const scheduleTdp = (nextDraft) => {
+        if (!tdpWritableRef.current) return;
+        const generation = ++tdpEditGeneration.current;
+        tdpDraftRef.current = nextDraft; setTdpDraft(nextDraft);
+        if (tdpTimer.current) clearTimeout(tdpTimer.current);
+        tdpTimer.current = setTimeout(() => { tdpTimer.current = null; void submitTdpDraft(nextDraft, generation); }, 300);
+      };
+      const setTdpEnabled = async enabled => {
+        if (!state.installed || !tdpMutationAvailable) return;
+        if (tdpTimer.current) clearTimeout(tdpTimer.current);
+        tdpTimer.current = null; tdpEditGeneration.current = 0; setBusy(true); setError(null);
+        try {
+          const result = await request("setDeviceTdpEnabled", { enabled });
+          setTdp(result.snapshot); setTdpDraft(result.snapshot.configuration); tdpDraftRef.current = result.snapshot.configuration;
+          if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
+        } catch (_) { failClosed("TDP update failed"); }
+        finally { setBusy(false); }
+      };
+      const tdpSlider = (label, source, limit, value, separator) => value == null || !limit ? null : React.createElement(native.SliderField, {
+        label,
+        description: `${value} W`,
+        min: label === "PL1" ? limit.pl1MinimumWatts : limit.pl2MinimumWatts,
+        max: label === "PL1" ? limit.pl2MaximumWatts : limit.pl2MaximumWatts,
+        step: 1,
+        value,
+        disabled: !tdpMutationAvailable || !tdpDraft?.enabled,
+        showValue: true,
+        bottomSeparator: separator,
+        onChange: next => {
+          const draft = tdpDraftRef.current;
+          if (!draft) return;
+          const pair = { ...draft[source] };
+          let numeric = Number(next);
+          if (label === "PL1") numeric = Math.min(numeric, limit.pl1MaximumWatts);
+          if (label === "PL1") pair.pl1Watts = numeric; else pair.pl2Watts = numeric;
+          const adjusted = adjustTdpPair(label === "PL1", pair.pl1Watts, pair.pl2Watts);
+          scheduleTdp({ ...draft, [source]: { pl1Watts: adjusted.pl1Watts, pl2Watts: adjusted.pl2Watts } });
+        },
+      });
       const numericNotches = modes.map(([mode]) => ({ notchIndex: mode, label: String(mode), value: mode }));
       const slider = (title, side, value, bottomSeparator) => value == null ? null : React.createElement(native.SliderField, {
         label: title,
@@ -556,10 +640,27 @@
         controls.push(slider("DC Mode", "dc", sideValue(cpu.dc, previewDc), "standard"));
       }
 
+      const tdpControls = [React.createElement(native.ToggleField, {
+        key: "tdp-enabled",
+        label: "TDP Control",
+        checked: !!tdpDraft?.enabled,
+        disabled: !tdpMutationAvailable,
+        onChange: value => void setTdpEnabled(!!value),
+      })];
+      if (tdpDraft?.enabled && tdpLimits) {
+        tdpControls.push(React.createElement("div", { key: "ac-heading" }, "Plugged in"));
+        tdpControls.push(tdpSlider("PL1", "ac", tdpLimits, tdpDraft.ac?.pl1Watts, "none"));
+        tdpControls.push(tdpSlider("PL2", "ac", tdpLimits, tdpDraft.ac?.pl2Watts, "none"));
+        tdpControls.push(React.createElement("div", { key: "dc-heading" }, "On battery"));
+        tdpControls.push(tdpSlider("PL1", "dc", tdpLimits, tdpDraft.dc?.pl1Watts, "none"));
+        tdpControls.push(tdpSlider("PL2", "dc", tdpLimits, tdpDraft.dc?.pl2Watts, "standard"));
+      }
+
       return React.createElement(React.Fragment, null,
         unavailable ? React.createElement("p", { key: "unavailable" }, status?.steam?.appId ? "Unavailable while a game is running" : "CPU Boost unavailable") : null,
         displayError ? React.createElement("p", { key: "error" }, displayError) : null,
-        ...controls.filter(Boolean));
+        ...controls.filter(Boolean),
+        ...tdpControls.filter(Boolean));
     }
 
     state.addonTabDescriptor = {

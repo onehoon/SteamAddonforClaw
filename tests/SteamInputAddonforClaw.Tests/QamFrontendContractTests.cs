@@ -232,7 +232,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("setTimeout(async () =>", source);
         Assert.Contains("state.onStateInvalidated", source);
         Assert.DoesNotContain("setInterval", source);
-        Assert.DoesNotContain("captureTdp", source[source.IndexOf("function buildAddonTab", StringComparison.Ordinal)..]);
+        Assert.Contains("request(\"captureTdp\")", source);
         Assert.Contains("cancelModeTimers();", source);
         Assert.Contains("setPreviewAc(null); setPreviewDc(null);", source);
         Assert.Contains("state.onStateInvalidated === handler", source);
@@ -265,10 +265,36 @@ public sealed class QamFrontendContractTests
         Assert.Contains("disabled: !modeWritable", source);
         Assert.DoesNotContain("value: value == null ? 0 : value", source);
         Assert.Contains("const failClosed", source);
-        Assert.Contains("setStatus(null); setCpu(null); setPreviewAc(null); setPreviewDc(null)", source);
+        Assert.Contains("setStatus(null); setCpu(null); setTdp(null); setTdpDraft(null)", source);
         Assert.Contains("cpu.lastFailure", source);
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
         Assert.Contains("native ToggleField/SliderField could not be resolved", source);
+    }
+
+    [Fact]
+    public void Qam_tdp_panel_projects_existing_device_contract_without_new_policy_or_polling()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("label: \"TDP Control\"", source);
+        Assert.Contains("request(\"setDeviceTdp\", { configuration: draft })", source);
+        Assert.Contains("request(\"setDeviceTdpEnabled\", { enabled })", source);
+        Assert.Contains("const tdpLimits = tdp?.limits", source);
+        Assert.Contains("max: label === \"PL1\" ? limit.pl2MaximumWatts : limit.pl2MaximumWatts", source);
+        Assert.Contains("step: 1", source);
+        Assert.Contains("const adjustTdpPair", source);
+        Assert.Contains("const generation = ++tdpEditGeneration.current", source);
+        Assert.Contains("generation === tdpEditGeneration.current", source);
+        Assert.Contains("setTimeout(() => { tdpTimer.current = null; void submitTdpDraft(nextDraft, generation); }, 300)", source);
+        Assert.Contains("if (tdpDraft?.enabled && tdpLimits)", source);
+        Assert.DoesNotContain("setTdpAcPl1", source);
+        Assert.DoesNotContain("setTdpAcPl2", source);
+        Assert.DoesNotContain("setTdpDcPl1", source);
+        Assert.DoesNotContain("setTdpDcPl2", source);
+        Assert.DoesNotContain("Success", source[source.IndexOf("function buildAddonTab", StringComparison.Ordinal)..]);
+        Assert.DoesNotContain("setInterval", source);
+        Assert.DoesNotContain("keydown", source);
+        Assert.DoesNotContain("gamepad", source);
     }
 
     [Fact]
