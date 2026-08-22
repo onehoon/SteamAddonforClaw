@@ -72,6 +72,7 @@ internal sealed class CpuBoostRuntime
 
     private ProfileDocument _document = new();
     private bool _persistenceWritable;
+    private Func<uint> _actualAppIdSource = static () => 0;
     private CpuBoostRuntimeSnapshot _snapshot = CpuBoostRuntimeSnapshot.Empty;
 
     internal CpuBoostRuntime(ProfileStore profileStore, ICpuBoostPowerPolicy? powerPolicy = null, ProfileMutationGate? mutationGate = null)
@@ -79,6 +80,38 @@ internal sealed class CpuBoostRuntime
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
         _powerPolicy = powerPolicy ?? new WindowsCpuBoostPowerPolicy();
         _mutationGate = mutationGate ?? new ProfileMutationGate();
+    }
+
+    /// <summary>Resolves the actual Steam AppID against the persisted Game/Device CPU policy.
+    /// This path deliberately does not consume routing's effective session.</summary>
+    internal void Reconcile(uint actualAppId)
+    {
+        lock (_mutationGate.Sync)
+        {
+            var loaded = _profileStore.Load();
+            lock (_sync)
+            {
+                _document = loaded.Document;
+                _persistenceWritable = loaded.CanSafelyReplace;
+            }
+            if (!loaded.CanSafelyReplace)
+            {
+                UpdateSnapshot(_powerPolicy.Read(), null, null, enabled: false);
+                return;
+            }
+
+            if (TryGetGameCpu(loaded.Document, actualAppId, out var gameAc, out var gameDc))
+            {
+                ReconcileWindows(gameAc, gameDc, "actual AppID game reconcile");
+                return;
+            }
+
+            var device = loaded.Document.Device.Performance.CpuBoost;
+            if (device is { Enabled: true, Ac: { } deviceAc, Dc: { } deviceDc })
+                ReconcileWindows(deviceAc, deviceDc, "actual AppID device reconcile");
+            else
+                RefreshSnapshotAfterApply(device, CpuBoostApplyResult.NoOp);
+        }
     }
 
     internal CpuBoostRuntimeSnapshot Snapshot { get { lock (_sync) return _snapshot; } }
@@ -107,7 +140,9 @@ internal sealed class CpuBoostRuntime
     /// guarantees a mutation can only ever run strictly before or strictly after startup reconcile,
     /// never interleaved with it.
     /// </summary>
-    internal void StartupReconcile()
+    internal void SetActualAppIdSource(Func<uint> source) => _actualAppIdSource = source ?? throw new ArgumentNullException(nameof(source));
+
+    internal void StartupReconcile(uint actualAppId = 0)
     {
         lock (_mutationGate.Sync)
         {
@@ -125,6 +160,12 @@ internal sealed class CpuBoostRuntime
                 // Malformed/UnsupportedSchemaVersion/ReadFailure: never bootstrap, never write
                 // Windows on this state's behalf -- just report the current unmanaged read.
                 UpdateSnapshot(_powerPolicy.Read(), null, null, enabled: false);
+                return;
+            }
+
+            if (TryGetGameCpu(loadResult.Document, actualAppId, out var gameAc, out var gameDc))
+            {
+                ReconcileWindows(gameAc, gameDc, contextLabel: "game profile startup reconcile");
                 return;
             }
 
@@ -319,19 +360,7 @@ internal sealed class CpuBoostRuntime
                 _persistenceWritable = true;
             }
 
-            if (!updatedCpuBoost.Enabled)
-            {
-                // Device CPU Boost Toggle addendum: while OFF, an AC/DC selection is saved but never
-                // applied to Windows -- it becomes authoritative the moment the feature is turned
-                // back on. (The Device page itself disables these selectors while OFF, but the
-                // Runtime enforces the same invariant regardless of caller.)
-                RefreshSnapshotAfterApply(updatedCpuBoost, CpuBoostApplyResult.NoOp);
-                AppLog.Info("Profiles.CpuBoost", "CPU Boost desired value saved while Device CPU Boost is disabled; not applied.", ("Side", mutateAc ? "AC" : "DC"), ("Mode", mode));
-                return new CpuBoostMutationResult(CpuBoostMutationOutcome.Succeeded, null);
-            }
-
-            var applyResult = _powerPolicy.Apply(mutateAc ? mode : null, mutateAc ? null : mode);
-            RefreshSnapshotAfterApply(updatedCpuBoost, applyResult);
+            var applyResult = ReconcileDeviceMutation(updatedDocument, _actualAppIdSource(), mutateAc, mode);
 
             if (!applyResult.Succeeded)
             {
@@ -416,15 +445,7 @@ internal sealed class CpuBoostRuntime
                 _persistenceWritable = true;
             }
 
-            if (!enabled)
-            {
-                AppLog.Info("Profiles.CpuBoost", "Device CPU Boost disabled; no Windows write performed.");
-                RefreshSnapshotAfterApply(updatedCpuBoost, CpuBoostApplyResult.NoOp);
-                return new CpuBoostMutationResult(CpuBoostMutationOutcome.Succeeded, null);
-            }
-
-            var applyResult = _powerPolicy.Apply(updatedCpuBoost.Ac, updatedCpuBoost.Dc);
-            RefreshSnapshotAfterApply(updatedCpuBoost, applyResult);
+            var applyResult = ReconcileDocument(updatedDocument, _actualAppIdSource(), "Device CPU enabled mutation");
 
             if (!applyResult.Succeeded)
             {
@@ -438,10 +459,40 @@ internal sealed class CpuBoostRuntime
         }
     }
 
-    /// <summary>Applies a complete (concrete AC and DC) saved baseline to Windows and refreshes the
-    /// snapshot. Only reached with both a complete baseline and Device CPU Boost Enabled -- see the
-    /// incomplete-baseline and Enabled checks in <see cref="StartupReconcile"/> above.</summary>
-    private void ReconcileWindows(CpuBoostMode desiredAc, CpuBoostMode desiredDc, string contextLabel)
+    /// <summary>Resolves and applies a complete (concrete AC and DC) CPU policy to Windows and
+    /// refreshes the snapshot.</summary>
+    private CpuBoostApplyResult ReconcileDocument(ProfileDocument document, uint actualAppId, string contextLabel)
+    {
+        if (TryGetGameCpu(document, actualAppId, out var gameAc, out var gameDc))
+            return ReconcileWindows(gameAc, gameDc, contextLabel + " (game)");
+
+        var device = document.Device.Performance.CpuBoost;
+        if (device is not { Enabled: true, Ac: { } deviceAc, Dc: { } deviceDc })
+        {
+            RefreshSnapshotAfterApply(device, CpuBoostApplyResult.NoOp);
+            return CpuBoostApplyResult.NoOp;
+        }
+        return ReconcileWindows(deviceAc, deviceDc, contextLabel + " (device)");
+    }
+
+    private CpuBoostApplyResult ReconcileDeviceMutation(ProfileDocument document, uint actualAppId, bool mutateAc, CpuBoostMode mode)
+    {
+        if (TryGetGameCpu(document, actualAppId, out var gameAc, out var gameDc))
+            return ReconcileWindows(gameAc, gameDc, "Device CPU mutation (game)");
+
+        var device = document.Device.Performance.CpuBoost;
+        if (device is not { Enabled: true })
+        {
+            RefreshSnapshotAfterApply(device, CpuBoostApplyResult.NoOp);
+            return CpuBoostApplyResult.NoOp;
+        }
+
+        var result = _powerPolicy.Apply(mutateAc ? mode : null, mutateAc ? null : mode);
+        RefreshSnapshotAfterApply(device, result);
+        return result;
+    }
+
+    private CpuBoostApplyResult ReconcileWindows(CpuBoostMode desiredAc, CpuBoostMode desiredDc, string contextLabel)
     {
         var applyResult = _powerPolicy.Apply(desiredAc, desiredDc);
         if (!applyResult.Succeeded)
@@ -450,6 +501,22 @@ internal sealed class CpuBoostRuntime
 
         var current = _powerPolicy.Read();
         UpdateSnapshot(current, desiredAc, desiredDc, enabled: true, applyResult.Succeeded ? null : applyResult.FailureMessage);
+        return applyResult;
+    }
+
+    private static bool TryGetGameCpu(ProfileDocument document, uint actualAppId, out CpuBoostMode ac, out CpuBoostMode dc)
+    {
+        ac = default;
+        dc = default;
+        if (actualAppId == 0
+            || !document.Games.TryGetValue(actualAppId.ToString(System.Globalization.CultureInfo.InvariantCulture), out var game)
+            || !game.Enabled
+            || game.Performance.CpuBoost is not { } cpu)
+            return false;
+
+        ac = cpu.Ac;
+        dc = cpu.Dc;
+        return true;
     }
 
     private void RefreshSnapshotAfterApply(DeviceCpuBoostSettings? cpuBoost, CpuBoostApplyResult applyResult)

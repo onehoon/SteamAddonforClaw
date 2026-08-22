@@ -933,6 +933,88 @@ public sealed class CpuBoostRuntimeTests : IDisposable
         Assert.Equal(1, backend.AcWriteCount);
     }
 
+    [Fact]
+    public void StartupReconcile_EnabledGameWinsEvenWhenDeviceCpuIsOff()
+    {
+        SaveProfile(deviceEnabled: false, gameAppId: 123, gameEnabled: true);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
+
+        runtime.StartupReconcile(123);
+
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, backend.Dc.Mode);
+    }
+
+    [Fact]
+    public void Reconcile_MissingOrDisabledGameFallsBackToEnabledDevice()
+    {
+        SaveProfile(deviceEnabled: true, gameAppId: 123, gameEnabled: false);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
+
+        runtime.StartupReconcile(123);
+
+        Assert.Equal(CpuBoostMode.Enabled, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Dc.Mode);
+    }
+
+    [Fact]
+    public void Reconcile_DeviceOffWithoutGameDoesNotWrite()
+    {
+        SaveProfile(deviceEnabled: false, gameAppId: null, gameEnabled: false);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
+
+        runtime.StartupReconcile(123);
+
+        Assert.Equal(0, backend.AcWriteCount);
+        Assert.Equal(0, backend.DcWriteCount);
+    }
+
+    [Fact]
+    public void Reconcile_DirectGameSwitchAndExitResolveCurrentActualAppId()
+    {
+        SaveProfile(deviceEnabled: true, gameAppId: 123, gameEnabled: true, secondGameAppId: 456);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
+
+        runtime.StartupReconcile(123);
+        runtime.Reconcile(456);
+        Assert.Equal(CpuBoostMode.Disabled, backend.Ac.Mode);
+        runtime.Reconcile(0);
+        Assert.Equal(CpuBoostMode.Enabled, backend.Ac.Mode);
+    }
+
+    [Fact]
+    public void DeviceMutationWhileGameIsActive_PersistsDeviceValueButKeepsGameApplied()
+    {
+        SaveProfile(deviceEnabled: true, gameAppId: 123, gameEnabled: true);
+        var backend = new FakeCpuBoostPowerPolicy();
+        var runtime = new CpuBoostRuntime(new ProfileStore(ProfilesPath), backend);
+        runtime.SetActualAppIdSource(() => 123);
+        runtime.StartupReconcile(123);
+
+        Assert.True(runtime.SetDeviceCpuBoostAc(CpuBoostMode.EfficientAggressive).Succeeded);
+
+        Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
+        Assert.Equal(CpuBoostMode.EfficientAggressive, new ProfileStore(ProfilesPath).Load().Document.Device.Performance.CpuBoost!.Ac);
+    }
+
+    private void SaveProfile(bool deviceEnabled, uint? gameAppId, bool gameEnabled, uint? secondGameAppId = null)
+    {
+        var games = new Dictionary<string, GameProfile>();
+        if (gameAppId is { } appId)
+            games[appId.ToString()] = new GameProfile { Enabled = gameEnabled, Performance = new() { CpuBoost = new() { Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled }, Tdp = new() { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } } } };
+        if (secondGameAppId is { } second)
+            games[second.ToString()] = new GameProfile { Enabled = true, Performance = new() { CpuBoost = new() { Ac = CpuBoostMode.Disabled, Dc = CpuBoostMode.EfficientAggressive }, Tdp = new() { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } } } };
+        new ProfileStore(ProfilesPath).Save(new ProfileDocument
+        {
+            Device = new() { Performance = new() { CpuBoost = new() { Enabled = deviceEnabled, Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Disabled } } },
+            Games = games
+        });
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))

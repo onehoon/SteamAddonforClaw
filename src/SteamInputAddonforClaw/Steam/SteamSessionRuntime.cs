@@ -32,6 +32,7 @@ internal sealed class SteamSessionRuntime : IDisposable
     {
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
         _sessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
+        _sessionWatcher.StateChanged += OnActualRunningAppIdChanged;
         _bigPictureWatcher = new SteamBigPictureWatcher();
         DeveloperTestModeState = new DeveloperTestModeState();
         _bigPictureWatcher.StateChanged += OnBigPictureStateChanged;
@@ -42,11 +43,15 @@ internal sealed class SteamSessionRuntime : IDisposable
 
     internal DeveloperTestModeState DeveloperTestModeState { get; }
     internal SteamSessionState State => _effectiveSource.State;
+    internal uint ActualRunningAppId => _sessionWatcher.State.RunningAppId;
     internal event EventHandler<SteamSessionStateChangedEventArgs>? StateChanged;
+    internal event Action<uint>? ActualRunningAppIdChanged;
     internal event Action<bool>? BigPictureStateChanged;
     internal bool IsBigPictureActive => _bigPictureWatcher.IsActive;
 
     private void OnBigPictureStateChanged(object? sender, EventArgs args) => BigPictureStateChanged?.Invoke(_bigPictureWatcher.IsActive);
+
+    private void OnActualRunningAppIdChanged(object? sender, EventArgs args) => ActualRunningAppIdChanged?.Invoke(_sessionWatcher.State.RunningAppId);
 
     /// <summary>
     /// Starts the primary Steam session watcher and refreshes the effective state. Callers must
@@ -78,6 +83,7 @@ internal sealed class SteamSessionRuntime : IDisposable
         _disposed = true;
         _diagnosticSessions.Complete();
         _effectiveSource.StateChanged -= OnEffectiveStateChanged;
+        _sessionWatcher.StateChanged -= OnActualRunningAppIdChanged;
         _effectiveSource.Dispose();
         _sessionWatcher.Dispose();
         _bigPictureWatcher.Dispose();
