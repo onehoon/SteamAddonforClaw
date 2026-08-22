@@ -13,6 +13,7 @@ public sealed class CenterMHelperStagingTests
     public void StageFromPublishRoot_resolves_the_exact_layout_CopyCenterMHelperOutput_writes()
     {
         var (publishRoot, runtimeDirectory, sourceBinary, stagedPath) = CreateFixture([1, 2, 3, 4]);
+        File.Delete(stagedPath);
 
         try
         {
