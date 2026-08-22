@@ -41,6 +41,20 @@ public class QamHostCdpEvaluateResultTests
     }
 
     [Fact]
+    public void IncludesExceptionDescriptionWhenCdpProvidesOne()
+    {
+        const string json = """
+            {"id":1,"result":{"exceptionDetails":{"text":"Uncaught","exception":{"description":"TypeError: example"}}}}
+            """;
+
+        var result = CdpEvaluateResult.Parse(json);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("TypeError: example", result.ErrorText);
+        Assert.Contains("Uncaught", result.ErrorText);
+    }
+
+    [Fact]
     public void TreatsAMissingResultFieldAsFailure()
     {
         const string json = """{"id":1}""";

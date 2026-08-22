@@ -170,14 +170,39 @@
 
   function findPanelComponents(modules) {
     for (const module of modules) {
-      for (const candidate of [module?.default, module]) {
-        if (!candidate || typeof candidate !== "object") continue;
-        const panelSection = Object.values(candidate).find(value => value?.toString?.()?.includes(".PanelSection"));
+      let defaultCandidate = null;
+      try { defaultCandidate = module?.default ?? null; } catch (_) { }
+      for (const candidate of [defaultCandidate, module]) {
+        if (!candidate || typeof candidate !== "object" || candidate === window) continue;
+        let panelSection = null;
+        for (const exportName of Object.keys(candidate)) {
+          let value;
+          try { value = candidate[exportName]; } catch (_) { continue; }
+          if (!value) continue;
+          let source;
+          try { source = value?.toString?.(); } catch (_) { continue; }
+          if (source?.includes(".PanelSection")) {
+            panelSection = value;
+            break;
+          }
+        }
         if (!panelSection) continue;
-        const panelSectionRow = Object.values(candidate).find(value => value !== panelSection && !value?.toString?.()?.includes(".PanelSection"));
-        if (!panelSectionRow) continue;
-        logOnce("native-panel", "QAM native PanelSection and PanelSectionRow resolved.");
-        return { PanelSection: panelSection, PanelSectionRow: panelSectionRow };
+        let panelSectionRow = null;
+        for (const exportName of Object.keys(candidate)) {
+          let value;
+          try { value = candidate[exportName]; } catch (_) { continue; }
+          if (!value || value === panelSection) continue;
+          let source;
+          try { source = value?.toString?.(); } catch (_) { continue; }
+          if (!source?.includes(".PanelSection")) {
+            panelSectionRow = value;
+            break;
+          }
+        }
+        if (panelSectionRow) {
+          logOnce("native-panel", "QAM native PanelSection and PanelSectionRow resolved.");
+          return { PanelSection: panelSection, PanelSectionRow: panelSectionRow };
+        }
       }
     }
     logOnce("native-panel", "QAM native PanelSection/PanelSectionRow unavailable.");

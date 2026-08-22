@@ -23,7 +23,10 @@ public sealed record CdpEvaluateResult(bool Succeeded, bool? BooleanValue, strin
         if (result.TryGetProperty("exceptionDetails", out var exceptionDetails))
         {
             var text = exceptionDetails.TryGetProperty("text", out var t) ? t.GetString() : "exception thrown during evaluation";
-            return new CdpEvaluateResult(Succeeded: false, BooleanValue: null, StringValue: null, ErrorText: text);
+            var description = exceptionDetails.TryGetProperty("exception", out var exception) &&
+                              exception.TryGetProperty("description", out var d) ? d.GetString() : null;
+            var errorText = string.IsNullOrWhiteSpace(description) ? text : $"{description} ({text})";
+            return new CdpEvaluateResult(Succeeded: false, BooleanValue: null, StringValue: null, ErrorText: errorText);
         }
 
         if (!result.TryGetProperty("result", out var valueContainer) || !valueContainer.TryGetProperty("value", out var value))
