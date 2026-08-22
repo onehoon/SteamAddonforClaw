@@ -144,7 +144,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
                 : runtime.PauseOwnedRouteForSuspendAsync(cancellationToken),
             reconcileOwnedRouteState: cancellationToken => runtime is null
                 ? Task.FromResult(RoutingStageOperationResult.Failure("RuntimeUnavailable"))
-                : runtime.ReconcileOwnedRouteStateAsync(cancellationToken));
+                : runtime.ReconcileOwnedRouteStateAsync(cancellationToken),
+            ordinaryReconcileAllowed: () => powerGate.IsOpen);
         deckStage.SetOutputFaultHandler(async () => { await coordinator.FailClosedAsync().ConfigureAwait(false); });
         handheldRoutingComposition.SetRuntimeFaultHandler((reason, yieldCurrentSteamSession) => HandleBackendRuntimeFaultAsync(reason, yieldCurrentSteamSession));
 

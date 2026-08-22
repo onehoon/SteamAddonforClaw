@@ -29,6 +29,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private readonly Func<CancellationToken, Task<bool>>? _beforeActiveSessionExit;
     private readonly Func<CancellationToken, Task<RoutingStageOperationResult>>? _pauseOwnedRouteForSuspend;
     private readonly Func<CancellationToken, Task<RoutingStageOperationResult>>? _reconcileOwnedRouteState;
+    private readonly Func<bool> _ordinaryReconcileAllowed;
     private readonly SemaphoreSlim _transitionGate = new(1, 1);
     private readonly Lock _cancellationSync = new();
     private CancellationTokenSource _transitionCancellation = new();
@@ -44,7 +45,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         IEnumerable<IRoutingRuntimeSessionBoundaryParticipant>? sessionBoundaryParticipants = null,
         Func<CancellationToken, Task<bool>>? beforeActiveSessionExit = null,
         Func<CancellationToken, Task<RoutingStageOperationResult>>? pauseOwnedRouteForSuspend = null,
-        Func<CancellationToken, Task<RoutingStageOperationResult>>? reconcileOwnedRouteState = null)
+        Func<CancellationToken, Task<RoutingStageOperationResult>>? reconcileOwnedRouteState = null,
+        Func<bool>? ordinaryReconcileAllowed = null)
     {
         _statusProvider = statusProvider ?? throw new ArgumentNullException(nameof(statusProvider));
         _sessionCoordinator = sessionCoordinator ?? throw new ArgumentNullException(nameof(sessionCoordinator));
@@ -52,6 +54,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         _beforeActiveSessionExit = beforeActiveSessionExit;
         _pauseOwnedRouteForSuspend = pauseOwnedRouteForSuspend;
         _reconcileOwnedRouteState = reconcileOwnedRouteState;
+        _ordinaryReconcileAllowed = ordinaryReconcileAllowed ?? (() => true);
     }
 
     internal async ValueTask<RoutingPipelineSessionReconcileResult> ReconcileAsync(CancellationToken cancellationToken)
@@ -65,6 +68,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             acquired = true;
             if (IsShutdownRequested) return RuntimeStoppedResult();
             using var transition = CreateTransitionCancellation(cancellationToken);
+            if (!_ordinaryReconcileAllowed() || transition.Token.IsCancellationRequested)
+                return new(true, _sessionCoordinator.CurrentState, RoutingActionKind.None, "PowerBarrierClosed");
             return await ReconcileCoreAsync(transition.Token).ConfigureAwait(false);
         }
         finally

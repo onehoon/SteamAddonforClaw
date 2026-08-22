@@ -1281,7 +1281,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     [Fact]
     public async Task Failed_suspend_pause_does_not_publish_preserved_session()
     {
-        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(WaitingForSteam(), Software()));
         var executor = new FakeExecutor();
         var session = new RoutingPipelineSessionCoordinator(executor);
         var bridge = new RoutingPipelineRuntimeCoordinator(
@@ -1368,6 +1370,32 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
             CancellationToken.None));
         Assert.Equal(1, auxiliaryCalls);
         Assert.Null(session.ActiveSession);
+    }
+
+    [Fact]
+    public async Task Ordinary_reconcile_rechecks_power_permission_at_transition_boundary()
+    {
+        var powerGate = new PowerMutationGate(initiallyOpen: true);
+        var provider = new FakeStatusProvider(
+            Snapshot(Eligible(), Software()),
+            Snapshot(WaitingForSteam(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            ordinaryReconcileAllowed: () => powerGate.IsOpen);
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var active = session.ActiveSession;
+        powerGate.EnterNewCycleBarrier(out _, out _);
+        bridge.CancelInFlightTransition();
+        var result = await bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("PowerBarrierClosed", result.Reason);
+        Assert.Same(active, session.ActiveSession);
+        Assert.Null(session.PendingCleanup);
     }
 
     [Fact]
