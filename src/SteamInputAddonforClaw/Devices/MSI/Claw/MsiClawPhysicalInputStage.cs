@@ -241,18 +241,27 @@ internal sealed class MsiClawPhysicalInputStage : IRoutingPipelineStage, IMsiCla
                         var result = _inputSource.StartPrepared(selection.Descriptor);
                         if (result.Started)
                         {
-                            var ready = await _inputSource.WaitForFirstValidStateAsync(cancellationToken).ConfigureAwait(false);
-                            if (ready && _inputSource.IsRunning)
+                            try
                             {
-                                lock (_sync)
+                                var ready = await _inputSource.WaitForFirstValidStateAsync(cancellationToken).ConfigureAwait(false);
+                                cancellationToken.ThrowIfCancellationRequested();
+                                if (ready && _inputSource.IsRunning)
                                 {
-                                    _currentIdentity = new(selection.Descriptor.InstanceGuid, selection.Descriptor.DevicePath!, selection.Descriptor.PnpInstanceId!, selection.Descriptor.PhysicalIdentity!);
-                                    _suspendPaused = false;
+                                    lock (_sync)
+                                    {
+                                        _currentIdentity = new(selection.Descriptor.InstanceGuid, selection.Descriptor.DevicePath!, selection.Descriptor.PnpInstanceId!, selection.Descriptor.PhysicalIdentity!);
+                                        _suspendPaused = false;
+                                    }
+                                    AppLog.Info("PhysicalInput", "Physical input resume reacquired.",
+                                        ("Event", "PhysicalInputResumeReacquired"), ("SessionGeneration", CurrentSessionGeneration),
+                                        ("InstanceGuid", selection.Descriptor.InstanceGuid), ("PnpInstanceId", selection.Descriptor.PnpInstanceId), ("Attempt", attempt));
+                                    return RoutingStageOperationResult.Success("Resumed");
                                 }
-                                AppLog.Info("PhysicalInput", "Physical input resume reacquired.",
-                                    ("Event", "PhysicalInputResumeReacquired"), ("SessionGeneration", CurrentSessionGeneration),
-                                    ("InstanceGuid", selection.Descriptor.InstanceGuid), ("PnpInstanceId", selection.Descriptor.PnpInstanceId), ("Attempt", attempt));
-                                return RoutingStageOperationResult.Success("Resumed");
+                            }
+                            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                            {
+                                await _inputSource.StopAsync().ConfigureAwait(false);
+                                throw;
                             }
                             await _inputSource.StopAsync().ConfigureAwait(false);
                         }
