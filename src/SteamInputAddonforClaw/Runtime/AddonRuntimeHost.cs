@@ -246,6 +246,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         if (_routingRuntime is null) return true;
         _resumeFreshReconcileSuppression.Begin();
         var succeeded = false;
+        var needsPostCommitFreshReconcile = false;
         try
         {
             succeeded = await _routingRuntime.ReconcilePreservedSessionAfterResumeAsync(
@@ -269,10 +270,12 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                     catch (Exception exception) { AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception); }
                 }, cancellationToken).ConfigureAwait(false);
+            needsPostCommitFreshReconcile = succeeded &&
+                _routingRuntime.CaptureStatus().OperationalState == RoutingOperationalState.Passive;
         }
         finally
         {
-            if (_resumeFreshReconcileSuppression.Complete(succeeded))
+            if (_resumeFreshReconcileSuppression.Complete(succeeded) || needsPostCommitFreshReconcile)
                 Interlocked.Exchange(ref _preservedResumeDeferredReconcile, 1);
         }
         return succeeded;
