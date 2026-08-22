@@ -1,5 +1,6 @@
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -133,6 +134,85 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(2, result.Document.Games.Count);
         Assert.Equal("Cyberpunk 2077", result.Document.Games["1091500"].DisplayName);
         Assert.Equal("Dota 2", result.Document.Games["570"].DisplayName);
+    }
+
+    [Fact]
+    public void EnableGameProfile_CopiesSavedDeviceValuesEvenWhenDeviceTogglesAreOff()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument
+        {
+            Device = new DeviceSettings
+            {
+                Performance = new DevicePerformanceSettings
+                {
+                    CpuBoost = new DeviceCpuBoostSettings { Enabled = false, Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.EfficientEnabled },
+                    Tdp = new DeviceTdpSettings { Enabled = false, Ac = new() { Pl1Watts = 30, Pl2Watts = 35 }, Dc = new() { Pl1Watts = 18, Pl2Watts = 22 } }
+                }
+            }
+        });
+
+        Assert.True(new GameProfileMutations(store).Enable(123, "Game"));
+        var game = store.Load().Document.Games["123"];
+
+        Assert.True(game.Enabled);
+        Assert.Equal(CpuBoostMode.Aggressive, game.Performance.CpuBoost!.Ac);
+        Assert.Equal(CpuBoostMode.EfficientEnabled, game.Performance.CpuBoost.Dc);
+        Assert.Equal(new TdpPowerPair { Pl1Watts = 30, Pl2Watts = 35 }, game.Performance.Tdp!.Ac);
+        Assert.Equal(new TdpPowerPair { Pl1Watts = 18, Pl2Watts = 22 }, game.Performance.Tdp.Dc);
+    }
+
+    [Fact]
+    public void EnableGameProfile_UsesFallbacksWhenDeviceValuesAreUnavailable()
+    {
+        var store = new ProfileStore(ProfilesPath);
+
+        Assert.True(new GameProfileMutations(store).Enable(123, null));
+        var game = store.Load().Document.Games["123"];
+
+        Assert.Equal(new GameCpuBoostSettings { Ac = CpuBoostMode.Enabled, Dc = CpuBoostMode.Enabled }, game.Performance.CpuBoost);
+        Assert.Equal(new TdpPowerPair { Pl1Watts = 20, Pl2Watts = 22 }, game.Performance.Tdp!.Ac);
+        Assert.Equal(new TdpPowerPair { Pl1Watts = 20, Pl2Watts = 22 }, game.Performance.Tdp.Dc);
+    }
+
+    [Fact]
+    public void DisableAndReenable_PreservesGameValuesAndEntry()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var mutations = new GameProfileMutations(store);
+        Assert.True(mutations.Enable(123, "Game"));
+        var custom = store.Load().Document.Games["123"] with
+        {
+            Performance = store.Load().Document.Games["123"].Performance with
+            {
+                CpuBoost = new() { Ac = CpuBoostMode.Disabled, Dc = CpuBoostMode.Aggressive },
+                Tdp = new() { Ac = new() { Pl1Watts = 25, Pl2Watts = 30 }, Dc = new() { Pl1Watts = 15, Pl2Watts = 20 } }
+            }
+        };
+        store.Save(store.Load().Document with { Games = new Dictionary<string, GameProfile> { ["123"] = custom with { Enabled = false } } });
+
+        Assert.True(mutations.Enable(123, null));
+        Assert.True(mutations.Disable(123));
+        var game = store.Load().Document.Games["123"];
+        Assert.False(game.Enabled);
+        Assert.Equal(CpuBoostMode.Disabled, game.Performance.CpuBoost!.Ac);
+        Assert.Equal(25, game.Performance.Tdp!.Ac.Pl1Watts);
+    }
+
+    [Fact]
+    public void SaveAndLoad_RoundTripsCompleteGameProfile()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument { Games = new Dictionary<string, GameProfile> { ["123"] = new()
+        {
+            Enabled = true, DisplayName = "Game", Performance = new() { CpuBoost = new() { Ac = CpuBoostMode.Disabled, Dc = CpuBoostMode.Enabled }, Tdp = new() { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 18, Pl2Watts = 20 } } }
+        } } });
+
+        var game = store.Load().Document.Games["123"];
+        Assert.True(game.Enabled);
+        Assert.Equal("Game", game.DisplayName);
+        Assert.Equal(CpuBoostMode.Disabled, game.Performance.CpuBoost!.Ac);
+        Assert.Equal(22, game.Performance.Tdp!.Ac.Pl2Watts);
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 
 namespace SteamInputAddonforClaw.Profiles;
 
@@ -10,6 +11,9 @@ namespace SteamInputAddonforClaw.Profiles;
 /// </summary>
 public sealed record GameProfile
 {
+    /// <summary>Owns activation of the complete per-game performance profile.</summary>
+    public bool Enabled { get; init; }
+
     public string? DisplayName { get; init; }
 
     public GamePerformanceOverrides Performance { get; init; } = new();
@@ -22,21 +26,39 @@ public sealed record GameProfile
 }
 
 /// <summary>
-/// Per-game field-level overrides of <see cref="DevicePerformanceSettings"/>. Every field is
-/// nullable: <see langword="null"/> means "inherit the Device/global value", an explicit value
-/// (including <see langword="false"/> or <c>0</c>) means "override it for this game". Empty
-/// placeholder in PR1 -- fields are added here as the corresponding Device setting is introduced,
-/// which is an additive change. <see cref="ExtensionData"/> preserves a future override field an
-/// older/compatible build does not yet understand across a load-then-save round trip.
+/// Complete per-game performance settings. When the owning <see cref="GameProfile.Enabled"/>
+/// switch is true, both CPU Boost and TDP are populated; they are not independent enabled
+/// switches and do not use null to inherit individual fields from Device. <see cref="ExtensionData"/>
+/// preserves future fields across a load-then-save round trip.
 /// </summary>
 public sealed record GamePerformanceOverrides
 {
+    public GameCpuBoostSettings? CpuBoost { get; init; }
+    public GameTdpSettings? Tdp { get; init; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
 
-/// <summary>Per-game field-level overrides of <see cref="DeviceDisplaySettings"/>. Same
-/// null-means-inherit semantic as <see cref="GamePerformanceOverrides"/>.</summary>
+public sealed record GameCpuBoostSettings
+{
+    public required CpuBoostMode Ac { get; init; }
+    public required CpuBoostMode Dc { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed record GameTdpSettings
+{
+    public required TdpPowerPair Ac { get; init; }
+    public required TdpPowerPair Dc { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+/// <summary>Per-game display settings, retained as an independent additive section.</summary>
 public sealed record GameDisplayOverrides
 {
     [JsonExtensionData]
