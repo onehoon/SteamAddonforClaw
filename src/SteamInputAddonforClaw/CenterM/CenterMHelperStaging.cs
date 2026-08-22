@@ -16,6 +16,7 @@ internal static class CenterMHelperStaging
     /// can never drift out of sync with each other.</summary>
     private static readonly string SourceRelativePath = Path.Combine("CenterMHelperSource", "CenterMHelper.exe");
     private const string StagedBinaryName = "MSI Center M.exe";
+    private static readonly object StagingSync = new();
 
     internal static string RuntimeDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonForClaw", "Runtime", "CenterM");
@@ -39,7 +40,7 @@ internal static class CenterMHelperStaging
                 return null;
             }
 
-            lock (typeof(CenterMHelperStaging))
+            lock (StagingSync)
             {
                 Directory.CreateDirectory(runtimeDirectory);
                 var stagedPath = Path.Combine(runtimeDirectory, StagedBinaryName);
