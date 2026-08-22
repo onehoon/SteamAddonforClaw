@@ -99,6 +99,7 @@ public sealed class ElevationConfigurationTests
     {
         var client = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Devices", "MSI", "Claw", "TdpHelperClient.cs"));
         var helper = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
+        var normalizedClient = client.ReplaceLineEndings("\n");
         Assert.Contains("new NamedPipeServerStream", client);
         Assert.Contains("PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly", client);
         Assert.Contains("new NamedPipeClientStream", helper);
@@ -106,7 +107,7 @@ public sealed class ElevationConfigurationTests
         Assert.DoesNotContain("new NamedPipeServerStream", helper);
         Assert.True(client.IndexOf("new NamedPipeServerStream", StringComparison.Ordinal)
             < client.IndexOf("Process.Start", StringComparison.Ordinal));
-        Assert.Contains("catch\n        {\n            CloseUnderLock();\n            throw;", client);
+        Assert.Contains("catch\n        {\n            CloseUnderLock();\n            throw;", normalizedClient);
     }
 
     private static string RepositoryRoot()
