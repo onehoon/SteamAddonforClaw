@@ -43,11 +43,11 @@ internal readonly record struct CenterMOem1LifecycleSnapshot(
 /// All facts are captured fresh at the moment of every safety-relevant decision -- OS
 /// notifications/timer ticks are only wake-up hints, never trusted as the state itself (research
 /// handoff: never infer causally). Every mutating public entry point runs behind a single async
-/// gate (<see cref="_gate"/>) so enable/disable, polling ticks, debounce completion, suspend, resume,
+/// gate (<see cref="_gate"/>) so enable/disable, polling ticks, debounce completion, resume,
 /// and shutdown can never race each other's ownership/tracking decisions. A monotonically
 /// increasing <see cref="_generation"/> lets a debounce (or any other deferred continuation) that
 /// resumes after newer state has already committed recognize it is stale and refuse to act. A
-/// separate monotonically increasing <see cref="_lifecycleEpoch"/> is bumped by disable/suspend/
+/// separate monotonically increasing <see cref="_lifecycleEpoch"/> is bumped by disable/
 /// shutdown BEFORE they ever try to acquire <see cref="_gate"/>, so a debounce continuation that
 /// re-enters the gate after such a request can recognize the request became authoritative even if
 /// the continuation itself happened to win the race for the gate first.
@@ -62,7 +62,7 @@ internal readonly record struct CenterMOem1LifecycleSnapshot(
 /// production DOES call <see cref="SetDesiredEnabledAsync"/> with true once WMI observation has
 /// actually started, and with false again on action-failure fail-open or shutdown.
 /// </summary>
-internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant, IAsyncDisposable, ICenterMOem1LifecycleDriverTarget
+internal sealed class CenterMOem1LifecycleCoordinator : IAsyncDisposable, ICenterMOem1LifecycleDriverTarget
 {
     private readonly Func<string> _publishRootProvider;
     private readonly CenterMBackendProbe _backendProbe;
@@ -118,7 +118,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// the epoch and is still waiting for <see cref="_gate"/>", because a later waiter is not
     /// guaranteed to lose the race for a <see cref="SemaphoreSlim"/> against an earlier one. This
     /// counter is incremented by <see cref="SetDesiredEnabledAsync"/> (disable only),
-    /// <see cref="QuiesceForSuspendAsync"/>, and <see cref="ShutdownAsync"/> BEFORE they ever wait on
+    /// <see cref="ShutdownAsync"/> BEFORE they ever wait on
     /// <see cref="_gate"/>, and decremented only after that same call has finished running under the
     /// gate (win or lose the race). Any arm-committing path must check
     /// <see cref="IsHighPriorityRequestPending"/> -- not just the epoch delta -- immediately before
@@ -151,15 +151,9 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// polling path may mutate helper ownership or MainUI tracking -- only
     /// <see cref="ReconcileAfterResumeAsync"/> clears it and performs the fresh resume
     /// reconciliation.</summary>
-    private bool _suspended;
-
-    // Request-time suspend intent survives a participant timeout. Unlike _suspended, this is set
-    // before waiting for _gate and is cleared only by the explicit resume boundary.
-    private bool _suspendBarrierRequested;
-
     /// <summary>Test-only synchronization seam: awaited (if set) by a debounce continuation
     /// immediately before it acquires <see cref="_gate"/>, letting tests deterministically force a
-    /// competing high-priority request (disable/suspend/shutdown) to run to completion first. Never
+    /// competing high-priority request (disable/shutdown) to run to completion first. Never
     /// touched by production code.</summary>
     internal Func<Task>? TestOnly_BeforeDebounceGateAcquire;
 
@@ -170,9 +164,9 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     internal event Action? TestOnly_DebounceContinuationFinished;
 
     /// <summary>Test-only synchronization seam (finding #2, review 4957507443): deterministically
-    /// simulates a suspend/disable/shutdown request's lifecycle-epoch bump becoming authoritative
+    /// simulates a disable/shutdown request's lifecycle-epoch bump becoming authoritative
     /// while some other operation is already in flight, without any real timing race. Mirrors
-    /// exactly what <see cref="QuiesceForSuspendAsync"/>/<see cref="SetDesiredEnabledAsync"/>/
+    /// exactly what <see cref="SetDesiredEnabledAsync"/>/
     /// <see cref="ShutdownAsync"/> do before ever waiting on <see cref="_gate"/>. Never touched by
     /// production code.</summary>
     internal void TestOnly_BumpLifecycleEpoch() => BumpLifecycleEpoch();
@@ -180,7 +174,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// <summary>Test-only synchronization seam (review 4957791980, finding #1): deterministically
     /// simulates a disable/suspend/shutdown request having already marked itself pending via the
     /// request-time barrier -- mirroring exactly what <see cref="SetDesiredEnabledAsync"/>(false)/
-    /// <see cref="QuiesceForSuspendAsync"/>/<see cref="ShutdownAsync"/> do before ever waiting on
+    /// <see cref="ShutdownAsync"/> does before ever waiting on
     /// <see cref="_gate"/> -- without any real timing race. Never touched by production code. Must be
     /// paired with <see cref="TestOnly_EndHighPriorityRequest"/> once the test no longer needs the
     /// marker set.</summary>
@@ -193,7 +187,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     /// <summary>Test-only synchronization seam (review 4958332345, site 1): invoked immediately
     /// before <see cref="AttemptArm"/> calls <see cref="TryLinearizeOrdinaryMutationStart"/> for
     /// helper Start, letting a test deterministically start a REAL competing high-priority request
-    /// (e.g. <see cref="QuiesceForSuspendAsync"/>) and let its synchronous
+    /// (e.g. <see cref="SetDesiredEnabledAsync"/>) and let its synchronous
     /// <see cref="BeginHighPriorityRequest"/> prefix run to completion before the linearization
     /// decision is made -- without any real timing race, since the calling method still holds
     /// <see cref="_gate"/> throughout. Never touched by production code.</summary>
@@ -325,13 +319,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     private CenterMOem1LifecycleSnapshot BuildSnapshotCore()
     {
-        // Review fix (BLOCKER): QuiesceForSuspendAsync deliberately keeps an already-armed helper
-        // alive and does not leave the Armed state, so _state == Armed alone is not sufficient once
-        // a direct coordinator quiesce has revoked custom-action admission.
-        // SuppressionReady must also require the suspend barrier to be clear, or a racing runtime
-        // tick's onReconciled could re-observe SuppressionReady == true and re-enable the bridge
-        // while suspend is still in effect.
-        var suppressionReady = _state == CenterMOem1LifecycleState.Armed && !IsSuspendBarrierActive;
+        var suppressionReady = _state == CenterMOem1LifecycleState.Armed;
         // "Native behavior guaranteed" means no residual helper ownership could be suppressing the
         // real MSI Center M launch -- distinct from "custom suppression inactive", which is true in
         // every non-Armed state including FaultedNative-with-retained-ownership.
@@ -429,22 +417,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
                         NotifySharedHelperSafetyFault("CenterMSharedHelperExited");
                         return;
                     }
-                    if (IsSuspendBarrierActive)
-                    {
-                        // Suspended barrier (finding #1): retiring the now-stale ownership record is
-                        // safe bookkeeping, but a fresh reconcile that could stage/start a new helper
-                        // must never run until ReconcileAfterResumeAsync explicitly clears the
-                        // barrier. Review 4957630432 finding #1 (state-consistency gap): the exact
-                        // owned helper is now confirmed gone, so Armed is no longer semantically true
-                        // even though re-arm is deferred until resume -- invalidate it here so the
-                        // snapshot can never report SuppressionReady == true with
-                        // HelperProcessId == null in the meantime.
-                        _lastReason = "HelperExitedWhileSuspended";
-                        if (_state == CenterMOem1LifecycleState.Armed)
-                            SetState(CenterMOem1LifecycleState.NeedsSetup);
-                        AppLog.Warn("CenterM.Oem1", "Helper exited while suspended; deferring reconciliation until resume.", null);
-                        return;
-                    }
                     AppLog.Warn("CenterM.Oem1", "Reconciling fresh after unexpected helper exit.", null);
                     await ReconcileCore("HelperUnexpectedExit", Interlocked.Read(ref _lifecycleEpoch), cancellationToken).ConfigureAwait(false);
                     return;
@@ -484,13 +456,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         try
         {
             if (_shutdown) return;
-            if (IsSuspendBarrierActive)
-            {
-                // Suspended barrier (finding #1): no new debounce may be started and no termination
-                // may be attempted from stale PID/window evidence while suspended.
-                return;
-            }
-
             var pollEpoch = Interlocked.Read(ref _lifecycleEpoch);
 
             if (_trackedMainUi is not null)
@@ -533,37 +498,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         finally { _gate.Release(); }
     }
 
-    /// <summary>IPowerSuspendParticipant: cancels in-flight destructive work (hidden-MainUI
-    /// termination debounce), establishes the suspended mutation barrier so no later poll/reconcile
-    /// entry point can stage/start a new helper or attempt MainUI termination while suspended, and
-    /// prevents new helper creation while suspended. Never terminates the real MainUI, and never
-    /// intentionally terminates the helper solely because suspend occurred.</summary>
-    public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
-    {
-        // Bumped BEFORE acquiring the gate (finding #6), same reasoning as SetDesiredEnabledAsync.
-        // Review 4957791980 finding #1: also marks the request pending via the request-time barrier
-        // for the same reason -- see SetDesiredEnabledAsync.
-        BeginSuspendBarrier();
-
-        try
-        {
-            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                CancelPendingDebounceCore("Suspend");
-                _suspended = true;
-                _lastReason = "SuspendQuiesced";
-                AppLog.Info("CenterM.Oem1", "Suspend quiesce completed; suspended mutation barrier established.", ("State", _state));
-                return true;
-            }
-            finally { _gate.Release(); }
-        }
-        finally { EndHighPriorityRequest(); }
-    }
-
     /// <summary>Fresh, complete OEM1 reconciliation on resume, independent of Steam/VIIPER routing
-    /// success. This is the explicit boundary that clears the suspended mutation barrier established
-    /// by <see cref="QuiesceForSuspendAsync"/> -- no other entry point clears it. Re-checks helper
+    /// success. Re-checks helper
     /// liveness, process topology, real MainUI presence/identity, and Launcher/Server before ever
     /// re-arming.</summary>
     internal async Task ReconcileAfterResumeAsync(CancellationToken cancellationToken = default)
@@ -572,9 +508,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         try
         {
             if (_shutdown) return;
-
-            lock (_requestBoundarySync) _suspendBarrierRequested = false;
-            _suspended = false;
 
             if (_helperOwnership.IsOwned)
             {
@@ -756,16 +689,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     {
         _lastReason = reason;
 
-        if (IsSuspendBarrierActive)
-        {
-            // Suspended barrier (finding #1): every mutating reconciliation path funnels through
-            // here, so guarding at entry blocks re-arm, drift cleanup, and disable-retry alike until
-            // ReconcileAfterResumeAsync explicitly clears the barrier.
-            _lastReason = $"{reason}:SuspendedBarrier";
-            AppLog.Info("CenterM.Oem1", "Reconcile suppressed by active suspend barrier.", ("Reason", reason));
-            return;
-        }
-
         if (!_desiredEnabled)
         {
             // Finding #5 (second bullet): a desired-disabled reconcile reached from any caller (not
@@ -788,9 +711,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             return;
         }
 
-        // Capture the reconciliation epoch once. A suspend participant may time out while this
-        // gate-held reconciliation is in flight; its pending marker can then be cleared, but this
-        // epoch must still prevent stale Armed publication.
+        // Capture the reconciliation epoch once so deferred work cannot publish stale Armed state.
         var reconciliationEpoch = expectedEpoch;
 
         if (_trackedMainUi is not null)
@@ -1034,17 +955,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     private async Task AttemptArm(long expectedEpoch, CancellationToken cancellationToken)
     {
-        // Finding #2 (review 4957507443): the request-time suspend boundary (QuiesceForSuspendAsync
-        // bumps _lifecycleEpoch BEFORE it ever waits for _gate) must invalidate an arm already in
-        // flight, even though _suspended itself is only set once QuiesceForSuspendAsync finally
-        // acquires _gate -- i.e. strictly AFTER this method (which holds the gate throughout) has
-        // already returned. Capture the epoch now so it can be re-checked immediately before ever
-        // committing Armed below.
-        // Keep the epoch captured by ReconcileCore. A timed-out suspend may have bumped the
-        // lifecycle epoch and cleared its pending marker before this child operation is entered;
-        // that newer value is not a valid baseline for the prerequisite/topology evidence that
-        // caused this arm.
-
         var publishRoot = _publishRootProvider();
         var stagedPath = _stager(publishRoot);
         if (stagedPath is null)
@@ -1073,11 +983,11 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         if (TestOnly_BeforeHelperStartLinearization is { } beforeStartHook)
             await beforeStartHook().ConfigureAwait(false);
 
-                if (!TryLinearizeOrdinaryMutationStart(expectedEpoch))
+        if (!TryLinearizeOrdinaryMutationStart(expectedEpoch))
         {
-            _lastReason = "SuspendRequestedDuringArmBeforeStart";
+            _lastReason = "HighPriorityRequestDuringArmBeforeStart";
             SetState(CenterMOem1LifecycleState.NeedsSetup);
-            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request (suspend/disable/shutdown) won the request boundary before helper Start was ever entered; no helper created, Armed never committed.", null);
+            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request won the request boundary before helper Start was ever entered; no helper created, Armed never committed.", null);
             return;
         }
 
@@ -1113,12 +1023,12 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             // Finding #2: a suspend (or disable/shutdown) request became authoritative while this
             // arm was already in flight, strictly after the helper was created. The newly-created
             // exact owned helper must be cleaned immediately and Armed must never be committed from
-            // this now-stale operation -- QuiesceForSuspendAsync is still blocked waiting for this
-            // method to release the gate and will establish _suspended right after.
+            // this now-stale operation -- the higher-priority request remains pending until this
+            // method releases the gate.
             var cleaned = _helperOwnership.Stop(_helperStopTimeout);
-            _lastReason = cleaned ? "SuspendRequestedDuringArm" : "SuspendRequestedDuringArmCleanupUnconfirmed";
+            _lastReason = cleaned ? "HighPriorityRequestDuringArm" : "HighPriorityRequestDuringArmCleanupUnconfirmed";
             SetState(cleaned ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
-            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request is pending (suspend/disable/shutdown) while an arm was in flight; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleaned));
+            AppLog.Warn("CenterM.Oem1", "Lifecycle epoch changed or a high-priority request is pending while an arm was in flight; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleaned));
             return;
         }
 
@@ -1143,7 +1053,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
             if (!TryCommitArmedState(expectedEpoch))
             {
                 var cleanedAtCommit = _helperOwnership.Stop(_helperStopTimeout);
-                _lastReason = cleanedAtCommit ? "SuspendRequestedDuringArmCommit" : "SuspendRequestedDuringArmCommitCleanupUnconfirmed";
+                _lastReason = cleanedAtCommit ? "HighPriorityRequestDuringArmCommit" : "HighPriorityRequestDuringArmCommitCleanupUnconfirmed";
                 SetState(cleanedAtCommit ? CenterMOem1LifecycleState.NeedsSetup : CenterMOem1LifecycleState.FaultedNative);
                 AppLog.Warn("CenterM.Oem1", "A high-priority request won the request boundary at the final Armed commit point; newly-created helper cleanup attempted, Armed never committed.", null, ("Cleaned", cleanedAtCommit));
                 return;
@@ -1660,8 +1570,8 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     private void BumpLifecycleEpoch() => Interlocked.Increment(ref _lifecycleEpoch);
 
-    /// <summary>Review 4957791980 finding #1 (extended by review 4958332345): marks a disable/
-    /// suspend/shutdown request as pending, BEFORE that request ever waits on <see cref="_gate"/>.
+    /// <summary>Marks a disable/shutdown request as pending, BEFORE that request ever waits on
+    /// <see cref="_gate"/>.
     /// Must be paired with exactly one <see cref="EndHighPriorityRequest"/> regardless of outcome
     /// (success, early return, or an exception/cancellation while waiting for the gate). Now
     /// synchronized via <see cref="_requestBoundarySync"/> (not a bare Interlocked increment) so it
@@ -1675,7 +1585,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
 
     /// <summary>Review 4957791980 finding #1: retires a request marked pending by
     /// <see cref="BeginHighPriorityRequest"/>. Deliberately not tied to the exact moment the
-    /// authoritative flag (<c>_desiredEnabled</c>/<c>_suspended</c>/<c>_shutdown</c>) is committed --
+    /// authoritative flag (<c>_desiredEnabled</c>/<c>_shutdown</c>) is committed --
     /// holding the marker slightly longer (through the rest of that call's own gate-held work) is
     /// always safe, only ever making a concurrent arm-committing path more conservative, never less.
     /// Held only briefly under <see cref="_requestBoundarySync"/>, never across an await.</summary>
@@ -1684,7 +1594,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
         lock (_requestBoundarySync) { _pendingHighPriorityRequests--; }
     }
 
-    /// <summary>Review 4957791980 finding #1: true while at least one disable/suspend/shutdown
+    /// <summary>True while at least one disable/shutdown
     /// request has bumped its request-time marker but has not yet finished running under
     /// <see cref="_gate"/>. Retained as a plain observational read for the sites that were not
     /// converted to a linearization call in review 4958332345 (the post-Start / post-invariant-
@@ -1695,25 +1605,6 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     private bool IsHighPriorityRequestPending
     {
         get { lock (_requestBoundarySync) { return _pendingHighPriorityRequests != 0; } }
-    }
-
-    private bool IsSuspendBarrierActive
-    {
-        get
-        {
-            lock (_requestBoundarySync)
-                return _suspendBarrierRequested || _suspended;
-        }
-    }
-
-    private void BeginSuspendBarrier()
-    {
-        lock (_requestBoundarySync)
-        {
-            _suspendBarrierRequested = true;
-            _pendingHighPriorityRequests++;
-            _lifecycleEpoch++;
-        }
     }
 
     /// <summary>Review 4958332345 (BLOCKER): the shared linearization point for an ordinary/
@@ -1730,8 +1621,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     {
         lock (_requestBoundarySync)
         {
-            return !_suspendBarrierRequested
-                && _pendingHighPriorityRequests == 0
+            return _pendingHighPriorityRequests == 0
                 && Interlocked.Read(ref _lifecycleEpoch) == expectedEpoch;
         }
     }
@@ -1749,8 +1639,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     {
         lock (_requestBoundarySync)
         {
-            if (_suspendBarrierRequested
-                || _pendingHighPriorityRequests != 0
+            if (_pendingHighPriorityRequests != 0
                 || Interlocked.Read(ref _lifecycleEpoch) != expectedEpoch)
                 return false;
             _lastReason = "Armed";
