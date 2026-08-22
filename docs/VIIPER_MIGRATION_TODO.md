@@ -367,14 +367,14 @@ which publishes `IControllerStateSnapshotSource.LatestState`, mapped through
 ~250 Hz absolute-deadline schedule already proven by
 `CanonicalSteamDeckInputPublisher`. It owns publication only -- not
 attachment, detachment, VIIPER logical-device lifetime, Game Bar policy, or
-There is still **no production caller**: it is not
+Deck neutral/live policy. There is still **no production caller**: it is not
 instantiated or started from `AddonRoutingRuntime`, `AddonProcessHost`,
 `CanonicalSteamDeckOutputStage`, `RoutingPipelineRuntimeCoordinator`,
 `GameBarForegroundWatcher`, power/resume logic, or OEM1, and it makes zero
 calls to `TryGetXbox360AttachmentState`/`AttachXbox360`/`DetachXbox360`.
-Xbox360 remains detached/unpublished during normal Runtime behavior.
-At that historical stage, Game Bar presentation switching remained planned,
-and no hardware validation of this publisher had been performed.
+Xbox360 remains detached/unpublished during normal Runtime behavior. At that
+historical stage, Game Bar presentation switching remained planned, and no
+hardware validation of this publisher had been performed.
 
 Deck presentation pause/resume foundation step: `CanonicalSteamDeckOutputStage`
 (`src/SteamInputAddonforClaw/VirtualOutput/Viiper/CanonicalSteamDeckOutputStage.cs`)

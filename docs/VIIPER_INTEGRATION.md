@@ -223,11 +223,6 @@ classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route. Final teardown is
 performed only by the runtime owner after routing shutdown succeeds; no second
 VIIPER server/bus owner exists in production. The retained Xbox360 handle is
 not attached or published by the current production policy.
-`CanonicalSteamDeckSession` borrows the persistent Deck handle and uses
-classified `AttachUSBDeviceEx`/`DetachUSBDeviceEx` per route. Final teardown
-is performed only by the runtime owner after routing shutdown succeeds; no
-second VIIPER server/bus owner exists in production.
-
 ## PR2b production composition
 
 `AddonRoutingRuntime` owns one `CanonicalViiperRuntime` for its lifetime. That
