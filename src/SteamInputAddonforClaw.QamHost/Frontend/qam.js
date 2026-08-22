@@ -170,8 +170,10 @@
 
   function findPanelComponents(modules) {
     for (const module of modules) {
-      for (const candidate of [module?.default, module]) {
-        if (!candidate || typeof candidate !== "object") continue;
+      let defaultCandidate = null;
+      try { defaultCandidate = module?.default ?? null; } catch (_) { }
+      for (const candidate of [defaultCandidate, module]) {
+        if (!candidate || typeof candidate !== "object" || candidate === window) continue;
         let panelSection = null;
         for (const exportName of Object.keys(candidate)) {
           let value;
