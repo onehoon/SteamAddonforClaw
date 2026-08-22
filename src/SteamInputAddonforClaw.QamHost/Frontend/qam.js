@@ -66,33 +66,18 @@
 
   function collectSearchableModules(webpackRequire) {
     const modules = [];
-    const seen = new Set();
     let loadFailures = 0;
-
-    const add = (moduleExports) => {
-      if (!moduleExports || typeof moduleExports !== "object" || seen.has(moduleExports)) return;
-      seen.add(moduleExports);
-      modules.push(moduleExports);
-      if (moduleExports.default && typeof moduleExports.default === "object" && !seen.has(moduleExports.default)) {
-        seen.add(moduleExports.default);
-        modules.push(moduleExports.default);
-      }
-    };
-
-    for (const moduleRecord of Object.values(webpackRequire.c || {})) {
-      add(moduleRecord && moduleRecord.exports);
-    }
 
     for (const id of Object.keys(webpackRequire.m || {})) {
       try {
-        add(webpackRequire(id));
+        const module = webpackRequire(id);
+        if (module) modules.push(module);
       } catch (err) {
-        // Some Steam modules have side effects or unmet prerequisites; skip only that module.
         loadFailures++;
       }
     }
 
-    logOnce("moduleDiscovery", `webpack modules: cached=${Object.keys(webpackRequire.c || {}).length} registered=${Object.keys(webpackRequire.m || {}).length} loaded=${modules.length} loadFailures=${loadFailures}`);
+    logOnce("moduleDiscovery", `webpack modules: registered=${Object.keys(webpackRequire.m || {}).length} loaded=${modules.length} loadFailures=${loadFailures}`);
 
     return modules;
   }
@@ -134,40 +119,52 @@
     return null;
   }
 
-  function renderTarget(candidate) {
-    if (typeof candidate === "function") return candidate;
-    if (candidate && typeof candidate === "object") {
-      if (typeof candidate.render === "function") return candidate.render;
-      if (typeof candidate.type === "function") return candidate.type;
+  function isCommonUiModule(candidate) {
+    if (!candidate || typeof candidate !== "object") return false;
+    for (const prop in candidate) {
+      if (candidate[prop]?.contextType?._currentValue && Object.keys(candidate).length > 60) return true;
     }
-    return null;
+    return false;
   }
 
   function findCommonUiModule(modules) {
-    for (const moduleExports of modules) {
-      if (!moduleExports || typeof moduleExports !== "object" || Object.keys(moduleExports).length <= 60) continue;
-      if (Object.values(moduleExports).some(value => value?.contextType?._currentValue)) {
-        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(moduleExports).length}`);
-        return moduleExports;
+    for (const module of modules) {
+      if (module?.default && isCommonUiModule(module.default)) {
+        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(module.default).length} Source=default`);
+        return module.default;
+      }
+      if (isCommonUiModule(module)) {
+        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(module).length} Source=root`);
+        return module;
       }
     }
     logOnce("commonUi", "Steam CommonUIModule unavailable.");
     return null;
   }
 
-  function findNativeComponent(commonUiModule, signatures, name) {
+  function findToggleField(commonUiModule) {
     if (!commonUiModule) return null;
     for (const candidate of Object.values(commonUiModule)) {
-      const render = renderTarget(candidate);
-      if (!render) continue;
-      let source;
-      try { source = Function.prototype.toString.call(render); } catch (_) { continue; }
-      if (signatures.some(signature => source.includes(signature))) {
-        logOnce(`native-${name}`, `QAM native ${name} resolved from Steam CommonUIModule.`);
+      const source = candidate?.render?.toString?.();
+      if (source?.includes("ToggleField,fallback") || source?.includes('ToggleField",')) {
+        logOnce("native-ToggleField", "QAM native ToggleField resolved.");
         return candidate;
       }
     }
-    logOnce(`native-${name}`, `QAM native ${name} unavailable in Steam CommonUIModule.`);
+    logOnce("native-ToggleField", "QAM native ToggleField unavailable.");
+    return null;
+  }
+
+  function findSliderField(commonUiModule) {
+    if (!commonUiModule) return null;
+    for (const candidate of Object.values(commonUiModule)) {
+      const source = candidate?.toString?.();
+      if (source?.includes("SliderField,fallback") || source?.includes('SliderField",')) {
+        logOnce("native-SliderField", "QAM native SliderField resolved.");
+        return candidate;
+      }
+    }
+    logOnce("native-SliderField", "QAM native SliderField unavailable.");
     return null;
   }
 
@@ -175,8 +172,8 @@
     const commonUiModule = findCommonUiModule(collectSearchableModules(webpackRequire));
     if (!commonUiModule) return null;
     const components = {
-      ToggleField: findNativeComponent(commonUiModule, ["ToggleField,fallback", "ToggleField\\\","], "ToggleField"),
-      SliderField: findNativeComponent(commonUiModule, ["SliderField,fallback", "SliderField\\\","], "SliderField"),
+      ToggleField: findToggleField(commonUiModule),
+      SliderField: findSliderField(commonUiModule),
     };
     if (!components.ToggleField || !components.SliderField) {
       logOnce("nativeControls", "QAM native ToggleField/SliderField unavailable; CPU Boost controls are disabled.");
