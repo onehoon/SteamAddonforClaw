@@ -119,15 +119,6 @@
     return null;
   }
 
-  function renderTarget(candidate) {
-    if (typeof candidate === "function") return candidate;
-    if (candidate && typeof candidate === "object") {
-      if (typeof candidate.render === "function") return candidate.render;
-      if (typeof candidate.type === "function") return candidate.type;
-    }
-    return null;
-  }
-
   function isCommonUiModule(candidate) {
     if (!candidate || typeof candidate !== "object") return false;
     for (const prop in candidate) {
@@ -154,11 +145,8 @@
   function findToggleField(commonUiModule) {
     if (!commonUiModule) return null;
     for (const candidate of Object.values(commonUiModule)) {
-      const render = candidate && typeof candidate.render === "function" ? candidate.render : null;
-      if (!render) continue;
-      let source;
-      try { source = Function.prototype.toString.call(render); } catch (_) { continue; }
-      if (source.includes("ToggleField,fallback") || source.includes("ToggleField\\\",")) {
+      const source = candidate?.render?.toString?.();
+      if (source?.includes("ToggleField,fallback") || source?.includes('ToggleField",')) {
         logOnce("native-ToggleField", "QAM native ToggleField resolved.");
         return candidate;
       }
@@ -170,9 +158,8 @@
   function findSliderField(commonUiModule) {
     if (!commonUiModule) return null;
     for (const candidate of Object.values(commonUiModule)) {
-      let source;
-      try { source = Function.prototype.toString.call(candidate); } catch (_) { continue; }
-      if (source.includes("SliderField,fallback") || source.includes("SliderField\\\",")) {
+      const source = candidate?.toString?.();
+      if (source?.includes("SliderField,fallback") || source?.includes('SliderField",')) {
         logOnce("native-SliderField", "QAM native SliderField resolved.");
         return candidate;
       }

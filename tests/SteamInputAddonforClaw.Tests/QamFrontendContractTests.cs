@@ -263,10 +263,12 @@ public sealed class QamFrontendContractTests
         Assert.Contains("function findToggleField(commonUiModule)", source);
         Assert.Contains("function findSliderField(commonUiModule)", source);
         Assert.Contains("Object.values(commonUiModule)", source);
-        Assert.Contains("candidate.render === \"function\"", source);
-        Assert.Contains("Function.prototype.toString.call(candidate)", source);
-        Assert.Contains("ToggleField,fallback", source);
-        Assert.Contains("SliderField,fallback", source);
+        Assert.Contains("candidate?.render?.toString?.()", source);
+        Assert.Contains("candidate?.toString?.()", source);
+        Assert.Contains("source?.includes('ToggleField\",')", source);
+        Assert.Contains("source?.includes('SliderField\",')", source);
+        Assert.DoesNotContain("ToggleField\\\\\\\",", source);
+        Assert.DoesNotContain("SliderField\\\\\\\",", source);
         Assert.DoesNotContain("findNativeComponent", source);
         Assert.DoesNotContain("findUniqueNativeComponent", source);
         Assert.DoesNotContain("requiredProps", source);
