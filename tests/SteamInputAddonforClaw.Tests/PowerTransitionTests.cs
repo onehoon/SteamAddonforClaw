@@ -464,6 +464,39 @@ public sealed class PowerTransitionTests
     }
 
     [Fact]
+    public async Task Resume_observation_cannot_adopt_a_newer_suspend_epoch()
+    {
+        var gate = new PowerMutationGate(true);
+        var recovery = new RecoverySafetyState(RecoverySafety.Safe);
+        var reconcileCalls = 0;
+        gate.EnterNewCycleBarrier(out _, out var resumeEpoch);
+        await using var coordinator = new PowerTransitionCoordinator(
+            gate,
+            recovery,
+            [],
+            hasIncompleteRecovery: () => false,
+            hasPreservedRoutingSession: () => true,
+            reconcilePreservedRoutingSession: _ =>
+            {
+                reconcileCalls++;
+                return Task.FromResult(true);
+            });
+        var observation = new PowerNotificationObservation(
+            18, PowerSignal.ResumeAutomatic, DateTimeOffset.UtcNow, 1,
+            Environment.CurrentManagedThreadId, resumeEpoch, resumeEpoch, false);
+
+        gate.EnterNewCycleBarrier(out _, out var newerSuspendEpoch);
+        coordinator.InvalidateForBarrier();
+        await coordinator.HandleAsync(observation);
+
+        Assert.Equal(0, reconcileCalls);
+        Assert.Equal(newerSuspendEpoch, gate.Epoch);
+        Assert.False(gate.IsOpen);
+        Assert.Equal(PowerTransitionState.Quiescing, coordinator.State);
+        Assert.Equal(RecoverySafety.Indeterminate, recovery.Current);
+    }
+
+    [Fact]
     public async Task Duplicate_suspend_does_not_advance_epoch_or_quiesce_twice()
     {
         var gate = new PowerMutationGate(true); var source = new FakeSource(true); var participant = new CountingParticipant();
