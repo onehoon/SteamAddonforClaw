@@ -1,11 +1,14 @@
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Management;
+using System.Runtime.InteropServices;
 using SteamInputAddonforClaw.TdpHelper;
 
 if (args.Length != 1) return;
 using var server = new NamedPipeServerStream(args[0], PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
-await server.WaitForConnectionAsync();
+using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+try { await server.WaitForConnectionAsync(connectTimeout.Token); }
+catch (OperationCanceledException) when (connectTimeout.IsCancellationRequested) { return; }
 using var reader = new StreamReader(server);
 using var writer = new StreamWriter(server) { AutoFlush = true };
 while (true)
@@ -28,7 +31,7 @@ static (bool Ok, byte[]? Payload) Invoke(string method, int block, byte value, b
     ManagementBaseObject? input = null;
     ManagementBaseObject? data = null;
     try { input = obj.GetMethodParameters(method); data = input?["Data"] as ManagementBaseObject; }
-    catch (ManagementException) { }
+    catch (Exception exception) when (IsExpectedWmiException(exception)) { }
     if (input is null || data is null)
     {
         input?.Dispose(); data?.Dispose(); input = obj.InvokeMethod("Get_WMI", null, null);
@@ -45,6 +48,8 @@ static (bool Ok, byte[]? Payload) Invoke(string method, int block, byte value, b
     return (true, bytes[1..]);
     }
 }
+static bool IsExpectedWmiException(Exception exception) =>
+    exception is ManagementException or COMException or UnauthorizedAccessException;
 static byte[] BuildPackage(int block, byte value) { var p = new byte[32]; p[0] = (byte)block; p[1] = value; return p; }
 record Request(string Operation, int Index, byte Value);
 record Response(bool Ok, string? Payload);
