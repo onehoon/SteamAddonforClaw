@@ -554,7 +554,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         var frozen = bridge.Session.ActiveSession!;
         var captures = provider.CaptureCount;
 
-        Assert.True(bridge.Bridge.HasResidualSessionState);
+        Assert.False(bridge.Bridge.HasResidualSessionState);
         var retried = await bridge.Bridge.RetryResidualCleanupForResumeAsync(CancellationToken.None);
 
         Assert.True(retried);

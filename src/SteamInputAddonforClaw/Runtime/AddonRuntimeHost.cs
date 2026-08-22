@@ -117,7 +117,9 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
             establishBaseline: token => EstablishResumeBaselineAsync(establishBaseline, token),
             hasResidualRoutingCleanup: () => _routingRuntime?.HasResidualSessionState == true,
             retryResidualRoutingCleanup: async token =>
-                _routingRuntime is null || await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false));
+                _routingRuntime is null || await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false),
+            hasPreservedRoutingSession: () => _routingRuntime?.HasPreservedSession == true,
+            reconcilePreservedRoutingSession: token => ReconcilePreservedRoutingSessionAsync(token));
         _powerWatcher = new PowerTransitionWatcher(notificationSource ?? new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
             () => _routingRuntime?.CancelInFlightTransition());
 
@@ -233,6 +235,19 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
         }
 
         return true;
+    }
+
+    private async Task<bool> ReconcilePreservedRoutingSessionAsync(CancellationToken cancellationToken)
+    {
+        if (_routingRuntime is null) return true;
+        var succeeded = await _routingRuntime.ReconcilePreservedSessionAfterResumeAsync(cancellationToken).ConfigureAwait(false);
+        if (_routingRuntime.AuxiliaryResumeParticipant is { } auxiliary)
+        {
+            try { await auxiliary.ReconcileAfterResumeAsync(cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) { AppLog.Error("Power.Recovery", "Auxiliary resume reconciliation failed.", exception); succeeded = false; }
+        }
+        return succeeded;
     }
 
     /// <summary>
