@@ -229,15 +229,24 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         Assert.DoesNotContain("QAM integration test", source);
-        Assert.Contains("title: \"Steam Addon for Claw\"", source);
+        Assert.Contains("title: null", source);
+        Assert.Contains("className: native.QamTitleClass", source);
+        Assert.Contains("function findPanelComponents(modules)", source);
+        Assert.Contains("PanelSection", source);
+        Assert.Contains("PanelSectionRow", source);
+        Assert.Contains("QAM native Title class resolved", source);
         Assert.Contains("fill: \"currentColor\"", source);
         Assert.Contains("[0, \"Disabled\"]", source);
         Assert.Contains("[1, \"Enabled\"]", source);
         Assert.Contains("[2, \"Aggressive\"]", source);
         Assert.Contains("[3, \"Efficient Enabled\"]", source);
         Assert.Contains("[4, \"Efficient Aggressive\"]", source);
-        Assert.Contains("[5, \"Aggressive at Guaranteed\"]", source);
-        Assert.Contains("[6, \"Efficient Aggressive at Guaranteed\"]", source);
+        Assert.Contains("[5, \"Aggressive At Guaranteed\"]", source);
+        Assert.Contains("[6, \"Efficient Aggressive At Guaranteed\"]", source);
+        Assert.Contains("Plugged in", source);
+        Assert.Contains("On battery", source);
+        Assert.DoesNotContain("AC Mode", source);
+        Assert.DoesNotContain("DC Mode", source);
         Assert.Contains("request(\"captureStatus\")", source);
         Assert.Contains("request(\"captureCpuBoost\")", source);
         Assert.Contains("request(\"setDeviceCpuBoostEnabled\"", source);
@@ -279,10 +288,18 @@ public sealed class QamFrontendContractTests
         Assert.Contains("native.ToggleField", source);
         Assert.Contains("native.SliderField", source);
         Assert.Contains("notchCount: modes.length", source);
-        Assert.Contains("notchLabels: numericNotches", source);
-        Assert.Contains("label: String(mode)", source);
         Assert.Contains("notchTicksVisible: true", source);
-        Assert.Contains("showValue: true", source);
+        Assert.DoesNotContain("numericNotches", source);
+        Assert.DoesNotContain("notchLabels", source);
+        var cpuSliderStart = source.IndexOf("const slider =", StringComparison.Ordinal);
+        var cpuSlider = source[cpuSliderStart..source.IndexOf("const controls =", cpuSliderStart, StringComparison.Ordinal)];
+        Assert.DoesNotContain("showValue: true", cpuSlider);
+        Assert.DoesNotContain("description: labelFor(value)", source);
+        Assert.DoesNotContain("description: `${value} W`", source);
+        Assert.Contains("selfMutationInvalidationRef", source);
+        Assert.Contains("selfMutationInvalidationRef.current--", source);
+        Assert.Contains("key: `cpu-row-${index}`", source);
+        Assert.Contains("key: `tdp-row-${index}`", source);
         Assert.Contains("bottomSeparator: cpu?.enabled ? \"none\" : \"standard\"", source);
         Assert.Contains("bottomSeparator,", source);
         Assert.Contains("\"standard\")", source);
@@ -299,7 +316,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("setStatus(null); setCpu(null); setTdp(null); setTdpDraft(null)", source);
         Assert.Contains("cpu.lastFailure", source);
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
-        Assert.Contains("native ToggleField/SliderField unavailable", source);
+        Assert.Contains("QAM required native controls/layout unavailable", source);
     }
 
     [Fact]

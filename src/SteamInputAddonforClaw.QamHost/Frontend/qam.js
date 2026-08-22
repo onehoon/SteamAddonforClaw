@@ -168,15 +168,49 @@
     return null;
   }
 
+  function findPanelComponents(modules) {
+    for (const module of modules) {
+      for (const candidate of [module?.default, module]) {
+        if (!candidate || typeof candidate !== "object") continue;
+        const panelSection = Object.values(candidate).find(value => value?.toString?.()?.includes(".PanelSection"));
+        if (!panelSection) continue;
+        const panelSectionRow = Object.values(candidate).find(value => value !== panelSection && !value?.toString?.()?.includes(".PanelSection"));
+        if (!panelSectionRow) continue;
+        logOnce("native-panel", "QAM native PanelSection and PanelSectionRow resolved.");
+        return { PanelSection: panelSection, PanelSectionRow: panelSectionRow };
+      }
+    }
+    logOnce("native-panel", "QAM native PanelSection/PanelSectionRow unavailable.");
+    return null;
+  }
+
+  function findQamTitleClass(modules) {
+    for (const module of modules) {
+      for (const candidate of [module?.default, module]) {
+        if (!candidate || typeof candidate !== "object") continue;
+        const title = candidate.Title;
+        if (typeof title === "string" && title.length > 0) {
+          logOnce("native-title", "QAM native Title class resolved.");
+          return title;
+        }
+      }
+    }
+    logOnce("native-title", "QAM native Title class unavailable.");
+    return null;
+  }
+
   function findNativeQamComponents(webpackRequire) {
-    const commonUiModule = findCommonUiModule(collectSearchableModules(webpackRequire));
+    const modules = collectSearchableModules(webpackRequire);
+    const commonUiModule = findCommonUiModule(modules);
     if (!commonUiModule) return null;
     const components = {
       ToggleField: findToggleField(commonUiModule),
       SliderField: findSliderField(commonUiModule),
+      ...findPanelComponents(modules),
+      QamTitleClass: findQamTitleClass(modules),
     };
-    if (!components.ToggleField || !components.SliderField) {
-      logOnce("nativeControls", "QAM native ToggleField/SliderField unavailable; CPU Boost controls are disabled.");
+    if (!components.ToggleField || !components.SliderField || !components.PanelSection || !components.PanelSectionRow || !components.QamTitleClass) {
+      logOnce("nativeControls", "QAM required native controls/layout unavailable; Addon tab is disabled.");
       return null;
     }
     logOnce("nativeControls", "QAM native ToggleField and SliderField resolved.");
@@ -430,7 +464,7 @@
     const modes = [
       [0, "Disabled"], [1, "Enabled"], [2, "Aggressive"],
       [3, "Efficient Enabled"], [4, "Efficient Aggressive"],
-      [5, "Aggressive at Guaranteed"], [6, "Efficient Aggressive at Guaranteed"],
+      [5, "Aggressive At Guaranteed"], [6, "Efficient Aggressive At Guaranteed"],
     ];
 
     function CpuBoostPanel() {
@@ -450,6 +484,7 @@
       const tdpWritableRef = React.useRef(false);
       const tdpEditGeneration = React.useRef(0);
       const modeWritableRef = React.useRef(false);
+      const selfMutationInvalidationRef = React.useRef(0);
 
       const failClosed = React.useCallback(message => {
         for (const key of ["ac", "dc"]) {
@@ -497,6 +532,10 @@
         const previous = state.onStateInvalidated;
         const handler = () => {
           previous?.();
+          if (selfMutationInvalidationRef.current > 0) {
+            selfMutationInvalidationRef.current--;
+            return;
+          }
           cancelModeTimers();
           // Keep a dirty TDP draft's debounce alive across invalidation; DevicePage does the same.
           setPreviewAc(null); setPreviewDc(null);
@@ -528,7 +567,9 @@
           if (!state.installed || !modeWritableRef.current) return;
           setBusy(true); setError(null);
           try {
+            selfMutationInvalidationRef.current++;
             const result = await request(side === "ac" ? "setDeviceCpuBoostAc" : "setDeviceCpuBoostDc", { mode: value });
+            selfMutationInvalidationRef.current = 0;
             setCpu(result.snapshot); side === "ac" ? setPreviewAc(null) : setPreviewDc(null);
             if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
           } catch (_) { failClosed("CPU Boost update failed"); }
@@ -542,7 +583,9 @@
         if (!mutationAvailable) return;
         setBusy(true); setError(null);
         try {
+          selfMutationInvalidationRef.current++;
           const result = await request("setDeviceCpuBoostEnabled", { enabled: value });
+          selfMutationInvalidationRef.current = 0;
           setCpu(result.snapshot); if (!result.succeeded) setError(result.failureMessage || "CPU Boost update failed");
         } catch (_) { failClosed("CPU Boost update failed"); }
         finally { setBusy(false); }
@@ -562,7 +605,9 @@
         if (!state.installed || !tdpWritableRef.current || !draft) return;
         setError(null);
         try {
+          selfMutationInvalidationRef.current++;
           const result = await request("setDeviceTdp", { configuration: draft });
+          selfMutationInvalidationRef.current = 0;
           if (generation === tdpEditGeneration.current) {
             tdpEditGeneration.current = 0;
             setTdp(result.snapshot); setTdpDraft(result.snapshot.configuration); tdpDraftRef.current = result.snapshot.configuration;
@@ -582,7 +627,9 @@
         if (tdpTimer.current) clearTimeout(tdpTimer.current);
         tdpTimer.current = null; tdpEditGeneration.current = 0; setBusy(true); setError(null);
         try {
+          selfMutationInvalidationRef.current++;
           const result = await request("setDeviceTdpEnabled", { enabled });
+          selfMutationInvalidationRef.current = 0;
           setTdp(result.snapshot); setTdpDraft(result.snapshot.configuration); tdpDraftRef.current = result.snapshot.configuration;
           if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
         } catch (_) { failClosed("TDP update failed"); }
@@ -590,7 +637,6 @@
       };
       const tdpSlider = (label, source, limit, value, separator) => value == null || !limit ? null : React.createElement(native.SliderField, {
         label,
-        description: `${value} W`,
         min: label === "PL1" ? limit.pl1MinimumWatts : limit.pl2MinimumWatts,
         max: label === "PL1" ? limit.pl2MaximumWatts : limit.pl2MaximumWatts,
         step: 1,
@@ -609,19 +655,17 @@
           scheduleTdp({ ...draft, [source]: { pl1Watts: adjusted.pl1Watts, pl2Watts: adjusted.pl2Watts } });
         },
       });
-      const numericNotches = modes.map(([mode]) => ({ notchIndex: mode, label: String(mode), value: mode }));
       const slider = (title, side, value, bottomSeparator) => value == null ? null : React.createElement(native.SliderField, {
-        label: title,
-        description: labelFor(value),
+        label: React.createElement(React.Fragment, null,
+          React.createElement("span", null, title),
+          React.createElement("span", { className: "DescriptionValue" }, labelFor(value))),
         min: 0,
         max: 6,
         step: 1,
         value,
         notchCount: modes.length,
-        notchLabels: numericNotches,
         disabled: !modeWritable,
         notchTicksVisible: true,
-        showValue: true,
         bottomSeparator,
         onChange: next => scheduleMode(side, Number(next)),
       });
@@ -637,8 +681,8 @@
         }),
       ];
       if (cpu?.enabled) {
-        controls.push(slider("AC Mode", "ac", sideValue(cpu.ac, previewAc), "none"));
-        controls.push(slider("DC Mode", "dc", sideValue(cpu.dc, previewDc), "standard"));
+        controls.push(slider("Plugged in", "ac", sideValue(cpu.ac, previewAc), "none"));
+        controls.push(slider("On battery", "dc", sideValue(cpu.dc, previewDc), "standard"));
       }
 
       const tdpControls = [React.createElement(native.ToggleField, {
@@ -660,16 +704,20 @@
       return React.createElement(React.Fragment, null,
         unavailable ? React.createElement("p", { key: "unavailable" }, status?.steam?.appId ? "Unavailable while a game is running" : "CPU Boost unavailable") : null,
         displayError ? React.createElement("p", { key: "error" }, displayError) : null,
-        ...controls.filter(Boolean),
-        ...tdpControls.filter(Boolean));
+        React.createElement(native.PanelSection, { key: "cpu-section" },
+          ...controls.filter(Boolean).map((control, index) => React.createElement(native.PanelSectionRow, { key: `cpu-row-${index}` }, control))),
+        React.createElement(native.PanelSection, { key: "tdp-section" },
+          ...tdpControls.filter(Boolean).map((control, index) => React.createElement(native.PanelSectionRow, { key: `tdp-row-${index}` }, control))));
     }
 
     state.addonTabDescriptor = {
       [TAB_MARKER]: true,
       key: "steam-input-addon",
-      title: "Steam Addon for Claw",
+      title: null,
       tab: icon,
-      panel: React.createElement(CpuBoostPanel),
+      panel: React.createElement(React.Fragment, null,
+        React.createElement("div", { className: native.QamTitleClass }, "Steam Addon for Claw"),
+        React.createElement(CpuBoostPanel)),
     };
     return state.addonTabDescriptor;
   }
