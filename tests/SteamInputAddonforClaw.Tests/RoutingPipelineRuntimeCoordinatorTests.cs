@@ -92,6 +92,27 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
     }
 
     [Fact]
+    public async Task Yield_request_captures_entering_session_before_inline_cancellation_retires_it()
+    {
+        var executor = new InlineCancelExecutor();
+        var bridge = Create(
+            new FakeStatusProvider(Snapshot(Eligible(), Software()), Snapshot(Eligible(), Software())),
+            executor);
+        var entering = bridge.Bridge.ReconcileAsync(CancellationToken.None).AsTask();
+        await executor.Started.Task;
+
+        Assert.NotNull(bridge.Session.EnteringSession);
+        var request = bridge.Bridge.RequestCurrentSessionYield();
+
+        Assert.NotNull(request);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => entering);
+        var ignored = await bridge.Bridge.ReconcileAsync(CancellationToken.None);
+
+        Assert.Equal("ExternalNativeTakeoverLatched", ignored.Reason);
+        Assert.Equal(1, executor.ExecuteCount);
+    }
+
+    [Fact]
     public async Task Retired_yield_request_is_noop_and_next_session_enters()
     {
         var executor = new FakeExecutor();
@@ -1259,7 +1280,7 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
 
     private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(
         FakeStatusProvider provider,
-        FakeExecutor executor,
+        IRoutingPipelineExecutor executor,
         params IRoutingRuntimeSessionBoundaryParticipant[] participants)
     {
         var session = new RoutingPipelineSessionCoordinator(executor);
@@ -1401,6 +1422,28 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
             }
             return RollbackResults.Count == 0 ? new RoutingPipelineRollbackResult(true, null, "Success") : RollbackResults.Dequeue();
         }
+    }
+
+    private sealed class InlineCancelExecutor : IRoutingPipelineExecutor
+    {
+        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int ExecuteCount { get; private set; }
+
+        public async ValueTask<RoutingPipelineExecutionResult> ExecuteAsync(
+            RoutingPipelinePlan plan,
+            CancellationToken cancellationToken)
+        {
+            ExecuteCount++;
+            var blocked = new TaskCompletionSource<RoutingPipelineExecutionResult>();
+            using var registration = cancellationToken.Register(() => blocked.TrySetCanceled(cancellationToken));
+            Started.TrySetResult();
+            return await blocked.Task.ConfigureAwait(false);
+        }
+
+        public ValueTask<RoutingPipelineRollbackResult> RollbackAsync(
+            RoutingPipelinePlan plan,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(new RoutingPipelineRollbackResult(true, null, "Success"));
     }
 
     private sealed class FakeBoundaryParticipant : IRoutingRuntimeSessionBoundaryParticipant

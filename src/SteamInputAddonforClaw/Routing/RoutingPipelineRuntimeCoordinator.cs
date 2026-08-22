@@ -159,7 +159,6 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     internal RoutingSessionYieldRequest? RequestCurrentSessionYield()
     {
         Volatile.Write(ref _sessionYieldRequested, 1);
-        CancelInFlightTransition();
         var session = _sessionCoordinator.ActiveSession;
         var wasEntering = false;
         session ??= _sessionCoordinator.PendingCleanup?.Session;
@@ -168,7 +167,13 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             session = _sessionCoordinator.EnteringSession;
             wasEntering = session is not null;
         }
-        if (session is not null) return new RoutingSessionYieldRequest(session, wasEntering);
+        if (session is not null)
+        {
+            // Cancellation can synchronously unwind EnterAsync and clear EnteringSession.
+            // Capture the existing session identity before allowing that cancellation.
+            CancelInFlightTransition();
+            return new RoutingSessionYieldRequest(session, wasEntering);
+        }
         if (_sessionYieldReason is null)
             Volatile.Write(ref _sessionYieldRequested, 0);
         return null;
