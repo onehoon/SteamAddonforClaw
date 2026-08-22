@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text.Json;
+using SteamInputAddonforClaw.Diagnostics;
 
 namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
@@ -30,7 +31,19 @@ internal sealed class TdpHelperClient : IAsyncDisposable
                 using var responseTimeout = new CancellationTokenSource(ResponseTimeout);
                 var responseLine = _reader!.ReadLineAsync(responseTimeout.Token).AsTask().GetAwaiter().GetResult();
                 var response = JsonSerializer.Deserialize<Response>(responseLine ?? "");
-                if (response?.Ok != true) return false;
+                if (response?.Ok != true)
+                {
+                    AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI helper operation failed",
+                        ("Operation", request.Operation), ("Index", request.Index),
+                        ("Stage", response?.Stage ?? "HelperProtocol"),
+                        ("ExceptionType", response?.ExceptionType),
+                        ("HResult", response?.HResult is int hr ? $"0x{hr:X8}" : null),
+                        ("ManagementStatus", response?.ManagementStatus),
+                        ("UsedFallback", response?.UsedFallback));
+                    return false;
+                }
+                if (response.UsedFallback)
+                    AppLog.Debug("Profiles.Tdp.Wmi", "MSI_ACPI compatibility fallback succeeded", ("Method", request.Operation), ("Index", request.Index), ("Stage", "GetWmiFallback"));
                 payload = response.Payload is null ? [] : Convert.FromBase64String(response.Payload);
                 return request.Operation == "SetData" || payload.Length > 0;
             }
@@ -60,5 +73,5 @@ internal sealed class TdpHelperClient : IAsyncDisposable
 
     public ValueTask DisposeAsync() { lock (_sync) CloseUnderLock(); return ValueTask.CompletedTask; }
     private sealed record Request(string Operation, int Index, byte Value);
-    private sealed record Response(bool Ok, string? Payload);
+    private sealed record Response(bool Ok, string? Payload, string? Stage = null, string? ExceptionType = null, int? HResult = null, int? ManagementStatus = null, bool UsedFallback = false);
 }

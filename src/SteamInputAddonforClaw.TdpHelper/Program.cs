@@ -19,7 +19,7 @@ while (true)
     {
         var request = JsonSerializer.Deserialize<Request>(line);
         if (request is null || !TdpHelperProtocol.IsSupported(request.Operation, request.Index)) { await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(false, null))); continue; }
-        (bool Ok, byte[]? Payload) result;
+        WmiResult result;
         try
         {
             result = await Task.Run(() => Invoke(
@@ -32,36 +32,53 @@ while (true)
         {
             return;
         }
-        await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(result.Ok, result.Payload is null ? null : Convert.ToBase64String(result.Payload))));
+        await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(result.Ok, result.Payload is null ? null : Convert.ToBase64String(result.Payload), result.Stage, result.ExceptionType, result.HResult, result.ManagementStatus, result.UsedFallback)));
     }
-    catch { await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(false, null))); }
+        catch (Exception exception)
+        { await writer.WriteLineAsync(JsonSerializer.Serialize(Failure("Protocol", exception))); }
 }
 
-static (bool Ok, byte[]? Payload) Invoke(string method, int block, byte value, bool responseRequired)
+static WmiResult Invoke(string method, int block, byte value, bool responseRequired)
 {
-    using var obj = new ManagementObject(@"\\.\root\WMI", "MSI_ACPI.InstanceName='ACPI\\PNP0C14\\0_0'", null);
-    ManagementBaseObject? input = null;
-    ManagementBaseObject? data = null;
-    try { input = obj.GetMethodParameters(method); data = input?["Data"] as ManagementBaseObject; }
-    catch (Exception exception) when (IsExpectedWmiException(exception)) { }
-    if (input is null || data is null)
+    try
     {
-        input?.Dispose(); data?.Dispose(); input = obj.InvokeMethod("Get_WMI", null, null);
-        data = input?["Data"] as ManagementBaseObject;
+        using var obj = new ManagementObject(@"\\.\root\WMI", "MSI_ACPI.InstanceName='ACPI\\PNP0C14\\0_0'", null);
+        ManagementBaseObject? input = null;
+        ManagementBaseObject? data = null;
+        var usedFallback = false;
+        try { input = obj.GetMethodParameters(method); data = input?["Data"] as ManagementBaseObject; }
+        catch (Exception exception) when (IsExpectedWmiException(exception)) { }
+        if (input is null || data is null)
+        {
+            usedFallback = true;
+            try
+            {
+                input?.Dispose(); data?.Dispose(); input = obj.InvokeMethod("Get_WMI", null, null);
+                data = input?["Data"] as ManagementBaseObject;
+            }
+            catch (Exception exception) when (IsExpectedWmiException(exception))
+            { return Failure("GetWmiFallback", exception, usedFallback); }
+        }
+        using (input)
+        using (data)
+        {
+            if (input is null || data is null) return Failure("InputDataUnavailable", null, usedFallback);
+            try { data["Bytes"] = BuildPackage(block, value); input["Data"] = data; }
+            catch (Exception exception) when (IsExpectedWmiException(exception)) { return Failure("InputSetup", exception, usedFallback); }
+            using var output = obj.InvokeMethod(method, input, null);
+            if (!responseRequired) return new(true, null, null, null, null, null, usedFallback);
+            if (output?["Data"] is not ManagementBaseObject response || response["Bytes"] is not byte[] bytes || bytes.Length < 2)
+                return Failure("OutputDataMissing", null, usedFallback);
+            if (bytes[0] != 1) return Failure("OutputFlagRejected", null, usedFallback);
+            return new(true, bytes[1..], null, null, null, null, usedFallback);
+        }
     }
-    using (input)
-    using (data)
-    {
-        if (input is null || data is null) throw new InvalidOperationException();
-    data["Bytes"] = BuildPackage(block, value); input["Data"] = data;
-    using var output = obj.InvokeMethod(method, input, null);
-    if (!responseRequired) return (true, null);
-    if (output?["Data"] is not ManagementBaseObject response || response["Bytes"] is not byte[] bytes || bytes.Length < 2 || bytes[0] != 1) return (false, null);
-    return (true, bytes[1..]);
-    }
+    catch (Exception exception) when (IsExpectedWmiException(exception)) { return Failure("InvokeMethod", exception); }
 }
 static bool IsExpectedWmiException(Exception exception) =>
     exception is ManagementException or COMException or UnauthorizedAccessException;
+static WmiResult Failure(string stage, Exception? exception, bool usedFallback = false) => new(false, null, stage, exception?.GetType().Name, exception?.HResult, exception is ManagementException management ? (int)management.ErrorCode : null, usedFallback);
 static byte[] BuildPackage(int block, byte value) { var p = new byte[32]; p[0] = (byte)block; p[1] = value; return p; }
 record Request(string Operation, int Index, byte Value);
-record Response(bool Ok, string? Payload);
+record Response(bool Ok, string? Payload, string? Stage = null, string? ExceptionType = null, int? HResult = null, int? ManagementStatus = null, bool UsedFallback = false);
+record WmiResult(bool Ok, byte[]? Payload, string? Stage, string? ExceptionType, int? HResult, int? ManagementStatus, bool UsedFallback);

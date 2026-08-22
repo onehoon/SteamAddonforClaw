@@ -36,13 +36,14 @@ public sealed class ElevationConfigurationTests
     }
 
     [Fact]
-    public void Wmi_fallback_entry_is_not_logged_as_a_method_failure()
+    public void Wmi_fallback_diagnostics_are_preserved_on_the_production_helper_path()
     {
-        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Devices", "MSI", "Claw", "MsiClawWmiTdpTransport.cs"));
-
-        Assert.Contains("MSI_ACPI compatibility fallback started", source);
-        Assert.Contains("MSI_ACPI compatibility fallback succeeded", source);
-        Assert.Contains("LogFailure(method, \"GetWmiFallback\"", source);
+        var helper = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
+        var client = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Devices", "MSI", "Claw", "TdpHelperClient.cs"));
+        Assert.Contains("Failure(\"GetWmiFallback\"", helper);
+        Assert.Contains("UsedFallback", helper);
+        Assert.Contains("Profiles.Tdp.Wmi", client);
+        Assert.Contains("GetWmiFallback", client);
     }
 
     [Fact]
