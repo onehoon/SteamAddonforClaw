@@ -5,6 +5,17 @@ using SteamInputAddonforClaw.Contracts.Wing;
 namespace SteamInputAddonforClaw.Contracts.Frontend;
 
 public enum FrontendLogLevel { Off, Info, Debug }
+public enum FrontendProfileGameSource { Steam, NonSteam }
+public sealed record FrontendProfileGameCatalogEntry(uint AppId, string Name, FrontendProfileGameSource Source);
+public sealed record FrontendGameCpuBoostConfiguration(CpuBoostMode Ac, CpuBoostMode Dc);
+public sealed record FrontendGameTdpConfiguration(FrontendTdpPowerPair Ac, FrontendTdpPowerPair Dc);
+public sealed record FrontendGameProfileSnapshot(uint AppId, string? DisplayName, bool Exists, bool Enabled,
+    FrontendGameCpuBoostConfiguration CpuBoost, FrontendGameTdpConfiguration Tdp, bool PersistenceWritable, FrontendTdpLimits? Limits);
+public enum FrontendGameProfileMutationOutcome { Succeeded, InvalidTarget, PersistenceFailed, Unavailable }
+public sealed record FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome Outcome, string? FailureMessage, FrontendGameProfileSnapshot Snapshot)
+{
+    public bool Succeeded => Outcome == FrontendGameProfileMutationOutcome.Succeeded;
+}
 public enum FrontendVibrationTestCommand { Rumble = 0, Haptic = 1, Stop = 3 }
 public enum FrontendSetupStatus { Complete, Required, Blocked, RestartRequired, NotApplicable, Indeterminate }
 public enum FrontendHardwareStatus { Supported, Unsupported, Indeterminate }
@@ -254,6 +265,12 @@ public interface IAddonFrontendControl
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
     Task<FrontendTdpMutationResult> SetDeviceTdpEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         Task.FromResult(new FrontendTdpMutationResult(FrontendTdpMutationOutcome.Unavailable, "TDP is unavailable.", FrontendTdpSnapshot.Unavailable));
+    Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<FrontendProfileGameCatalogEntry>>([]);
+    Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(appId));
+    Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default) => Task.FromResult(FrontendGameProfileSnapshotUnavailable(0));
+    Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAsync(uint appId, CpuBoostMode ac, CpuBoostMode dc, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
 
     // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
     /// <summary>Opens (or re-opens, if the previous session Completed/Failed) the diagnostic session:
@@ -279,4 +296,7 @@ public interface IAddonFrontendControl
     /// disposes the Runtime-owned coordinator. Call when the page is left, regardless of how.</summary>
     Task<FrontendClawSensorProbeSnapshot> CloseClawSensorProbeAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(FrontendClawSensorProbeSnapshot.Unavailable);
+
+    private static FrontendGameProfileSnapshot FrontendGameProfileSnapshotUnavailable(uint appId) => new(appId, null, false, false,
+        new(CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(new(20, 22), new(20, 22)), false, null);
 }

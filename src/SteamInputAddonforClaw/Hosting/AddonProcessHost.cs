@@ -58,6 +58,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly ProfileStore _profileStore;
     private readonly ProfileMutationGate _profileMutationGate = new();
     private readonly CpuBoostRuntime _cpuBoostRuntime;
+    private readonly GameProfileMutations _gameProfileMutations;
     private TdpRuntime? _tdpRuntime;
     private HelperMsiClawTdpTransport? _tdpTransport;
     private TdpPowerLifecycleWatcher? _tdpPowerLifecycleWatcher;
@@ -83,6 +84,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             : Path.Combine(testOnlyDataRoot, "logs");
         _profileStore = new(profilePath);
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
+        _gameProfileMutations = new(_profileStore, _profileMutationGate);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, logDirectory);
         _gameBarForegroundWatcher = new GameBarForegroundWatcher();
@@ -178,6 +180,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             && startupResult.HardwareDeviceModel is { } tdpModel
             && MsiClawTdpPolicy.TryResolve(tdpModel, out _))
         {
+            _gameProfileMutations.SetModelId(tdpModel);
             _tdpTransport = new();
             _tdpRuntime = new(_profileStore, _profileMutationGate, tdpModel,
                 new MsiClawTdpHardware(_tdpTransport));
@@ -193,7 +196,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // Device/Profile CPU Boost is a sibling capability of Routing/OEM1, not a member of the
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
-            cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime);
+            cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
+            actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
