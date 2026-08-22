@@ -179,7 +179,11 @@ public sealed partial class ControllerPage : UserControl
         return new WingSlotBinding { Action = action, Hotkey = new WingHotkeyBinding(modifiers, key), Launch = new WingLaunchApplicationBinding(executable.Text, arguments.Text) };
     }
 
-    private void ApplyWingMappingAvailability() => WingMappingCard.IsEnabled = _wingMappingAvailable;
+    private void ApplyWingMappingAvailability()
+    {
+        WingSingleMappingCard.IsEnabled = _wingMappingAvailable;
+        WingDoubleMappingCard.IsEnabled = _wingMappingAvailable;
+    }
 
     /// <summary>
     /// Unsupported-hardware presentation, composed from the patterns already in this app: the card
