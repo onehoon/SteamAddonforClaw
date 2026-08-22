@@ -26,7 +26,7 @@ public sealed partial class ProfilePage : UserControl
 
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
     internal void Activate() { _active = true; if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated; if (_selectedGame is not null) _ = CaptureSelectedAsync(_selectedGame.AppId); }
-    internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; CancelTdpDebounce(); _tdpDraftDirty = false; }
+    internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; }
     private void OnStateInvalidated(object? sender, EventArgs e) { if (_active && _selectedGame is not null) DispatcherQueue.TryEnqueue(() => _ = CaptureSelectedAsync(_selectedGame.AppId)); }
 
     private async void RefreshGamesButton_Click(object sender, RoutedEventArgs e)
