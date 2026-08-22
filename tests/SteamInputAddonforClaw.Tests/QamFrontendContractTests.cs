@@ -216,7 +216,7 @@ public sealed class QamFrontendContractTests
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
         Assert.DoesNotContain("QAM integration test", source);
-        Assert.Contains("title: \"Steam Input Addon\"", source);
+        Assert.Contains("title: \"Steam Addon for Claw\"", source);
         Assert.Contains("fill: \"currentColor\"", source);
         Assert.Contains("[0, \"Disabled\"]", source);
         Assert.Contains("[1, \"Enabled\"]", source);
@@ -236,18 +236,39 @@ public sealed class QamFrontendContractTests
         Assert.Contains("cancelModeTimers();", source);
         Assert.Contains("setPreviewAc(null); setPreviewDc(null);", source);
         Assert.Contains("state.onStateInvalidated === handler", source);
-        Assert.Contains("style: { width: \"100%\" }", source);
-        Assert.Contains("\"aria-hidden\": \"true\"", source);
-        Assert.Contains("modes.map(([mode])", source);
+        Assert.Contains("function findNativeQamComponents(webpackRequire)", source);
+        Assert.Contains("function renderTarget(candidate)", source);
+        Assert.Contains("typeof candidate.render === \"function\"", source);
+        Assert.Contains("typeof candidate.type === \"function\"", source);
+        Assert.Contains("function findUniqueNativeComponent(modules, signatures, requiredProps, name)", source);
+        Assert.Contains("new Map(matches.map(match => [match.render, match.candidate]))", source);
+        Assert.Contains("if (unique.length !== 1)", source);
+        Assert.Contains("findUniqueNativeComponent(modules, [\"ToggleField,fallback\"", source);
+        Assert.Contains("findUniqueNativeComponent(modules, [\"SliderField,fallback\"", source);
+        Assert.Contains("native.ToggleField", source);
+        Assert.Contains("native.SliderField", source);
+        Assert.Contains("notchCount: modes.length", source);
+        Assert.Contains("notchLabels: numericNotches", source);
+        Assert.Contains("label: String(mode)", source);
+        Assert.Contains("notchTicksVisible: true", source);
+        Assert.Contains("showValue: true", source);
+        Assert.Contains("bottomSeparator: cpu?.enabled ? \"none\" : \"standard\"", source);
+        Assert.Contains("bottomSeparator,", source);
+        Assert.Contains("\"standard\")", source);
+        Assert.Contains("if (cpu?.enabled)", source);
+        Assert.DoesNotContain("type: \"checkbox\"", source);
+        Assert.DoesNotContain("type: \"range\"", source);
+        Assert.DoesNotContain("setInterval", source);
+        Assert.DoesNotContain("fontFamily: \"sans-serif\"", source);
         Assert.Contains("const mutationAvailable", source);
         Assert.Contains("const modeWritable = mutationAvailable && cpu.enabled", source);
         Assert.Contains("disabled: !modeWritable", source);
-        Assert.Contains("minHeight: \"1.2em\"", source);
         Assert.DoesNotContain("value: value == null ? 0 : value", source);
         Assert.Contains("const failClosed", source);
         Assert.Contains("setStatus(null); setCpu(null); setPreviewAc(null); setPreviewDc(null)", source);
         Assert.Contains("cpu.lastFailure", source);
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
+        Assert.Contains("native ToggleField/SliderField could not be resolved", source);
     }
 
     [Fact]
