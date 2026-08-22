@@ -1278,6 +1278,44 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => bridge.Bridge.ReconcileFreshAfterResumeAsync(new CancellationToken(true)).AsTask());
     }
 
+    [Fact]
+    public async Task Failed_suspend_pause_does_not_publish_preserved_session()
+    {
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Failure("PauseFailed")),
+            reconcileOwnedRouteState: _ => Task.FromResult(RoutingStageOperationResult.Success()));
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var active = session.ActiveSession;
+        Assert.False(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+        Assert.Same(active, session.ActiveSession);
+        Assert.False(bridge.HasPreservedSession);
+    }
+
+    [Fact]
+    public async Task Successful_suspend_pause_publishes_the_exact_active_session()
+    {
+        var provider = new FakeStatusProvider(Snapshot(Eligible(), Software()));
+        var executor = new FakeExecutor();
+        var session = new RoutingPipelineSessionCoordinator(executor);
+        var bridge = new RoutingPipelineRuntimeCoordinator(
+            provider,
+            session,
+            pauseOwnedRouteForSuspend: _ => Task.FromResult(RoutingStageOperationResult.Success("Paused")),
+            reconcileOwnedRouteState: _ => Task.FromResult(RoutingStageOperationResult.Success()));
+
+        Assert.True((await bridge.ReconcileAsync(CancellationToken.None)).Succeeded);
+        var active = session.ActiveSession;
+        Assert.True(await bridge.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None));
+        Assert.Same(active, session.ActiveSession);
+        Assert.True(bridge.HasPreservedSession);
+    }
+
     private static (RoutingPipelineRuntimeCoordinator Bridge, RoutingPipelineSessionCoordinator Session) Create(
         FakeStatusProvider provider,
         IRoutingPipelineExecutor executor,

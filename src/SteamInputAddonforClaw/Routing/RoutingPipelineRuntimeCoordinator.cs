@@ -36,6 +36,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private string? _sessionYieldReason;
     private int _shutdownRequested;
     private int _transitionOperationCount;
+    private ActiveRoutingPipelineSession? _suspendPreservedSession;
 
     internal RoutingPipelineRuntimeCoordinator(
         ISystemStatusProvider statusProvider,
@@ -107,7 +108,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         Volatile.Read(ref _transitionOperationCount) > 0
         || _sessionCoordinator.PendingCleanup is not null;
 
-    internal bool HasPreservedSession => _sessionCoordinator.ActiveSession is not null &&
+    internal bool HasPreservedSession => _suspendPreservedSession is { } preserved &&
+        ReferenceEquals(_sessionCoordinator.ActiveSession, preserved) &&
         _sessionCoordinator.PendingCleanup is null;
 
     /// <summary>
@@ -294,8 +296,20 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             if (_sessionCoordinator.ActiveSession is not null && _sessionCoordinator.PendingCleanup is null &&
                 _pauseOwnedRouteForSuspend is not null)
             {
+                var active = _sessionCoordinator.ActiveSession;
                 var paused = await _pauseOwnedRouteForSuspend(cancellationToken).ConfigureAwait(false);
-                if (!paused.Succeeded) return false;
+                if (!paused.Succeeded)
+                {
+                    _suspendPreservedSession = null;
+                    return false;
+                }
+                if (!ReferenceEquals(_sessionCoordinator.ActiveSession, active) ||
+                    _sessionCoordinator.PendingCleanup is not null)
+                {
+                    _suspendPreservedSession = null;
+                    return false;
+                }
+                _suspendPreservedSession = active;
                 AppLog.Info("Routing.Power", "Active route preserved for suspend.",
                     ("Action", "SuspendPreserve"), ("Epoch", epoch));
                 return true;
@@ -361,7 +375,9 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         {
             await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             acquired = true;
-            if (_sessionCoordinator.ActiveSession is null || _reconcileOwnedRouteState is null)
+            var preserved = _suspendPreservedSession;
+            if (preserved is null || !ReferenceEquals(_sessionCoordinator.ActiveSession, preserved) ||
+                _sessionCoordinator.PendingCleanup is not null || _reconcileOwnedRouteState is null)
                 return false;
             var owned = await _reconcileOwnedRouteState(cancellationToken).ConfigureAwait(false);
             if (!owned.Succeeded)
@@ -371,6 +387,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         }
         finally
         {
+            _suspendPreservedSession = null;
             if (acquired) _transitionGate.Release();
             Interlocked.Decrement(ref _transitionOperationCount);
         }
