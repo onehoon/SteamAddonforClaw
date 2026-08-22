@@ -71,11 +71,13 @@
 
     const add = (moduleExports) => {
       if (!moduleExports || typeof moduleExports !== "object" || seen.has(moduleExports)) return;
-      seen.add(moduleExports);
-      modules.push(moduleExports);
-      if (moduleExports.default && typeof moduleExports.default === "object" && !seen.has(moduleExports.default)) {
-        seen.add(moduleExports.default);
-        modules.push(moduleExports.default);
+      const candidates = moduleExports.default && typeof moduleExports.default === "object"
+        ? [[moduleExports.default, "default"], [moduleExports, "root"]]
+        : [[moduleExports, "root"]];
+      for (const [candidate, source] of candidates) {
+        if (seen.has(candidate)) continue;
+        seen.add(candidate);
+        modules.push({ exports: candidate, source });
       }
     };
 
@@ -103,7 +105,8 @@
   // patched because enumeration order does not tell us which one the current Steam build renders.
   function findQamRenderers(webpackRequire) {
     const matches = [];
-    for (const moduleExports of collectSearchableModules(webpackRequire)) {
+    for (const module of collectSearchableModules(webpackRequire)) {
+      const moduleExports = module.exports;
       for (const candidate of Object.values(moduleExports)) {
         const render = candidate && typeof candidate.type === "function" ? candidate.type : null;
         if (!render) continue;
@@ -125,7 +128,8 @@
   }
 
   function findReact(webpackRequire) {
-    for (const mod of collectSearchableModules(webpackRequire)) {
+    for (const module of collectSearchableModules(webpackRequire)) {
+      const mod = module.exports;
       if (mod && mod.createElement && mod.Component) {
         logOnce("react", "React export found.");
         return mod;
@@ -144,10 +148,11 @@
   }
 
   function findCommonUiModule(modules) {
-    for (const moduleExports of modules) {
+    for (const module of modules) {
+      const moduleExports = module.exports;
       if (!moduleExports || typeof moduleExports !== "object" || Object.keys(moduleExports).length <= 60) continue;
       if (Object.values(moduleExports).some(value => value?.contextType?._currentValue)) {
-        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(moduleExports).length}`);
+        logOnce("commonUi", `Steam CommonUIModule resolved. Exports=${Object.keys(moduleExports).length} Source=${module.source}`);
         return moduleExports;
       }
     }
@@ -155,19 +160,33 @@
     return null;
   }
 
-  function findNativeComponent(commonUiModule, signatures, name) {
+  function findToggleField(commonUiModule) {
     if (!commonUiModule) return null;
     for (const candidate of Object.values(commonUiModule)) {
-      const render = renderTarget(candidate);
+      const render = candidate && typeof candidate.render === "function" ? candidate.render : null;
       if (!render) continue;
       let source;
       try { source = Function.prototype.toString.call(render); } catch (_) { continue; }
-      if (signatures.some(signature => source.includes(signature))) {
-        logOnce(`native-${name}`, `QAM native ${name} resolved from Steam CommonUIModule.`);
+      if (source.includes("ToggleField,fallback") || source.includes("ToggleField\\\",")) {
+        logOnce("native-ToggleField", "QAM native ToggleField resolved.");
         return candidate;
       }
     }
-    logOnce(`native-${name}`, `QAM native ${name} unavailable in Steam CommonUIModule.`);
+    logOnce("native-ToggleField", "QAM native ToggleField unavailable.");
+    return null;
+  }
+
+  function findSliderField(commonUiModule) {
+    if (!commonUiModule) return null;
+    for (const candidate of Object.values(commonUiModule)) {
+      let source;
+      try { source = Function.prototype.toString.call(candidate); } catch (_) { continue; }
+      if (source.includes("SliderField,fallback") || source.includes("SliderField\\\",")) {
+        logOnce("native-SliderField", "QAM native SliderField resolved.");
+        return candidate;
+      }
+    }
+    logOnce("native-SliderField", "QAM native SliderField unavailable.");
     return null;
   }
 
@@ -175,8 +194,8 @@
     const commonUiModule = findCommonUiModule(collectSearchableModules(webpackRequire));
     if (!commonUiModule) return null;
     const components = {
-      ToggleField: findNativeComponent(commonUiModule, ["ToggleField,fallback", "ToggleField\\\","], "ToggleField"),
-      SliderField: findNativeComponent(commonUiModule, ["SliderField,fallback", "SliderField\\\","], "SliderField"),
+      ToggleField: findToggleField(commonUiModule),
+      SliderField: findSliderField(commonUiModule),
     };
     if (!components.ToggleField || !components.SliderField) {
       logOnce("nativeControls", "QAM native ToggleField/SliderField unavailable; CPU Boost controls are disabled.");
