@@ -429,13 +429,6 @@ public sealed class AddonRuntimeHostTests
 
         try
         {
-            // Suspend first (the OEM1 auxiliary power participant's own QuiesceForSuspendAsync sets
-            // LastReason to "SuspendQuiesced" -- deterministic ground truth before resume even
-            // starts, so the check below can unambiguously attribute a later "ResumeReconcile" to
-            // the resume path specifically, not to suspend).
-            await source.RaiseAsync(4);
-            Assert.True(SpinWait.SpinUntil(() => oem1Coordinator.GetSnapshot().LastReason == "SuspendQuiesced", TimeSpan.FromSeconds(5)));
-
             await source.RaiseAsync(18);
 
             // Routing's own fresh reconcile throws (ThrowingStatusProvider), which would previously

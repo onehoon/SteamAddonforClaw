@@ -260,12 +260,11 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // PR3: the two narrow callbacks below let the OEM1 action path (wired later, only by
         // ConfigureOem1ActionPath) refresh custom gesture-bridge authority from the coordinator's own
         // freshly reconciled SuppressionReady snapshot after every tick/resume -- see
-        // RefreshOem1BridgeAuthority. Suspend revokes authority immediately (work order Scope 14).
+        // RefreshOem1BridgeAuthority. Hibernate does not revoke healthy OEM1 authority.
         CenterMOem1Runtime = centerMOem1Runtime ?? new CenterMOem1LifecycleRuntime(
             CenterMOem1Coordinator,
             routingGuardIsArmed: () => CenterMGuard.IsArmed,
-            onReconciled: RefreshOem1BridgeAuthority,
-            onSuspending: () => _oem1Bridge?.SetCustomAuthority(false));
+            onReconciled: RefreshOem1BridgeAuthority);
 
         _startCenterMOem1LifecycleRuntime = startCenterMOem1LifecycleRuntime;
 
@@ -290,10 +289,9 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     IRoutingSafetySession? IHandheldRoutingComposition.SafetySession => NativeModeSession;
     IPhysicalRumbleSink? IHandheldRoutingComposition.PhysicalRumbleSink => PhysicalRumbleSink;
 
-    // PR2: the OEM1 lifecycle driver is the composition's only auxiliary power/resume
-    // participant -- exposed generically so AddonRuntimeHost never needs to know it is MSI/CenterM
-    // specific (work order requirement 13).
-    IPowerSuspendParticipant? IHandheldRoutingComposition.AuxiliaryPowerParticipant => CenterMOem1Runtime;
+    // OEM1 remains an auxiliary resume participant, but Hibernate is intentionally not an OEM1
+    // shutdown boundary. AddonRuntimeHost therefore never invokes coordinator suspend quiesce.
+    IPowerSuspendParticipant? IHandheldRoutingComposition.AuxiliaryPowerParticipant => null;
     IRuntimeResumeParticipant? IHandheldRoutingComposition.AuxiliaryResumeParticipant => CenterMOem1Runtime;
 
     void IHandheldRoutingComposition.SetRuntimeFaultHandler(Func<string, bool, ValueTask> handler) =>

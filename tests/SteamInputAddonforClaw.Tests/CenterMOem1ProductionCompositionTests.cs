@@ -212,17 +212,13 @@ public sealed class CenterMOem1ProductionCompositionTests
     // ---- Suspend/resume ----
 
     [Fact]
-    public async Task Suspend_reaches_the_coordinators_quiesce_participant()
+    public async Task Hibernate_does_not_register_OEM1_as_a_suspend_participant()
     {
-        var target = new FakeDriverTarget();
-        var runtime = new CenterMOem1LifecycleRuntime(target, routingGuardIsArmed: () => false);
+        var composition = NewComposition(out _, out _, startDriver: false);
 
-        IPowerSuspendParticipant participant = runtime;
-        var result = await participant.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(1), 1, 1, CancellationToken.None);
+        Assert.Null(((IHandheldRoutingComposition)composition).AuxiliaryPowerParticipant);
 
-        Assert.True(result);
-        Assert.Equal(1, target.QuiesceCount);
-        await runtime.DisposeAsync();
+        await ((IAsyncDisposable)composition).DisposeAsync();
     }
 
     [Fact]
@@ -303,7 +299,6 @@ public sealed class CenterMOem1ProductionCompositionTests
         internal readonly SemaphoreSlim PollTicked = new(0);
         internal int LivenessPollCount;
         internal int PollTickCount;
-        internal int QuiesceCount;
         internal int ResumeReconcileCount;
         internal bool Disposed;
         internal bool ThrowOnFirstLivenessPoll;
@@ -323,12 +318,6 @@ public sealed class CenterMOem1ProductionCompositionTests
             Interlocked.Increment(ref PollTickCount);
             PollTicked.Release();
             return Task.CompletedTask;
-        }
-
-        public Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
-        {
-            Interlocked.Increment(ref QuiesceCount);
-            return Task.FromResult(true);
         }
 
         public Task ReconcileAfterResumeAsync(CancellationToken cancellationToken = default)

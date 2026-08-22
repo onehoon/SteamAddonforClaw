@@ -15,7 +15,6 @@ internal interface ICenterMOem1LifecycleDriverTarget
 {
     Task PollHelperLivenessAsync(CancellationToken cancellationToken = default);
     Task PollTickAsync(CancellationToken cancellationToken = default);
-    Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken);
     Task ReconcileAfterResumeAsync(CancellationToken cancellationToken = default);
     ValueTask DisposeAsync();
 }
@@ -38,13 +37,12 @@ internal interface ICenterMOem1LifecycleDriverTarget
 /// is skipped while the guard is Armed, so this driver never fights the guard's transient
 /// <c>Local\MSI Center M.exe</c> launch-protection authority during routing.
 /// </remarks>
-internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IRuntimeResumeParticipant, IAsyncDisposable
+internal sealed class CenterMOem1LifecycleRuntime : IRuntimeResumeParticipant, IAsyncDisposable
 {
     private readonly ICenterMOem1LifecycleDriverTarget _coordinator;
     private readonly Func<bool> _routingGuardIsArmed;
     private readonly Func<CancellationToken, Task> _waitForNextTick;
     private readonly Action? _onReconciled;
-    private readonly Action? _onSuspending;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _startSync = new();
     private Task? _loop;
@@ -54,8 +52,7 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
         Func<bool> routingGuardIsArmed,
         TimeSpan? pollInterval = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        Action? onReconciled = null,
-        Action? onSuspending = null)
+        Action? onReconciled = null)
     {
         _coordinator = coordinator;
         _routingGuardIsArmed = routingGuardIsArmed;
@@ -65,7 +62,6 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
         // reconciled SuppressionReady snapshot, without this runtime adding a second poller/state
         // machine of its own. Never touched unless a caller supplies it.
         _onReconciled = onReconciled;
-        _onSuspending = onSuspending;
         // One simple low-rate constant, per the work order -- no configurable polling setting, no
         // scheduler/timer-service abstraction. The delay function is injectable purely so tests can
         // drive the loop deterministically (same seam style as the coordinator's own `_delay`),
@@ -129,21 +125,6 @@ internal sealed class CenterMOem1LifecycleRuntime : IPowerSuspendParticipant, IR
                 AppLog.Error("CenterM.Oem1", "OEM1 lifecycle reconciliation tick failed; the driver will retry on the next tick.", exception);
             }
         }
-    }
-
-    public async Task<bool> QuiesceForSuspendAsync(DateTimeOffset deadline, long cycle, long epoch, CancellationToken cancellationToken)
-    {
-        // Review fix (BLOCKER): the coordinator's own QuiesceForSuspendAsync establishes its
-        // request-time suspend barrier synchronously, before its first await -- so starting that
-        // call (without yet awaiting it) is itself the linearization point at which the barrier
-        // becomes authoritative. Starting it BEFORE _onSuspending closes the small window where a
-        // racing driver tick could otherwise finish (and republish SuppressionReady == true) between
-        // the bridge revocation and the barrier actually taking effect. The task is only awaited
-        // after _onSuspending runs, matching this method's original ordering guarantee (bridge OFF
-        // completes synchronously before suspend quiesce is reported done).
-        var quiesce = _coordinator.QuiesceForSuspendAsync(deadline, cycle, epoch, cancellationToken);
-        _onSuspending?.Invoke();
-        return await quiesce.ConfigureAwait(false);
     }
 
     /// <summary>Runs the coordinator's existing fresh resume reconciliation exactly once. Never

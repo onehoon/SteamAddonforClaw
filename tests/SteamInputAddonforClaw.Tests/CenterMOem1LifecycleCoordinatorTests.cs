@@ -1333,53 +1333,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
-    public async Task Runtime_never_republishes_suppression_ready_via_onReconciled_during_a_driven_tick_while_suspended()
-    {
-        // Review fix (BLOCKER): before the SuppressionReady/suspend-barrier fix, a driver tick
-        // running while QuiesceForSuspendAsync had already revoked bridge authority could still
-        // observe State == Armed and re-report SuppressionReady == true via onReconciled, which a
-        // production OEM1 action-path owner uses to re-enable the custom gesture bridge -- reviving
-        // custom OEM1 admission mid-suspend. This drives a real tick through the real runtime+
-        // coordinator while suspended and proves onReconciled never observes SuppressionReady == true
-        // until AFTER ReconcileAfterResumeAsync completes.
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.True(coordinator.GetSnapshot().SuppressionReady);
-
-        var released = new SemaphoreSlim(0);
-        var reconciledSignal = new SemaphoreSlim(0);
-        var observedReadyDuringSuspend = false;
-
-        var runtime = new CenterMOem1LifecycleRuntime(
-            coordinator,
-            routingGuardIsArmed: () => false,
-            delay: (_, token) => released.WaitAsync(token),
-            onReconciled: () =>
-            {
-                if (coordinator.GetSnapshot().SuppressionReady)
-                    observedReadyDuringSuspend = true;
-                reconciledSignal.Release();
-            });
-
-        runtime.Start();
-
-        IPowerSuspendParticipant suspendParticipant = runtime;
-        await suspendParticipant.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        released.Release(); // let one driven tick run while the suspend barrier is active
-        await reconciledSignal.WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.False(observedReadyDuringSuspend);
-
-        IRuntimeResumeParticipant resumeParticipant = runtime;
-        await resumeParticipant.ReconcileAfterResumeAsync(CancellationToken.None);
-        Assert.True(coordinator.GetSnapshot().SuppressionReady);
-
-        await runtime.DisposeAsync();
-    }
-
-    [Fact]
     public async Task Resume_SameValidHelper_StaysArmed()
     {
         var h = NewHarness();

@@ -327,7 +327,7 @@ internal sealed class CenterMOem1LifecycleCoordinator : IPowerSuspendParticipant
     {
         // Review fix (BLOCKER): QuiesceForSuspendAsync deliberately keeps an already-armed helper
         // alive and does not leave the Armed state, so _state == Armed alone is not sufficient once
-        // suspend has revoked custom-action admission (see CenterMOem1LifecycleRuntime.onSuspending).
+        // a direct coordinator quiesce has revoked custom-action admission.
         // SuppressionReady must also require the suspend barrier to be clear, or a racing runtime
         // tick's onReconciled could re-observe SuppressionReady == true and re-enable the bridge
         // while suspend is still in effect.
