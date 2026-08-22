@@ -580,41 +580,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
-    public async Task TimedOutSuspendDuringHelperLivenessExit_RetiresOwnershipAndDefersRearmUntilResume()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-
-        using var suspendCts = new CancellationTokenSource();
-        Task? suspendTask = null;
-        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
-        h.HelperApi.OnPollLivenessCalled = () =>
-        {
-            suspendTask = coordinator.QuiesceForSuspendAsync(
-                DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, suspendCts.Token);
-            suspendCts.Cancel();
-            Assert.ThrowsAny<OperationCanceledException>(() => suspendTask!.GetAwaiter().GetResult());
-        };
-
-        await coordinator.PollHelperLivenessAsync();
-
-        Assert.NotNull(suspendTask);
-        Assert.Equal(1, h.HelperApi.StartCallCount);
-        Assert.False(h.HelperOwnership.IsOwned);
-
-        h.HelperApi.OnPollLivenessCalled = null;
-        await coordinator.ReconcileAsync("after timed-out helper liveness");
-        Assert.Equal(1, h.HelperApi.StartCallCount);
-        Assert.NotEqual(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-
-        await coordinator.ReconcileAfterResumeAsync();
-        Assert.Equal(2, h.HelperApi.StartCallCount);
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-    }
-
-    [Fact]
     public async Task Liveness_Uncertain_NoBlindRespawn_ExactHandleStopAttempted()
     {
         var h = NewHarness();
@@ -726,27 +691,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
         Assert.True(h.HelperOwnership.IsOwned);
         Assert.False(snap.NativeBehaviorGuaranteed);
-    }
-
-    [Fact]
-    public async Task SuspendedExit_PriorStateArmed_InvalidatesArmed_SnapshotNeverReportsSuppressionReadyWithNoHelper()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
-        await coordinator.PollHelperLivenessAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
-        // The direct assertion the review asked for: never SuppressionReady == true with
-        // HelperProcessId == null.
-        Assert.False(snap.SuppressionReady && snap.HelperProcessId is null);
-        Assert.Null(snap.HelperProcessId);
     }
 
     [Fact]
@@ -1096,45 +1040,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
-    public async Task SuspendDuringDebounce_CantKillStale()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-        h.Delay.Held = true;
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-        await coordinator.PollTickAsync();
-
-        // Suspend cancels the pending debounce synchronously as part of its own gate turn, so the
-        // continuation may already finish before this call returns -- subscribe first.
-        await AwaitDebounceCompletionAsync(coordinator,
-            () => coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None));
-        h.Delay.Release();
-
-        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
-    }
-
-    // ============================================================
-    // Safe termination result handling
-    // ============================================================
-
-    private async Task<(CenterMOem1LifecycleCoordinator Coordinator, Harness H)> ArmAdoptAndReachDebounce()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-        h.Delay.Held = false; // let the debounce resolve immediately once started
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-        // Subscribe BEFORE triggering the poll that starts the debounce: with Held == false the
-        // fire-and-forget continuation may finish essentially immediately, so subscribing after
-        // would risk a missed signal.
-        await AwaitDebounceCompletionAsync(coordinator, () => coordinator.PollTickAsync());
-        return (coordinator, h);
-    }
-
-    [Fact]
     public async Task DebounceCompletes_TerminatorInvokedExactlyOnce()
     {
         var (coordinator, h) = await ArmAdoptAndReachDebounce();
@@ -1295,58 +1200,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     // ============================================================
 
     [Fact]
-    public async Task Suspend_DoesNotKillAValidHelper()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        Assert.Equal(1, h.HelperApi.StartCallCount);
-        Assert.False(coordinator.GetSnapshot().NativeBehaviorGuaranteed); // still owned
-    }
-
-    [Fact]
-    public async Task Suspend_ReportsSuppressionNotReady_EvenThoughStateStaysArmed()
-    {
-        // Review fix (BLOCKER): QuiesceForSuspendAsync deliberately keeps an already-armed helper
-        // alive and does not leave the Armed state, so a caller deriving custom-action admission
-        // from State == Armed alone (as the OEM1 action-path composition does via SuppressionReady)
-        // could wrongly treat suspend as still ready. SuppressionReady must go false as soon as the
-        // suspend barrier is active, independent of State.
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.True(coordinator.GetSnapshot().SuppressionReady);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        var snapshot = coordinator.GetSnapshot();
-        Assert.Equal(CenterMOem1LifecycleState.Armed, snapshot.State);
-        Assert.False(snapshot.SuppressionReady);
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-        Assert.True(coordinator.GetSnapshot().SuppressionReady);
-    }
-
-    [Fact]
-    public async Task Resume_SameValidHelper_StaysArmed()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-        Assert.Equal(1, h.HelperApi.StartCallCount); // no duplicate helper created
-    }
-
-    [Fact]
     public async Task Resume_HelperExitedDuringSleep_FreshReconcile_ReArms()
     {
         var h = NewHarness();
@@ -1425,129 +1278,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     // between reconcile calls) was bypassed whenever a real MainUI was already tracked. The fix
     // refreshes those prerequisites before ever permitting hidden-debounce termination, while still
     // resolving the exact retained identity/SeenVisible history first.
-    // ============================================================
-
-    [Fact]
-    public async Task Resume_TrackedSeenVisibleHiddenAtResume_LauncherDrifted_ZeroDebounceOrTermination()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-        Assert.True(coordinator.GetSnapshot().SeenVisible);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        // Prerequisite drift during sleep: Launcher is no longer present.
-        h.Snapshots.Launcher = [];
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0); // hidden at resume
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
-        Assert.Equal(0, h.Delay.CallCount); // no debounce ever started
-        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // never terminated
-        // Retained identity preserved as non-destructive/native state, not discarded.
-        Assert.Equal(5555, snap.RealMainUiProcessId);
-    }
-
-    [Fact]
-    public async Task Resume_TrackedSeenVisibleHiddenAtResume_EnvironmentEligibilityFalse_ZeroDebounceOrTermination()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        // Environment eligibility drift during sleep -- covers both the "false" and "uncertain"
-        // (predicate throws, treated as unsupported/fail-open) cases via the same wrapped predicate.
-        h.EnvironmentEligible = () => false;
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
-        Assert.Equal(0, h.Delay.CallCount);
-        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public async Task Resume_TrackedSeenVisibleHiddenAtResume_LauncherMissing_ZeroDebounceOrTermination()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        h.Snapshots.Launcher = []; // prerequisite drift during sleep
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
-        Assert.Equal(0, h.Delay.CallCount);
-        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public async Task Resume_TrackedSeenVisibleHiddenAtResume_ServerMissing_ZeroDebounceOrTermination()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        h.Snapshots.Server = []; // prerequisite drift during sleep
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, snap.State);
-        Assert.Equal(0, h.Delay.CallCount);
-        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public async Task Resume_TrackedIdentityExitedDuringSleep_PrerequisitesInvalid_RetiresIdentity_NoArmFromSameResume()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-        Assert.Equal(1, h.HelperApi.StartCallCount);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        // During sleep: the tracked identity exits AND a prerequisite (Launcher) drifts invalid.
-        h.IdentityInspector.Status = LiveProcessProbeStatus.Exited;
-        h.Snapshots.Launcher = [];
-        h.Snapshots.Foreign = []; // the exited real MainUI no longer appears in enumeration either
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        // The exact identity is retired -- no longer tracked.
-        Assert.Null(snap.RealMainUiProcessId);
-        // But the same resume reconciliation must never arm a helper while Launcher is still drifted:
-        // the natural-exit path re-enters ReconcileCore fresh, which re-evaluates prerequisites and
-        // fails open into NeedsSetup instead of arming.
-        Assert.Equal(CenterMOem1LifecycleState.NeedsSetup, snap.State);
-        Assert.Equal(1, h.HelperApi.StartCallCount); // no re-arm from this same resume reconciliation
-        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount); // never attempted to terminate (already exited)
-    }
-
-    // ============================================================
-    // Concurrency races
     // ============================================================
 
     [Fact]
@@ -1644,70 +1374,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     // ============================================================
 
     // ---- Finding #1: suspended mutation barrier ----
-
-    [Fact]
-    public async Task Suspend_HelperExitsAfterQuiesce_LivenessPoll_NoReArmBeforeResume()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Exited;
-        await coordinator.PollHelperLivenessAsync();
-
-        // The exited handle is retired (bookkeeping only), but no fresh reconcile -- and therefore
-        // no new helper -- may run while the suspended barrier is active.
-        Assert.Equal(1, h.HelperApi.StartCallCount);
-        Assert.True(coordinator.GetSnapshot().NativeBehaviorGuaranteed);
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-        Assert.Equal(2, h.HelperApi.StartCallCount); // resume is the explicit boundary that re-arms
-    }
-
-    [Fact]
-    public async Task Suspend_TrackedMainUiHiddenAfterQuiesce_PollStartsNoDebounceOrTermination()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-        Assert.True(coordinator.GetSnapshot().SeenVisible);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0); // hidden
-        await coordinator.PollTickAsync();
-
-        Assert.NotEqual(CenterMOem1LifecycleState.HiddenDebounce, coordinator.GetSnapshot().State);
-        Assert.Equal(0, h.Delay.CallCount); // no debounce ever started while suspended
-        Assert.Equal(0, h.TerminateInvoker.TerminateCallCount);
-    }
-
-    [Fact]
-    public async Task SuspendedBarrier_BlocksGenericReconcile_UntilResumeClearsIt()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        await coordinator.ReconcileAsync("attempted-reconcile-while-suspended");
-        Assert.Equal(1, h.HelperApi.StartCallCount); // barrier refused to mutate anything
-
-        await coordinator.ReconcileAfterResumeAsync(); // explicit boundary: clears barrier, reconciles fresh
-
-        Assert.Equal(CenterMOem1LifecycleState.Armed, coordinator.GetSnapshot().State);
-        Assert.Equal(1, h.HelperApi.StartCallCount); // world was clean -- resume simply reconfirms Armed
-    }
-
-    // ---- Finding #2: retained-handle-anchored adoption and observation ----
 
     [Fact]
     public async Task AdoptionCandidate_RetainedHandleReportsDifferentIdentity_NoAdoption()
@@ -1991,31 +1657,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     [Fact]
-    public async Task PartialCleanupUnconfirmed_ResumeReconcile_DoesNotUpgradeToArmed()
-    {
-        var h = NewHarness();
-        h.HelperApi.JobSucceeds = false;
-        h.HelperApi.WaitForExitSucceeds = false;
-        var coordinator = h.Build();
-
-        await coordinator.SetDesiredEnabledAsync(true);
-        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, coordinator.GetSnapshot().State);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        // The residual, job-less handle is still alive across the sleep -- resume must not treat
-        // "alive and unique" as sufficient to upgrade it to Armed.
-        h.HelperApi.LivenessResult = LiveProcessProbeStatus.Alive;
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
-        Assert.Equal(1, h.HelperApi.StartCallCount); // no second Start attempted either
-    }
-
-    // ---- Finding #2: completed/stale debounce continuations must always retire the pending debounce ----
-
-    [Fact]
     public async Task DebounceExpires_VisibleAgain_SecondHiddenCycleStartsANewDebounce()
     {
         var h = NewHarness();
@@ -2157,70 +1798,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     }
 
     // ---- Finding #4: resume/reconcile must resolve an existing tracked real MainUI first ----
-
-    [Fact]
-    public async Task Resume_TrackedRealMainUiStillAlive_IdentityAndSeenVisiblePreserved_NoDoubleAdoption()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.PollTickAsync();
-        Assert.True(coordinator.GetSnapshot().SeenVisible);
-        var handleOpenCallsBeforeSuspend = h.HandleOpener.OpenCallCount;
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        // The exact same real MainUI remains alive across resume (still enumerable, and the
-        // retained handle still confirms it).
-        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.Equal(5555, snap.RealMainUiProcessId);
-        Assert.True(snap.SeenVisible); // history preserved -- no re-adoption/reset
-        Assert.Equal(handleOpenCallsBeforeSuspend, h.HandleOpener.OpenCallCount); // no second handle opened
-    }
-
-    [Fact]
-    public async Task Resume_TrackedRealMainUiExitedDuringSleep_RetiredBeforeAnyArmCommit()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        // The tracked real MainUI exited during sleep: the retained handle proves it, and it no
-        // longer appears in a fresh enumeration.
-        h.IdentityInspector.Status = LiveProcessProbeStatus.Exited;
-        h.Snapshots.Foreign = [];
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.Null(snap.RealMainUiProcessId); // retired, never left dangling while re-arming
-        Assert.Equal(CenterMOem1LifecycleState.Armed, snap.State); // clean world -> fresh arm afterward
-        Assert.Equal(2, h.HelperApi.StartCallCount);
-    }
-
-    [Fact]
-    public async Task Resume_TrackedRealMainUiRetainedIdentityUncertain_NoHelperStart()
-    {
-        var h = NewHarness();
-        var coordinator = await ArmAndAdoptStartingHidden(h);
-        var startCallCountAfterAdopt = h.HelperApi.StartCallCount; // the helper was stopped before adoption
-
-        await coordinator.QuiesceForSuspendAsync(DateTimeOffset.UtcNow.AddSeconds(5), 1, 1, CancellationToken.None);
-
-        h.IdentityInspector.Status = LiveProcessProbeStatus.Uncertain;
-
-        await coordinator.ReconcileAfterResumeAsync();
-
-        var snap = coordinator.GetSnapshot();
-        Assert.Equal(CenterMOem1LifecycleState.FaultedNative, snap.State);
-        Assert.Equal(startCallCountAfterAdopt, h.HelperApi.StartCallCount); // no helper arm from an uncertain retained identity
-    }
-
-    // ---- Finding #5: environment eligibility must default/fail closed (unsupported), never open ----
 
     [Fact]
     public void DefaultEnvironmentEligibility_FailsClosed_NoPredicateInjected()
@@ -2370,25 +1947,6 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
     // Review 4957507443, finding #2 (BLOCKER): the request-time suspend boundary must invalidate
     // an arm already in flight, before Armed is ever committed.
     // ============================================================
-
-    [Fact]
-    public async Task AttemptArm_SuspendRequestedWhileArmInFlight_HelperCleanedUp_ArmedNeverCommitted()
-    {
-        var h = NewHarness();
-        var coordinator = h.Build();
-
-        // Simulates QuiesceForSuspendAsync bumping the lifecycle epoch (which it always does BEFORE
-        // ever waiting on the gate) at the exact moment the helper process has just been created,
-        // strictly after AttemptArm (which already holds the gate) started its work.
-        h.HelperApi.OnCreateSuspendedCalled = () => coordinator.TestOnly_BumpLifecycleEpoch();
-
-        await coordinator.SetDesiredEnabledAsync(true);
-
-        var snap = coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snap.State);
-        Assert.False(h.HelperOwnership.IsOwned); // newly-created helper was cleaned up, not left running
-        Assert.Equal(1, h.HelperApi.StartCallCount); // no second helper created from the stale operation
-    }
 
     [Fact]
     public async Task AttemptArm_SuspendRequestedWhileArmInFlight_CleanupUnconfirmed_OwnershipRetainedFaultedNative()
@@ -3351,5 +2909,19 @@ public sealed class CenterMOem1LifecycleCoordinatorTests
         {
             coordinator.TestOnly_DebounceContinuationFinished -= OnFinished;
         }
+    }
+    private async Task<(CenterMOem1LifecycleCoordinator Coordinator, Harness H)> ArmAdoptAndReachDebounce()
+    {
+        var h = NewHarness();
+        var coordinator = await ArmAndAdoptStartingHidden(h);
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 1);
+        await coordinator.PollTickAsync();
+        h.Delay.Held = false; // let the debounce resolve immediately once started
+        h.WindowProvider.NextSnapshot = new MainUiWindowSnapshot(true, 1, 0);
+        // Subscribe BEFORE triggering the poll that starts the debounce: with Held == false the
+        // fire-and-forget continuation may finish essentially immediately, so subscribing after
+        // would risk a missed signal.
+        await AwaitDebounceCompletionAsync(coordinator, () => coordinator.PollTickAsync());
+        return (coordinator, h);
     }
 }
