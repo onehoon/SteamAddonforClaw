@@ -6,6 +6,7 @@ namespace SteamInputAddonforClaw.Devices.MSI.Claw;
 
 internal sealed class TdpHelperClient : IAsyncDisposable
 {
+    private static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(15);
     private readonly Lock _sync = new();
     private NamedPipeClientStream? _pipe;
     private StreamReader? _reader;
@@ -26,7 +27,9 @@ internal sealed class TdpHelperClient : IAsyncDisposable
                 EnsureConnected();
                 _writer!.WriteLine(JsonSerializer.Serialize(request));
                 _writer.Flush();
-                var response = JsonSerializer.Deserialize<Response>(_reader!.ReadLine() ?? "");
+                using var responseTimeout = new CancellationTokenSource(ResponseTimeout);
+                var responseLine = _reader!.ReadLineAsync(responseTimeout.Token).AsTask().GetAwaiter().GetResult();
+                var response = JsonSerializer.Deserialize<Response>(responseLine ?? "");
                 if (response?.Ok != true) return false;
                 payload = response.Payload is null ? [] : Convert.FromBase64String(response.Payload);
                 return request.Operation == "SetData" || payload.Length > 0;

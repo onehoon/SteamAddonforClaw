@@ -19,7 +19,19 @@ while (true)
     {
         var request = JsonSerializer.Deserialize<Request>(line);
         if (request is null || !TdpHelperProtocol.IsSupported(request.Operation, request.Index)) { await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(false, null))); continue; }
-        var result = Invoke(TdpHelperProtocol.GetWmiMethod(request.Operation), request.Index, request.Value, request.Operation == "GetAp");
+        (bool Ok, byte[]? Payload) result;
+        try
+        {
+            result = await Task.Run(() => Invoke(
+                TdpHelperProtocol.GetWmiMethod(request.Operation),
+                request.Index,
+                request.Value,
+                request.Operation == "GetAp")).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException)
+        {
+            return;
+        }
         await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(result.Ok, result.Payload is null ? null : Convert.ToBase64String(result.Payload))));
     }
     catch { await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(false, null))); }

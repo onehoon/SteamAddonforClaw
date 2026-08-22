@@ -79,6 +79,16 @@ public sealed class ElevationConfigurationTests
         Assert.Contains("await _tdpTransport.DisposeAsync()", source);
     }
 
+    [Fact]
+    public void Tdp_helper_request_and_response_paths_are_time_bounded()
+    {
+        var client = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw", "Devices", "MSI", "Claw", "TdpHelperClient.cs"));
+        var helper = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
+        Assert.Contains("ReadLineAsync(responseTimeout.Token)", client);
+        Assert.Contains("WaitAsync(TimeSpan.FromSeconds(10))", helper);
+        Assert.Contains("return;", helper);
+    }
+
     private static string RepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
