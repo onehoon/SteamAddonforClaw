@@ -15,9 +15,9 @@
                 </ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch x:Name="SteamInputRoutingToggleSwitch" OffContent="" OnContent="" Toggled="SteamInputRoutingToggleSwitch_Toggled" />
                 <ctcontrols:SettingsExpander.Items>
+                    <TextBlock Text="During Steam Input routing, Xbox Game Bar is disabled and this button uses the action configured below. Win + G is also blocked while routing to protect controller routing." TextWrapping="Wrap" MaxWidth="1000" Opacity="0.75" />
                     <ctcontrols:SettingsCard x:Name="WingSingleMappingCard" Header="Single Press">
                         <StackPanel Spacing="10">
-                            <TextBlock Text="During Steam Input routing, Xbox Game Bar is disabled and this button uses the action configured below. Win + G is also blocked while routing to protect controller routing." TextWrapping="Wrap" />
                             <ComboBox x:Name="WingSingleActionComboBox" MinWidth="220" SelectionChanged="WingAction_SelectionChanged" />
                             <StackPanel x:Name="WingSingleHotkeyDetails" Spacing="6" Visibility="Collapsed">
                                 <StackPanel Orientation="Horizontal" Spacing="12">
