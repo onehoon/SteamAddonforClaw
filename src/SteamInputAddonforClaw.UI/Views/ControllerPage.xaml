@@ -18,10 +18,15 @@
                     <ctcontrols:SettingsCard x:Name="WingMappingCard" Header="Gamebar Widget Button">
                     <StackPanel Spacing="10" Padding="0,8,0,0">
                         <TextBlock FontWeight="SemiBold" Text="Gamebar Widget Button" />
-                        <TextBlock Text="During Steam Input routing, Xbox Game Bar is disabled and this button uses the action configured below. Win + G is also blocked while routing to protect controller routing." TextWrapping="Wrap" MaxWidth="1200" Opacity="0.75" />
-                        <ctcontrols:SettingsCard Header="Single Press">
-                            <ComboBox x:Name="WingSingleActionComboBox" SelectionChanged="WingAction_SelectionChanged" />
-                        </ctcontrols:SettingsCard>
+                        <TextBlock Text="During Steam Input routing, Xbox Game Bar is disabled and this button uses the action configured below. Win + G is also blocked while routing to protect controller routing." TextWrapping="Wrap" Width="1000" Opacity="0.75" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Single Press" VerticalAlignment="Center" />
+                            <ComboBox x:Name="WingSingleActionComboBox" Grid.Column="1" MinWidth="220" SelectionChanged="WingAction_SelectionChanged" />
+                        </Grid>
                         <StackPanel x:Name="WingSingleHotkeyDetails" Spacing="6" Visibility="Collapsed">
                             <StackPanel Orientation="Horizontal" Spacing="12">
                                 <CheckBox x:Name="WingSingleControlCheckBox" Content="Ctrl" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
@@ -35,9 +40,14 @@
                             <TextBox x:Name="WingSingleExecutableTextBox" Header="Executable (.exe)" LostFocus="WingConfiguration_LostFocus" />
                             <TextBox x:Name="WingSingleArgumentsTextBox" Header="Arguments" LostFocus="WingConfiguration_LostFocus" />
                         </StackPanel>
-                        <ctcontrols:SettingsCard Header="Double Press">
-                            <ComboBox x:Name="WingDoubleActionComboBox" SelectionChanged="WingAction_SelectionChanged" />
-                        </ctcontrols:SettingsCard>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Double Press" VerticalAlignment="Center" />
+                            <ComboBox x:Name="WingDoubleActionComboBox" Grid.Column="1" MinWidth="220" SelectionChanged="WingAction_SelectionChanged" />
+                        </Grid>
                         <StackPanel x:Name="WingDoubleHotkeyDetails" Spacing="6" Visibility="Collapsed">
                             <StackPanel Orientation="Horizontal" Spacing="12">
                                 <CheckBox x:Name="WingDoubleControlCheckBox" Content="Ctrl" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
