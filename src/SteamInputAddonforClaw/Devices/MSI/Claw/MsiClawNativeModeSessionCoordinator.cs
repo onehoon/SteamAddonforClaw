@@ -53,7 +53,7 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
             if (original is null || original.IdentityConfidence != MsiClawIdentityConfidence.Strong)
                 return RoutingStageOperationResult.Failure("OriginalIdentityUnavailable");
 
-            var current = await _nativeState.CaptureStableCurrentSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        var current = await _nativeState.CaptureStableCurrentSnapshotAsync(cancellationToken, allowTransientDeviceNotFound: true).ConfigureAwait(false);
             var currentPayload = current.Snapshot?.Payload.Deserialize<MsiClawNativeStatePayload>();
             if (!current.AllowsMutation || currentPayload is null)
                 return RoutingStageOperationResult.Failure(current.Reason);

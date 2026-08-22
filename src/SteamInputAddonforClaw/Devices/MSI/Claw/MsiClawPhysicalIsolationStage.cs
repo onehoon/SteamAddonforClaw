@@ -56,7 +56,10 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             return ValueTask.FromResult(Failure("AmbiguousMutationPending"));
 
         var repaired = false;
-        if (_ownedWhitelist && !inspection.ApplicationWhitelist.Contains(_executablePath!, StringComparer.OrdinalIgnoreCase))
+        var whitelistPresent = inspection.ApplicationWhitelist.Contains(_executablePath!, StringComparer.OrdinalIgnoreCase);
+        if (!whitelistPresent && !_ownedWhitelist)
+            return ValueTask.FromResult(Failure("PreExistingWhitelistDrift"));
+        if (!whitelistPresent)
         {
             if (!Try(() => _hidHide.AddApplication(_executablePath!))) return ValueTask.FromResult(Failure("WhitelistRepairFailed"));
             repaired = true;
@@ -67,9 +70,20 @@ internal sealed class MsiClawPhysicalIsolationStage : IRoutingPipelineStage
             if (!Try(() => _hidHide.AddHiddenDevice(entry.Value))) return ValueTask.FromResult(Failure("DeviceRepairFailed"));
             repaired = true;
         }
+        foreach (var entry in _entries.Where(entry => !entry.Owned))
+        {
+            if (!(inspection.HiddenDeviceEntries ?? []).Any(value => string.Equals(value, entry.Value, StringComparison.OrdinalIgnoreCase)))
+                return ValueTask.FromResult(Failure("PreExistingDeviceDrift"));
+        }
         inspection = _hidHide.Inspect();
         if (!inspection.IsConfigurationReadable || inspection.IsInverseWhitelist)
             return ValueTask.FromResult(Failure("HidHideConfigurationUnsafe"));
+        if (!inspection.ApplicationWhitelist.Contains(_executablePath!, StringComparer.OrdinalIgnoreCase))
+            return ValueTask.FromResult(Failure("WhitelistRepairUnverified"));
+        if (_entries.Any(entry => !(inspection.HiddenDeviceEntries ?? []).Any(value => string.Equals(value, entry.Value, StringComparison.OrdinalIgnoreCase))))
+            return ValueTask.FromResult(Failure("DeviceRepairUnverified"));
+        if (!inspection.IsActive && !_activeMutationOwned)
+            return ValueTask.FromResult(Failure("PreExistingActiveStateDrift"));
         if (_activeMutationOwned && !ContainsOnlySessionOwnedEntries(inspection))
             return ValueTask.FromResult(Failure("ActiveStateRepairUnsafeForeignBlockedEntries"));
         if (_activeMutationOwned && !inspection.IsActive)

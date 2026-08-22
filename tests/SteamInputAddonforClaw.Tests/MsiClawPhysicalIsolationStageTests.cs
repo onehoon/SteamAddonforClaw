@@ -98,6 +98,71 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
     }
 
     [Fact]
+    public async Task ReconcileOwnedState_fails_when_preexisting_whitelist_disappears()
+    {
+        var hid = new FakeHidHide { Applications = ["C:\\addon.exe"] };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        hid.Applications.Clear(); hid.Trace.Clear();
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("PreExistingWhitelistDrift", result.Reason);
+        Assert.Empty(hid.Trace);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_fails_when_preexisting_device_disappears()
+    {
+        const string device = "HID\\VID_0DB0&PID_1902&MI_00&COL01\\CHILD";
+        var hid = new FakeHidHide { Applications = ["C:\\addon.exe"], HiddenDevices = [device] };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        hid.HiddenDevices.Clear(); hid.Trace.Clear();
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("PreExistingDeviceDrift", result.Reason);
+        Assert.Empty(hid.Trace);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_fails_when_preexisting_active_disappears()
+    {
+        var hid = new FakeHidHide { Applications = ["C:\\addon.exe"], Active = true };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        hid.Active = false; hid.Trace.Clear();
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("PreExistingActiveStateDrift", result.Reason);
+        Assert.Empty(hid.Trace);
+    }
+
+    [Fact]
+    public async Task ReconcileOwnedState_owned_device_repair_must_be_verified()
+    {
+        var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
+        var stage = Create(hid);
+        Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        hid.FailDeviceAddWithoutApplying = false;
+        Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        hid.HiddenDevices.Clear(); hid.ReportDeviceAddSuccessWithoutApplying = true; hid.Trace.Clear();
+
+        var result = await stage.ReconcileOwnedStateAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("DeviceRepairUnverified", result.Reason);
+    }
+
+    [Fact]
     public async Task InactiveHidHideIsEnabledLastAndRestoredFirst()
     {
         var hid = new FakeHidHide { Active = false, Status = HidHideInspectionStatus.Disabled };
@@ -402,6 +467,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         public bool ReportDeviceAddFailureAfterApplying { get; set; }
         public bool FailApplicationAddWithoutApplying { get; set; }
         public bool FailDeviceAddWithoutApplying { get; set; }
+        public bool ReportDeviceAddSuccessWithoutApplying { get; set; }
         public bool Active { get; set; } = true;
         public bool Inverse { get; set; }
         public bool DriftToInverseAfterDeviceAdd { get; set; }
@@ -427,7 +493,7 @@ public sealed class MsiClawPhysicalIsolationStageTests : IDisposable
         }
         public bool AddApplication(string path) { Trace.Add("AddApplication"); if (FailApplicationAddWithoutApplying) return false; Applications.Add(path); return true; }
         public bool RemoveApplication(string path) { Trace.Add("RemoveApplication"); Applications.RemoveAll(x => string.Equals(x, path, StringComparison.OrdinalIgnoreCase)); return true; }
-        public bool AddHiddenDevice(string entry) { Trace.Add("AddDevice:" + entry); if (FailDeviceAddWithoutApplying) return false; HiddenDevices.Add(entry); if (DriftToInverseAfterDeviceAdd) Inverse = true; return !FailDeviceAdd && !ReportDeviceAddFailureAfterApplying; }
+        public bool AddHiddenDevice(string entry) { Trace.Add("AddDevice:" + entry); if (FailDeviceAddWithoutApplying || ReportDeviceAddSuccessWithoutApplying) return !FailDeviceAddWithoutApplying; HiddenDevices.Add(entry); if (DriftToInverseAfterDeviceAdd) Inverse = true; return !FailDeviceAdd && !ReportDeviceAddFailureAfterApplying; }
         public bool RemoveHiddenDevice(string entry) { Trace.Add("RemoveDevice:" + entry); HiddenDevices.RemoveAll(x => string.Equals(x, entry, StringComparison.OrdinalIgnoreCase)); return true; }
     }
 
