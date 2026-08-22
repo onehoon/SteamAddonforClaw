@@ -1052,9 +1052,9 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => quiesce);
-        Assert.False(bridge.Bridge.CanApplyInteractivePresentation);
+        Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
         executor.ReleaseRollback.TrySetResult();
-        Assert.True(await holder);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => holder);
         Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
     }
 

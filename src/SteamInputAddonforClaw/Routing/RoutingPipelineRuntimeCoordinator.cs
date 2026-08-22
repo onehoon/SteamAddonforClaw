@@ -130,7 +130,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             await _transitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             acquired = true;
             if (IsShutdownRequested) return false;
-            return await RetireResidualSessionCoreAsync(cancellationToken).ConfigureAwait(false);
+            using var transition = CreateTransitionCancellation(cancellationToken);
+            return await RetireResidualSessionCoreAsync(transition.Token, cancelPendingCleanup: true).ConfigureAwait(false);
         }
         finally
         {
@@ -343,7 +344,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             var result = await _sessionCoordinator.ReconcileAsync(
                 RecoveryResetDecision,
                 IndeterminateClassification,
-                CancellationToken.None).ConfigureAwait(false);
+                cancellationToken,
+                cancelPendingCleanup: true).ConfigureAwait(false);
             var retired = result.Succeeded && _sessionCoordinator.ActiveSession is null && _sessionCoordinator.PendingCleanup is null;
             AppLog.Info("Routing.Power", "Routing suspend teardown completed.",
                 ("Action", "SuspendTeardown"), ("Result", retired ? "Passive" : "Failed"),
@@ -386,7 +388,7 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             var token = transition.Token;
             var owned = await _reconcileOwnedRouteState(token).ConfigureAwait(false);
             if (!owned.Succeeded)
-                return await RetireResidualSessionCoreAsync(token).ConfigureAwait(false);
+                return await RetireResidualSessionCoreAsync(token, cancelPendingCleanup: true).ConfigureAwait(false);
             await refreshBeforeDecision(token).ConfigureAwait(false);
             var result = await ReconcileCoreAsync(token).ConfigureAwait(false);
             return result.Succeeded;
@@ -473,12 +475,15 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     /// <see cref="ReconcileFreshAfterResumeCoreAsync"/> (post-journal-recovery re-entry) and
     /// <see cref="RetryResidualCleanupForResumeAsync"/> (pre-journal-recovery residual cleanup).
     /// </summary>
-    private async ValueTask<bool> RetireResidualSessionCoreAsync(CancellationToken cancellationToken)
+    private async ValueTask<bool> RetireResidualSessionCoreAsync(
+        CancellationToken cancellationToken,
+        bool cancelPendingCleanup = false)
     {
         var result = await _sessionCoordinator.ReconcileAsync(
             RecoveryResetDecision,
             IndeterminateClassification,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            cancelPendingCleanup: cancelPendingCleanup).ConfigureAwait(false);
         return result.Succeeded && _sessionCoordinator.ActiveSession is null && _sessionCoordinator.PendingCleanup is null;
     }
 
