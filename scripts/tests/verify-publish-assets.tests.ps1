@@ -105,6 +105,16 @@ try {
     Remove-Item -LiteralPath (Join-Path $root 'CenterMHelperSource\CenterMHelper.exe')
     Assert-MissingAssetFailure -Result (Invoke-Verify -PublishDirectory $root) -Case 'missing CenterM helper artifact' -Asset 'CenterMHelperSource\CenterMHelper.exe'
 
+    foreach ($sidecar in @('CenterMHelper.dll', 'CenterMHelper.deps.json', 'CenterMHelper.runtimeconfig.json')) {
+        $root = New-Fixture
+        $fixturesToClean += $root
+        Set-Content -LiteralPath (Join-Path $root "CenterMHelperSource\$sidecar") -Value 'forbidden'
+        $result = Invoke-Verify -PublishDirectory $root
+        if ($result.ExitCode -eq 0) {
+            throw "Expected '$sidecar' to be rejected, but verification succeeded."
+        }
+    }
+
     $root = New-Fixture
     $fixturesToClean += $root
     Remove-Item -LiteralPath (Join-Path $root 'SteamInputAddonforClaw.TdpHelper.exe')

@@ -68,7 +68,7 @@ if ($missingAssets) {
 
 $centerMHelperSource = Join-Path $PublishDirectory 'CenterMHelperSource'
 $centerMHelperSidecars = @(Get-ChildItem -LiteralPath $centerMHelperSource -File | Where-Object {
-    $_.Extension -in @('.dll', '.deps.json', '.runtimeconfig.json')
+    $_.Name -match '\.(dll|deps\.json|runtimeconfig\.json)$'
 })
 if ($centerMHelperSidecars.Count -gt 0) {
     throw "CenterMHelperSource contains NativeAOT-forbidden sidecar payload: $($centerMHelperSidecars.Name -join ', ')"
