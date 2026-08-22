@@ -43,6 +43,8 @@ if (-not (Test-Path -LiteralPath $iconPath)) {
 
 & (Join-Path $PSScriptRoot 'verify-publish-assets.ps1') -PublishDirectory $publishDirectory
 
+& (Join-Path $PSScriptRoot 'report-publish-size.ps1') -PublishDirectory $publishDirectory
+
 $vpkArguments = @(
     'vpk', '--version', '1.2.0', 'pack',
     '--packId', 'SteamInputAddonforClaw',
