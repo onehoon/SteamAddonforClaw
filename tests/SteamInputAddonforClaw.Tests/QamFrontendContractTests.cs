@@ -232,6 +232,12 @@ public sealed class QamFrontendContractTests
         Assert.Contains("title: null", source);
         Assert.Contains("className: native.QamTitleClass", source);
         Assert.Contains("function findPanelComponents(modules)", source);
+        Assert.Contains("let panelSection = null", source);
+        Assert.Contains("candidate[exportName]", source);
+        Assert.Contains("source?.includes(\".PanelSection\")", source);
+        Assert.Contains("return { PanelSection: panelSection, PanelSectionRow: panelSectionRow }", source);
+        Assert.DoesNotContain("Object.values(candidate).find(value => value?.toString", source);
+        Assert.Contains("try { value = candidate[exportName]; } catch (_) { continue; }", source);
         Assert.Contains("PanelSection", source);
         Assert.Contains("PanelSectionRow", source);
         Assert.Contains("function isSteamClassModule(candidate)", source);
