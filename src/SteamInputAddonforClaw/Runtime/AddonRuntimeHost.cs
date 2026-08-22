@@ -146,6 +146,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     /// <summary>Normal (non-resume) reconcile, via the safe C5b1 path. No-op when routing is unavailable.</summary>
     internal async Task ReconcileAsync(CancellationToken cancellationToken = default)
     {
+        if (!_powerGate.IsOpen)
+            return;
         if (_routingRuntime is not null &&
             await _routingRuntime.ReconcileSafelyAsync(RequestStatusRefresh, cancellationToken).ConfigureAwait(false))
             _routingReconcileCompleted?.Invoke();

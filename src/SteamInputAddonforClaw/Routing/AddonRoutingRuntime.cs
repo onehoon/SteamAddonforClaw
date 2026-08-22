@@ -255,7 +255,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
     {
         var result = await _composition.PauseOwnedRouteForSuspendAsync(cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return result;
-        var deckPaused = await _deckStage.PausePresentationAsync(cancellationToken).ConfigureAwait(false);
+        var deckPaused = await _deckStage.PausePresentationAsync(
+            cancellationToken, reportOutputFaultOnFailure: false).ConfigureAwait(false);
         return deckPaused
             ? RoutingStageOperationResult.Success("RoutePausedForSuspend")
             : RoutingStageOperationResult.Failure("SteamDeckPresentationPauseFailed");

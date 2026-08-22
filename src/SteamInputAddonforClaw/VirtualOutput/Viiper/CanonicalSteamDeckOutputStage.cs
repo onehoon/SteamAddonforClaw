@@ -307,7 +307,9 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
     /// publisher is proven stopped, since a still-running publisher's next tick would immediately
     /// overwrite neutral with live state.
     /// </summary>
-    internal async Task<bool> PausePresentationAsync(CancellationToken cancellationToken = default)
+    internal async Task<bool> PausePresentationAsync(
+        CancellationToken cancellationToken = default,
+        bool reportOutputFaultOnFailure = true)
     {
         await _serial.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -326,7 +328,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 // Publisher shutdown could not be proven -- there may still be an in-flight SetState.
                 // Do not write neutral, do not mark paused: fail closed through the existing output
                 // fault path rather than attempting recovery/retry heuristics here.
-                ReportOutputFault(exception);
+                if (reportOutputFaultOnFailure) ReportOutputFault(exception);
                 return false;
             }
 
@@ -334,7 +336,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             try { neutralAccepted = _canonicalSession.SetNeutral(); }
             catch (Exception exception)
             {
-                ReportOutputFault(exception);
+                if (reportOutputFaultOnFailure) ReportOutputFault(exception);
                 return false;
             }
             if (!neutralAccepted)
@@ -343,7 +345,8 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 // Do not restart the publisher, do not detach here, do not pretend pause succeeded --
                 // report through the existing output-fault/fail-close path; outer routing rollback
                 // remains responsible for structural teardown.
-                ReportOutputFault(new InvalidOperationException("Canonical VIIPER rejected the Steam Deck neutral report during presentation pause."));
+                if (reportOutputFaultOnFailure)
+                    ReportOutputFault(new InvalidOperationException("Canonical VIIPER rejected the Steam Deck neutral report during presentation pause."));
                 return false;
             }
 
