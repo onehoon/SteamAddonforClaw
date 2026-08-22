@@ -12,4 +12,12 @@ public sealed class ProfilePagePolicyTests
         Assert.True(ProfilePage.IsCurrentProfileResponse(200u, 200u));
         Assert.False(ProfilePage.IsCurrentProfileResponse(null, 200u));
     }
+
+    [Fact]
+    public void Older_tdp_completion_preserves_a_newer_dirty_draft()
+    {
+        Assert.True(ProfilePage.ShouldPreserveDirtyTdpDraft(true, 4, 5));
+        Assert.False(ProfilePage.ShouldPreserveDirtyTdpDraft(false, 4, 5));
+        Assert.False(ProfilePage.ShouldPreserveDirtyTdpDraft(true, 5, 5));
+    }
 }
