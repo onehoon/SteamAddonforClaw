@@ -944,6 +944,9 @@ public sealed class CpuBoostRuntimeTests : IDisposable
 
         Assert.Equal(CpuBoostMode.Aggressive, backend.Ac.Mode);
         Assert.Equal(CpuBoostMode.EfficientEnabled, backend.Dc.Mode);
+        Assert.False(runtime.Snapshot.Enabled);
+        Assert.Equal(CpuBoostMode.Enabled, runtime.Snapshot.AcDesired);
+        Assert.Equal(CpuBoostMode.Disabled, runtime.Snapshot.DcDesired);
     }
 
     [Fact]

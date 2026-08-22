@@ -102,13 +102,13 @@ internal sealed class CpuBoostRuntime
 
             if (TryGetGameCpu(loaded.Document, actualAppId, out var gameAc, out var gameDc))
             {
-                ReconcileWindows(gameAc, gameDc, "actual AppID game reconcile");
+                ReconcileWindows(gameAc, gameDc, loaded.Document.Device.Performance.CpuBoost, "actual AppID game reconcile");
                 return;
             }
 
             var device = loaded.Document.Device.Performance.CpuBoost;
             if (device is { Enabled: true, Ac: { } deviceAc, Dc: { } deviceDc })
-                ReconcileWindows(deviceAc, deviceDc, "actual AppID device reconcile");
+                ReconcileWindows(deviceAc, deviceDc, device, "actual AppID device reconcile");
             else
                 RefreshSnapshotAfterApply(device, CpuBoostApplyResult.NoOp);
         }
@@ -165,7 +165,7 @@ internal sealed class CpuBoostRuntime
 
             if (TryGetGameCpu(loadResult.Document, actualAppId, out var gameAc, out var gameDc))
             {
-                ReconcileWindows(gameAc, gameDc, contextLabel: "game profile startup reconcile");
+                ReconcileWindows(gameAc, gameDc, loadResult.Document.Device.Performance.CpuBoost, contextLabel: "game profile startup reconcile");
                 return;
             }
 
@@ -190,7 +190,7 @@ internal sealed class CpuBoostRuntime
                 return;
             }
 
-            ReconcileWindows(cpuBoost.Ac.Value, cpuBoost.Dc.Value, contextLabel: "startup reconcile");
+            ReconcileWindows(cpuBoost.Ac.Value, cpuBoost.Dc.Value, cpuBoost, contextLabel: "startup reconcile");
         }
     }
 
@@ -284,7 +284,7 @@ internal sealed class CpuBoostRuntime
             // the side that was already persisted may differ from the current Windows value, so an
             // enabled Device policy must still reconcile Windows to the now-complete persisted
             // baseline rather than leaving a stale effective value in place for the whole session.
-            ReconcileWindows(baseline.Ac!.Value, baseline.Dc!.Value, contextLabel: "startup baseline completion");
+            ReconcileWindows(baseline.Ac!.Value, baseline.Dc!.Value, baseline, contextLabel: "startup baseline completion");
             return;
         }
 
@@ -464,7 +464,7 @@ internal sealed class CpuBoostRuntime
     private CpuBoostApplyResult ReconcileDocument(ProfileDocument document, uint actualAppId, string contextLabel)
     {
         if (TryGetGameCpu(document, actualAppId, out var gameAc, out var gameDc))
-            return ReconcileWindows(gameAc, gameDc, contextLabel + " (game)");
+            return ReconcileWindows(gameAc, gameDc, document.Device.Performance.CpuBoost, contextLabel + " (game)");
 
         var device = document.Device.Performance.CpuBoost;
         if (device is not { Enabled: true, Ac: { } deviceAc, Dc: { } deviceDc })
@@ -472,13 +472,13 @@ internal sealed class CpuBoostRuntime
             RefreshSnapshotAfterApply(device, CpuBoostApplyResult.NoOp);
             return CpuBoostApplyResult.NoOp;
         }
-        return ReconcileWindows(deviceAc, deviceDc, contextLabel + " (device)");
+        return ReconcileWindows(deviceAc, deviceDc, device, contextLabel + " (device)");
     }
 
     private CpuBoostApplyResult ReconcileDeviceMutation(ProfileDocument document, uint actualAppId, bool mutateAc, CpuBoostMode mode)
     {
         if (TryGetGameCpu(document, actualAppId, out var gameAc, out var gameDc))
-            return ReconcileWindows(gameAc, gameDc, "Device CPU mutation (game)");
+            return ReconcileWindows(gameAc, gameDc, document.Device.Performance.CpuBoost, "Device CPU mutation (game)");
 
         var device = document.Device.Performance.CpuBoost;
         if (device is not { Enabled: true })
@@ -492,7 +492,7 @@ internal sealed class CpuBoostRuntime
         return result;
     }
 
-    private CpuBoostApplyResult ReconcileWindows(CpuBoostMode desiredAc, CpuBoostMode desiredDc, string contextLabel)
+    private CpuBoostApplyResult ReconcileWindows(CpuBoostMode desiredAc, CpuBoostMode desiredDc, DeviceCpuBoostSettings? device, string contextLabel)
     {
         var applyResult = _powerPolicy.Apply(desiredAc, desiredDc);
         if (!applyResult.Succeeded)
@@ -500,7 +500,7 @@ internal sealed class CpuBoostRuntime
                 ("Context", contextLabel), ("AcSucceeded", applyResult.AcSucceeded), ("DcSucceeded", applyResult.DcSucceeded));
 
         var current = _powerPolicy.Read();
-        UpdateSnapshot(current, desiredAc, desiredDc, enabled: true, applyResult.Succeeded ? null : applyResult.FailureMessage);
+        UpdateSnapshot(current, device?.Ac, device?.Dc, enabled: device?.Enabled == true, applyResult.Succeeded ? null : applyResult.FailureMessage);
         return applyResult;
     }
 

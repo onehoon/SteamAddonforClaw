@@ -32,13 +32,14 @@ internal sealed class SteamSessionRuntime : IDisposable
     {
         _runningAppIdSource = new SteamRunningAppIdRegistrySource();
         _sessionWatcher = new SteamSessionWatcher(_runningAppIdSource);
-        _sessionWatcher.StateChanged += OnActualRunningAppIdChanged;
         _bigPictureWatcher = new SteamBigPictureWatcher();
         DeveloperTestModeState = new DeveloperTestModeState();
         _bigPictureWatcher.StateChanged += OnBigPictureStateChanged;
         _bigPictureWatcher.Start();
         _effectiveSource = new EffectiveSteamSessionSource(_sessionWatcher, _bigPictureWatcher, DeveloperTestModeState, routingPreference);
         _effectiveSource.StateChanged += OnEffectiveStateChanged;
+        // Routing publishes the actual transition before Profile performs I/O or PowrProf work.
+        _sessionWatcher.StateChanged += OnActualRunningAppIdChanged;
     }
 
     internal DeveloperTestModeState DeveloperTestModeState { get; }
