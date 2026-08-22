@@ -14,13 +14,16 @@ public sealed class ProfileGameCatalogScanner
     public ProfileGameCatalogScanner(Func<string?>? steamRootProvider = null) =>
         _steamRootProvider = steamRootProvider ?? LocateSteamRoot;
 
-    public Task<IReadOnlyList<ProfileGameCatalogEntry>> ScanAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ProfileGameCatalogEntry>> ScanAsync(CancellationToken cancellationToken = default) =>
+        Task.Run(() => Scan(cancellationToken), CancellationToken.None);
+
+    private IReadOnlyList<ProfileGameCatalogEntry> Scan(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var result = new Dictionary<uint, ProfileGameCatalogEntry>();
         var root = _steamRootProvider();
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-            return Task.FromResult<IReadOnlyList<ProfileGameCatalogEntry>>(Array.Empty<ProfileGameCatalogEntry>());
+            return Array.Empty<ProfileGameCatalogEntry>();
 
         var libraries = ReadLibraries(root);
         libraries.Add(root);
@@ -28,15 +31,20 @@ public sealed class ProfileGameCatalogScanner
         {
             cancellationToken.ThrowIfCancellationRequested();
             var apps = Path.Combine(library, "steamapps");
-            foreach (var manifest in Directory.EnumerateFiles(apps, "appmanifest_*.acf", SearchOption.TopDirectoryOnly))
+            string[] manifests;
+            try { manifests = Directory.EnumerateFiles(apps, "appmanifest_*.acf", SearchOption.TopDirectoryOnly).ToArray(); }
+            catch (IOException) { continue; }
+            catch (UnauthorizedAccessException) { continue; }
+            foreach (var manifest in manifests)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    var values = TextVdf.Read(File.ReadAllText(manifest));
-                    if (uint.TryParse(values.GetValueOrDefault("appid"), out var appId) &&
-                        !string.IsNullOrWhiteSpace(values.GetValueOrDefault("name")))
-                        result[appId] = new(appId, values["name"], ProfileGameSource.Steam);
+                    var text = File.ReadAllText(manifest);
+                    var appIdText = TextVdf.ReadValues(text, "appid").FirstOrDefault();
+                    var name = TextVdf.ReadValues(text, "name").FirstOrDefault();
+                    if (uint.TryParse(appIdText, out var appId) && !string.IsNullOrWhiteSpace(name))
+                        result[appId] = new(appId, name, ProfileGameSource.Steam);
                 }
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
@@ -61,30 +69,26 @@ public sealed class ProfileGameCatalogScanner
                 catch (FormatException) { }
             }
 
-        return Task.FromResult<IReadOnlyList<ProfileGameCatalogEntry>>(result.Values
-            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.AppId).ToArray());
+        return result.Values
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.AppId).ToArray();
     }
 
     private static List<string> ReadLibraries(string root)
     {
-        var result = new List<string>();
         try
         {
-            var values = TextVdf.Read(File.ReadAllText(Path.Combine(root, "steamapps", "libraryfolders.vdf")));
-            foreach (var value in values.Values)
-                if (value.StartsWith("\\") || Path.IsPathRooted(value)) result.Add(value);
+            return TextVdf.ReadValues(File.ReadAllText(Path.Combine(root, "steamapps", "libraryfolders.vdf")), "path")
+                .Where(Path.IsPathRooted).ToList();
         }
-        catch (IOException) { } catch (UnauthorizedAccessException) { } catch (FormatException) { }
-        return result;
+        catch (IOException) { return []; } catch (UnauthorizedAccessException) { return []; } catch (FormatException) { return []; }
     }
 
     private static string? LocateSteamRoot()
     {
         var candidates = new[] {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"),
             (string?)Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam")?.GetValue("SteamPath"),
-            (string?)Registry.LocalMachine.OpenSubKey(@"Software\WOW6432Node\Valve\Steam")?.GetValue("InstallPath"),
-            (string?)Registry.LocalMachine.OpenSubKey(@"Software\Valve\Steam")?.GetValue("InstallPath"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam")
+            (string?)Registry.LocalMachine.OpenSubKey(@"Software\WOW6432Node\Valve\Steam")?.GetValue("InstallPath")
         };
         return candidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path) &&
             File.Exists(Path.Combine(path, "steam.exe")));
@@ -92,15 +96,13 @@ public sealed class ProfileGameCatalogScanner
 
     private static class TextVdf
     {
-        public static Dictionary<string, string> Read(string text)
+        public static IEnumerable<string> ReadValues(string text, string wantedKey)
         {
             var tokens = System.Text.RegularExpressions.Regex.Matches(text, "\\\"((?:\\\\.|[^\\\"])*)\\\"")
                 .Select(m => m.Groups[1].Value.Replace("\\\\\"", "\\\"").Replace("\\\\", "\\"))
                 .ToArray();
-            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             for (var i = 0; i + 1 < tokens.Length; i++)
-                if (tokens[i] is "appid" or "name" or "path") values[tokens[i]] = tokens[i + 1];
-            return values;
+                if (string.Equals(tokens[i], wantedKey, StringComparison.OrdinalIgnoreCase)) yield return tokens[i + 1];
         }
     }
 

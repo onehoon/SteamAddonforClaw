@@ -40,6 +40,20 @@ public sealed class ProfileGameCatalogScannerTests : IDisposable
         await Assert.ThrowsAsync<OperationCanceledException>(() => new ProfileGameCatalogScanner(() => _root).ScanAsync(cts.Token));
     }
 
+    [Fact]
+    public async Task ScanAsync_KeepsValidGamesWhenOneConfiguredLibraryIsUnavailable()
+    {
+        var valid = Path.Combine(_root, "ValidLibrary");
+        WriteManifest(valid, 50, "Valid");
+        var missing = Path.Combine(_root, "MissingLibrary");
+        File.WriteAllText(Path.Combine(_root, "steamapps", "libraryfolders.vdf"),
+            $"\"libraryfolders\" {{ \"1\" {{ \"path\" \"{valid.Replace("\\", "\\\\")}\" }} \"2\" {{ \"path\" \"{missing.Replace("\\", "\\\\")}\" }} }}");
+
+        var entries = await new ProfileGameCatalogScanner(() => _root).ScanAsync();
+
+        Assert.Contains(entries, entry => entry.AppId == 50);
+    }
+
     private void WriteManifest(string library, uint id, string name)
     {
         Directory.CreateDirectory(Path.Combine(library, "steamapps"));
