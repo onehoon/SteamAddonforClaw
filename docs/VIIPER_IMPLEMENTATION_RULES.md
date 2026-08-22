@@ -26,6 +26,8 @@ Steam Deck — VID=0x28DE, PID=0x1205
 
 New runtime composition must instantiate the canonical Steam Deck stage. Do
 not add target selection, silent fallback, or a second active Steam output.
+Game Bar foreground is not a target-selection event: the same canonical Steam
+Deck presentation remains authoritative for the full active Steam route.
 
 ## 3. Source and ABI rules
 
