@@ -30,7 +30,12 @@
   </Target>
 
   <Target Name="CopyTdpHelperOutput" AfterTargets="Build;Publish">
-    <Copy SourceFiles="..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\SteamInputAddonforClaw.TdpHelper.exe" DestinationFolder="$(OutDir)" Condition="Exists('..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\SteamInputAddonforClaw.TdpHelper.exe')" />
+    <ItemGroup>
+      <TdpHelperOutput Include="..\SteamInputAddonforClaw.TdpHelper\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\publish\SteamInputAddonforClaw.TdpHelper.exe" />
+    </ItemGroup>
+    <Error Text="TDP helper publish output not found." Condition="!Exists('%(TdpHelperOutput.Identity)')" />
+    <Copy SourceFiles="@(TdpHelperOutput)" DestinationFolder="$(OutDir)" />
+    <Copy SourceFiles="@(TdpHelperOutput)" DestinationFolder="$(PublishDir)" Condition="'$(PublishDir)' != ''" />
   </Target>
 
   <!-- The staged/renamed helper must be genuinely self-contained at its final path (no separate

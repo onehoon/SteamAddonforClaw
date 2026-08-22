@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Management;
+using SteamInputAddonforClaw.TdpHelper;
 
 if (args.Length != 1) return;
 using var server = new NamedPipeServerStream(args[0], PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
@@ -14,8 +15,8 @@ while (true)
     try
     {
         var request = JsonSerializer.Deserialize<Request>(line);
-        if (request is null || request.Operation is not ("GetAp" or "SetData") || request.Index is < 0 or > 255) { await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(false, null))); continue; }
-        var result = Invoke(request.Operation, request.Index, request.Value, request.Operation == "GetAp");
+        if (request is null || !TdpHelperProtocol.IsSupported(request.Operation, request.Index)) { await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(false, null))); continue; }
+        var result = Invoke(TdpHelperProtocol.GetWmiMethod(request.Operation), request.Index, request.Value, request.Operation == "GetAp");
         await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(result.Ok, result.Payload is null ? null : Convert.ToBase64String(result.Payload))));
     }
     catch { await writer.WriteLineAsync(JsonSerializer.Serialize(new Response(false, null))); }

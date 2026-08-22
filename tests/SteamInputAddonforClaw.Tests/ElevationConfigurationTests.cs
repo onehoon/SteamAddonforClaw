@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using Xunit;
+using SteamInputAddonforClaw.TdpHelper;
 
 namespace SteamInputAddonforClaw.Tests;
 
@@ -49,9 +50,25 @@ public sealed class ElevationConfigurationTests
     {
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SteamInputAddonforClaw.TdpHelper", "Program.cs"));
         Assert.Contains("obj.InvokeMethod(\"Get_WMI\", null, null)", source);
-        Assert.Contains("request.Operation is not (\"GetAp\" or \"SetData\")", source);
+        Assert.Contains("TdpHelperProtocol.IsSupported", source);
         Assert.Contains("new Response(false, null)", source);
     }
+
+    [Theory]
+    [InlineData("GetAp", "Get_AP")]
+    [InlineData("SetData", "Set_Data")]
+    public void Tdp_helper_maps_ipc_operations_to_the_real_wmi_methods(string operation, string wmiMethod) =>
+        Assert.Equal(wmiMethod, TdpHelperProtocol.GetWmiMethod(operation));
+
+    [Theory]
+    [InlineData("GetAp", 0, true)]
+    [InlineData("GetAp", 80, false)]
+    [InlineData("SetData", 80, true)]
+    [InlineData("SetData", 81, true)]
+    [InlineData("SetData", 210, true)]
+    [InlineData("SetData", 1, false)]
+    public void Tdp_helper_rejects_unsupported_privileged_blocks(string operation, int index, bool expected) =>
+        Assert.Equal(expected, TdpHelperProtocol.IsSupported(operation, index));
 
     [Fact]
     public void Runtime_uses_one_owned_helper_transport_for_the_tdp_runtime()
