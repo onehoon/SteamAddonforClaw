@@ -10,7 +10,7 @@
                     </DataTemplate>
                 </AutoSuggestBox.ItemTemplate>
             </AutoSuggestBox>
-            <Button Grid.Column="1" x:Name="RefreshGamesButton" Content="Refresh" Click="RefreshGamesButton_Click" />
+            <Button Grid.Column="1" x:Name="RefreshGamesButton" Content="Refresh" Style="{StaticResource AccentButtonStyle}" Click="RefreshGamesButton_Click" />
         </Grid></ctcontrols:SettingsCard>
         <ctcontrols:SettingsCard><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <TextBlock x:Name="SelectedGameText" VerticalAlignment="Center" Text="Click Refresh, then select a game." TextWrapping="Wrap" />

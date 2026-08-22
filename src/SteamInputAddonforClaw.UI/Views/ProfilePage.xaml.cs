@@ -36,7 +36,7 @@ public sealed partial class ProfilePage : UserControl
         {
             var selected = _selectedGame?.AppId; _catalog = await _frontend.ScanProfileGamesAsync(); GameSelector.ItemsSource = _catalog;
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
-            if (_selectedGame is null) { ClearSelection(); ClearError(); } else { GameSelector.Text = _selectedGame.Name; await CaptureSelectedAsync(_selectedGame.AppId); }
+            if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo("No installed Steam games were found."); else ClearError(); } else { GameSelector.Text = _selectedGame.Name; await CaptureSelectedAsync(_selectedGame.AppId); }
         }
         catch (Exception exception) { ShowError("Game catalog could not be refreshed.", exception); }
     }
@@ -102,6 +102,7 @@ public sealed partial class ProfilePage : UserControl
     private void SetTdpText() { AcPl1Value.Text = _acPl1 is { } x ? $"{x} W" : "— W"; AcPl2Value.Text = _acPl2 is { } y ? $"{y} W" : "— W"; DcPl1Value.Text = _dcPl1 is { } z ? $"{z} W" : "— W"; DcPl2Value.Text = _dcPl2 is { } w ? $"{w} W" : "— W"; }
     private void CancelTdpDebounce() { _tdpGeneration++; _tdpDebounce?.Cancel(); _tdpDebounce = null; }
     private void ShowError(string message, Exception? exception) { ProfileInfoBar.Severity = InfoBarSeverity.Error; ProfileInfoBar.Message = message; ProfileInfoBar.IsOpen = true; if (exception is not null) AppLog.Warn("Profile", message, exception); }
+    private void ShowInfo(string message) { ProfileInfoBar.Severity = InfoBarSeverity.Informational; ProfileInfoBar.Message = message; ProfileInfoBar.IsOpen = true; }
     private void ClearError() => ProfileInfoBar.IsOpen = false;
     internal static bool IsCurrentProfileResponse(uint? selectedAppId, uint responseAppId) => selectedAppId == responseAppId;
     internal static bool ShouldPreserveDirtyTdpDraft(bool dirty, long submittedGeneration, long currentGeneration) => dirty && submittedGeneration != currentGeneration;

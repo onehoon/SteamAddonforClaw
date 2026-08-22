@@ -9,6 +9,58 @@ public sealed class ProfileGameCatalogScannerTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "SteamInputAddonforClaw.Catalog.", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void SteamRootSelection_PrefersValidSteamPath()
+    {
+        var steamPath = CreateSteamInstall("SteamPath");
+        var installPath = CreateSteamInstall("InstallPath");
+
+        var selected = ProfileGameCatalogScanner.SteamInstallPathSelector.SelectValidSteamRoot([steamPath, installPath]);
+
+        Assert.Equal(Path.GetFullPath(steamPath), selected);
+    }
+
+    [Fact]
+    public void SteamRootSelection_UsesCurrentUserInstallPathFallback()
+    {
+        var installPath = CreateSteamInstall("InstallPath");
+
+        var selected = ProfileGameCatalogScanner.SteamInstallPathSelector.SelectValidSteamRoot([null, installPath]);
+
+        Assert.Equal(Path.GetFullPath(installPath), selected);
+    }
+
+    [Fact]
+    public void SteamRootSelection_SkipsInvalidEarlierCandidate()
+    {
+        var installPath = CreateSteamInstall("InstallPath");
+
+        var selected = ProfileGameCatalogScanner.SteamInstallPathSelector.SelectValidSteamRoot([Path.Combine(_root, "missing"), installPath]);
+
+        Assert.Equal(Path.GetFullPath(installPath), selected);
+    }
+
+    [Fact]
+    public void SteamRootSelection_AcceptsConventionalFallback()
+    {
+        var fallback = CreateSteamInstall("Program Files (x86)", "Steam");
+
+        var selected = ProfileGameCatalogScanner.SteamInstallPathSelector.SelectValidSteamRoot([null, fallback]);
+
+        Assert.Equal(Path.GetFullPath(fallback), selected);
+    }
+
+    [Fact]
+    public void SteamRootSelection_RequiresSteamExecutable()
+    {
+        var directory = Path.Combine(_root, "without-executable");
+        Directory.CreateDirectory(directory);
+
+        var selected = ProfileGameCatalogScanner.SteamInstallPathSelector.SelectValidSteamRoot([directory]);
+
+        Assert.Null(selected);
+    }
+
+    [Fact]
     public async Task ScanAsync_MergesLibrariesAndAllAccounts_DeduplicatesAndOrders()
     {
         var second = Path.Combine(_root, "Library2");
@@ -91,6 +143,14 @@ public sealed class ProfileGameCatalogScannerTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root, "steamapps"));
         if (!string.Equals(library, _root, StringComparison.OrdinalIgnoreCase))
             File.WriteAllText(Path.Combine(_root, "steamapps", "libraryfolders.vdf"), $"\"libraryfolders\" {{ \"1\" {{ \"path\" \"{library.Replace("\\", "\\\\")}\" }} }}");
+    }
+
+    private string CreateSteamInstall(params string[] segments)
+    {
+        var path = Path.Combine([_root, .. segments]);
+        Directory.CreateDirectory(path);
+        File.WriteAllText(Path.Combine(path, "steam.exe"), string.Empty);
+        return path;
     }
 
     private void WriteShortcuts(string account, params (uint Id, string Name)[] entries)
