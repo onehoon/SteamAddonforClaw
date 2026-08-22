@@ -9,7 +9,7 @@
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
                 <TextBlock Opacity="0.7" Text="Configure Steam Input controller routing." TextWrapping="Wrap" />
             </StackPanel>
-            <ctcontrols:SettingsExpander x:Name="SteamInputRoutingExpander" Header="Steam Input Routing" IsExpanded="True" Description="Automatically route the built-in controller through Steam Input for Steam games and Big Picture Mode.">
+            <ctcontrols:SettingsExpander x:Name="SteamInputRoutingExpander" Header="Steam Input Routing" IsExpanded="True" Description="Automatically route the built-in controller through Steam Input for Steam games and Big Picture Mode.&#xA;Xbox Game Bar is disabled during routing, and the Game Bar button action is configured below.">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <SymbolIcon Symbol="Repair" />
                 </ctcontrols:SettingsExpander.HeaderIcon>
