@@ -74,6 +74,19 @@ public sealed class FrontendNamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Resolution_rpc_round_trips_value_and_clear()
+    {
+        var fake = new RecordingFrontendControl();
+        var (server, pipeName) = await StartServerAsync(fake);
+        await using var serverLifetime = server;
+        await using var client = await ConnectAsync(pipeName);
+        var set = await client.SetGameProfileResolutionAsync(123, new(1920, 1080), "Game");
+        var cleared = await client.SetGameProfileResolutionAsync(123, null, "Game");
+        Assert.Equal(new FrontendGameResolution(1920, 1080), set.Snapshot.Resolution);
+        Assert.Null(cleared.Snapshot.Resolution);
+    }
+
+    [Fact]
     public async Task CPU_Boost_operations_round_trip_through_the_named_pipe()
     {
         var fake = new RecordingFrontendControl();
@@ -1170,7 +1183,7 @@ public sealed class FrontendNamedPipeTransportTests
         public CpuBoostMode? LastAcMode { get; private set; }
         public CpuBoostMode? LastDcMode { get; private set; }
         public bool? LastEnabled { get; private set; }
-        public FrontendGameProfileSnapshot GameProfile { get; } = new(12345, "Test Game", true, true,
+        public FrontendGameProfileSnapshot GameProfile { get; private set; } = new(12345, "Test Game", true, true,
             new(CpuBoostMode.Enabled, CpuBoostMode.Disabled), new(new(20, 22), new(18, 20)), true, new(8, 30, 8, 40));
         public FrontendGameTdpConfiguration GameTdp { get; } = new(new(21, 31), new(11, 21));
         public FrontendGameProfileMutationResult GameMutationResult { get; private set; }
@@ -1188,6 +1201,7 @@ public sealed class FrontendNamedPipeTransportTests
         public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAcAsync(uint appId, CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; LastGameCpu = (mode, LastGameCpu.GetValueOrDefault().Dc); return Task.FromResult(GameMutationResult); }
         public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostDcAsync(uint appId, CpuBoostMode mode, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; LastGameCpu = (LastGameCpu.GetValueOrDefault().Ac, mode); return Task.FromResult(GameMutationResult); }
         public Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; LastGameTdp = configuration; return Task.FromResult(GameMutationResult); }
+        public Task<FrontendGameProfileMutationResult> SetGameProfileResolutionAsync(uint appId, FrontendGameResolution? resolution, string? displayName, CancellationToken t = default) { TotalCalls++; LastGameProfileAppId = appId; GameProfile = GameProfile with { AppId = appId, Resolution = resolution }; GameMutationResult = new(FrontendGameProfileMutationOutcome.Succeeded, null, GameProfile); return Task.FromResult(GameMutationResult); }
 
         public FrontendClawSensorProbeSnapshot ClawSensorProbeSnapshot { get; } = new(
             true, FrontendClawSensorProbeState.RecordingPhase, FrontendClawSensorProbePhase.RollLeft, 1, 7,
