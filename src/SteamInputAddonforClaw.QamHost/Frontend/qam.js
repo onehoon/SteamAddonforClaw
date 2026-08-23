@@ -512,6 +512,7 @@
       const [status, setStatus] = React.useState(null);
       const [cpu, setCpu] = React.useState(null);
       const [tdp, setTdp] = React.useState(null);
+      const [profile, setProfile] = React.useState(null);
       const [tdpDraft, setTdpDraft] = React.useState(null);
       const [previewAc, setPreviewAc] = React.useState(null);
       const [previewDc, setPreviewDc] = React.useState(null);
@@ -538,7 +539,7 @@
         if (tdpTimer.current) clearTimeout(tdpTimer.current);
         tdpTimer.current = null;
         tdpEditGeneration.current = 0;
-        setStatus(null); setCpu(null); setTdp(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
+        setStatus(null); setCpu(null); setTdp(null); setProfile(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
       }, []);
 
       const refresh = React.useCallback(async () => {
@@ -546,14 +547,16 @@
         refreshInFlight.current = true;
         try {
           const nextStatus = await request("captureStatus");
-          const nextCpu = await request("captureCpuBoost");
-          const nextTdp = await request("captureTdp");
+          const activeGame = nextStatus.steam?.appId > 0;
+          const nextProfile = activeGame ? await request("captureActiveGameProfile") : null;
+          const nextCpu = activeGame ? null : await request("captureCpuBoost");
+          const nextTdp = activeGame ? null : await request("captureTdp");
           const nextDraft = nextTdp.configuration ? {
             enabled: nextTdp.configuration.enabled,
             ac: { ...nextTdp.configuration.ac },
             dc: { ...nextTdp.configuration.dc },
           } : null;
-          setStatus(nextStatus); setCpu(nextCpu); setTdp(nextTdp);
+          setStatus(nextStatus); setCpu(nextCpu); setTdp(nextTdp); setProfile(nextProfile);
           if (tdpEditGeneration.current === 0) { setTdpDraft(nextDraft); tdpDraftRef.current = nextDraft; }
           setPreviewAc(null); setPreviewDc(null); setError(null);
         } catch (_) { failClosed("QAM bridge unavailable"); }
@@ -602,6 +605,7 @@
       }, [refresh, cancelModeTimers]);
 
       const unavailable = !status || status.steam?.appId !== 0 || !status.steam?.active || status.steam?.source !== 1;
+      const activeProfile = !!profile && status?.steam?.appId > 0;
       const mutationAvailable = !!cpu && cpu.persistenceWritable && !unavailable && !busy;
       const modeWritable = mutationAvailable && cpu.enabled;
       const tdpMutationAvailable = !!tdp && tdp.available && tdp.persistenceWritable && !unavailable && !busy;
@@ -753,6 +757,69 @@
         tdpControls.push({ key: "tdp-dc-heading", node: React.createElement("div", null, "On battery") });
         tdpControls.push({ key: "tdp-dc-pl1", node: tdpSlider("PL1", "dc", tdpLimits, tdpDraft.dc?.pl1Watts, "none") });
         tdpControls.push({ key: "tdp-dc-pl2", compact: true, node: tdpSlider("PL2", "dc", tdpLimits, tdpDraft.dc?.pl2Watts, "standard") });
+      }
+
+      if (activeProfile) {
+        const writable = profile.persistenceWritable && !busy;
+        const enabled = !!profile.enabled;
+        const mutate = async (method, payload) => {
+          if (!state.installed || !writable || !enabled) return;
+          setBusy(true); setError(null);
+          try {
+            beginMutation();
+            const result = await request(method, payload);
+            setProfile(result.snapshot);
+            if (!result.succeeded) setError(result.failureMessage || "Profile update failed");
+          } catch (_) { failClosed("Profile update failed"); }
+          finally { endMutation(); setBusy(false); }
+        };
+        const toggleProfile = async value => {
+          if (!state.installed || !writable) return;
+          setBusy(true); setError(null);
+          try {
+            beginMutation();
+            const result = await request("setActiveGameProfileEnabled", { enabled: !!value, displayName: profile.displayName });
+            setProfile(result.snapshot);
+            if (!result.succeeded) setError(result.failureMessage || "Profile update failed");
+          } catch (_) { failClosed("Profile update failed"); }
+          finally { endMutation(); setBusy(false); }
+        };
+        const profileSlider = (label, side, value, separator) => value == null ? null : React.createElement(native.SliderField, {
+          label: React.createElement(React.Fragment, null,
+            React.createElement("div", { className: native.FieldLabelRowClass },
+              React.createElement("span", { className: native.FieldLabelClass }, label),
+              React.createElement("span", { className: native.FieldLabelValueClass }, labelFor(value)))),
+          min: 0, max: 6, step: 1, value, notchCount: modes.length,
+          disabled: !writable || !enabled, notchTicksVisible: true, bottomSeparator: separator,
+          onChange: next => void mutate(side === "ac" ? "setActiveGameCpuBoostAc" : "setActiveGameCpuBoostDc", { mode: Number(next) }),
+        });
+        const profileTdpSlider = (label, side, value, separator) => value == null || !profile.limits ? null : React.createElement(native.SliderField, {
+          label, min: label === "PL1" ? profile.limits.pl1MinimumWatts : profile.limits.pl2MinimumWatts,
+          max: label === "PL1" ? profile.limits.pl1MaximumWatts : profile.limits.pl2MaximumWatts,
+          step: 1, value, showValue: true, disabled: !writable || !enabled, bottomSeparator: separator,
+          onChange: next => {
+            const configuration = { ac: { ...profile.tdp.ac }, dc: { ...profile.tdp.dc } };
+            configuration[side][label === "PL1" ? "pl1Watts" : "pl2Watts"] = Number(next);
+            void mutate("setActiveGameTdp", { configuration });
+          },
+        });
+        const profileControls = [
+          { key: "profile-toggle", node: React.createElement(native.ToggleField, { label: profile.displayName || `Game ${profile.appId}`, checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }) },
+          { key: "profile-ac", node: profileSlider("Plugged in", "ac", profile.cpuBoost?.ac, "none") },
+          { key: "profile-dc", node: profileSlider("On battery", "dc", profile.cpuBoost?.dc, "standard") },
+        ];
+        const profileTdpControls = profile.limits ? [
+          { key: "profile-tdp-ac-heading", node: React.createElement("div", null, "TDP · Plugged in") },
+          { key: "profile-tdp-ac-pl1", node: profileTdpSlider("PL1", "ac", profile.tdp?.ac?.pl1Watts, "none") },
+          { key: "profile-tdp-ac-pl2", compact: true, node: profileTdpSlider("PL2", "ac", profile.tdp?.ac?.pl2Watts, "none") },
+          { key: "profile-tdp-dc-heading", node: React.createElement("div", null, "TDP · On battery") },
+          { key: "profile-tdp-dc-pl1", node: profileTdpSlider("PL1", "dc", profile.tdp?.dc?.pl1Watts, "none") },
+          { key: "profile-tdp-dc-pl2", compact: true, node: profileTdpSlider("PL2", "dc", profile.tdp?.dc?.pl2Watts, "standard") },
+        ] : [];
+        return React.createElement(React.Fragment, null,
+          displayError ? React.createElement("p", { key: "error" }, displayError) : null,
+          React.createElement(native.PanelSection, { key: "profile-section" }, ...profileControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key }, x.node))),
+          React.createElement(native.PanelSection, { key: "profile-tdp-section" }, ...profileTdpControls.filter(x => x.node).map(x => React.createElement(native.PanelSectionRow, { key: x.key, style: x.compact ? { marginTop: "-4px" } : undefined }, x.node))));
       }
 
       return React.createElement(React.Fragment, null,
