@@ -51,6 +51,7 @@ public sealed partial class ProfilePage : UserControl
         if (args.ChosenSuggestion is FrontendProfileGameCatalogEntry chosen)
         {
             _ = SelectGameAsync(chosen);
+            DispatcherQueue.TryEnqueue(() => GameSelector.Text = FormatGame(chosen));
             return;
         }
 
@@ -61,10 +62,12 @@ public sealed partial class ProfilePage : UserControl
             string.Equals(FormatGame(game), query, StringComparison.OrdinalIgnoreCase));
 
         if (exact is not null)
+        {
             _ = SelectGameAsync(exact);
+            DispatcherQueue.TryEnqueue(() => GameSelector.Text = FormatGame(exact));
+        }
     }
     private void GameSelector_GotFocus(object sender, RoutedEventArgs e) => OpenGameList();
-    private void OpenGameSelectorButton_Click(object sender, RoutedEventArgs e) { GameSelector.Focus(FocusState.Programmatic); OpenGameList(); }
     private void OpenGameList() { GameSelector.ItemsSource = FilterCatalog(GameSelector.Text); GameSelector.IsSuggestionListOpen = _catalog.Count > 0; }
     private IReadOnlyList<FrontendProfileGameCatalogEntry> FilterCatalog(string? query) { if (string.IsNullOrWhiteSpace(query) || (_selectedGame is not null && string.Equals(query, FormatGame(_selectedGame), StringComparison.Ordinal))) return _catalog; return _catalog.Where(x => x.Name.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase) || x.AppId.ToString().Contains(query.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray(); }
     private static string FormatGame(FrontendProfileGameCatalogEntry game) => $"{game.Name} ({game.AppId})";
