@@ -517,6 +517,7 @@
       const profileTdpDraftRef = React.useRef(null);
       const profileTdpTimer = React.useRef(null);
       const profileTdpGeneration = React.useRef(0);
+      const activeProfileAppIdRef = React.useRef(0);
       const [tdpDraft, setTdpDraft] = React.useState(null);
       const [previewAc, setPreviewAc] = React.useState(null);
       const [previewDc, setPreviewDc] = React.useState(null);
@@ -546,6 +547,7 @@
         if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
         profileTdpTimer.current = null;
         profileTdpGeneration.current = 0;
+        activeProfileAppIdRef.current = 0;
         setStatus(null); setCpu(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
       }, []);
 
@@ -554,7 +556,16 @@
         refreshInFlight.current = true;
         try {
           const nextStatus = await request("captureStatus");
-          const activeGame = nextStatus.steam?.appId > 0;
+          const nextAppId = Number(nextStatus.steam?.appId || 0);
+          if (activeProfileAppIdRef.current !== nextAppId) {
+            if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
+            profileTdpTimer.current = null;
+            profileTdpGeneration.current = 0;
+            profileTdpDraftRef.current = null;
+            setProfileTdpDraft(null);
+          }
+          activeProfileAppIdRef.current = nextAppId;
+          const activeGame = nextAppId > 0;
           const nextProfile = activeGame ? await request("captureActiveGameProfile") : null;
           const nextCpu = activeGame ? null : await request("captureCpuBoost");
           const nextTdp = activeGame ? null : await request("captureTdp");
@@ -834,7 +845,7 @@
           label: React.createElement(React.Fragment, null,
             React.createElement("div", { className: native.FieldLabelRowClass },
               React.createElement("span", { className: native.FieldLabelClass }, label),
-              React.createElement("span", { className: native.FieldLabelValueClass }, labelFor(value)))),
+              React.createElement("span", { className: native.FieldLabelValueClass }, labelFor(preview ?? value)))),
           min: 0, max: 6, step: 1, value: preview ?? value, notchCount: modes.length,
           disabled: !profile.persistenceWritable || !enabled || busy, notchTicksVisible: true, bottomSeparator: separator,
           onChange: next => scheduleProfileMode(side, Number(next)),
@@ -858,8 +869,10 @@
           { key: "profile-dc", node: profileSlider("On battery", "dc", profile.cpuBoost?.dc, previewDc, "standard") },
         ];
         const profileTdpControls = profile.limits ? [
+          { key: "profile-tdp-ac-heading", node: React.createElement("div", null, "Plugged in") },
           { key: "profile-tdp-ac-pl1", node: profileTdpSlider("PL1", "ac", profileTdpDraft?.ac?.pl1Watts, "none") },
           { key: "profile-tdp-ac-pl2", compact: true, node: profileTdpSlider("PL2", "ac", profileTdpDraft?.ac?.pl2Watts, "none") },
+          { key: "profile-tdp-dc-heading", node: React.createElement("div", null, "On battery") },
           { key: "profile-tdp-dc-pl1", node: profileTdpSlider("PL1", "dc", profileTdpDraft?.dc?.pl1Watts, "none") },
           { key: "profile-tdp-dc-pl2", compact: true, node: profileTdpSlider("PL2", "dc", profileTdpDraft?.dc?.pl2Watts, "standard") },
         ] : [];

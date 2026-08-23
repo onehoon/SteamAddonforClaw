@@ -406,13 +406,19 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        Assert.Contains("const activeGame = nextStatus.steam?.appId > 0", source);
+        Assert.Contains("const nextAppId = Number(nextStatus.steam?.appId || 0)", source);
         Assert.Contains("request(\"captureActiveGameProfile\")", source);
         Assert.Contains("key: \"profile-toggle\"", source);
         Assert.Contains("request(\"setActiveGameProfileEnabled\"", source);
         Assert.Contains("\"setActiveGameCpuBoostAc\"", source);
         Assert.Contains("\"setActiveGameCpuBoostDc\"", source);
         Assert.Contains("\"setActiveGameTdp\"", source);
+        Assert.Contains("const activeProfileAppIdRef = React.useRef(0);", source);
+        Assert.Contains("if (activeProfileAppIdRef.current !== nextAppId)", source);
+        Assert.Contains("profileTdpGeneration.current = 0", source);
+        Assert.Contains("labelFor(preview ?? value)", source);
+        Assert.Contains("profile-tdp-ac-heading", source);
+        Assert.Contains("profile-tdp-dc-heading", source);
         Assert.Contains("disabled: !profile.persistenceWritable || !enabled", source);
         Assert.Contains("profile.cpuBoost?.ac", source);
         Assert.Contains("profileTdpDraft?.dc?.pl2Watts", source);
