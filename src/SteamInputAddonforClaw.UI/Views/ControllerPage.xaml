@@ -15,8 +15,8 @@
                 <ctcontrols:SettingsExpander.Items>
                     <ctcontrols:SettingsCard Header="Routing Button Behavior" Description="During active Steam Input Routing (Steam game or Big Picture Mode), these button assignments are fixed and cannot be customized.">
                         <StackPanel Spacing="8">
-                            <TextBlock Text="WING Button    Steam Button" />
-                            <TextBlock Text="Center M Button    Steam Quick Access" />
+                            <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="Gamebar Button"/><TextBlock Grid.Column="1" Text="→"/><TextBlock Grid.Column="2" Text="Steam Button"/></Grid>
+                            <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="Center M Button"/><TextBlock Grid.Column="1" Text="→"/><TextBlock Grid.Column="2" Text="Steam Quick Access"/></Grid>
                         </StackPanel>
                     </ctcontrols:SettingsCard>
                 </ctcontrols:SettingsExpander.Items>

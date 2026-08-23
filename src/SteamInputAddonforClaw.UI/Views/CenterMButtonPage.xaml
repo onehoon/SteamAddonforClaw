@@ -2,15 +2,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
-    <StackPanel Spacing="12">
-        <ctcontrols:SettingsCard Header="Center M Button" Description="Normal action used when Steam Input Routing is inactive.">
-            <StackPanel Spacing="8">
-                <TextBlock Text="Remapping" />
-                <ToggleSwitch x:Name="RemappingToggleSwitch" IsOn="True" IsEnabled="False" OffContent="" OnContent="" />
-                <TextBlock Text="Always enabled" Opacity="0.7" />
-            </StackPanel>
-        </ctcontrols:SettingsCard>
-        <ctcontrols:SettingsExpander Header="Normal Action" Description="Editable Center M action outside active Steam routing." IsExpanded="True">
+    <ctcontrols:SettingsExpander Header="Center M Button" Description="Remapping is always enabled. Configure the normal action used when Steam Input Routing is inactive." IsExpanded="True">
             <ctcontrols:SettingsExpander.Items>
                 <ctcontrols:SettingsCard Header="Normal Action">
                     <ComboBox x:Name="NormalSingleActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
@@ -19,6 +11,5 @@
                     <StackPanel x:Name="NormalSingleConfigPanel" Spacing="8" />
                 </ctcontrols:SettingsCard>
             </ctcontrols:SettingsExpander.Items>
-        </ctcontrols:SettingsExpander>
-    </StackPanel>
+    </ctcontrols:SettingsExpander>
 </UserControl>
