@@ -23,7 +23,7 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 
 ## Requirements
 
-- Windows 10 or Windows 11 x64
+- Windows 11 x64
 - A supported MSI Claw model listed above
 - Steam installed and running for Steam Input routing and Quick Access Menu integration
 - The normal MSI controller environment, including MSI Center M, available on the device
