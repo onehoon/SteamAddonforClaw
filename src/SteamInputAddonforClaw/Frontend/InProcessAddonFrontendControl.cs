@@ -8,6 +8,7 @@ using SteamInputAddonforClaw.Diagnostics.EnvironmentDiscovery;
 using SteamInputAddonforClaw.Prerequisites;
 using SteamInputAddonforClaw.Profiles.Performance;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Display;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Runtime;
 using SteamInputAddonforClaw.Settings;
@@ -59,6 +60,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     private readonly GameProfileMutations? _gameProfileMutations;
     private readonly Func<uint> _actualRunningAppIdSource;
     private readonly Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>> _scanProfileGames;
+    private readonly GameDisplayResolutionRuntime? _displayResolutionRuntime;
 
     /// <param name="oem1MappingAvailable">The startup hardware-support result
     /// (<see cref="Startup.StartupResult.HardwareSupported"/>), reported verbatim on bootstrap so the
@@ -69,7 +71,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
         _cpuBoostRuntime = cpuBoostRuntime;
@@ -77,6 +79,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         _gameProfileMutations = gameProfileMutations;
         _actualRunningAppIdSource = actualRunningAppIdSource ?? (() => _runtime?.ActualRunningAppId ?? 0);
         _scanProfileGames = scanProfileGames ?? (token => new ProfileGameCatalogScanner().ScanAsync(token));
+        _displayResolutionRuntime = displayResolutionRuntime;
         _settings = settings;
         _status = status;
         _runtime = runtime;
@@ -135,6 +138,13 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     public Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) =>
         MutateTdpAfterShutdownCheck(appId, configuration);
 
+    public Task<FrontendGameProfileMutationResult> SetGameProfileResolutionAsync(uint appId, FrontendGameResolution? resolution, string? displayName, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var target = resolution is null ? null : new GameDisplayResolution { Width = resolution.Width, Height = resolution.Height };
+        return Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetResolution(appId, target, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: false, display: true));
+    }
+
     private Task<FrontendGameProfileMutationResult> MutateCpuBoostAfterShutdownCheck(uint appId, Func<GameProfileMutations, uint, CpuBoostMode, GameProfileMutations.MutationOutcome> mutation, CpuBoostMode mode)
     {
         ThrowIfShuttingDown();
@@ -155,24 +165,26 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var limits = _tdpRuntime?.CaptureSnapshot().Policy is { } policy ? new FrontendTdpLimits(policy.Pl1MinimumWatts, policy.Pl1MaximumWatts, policy.Pl2MinimumWatts, policy.Pl2MaximumWatts) : null;
         return new(appId, profile.DisplayName, captured.Exists, captured.Exists && profile.Enabled,
             new(profile.Performance.CpuBoost!.Ac, profile.Performance.CpuBoost.Dc),
-            new(new(profile.Performance.Tdp!.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts), new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)), captured.PersistenceWritable, limits);
+            new(new(profile.Performance.Tdp!.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts), new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)), captured.PersistenceWritable, limits,
+            profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null);
     }
 
-    private FrontendGameProfileMutationResult MutateGame(uint appId, GameProfileMutations.MutationOutcome outcome, bool cpu, bool tdp)
+    private FrontendGameProfileMutationResult MutateGame(uint appId, GameProfileMutations.MutationOutcome outcome, bool cpu, bool tdp, bool display = false)
     {
         var mapped = outcome switch { GameProfileMutations.MutationOutcome.Succeeded => FrontendGameProfileMutationOutcome.Succeeded, GameProfileMutations.MutationOutcome.InvalidTarget => FrontendGameProfileMutationOutcome.InvalidTarget, GameProfileMutations.MutationOutcome.PersistenceFailed => FrontendGameProfileMutationOutcome.PersistenceFailed, _ => FrontendGameProfileMutationOutcome.Unavailable };
         if (outcome == GameProfileMutations.MutationOutcome.Succeeded)
         {
-            ReconcileGame(appId, cpu, tdp); StateInvalidated?.Invoke(this, EventArgs.Empty);
+            ReconcileGame(appId, cpu, tdp, display); StateInvalidated?.Invoke(this, EventArgs.Empty);
         }
         return new(mapped, mapped == FrontendGameProfileMutationOutcome.Succeeded ? null : "Game Profile mutation failed.", CaptureGameProfile(appId));
     }
 
-    private void ReconcileGame(uint appId, bool cpu, bool tdp)
+    private void ReconcileGame(uint appId, bool cpu, bool tdp, bool display = false)
     {
         if (appId != _actualRunningAppIdSource()) return;
         if (cpu) try { _cpuBoostRuntime?.Reconcile(appId); } catch (Exception ex) { AppLog.Error("Profiles.CpuBoost", "Game Profile CPU reconcile failed.", ex); }
         if (tdp) try { _tdpRuntime?.ReconcileCurrent(true, false, "GameProfileMutation"); } catch (Exception ex) { AppLog.Error("Profiles.Tdp", "Game Profile TDP reconcile failed.", ex); }
+        if (display) try { _displayResolutionRuntime?.Reconcile(appId); } catch (Exception ex) { AppLog.Error("Profiles.Display", "Game Profile display reconcile failed.", ex); }
     }
 
     private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(new(20, 22), new(20, 22)), false, null);

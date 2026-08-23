@@ -132,6 +132,8 @@ public sealed class NamedPipeAddonFrontendServer : IAsyncDisposable
     }
     private async Task<System.Text.Json.JsonElement> InvokeAsync(FrontendRpcMethod m, System.Text.Json.JsonElement? p, CancellationToken t) => m == FrontendRpcMethod.SetGameProfileFavorite
         ? FrontendWireCodec.Payload(await _inner.SetGameProfileFavoriteAsync(FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).Favorite, FrontendWireCodec.Decode<SetGameProfileFavoriteRequest>(p).DisplayName, t).ConfigureAwait(false))
+        : m == FrontendRpcMethod.SetGameProfileResolution
+        ? FrontendWireCodec.Payload(await _inner.SetGameProfileResolutionAsync(FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).AppId, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).Resolution, FrontendWireCodec.Decode<SetGameProfileResolutionRequest>(p).DisplayName, t).ConfigureAwait(false))
         : m == FrontendRpcMethod.SetWingMapping
         ? FrontendWireCodec.Payload(await _inner.SetWingMappingAsync(FrontendWireCodec.Decode<SetWingMappingRequest>(p).Mapping, t).ConfigureAwait(false))
         : m switch

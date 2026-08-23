@@ -63,6 +63,13 @@ public sealed record GameTdpSettings
 /// <summary>Per-game display settings, retained as an independent additive section.</summary>
 public sealed record GameDisplayOverrides
 {
+    public GameDisplayResolution? Resolution { get; init; }
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed record GameDisplayResolution
+{
+    public required int Width { get; init; }
+    public required int Height { get; init; }
 }

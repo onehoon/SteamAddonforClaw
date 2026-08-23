@@ -16,6 +16,7 @@ internal static class AddonDataPaths
     /// a separate storage domain from <see cref="SettingsPath"/>, but the same canonical
     /// persistent <c>-Data</c> root.</summary>
     internal static string ProfilesPath => ResolveProfilesPath(VelopackAppPaths.RootAppDirectory);
+    internal static string DisplayResolutionRecoveryPath => Path.Combine(RootDirectory, "display-resolution-recovery.json");
 
     internal static string ResolveSettingsPath(string rootAppDirectory) =>
         Path.Combine(ResolveDataRoot(rootAppDirectory), "settings.json");
