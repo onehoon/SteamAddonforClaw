@@ -145,6 +145,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// It is also the extra condition on custom gesture authority, so a revoke takes effect
     /// immediately rather than only once the coordinator's next reconcile observes it.</summary>
     private bool _oem1RemappingEnabled;
+    private bool _oem1RoutingActive;
     private Func<RoutingRuntimeStatusSnapshot>? _captureOem1RoutingStatus;
 
     /// <summary>WMI observation is started lazily and exactly once, the first time remapping is
@@ -400,12 +401,25 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // switched off this still resolves normally -- it simply never enables anything.
         // The lifecycle must also be available for the fixed routing-active OEM1 role. The
         // dispatcher still keeps normal/non-routing remapping fail-open when this switch is off.
-        var enabled = ComputeOem1CanArm(mappingPreference) || captureRoutingStatus().SteamOutputActive;
+        var enabled = ComputeOem1CanArm(mappingPreference);
         lock (_oem1TaskSync)
         {
             _oem1RemappingEnabled = enabled;
             return _oem1ActivationTask = StartInitialOem1ActivationAsync(enabled);
         }
+    }
+
+    async Task IHandheldRoutingComposition.PrepareRoutingEntryAsync(CancellationToken cancellationToken)
+    {
+        _oem1RoutingActive = true;
+        await RequestOem1EnabledTransitionAsync(true).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IHandheldRoutingComposition.CompleteRoutingExitAsync(CancellationToken cancellationToken)
+    {
+        _oem1RoutingActive = false;
+        var normalEnabled = _oem1MappingPreference is { } preference && ComputeOem1CanArm(preference);
+        await RequestOem1EnabledTransitionAsync(normalEnabled).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     Task IHandheldRoutingComposition.ConfigureWingActionPath(
@@ -531,8 +545,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private void OnOem1MappingChanged(object? sender, EventArgs args)
     {
         if (_oem1MappingPreference is not { } preference) return;
-        var routingActive = _captureOem1RoutingStatus?.Invoke().SteamOutputActive == true;
-        RequestOem1EnabledTransitionAsync(ComputeOem1CanArm(preference) || routingActive);
+        RequestOem1EnabledTransitionAsync(ComputeOem1CanArm(preference) || _oem1RoutingActive);
     }
 
     private async Task ContinueOem1RemappingAsync(Task previous, bool enabled)
@@ -604,8 +617,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         {
             lock (_oem1TaskSync)
             {
-                var routingActive = _captureOem1RoutingStatus?.Invoke().SteamOutputActive == true;
-                return !_oem1Stopping && _oem1FailOpenTask is null && (_oem1RemappingEnabled || routingActive);
+                return !_oem1Stopping && _oem1FailOpenTask is null && (_oem1RemappingEnabled || _oem1RoutingActive);
             }
         });
     }

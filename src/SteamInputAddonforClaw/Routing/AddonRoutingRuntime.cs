@@ -139,6 +139,8 @@ internal sealed class AddonRoutingRuntime : IAsyncDisposable, IPowerSuspendParti
             beforeActiveSessionExit: cancellationToken => runtime is null
                 ? Task.FromResult(true)
                 : runtime.RetireXbox360BeforeOuterRouteExitAsync(cancellationToken),
+            prepareRoutingEntry: cancellationToken => handheldRoutingComposition.PrepareRoutingEntryAsync(cancellationToken),
+            completeRoutingExit: cancellationToken => handheldRoutingComposition.CompleteRoutingExitAsync(cancellationToken),
             pauseOwnedRouteForSuspend: cancellationToken => runtime is null
                 ? Task.FromResult(RoutingStageOperationResult.Failure("RuntimeUnavailable"))
                 : runtime.PauseOwnedRouteForSuspendAsync(cancellationToken),

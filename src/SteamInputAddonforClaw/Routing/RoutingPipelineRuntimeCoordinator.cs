@@ -27,6 +27,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
     private readonly RoutingPipelineSessionCoordinator _sessionCoordinator;
     private readonly IReadOnlyList<IRoutingRuntimeSessionBoundaryParticipant> _sessionBoundaryParticipants;
     private readonly Func<CancellationToken, Task<bool>>? _beforeActiveSessionExit;
+    private readonly Func<CancellationToken, Task>? _prepareRoutingEntry;
+    private readonly Func<CancellationToken, Task>? _completeRoutingExit;
     private readonly Func<CancellationToken, Task<RoutingStageOperationResult>>? _pauseOwnedRouteForSuspend;
     private readonly Func<CancellationToken, Task<RoutingStageOperationResult>>? _reconcileOwnedRouteState;
     private readonly Func<bool> _ordinaryReconcileAllowed;
@@ -44,6 +46,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         RoutingPipelineSessionCoordinator sessionCoordinator,
         IEnumerable<IRoutingRuntimeSessionBoundaryParticipant>? sessionBoundaryParticipants = null,
         Func<CancellationToken, Task<bool>>? beforeActiveSessionExit = null,
+        Func<CancellationToken, Task>? prepareRoutingEntry = null,
+        Func<CancellationToken, Task>? completeRoutingExit = null,
         Func<CancellationToken, Task<RoutingStageOperationResult>>? pauseOwnedRouteForSuspend = null,
         Func<CancellationToken, Task<RoutingStageOperationResult>>? reconcileOwnedRouteState = null,
         Func<bool>? ordinaryReconcileAllowed = null)
@@ -52,6 +56,8 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
         _sessionCoordinator = sessionCoordinator ?? throw new ArgumentNullException(nameof(sessionCoordinator));
         _sessionBoundaryParticipants = (sessionBoundaryParticipants ?? []).ToArray();
         _beforeActiveSessionExit = beforeActiveSessionExit;
+        _prepareRoutingEntry = prepareRoutingEntry;
+        _completeRoutingExit = completeRoutingExit;
         _pauseOwnedRouteForSuspend = pauseOwnedRouteForSuspend;
         _reconcileOwnedRouteState = reconcileOwnedRouteState;
         _ordinaryReconcileAllowed = ordinaryReconcileAllowed ?? (() => true);
@@ -468,10 +474,16 @@ internal sealed class RoutingPipelineRuntimeCoordinator : IPowerSuspendParticipa
             }
         }
 
+        var entering = _sessionCoordinator.ActiveSession is null && snapshot.RoutingDecision.Kind == RoutingDecisionKind.Eligible;
+        if (entering && _prepareRoutingEntry is not null)
+            await _prepareRoutingEntry(cancellationToken).ConfigureAwait(false);
+
         var result = await _sessionCoordinator.ReconcileAsync(
             snapshot.RoutingDecision,
             classification,
             cancellationToken).ConfigureAwait(false);
+        if (result.Succeeded && result.Action == RoutingActionKind.ExitOverride && _completeRoutingExit is not null)
+            await _completeRoutingExit(cancellationToken).ConfigureAwait(false);
         if (IsSteamSessionEnded(snapshot.RoutingDecision) && result.Succeeded &&
             _sessionCoordinator.ActiveSession is null && _sessionCoordinator.PendingCleanup is null)
             return await ApplySessionBoundaryAsync(result).ConfigureAwait(false);

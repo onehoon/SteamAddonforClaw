@@ -283,6 +283,33 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     }
 
     [Fact]
+    public async Task Routing_lifecycle_arms_fixed_oem1_role_then_restores_native_policy()
+    {
+        var requests = 0;
+        var routingActive = false;
+        var (composition, eventSource, mapping) = BuildArmable(
+            initialMapping: Oem1MappingSettings.Default with { RemappingEnabled = false });
+        IHandheldRoutingComposition handheld = composition;
+
+        await handheld.ConfigureOem1ActionPath(() => Status(routingActive), () => requests++, mapping);
+        await composition.TestOnly_Oem1ActivationTask;
+        Assert.False(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+
+        await handheld.PrepareRoutingEntryAsync(CancellationToken.None);
+        routingActive = true;
+        eventSource.Emit(new MsiOemEvent(41, CenterMOemCode.Oem1));
+        await Task.Delay(50);
+        Assert.Equal(1, requests);
+        Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+
+        await handheld.CompleteRoutingExitAsync(CancellationToken.None);
+        Assert.False(composition.CenterMOem1Coordinator.GetSnapshot().SuppressionReady);
+        Assert.True(composition.CenterMOem1Coordinator.GetSnapshot().NativeBehaviorGuaranteed);
+
+        await ((IAsyncDisposable)composition).DisposeAsync();
+    }
+
+    [Fact]
     public async Task Initial_OEM1_activation_is_deferred_until_after_composition_returns()
     {
         var (composition, eventSource, mapping) = BuildArmable();

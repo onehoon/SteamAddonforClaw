@@ -72,6 +72,10 @@ internal interface IHandheldRoutingComposition : IAsyncDisposable
     Task<RoutingStageOperationResult> ReconcileOwnedRouteStateAsync(CancellationToken cancellationToken) =>
         Task.FromResult(RoutingStageOperationResult.Success("NoOwnedRoute"));
 
+    Task PrepareRoutingEntryAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    Task CompleteRoutingExitAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     /// <summary>
     /// Optional OEM1 production action-path wiring hook (PR3 development E2E POC). The generic
     /// routing/output layer is the only place that owns the canonical Steam Deck output stage's QAM
