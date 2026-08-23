@@ -26,9 +26,12 @@ Addon은 MSI의 정확한 Board ID를 기준으로 지원 모델을 식별합니
 - Windows 11 x64
 - 위 목록에 포함된 지원 MSI Claw 모델
 - Steam Input Routing, 게임별 Steam 프로파일, Quick Access Menu 통합 기능을 사용하려면 Steam이 설치되어 있고 실행 중이어야 함
-- MSI Center M을 포함한 기기의 정상 MSI 컨트롤러 환경이 사용 가능해야 함
+- **순정 MSI Center M이 설치되어 있고 정상적으로 사용 가능한 기본 MSI 컨트롤러 환경**
 
-컨트롤러 라우팅 기능은 다른 컨트롤러 라우팅 프로그램이나 가상 컨트롤러 관리 프로그램이 같은 내장 컨트롤러의 소유권을 동시에 가져가는 환경을 전제로 하지 않습니다.
+> [!CAUTION]
+> **Steam Addon for Claw는 순정 MSI Center M이 설치된 기본 컨트롤러 환경만 지원합니다.**
+>
+> **Handheld Companion, ClawTweaks 또는 이와 유사한 프로그램과 병행 사용하지 마십시오.** 내장 컨트롤러를 관리하거나, 컨트롤러 모드를 변경하거나, 별도 Routing/가상 컨트롤러 소유권을 제공하는 프로그램과의 동시 사용은 지원하지 않습니다. 이러한 환경에서는 컨트롤러 소유권, Routing, 복구 또는 종료(Teardown) 경로가 서로 충돌할 수 있습니다.
 
 ## 주요 기능
 
@@ -330,6 +333,7 @@ Addon은 시작 시 이전의 오래된 Routing 세션을 의도적으로 다시
 ## 알려진 제한 사항
 
 - 현재 실제 하드웨어 검증은 MSI Claw 8 EX AI+ CG3EM (`MS-1T91`)에서 완료되어 있습니다. A2VM 모델은 지원되지만 아직 실제 기기 검증이 남아 있습니다.
+- **순정 MSI Center M 컨트롤러 환경만 지원합니다. Handheld Companion, ClawTweaks 및 유사 컨트롤러 관리 환경과의 병행 사용은 지원하지 않습니다.**
 - Motion / Gyro 출력은 현재 Steam Deck 가상 컨트롤러 매핑에서 지원되지 않습니다.
 - 런처 기반 Non-Steam 게임은 실제 게임 시작 후에도 Steam이 해당 shortcut을 활성 `RunningAppID`로 계속 보고하는 경우에만 정상 동작합니다.
 - QAM 통합은 Steam GamepadUI 내부 구조에 의존하므로 Steam Client의 큰 UI 변경 이후 Addon 업데이트가 필요할 수 있습니다.
@@ -340,10 +344,11 @@ Addon은 시작 시 이전의 오래된 Routing 세션을 의도적으로 다시
 Steam Input Routing이 활성화되지 않는 경우 다음 항목을 확인합니다.
 
 1. 기기가 위 지원 목록의 Board ID 중 하나인지 확인합니다.
-2. **Controller** 탭에서 **Steam Input Routing**이 활성화되어 있는지 확인합니다.
-3. Steam이 실행 중이며 해당 Steam 게임 또는 Non-Steam shortcut을 현재 실행 중인 것으로 인식하고 있는지 확인합니다.
-4. 내장 컨트롤러를 관리하고 있을 수 있는 다른 컨트롤러 Routing 또는 가상 컨트롤러 도구를 종료합니다.
-5. MSI Center M을 직접 열었거나 컨트롤러가 재열거된 경우 Addon이 안정적인 기본 컨트롤러 상태로 돌아갈 수 있도록 한 뒤 Steam 세션을 다시 시작합니다.
+2. **순정 MSI Center M 환경인지 확인하고 Handheld Companion, ClawTweaks 또는 다른 컨트롤러 관리 프로그램이 실행 중이지 않은지 확인합니다.**
+3. **Controller** 탭에서 **Steam Input Routing**이 활성화되어 있는지 확인합니다.
+4. Steam이 실행 중이며 해당 Steam 게임 또는 Non-Steam shortcut을 현재 실행 중인 것으로 인식하고 있는지 확인합니다.
+5. 내장 컨트롤러를 관리하고 있을 수 있는 다른 컨트롤러 Routing 또는 가상 컨트롤러 도구를 종료합니다.
+6. MSI Center M을 직접 열었거나 컨트롤러가 재열거된 경우 Addon이 안정적인 기본 컨트롤러 상태로 돌아갈 수 있도록 한 뒤 Steam 세션을 다시 시작합니다.
 
 런처가 종료된 뒤 Non-Steam 게임 프로파일 적용이 중단된다면 Steam이 여전히 해당 Non-Steam shortcut을 실행 중으로 표시하는지 확인합니다. Addon은 하위 게임 실행 파일을 별도로 스캔하지 않고 Steam이 제공하는 활성 AppID를 의도적으로 기준으로 사용합니다.
 
