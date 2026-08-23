@@ -2,7 +2,5 @@
     x:Class="SteamInputAddonforClaw.Views.HowToUsePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <StackPanel Padding="32" Spacing="12">
-        <TextBlock FontSize="24" FontWeight="SemiBold" Text="How to Use" />
-    </StackPanel>
+    <WebView2 x:Name="DocumentationWebView" />
 </UserControl>
