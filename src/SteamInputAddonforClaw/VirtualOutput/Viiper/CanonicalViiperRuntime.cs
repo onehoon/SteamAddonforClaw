@@ -310,8 +310,13 @@ internal sealed class CanonicalViiperRuntime
             }
             if (xbox360AttachmentState != USBDeviceAttachmentState.Detached)
             {
-                if (xbox360AttachmentState == USBDeviceAttachmentState.Attached && runtime.TryDetachXbox360IfAttached(xbox360AttachmentState))
+                if (xbox360AttachmentState == USBDeviceAttachmentState.Attached)
+                {
+                    LogInitFailure("Xbox360InitialAttachmentStateNotDetached");
+                    if (!runtime.TryDetachXbox360IfAttached(xbox360AttachmentState))
+                        return runtime;
                     return UnwindXbox360ThenDeckThenBusServer(runtime);
+                }
                 runtime.MarkUnsafe($"Xbox360InitialAttachmentState{(int)xbox360AttachmentState}");
                 return runtime;
             }

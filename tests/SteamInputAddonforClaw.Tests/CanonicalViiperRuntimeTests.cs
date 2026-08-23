@@ -248,6 +248,25 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
+    public async Task Xbox360_initial_attached_retryable_detach_retains_owner_and_retries()
+    {
+        var native = new FakeNative
+        {
+            Xbox360InitialAttachmentState = USBDeviceAttachmentState.Attached,
+            Xbox360DetachResults = new Queue<USBDeviceDetachResult>(
+                [USBDeviceDetachResult.RetryableFailure, USBDeviceDetachResult.Success])
+        };
+
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress, createXbox360ForTests: true);
+
+        Assert.NotNull(runtime);
+        Assert.Equal(CanonicalViiperRuntimeState.CleanupPending, runtime!.State);
+        Assert.Equal(CanonicalViiperRuntimeTeardownPhase.Xbox360Detach, runtime.TeardownPhase);
+        Assert.True(await runtime.TeardownAsync());
+        Assert.Equal(CanonicalViiperRuntimeState.Closed, runtime.State);
+    }
+
+    [Fact]
     public void Xbox360_attachment_state_query_failure_stops_with_no_destructive_calls_and_retains_owner()
     {
         var native = new FakeNative { Xbox360AttachmentStateQuerySucceeds = false };
