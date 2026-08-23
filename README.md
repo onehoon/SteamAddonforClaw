@@ -1,6 +1,6 @@
-# Steam Input Addon for Claw
+# Steam Addon for Claw
 
-Steam Input Addon for Claw brings Steam Input and Steam Deck-style controller integration to the built-in controller on supported MSI Claw handhelds.
+Steam Addon for Claw brings Steam Input and Steam Deck-style controller integration to the built-in controller on supported MSI Claw handhelds.
 
 When a Steam game or Steam Big Picture session needs the controller, the Addon temporarily routes the built-in MSI controller through a virtual Steam Deck controller. When routing is no longer needed, the Claw returns to its normal native Windows controller mode.
 
@@ -67,7 +67,7 @@ MSI Claw built-in controller
         ↓
 MSI DirectInput mode
         ↓
-Steam Input Addon for Claw
+Steam Addon for Claw
         ↓
 Virtual Steam Deck controller
         ↓
@@ -209,7 +209,7 @@ Performance profiles use the actual Steam AppID and operate independently from t
 
 ## Steam Quick Access Menu support
 
-Steam Input Addon for Claw integrates its performance controls into Steam's GamepadUI / Quick Access Menu.
+Steam Addon for Claw integrates its performance controls into Steam's GamepadUI / Quick Access Menu.
 
 During active routing, press **Center M** to open Steam Quick Access.
 
@@ -226,7 +226,7 @@ The QAM integration uses Steam's native GamepadUI components. If a Steam client 
 ## Quick start
 
 1. Install the official release package.
-2. Launch **Steam Input Addon for Claw**.
+2. Launch **Steam Addon for Claw**.
 3. Keep Steam running.
 4. Open the **Controller** tab.
 5. Enable **Steam Input Routing**.

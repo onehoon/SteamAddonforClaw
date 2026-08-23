@@ -123,8 +123,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             {
                 var unsupported = startupResult.HardwareStatus == HardwareCompatibilityStatus.Unsupported;
                 NativeStartupWarning.Show(unsupported
-                    ? "This device is not supported by Steam Input Addon for Claw."
-                    : "This device could not be identified. Steam Input Addon for Claw will exit without making any changes.");
+                    ? "This device is not supported by Steam Addon for Claw."
+                    : "This device could not be identified. Steam Addon for Claw will exit without making any changes.");
                 _startupOutcome = unsupported
                     ? AddonProcessStartupOutcome.UnsupportedHardware
                     : AddonProcessStartupOutcome.IndeterminateHardware;
@@ -463,7 +463,7 @@ internal static class NativeStartupWarning
     private const uint MbOk = 0x00000000;
     private const uint MbIconWarning = 0x00000030;
 
-    internal static void Show(string message) => MessageBoxW(0, message, "Steam Input Addon for Claw", MbOk | MbIconWarning);
+    internal static void Show(string message) => MessageBoxW(0, message, "Steam Addon for Claw", MbOk | MbIconWarning);
 
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private static extern int MessageBoxW(nint hWnd, string lpText, string lpCaption, uint uType);
