@@ -103,9 +103,12 @@ internal sealed class GameProfileMutations
             if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
             var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (!loaded.Document.Games.TryGetValue(key, out var current))
+            {
+                if (resolution is null) return MutationOutcome.Succeeded;
                 current = new GameProfile { Enabled = false, DisplayName = displayName };
+            }
+            if (current.Display.Resolution is null && resolution is null) return MutationOutcome.Succeeded;
             var display = current.Display with { Resolution = resolution };
-            if (current.Display.Resolution is null && resolution is null && loaded.Document.Games.ContainsKey(key)) return MutationOutcome.Succeeded;
             loaded.Document.Games[key] = current with { Display = display, DisplayName = displayName ?? current.DisplayName };
             try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
         }

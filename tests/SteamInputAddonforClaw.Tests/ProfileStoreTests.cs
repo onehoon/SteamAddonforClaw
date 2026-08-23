@@ -533,6 +533,16 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.True(saved.Display.ExtensionData!.ContainsKey("future"));
     }
 
+    [Fact]
+    public void SetResolution_ClearingAbsentResolutionDoesNotCreateGhostProfile()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var mutations = new GameProfileMutations(store);
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetResolution(123, null, "Game"));
+        Assert.False(store.Load().Document.Games.ContainsKey("123"));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))
