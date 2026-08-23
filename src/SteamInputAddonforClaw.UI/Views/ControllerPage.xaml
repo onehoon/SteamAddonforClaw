@@ -21,6 +21,7 @@
                     </ctcontrols:SettingsCard>
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
+            <TextBlock x:Name="CenterMUnavailableText" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
             <views:CenterMButtonPage x:Name="CenterMInlineContent" />
         </StackPanel>
     </ScrollViewer>

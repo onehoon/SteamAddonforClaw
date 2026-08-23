@@ -24,7 +24,8 @@ public sealed partial class ControllerPage : UserControl
         _lastKnownSteamInputRoutingEnabled = bootstrap.Settings.SteamInputRoutingEnabled;
         SteamInputRoutingToggleSwitch.IsOn = _lastKnownSteamInputRoutingEnabled;
         _oem1MappingAvailable = bootstrap.Oem1MappingAvailable;
-        CenterMInlineContent.IsEnabled = _oem1MappingAvailable;
+        CenterMInlineContent.Visibility = _oem1MappingAvailable ? Visibility.Visible : Visibility.Collapsed;
+        CenterMUnavailableText.Visibility = _oem1MappingAvailable ? Visibility.Collapsed : Visibility.Visible;
         CenterMInlineContent.Initialize(bootstrap, windowHandleProvider);
         CenterMInlineContent.MappingEditRequested += (_, mapping) => MappingEditRequested?.Invoke(this, mapping with { RemappingEnabled = true });
         ApplyOem1Mapping(bootstrap.Settings.Oem1Mapping);

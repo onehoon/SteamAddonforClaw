@@ -79,12 +79,6 @@ internal sealed class Oem1ActionDispatcher
             // actually active right now? Never Available, never routing-enabled, never eligibility.
             var routingActuallyActive = _captureRoutingStatus().SteamOutputActive;
 
-            if (routingActuallyActive)
-            {
-                _requestQuickAccessPulse();
-                return true;
-            }
-
             slot = Oem1MappingSlots.Resolve(routingActuallyActive, request.Gesture);
             var binding = mapping.Resolve(slot);
             action = binding.Action;
