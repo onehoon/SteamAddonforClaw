@@ -200,6 +200,24 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void CpuBoostSideMutations_PreserveTheOppositePersistedSide()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var mutations = new GameProfileMutations(store);
+        Assert.True(mutations.Enable(123, "Game"));
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostAc(123, CpuBoostMode.Aggressive));
+        var afterAc = store.Load().Document.Games["123"].Performance.CpuBoost!;
+        Assert.Equal(CpuBoostMode.Aggressive, afterAc.Ac);
+        Assert.Equal(CpuBoostMode.Enabled, afterAc.Dc);
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetCpuBoostDc(123, CpuBoostMode.Disabled));
+        var afterDc = store.Load().Document.Games["123"].Performance.CpuBoost!;
+        Assert.Equal(CpuBoostMode.Aggressive, afterDc.Ac);
+        Assert.Equal(CpuBoostMode.Disabled, afterDc.Dc);
+    }
+
+    [Fact]
     public void SaveAndLoad_RoundTripsCompleteGameProfile()
     {
         var store = new ProfileStore(ProfilesPath);
