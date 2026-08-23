@@ -415,7 +415,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("\"setActiveGameTdp\"", source);
         Assert.Contains("disabled: !profile.persistenceWritable || !enabled", source);
         Assert.Contains("profile.cpuBoost?.ac", source);
-        Assert.Contains("profile.tdp?.dc?.pl2Watts", source);
+        Assert.Contains("profileTdpDraft?.dc?.pl2Watts", source);
         Assert.DoesNotContain("setInterval", source);
         Assert.DoesNotContain("type: \"checkbox\"", source);
         Assert.DoesNotContain("type: \"range\"", source);

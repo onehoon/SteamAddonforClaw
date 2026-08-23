@@ -513,6 +513,7 @@
       const [cpu, setCpu] = React.useState(null);
       const [tdp, setTdp] = React.useState(null);
       const [profile, setProfile] = React.useState(null);
+      const [profileTdpDraft, setProfileTdpDraft] = React.useState(null);
       const profileTdpDraftRef = React.useRef(null);
       const profileTdpTimer = React.useRef(null);
       const profileTdpGeneration = React.useRef(0);
@@ -542,7 +543,10 @@
         if (tdpTimer.current) clearTimeout(tdpTimer.current);
         tdpTimer.current = null;
         tdpEditGeneration.current = 0;
-        setStatus(null); setCpu(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
+        if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
+        profileTdpTimer.current = null;
+        profileTdpGeneration.current = 0;
+        setStatus(null); setCpu(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
       }, []);
 
       const refresh = React.useCallback(async () => {
@@ -560,7 +564,11 @@
             dc: { ...nextTdp.configuration.dc },
           } : null;
           setStatus(nextStatus); setCpu(nextCpu); setTdp(nextTdp); setProfile(nextProfile);
-          if (nextProfile?.tdp) profileTdpDraftRef.current = { ac: { ...nextProfile.tdp.ac }, dc: { ...nextProfile.tdp.dc } };
+          if (nextProfile?.tdp && profileTdpGeneration.current === 0) {
+            const nextProfileDraft = { ac: { ...nextProfile.tdp.ac }, dc: { ...nextProfile.tdp.dc } };
+            profileTdpDraftRef.current = nextProfileDraft;
+            setProfileTdpDraft(nextProfileDraft);
+          }
           if (tdpEditGeneration.current === 0) { setTdpDraft(nextDraft); tdpDraftRef.current = nextDraft; }
           setPreviewAc(null); setPreviewDc(null); setError(null);
         } catch (_) { failClosed("QAM bridge unavailable"); }
@@ -788,11 +796,18 @@
         };
         const toggleProfile = async value => {
           if (!state.installed || !writable) return;
+          cancelModeTimers();
+          if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
+          profileTdpTimer.current = null;
+          profileTdpGeneration.current = 0;
+          setPreviewAc(null); setPreviewDc(null);
           setBusy(true); setError(null);
           try {
             beginMutation();
             const result = await request("setActiveGameProfileEnabled", { enabled: !!value, displayName: profile.displayName });
             setProfile(result.snapshot);
+            const nextDraft = result.snapshot.tdp ? { ac: { ...result.snapshot.tdp.ac }, dc: { ...result.snapshot.tdp.dc } } : null;
+            profileTdpDraftRef.current = nextDraft; setProfileTdpDraft(nextDraft);
             if (!result.succeeded) setError(result.failureMessage || "Profile update failed");
           } catch (_) { failClosed("Profile update failed"); }
           finally { endMutation(); setBusy(false); }
@@ -800,6 +815,7 @@
         const scheduleProfileTdp = draft => {
           if (!state.installed || !profile.persistenceWritable || !enabled || !profile.limits) return;
           profileTdpDraftRef.current = draft;
+          setProfileTdpDraft(draft);
           const generation = ++profileTdpGeneration.current;
           if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
           profileTdpTimer.current = setTimeout(async () => {
@@ -808,7 +824,7 @@
             try {
               beginMutation();
               const result = await request("setActiveGameTdp", { configuration: draft });
-              if (generation === profileTdpGeneration.current) { setProfile(result.snapshot); profileTdpDraftRef.current = { ac: { ...result.snapshot.tdp.ac }, dc: { ...result.snapshot.tdp.dc } }; }
+              if (generation === profileTdpGeneration.current) { profileTdpGeneration.current = 0; setProfile(result.snapshot); const nextDraft = { ac: { ...result.snapshot.tdp.ac }, dc: { ...result.snapshot.tdp.dc } }; profileTdpDraftRef.current = nextDraft; setProfileTdpDraft(nextDraft); }
               if (!result.succeeded) setError(result.failureMessage || "TDP update failed");
             } catch (_) { failClosed("TDP update failed"); }
             finally { endMutation(); }
@@ -820,15 +836,15 @@
               React.createElement("span", { className: native.FieldLabelClass }, label),
               React.createElement("span", { className: native.FieldLabelValueClass }, labelFor(value)))),
           min: 0, max: 6, step: 1, value: preview ?? value, notchCount: modes.length,
-          disabled: !profile.persistenceWritable || !enabled, notchTicksVisible: true, bottomSeparator: separator,
+          disabled: !profile.persistenceWritable || !enabled || busy, notchTicksVisible: true, bottomSeparator: separator,
           onChange: next => scheduleProfileMode(side, Number(next)),
         });
         const profileTdpSlider = (label, side, value, separator) => value == null || !profile.limits ? null : React.createElement(native.SliderField, {
           label, min: label === "PL1" ? profile.limits.pl1MinimumWatts : profile.limits.pl2MinimumWatts,
-          max: label === "PL1" ? profile.limits.pl1MaximumWatts : profile.limits.pl2MaximumWatts,
-          step: 1, value, showValue: true, disabled: !profile.persistenceWritable || !enabled, bottomSeparator: separator,
+          max: profile.limits.pl2MaximumWatts,
+          step: 1, value, showValue: true, disabled: !profile.persistenceWritable || !enabled || busy, bottomSeparator: separator,
           onChange: next => {
-            const draft = profileTdpDraftRef.current || { ac: { ...profile.tdp.ac }, dc: { ...profile.tdp.dc } };
+            const draft = profileTdpDraftRef.current || profileTdpDraft || { ac: { ...profile.tdp.ac }, dc: { ...profile.tdp.dc } };
             const pair = { ...draft[side] }; let numeric = Number(next);
             if (label === "PL1") numeric = Math.min(numeric, profile.limits.pl1MaximumWatts);
             pair[label === "PL1" ? "pl1Watts" : "pl2Watts"] = numeric;
@@ -842,12 +858,10 @@
           { key: "profile-dc", node: profileSlider("On battery", "dc", profile.cpuBoost?.dc, previewDc, "standard") },
         ];
         const profileTdpControls = profile.limits ? [
-          { key: "profile-tdp-ac-heading", node: React.createElement("div", null, "TDP · Plugged in") },
-          { key: "profile-tdp-ac-pl1", node: profileTdpSlider("PL1", "ac", profile.tdp?.ac?.pl1Watts, "none") },
-          { key: "profile-tdp-ac-pl2", compact: true, node: profileTdpSlider("PL2", "ac", profile.tdp?.ac?.pl2Watts, "none") },
-          { key: "profile-tdp-dc-heading", node: React.createElement("div", null, "TDP · On battery") },
-          { key: "profile-tdp-dc-pl1", node: profileTdpSlider("PL1", "dc", profile.tdp?.dc?.pl1Watts, "none") },
-          { key: "profile-tdp-dc-pl2", compact: true, node: profileTdpSlider("PL2", "dc", profile.tdp?.dc?.pl2Watts, "standard") },
+          { key: "profile-tdp-ac-pl1", node: profileTdpSlider("PL1", "ac", profileTdpDraft?.ac?.pl1Watts, "none") },
+          { key: "profile-tdp-ac-pl2", compact: true, node: profileTdpSlider("PL2", "ac", profileTdpDraft?.ac?.pl2Watts, "none") },
+          { key: "profile-tdp-dc-pl1", node: profileTdpSlider("PL1", "dc", profileTdpDraft?.dc?.pl1Watts, "none") },
+          { key: "profile-tdp-dc-pl2", compact: true, node: profileTdpSlider("PL2", "dc", profileTdpDraft?.dc?.pl2Watts, "standard") },
         ] : [];
         return React.createElement(React.Fragment, null,
           displayError ? React.createElement("p", { key: "error" }, displayError) : null,
