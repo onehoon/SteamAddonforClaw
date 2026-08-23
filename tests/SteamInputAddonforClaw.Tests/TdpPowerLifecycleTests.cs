@@ -138,6 +138,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
 
         watcher.Observe(TdpPowerNotification.Suspend);
         delay.Reset(); watcher.Observe(TdpPowerNotification.ResumeAutomatic); watcher.Observe(TdpPowerNotification.ResumeSuspend); delay.Release();
+        await Task.Yield(); delay.Reset(); delay.Release();
         await watcher.DrainPendingAsync(); await runtime.DrainAsync();
 
         Assert.Equal(["GetAp(0)", "SetData(80,8)", "SetData(81,30)", "SetData(80,20)"], transport.Operations);
@@ -152,8 +153,29 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         await using var runtime = CreateRuntime(transport, TdpPowerSource.AC);
         using var watcher = CreateWatcher(runtime, source, delay);
         watcher.Observe(TdpPowerNotification.ResumeAutomatic); watcher.Observe(TdpPowerNotification.ResumeSuspend); delay.Release();
+        await Task.Yield(); delay.Reset(); delay.Release();
         await watcher.DrainPendingAsync(); await runtime.DrainAsync();
         Assert.Equal(1, transport.Operations.Count(x => x == "GetAp(0)"));
+    }
+
+    [Fact]
+    public async Task ResumeApplyFailureGetsExactlyOneRetry()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        var source = new FakeSource(); var delay = new FakeDelay();
+        var transport = new FakeTransport { Ap = [0, 0, 0xC4], FailWritesRemaining = 8 };
+        await using var runtime = CreateRuntime(transport, TdpPowerSource.AC);
+        using var watcher = CreateWatcher(runtime, source, delay);
+
+        watcher.Observe(TdpPowerNotification.Suspend);
+        watcher.Observe(TdpPowerNotification.ResumeAutomatic);
+        delay.Release();
+        await Task.Yield(); delay.Reset(); delay.Release();
+        await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+
+        Assert.Equal(2, transport.Operations.Count(x => x == "GetAp(0)"));
+        AppLog.DrainForTests();
+        Assert.Contains("Reason=ResumeRetry", LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath));
     }
 
     [Fact]
@@ -319,6 +341,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
     {
         public byte[] Ap { get; set; } = [0, 0, 0xC0];
         public bool FailWrites { get; set; }
+        public int FailWritesRemaining { get; set; }
         public bool BlockFirstApply { get; set; }
         public TaskCompletionSource FirstApplyStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim ReleaseFirstApply { get; } = new(false);
@@ -331,6 +354,11 @@ public sealed class TdpPowerLifecycleTests : IDisposable
             {
                 FirstApplyStarted.TrySetResult();
                 ReleaseFirstApply.Wait(TimeSpan.FromSeconds(5));
+            }
+            if (FailWritesRemaining > 0)
+            {
+                FailWritesRemaining--;
+                return false;
             }
             return !FailWrites;
         }

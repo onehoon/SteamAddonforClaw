@@ -124,13 +124,14 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
             await _delay(SettleDelay, pending.Token).ConfigureAwait(false);
             bool force;
             bool invalidate;
+            bool retryAfterResume;
             string settledReason;
             lock (_sync)
             {
                 if (_disposed || !ReferenceEquals(_pending, pending)) return;
-                _pending = null;
                 force = _pendingForce;
                 invalidate = _pendingInvalidate;
+                retryAfterResume = _pendingReasons.Contains("Resume", StringComparer.Ordinal);
                 settledReason = string.Join('+', _pendingReasons);
                 _pendingForce = false;
                 _pendingInvalidate = false;
@@ -138,10 +139,28 @@ internal sealed class TdpPowerLifecycleWatcher : IDisposable
             }
             AppLog.Debug("Profiles.Tdp", "Lifecycle reconcile settled", ("Reason", settledReason), ("Force", force), ("Invalidate", invalidate));
             _runtime.ReconcileCurrent(force, invalidate, settledReason);
+            if (retryAfterResume)
+            {
+                await _runtime.DrainAsync().ConfigureAwait(false);
+                await _delay(SettleDelay, pending.Token).ConfigureAwait(false);
+                lock (_sync)
+                {
+                    if (_disposed || !ReferenceEquals(_pending, pending)) return;
+                }
+                AppLog.Debug("Profiles.Tdp", "Lifecycle resume retry settled", ("Reason", "ResumeRetry"), ("Force", false), ("Invalidate", false));
+                _runtime.ReconcileCurrent(forceApply: false, invalidateHardwareCache: false, "ResumeRetry");
+            }
         }
         catch (OperationCanceledException) when (pending.IsCancellationRequested) { }
         catch (Exception exception) { AppLog.Error("Profiles.Tdp", "TDP lifecycle settle failed.", exception, ("Reason", reason)); }
-        finally { pending.Dispose(); }
+        finally
+        {
+            lock (_sync)
+            {
+                if (ReferenceEquals(_pending, pending)) _pending = null;
+            }
+            pending.Dispose();
+        }
     }
 
     private void CancelPendingUnderLock()
