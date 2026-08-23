@@ -392,7 +392,8 @@ public sealed class QamFrontendContractTests
 
         Assert.Contains("captureActiveGameProfile", source);
         Assert.Contains("setActiveGameProfileEnabled", source);
-        Assert.Contains("setActiveGameCpuBoost", source);
+        Assert.Contains("setActiveGameCpuBoostAc", source);
+        Assert.Contains("setActiveGameCpuBoostDc", source);
         Assert.Contains("setActiveGameTdp", source);
         var activePath = source[source.IndexOf("private async Task<object> ActiveMutationAsync", StringComparison.Ordinal)..];
         Assert.Contains("CaptureActiveGameProfileAsync", activePath);

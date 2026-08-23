@@ -80,13 +80,15 @@ public sealed partial class ProfilePage : UserControl
         CancelTdpDebounce();
         try { var result = await _frontend.SetGameProfileEnabledAsync(appId, ProfileEnabledToggle.IsOn, _selectedGame.Name); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "Profile could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "Profile could not be updated because the Runtime connection was interrupted.", exception); }
     }
-    private async void CpuBoostAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync();
-    private async void CpuBoostDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync();
-    private async Task MutateCpuAsync()
+    private async void CpuBoostAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(true);
+    private async void CpuBoostDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(false);
+    private async Task MutateCpuAsync(bool acSide)
     {
-        if (_suppressEvents || _frontend is null || _selectedGame is null || CpuBoostAcComboBox.SelectedItem is not CpuBoostModeItem ac || CpuBoostDcComboBox.SelectedItem is not CpuBoostModeItem dc) return;
+        if (_suppressEvents || _frontend is null || _selectedGame is null) return;
+        var mode = (acSide ? CpuBoostAcComboBox : CpuBoostDcComboBox).SelectedItem as CpuBoostModeItem;
+        if (mode is null) return;
         var appId = _selectedGame.AppId;
-        try { var result = await _frontend.SetGameProfileCpuBoostAsync(appId, ac.Mode, dc.Mode); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "CPU Boost could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "CPU Boost could not be updated.", exception); }
+        try { var result = acSide ? await _frontend.SetGameProfileCpuBoostAcAsync(appId, mode.Mode) : await _frontend.SetGameProfileCpuBoostDcAsync(appId, mode.Mode); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "CPU Boost could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(appId, "CPU Boost could not be updated.", exception); }
     }
     private void TdpSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {

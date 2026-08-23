@@ -63,14 +63,22 @@ internal sealed class GameProfileMutations
         }
     }
 
-    internal MutationOutcome SetCpuBoost(uint appId, CpuBoostMode ac, CpuBoostMode dc)
+    internal MutationOutcome SetCpuBoostAc(uint appId, CpuBoostMode mode)
+        => SetCpuBoost(appId, cpu => cpu with { Ac = mode });
+
+    internal MutationOutcome SetCpuBoostDc(uint appId, CpuBoostMode mode)
+        => SetCpuBoost(appId, cpu => cpu with { Dc = mode });
+
+    private MutationOutcome SetCpuBoost(uint appId, Func<GameCpuBoostSettings, GameCpuBoostSettings> update)
     {
         lock (_gate.Sync)
         {
             var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
             var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (!loaded.Document.Games.TryGetValue(key, out var profile)) return MutationOutcome.Unavailable;
-            loaded.Document.Games[key] = profile with { Performance = profile.Performance with { CpuBoost = new GameCpuBoostSettings { Ac = ac, Dc = dc } } };
+            var currentCpu = profile.Performance.CpuBoost;
+            if (currentCpu is null) return MutationOutcome.Unavailable;
+            loaded.Document.Games[key] = profile with { Performance = profile.Performance with { CpuBoost = update(currentCpu) } };
             try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
         }
     }

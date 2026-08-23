@@ -111,16 +111,19 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return Task.FromResult(MutateGame(appId, outcome, cpu: true, tdp: true));
     }
 
-    public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAsync(uint appId, CpuBoostMode ac, CpuBoostMode dc, CancellationToken cancellationToken = default) =>
-        MutateCpuBoostAfterShutdownCheck(appId, ac, dc);
+    public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        MutateCpuBoostAfterShutdownCheck(appId, static (mutations, id, value) => mutations.SetCpuBoostAc(id, value), mode);
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostDcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
+        MutateCpuBoostAfterShutdownCheck(appId, static (mutations, id, value) => mutations.SetCpuBoostDc(id, value), mode);
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) =>
         MutateTdpAfterShutdownCheck(appId, configuration);
 
-    private Task<FrontendGameProfileMutationResult> MutateCpuBoostAfterShutdownCheck(uint appId, CpuBoostMode ac, CpuBoostMode dc)
+    private Task<FrontendGameProfileMutationResult> MutateCpuBoostAfterShutdownCheck(uint appId, Func<GameProfileMutations, uint, CpuBoostMode, GameProfileMutations.MutationOutcome> mutation, CpuBoostMode mode)
     {
         ThrowIfShuttingDown();
-        return Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetCpuBoost(appId, ac, dc) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: true, tdp: false));
+        return Task.FromResult(MutateGame(appId, _gameProfileMutations is { } mutations ? mutation(mutations, appId, mode) : GameProfileMutations.MutationOutcome.Unavailable, cpu: true, tdp: false));
     }
 
     private Task<FrontendGameProfileMutationResult> MutateTdpAfterShutdownCheck(uint appId, FrontendGameTdpConfiguration configuration)
