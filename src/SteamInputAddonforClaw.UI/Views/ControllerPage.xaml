@@ -1,91 +1,28 @@
-<UserControl
-    x:Class="SteamInputAddonforClaw.Views.ControllerPage"
+<UserControl x:Class="SteamInputAddonforClaw.Views.ControllerPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls">
+    xmlns:ctcontrols="using:CommunityToolkit.WinUI.Controls"
+    xmlns:views="using:SteamInputAddonforClaw.Views">
     <ScrollViewer Padding="32">
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
                 <TextBlock FontSize="24" FontWeight="SemiBold" Text="Controller" />
                 <TextBlock Opacity="0.7" Text="Configure Steam Input controller routing." TextWrapping="Wrap" />
             </StackPanel>
-            <ctcontrols:SettingsExpander x:Name="SteamInputRoutingExpander" Header="Steam Input Routing" IsExpanded="True" Description="Automatically route the built-in controller through Steam Input for Steam games and Big Picture Mode.&#xA;Xbox Game Bar is disabled during routing, and the Game Bar button action is configured below.">
-                <ctcontrols:SettingsExpander.HeaderIcon>
-                    <SymbolIcon Symbol="Repair" />
-                </ctcontrols:SettingsExpander.HeaderIcon>
+            <ctcontrols:SettingsExpander x:Name="SteamInputRoutingExpander" Header="Steam Input Routing" IsExpanded="True" Description="Automatically route the built-in controller through Steam Input for Steam games and Big Picture Mode.">
+                <ctcontrols:SettingsExpander.HeaderIcon><SymbolIcon Symbol="Repair" /></ctcontrols:SettingsExpander.HeaderIcon>
                 <ToggleSwitch x:Name="SteamInputRoutingToggleSwitch" OffContent="" OnContent="" Toggled="SteamInputRoutingToggleSwitch_Toggled" />
                 <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard x:Name="WingSingleMappingCard" Header="Single Press">
-                        <StackPanel Spacing="10">
-                            <ComboBox x:Name="WingSingleActionComboBox" MinWidth="220" SelectionChanged="WingAction_SelectionChanged" />
-                            <StackPanel x:Name="WingSingleHotkeyDetails" Spacing="6" Visibility="Collapsed">
-                                <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <CheckBox x:Name="WingSingleControlCheckBox" Content="Ctrl" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
-                                    <CheckBox x:Name="WingSingleShiftCheckBox" Content="Shift" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
-                                    <CheckBox x:Name="WingSingleAltCheckBox" Content="Alt" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
-                                    <CheckBox x:Name="WingSingleWindowsCheckBox" Content="Windows" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
-                                </StackPanel>
-                                <ComboBox x:Name="WingSingleKeyComboBox" Header="Key" SelectionChanged="WingAction_SelectionChanged" />
-                            </StackPanel>
-                            <StackPanel x:Name="WingSingleLaunchDetails" Spacing="6" Visibility="Collapsed">
-                                <TextBox x:Name="WingSingleExecutableTextBox" Header="Executable (.exe)" LostFocus="WingConfiguration_LostFocus" />
-                                <TextBox x:Name="WingSingleArgumentsTextBox" Header="Arguments" LostFocus="WingConfiguration_LostFocus" />
-                            </StackPanel>
-                        </StackPanel>
-                    </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard x:Name="WingDoubleMappingCard" Header="Double Press">
-                        <StackPanel Spacing="10">
-                            <ComboBox x:Name="WingDoubleActionComboBox" MinWidth="220" SelectionChanged="WingAction_SelectionChanged" />
-                            <StackPanel x:Name="WingDoubleHotkeyDetails" Spacing="6" Visibility="Collapsed">
-                                <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <CheckBox x:Name="WingDoubleControlCheckBox" Content="Ctrl" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
-                                    <CheckBox x:Name="WingDoubleShiftCheckBox" Content="Shift" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
-                                    <CheckBox x:Name="WingDoubleAltCheckBox" Content="Alt" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
-                                    <CheckBox x:Name="WingDoubleWindowsCheckBox" Content="Windows" Checked="WingConfiguration_Changed" Unchecked="WingConfiguration_Changed" />
-                                </StackPanel>
-                                <ComboBox x:Name="WingDoubleKeyComboBox" Header="Key" SelectionChanged="WingAction_SelectionChanged" />
-                            </StackPanel>
-                            <StackPanel x:Name="WingDoubleLaunchDetails" Spacing="6" Visibility="Collapsed">
-                                <TextBox x:Name="WingDoubleExecutableTextBox" Header="Executable (.exe)" LostFocus="WingConfiguration_LostFocus" />
-                                <TextBox x:Name="WingDoubleArgumentsTextBox" Header="Arguments" LostFocus="WingConfiguration_LostFocus" />
-                            </StackPanel>
+                    <ctcontrols:SettingsCard Header="Routing Button Behavior" Description="During active Steam Input Routing (Steam game or Big Picture Mode), these button assignments are fixed and cannot be customized.">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="WING Button    Steam Button" />
+                            <TextBlock Text="Center M Button    Steam Quick Access" />
                         </StackPanel>
                     </ctcontrols:SettingsCard>
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
-
-            <!--
-                The toggle changes ONLY the global remapping switch; clicking anywhere else on the
-                card (the chevron area) opens the detail page. IsClickEnabled gives the card the
-                standard Windows 11 navigation chevron, and the nested ToggleSwitch keeps its own
-                click for itself.
-            -->
-            <ctcontrols:SettingsCard
-                x:Name="CenterMButtonCard"
-                Click="CenterMButtonCard_Click"
-                Description="Customize Center M button actions"
-                Header="Center M Button"
-                IsClickEnabled="True">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Setting" />
-                </ctcontrols:SettingsCard.HeaderIcon>
-                <!--
-                    Exactly one of these two is ever visible. On hardware the Addon does not
-                    recognize as a supported MSI Claw the feature does not exist at all, so the
-                    toggle is disabled AND replaced by the same plain "Unavailable" text badge the
-                    Status page uses for an unavailable controller path, never shown as merely Off.
-                -->
-                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <TextBlock
-                        x:Name="CenterMUnavailableText"
-                        FontSize="13"
-                        FontWeight="SemiBold"
-                        Text="Unavailable"
-                        VerticalAlignment="Center"
-                        Visibility="Collapsed" />
-                    <ToggleSwitch x:Name="CenterMRemappingToggleSwitch" OffContent="" OnContent="" Toggled="CenterMRemappingToggleSwitch_Toggled" />
-                </StackPanel>
-            </ctcontrols:SettingsCard>
+            <TextBlock x:Name="CenterMUnavailableText" Text="Unavailable" FontWeight="SemiBold" Visibility="Collapsed" />
+            <views:CenterMButtonPage x:Name="CenterMInlineContent" />
         </StackPanel>
     </ScrollViewer>
 </UserControl>

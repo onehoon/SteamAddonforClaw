@@ -61,10 +61,7 @@ public sealed partial class MainWindow : Window
         SettingsContent.Initialize(_frontend, _bootstrap);
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
-        ControllerContent.Initialize(_frontend, _bootstrap);
-        CenterMButtonContent.Initialize(_bootstrap, () => WindowNative.GetWindowHandle(this));
-        ControllerContent.CenterMButtonRequested += (_, _) => OpenCenterMButton();
-        CenterMButtonContent.BackRequested += (_, _) => ReturnToController("BackButton");
+        ControllerContent.Initialize(_frontend, _bootstrap, () => WindowNative.GetWindowHandle(this));
         // Review fix (BLOCKER): a per-page save chain only serialized edits made ON that page --
         // leaving the detail page mid-save and immediately toggling on the Controller page had no
         // ordering relationship between the two pages' independent RPCs, so either could land last
@@ -72,7 +69,6 @@ public sealed partial class MainWindow : Window
         // single owner of the current OEM1 mapping and its one ordered save chain, exactly as it
         // already owns navigation between the two pages.
         ControllerContent.MappingEditRequested += (_, mapping) => QueueOem1Mutation(mapping);
-        CenterMButtonContent.MappingEditRequested += (_, mapping) => QueueOem1Mutation(mapping);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;
         DeveloperMenuContent.Initialize(_frontend, _bootstrap, () => _prerequisiteSetupInProgress);
         DeveloperMenuContent.BackRequested += (_, _) => ReturnToSettings("BackButton");
@@ -203,7 +199,6 @@ public sealed partial class MainWindow : Window
         HowToUseContent.Visibility = page == MainNavigationPage.HowToUse ? Visibility.Visible : Visibility.Collapsed;
         SettingsContent.Visibility = page == MainNavigationPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         DeveloperMenuContent.Visibility = page == MainNavigationPage.DeveloperMenu ? Visibility.Visible : Visibility.Collapsed;
-        CenterMButtonContent.Visibility = page == MainNavigationPage.CenterMButton ? Visibility.Visible : Visibility.Collapsed;
         VibrationTestContent.Visibility = page == MainNavigationPage.VibrationTest ? Visibility.Visible : Visibility.Collapsed;
         ClawSensorProbeContent.Visibility = page == MainNavigationPage.ClawSensorProbe ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
@@ -382,28 +377,8 @@ public sealed partial class MainWindow : Window
                 ShowPage(_navigationState.ReturnToDeveloperMenu());
                 break;
             case MainNavigationPage.Controller:
-                ReturnToController("MouseBackButton");
                 break;
         }
-    }
-
-    private void OpenCenterMButton()
-    {
-        var previousPage = _navigationState.CurrentPage;
-        ShowPage(_navigationState.OpenCenterMButton());
-        AppLog.Info("Window", "Center M button page opened.",
-            ("PreviousPage", previousPage),
-            ("CurrentPage", _navigationState.CurrentPage));
-    }
-
-    private void ReturnToController(string reason)
-    {
-        var previousPage = _navigationState.CurrentPage;
-        ShowPage(_navigationState.ReturnToController());
-        AppLog.Info("Window", "Center M button page closed.",
-            ("PreviousPage", previousPage),
-            ("CurrentPage", _navigationState.CurrentPage),
-            ("Reason", reason));
     }
 
     /// <summary>
@@ -420,7 +395,6 @@ public sealed partial class MainWindow : Window
         var version = ++_oem1EditVersion;
 
         ControllerContent.ApplyOem1Mapping(next);
-        CenterMButtonContent.Apply(next);
 
         _oem1SaveChain = SaveOem1AfterAsync(_oem1SaveChain, next, version);
     }
@@ -445,7 +419,6 @@ public sealed partial class MainWindow : Window
 
             _oem1UiMapping = result.Oem1Mapping;
             ControllerContent.ApplyOem1Mapping(result.Oem1Mapping);
-            CenterMButtonContent.Apply(result.Oem1Mapping);
         }
         catch (Exception exception)
         {
@@ -456,7 +429,6 @@ public sealed partial class MainWindow : Window
 
             _oem1UiMapping = _oem1PersistedMapping;
             ControllerContent.ApplyOem1Mapping(_oem1PersistedMapping);
-            CenterMButtonContent.Apply(_oem1PersistedMapping);
         }
     }
 

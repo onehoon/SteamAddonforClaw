@@ -284,7 +284,7 @@ public sealed class Oem1ActionDispatcherTests
     // ---- Global remapping switch ----
 
     [Fact]
-    public void Remapping_off_executes_nothing_at_all()
+    public void Remapping_off_does_not_disable_the_product_policy()
     {
         var pulses = 0;
         var bigPictures = 0;
@@ -310,7 +310,10 @@ public sealed class Oem1ActionDispatcherTests
         Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single)));
         Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Double)));
 
-        Assert.Equal(0, pulses + bigPictures + hotkeys + launches);
+        Assert.Equal(1, bigPictures);
+        Assert.Equal(1, hotkeys);
+        Assert.Equal(1, pulses);
+        Assert.Equal(1, launches);
     }
 
     [Fact]
@@ -325,12 +328,12 @@ public sealed class Oem1ActionDispatcherTests
 
         mapping = mapping with { RemappingEnabled = false };
         dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
-        Assert.Equal(0, bigPictures);
+        Assert.Equal(1, bigPictures);
         Assert.Equal(Oem1Action.SteamBigPicture, mapping.NormalSingle.Action);
 
         mapping = mapping with { RemappingEnabled = true };
         dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
-        Assert.Equal(1, bigPictures);
+        Assert.Equal(2, bigPictures);
     }
 
     // ---- Capability validation ----
