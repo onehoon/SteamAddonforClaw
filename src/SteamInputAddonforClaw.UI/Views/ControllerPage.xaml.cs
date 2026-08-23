@@ -39,7 +39,7 @@ public sealed partial class ControllerPage : UserControl
     /// </summary>
     internal event EventHandler<Oem1MappingSettings>? MappingEditRequested;
 
-    internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap)
+    internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap, Func<nint> windowHandleProvider)
     {
         _frontend = frontend;
         _isLoading = true;
@@ -47,7 +47,7 @@ public sealed partial class ControllerPage : UserControl
         _lastKnownSteamInputRoutingEnabled = bootstrap.Settings.SteamInputRoutingEnabled;
         _oem1MappingAvailable = bootstrap.Oem1MappingAvailable;
         ApplyOem1MappingAvailability();
-        CenterMInlineContent.Initialize(bootstrap, () => 0);
+        CenterMInlineContent.Initialize(bootstrap, windowHandleProvider);
         CenterMInlineContent.MappingEditRequested += (_, mapping) => MappingEditRequested?.Invoke(this, mapping);
         ApplyOem1Mapping(bootstrap.Settings.Oem1Mapping);
         _isLoading = false;

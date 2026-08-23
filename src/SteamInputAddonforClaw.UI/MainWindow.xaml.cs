@@ -61,7 +61,7 @@ public sealed partial class MainWindow : Window
         SettingsContent.Initialize(_frontend, _bootstrap);
         DeviceContent.Initialize(_frontend);
         ProfileContent.Initialize(_frontend);
-        ControllerContent.Initialize(_frontend, _bootstrap);
+        ControllerContent.Initialize(_frontend, _bootstrap, () => WindowNative.GetWindowHandle(this));
         // The window owns the single ordered OEM1 persistence chain for the inline Controller editor.
         ControllerContent.MappingEditRequested += (_, mapping) => QueueOem1Mutation(mapping);
         SettingsContent.DeveloperMenuRequested += OnDeveloperMenuRequested;

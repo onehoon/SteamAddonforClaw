@@ -170,6 +170,19 @@ public sealed class Oem1ActionDispatcherTests
     }
 
     [Fact]
+    public void Routing_active_fixed_quick_access_ignores_remapping_switch()
+    {
+        var pulseCount = 0;
+        var dispatcher = CreateDispatcher(
+            () => StatusWithSteamOutput(true),
+            () => pulseCount++,
+            mapping: Oem1MappingSettings.Default with { RemappingEnabled = false });
+
+        Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single)));
+        Assert.Equal(1, pulseCount);
+    }
+
+    [Fact]
     public void All_four_slots_resolve_independently()
     {
         var hotkeys = 0;
@@ -310,7 +323,7 @@ public sealed class Oem1ActionDispatcherTests
         Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single)));
         Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Double)));
 
-        Assert.Equal(0, pulses + bigPictures + hotkeys + launches);
+        Assert.Equal(2, pulses + bigPictures + hotkeys + launches);
     }
 
     [Fact]

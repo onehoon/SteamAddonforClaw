@@ -72,13 +72,6 @@ internal sealed class Oem1ActionDispatcher
         {
             var mapping = _captureMapping();
 
-            // Belt-and-braces with the composition, which already revokes gesture-bridge authority
-            // and disables the suppression lifecycle while remapping is off. If a gesture still
-            // arrives (a press already in flight across the toggle), it must do nothing at all --
-            // native Center M is the behaviour the user asked for.
-            if (!mapping.RemappingEnabled)
-                return true;
-
             // The ONLY question that matters for domain selection: is canonical Steam Deck routing
             // actually active right now? Never Available, never routing-enabled, never eligibility.
             var routingActuallyActive = _captureRoutingStatus().SteamOutputActive;
@@ -90,6 +83,10 @@ internal sealed class Oem1ActionDispatcher
                 _requestQuickAccessPulse();
                 return true;
             }
+
+            // This switch controls only the normal/non-routing custom mapping domain.
+            if (!mapping.RemappingEnabled)
+                return true;
 
             slot = Oem1MappingSlots.Resolve(routingActuallyActive, request.Gesture);
             var binding = mapping.Resolve(slot);

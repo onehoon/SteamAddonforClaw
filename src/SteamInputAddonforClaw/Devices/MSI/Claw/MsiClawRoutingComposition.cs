@@ -145,6 +145,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// It is also the extra condition on custom gesture authority, so a revoke takes effect
     /// immediately rather than only once the coordinator's next reconcile observes it.</summary>
     private bool _oem1RemappingEnabled;
+    private Func<RoutingRuntimeStatusSnapshot>? _captureOem1RoutingStatus;
 
     /// <summary>WMI observation is started lazily and exactly once, the first time remapping is
     /// actually enabled -- a user who has the feature switched off must never have Event41
@@ -387,6 +388,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         _oem1GestureRecognizer = recognizer;
         _oem1Bridge = bridge;
         _oem1MappingPreference = mappingPreference;
+        _captureOem1RoutingStatus = captureRoutingStatus;
         mappingPreference.Oem1MappingChanged += OnOem1MappingChanged;
 
         if (!_startCenterMOem1LifecycleRuntime)
@@ -396,7 +398,9 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         // can join it before the coordinator it calls into is disposed, AND the production startup
         // boundary can await the SAME task before routing/power observation begins. When remapping is
         // switched off this still resolves normally -- it simply never enables anything.
-        var enabled = ComputeOem1CanArm(mappingPreference);
+        // The lifecycle must also be available for the fixed routing-active OEM1 role. The
+        // dispatcher still keeps normal/non-routing remapping fail-open when this switch is off.
+        var enabled = ComputeOem1CanArm(mappingPreference) || captureRoutingStatus().SteamOutputActive;
         lock (_oem1TaskSync)
         {
             _oem1RemappingEnabled = enabled;
@@ -527,7 +531,8 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     private void OnOem1MappingChanged(object? sender, EventArgs args)
     {
         if (_oem1MappingPreference is not { } preference) return;
-        RequestOem1EnabledTransitionAsync(ComputeOem1CanArm(preference));
+        var routingActive = _captureOem1RoutingStatus?.Invoke().SteamOutputActive == true;
+        RequestOem1EnabledTransitionAsync(ComputeOem1CanArm(preference) || routingActive);
     }
 
     private async Task ContinueOem1RemappingAsync(Task previous, bool enabled)
@@ -598,7 +603,10 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
         bridge.SetCustomAuthority(ready, allowActivation: () =>
         {
             lock (_oem1TaskSync)
-                return !_oem1Stopping && _oem1FailOpenTask is null && _oem1RemappingEnabled;
+            {
+                var routingActive = _captureOem1RoutingStatus?.Invoke().SteamOutputActive == true;
+                return !_oem1Stopping && _oem1FailOpenTask is null && (_oem1RemappingEnabled || routingActive);
+            }
         });
     }
 
