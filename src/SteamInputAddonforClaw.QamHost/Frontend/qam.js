@@ -628,7 +628,7 @@
       }, [refresh, cancelModeTimers]);
 
       const unavailable = !status || status.steam?.appId !== 0 || !status.steam?.active || status.steam?.source !== 1;
-      const activeProfile = !!profile && status?.steam?.appId > 0;
+      const activeProfile = Number(profile?.appId || 0) > 0;
       const mutationAvailable = !!cpu && cpu.persistenceWritable && !unavailable && !busy;
       const modeWritable = mutationAvailable && cpu.enabled;
       const tdpMutationAvailable = !!tdp && tdp.available && tdp.persistenceWritable && !unavailable && !busy;
