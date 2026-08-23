@@ -597,7 +597,8 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         return (new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear"), snapshot);
     }
 
-    private static string IdentityCachePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "steamdeck-pnp-cache.json");
+    internal static string? TestOnlyIdentityCachePath { get; set; }
+    private static string IdentityCachePath => TestOnlyIdentityCachePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamInputAddonforClaw", "steamdeck-pnp-cache.json");
 
     private static IReadOnlySet<string> LoadIdentityCache()
     {

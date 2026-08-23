@@ -41,6 +41,39 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
+    public async Task PersistentIdentityCache_replaces_only_after_successful_fallback_resolution()
+    {
+        var first = Device("USB\\VID_28DE&PID_1205\\CACHE_A");
+        var firstStage = Create(new FakeCanonicalSession(), new FakeEnumerator([
+            [], [UsbIpHost(), first], [UsbIpHost(), first]
+        ]), new FakeHidHide());
+        Assert.True((await firstStage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await firstStage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var cachePath = CanonicalSteamDeckOutputStage.TestOnlyIdentityCachePath!;
+        Assert.Contains("CACHE_A", File.ReadAllText(cachePath), StringComparison.OrdinalIgnoreCase);
+
+        var second = Device("USB\\VID_28DE&PID_1205\\CACHE_B");
+        var secondStage = Create(new FakeCanonicalSession(), new FakeEnumerator([
+            [], [UsbIpHost(), second], [UsbIpHost(), second]
+        ]), new FakeHidHide());
+        Assert.True((await secondStage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await secondStage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+
+        var latest = File.ReadAllText(cachePath);
+        Assert.DoesNotContain("CACHE_A", latest, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CACHE_B", latest, StringComparison.OrdinalIgnoreCase);
+
+        var hitEnumerator = new FakeEnumerator([
+            [], [UsbIpHost(), second], [UsbIpHost(), second]
+        ], directLookup: true);
+        var hitStage = Create(new FakeCanonicalSession(), hitEnumerator, new FakeHidHide());
+        Assert.True((await hitStage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True((await hitStage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
+        Assert.True(hitEnumerator.DirectLookupCalls > 0);
+    }
+
+    [Fact]
     public async Task ReconcileOwnedState_healthy_canonical_route_is_strict_noop()
     {
         var session = new FakeCanonicalSession();
@@ -1258,6 +1291,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Directory.CreateDirectory(_directory);
         AppLog.DirectoryOverride = _directory;
         AppLog.MinimumLevelOverride = AppLogLevel.Debug;
+        CanonicalSteamDeckOutputStage.TestOnlyIdentityCachePath = Path.Combine(_directory, "steamdeck-pnp-cache.json");
     }
 
     public void Dispose()
@@ -1265,14 +1299,22 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         AppLog.MinimumLevelOverride = AppLogLevel.Off;
         AppLog.DrainForTests();
         AppLog.DirectoryOverride = null;
+        CanonicalSteamDeckOutputStage.TestOnlyIdentityCachePath = null;
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 
-    private sealed class FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states) : IControllerDeviceEnumerator
+    private sealed class FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states, bool directLookup = false) : IControllerDeviceEnumerator
     {
         private int _index;
+        public int DirectLookupCalls { get; private set; }
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Count - 1)];
-        public ControllerDeviceInfo? FindPresentDevice(string instanceId) => null;
+        public ControllerDeviceInfo? FindPresentDevice(string instanceId)
+        {
+            DirectLookupCalls++;
+            if (!directLookup) return null;
+            return states.SelectMany(state => state).FirstOrDefault(device =>
+                string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     // Returns [] for the very first call (the "before" snapshot) and thereafter either [deck] or []

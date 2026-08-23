@@ -93,7 +93,7 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
     public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId)
     {
         using var set = OpenPresentSet();
-        var light = ReadLightweightDevices(set.Handle);
+        var light = ReadLightweightDevices(set.Handle, vendorId, productId);
         var target = light.Values.Where(d => ParseVendorProductId(d.HardwareIds).VendorId == vendorId && ParseVendorProductId(d.HardwareIds).ProductId == productId).ToArray();
         var selected = target.SelectMany(d => AncestorIds(d.DevInst)).Concat(target.Select(d => d.InstanceId))
             .Where(id => id.Length != 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -144,13 +144,21 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
             GetRegistryString(set, ref data, SpdrpFriendlyName), usage.Page, usage.Usage);
     }
 
-    private static Dictionary<string, LightDevice> ReadLightweightDevices(IntPtr set)
+    private static Dictionary<string, LightDevice> ReadLightweightDevices(IntPtr set, ushort vendorId, ushort productId)
     {
         var result = new Dictionary<string, LightDevice>(StringComparer.OrdinalIgnoreCase);
         for (uint index = 0; TryGetDevice(set, index, out var data); index++)
         {
-            var ids = GetRegistryMultiString(set, ref data, SpdrpHardwareId);
             var instanceId = GetDeviceInstanceId(set, ref data);
+            // InstanceId is the cheap first discriminator for the common USB/HID case.
+            // Read HardwareIds only when the instance string cannot prove either a match or
+            // a non-match, preserving support for bus-specific IDs that omit VID/PID.
+            var instanceIdentity = ParseVendorProductId([instanceId]);
+            var ids = instanceIdentity.VendorId == vendorId && instanceIdentity.ProductId == productId
+                ? (IReadOnlyList<string>)[instanceId]
+                : instanceIdentity.VendorId is not null && instanceIdentity.ProductId is not null
+                    ? []
+                    : GetRegistryMultiString(set, ref data, SpdrpHardwareId);
             result[instanceId] = new LightDevice(instanceId, data.DevInst, ids, data);
         }
         return result;

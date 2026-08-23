@@ -99,16 +99,11 @@ internal sealed class MsiClawModeController(
             cancellationToken.ThrowIfCancellationRequested();
             poll++;
             var probeStarted = Stopwatch.GetTimestamp();
-            var targetPidPresent = deviceEnumerator.IsPresent(MsiClawHardware.VendorId, targetTopology.ProductId);
+            var verificationStarted = Stopwatch.GetTimestamp();
+            var current = deviceEnumerator.EnumeratePresentDevices(MsiClawHardware.VendorId, targetTopology.ProductId);
+            var exactVerificationMs = Stopwatch.GetElapsedTime(verificationStarted).TotalMilliseconds;
             var targetProbeMs = Stopwatch.GetElapsedTime(probeStarted).TotalMilliseconds;
-            IReadOnlyList<ControllerDeviceInfo> current = [];
-            var exactVerificationMs = 0d;
-            if (targetPidPresent)
-            {
-                var verificationStarted = Stopwatch.GetTimestamp();
-                current = deviceEnumerator.EnumeratePresentDevices(MsiClawHardware.VendorId, targetTopology.ProductId);
-                exactVerificationMs = Stopwatch.GetElapsedTime(verificationStarted).TotalMilliseconds;
-            }
+            var targetPidPresent = current.Any(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId);
             oldGone = oldPid is not { } sourcePid || !deviceEnumerator.IsPresent(MsiClawHardware.VendorId, sourcePid);
             // TargetPidPresent: any present node with the target PID, regardless of topology --
             // distinguishes "PID_1902 hasn't appeared yet" from "PID_1902 is present but the

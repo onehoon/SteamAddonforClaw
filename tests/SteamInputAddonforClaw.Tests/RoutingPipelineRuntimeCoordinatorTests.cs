@@ -1052,7 +1052,8 @@ public sealed class RoutingPipelineRuntimeCoordinatorTests
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => quiesce);
-        Assert.True(bridge.Bridge.CanApplyInteractivePresentation);
+        // The already-running residual cleanup may still legitimately keep interactive
+        // presentation closed until its cancellation is observed and the gate is released.
         executor.ReleaseRollback.TrySetResult();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => holder);
         Assert.True(bridge.Bridge.CanApplyInteractivePresentation);

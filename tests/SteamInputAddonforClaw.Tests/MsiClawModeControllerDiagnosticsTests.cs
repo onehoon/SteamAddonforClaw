@@ -80,7 +80,7 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
         var result = await controller.SwitchModeAsync(MsiClawNativeMode.DirectInput, MsiClawPhysicalIdentity.From(source), CancellationToken.None);
 
         Assert.Equal(MsiClawModeTransitionStatus.TargetDeviceDidNotAppear, result.Status);
-        Assert.Equal(1, enumerator.CallCount);
+        Assert.Equal(2, enumerator.CallCount);
         AppLog.DrainForTests();
         var log = LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath);
         Assert.Contains("TargetPidPresent=False", log);
@@ -106,8 +106,11 @@ public sealed class MsiClawModeControllerDiagnosticsTests : IDisposable
             if (productId == 0x1902) TargetProbeCount++;
             return states[Math.Min(_index, states.Length - 1)].Any(d => d.VendorId == vendorId && d.ProductId == productId);
         }
-        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId) =>
-            states[Math.Min(_index++, states.Length - 1)].Where(d => d.VendorId == vendorId && d.ProductId == productId).ToArray();
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId)
+        {
+            if (productId == 0x1902) TargetProbeCount++;
+            return states[Math.Min(_index++, states.Length - 1)].Where(d => d.VendorId == vendorId && d.ProductId == productId).ToArray();
+        }
     }
 
     private sealed class RecordingWriter : IMsiClawModeWriter
