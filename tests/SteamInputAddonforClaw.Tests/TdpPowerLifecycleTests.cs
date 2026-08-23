@@ -138,6 +138,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
 
         watcher.Observe(TdpPowerNotification.Suspend);
         delay.Reset(); watcher.Observe(TdpPowerNotification.ResumeAutomatic); watcher.Observe(TdpPowerNotification.ResumeSuspend); delay.Release();
+        await Task.Yield(); delay.Reset(); delay.Release();
         await watcher.DrainPendingAsync(); await runtime.DrainAsync();
 
         Assert.Equal(["GetAp(0)", "SetData(80,8)", "SetData(81,30)", "SetData(80,20)"], transport.Operations);
@@ -152,8 +153,30 @@ public sealed class TdpPowerLifecycleTests : IDisposable
         await using var runtime = CreateRuntime(transport, TdpPowerSource.AC);
         using var watcher = CreateWatcher(runtime, source, delay);
         watcher.Observe(TdpPowerNotification.ResumeAutomatic); watcher.Observe(TdpPowerNotification.ResumeSuspend); delay.Release();
+        await Task.Yield(); delay.Reset(); delay.Release();
         await watcher.DrainPendingAsync(); await runtime.DrainAsync();
         Assert.Equal(1, transport.Operations.Count(x => x == "GetAp(0)"));
+    }
+
+    [Fact]
+    public async Task ResumeApplyFailureGetsExactlyOneRetry()
+    {
+        Save(new DeviceTdpSettings { Enabled = true, Ac = Pair(20, 30), Dc = Pair(10, 20) });
+        var source = new FakeSource(); var delay = new FakeDelay();
+        var transport = new FakeTransport { Ap = [0, 0, 0xC4], FailAppliesRemaining = 1 };
+        await using var runtime = CreateRuntime(transport, TdpPowerSource.AC);
+        using var watcher = CreateWatcher(runtime, source, delay);
+
+        watcher.Observe(TdpPowerNotification.Suspend);
+        watcher.Observe(TdpPowerNotification.ResumeAutomatic);
+        delay.Release();
+        await Task.Yield(); delay.Reset(); delay.Release();
+        await watcher.DrainPendingAsync(); await runtime.DrainAsync();
+
+        Assert.Equal(2, transport.Operations.Count(x => x == "GetAp(0)"));
+        Assert.Equal(1, transport.SuccessfulApplyCount);
+        AppLog.DrainForTests();
+        Assert.Contains("Reason=ResumeRetry", LogFileTestHelper.ReadAllText(AppLog.CurrentLogFilePath));
     }
 
     [Fact]
@@ -319,11 +342,22 @@ public sealed class TdpPowerLifecycleTests : IDisposable
     {
         public byte[] Ap { get; set; } = [0, 0, 0xC0];
         public bool FailWrites { get; set; }
+        public int FailAppliesRemaining { get; set; }
+        public int SuccessfulApplyCount { get; private set; }
+        private bool _currentApplyFails;
         public bool BlockFirstApply { get; set; }
         public TaskCompletionSource FirstApplyStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim ReleaseFirstApply { get; } = new(false);
         public List<string> Operations { get; } = [];
-        public bool TryGetAp(int index, out byte[] payload) { Operations.Add($"GetAp({index})"); payload = Ap; return true; }
+        public bool TryGetAp(int index, out byte[] payload)
+        {
+            Operations.Add($"GetAp({index})");
+            _currentApplyFails = FailAppliesRemaining > 0;
+            if (_currentApplyFails) FailAppliesRemaining--;
+            else SuccessfulApplyCount++;
+            payload = Ap;
+            return true;
+        }
         public bool TrySetData(int block, byte value)
         {
             Operations.Add($"SetData({block},{value})");
@@ -332,7 +366,7 @@ public sealed class TdpPowerLifecycleTests : IDisposable
                 FirstApplyStarted.TrySetResult();
                 ReleaseFirstApply.Wait(TimeSpan.FromSeconds(5));
             }
-            return !FailWrites;
+            return !FailWrites && !_currentApplyFails;
         }
     }
 }
