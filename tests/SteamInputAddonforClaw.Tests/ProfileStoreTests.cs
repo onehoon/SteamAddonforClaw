@@ -499,6 +499,40 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(CpuBoostMode.Aggressive, profile.Performance.CpuBoost!.Ac);
     }
 
+    [Fact]
+    public void SetResolution_CreatesDisabledProfileAndRoundTrips()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        var mutations = new GameProfileMutations(store);
+
+        var result = mutations.SetResolution(123, new GameDisplayResolution { Width = 1440, Height = 900 }, "Game");
+
+        var saved = store.Load().Document.Games["123"];
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, result);
+        Assert.False(saved.Enabled);
+        Assert.Equal(1440, saved.Display.Resolution!.Width);
+        Assert.Equal(900, saved.Display.Resolution.Height);
+        Assert.Equal("Game", saved.DisplayName);
+    }
+
+    [Fact]
+    public void SetResolution_ClearProducesDoNotChangeAndPreservesUnknownDisplayData()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument { Games = new Dictionary<string, GameProfile>
+        {
+            ["123"] = new() { Enabled = false, Display = new() { Resolution = new GameDisplayResolution { Width = 1920, Height = 1080 }, ExtensionData = new() { ["future"] = System.Text.Json.JsonDocument.Parse("true").RootElement.Clone() } } }
+        }});
+        var mutations = new GameProfileMutations(store);
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetResolution(123, null, null));
+
+        var saved = store.Load().Document.Games["123"];
+        Assert.False(saved.Enabled);
+        Assert.Null(saved.Display.Resolution);
+        Assert.True(saved.Display.ExtensionData!.ContainsKey("future"));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))
