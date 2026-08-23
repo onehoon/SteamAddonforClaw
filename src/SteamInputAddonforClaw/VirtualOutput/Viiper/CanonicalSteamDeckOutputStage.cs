@@ -574,6 +574,9 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             return (cachedResult, cachedSnapshot);
         }
 
+        AppLog.Debug("RoutingTrace", "Steam Deck PnP cache miss; using full target-scoped discovery.",
+            ("Event", "PnpCacheMiss"), ("Fallback", "FullDiscovery"));
+
         var deadline = DateTime.UtcNow + _pnPTimeout;
         ViiperVirtualDeviceResolution result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear");
         IReadOnlyList<ControllerDeviceInfo> snapshot;
@@ -588,8 +591,6 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 AppLog.Debug("RoutingTrace", "First Steam Deck candidate observed.",
                     ("Event", "FirstDeckCandidateSeen"), ("Status", result.Status));
             }
-            if (cachedIds.Count > 0)
-                AppLog.Debug("RoutingTrace", "Steam Deck PnP cache miss; using full target-scoped discovery.", ("Event", "PnpCacheMiss"));
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Ambiguous)
                 return (result, snapshot);
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved)

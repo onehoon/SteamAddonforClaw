@@ -1002,8 +1002,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
             [UsbIpHost(), controllerLeaf], // t1: Controller interface appears first
             [UsbIpHost(), controllerLeaf, keyboardLeaf], // t2: Keyboard sibling joins
             [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // t3: Mouse sibling joins
-            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // stable (2/3 consecutive)
-            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // stable (3/3 consecutive) -> resolved
+            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // complete logical identity -> resolved
             [], // rollback: all three verified absent after native remove
         ]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
@@ -1019,11 +1018,9 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     [Fact]
     public async Task FirstValidDeckIdentityIsAcceptedWithoutStabilizationWindow()
     {
-        // Unlike a true sibling of the SAME composite device (same ContainerId, see the convergence
-        // test above), a genuinely different device (different ContainerId) appearing WHILE the
-        // resolver is still stabilizing an existing candidate group must still fail closed as
-        // Ambiguous -- stabilization must not be mistaken for "wait indefinitely and merge anything
-        // that shows up".
+        // A genuinely different device (different ContainerId) appearing alongside an otherwise
+        // valid candidate must still fail closed as Ambiguous; removing repeated snapshots must
+        // not weaken ownership checks.
         var containerA = Guid.NewGuid();
         var containerB = Guid.NewGuid();
         var leafA = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\A", containerA, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
