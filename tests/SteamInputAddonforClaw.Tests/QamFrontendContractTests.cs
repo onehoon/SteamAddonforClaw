@@ -349,7 +349,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("disabled: !modeWritable", source);
         Assert.DoesNotContain("value: value == null ? 0 : value", source);
         Assert.Contains("const failClosed", source);
-        Assert.Contains("setStatus(null); setCpu(null); setTdp(null); setTdpDraft(null)", source);
+        Assert.Contains("setStatus(null); setCpu(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null", source);
         Assert.Contains("cpu.lastFailure", source);
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
         Assert.Contains("QAM required native controls/layout unavailable", source);
@@ -399,6 +399,35 @@ public sealed class QamFrontendContractTests
         Assert.Contains("CaptureActiveGameProfileAsync", activePath);
         Assert.DoesNotContain("CaptureStatusAsync", activePath);
         Assert.DoesNotContain("MutateAsync", activePath);
+    }
+
+    [Fact]
+    public void Qam_projects_active_game_profile_without_device_controls_or_polling()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        Assert.Contains("const nextAppId = Number(nextProfile?.appId || 0)", source);
+        Assert.Contains("const activeProfile = Number(profile?.appId || 0) > 0;", source);
+        Assert.DoesNotContain("const activeProfile = !!profile && status?.steam?.appId > 0;", source);
+        Assert.DoesNotContain("const nextAppId = Number(nextStatus.steam?.appId || 0)", source);
+        Assert.Contains("request(\"captureActiveGameProfile\")", source);
+        Assert.Contains("key: \"profile-toggle\"", source);
+        Assert.Contains("request(\"setActiveGameProfileEnabled\"", source);
+        Assert.Contains("\"setActiveGameCpuBoostAc\"", source);
+        Assert.Contains("\"setActiveGameCpuBoostDc\"", source);
+        Assert.Contains("\"setActiveGameTdp\"", source);
+        Assert.Contains("const activeProfileAppIdRef = React.useRef(0);", source);
+        Assert.Contains("if (activeProfileAppIdRef.current !== nextAppId)", source);
+        Assert.Contains("profileTdpGeneration.current = 0", source);
+        Assert.Contains("labelFor(preview ?? value)", source);
+        Assert.Contains("profile-tdp-ac-heading", source);
+        Assert.Contains("profile-tdp-dc-heading", source);
+        Assert.Contains("disabled: !profile.persistenceWritable || !enabled", source);
+        Assert.Contains("profile.cpuBoost?.ac", source);
+        Assert.Contains("profileTdpDraft?.dc?.pl2Watts", source);
+        Assert.DoesNotContain("setInterval", source);
+        Assert.DoesNotContain("type: \"checkbox\"", source);
+        Assert.DoesNotContain("type: \"range\"", source);
     }
 
     [Fact]
