@@ -202,6 +202,7 @@ public sealed partial class MainWindow : Window
         VibrationTestContent.Visibility = page == MainNavigationPage.VibrationTest ? Visibility.Visible : Visibility.Collapsed;
         ClawSensorProbeContent.Visibility = page == MainNavigationPage.ClawSensorProbe ? Visibility.Visible : Visibility.Collapsed;
         if (page == MainNavigationPage.Status) _ = RefreshSystemStatusAsync();
+        if (page == MainNavigationPage.HowToUse) HowToUseContent.Activate();
         // Activate/Deactivate run for EVERY navigation transition (Back button, mouse-back, or any
         // other route), not just the page's own Back button -- the session must close no matter how
         // the user leaves.
