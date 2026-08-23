@@ -90,6 +90,17 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         return false;
     }
 
+    public IReadOnlyList<string> EnumeratePresentInstanceIds(ushort vendorId, ushort productId)
+    {
+        using var set = OpenPresentSet();
+        var light = ReadLightweightDevices(set.Handle, vendorId, productId);
+        return light.Values
+            .Where(d => ParseVendorProductId(d.HardwareIds).VendorId == vendorId
+                && ParseVendorProductId(d.HardwareIds).ProductId == productId)
+            .Select(d => d.InstanceId)
+            .ToArray();
+    }
+
     public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices(ushort vendorId, ushort productId)
     {
         using var set = OpenPresentSet();

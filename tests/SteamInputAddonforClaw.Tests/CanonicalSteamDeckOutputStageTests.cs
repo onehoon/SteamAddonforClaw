@@ -116,7 +116,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task ReconcileOwnedState_attached_without_owned_pnp_fails_without_mutation()
     {
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [], [], []]), new FakeHidHide());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [], [], [], []]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         var traceCount = session.Trace.Count;
@@ -146,7 +146,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task ReconcileOwnedState_does_not_adopt_foreign_matching_pnp()
     {
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), Device("foreign")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")]]), new FakeHidHide());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), Device("foreign")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")]]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -999,10 +999,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], // before
-            [UsbIpHost(), controllerLeaf], // t1: Controller interface appears first
-            [UsbIpHost(), controllerLeaf, keyboardLeaf], // t2: Keyboard sibling joins
-            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // t3: Mouse sibling joins
-            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // complete logical identity -> resolved
+            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // current exact composite identity
             [], // rollback: all three verified absent after native remove
         ]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
@@ -1033,8 +1030,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], // before
-            [UsbIpHost(), leafA], // t1: first candidate observed
-            [UsbIpHost(), leafA, leafB], // t2: a genuinely different ContainerId's node appears
+            [UsbIpHost(), leafA, leafB], // ambiguity in the current snapshot fails immediately
             [], // rollback: both potential candidates verified absent
         ]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
@@ -1079,18 +1075,19 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task CandidateThatDisappearsBeforeResolutionFailsClosed()
+    public async Task CurrentExactCandidateIsAcceptedWithoutASecondSnapshot()
     {
         var candidate = Device("USB\\VID_28DE&PID_1205\\TRANSIENT");
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
-            [], [UsbIpHost(), candidate], [], [], []
+            [], [UsbIpHost(), candidate], []
         ]), new FakeHidHide(), TimeSpan.FromMilliseconds(4));
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
@@ -1323,6 +1320,9 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
             return states.SelectMany(state => state).FirstOrDefault(device =>
                 string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase));
         }
+        public IReadOnlyList<string> EnumeratePresentInstanceIds(ushort vendorId, ushort productId) =>
+            states[^1].Where(device => device.Present && device.VendorId == vendorId && device.ProductId == productId)
+                .Select(device => device.InstanceId).ToArray();
     }
 
     // Returns [] for the very first call (the "before" snapshot) and thereafter either [deck] or []

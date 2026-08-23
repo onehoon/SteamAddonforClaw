@@ -581,7 +581,6 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         ViiperVirtualDeviceResolution result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear");
         IReadOnlyList<ControllerDeviceInfo> snapshot;
         var firstCandidateLogged = false;
-        string? pendingIdentitySignature = null;
         while (true)
         {
             snapshot = _enumerator.EnumeratePresentDevices(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId);
@@ -594,31 +593,13 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             }
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Ambiguous)
                 return (result, snapshot);
-            if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved)
-            {
-                var identitySignature = BuildResolvedIdentitySignature(result);
-                if (string.Equals(pendingIdentitySignature, identitySignature, StringComparison.OrdinalIgnoreCase))
-                    return (result, snapshot);
-                pendingIdentitySignature = identitySignature;
-            }
-            else
-            {
-                pendingIdentitySignature = null;
-            }
+            if (result.Status is ViiperVirtualDeviceResolutionStatus.Resolved
+                or ViiperVirtualDeviceResolutionStatus.Ambiguous)
+                return (result, snapshot);
             if (DateTime.UtcNow >= deadline) break;
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
         }
         return (new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear"), snapshot);
-    }
-
-    private static string BuildResolvedIdentitySignature(ViiperVirtualDeviceResolution resolved)
-    {
-        var logicalKey = ControllerLogicalIdentity.GetLogicalKey(resolved.Devices[0]);
-        var instanceIds = resolved.Devices
-            .Select(device => device.InstanceId)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(instanceId => instanceId, StringComparer.OrdinalIgnoreCase);
-        return $"{logicalKey}\u001f{string.Join("\u001f", instanceIds)}";
     }
 
     private bool TryResolveCachedIdentity(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds,
@@ -627,6 +608,17 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "CachedIdentityUnavailable");
         snapshot = [];
         if (cachedIds.Count == 0) return false;
+
+        var beforeTargetIds = before
+            .Where(device => device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId
+                && device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId)
+            .Select(device => device.InstanceId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var currentNewTargetIds = _enumerator
+            .EnumeratePresentInstanceIds(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId)
+            .Where(id => !beforeTargetIds.Contains(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!currentNewTargetIds.SetEquals(cachedIds)) return false;
 
         var byId = new Dictionary<string, ControllerDeviceInfo>(StringComparer.OrdinalIgnoreCase);
         var pending = new Queue<string>(cachedIds);
