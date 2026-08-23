@@ -36,7 +36,7 @@ public sealed partial class ProfilePage : UserControl
         {
             var selected = _selectedGame?.AppId; _catalog = await _frontend.ScanProfileGamesAsync(); GameSelector.ItemsSource = _catalog;
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
-            if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo("No installed Steam games were found."); else ClearError(); } else { GameSelector.Text = _selectedGame.Name; await CaptureSelectedAsync(_selectedGame.AppId); }
+            if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo("No installed Steam games were found."); else ClearError(); } else { GameSelector.Text = FormatGame(_selectedGame); await CaptureSelectedAsync(_selectedGame.AppId); }
         }
         catch (Exception exception) { ShowError("Game catalog could not be refreshed.", exception); }
     }
@@ -44,20 +44,25 @@ public sealed partial class ProfilePage : UserControl
     private void GameSelector_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
-        var query = sender.Text.Trim(); sender.ItemsSource = string.IsNullOrEmpty(query) ? _catalog : _catalog.Where(x => x.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || x.AppId.ToString().Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
+        sender.ItemsSource = FilterCatalog(sender.Text);
     }
-    private void GameSelector_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { if (args.ChosenSuggestion is FrontendProfileGameCatalogEntry game) _ = SelectGameAsync(game); else if (_catalog.FirstOrDefault(x => string.Equals(x.Name, sender.Text, StringComparison.OrdinalIgnoreCase) || x.AppId.ToString() == sender.Text) is { } exact) _ = SelectGameAsync(exact); }
-    private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = game; GameSelector.Text = game.Name; BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
-    private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = true; try { SelectedGameText.Text = $"{game.Name} ({game.AppId})"; ProfileEnabledToggle.Visibility = Visibility.Visible; ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = false; } SetEditorsEnabled(false); }
+    private void GameSelector_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { if (args.ChosenSuggestion is FrontendProfileGameCatalogEntry game) _ = SelectGameAsync(game); else if (FilterCatalog(sender.Text).FirstOrDefault() is { } exact) _ = SelectGameAsync(exact); }
+    private void GameSelector_GotFocus(object sender, RoutedEventArgs e) => OpenGameList();
+    private void OpenGameSelectorButton_Click(object sender, RoutedEventArgs e) { GameSelector.Focus(FocusState.Programmatic); OpenGameList(); }
+    private void OpenGameList() { GameSelector.ItemsSource = FilterCatalog(GameSelector.Text); GameSelector.IsSuggestionListOpen = _catalog.Count > 0; }
+    private IReadOnlyList<FrontendProfileGameCatalogEntry> FilterCatalog(string? query) { if (string.IsNullOrWhiteSpace(query) || (_selectedGame is not null && string.Equals(query, FormatGame(_selectedGame), StringComparison.Ordinal))) return _catalog; return _catalog.Where(x => x.Name.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase) || x.AppId.ToString().Contains(query.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray(); }
+    private static string FormatGame(FrontendProfileGameCatalogEntry game) => $"{game.Name} ({game.AppId})";
+    private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = game; GameSelector.Text = FormatGame(game); BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
+    private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = true; try { ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = false; } SetEditorsEnabled(false); }
     private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) ShowError("Profile settings could not be loaded.", exception); } }
-    private void ClearSelection() { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; GameSelector.Text = string.Empty; SelectedGameText.Text = "Click Refresh, then select a game."; ProfileEnabledToggle.Visibility = Visibility.Collapsed; SetEditorsEnabled(false); }
+    private void ClearSelection() { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; GameSelector.Text = string.Empty; ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; SetEditorsEnabled(false); }
 
     private void Render(FrontendGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false)
     {
         _snapshot = snapshot; _suppressEvents = _suppressTdpEvents = true;
         try
         {
-            SelectedGameText.Text = $"{_selectedGame?.Name ?? snapshot.DisplayName ?? "Game"} ({snapshot.AppId})"; ProfileEnabledToggle.Visibility = Visibility.Visible; ProfileEnabledToggle.IsOn = snapshot.Enabled; ProfileEnabledToggle.IsEnabled = snapshot.PersistenceWritable;
+            ProfileEnabledToggle.IsOn = snapshot.Enabled; ProfileEnabledToggle.IsEnabled = snapshot.PersistenceWritable;
             CpuBoostAcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Ac); CpuBoostDcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Dc);
             if (!preserveDirtyTdpDraft || !_tdpDraftDirty)
             {

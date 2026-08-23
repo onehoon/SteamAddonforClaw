@@ -2,19 +2,22 @@
     <ScrollViewer Padding="32"><StackPanel Spacing="16">
         <TextBlock FontSize="24" FontWeight="SemiBold" Text="Profile" />
         <InfoBar x:Name="ProfileInfoBar" IsClosable="False" IsOpen="False" Severity="Warning" />
-        <ctcontrols:SettingsCard><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <AutoSuggestBox x:Name="GameSelector" PlaceholderText="Select a game" QueryIcon="Find" TextMemberPath="Name" TextChanged="GameSelector_TextChanged" QuerySubmitted="GameSelector_QuerySubmitted">
+        <ctcontrols:SettingsCard><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <AutoSuggestBox x:Name="GameSelector" PlaceholderText="Search or select a game" QueryIcon="Find" TextChanged="GameSelector_TextChanged" QuerySubmitted="GameSelector_QuerySubmitted" GotFocus="GameSelector_GotFocus">
                 <AutoSuggestBox.ItemTemplate>
                     <DataTemplate>
-                        <TextBlock Text="{Binding Name}" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="{Binding Name}" />
+                            <TextBlock Text="(" />
+                            <TextBlock Text="{Binding AppId}" />
+                            <TextBlock Text=")" />
+                        </StackPanel>
                     </DataTemplate>
                 </AutoSuggestBox.ItemTemplate>
             </AutoSuggestBox>
-            <Button Grid.Column="1" x:Name="RefreshGamesButton" Content="Refresh" Style="{StaticResource AccentButtonStyle}" Click="RefreshGamesButton_Click" />
-        </Grid></ctcontrols:SettingsCard>
-        <ctcontrols:SettingsCard><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <TextBlock x:Name="SelectedGameText" VerticalAlignment="Center" Text="Click Refresh, then select a game." TextWrapping="Wrap" />
-            <ToggleSwitch Grid.Column="1" x:Name="ProfileEnabledToggle" OffContent="" OnContent="" Visibility="Collapsed" Toggled="ProfileEnabledToggle_Toggled" />
+            <ToggleSwitch Grid.Column="1" x:Name="ProfileEnabledToggle" OffContent="" OnContent="" IsEnabled="False" Toggled="ProfileEnabledToggle_Toggled" />
+            <Button Grid.Column="2" x:Name="OpenGameSelectorButton" Content="&#xE70D;" Click="OpenGameSelectorButton_Click" ToolTipService.ToolTip="Show all games" />
+            <Button Grid.Column="3" x:Name="RefreshGamesButton" Content="Refresh" Style="{StaticResource AccentButtonStyle}" Click="RefreshGamesButton_Click" />
         </Grid></ctcontrols:SettingsCard>
         <ctcontrols:SettingsExpander x:Name="CpuBoostExpander" Header="CPU Boost" Description="Processor performance boost mode." IsExpanded="True"><ctcontrols:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xEEA1;"/></ctcontrols:SettingsExpander.HeaderIcon><ctcontrols:SettingsExpander.Items>
             <ctcontrols:SettingsCard Header="Plugged in"><ComboBox x:Name="CpuBoostAcComboBox" MinWidth="220" DisplayMemberPath="Label" SelectionChanged="CpuBoostAcComboBox_SelectionChanged"/></ctcontrols:SettingsCard>
