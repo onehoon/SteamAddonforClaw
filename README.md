@@ -26,9 +26,12 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 - Windows 11 x64
 - A supported MSI Claw model listed above
 - Steam installed and running for Steam Input routing, per-game Steam profiles, and Quick Access Menu integration
-- The normal MSI controller environment, including MSI Center M, available on the device
+- The stock MSI controller environment with MSI Center M installed and available
 
-Controller routing is not intended to share ownership of the built-in controller with another controller-routing or virtual-controller manager at the same time.
+> [!CAUTION]
+> **Steam Addon for Claw supports only the stock MSI Center M controller environment.**
+>
+> Do not use it together with **Handheld Companion, ClawTweaks, or similar software** that manages the built-in controller, changes its controller mode, performs controller routing, or adds another virtual-controller ownership layer. These configurations are not supported and can conflict with controller ownership, routing, recovery, or teardown.
 
 ## Main features
 
@@ -330,6 +333,7 @@ The Addon does not intentionally replay a stale routed session after startup. Co
 ## Known limitations
 
 - Physical hardware validation is currently complete on the MSI Claw 8 EX AI+ CG3EM (`MS-1T91`); A2VM models are supported but still awaiting physical-device validation.
+- Only the stock MSI Center M controller environment is supported. Handheld Companion, ClawTweaks, and similar controller-management environments are not supported for concurrent use with the Addon.
 - Motion / gyro output is not currently supported by the Steam Deck virtual-controller mapping.
 - Launcher-based Non-Steam games depend on Steam continuing to report the shortcut as the active `RunningAppID` after the actual game starts.
 - QAM integration depends on Steam GamepadUI internals and may require an Addon update after a major Steam client UI change.
@@ -340,10 +344,11 @@ The Addon does not intentionally replay a stale routed session after startup. Co
 If Steam Input Routing does not activate:
 
 1. Confirm the device is one of the supported board IDs listed above.
-2. Confirm **Steam Input Routing** is enabled in the Controller tab.
-3. Confirm Steam is running and recognizes the game or Non-Steam shortcut as currently running.
-4. Close other controller-routing or virtual-controller tools that may be managing the built-in controller.
-5. If MSI Center M was opened or the controller was re-enumerated, allow the Addon to return to a stable native state and then start the Steam session again.
+2. Confirm the machine is using the stock MSI Center M controller environment and that Handheld Companion, ClawTweaks, or another controller-management tool is not active.
+3. Confirm **Steam Input Routing** is enabled in the Controller tab.
+4. Confirm Steam is running and recognizes the game or Non-Steam shortcut as currently running.
+5. Close other controller-routing or virtual-controller tools that may be managing the built-in controller.
+6. If MSI Center M was opened or the controller was re-enumerated, allow the Addon to return to a stable native state and then start the Steam session again.
 
 If a Non-Steam game profile stops applying after a launcher closes, check whether Steam still shows that Non-Steam shortcut as running. The Addon intentionally follows Steam's active AppID rather than scanning the child game executable.
 
