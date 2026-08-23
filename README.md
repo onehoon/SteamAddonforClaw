@@ -1,145 +1,284 @@
-# Steam Addon for Claw
+# Steam Input Addon for Claw
 
-> [!WARNING]
-> **This project is still under active development. Do not download or install it yet.**
->
-> The current code is not release-ready. Do not install source archives, CI/Actions
-> artifacts, or development builds. Hardware and lifecycle validation is still in
-> progress. Please wait for an official release.
+Steam Input Addon for Claw brings Steam Input and Steam Deck-style controller integration to the built-in controller on supported MSI Claw handhelds.
 
-Steam Input Addon for Claw exposes the built-in MSI Claw controller to Steam
-through a canonical Steam Deck virtual output. The active output identity is
-Steam Deck `VID=0x28DE`, `PID=0x1205`.
+When a Steam game or Steam Big Picture session needs the controller, the Addon temporarily routes the built-in MSI controller through a virtual Steam Deck controller. When routing is no longer needed, the Claw returns to its normal native Windows controller mode.
 
-## Current status
+It also provides Center M button remapping, device-level CPU Boost and TDP controls, per-game performance profiles, and controls inside Steam Quick Access Menu.
 
-| Area | Status |
-| --- | --- |
-| Physical MSI Claw PID_1902 acquisition | Implemented |
-| Native mode / HidHide / recovery safety shell | Implemented |
-| Active Steam virtual output | Steam Deck `28DE:1205` |
-| VIIPER Steam Deck typed wrapper | Validated and embedded at the pinned VIIPER revision |
-| Addon Steam Deck session / mapper / publisher | Implemented |
-| EX hardware basic non-gyro controller input | Validated |
-| Lifecycle and recovery hardware validation | Remaining validation track |
-| Rumble / haptic feedback | Production two-motor translation/wiring implemented; hardware validation pending |
-| Audio / jingle feedback | Unsupported |
-| Gyro / accelerometer | Separate feature track |
-| Quick Access / OEM1 | Production wiring + configurable mappings implemented; hardware validation pending |
-| Steam-native routing presentation | Steam Deck `28DE:1205` is the single active virtual-controller presentation |
+## Supported devices
 
-## Product goal
+| Device | Board ID | Support |
+| --- | --- | --- |
+| MSI Claw 7 AI+ A2VM | `MS-1T42` | Supported |
+| MSI Claw 8 AI+ A2VM | `MS-1T52` | Supported |
+| MSI Claw 8 EX AI+ CG3EM | `MS-1T91` | Supported |
 
-Expose the Claw's native controller to Steam while preserving the device's
-normal Windows behavior outside an active Steam routing session. The Addon
-must acquire only the verified MSI controller collection, establish a safe
-native mode boundary, create one owned Steam Deck virtual device, publish
-normalized input, and restore the live stock state during teardown.
+The Addon identifies supported models by their exact MSI board ID. Unsupported or unrecognized hardware exits before the controller runtime starts and does not apply controller or performance changes.
 
-The canonical Steam Deck is the single production virtual-controller
-presentation for an active Steam routing session. Game Bar foreground does not
-select another virtual controller.
+### Hardware validation status
 
-During active Steam routing:
+- **MSI Claw 8 EX AI+ CG3EM (`MS-1T91`)** — tested on physical hardware.
+- **MSI Claw 7 AI+ / 8 AI+ A2VM (`MS-1T42`, `MS-1T52`)** — supported, but physical hardware validation is still pending.
 
-- WING defaults to the Steam Button;
-- Center M / OEM1 defaults to Steam Quick Access;
-- Addon quick controls are integrated into Steam Quick Access Menu;
-- native Win+G/Game Bar activation is protected while the route is owned.
+## Requirements
 
-Outside routing, native Windows and Game Bar behavior is restored.
+- Windows 10 or Windows 11 x64
+- A supported MSI Claw model listed above
+- Steam installed and running for Steam Input routing and Quick Access Menu integration
+- The normal MSI controller environment, including MSI Center M, available on the device
 
-## Initial MSI Claw mapping
+Controller routing is not intended to share ownership of the built-in controller with another controller-routing or virtual-controller manager at the same time.
 
-| Physical control | Steam Deck output |
+## Main features
+
+- Automatic Steam Input routing for Steam games and Steam Big Picture Mode
+- Virtual Steam Deck controller output (`VID 28DE`, `PID 1205`)
+- Built-in controller button, stick, trigger, D-pad, and rear-button mapping
+- Physical rumble support
+- WING button integration as the Steam button during active routing
+- Center M / OEM1 integration as Steam Quick Access during active routing
+- Configurable Center M normal action outside active routing
+- Device-level CPU Boost and TDP control
+- Per-game CPU Boost and TDP profiles
+- Steam Quick Access Menu controls
+- Background tray operation and lifecycle recovery
+
+## Steam Input Routing
+
+Open the **Controller** tab and enable **Steam Input Routing**.
+
+When enabled, the Addon automatically routes the built-in controller when a Steam game or Steam Big Picture Mode requires Steam Input.
+
+### Normal operation
+
+```text
+MSI Claw built-in controller
+        ↓
+Native MSI / Windows controller mode
+```
+
+Outside an active Steam route, the Claw remains in its normal controller mode.
+
+### During Steam Input Routing
+
+```text
+MSI Claw built-in controller
+        ↓
+MSI DirectInput mode
+        ↓
+Steam Input Addon for Claw
+        ↓
+Virtual Steam Deck controller
+        ↓
+Steam Input
+```
+
+The virtual Steam Deck controller is the single controller presentation used by the Addon while routing is active.
+
+If routing cannot be established safely, the Addon does not continue with a partially owned route and returns toward the native controller state instead.
+
+## Controller mapping
+
+The built-in MSI Claw controls are mapped to the virtual Steam Deck controller as follows.
+
+| MSI Claw control | Steam Deck output |
 | --- | --- |
 | A / B / X / Y | A / B / X / Y |
 | D-pad | D-pad |
-| LB / RB | LB / RB |
-| analog LT / RT | analog LT / RT |
-| digital LT / RT | digital L2 / R2 |
-| left stick | left stick |
-| right stick | right stick |
+| LB / RB | L1 / R1 |
+| LT / RT analog travel | L2 / R2 analog triggers |
+| LT / RT full pull | L2 / R2 digital full-pull |
+| Left stick | Left stick |
+| Right stick | Right stick |
 | L3 / R3 | L3 / R3 |
-| M1 / M2 | rear-button mapping defined by the Deck mapper |
-| Steam key | Steam |
-| Quick Access key | Quick Access |
+| Menu / Start | Menu |
+| View / Back | Options |
+| M1 right rear button | R4 |
+| M2 left rear button | L4 |
 
-Trackpad and motion fields remain neutral until their separate feature tracks
-are implemented and validated.
+Motion / gyro output is not currently part of the supported controller mapping.
 
-## Physical input contract
+## WING and Center M button behavior
 
-The Addon acquires the MSI Claw PID_1902 DirectInput gamepad only after exact
-PnP identity and topology checks. VID/PID counts alone are insufficient.
+The WING and Center M buttons intentionally behave differently depending on whether Steam Input Routing is active.
 
-The normalized input state preserves independent analog trigger travel and
-digital full-pull trigger buttons, rear-button side identity, sticks, buttons,
-and D-pad state. Output-specific policy is applied only after normalization.
+| Button | Routing inactive | Steam Input Routing active |
+| --- | --- | --- |
+| **WING** | Native Windows / Game Bar behavior | **Steam Button** |
+| **Center M / OEM1** | User-configured Normal Action | **Steam Quick Access** |
 
-## Safety and lifecycle invariants
+The routing-time assignments are fixed. They are not user-remappable because they provide the Steam system-button behavior needed while the virtual Steam Deck controller is active.
 
-- unknown device ownership fails closed;
-- physical isolation is scoped to the verified MSI controller topology;
-- virtual-device ownership is tracked by exact identity;
-- startup uses live current-world state rather than replaying stale routing;
-- suspend/resume and teardown restore a safe stock baseline;
-- native, PnP, HidHide, publisher, and recovery failures do not select another
-  output implementation or silently continue routing.
+## Center M button remapping
 
-## Supported environment
+The **Controller** tab also contains the Center M button settings used when Steam Input Routing is inactive.
 
-- Windows 10/11 x64
-- MSI Claw EX hardware for the validated basic-input path
-- Steam running locally for Steam routing
-- the pinned VIIPER runtime and supported usbip-win2 compatibility described in
-  [`docs/VIIPER_INTEGRATION.md`](docs/VIIPER_INTEGRATION.md)
+Center M remapping is managed by the Addon and is shown as **Always enabled**. The editable **Normal Action** controls what a normal Center M press does outside an active Steam route.
 
-## Roadmap
+Available Normal Actions are:
+
+- **None**
+- **Steam Big Picture** — the default action
+- **Keyboard / Hotkey** — optional Ctrl, Shift, Alt, or Win modifiers plus one key
+- **Launch Application** — launches a selected `.exe`, with optional arguments
+
+During active routing, the Normal Action is temporarily ignored and Center M always becomes **Steam Quick Access**.
+
+### MSI Center M suppression and ownership
+
+The MSI Center M application can change the physical controller mode. That would conflict with an active Steam route, so the Addon protects controller ownership while routing is active.
+
+When a route is being established, the Addon checks the real MSI Center M MainUI state and prevents Center M from unexpectedly taking the controller back while the virtual Steam Deck route is owned. If that ownership boundary cannot be established safely, routing does not continue.
+
+When Steam Input Routing is inactive, manually opening the real MSI Center M application is still allowed and native Center M behavior can take over normally. The physical Center M button itself continues to use the Normal Action configured in the Addon.
+
+## Device tab
+
+The **Device** tab contains global performance settings for the handheld.
+
+These settings are the normal device-level values used when no enabled game profile is taking priority.
+
+### CPU Boost
+
+CPU Boost can be enabled independently and configured separately for:
+
+- **Plugged in**
+- **On battery**
+
+The available Windows processor boost modes are presented directly in the UI.
+
+### TDP Control
+
+TDP Control provides separate AC and battery values for:
+
+- **PL1**
+- **PL2**
+
+The available range is limited to the supported range for the detected Claw model.
+
+On first use, the Addon can initialize its TDP values from the existing MSI Center M Manual TDP values when those values are available.
+
+### What turning a Device feature off means
+
+Turning **CPU Boost** or **TDP Control** off means the Addon stops managing that feature at the Device level.
+
+It is not a "restore the value that existed before the Addon started" command. Saved values are kept so they are available again if the feature is re-enabled.
+
+## Profile tab
+
+The **Profile** tab provides per-game CPU Boost and TDP settings.
+
+The game list is built from:
+
+- installed Steam games
+- Non-Steam shortcuts registered in Steam
+
+Use **Refresh** if you install a game or add a new Non-Steam shortcut while the Addon is already running.
+
+### Creating a game profile
+
+1. Open **Profile**.
+2. Search for or select a game.
+3. Enable the profile using the toggle beside the game selector.
+4. Configure CPU Boost for plugged-in and battery operation.
+5. Configure TDP PL1 / PL2 for plugged-in and battery operation.
+
+A profile is a complete per-game performance configuration rather than a set of individual inherited overrides.
+
+When a profile is enabled for the first time, its initial values are copied from the saved Device values when available. After that, the game keeps its own saved values.
+
+Disabling a profile does not erase its settings.
+
+### Device and Profile priority
+
+When a game with an enabled profile is running:
 
 ```text
-Current  Steam Deck 28DE:1205 active runtime
-SD3      lifecycle, recovery, and failure-path hardware validation
-SD4      production readiness review
-SD5      OEM1 / Quick Access software implemented; hardware validation pending
-SD6      gyro / accelerometer feature track
+Enabled game Profile
+        ↓ takes priority over
+Enabled Device setting
 ```
 
-Rumble and haptic commands are translated through the production two-motor
-feedback path, but hardware validation remains pending. Do not treat one
-validated feature as validation of the remaining hardware or lifecycle surface.
+When the game exits:
 
-## Frontend transport foundation
+- if the corresponding Device feature is enabled, the saved Device value becomes effective again;
+- if the Device feature is disabled, the Addon stops managing that feature instead of restoring an older pre-game value.
 
-The Runtime is a headless native process that owns controller/routing state, the
-named-pipe server, and the native tray. The frontend is a separate disposable
-WinUI process that owns presentation and uses the named-pipe client. The
-transport uses a user/session-scoped endpoint, CurrentUserOnly pipe access,
-versioned bounded JSON frames, typed RPC methods, cancellation, reconnect
-handling, and `StateInvalidated` notifications.
+Performance profiles use the actual Steam AppID and operate independently from the controller-routing switch. A game profile can therefore apply even when Steam Input Routing itself is disabled.
 
-Unknown string RPC method names are represented as `Unknown` and return
-`UnsupportedMethod`; missing, null, numeric, malformed, or structurally invalid
-requests return `InvalidMessage` without invoking frontend operations.
+## Steam Quick Access Menu support
 
-The current transport test suite covers all frontend operations and these wire
-failure/reconnect/concurrency cases. Release packaging places the self-contained
-UI publish under `ui/` beside the headless Runtime; hardware/manual validation
-remains separate follow-up work.
+Steam Input Addon for Claw integrates its performance controls into Steam's GamepadUI / Quick Access Menu.
 
-## Reference documents
+During active routing, press **Center M** to open Steam Quick Access.
 
-- [`docs/VIIPER_INTEGRATION.md`](docs/VIIPER_INTEGRATION.md)
-- [`docs/VIIPER_MIGRATION_TODO.md`](docs/VIIPER_MIGRATION_TODO.md)
-- [`docs/VIIPER_IMPLEMENTATION_RULES.md`](docs/VIIPER_IMPLEMENTATION_RULES.md)
-- [`docs/Reference Research_Steam Deck VIIPER SteamOutput Input Reports.txt`](docs/Reference%20Research_Steam%20Deck%20VIIPER%20SteamOutput%20Input%20Reports.txt)
-- [`docs/Reference Research_Physical Input HidHide MSI Claw Isolation.txt`](docs/Reference%20Research_Physical%20Input%20HidHide%20MSI%20Claw%20Isolation.txt)
+The Addon tab provides quick access to the same performance settings used by the desktop UI:
 
-## Development policy
+- CPU Boost
+- TDP PL1 / PL2
+- active game Profile controls
 
-Keep changes small and independently reviewable. Runtime, ABI, generated
-header, DLL, provenance, tests, and hardware-validation claims must remain
-consistent. Hardware-dependent claims require actual device evidence.
+When no game is active, the QAM surface exposes Device-level controls. When a supported active game is detected, it presents that game's Profile controls instead.
+
+The QAM integration uses Steam's native GamepadUI components. If a Steam client update changes those internal components in an incompatible way, the Addon disables the affected QAM integration rather than injecting an unsupported fallback UI.
+
+## Quick start
+
+1. Install the official release package.
+2. Launch **Steam Input Addon for Claw**.
+3. Keep Steam running.
+4. Open the **Controller** tab.
+5. Enable **Steam Input Routing**.
+6. Start a Steam game or enter Steam Big Picture Mode.
+7. Use **WING** for the Steam menu and **Center M** for Steam Quick Access while routing is active.
+8. Configure optional CPU Boost / TDP defaults in **Device**.
+9. Configure game-specific performance settings in **Profile** if desired.
+
+## Background operation
+
+The controller runtime runs separately from the settings window and remains available from the system tray.
+
+Closing the settings window does not need to stop controller routing or profile handling. Use the tray controls when you want to reopen the UI or fully exit the Addon.
+
+## Safety and recovery
+
+The Addon is designed around the normal handheld lifecycle rather than leaving the controller permanently in a routed state.
+
+It handles the controller ownership and recovery path across events such as:
+
+- entering and leaving Steam routing
+- physical controller re-enumeration
+- sleep / hibernate / resume
+- application shutdown or restart
+- routing failures and rollback
+
+The Addon does not intentionally replay a stale routed session after startup. Controller ownership is rebuilt from the current live device state.
+
+## Known limitations
+
+- Physical hardware validation is currently complete on the MSI Claw 8 EX AI+ CG3EM (`MS-1T91`); A2VM models are supported but still awaiting physical-device validation.
+- Motion / gyro output is not currently supported by the Steam Deck virtual-controller mapping.
+- QAM integration depends on Steam GamepadUI internals and may require an Addon update after a major Steam client UI change.
+- Running another application that independently takes ownership of the same physical controller can prevent Steam Input Routing from becoming active.
+
+## Troubleshooting
+
+If Steam Input Routing does not activate:
+
+1. Confirm the device is one of the supported board IDs listed above.
+2. Confirm **Steam Input Routing** is enabled in the Controller tab.
+3. Confirm Steam is running.
+4. Close other controller-routing or virtual-controller tools that may be managing the built-in controller.
+5. If MSI Center M was opened or the controller was re-enumerated, allow the Addon to return to a stable native state and then start the Steam session again.
+
+If the Steam Quick Access Addon tab is missing after a Steam client update, the Steam GamepadUI integration may need a compatibility update. Core settings remain available from the desktop UI.
+
+## Development documentation
+
+Technical implementation notes, protocol research, lifecycle design, and the pre-release development README are available in [`docs/`](docs/).
+
+The previous development-oriented README is preserved as [`docs/PRE_RELEASE_DEVELOPMENT_STATUS.md`](docs/PRE_RELEASE_DEVELOPMENT_STATUS.md).
 
 ## License
 
