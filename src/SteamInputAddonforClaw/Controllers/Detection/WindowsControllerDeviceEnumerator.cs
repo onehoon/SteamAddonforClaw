@@ -84,7 +84,7 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         using var set = OpenPresentSet();
         for (uint index = 0; TryGetDevice(set.Handle, index, out var data); index++)
         {
-            var parsed = ParseVendorProductId(GetRegistryMultiString(set.Handle, ref data, SpdrpHardwareId));
+            var parsed = ParseVendorProductId([GetDeviceInstanceId(set.Handle, ref data)]);
             if (parsed.VendorId == vendorId && parsed.ProductId == productId) return true;
         }
         return false;
@@ -95,8 +95,8 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         using var set = OpenPresentSet();
         var light = ReadLightweightDevices(set.Handle, vendorId, productId);
         return light.Values
-            .Where(d => ParseVendorProductId(d.HardwareIds).VendorId == vendorId
-                && ParseVendorProductId(d.HardwareIds).ProductId == productId)
+            .Where(d => ParseVendorProductId([d.InstanceId]).VendorId == vendorId
+                && ParseVendorProductId([d.InstanceId]).ProductId == productId)
             .Select(d => d.InstanceId)
             .ToArray();
     }
@@ -162,14 +162,10 @@ public sealed class WindowsControllerDeviceEnumerator : IControllerDeviceEnumera
         {
             var instanceId = GetDeviceInstanceId(set, ref data);
             // InstanceId is the cheap first discriminator for the common USB/HID case.
-            // Read HardwareIds only when the instance string cannot prove either a match or
-            // a non-match, preserving support for bus-specific IDs that omit VID/PID.
             var instanceIdentity = ParseVendorProductId([instanceId]);
             var ids = instanceIdentity.VendorId == vendorId && instanceIdentity.ProductId == productId
                 ? (IReadOnlyList<string>)[instanceId]
-                : instanceIdentity.VendorId is not null && instanceIdentity.ProductId is not null
-                    ? []
-                    : GetRegistryMultiString(set, ref data, SpdrpHardwareId);
+                : [];
             result[instanceId] = new LightDevice(instanceId, data.DevInst, ids, data);
         }
         return result;

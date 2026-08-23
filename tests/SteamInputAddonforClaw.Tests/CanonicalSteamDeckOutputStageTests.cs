@@ -993,13 +993,15 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         // the candidate set stops growing, all three siblings must resolve together as ONE fully-owned
         // logical Deck device, and teardown must then cleanly verify absence/ownership for all three.
         var container = Guid.NewGuid();
-        var controllerLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
-        var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
-        var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
+        var controllerLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_02\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_00\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205&MI_00"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
+        var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_01\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205&MI_01"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], // before
-            [UsbIpHost(), controllerLeaf, keyboardLeaf, mouseLeaf], // current exact composite identity
+            [UsbIpHost(), keyboardLeaf], // partial composite: not ready
+            [UsbIpHost(), keyboardLeaf, mouseLeaf], // still partial
+            [UsbIpHost(), keyboardLeaf, mouseLeaf, controllerLeaf], // first complete composite identity
             [], // rollback: all three verified absent after native remove
         ]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
