@@ -47,18 +47,11 @@ public sealed partial class ProfilePage : UserControl
         GameGrid.ItemsSource = _catalog.Where(x => query.Length == 0 || x.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || x.AppId.ToString().Contains(query, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(x => x.Favorite).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.AppId).Select(x => new GameCardItem(x)).ToArray();
     }
-    private void GameGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    private async void GameCardButton_Click(object sender, RoutedEventArgs e)
     {
-        if (GameGrid.ItemsPanelRoot is not ItemsWrapGrid panel) return;
-        const double minimumCardWidth = 220;
-        var columns = e.NewSize.Width >= minimumCardWidth * 3 ? 3 : e.NewSize.Width >= minimumCardWidth * 2 ? 2 : 1;
-        panel.MaximumRowsOrColumns = columns; panel.ItemWidth = Math.Max(minimumCardWidth, e.NewSize.Width / columns); panel.ItemHeight = 80;
-    }
-    private async void GameGrid_ItemClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is not GameCardItem card) return;
-        CancelTdpDebounce(); SelectedGameNameText.Text = card.Name; CatalogPanel.Visibility = Visibility.Collapsed; DetailPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Collapsed;
-        await SelectGameAsync(card.Game);
+        if ((sender as Button)?.Tag is not FrontendProfileGameCatalogEntry game) return;
+        CancelTdpDebounce(); SelectedGameNameText.Text = game.Name; CatalogPanel.Visibility = Visibility.Collapsed; DetailPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Collapsed;
+        await SelectGameAsync(game);
     }
     private void BackButton_Click(object sender, RoutedEventArgs e) { CancelTdpDebounce(); DetailPanel.Visibility = Visibility.Collapsed; CatalogPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Visible; }
     private async void FavoriteButton_Click(object sender, RoutedEventArgs e)
