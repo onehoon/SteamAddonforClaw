@@ -8,7 +8,7 @@ public sealed partial class HowToUsePage : UserControl
     internal const string EnglishDocumentationUrl =
         "https://github.com/onehoon/SteamInputAddonforClaw#readme";
     internal const string KoreanDocumentationUrl =
-        "https://github.com/onehoon/SteamInputAddonforClaw#readme";
+        "https://github.com/onehoon/SteamInputAddonforClaw/wiki/한국어-사용-가이드";
 
     private bool _activated;
 
