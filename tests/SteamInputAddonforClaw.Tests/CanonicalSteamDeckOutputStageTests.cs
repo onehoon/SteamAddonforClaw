@@ -71,6 +71,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         Assert.True((await hitStage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await hitStage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True(hitEnumerator.DirectLookupCalls > 0);
+        Assert.Equal(1, hitEnumerator.EnumerateCalls);
     }
 
     [Fact]
@@ -1307,7 +1308,12 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     {
         private int _index;
         public int DirectLookupCalls { get; private set; }
-        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Count - 1)];
+        public int EnumerateCalls { get; private set; }
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
+        {
+            EnumerateCalls++;
+            return states[Math.Min(_index++, states.Count - 1)];
+        }
         public ControllerDeviceInfo? FindPresentDevice(string instanceId)
         {
             DirectLookupCalls++;
