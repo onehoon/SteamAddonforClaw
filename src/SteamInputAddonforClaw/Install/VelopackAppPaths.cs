@@ -12,6 +12,8 @@ internal static class VelopackAppPaths
     internal static string LegacyHidHideProvisioningReceiptPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "SteamInputAddonforClaw-State", "provisioning", "hidhide.json");
+    internal static string CefMarkerOwnershipDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SteamInputAddonforClaw", "ownership");
+    internal static string CefMarkerOwnershipPath => Path.Combine(CefMarkerOwnershipDirectory, "steam-cef-marker.json");
     private const string ExecutableName = "SteamInputAddonforClaw.exe";
 
     public static string RootAppDirectory => string.IsNullOrWhiteSpace(VelopackLocator.Current.RootAppDir)

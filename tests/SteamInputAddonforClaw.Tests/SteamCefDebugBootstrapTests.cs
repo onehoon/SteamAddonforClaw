@@ -15,6 +15,8 @@ public sealed class SteamCefDebugBootstrapTests
         var marker = System.IO.Path.Combine(scope.Path, SteamCefDebugBootstrap.MarkerFileName);
         Assert.True(File.Exists(marker));
         Assert.Equal(0, new FileInfo(marker).Length);
+        SteamCefDebugBootstrap.RemoveOwnedMarker();
+        Assert.False(File.Exists(marker));
     }
 
     [Fact]
@@ -26,6 +28,8 @@ public sealed class SteamCefDebugBootstrapTests
 
         Assert.True(SteamCefDebugBootstrap.EnsureForSteamDirectory(scope.Path));
 
+        Assert.Equal("owned-by-another-tool", File.ReadAllText(marker));
+        SteamCefDebugBootstrap.RemoveOwnedMarker();
         Assert.Equal("owned-by-another-tool", File.ReadAllText(marker));
     }
 

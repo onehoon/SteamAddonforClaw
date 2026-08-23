@@ -1,5 +1,7 @@
 using Microsoft.Win32;
 using SteamInputAddonforClaw.Diagnostics;
+using SteamInputAddonforClaw.Install;
+using System.Text.Json;
 
 namespace SteamInputAddonforClaw.Steam;
 
@@ -75,6 +77,9 @@ internal static class SteamCefDebugBootstrap
                 return true;
             }
 
+            Directory.CreateDirectory(VelopackAppPaths.CefMarkerOwnershipDirectory);
+            File.WriteAllText(VelopackAppPaths.CefMarkerOwnershipPath, JsonSerializer.Serialize(new CefMarkerOwnership(normalizedDirectory)));
+
             AppLog.Info(
                 "QAM.Bootstrap",
                 "Steam CEF remote-debugging marker created. Restart Steam once if it is already running.",
@@ -91,4 +96,18 @@ internal static class SteamCefDebugBootstrap
             return false;
         }
     }
+
+    internal static void RemoveOwnedMarker()
+    {
+        try
+        {
+            if (!File.Exists(VelopackAppPaths.CefMarkerOwnershipPath)) return;
+            var ownership = JsonSerializer.Deserialize<CefMarkerOwnership>(File.ReadAllText(VelopackAppPaths.CefMarkerOwnershipPath));
+            if (ownership is { SteamDirectory.Length: > 0 }) File.Delete(Path.Combine(ownership.SteamDirectory, MarkerFileName));
+        }
+        catch (Exception exception) { AppLog.Warn("Uninstall", "Owned Steam CEF marker cleanup failed.", exception); }
+        finally { try { File.Delete(VelopackAppPaths.CefMarkerOwnershipPath); } catch { } }
+    }
+
+    private sealed record CefMarkerOwnership(string SteamDirectory);
 }
