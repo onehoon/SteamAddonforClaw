@@ -82,7 +82,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task ReconcileOwnedState_attached_without_owned_pnp_fails_without_mutation()
     {
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), new FakeHidHide());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [], [], []]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         var traceCount = session.Trace.Count;
@@ -112,7 +112,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task ReconcileOwnedState_does_not_adopt_foreign_matching_pnp()
     {
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), Device("foreign")]]), new FakeHidHide());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), Device("foreign")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")]]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -983,7 +983,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     [Fact]
-    public async Task DifferentContainerIdAppearingDuringStabilizationIsAmbiguous()
+    public async Task FirstValidDeckIdentityIsAcceptedWithoutStabilizationWindow()
     {
         // Unlike a true sibling of the SAME composite device (same ContainerId, see the convergence
         // test above), a genuinely different device (different ContainerId) appearing WHILE the
@@ -1005,50 +1005,44 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("AmbiguousVirtualDeviceIdentity", result.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
-    public async Task SameCountWithDifferentContainerIdsNeverStabilizes()
+    public async Task StableDeckIdentityDoesNotRequireRepeatedSamples()
     {
-        var leafA = DeviceWithContainer("USB\\VID_28DE&PID_1205\\A", Guid.NewGuid());
-        var leafB = DeviceWithContainer("USB\\VID_28DE&PID_1205\\B", Guid.NewGuid());
+        var leafA = Device("USB\\VID_28DE&PID_1205\\A");
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
-            [], [UsbIpHost(), leafA], [UsbIpHost(), leafB], [UsbIpHost(), leafA], [UsbIpHost(), leafB], []
+            [], [UsbIpHost(), leafA], [UsbIpHost(), leafA], []
         ]), new FakeHidHide(), TimeSpan.FromMilliseconds(4));
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
-    public async Task SameLogicalKeyWithDifferentInstanceIdsNeverStabilizes()
+    public async Task ValidLogicalDeckIdentityIsAcceptedOnFirstEvidence()
     {
-        var container = Guid.NewGuid();
-        var first = DeviceWithContainer("USB\\VID_28DE&PID_1205\\FIRST", container);
-        var second = DeviceWithContainer("USB\\VID_28DE&PID_1205\\SECOND", container);
+        var first = Device("USB\\VID_28DE&PID_1205\\FIRST");
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
-            [], [UsbIpHost(), first], [UsbIpHost(), second], [UsbIpHost(), first], [UsbIpHost(), second], []
+            [], [UsbIpHost(), first], [UsbIpHost(), first], []
         ]), new FakeHidHide(), TimeSpan.FromMilliseconds(4));
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
-    public async Task CandidateResolvedOnceThenDisappearingFailsClosedAtTimeout()
+    public async Task CandidateThatDisappearsBeforeResolutionFailsClosed()
     {
         var candidate = Device("USB\\VID_28DE&PID_1205\\TRANSIENT");
         var session = new FakeCanonicalSession();
@@ -1059,13 +1053,12 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
     [Fact]
-    public async Task CandidateAppearingTooLateForThreeStableSamplesFailsClosed()
+    public async Task CandidateAppearingBeforeTimeoutCanResolveImmediately()
     {
         var candidate = Device("USB\\VID_28DE&PID_1205\\LATE");
         var session = new FakeCanonicalSession();
@@ -1076,8 +1069,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("VirtualDeviceIdentityDidNotStabilize", result.Reason);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
@@ -1277,7 +1269,11 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     }
 
     private sealed class FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states) : IControllerDeviceEnumerator
-    { private int _index; public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Count - 1)]; }
+    {
+        private int _index;
+        public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices() => states[Math.Min(_index++, states.Count - 1)];
+        public ControllerDeviceInfo? FindPresentDevice(string instanceId) => null;
+    }
 
     // Returns [] for the very first call (the "before" snapshot) and thereafter either [deck] or []
     // depending on DeviceRemoved, regardless of how many times WaitForIdentityAsync polls.
