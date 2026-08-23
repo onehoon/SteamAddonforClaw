@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This file lists third-party software distributed with, linked by, or referenced during development of Steam Input Addon for Claw. It is not an exhaustive inventory of all files in a final self-contained distribution; release packaging requires a separate, package-specific license review. A project listed in the References section does not have its source code incorporated into this project.
+This file lists third-party software distributed with, linked by, or referenced during development of Steam Addon for Claw. It is not an exhaustive inventory of all files in a final self-contained distribution; release packaging requires a separate, package-specific license review. A project listed in the References section does not have its source code incorporated into this project.
 
 ## Distributed / Linked Components
 

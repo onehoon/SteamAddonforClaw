@@ -48,7 +48,7 @@ if (-not (Test-Path -LiteralPath $iconPath)) {
 $vpkArguments = @(
     'vpk', '--version', '1.2.0', 'pack',
     '--packId', 'SteamInputAddonforClaw',
-    '--packTitle', 'Steam Input Addon for Claw',
+    '--packTitle', 'Steam Addon for Claw',
     '--packVersion', $Version,
     '--packDir', $publishDirectory,
     '--mainExe', 'SteamInputAddonforClaw.exe',

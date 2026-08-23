@@ -275,7 +275,7 @@ public sealed partial class MainWindow : Window
             var dialog = new ContentDialog
             {
                 Title = "Setup required",
-                Content = "Steam Input Addon for Claw needs a few required components. Install them now?",
+                Content = "Steam Addon for Claw needs a few required components. Install them now?",
                 PrimaryButtonText = "Install",
                 CloseButtonText = "Not now",
                 XamlRoot = Content.XamlRoot
@@ -327,7 +327,7 @@ public sealed partial class MainWindow : Window
             var restartDialog = new ContentDialog
             {
                 Title = "Restart required",
-                Content = "Windows needs to restart to finish setting up Steam Input Addon for Claw.",
+                Content = "Windows needs to restart to finish setting up Steam Addon for Claw.",
                 PrimaryButtonText = "Restart now",
                 CloseButtonText = "Later",
                 XamlRoot = Content.XamlRoot
@@ -501,6 +501,6 @@ public sealed partial class MainWindow : Window
         return Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.1.0";
     }
 
-    internal static string FormatWindowTitle(string version) => $"Steam Input Addon for Claw v{version}";
+    internal static string FormatWindowTitle(string version) => $"Steam Addon for Claw v{version}";
 
 }
