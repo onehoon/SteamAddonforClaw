@@ -5,6 +5,7 @@ using SteamInputAddonforClaw.Profiles;
 using SteamInputAddonforClaw.Profiles.Performance;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -340,77 +341,26 @@ public sealed class TdpPowerLifecycleTests : IDisposable
 
     private sealed class FakeDelay
     {
-        private readonly Lock _sync = new();
-        private readonly Queue<TaskCompletionSource> _pendingDelays = [];
-        private readonly Queue<TaskCompletionSource<TaskCompletionSource>> _releaseRequests = [];
-        private readonly Queue<TaskCompletionSource> _arrivals = [];
-        private readonly Queue<TaskCompletionSource> _arrivalRequests = [];
+        private readonly Channel<TaskCompletionSource> _calls = Channel.CreateUnbounded<TaskCompletionSource>();
 
-        public Task WaitAsync(TimeSpan _, CancellationToken cancellationToken)
+        public async Task WaitAsync(TimeSpan _, CancellationToken cancellationToken)
         {
-            if (cancellationToken.IsCancellationRequested)
-                return Task.FromCanceled(cancellationToken);
-
-            var delay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            TaskCompletionSource<TaskCompletionSource>? releaseRequest = null;
-            TaskCompletionSource? arrivalRequest = null;
-            lock (_sync)
-            {
-                if (_arrivalRequests.Count > 0)
-                    arrivalRequest = _arrivalRequests.Dequeue();
-                else
-                {
-                    var arrivalMarker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                    arrivalMarker.TrySetResult();
-                    _arrivals.Enqueue(arrivalMarker);
-                }
-                if (_releaseRequests.Count > 0)
-                    releaseRequest = _releaseRequests.Dequeue();
-                else
-                    _pendingDelays.Enqueue(delay);
-            }
-
-            arrivalRequest?.TrySetResult();
-            releaseRequest?.TrySetResult(delay);
-            return delay.Task.WaitAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await _calls.Writer.WriteAsync(gate, cancellationToken).ConfigureAwait(false);
+            await gate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task WaitForNextDelayAsync()
+        public async Task WaitForNextDelayAsync(CancellationToken cancellationToken = default)
         {
-            TaskCompletionSource? arrival = null;
-            Task? waitTask = null;
-            lock (_sync)
-            {
-                if (_arrivals.Count > 0)
-                    arrival = _arrivals.Dequeue();
-                else
-                {
-                    var request = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _arrivalRequests.Enqueue(request);
-                    waitTask = request.Task;
-                }
-            }
-            if (waitTask is not null)
-                await waitTask.ConfigureAwait(false);
+            if (!await _calls.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+                throw new InvalidOperationException("Fake delay channel was closed.");
         }
 
-        public async Task ReleaseNextAsync()
+        public async Task ReleaseNextAsync(CancellationToken cancellationToken = default)
         {
-            TaskCompletionSource? delay = null;
-            TaskCompletionSource<TaskCompletionSource>? request = null;
-            lock (_sync)
-            {
-                if (_pendingDelays.Count > 0)
-                    delay = _pendingDelays.Dequeue();
-                else
-                {
-                    request = new(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _releaseRequests.Enqueue(request);
-                }
-            }
-
-            delay ??= await request!.Task.ConfigureAwait(false);
-            delay.TrySetResult();
+            var gate = await _calls.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            gate.TrySetResult();
         }
     }
 
