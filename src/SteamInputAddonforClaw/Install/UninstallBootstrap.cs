@@ -103,7 +103,7 @@ internal static class UninstallBootstrap
                     !UninstallDependencyOwnershipPolicy.CanRemoveHidHide(receipt, new(true, key.GetValue("DisplayVersion") as string, true))) continue;
                 RunUninstaller(key.GetValue("QuietUninstallString") as string, "HidHide");
                 var after = new WindowsHidHidePackageProbe().Inspect();
-                AppLog.Info("Uninstall", "HidHide package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version));
+                AppLog.Info("Uninstall", "HidHide package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version), ("VerifiedRemoved", UninstallPackageRemovalPolicy.IsVerifiedRemoved(null, after.Installed)));
                 return;
             }
         }
@@ -116,7 +116,7 @@ internal static class UninstallBootstrap
         if (key is null || !UninstallDependencyOwnershipPolicy.CanRemoveUsbIp(receipt, new(true, key.GetValue("DisplayVersion") as string, true, true, key.GetValue("QuietUninstallString") as string))) return;
         RunUninstaller(key.GetValue("QuietUninstallString") as string, "usbip-win2");
         var after = new WindowsUsbIpWin2PackageProbe().Inspect();
-        AppLog.Info("Uninstall", "usbip-win2 package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version));
+        AppLog.Info("Uninstall", "usbip-win2 package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version), ("VerifiedRemoved", UninstallPackageRemovalPolicy.IsVerifiedRemoved(null, after.Installed)));
     }
 
     private static void RunUninstaller(string? command, string package)
@@ -127,11 +127,16 @@ internal static class UninstallBootstrap
         var arguments = trimmed.Length > fileName.Length + (trimmed.StartsWith('"') ? 2 : 0) ? trimmed[(trimmed.StartsWith('"') ? fileName.Length + 2 : fileName.Length)..].Trim() : string.Empty;
         using var process = Process.Start(new ProcessStartInfo(fileName, arguments) { UseShellExecute = false });
         process?.WaitForExit();
-        AppLog.Info("Uninstall", "Exact dependency uninstaller completed.", ("Package", package), ("ExitCode", process?.ExitCode));
+        AppLog.Info("Uninstall", "Exact dependency uninstaller completed.", ("Package", package), ("ExitCode", process?.ExitCode), ("ReprobeRequired", true));
     }
 
     private static void TryDeleteDirectory(string path) { try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch (Exception e) { AppLog.Warn("Uninstall", "Directory cleanup failed.", e, ("Path", path)); } }
     private static void TryDeleteFile(string path) { try { if (File.Exists(path)) File.Delete(path); } catch (Exception e) { AppLog.Warn("Uninstall", "File cleanup failed.", e, ("Path", path)); } }
+}
+
+internal static class UninstallPackageRemovalPolicy
+{
+    internal static bool IsVerifiedRemoved(int? exitCode, bool packageStillPresent) => !packageStillPresent;
 }
 
 internal static class UninstallSafetyCoordinator

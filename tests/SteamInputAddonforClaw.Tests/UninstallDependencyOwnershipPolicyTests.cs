@@ -8,6 +8,16 @@ namespace SteamInputAddonforClaw.Tests;
 public sealed class UninstallDependencyOwnershipPolicyTests
 {
     [Theory]
+    [InlineData(0)]
+    [InlineData(3010)]
+    [InlineData(1603)]
+    public void Final_absent_package_probe_is_authoritative_over_uninstaller_exit_code(int exitCode)
+    {
+        Assert.True(UninstallPackageRemovalPolicy.IsVerifiedRemoved(exitCode, packageStillPresent: false));
+        Assert.False(UninstallPackageRemovalPolicy.IsVerifiedRemoved(exitCode, packageStillPresent: true));
+    }
+
+    [Theory]
     [InlineData(false, false, false)]
     [InlineData(true, true, true)]
     [InlineData(true, false, false)]
