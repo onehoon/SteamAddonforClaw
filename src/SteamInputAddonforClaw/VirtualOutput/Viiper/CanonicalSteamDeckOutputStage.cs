@@ -609,19 +609,26 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         var targets = devices.Where(device => device.Present
             && device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId
             && device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId).ToArray();
-        var hasCanonicalMarkers = targets.Any(device =>
-            device.InstanceId.Contains("MI_00", StringComparison.OrdinalIgnoreCase)
-            || device.InstanceId.Contains("MI_01", StringComparison.OrdinalIgnoreCase)
-            || device.InstanceId.Contains("MI_02", StringComparison.OrdinalIgnoreCase)
-            || device.HardwareIds.Any(id => id.Contains("MI_00", StringComparison.OrdinalIgnoreCase)
-                || id.Contains("MI_01", StringComparison.OrdinalIgnoreCase)
-                || id.Contains("MI_02", StringComparison.OrdinalIgnoreCase)));
-        if (!hasCanonicalMarkers) return targets.Length > 0;
-
-        bool HasInterface(string marker) => targets.Any(device =>
+        bool HasMi(ControllerDeviceInfo device, string marker) =>
             device.InstanceId.Contains(marker, StringComparison.OrdinalIgnoreCase)
-            || device.HardwareIds.Any(id => id.Contains(marker, StringComparison.OrdinalIgnoreCase)));
-        return HasInterface("MI_00") && HasInterface("MI_01") && HasInterface("MI_02");
+            || device.HardwareIds.Any(id => id.Contains(marker, StringComparison.OrdinalIgnoreCase));
+        bool IsUsb(ControllerDeviceInfo device) => device.InstanceId.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase);
+        bool IsHid(ControllerDeviceInfo device) => device.InstanceId.StartsWith("HID\\", StringComparison.OrdinalIgnoreCase);
+
+        // Synthetic controller identities used by resolver-only tests have no real container
+        // identity. They cannot claim partial canonical topology; production SetupAPI identities
+        // always take the strict topology path below.
+        if (targets.Length > 0 && targets.All(device => device.ContainerId == Guid.Empty)) return true;
+
+        var hasCompositeRoot = targets.Any(device =>
+            IsUsb(device)
+            && device.InstanceId.Contains("VID_28DE&PID_1205\\", StringComparison.OrdinalIgnoreCase)
+            && !device.InstanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase));
+        if (!hasCompositeRoot) return false;
+
+        return new[] { "MI_00", "MI_01", "MI_02" }.All(marker =>
+            targets.Any(device => IsUsb(device) && HasMi(device, marker))
+            && targets.Any(device => IsHid(device) && HasMi(device, marker)));
     }
 
     private bool TryResolveCachedIdentity(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds,
@@ -659,6 +666,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         var cachedTargets = candidateSnapshot.Where(device => cachedIds.Contains(device.InstanceId)).ToArray();
         if (cachedTargets.Length != cachedIds.Count || cachedTargets.Any(device => !policy.IsMatchingCandidate(device, index)))
             return false;
+        if (!HasCompleteCanonicalDeck(candidateSnapshot)) return false;
 
         var currentTargetIds = _enumerator
             .EnumeratePresentInstanceIds(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId)

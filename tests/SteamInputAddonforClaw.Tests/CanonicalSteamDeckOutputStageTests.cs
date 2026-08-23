@@ -915,10 +915,16 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task MultiplePnPNodesSharingSameContainerIdResolveToOneLogicalDeck()
     {
         var container = Guid.NewGuid();
-        var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
-        var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
+        var root = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\ROOT", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205"], [], "USB", null, null, 0x28DE, 0x1205, true);
+        var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_00\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205&MI_00"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
+        var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_01\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205&MI_01"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
+        var controllerLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_02\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var keyboardHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_00\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_00"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var mouseHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_01\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_01"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var controllerHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_02\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), keyboardLeaf, mouseLeaf], [UsbIpHost(), keyboardLeaf, mouseLeaf], [UsbIpHost(), keyboardLeaf, mouseLeaf], []]), new FakeHidHide());
+        var complete = new[] { UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid };
+        var stage = Create(session, new FakeEnumerator([[], complete, complete, []]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
@@ -996,12 +1002,16 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var controllerLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_02\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
         var keyboardLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_00\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205&MI_00"], [], "Keyboard", null, null, 0x28DE, 0x1205, true);
         var mouseLeaf = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205&MI_01\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205&MI_01"], [], "Mouse", null, null, 0x28DE, 0x1205, true);
+        var root = new ControllerDeviceInfo("USB\\VID_28DE&PID_1205\\ROOT", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205"], [], "USB", null, null, 0x28DE, 0x1205, true);
+        var keyboardHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_00\\KBD", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_00"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var mouseHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_01\\MOUSE", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_01"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+        var controllerHid = new ControllerDeviceInfo("HID\\VID_28DE&PID_1205&MI_02\\CONTROLLER", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", ["HID\\VID_28DE&PID_1205&MI_02"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], // before
             [UsbIpHost(), keyboardLeaf], // partial composite: not ready
             [UsbIpHost(), keyboardLeaf, mouseLeaf], // still partial
-            [UsbIpHost(), keyboardLeaf, mouseLeaf, controllerLeaf], // first complete composite identity
+            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid], // first complete composite identity
             [], // rollback: all three verified absent after native remove
         ]), new FakeHidHide());
         await stage.PrepareMutationAsync(CancellationToken.None);
