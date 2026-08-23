@@ -83,6 +83,14 @@ internal sealed class Oem1ActionDispatcher
             // actually active right now? Never Available, never routing-enabled, never eligibility.
             var routingActuallyActive = _captureRoutingStatus().SteamOutputActive;
 
+            // Routing-active OEM1 is a fixed system role. Do not consult persisted routing slots:
+            // this also prevents old Hotkey/Launch/None values from executing in production.
+            if (routingActuallyActive)
+            {
+                _requestQuickAccessPulse();
+                return true;
+            }
+
             slot = Oem1MappingSlots.Resolve(routingActuallyActive, request.Gesture);
             var binding = mapping.Resolve(slot);
             action = binding.Action;

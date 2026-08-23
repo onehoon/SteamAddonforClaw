@@ -8,31 +8,13 @@
         HorizontalContentAlignment="Stretch"
         HorizontalScrollBarVisibility="Disabled">
         <StackPanel Spacing="12">
-            <Button
-                Click="BackButton_Click"
-                Content="Back to Controller"
-                HorizontalAlignment="Left" />
-
-            <TextBlock FontSize="24" FontWeight="SemiBold" Text="Center M Button Remapping" />
-
-            <ctcontrols:SettingsCard
-                Description="When off, the Center M button keeps its original MSI behavior. Your mappings below are kept and restored when you turn this back on."
-                Header="Center M Button Remapping">
-                <ctcontrols:SettingsCard.HeaderIcon>
-                    <SymbolIcon Symbol="Setting" />
-                </ctcontrols:SettingsCard.HeaderIcon>
+            <ctcontrols:SettingsCard Header="Remapping" Description="When off, native MSI Center M behavior is restored; your normal action is kept.">
                 <ToggleSwitch x:Name="RemappingToggleSwitch" OffContent="" OnContent="" Toggled="RemappingToggleSwitch_Toggled" />
             </ctcontrols:SettingsCard>
-
-            <!--
-                Two top-level expanders, never nested deeper, never tabs: Normal and Steam Routing are
-                independent mapping domains the user should be able to see side by side. Both stay
-                expanded by default so the current configuration is visible without a click.
-            -->
             <ctcontrols:SettingsExpander
                 x:Name="NormalExpander"
-                Description="Used when Steam routing is not active"
-                Header="Normal"
+                Description="Used when Steam Input Routing is inactive"
+                Header="Center M Button"
                 IsExpanded="True">
                 <ctcontrols:SettingsExpander.HeaderIcon>
                     <SymbolIcon Symbol="Home" />
@@ -45,37 +27,6 @@
                         <StackPanel x:Name="NormalSingleConfigPanel" Spacing="8" />
                     </ctcontrols:SettingsCard>
 
-                    <ctcontrols:SettingsCard Header="Double Press">
-                        <ComboBox x:Name="NormalDoubleActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
-                    </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard x:Name="NormalDoubleConfigCard" ContentAlignment="Vertical">
-                        <StackPanel x:Name="NormalDoubleConfigPanel" Spacing="8" />
-                    </ctcontrols:SettingsCard>
-                </ctcontrols:SettingsExpander.Items>
-            </ctcontrols:SettingsExpander>
-
-            <ctcontrols:SettingsExpander
-                x:Name="RoutingExpander"
-                Description="Used while Steam Deck routing is active"
-                Header="Steam Routing"
-                IsExpanded="True">
-                <ctcontrols:SettingsExpander.HeaderIcon>
-                    <SymbolIcon Symbol="Repair" />
-                </ctcontrols:SettingsExpander.HeaderIcon>
-                <ctcontrols:SettingsExpander.Items>
-                    <ctcontrols:SettingsCard Header="Single Press">
-                        <ComboBox x:Name="RoutingSingleActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
-                    </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard x:Name="RoutingSingleConfigCard" ContentAlignment="Vertical">
-                        <StackPanel x:Name="RoutingSingleConfigPanel" Spacing="8" />
-                    </ctcontrols:SettingsCard>
-
-                    <ctcontrols:SettingsCard Header="Double Press">
-                        <ComboBox x:Name="RoutingDoubleActionComboBox" MinWidth="220" SelectionChanged="ActionComboBox_SelectionChanged" />
-                    </ctcontrols:SettingsCard>
-                    <ctcontrols:SettingsCard x:Name="RoutingDoubleConfigCard" ContentAlignment="Vertical">
-                        <StackPanel x:Name="RoutingDoubleConfigPanel" Spacing="8" />
-                    </ctcontrols:SettingsCard>
                 </ctcontrols:SettingsExpander.Items>
             </ctcontrols:SettingsExpander>
         </StackPanel>
