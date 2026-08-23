@@ -18,7 +18,8 @@ public sealed class UnsupportedHardwareStartupGateTests
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.True(result.ShouldStartRuntime);
+        Assert.False(result.ShouldStartRuntime);
+        Assert.Equal(HardwareCompatibilityStatus.Unsupported, result.HardwareStatus);
         Assert.Equal(ControllerEnvironmentMode.Unsupported, result.EnvironmentMode);
         Assert.Equal(ControllerEnvironmentReadiness.NotApplicable, result.EnvironmentReadiness);
         // The single hardware-support result every downstream feature gate reads (currently the OEM1
@@ -33,7 +34,8 @@ public sealed class UnsupportedHardwareStartupGateTests
 
         var result = await coordinator.RunAsync(CancellationToken.None);
 
-        Assert.True(result.ShouldStartRuntime);
+        Assert.False(result.ShouldStartRuntime);
+        Assert.Equal(HardwareCompatibilityStatus.Indeterminate, result.HardwareStatus);
         Assert.Equal(ControllerEnvironmentMode.Indeterminate, result.EnvironmentMode);
         Assert.Equal(ControllerEnvironmentReadiness.Indeterminate, result.EnvironmentReadiness);
         // Indeterminate is not support: a machine the probe could not identify must not unlock
@@ -62,6 +64,7 @@ public sealed class UnsupportedHardwareStartupGateTests
         Assert.Equal(ControllerEnvironmentMode.StockCenterM, result.EnvironmentMode);
         Assert.Equal(ControllerEnvironmentReadiness.Stable, result.EnvironmentReadiness);
         Assert.True(result.HardwareSupported);
+        Assert.Equal(HardwareCompatibilityStatus.Supported, result.HardwareStatus);
         Assert.Equal(["UpdateGate", "HardwareCompatibility", "EnvironmentDetector", "EnvironmentWaiter"], events);
     }
 

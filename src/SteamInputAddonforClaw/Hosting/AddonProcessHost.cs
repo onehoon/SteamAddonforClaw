@@ -25,6 +25,8 @@ internal enum AddonProcessStartupOutcome
 {
     RuntimeReady,
     UpdateRestartScheduled,
+    UnsupportedHardware,
+    IndeterminateHardware,
     Canceled
 }
 
@@ -115,10 +117,23 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         try
         {
             var startupResult = await startupComposition.Coordinator.RunAsync(_startupCancellationTokenSource.Token).ConfigureAwait(false);
+            _startupResult = startupResult;
+
+            if (startupResult.HardwareStatus is HardwareCompatibilityStatus.Unsupported or HardwareCompatibilityStatus.Indeterminate)
+            {
+                var unsupported = startupResult.HardwareStatus == HardwareCompatibilityStatus.Unsupported;
+                NativeStartupWarning.Show(unsupported
+                    ? "This device is not supported by Steam Input Addon for Claw."
+                    : "This device could not be identified. Steam Input Addon for Claw will exit without making any changes.");
+                _startupOutcome = unsupported
+                    ? AddonProcessStartupOutcome.UnsupportedHardware
+                    : AddonProcessStartupOutcome.IndeterminateHardware;
+                return _startupOutcome.Value;
+            }
+
             _startupOutcome = startupResult.ShouldStartRuntime
                 ? AddonProcessStartupOutcome.RuntimeReady
                 : AddonProcessStartupOutcome.UpdateRestartScheduled;
-            _startupResult = startupResult;
 
             // QamHost itself remains BPM-scoped. Prepare only Steam's persistent CEF bootstrap
             // marker here so a normal future Steam/steamwebhelper launch exposes the loopback CDP
@@ -441,6 +456,17 @@ internal sealed class AddonProcessHost : IAsyncDisposable
 
     private void RequestGameBarPresentationReconcile() =>
         _gameBarDelivery.Request(_gameBarForegroundWatcher.IsForeground);
+}
+
+internal static class NativeStartupWarning
+{
+    private const uint MbOk = 0x00000000;
+    private const uint MbIconWarning = 0x00000030;
+
+    internal static void Show(string message) => MessageBoxW(0, message, "Steam Input Addon for Claw", MbOk | MbIconWarning);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int MessageBoxW(nint hWnd, string lpText, string lpCaption, uint uType);
 }
 
 internal sealed class GameBarForegroundPresentationDelivery

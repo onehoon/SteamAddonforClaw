@@ -30,7 +30,9 @@ internal sealed class RuntimeProcessApplication
         try
         {
             var outcome = _processHost.RunStartupAsync().GetAwaiter().GetResult();
-            if (outcome == AddonProcessStartupOutcome.UpdateRestartScheduled)
+            if (outcome is AddonProcessStartupOutcome.UpdateRestartScheduled
+                or AddonProcessStartupOutcome.UnsupportedHardware
+                or AddonProcessStartupOutcome.IndeterminateHardware)
                 return;
             if (outcome != AddonProcessStartupOutcome.RuntimeReady)
                 return;
