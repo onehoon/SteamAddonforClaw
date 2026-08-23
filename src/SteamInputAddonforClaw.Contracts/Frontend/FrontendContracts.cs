@@ -6,7 +6,7 @@ namespace SteamInputAddonforClaw.Contracts.Frontend;
 
 public enum FrontendLogLevel { Off, Info, Debug }
 public enum FrontendProfileGameSource { Steam, NonSteam }
-public sealed record FrontendProfileGameCatalogEntry(uint AppId, string Name, FrontendProfileGameSource Source);
+public sealed record FrontendProfileGameCatalogEntry(uint AppId, string Name, FrontendProfileGameSource Source, bool Favorite = false);
 public sealed record FrontendGameCpuBoostConfiguration(CpuBoostMode Ac, CpuBoostMode Dc);
 public sealed record FrontendGameTdpConfiguration(FrontendTdpPowerPair Ac, FrontendTdpPowerPair Dc);
 public sealed record FrontendGameProfileSnapshot(uint AppId, string? DisplayName, bool Exists, bool Enabled,
@@ -272,6 +272,7 @@ public interface IAddonFrontendControl
     Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostDcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
     Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Game Profile is unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
+    Task<FrontendGameProfileMutationResult> SetGameProfileFavoriteAsync(uint appId, bool favorite, string? displayName, CancellationToken cancellationToken = default) => Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Unavailable, "Favorites are unavailable.", FrontendGameProfileSnapshotUnavailable(appId)));
 
     // ---- Claw Sensor Probe (developer-only gyro/accelerometer diagnostic) ----
     /// <summary>Opens (or re-opens, if the previous session Completed/Failed) the diagnostic session:

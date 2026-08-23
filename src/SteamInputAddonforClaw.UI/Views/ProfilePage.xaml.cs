@@ -22,8 +22,7 @@ public sealed partial class ProfilePage : UserControl
     public ProfilePage()
     {
         InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; SetEditorsEnabled(false);
-    }
-
+}
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
     internal void Activate() { _active = true; if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated; if (_selectedGame is not null) _ = CaptureSelectedAsync(_selectedGame.AppId); }
     internal void Deactivate() { _active = false; _frontend?.StateInvalidated -= OnStateInvalidated; }
@@ -34,11 +33,31 @@ public sealed partial class ProfilePage : UserControl
         if (_frontend is null) return;
         try
         {
-            var selected = _selectedGame?.AppId; _catalog = await _frontend.ScanProfileGamesAsync(); GameSelector.ItemsSource = _catalog;
+            var selected = _selectedGame?.AppId; _catalog = await _frontend.ScanProfileGamesAsync(); GameSelector.ItemsSource = _catalog; ApplyCatalogFilter();
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
             if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo("No installed Steam games were found."); else ClearError(); } else { GameSelector.Text = FormatGame(_selectedGame); await CaptureSelectedAsync(_selectedGame.AppId); }
         }
         catch (Exception exception) { ShowError("Game catalog could not be refreshed.", exception); }
+    }
+
+    private void GameSearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyCatalogFilter();
+    private void ApplyCatalogFilter()
+    {
+        var query = GameSearchBox.Text.Trim();
+        GameGrid.ItemsSource = _catalog.Where(x => query.Length == 0 || x.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || x.AppId.ToString().Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(x => x.Favorite).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.AppId).ToArray();
+    }
+    private void GameGrid_ItemClick(object sender, ItemClickEventArgs e) { if (e.ClickedItem is FrontendProfileGameCatalogEntry game) _ = SelectGameAsync(game); }
+    private async void FavoriteButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_frontend is null || (sender as Button)?.Tag is not FrontendProfileGameCatalogEntry game) return;
+        try
+        {
+            var result = await _frontend.SetGameProfileFavoriteAsync(game.AppId, !game.Favorite, game.Name);
+            if (!result.Succeeded) { ShowError(result.FailureMessage ?? "Favorite could not be saved.", null); return; }
+            _catalog = _catalog.Select(x => x.AppId == game.AppId ? x with { Favorite = !game.Favorite } : x).ToArray(); ApplyCatalogFilter();
+        }
+        catch (Exception exception) { ShowError("Favorite could not be saved.", exception); }
     }
 
     private void GameSelector_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)

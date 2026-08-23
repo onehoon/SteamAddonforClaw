@@ -13,6 +13,8 @@ public sealed record GameProfile
 {
     /// <summary>Owns activation of the complete per-game performance profile.</summary>
     public bool Enabled { get; init; }
+    /// <summary>Desktop catalog metadata only; never grants performance ownership.</summary>
+    public bool Favorite { get; init; }
 
     public string? DisplayName { get; init; }
 

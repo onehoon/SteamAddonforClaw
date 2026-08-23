@@ -69,6 +69,32 @@ internal sealed class GameProfileMutations
     internal MutationOutcome SetCpuBoostDc(uint appId, CpuBoostMode mode)
         => SetCpuBoost(appId, cpu => cpu with { Dc = mode });
 
+    internal IReadOnlySet<uint> CaptureFavoriteAppIds()
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            return loaded.Document.Games.Where(x => x.Value.Favorite && uint.TryParse(x.Key, out _)).Select(x => uint.Parse(x.Key, System.Globalization.CultureInfo.InvariantCulture)).ToHashSet();
+        }
+    }
+
+    internal MutationOutcome SetFavorite(uint appId, bool favorite, string? displayName)
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load();
+            if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var current))
+            {
+                if (!favorite) return MutationOutcome.Succeeded;
+                loaded.Document.Games[key] = new GameProfile { Favorite = true, DisplayName = displayName };
+            }
+            else loaded.Document.Games[key] = current with { Favorite = favorite, DisplayName = displayName ?? current.DisplayName };
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
+
     private MutationOutcome SetCpuBoost(uint appId, Func<GameCpuBoostSettings, GameCpuBoostSettings> update)
     {
         lock (_gate.Sync)

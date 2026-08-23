@@ -467,6 +467,38 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.DoesNotContain(Path.Combine(_testDirectory, "app", "current"), path);
     }
 
+    [Fact]
+    public void FavoriteMutation_CreatesDisabledEntryAndRoundTrips()
+    {
+        var mutations = new GameProfileMutations(new ProfileStore(ProfilesPath));
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetFavorite(123, true, "Game"));
+
+        var profile = new ProfileStore(ProfilesPath).Load().Document.Games["123"];
+        Assert.True(profile.Favorite);
+        Assert.False(profile.Enabled);
+        Assert.Null(profile.Performance.CpuBoost);
+        Assert.True(new ProfileStore(ProfilesPath).Load().Document.Games["123"].Favorite);
+    }
+
+    [Fact]
+    public void FavoriteMutation_PreservesExistingPerformanceProfile()
+    {
+        var store = new ProfileStore(ProfilesPath);
+        store.Save(new ProfileDocument { Games = new Dictionary<string, GameProfile>
+        {
+            ["123"] = new() { DisplayName = "Game", Performance = new() { CpuBoost = new() { Ac = CpuBoostMode.Aggressive, Dc = CpuBoostMode.Enabled } } }
+        }});
+        var mutations = new GameProfileMutations(store);
+
+        Assert.Equal(GameProfileMutations.MutationOutcome.Succeeded, mutations.SetFavorite(123, true, null));
+
+        var profile = store.Load().Document.Games["123"];
+        Assert.True(profile.Favorite);
+        Assert.False(profile.Enabled);
+        Assert.Equal(CpuBoostMode.Aggressive, profile.Performance.CpuBoost!.Ac);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))
