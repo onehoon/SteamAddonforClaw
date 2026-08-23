@@ -868,6 +868,22 @@ public sealed class CanonicalViiperRuntimeTests
     }
 
     [Fact]
+    public void Dormant_Xbox360_primitives_are_unavailable_without_touching_native_when_not_created()
+    {
+        var native = new FakeNative();
+        var runtime = CanonicalViiperRuntime.TryInitialize(native, LoopbackAddress)!;
+        native.Calls.Clear();
+
+        Assert.False(runtime.TryGetXbox360AttachmentState(out _));
+        Assert.Equal(USBDeviceAttachResult.Invalid, runtime.AttachXbox360());
+        Assert.Equal(USBDeviceDetachResult.Invalid, runtime.DetachXbox360());
+        Assert.False(runtime.SetXbox360State(default));
+
+        Assert.Equal(CanonicalViiperRuntimeState.Ready, runtime.State);
+        Assert.Empty(native.Calls);
+    }
+
+    [Fact]
     public void TryGetXbox360AttachmentState_detached_succeeds()
     {
         var native = new FakeNative { Xbox360AttachmentStateDuringTeardown = USBDeviceAttachmentState.Detached };
