@@ -88,6 +88,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (_runtime is not null)
         {
             _runtime.SteamSessionStateChanged += (_, _) => StateInvalidated?.Invoke(this, EventArgs.Empty);
+            _runtime.ActualRunningAppIdChanged += _ => StateInvalidated?.Invoke(this, EventArgs.Empty);
             _runtime.StatusRefreshRequested += (_, _) => StateInvalidated?.Invoke(this, EventArgs.Empty);
         }
     }

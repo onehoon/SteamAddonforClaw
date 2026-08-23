@@ -556,7 +556,8 @@
         refreshInFlight.current = true;
         try {
           const nextStatus = await request("captureStatus");
-          const nextAppId = Number(nextStatus.steam?.appId || 0);
+          const nextProfile = await request("captureActiveGameProfile");
+          const nextAppId = Number(nextProfile?.appId || 0);
           if (activeProfileAppIdRef.current !== nextAppId) {
             if (profileTdpTimer.current) clearTimeout(profileTdpTimer.current);
             profileTdpTimer.current = null;
@@ -566,7 +567,6 @@
           }
           activeProfileAppIdRef.current = nextAppId;
           const activeGame = nextAppId > 0;
-          const nextProfile = activeGame ? await request("captureActiveGameProfile") : null;
           const nextCpu = activeGame ? null : await request("captureCpuBoost");
           const nextTdp = activeGame ? null : await request("captureTdp");
           const nextDraft = nextTdp?.configuration ? {

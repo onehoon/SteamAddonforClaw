@@ -406,7 +406,8 @@ public sealed class QamFrontendContractTests
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
 
-        Assert.Contains("const nextAppId = Number(nextStatus.steam?.appId || 0)", source);
+        Assert.Contains("const nextAppId = Number(nextProfile?.appId || 0)", source);
+        Assert.DoesNotContain("const nextAppId = Number(nextStatus.steam?.appId || 0)", source);
         Assert.Contains("request(\"captureActiveGameProfile\")", source);
         Assert.Contains("key: \"profile-toggle\"", source);
         Assert.Contains("request(\"setActiveGameProfileEnabled\"", source);
