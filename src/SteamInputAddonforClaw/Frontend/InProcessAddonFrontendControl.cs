@@ -95,8 +95,18 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public event EventHandler? StateInvalidated;
 
-    public async Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default) =>
-        (await _scanProfileGames(cancellationToken).ConfigureAwait(false)).Select(x => new FrontendProfileGameCatalogEntry(x.AppId, x.Name, x.Source == ProfileGameSource.Steam ? FrontendProfileGameSource.Steam : FrontendProfileGameSource.NonSteam)).ToArray();
+    public async Task<IReadOnlyList<FrontendProfileGameCatalogEntry>> ScanProfileGamesAsync(CancellationToken cancellationToken = default)
+    {
+        var favorites = _gameProfileMutations?.CaptureFavoriteAppIds() ?? new HashSet<uint>();
+        return (await _scanProfileGames(cancellationToken).ConfigureAwait(false)).Select(x => new FrontendProfileGameCatalogEntry(x.AppId, x.Name, x.Source == ProfileGameSource.Steam ? FrontendProfileGameSource.Steam : FrontendProfileGameSource.NonSteam, favorites.Contains(x.AppId))).ToArray();
+    }
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfileFavoriteAsync(uint appId, bool favorite, string? displayName, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var outcome = _gameProfileMutations?.SetFavorite(appId, favorite, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable;
+        return Task.FromResult(MutateGame(appId, outcome, cpu: false, tdp: false));
+    }
 
     public Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(CaptureGameProfile(appId));
     public async Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default)

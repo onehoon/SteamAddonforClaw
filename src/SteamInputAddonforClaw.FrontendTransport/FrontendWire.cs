@@ -24,7 +24,7 @@ namespace SteamInputAddonforClaw.FrontendTransport;
 // Version 7: Game Profile capture, catalog, and mutation RPCs.
 // Version 8: Game Profile CPU Boost mutation changes from one combined AC/DC RPC
 // to independent AC and DC RPCs.
-public static class FrontendTransportProtocol { public const int CurrentVersion = 8; }
+public static class FrontendTransportProtocol { public const int CurrentVersion = 9; } // v9 adds Desktop Profile favorites.
 public static class FrontendPipeEndpoint
 {
     /// <summary>Supported product model is one Windows user, one interactive session -- the SID
@@ -50,7 +50,7 @@ public sealed class FrontendProtocolException(string message) : FrontendTranspor
 public sealed class FrontendRemoteException(FrontendRemoteErrorCode code, string message) : FrontendTransportException(message) { public FrontendRemoteErrorCode Code { get; } = code; }
 
 internal enum FrontendWireMessageKind { Handshake, HandshakeAccepted, Request, CancelRequest, Response, Notification, ProtocolError }
-internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SetOem1Mapping, SetWingMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, RunVibrationTest, OpenVibrationTestSession, CloseVibrationTestSession, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdp }
+internal enum FrontendRpcMethod { Unknown = 0, GetBootstrap, CaptureStatus, SetLaunchAtWindowsStartup, SetSteamInputRoutingEnabled, SetLogLevel, SetOem1Mapping, SetWingMapping, SuppressDeveloperMenuWarning, SetDeveloperTestMode, RunPrerequisiteSetup, GenerateEnvironmentReport, RunVibrationTest, OpenVibrationTestSession, CloseVibrationTestSession, CaptureCpuBoost, SetDeviceCpuBoostAc, SetDeviceCpuBoostDc, SetDeviceCpuBoostEnabled, CaptureTdp, SetDeviceTdp, SetDeviceTdpEnabled, OpenClawSensorProbe, StartClawSensorProbe, CaptureClawSensorProbe, NextClawSensorProbePhase, PreviousClawSensorProbePhase, StopClawSensorProbe, CloseClawSensorProbe, ScanProfileGames, CaptureGameProfile, CaptureActiveGameProfile, SetGameProfileEnabled, SetGameProfileCpuBoostAc, SetGameProfileCpuBoostDc, SetGameProfileTdp, SetGameProfileFavorite }
 internal enum FrontendNotificationKind { StateInvalidated }
 public enum FrontendRemoteErrorCode { ProtocolMismatch, InvalidMessage, UnsupportedMethod, OperationFailed, Cancelled }
 internal sealed record FrontendWireError(FrontendRemoteErrorCode Code, string Message);
@@ -72,6 +72,7 @@ internal sealed record SetGameProfileEnabledRequest(uint AppId, bool Enabled, st
 internal sealed record SetGameProfileCpuBoostAcRequest(uint AppId, SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetGameProfileCpuBoostDcRequest(uint AppId, SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode Mode);
 internal sealed record SetGameProfileTdpRequest(uint AppId, FrontendGameTdpConfiguration Configuration);
+internal sealed record SetGameProfileFavoriteRequest(uint AppId, bool Favorite, string? DisplayName);
 
 internal static class FrontendWireCodec
 {
