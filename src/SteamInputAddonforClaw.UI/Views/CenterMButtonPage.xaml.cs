@@ -37,7 +37,6 @@ public sealed partial class CenterMButtonPage : UserControl
     }
 
     /// <summary>Raised when the user asks to go back; the host owns navigation.</summary>
-    internal event EventHandler? BackRequested;
 
     /// <summary>
     /// Review fix (BLOCKER): this page used to own its own save-ordering chain, but that only
@@ -55,10 +54,7 @@ public sealed partial class CenterMButtonPage : UserControl
         _windowHandleProvider = windowHandleProvider;
         _slots =
         [
-            new SlotEditor(Oem1BindingSlot.NormalSingle, NormalSingleActionComboBox, NormalSingleConfigCard, NormalSingleConfigPanel, this),
-            new SlotEditor(Oem1BindingSlot.NormalDouble, NormalDoubleActionComboBox, NormalDoubleConfigCard, NormalDoubleConfigPanel, this),
-            new SlotEditor(Oem1BindingSlot.RoutingSingle, RoutingSingleActionComboBox, RoutingSingleConfigCard, RoutingSingleConfigPanel, this),
-            new SlotEditor(Oem1BindingSlot.RoutingDouble, RoutingDoubleActionComboBox, RoutingDoubleConfigCard, RoutingDoubleConfigPanel, this)
+            new SlotEditor(Oem1BindingSlot.NormalSingle, NormalSingleActionComboBox, NormalSingleConfigCard, NormalSingleConfigPanel, this)
         ];
 
         Apply(bootstrap.Settings.Oem1Mapping);
@@ -72,9 +68,7 @@ public sealed partial class CenterMButtonPage : UserControl
         try
         {
             _mapping = mapping;
-            RemappingToggleSwitch.IsOn = mapping.RemappingEnabled;
             foreach (var slot in _slots) slot.Load(mapping.Resolve(slot.Slot));
-            ApplyRemappingEnabledState(mapping.RemappingEnabled);
         }
         finally { _isLoading = false; }
     }
@@ -84,20 +78,6 @@ public sealed partial class CenterMButtonPage : UserControl
     /// values, and the explanation of what "off" means lives on the switch's own card. Nothing is
     /// cleared or hidden.
     /// </summary>
-    private void ApplyRemappingEnabledState(bool enabled)
-    {
-        NormalExpander.IsEnabled = enabled;
-        RoutingExpander.IsEnabled = enabled;
-    }
-
-    private void BackButton_Click(object sender, RoutedEventArgs args) => BackRequested?.Invoke(this, EventArgs.Empty);
-
-    private void RemappingToggleSwitch_Toggled(object sender, RoutedEventArgs args)
-    {
-        if (_isLoading) return;
-        MappingEditRequested?.Invoke(this, _mapping with { RemappingEnabled = RemappingToggleSwitch.IsOn });
-    }
-
     private void ActionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
         if (_isLoading) return;

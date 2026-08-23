@@ -439,8 +439,7 @@ internal sealed class MsiClawRoutingComposition : IHandheldRoutingComposition
     /// (<see cref="OnOem1MappingChanged"/>) so both apply the exact same gate. The rest of the arming
     /// decision (environment eligibility, Launcher/Server readiness, same-name topology, exact helper
     /// ownership) is owned entirely by <see cref="CenterMOem1LifecycleCoordinator"/>.</summary>
-    private static bool ComputeOem1CanArm(Settings.IOem1MappingPreference preference) =>
-        preference.Oem1Mapping.RemappingEnabled;
+    private static bool ComputeOem1CanArm(Settings.IOem1MappingPreference preference) => true;
 
     /// <summary>Requests the given desired-enabled value be applied through the SAME serialized
     /// activation chain <see cref="OnOem1MappingChanged"/> already uses for every enable/disable

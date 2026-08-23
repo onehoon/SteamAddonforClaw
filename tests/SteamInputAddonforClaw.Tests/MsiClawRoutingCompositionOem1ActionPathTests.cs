@@ -266,7 +266,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     // ---- Global remapping switch ----
 
     [Fact]
-    public async Task Remapping_off_at_startup_never_arms_suppression_and_leaves_native_center_m()
+    public async Task Remapping_off_at_startup_still_arms_always_on_oem1()
     {
         var (composition, _, mapping) = BuildArmable(initialMapping: Oem1MappingSettings.Default with { RemappingEnabled = false });
         IHandheldRoutingComposition handheld = composition;
@@ -275,9 +275,8 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         await composition.TestOnly_Oem1ActivationTask;
 
         var snapshot = composition.CenterMOem1Coordinator.GetSnapshot();
-        Assert.NotEqual(CenterMOem1LifecycleState.Armed, snapshot.State);
-        Assert.False(snapshot.SuppressionReady);
-        Assert.True(snapshot.NativeBehaviorGuaranteed);
+        Assert.Equal(CenterMOem1LifecycleState.Armed, snapshot.State);
+        Assert.True(snapshot.SuppressionReady);
 
         await ((IAsyncDisposable)composition).DisposeAsync();
     }
@@ -333,7 +332,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
     }
 
     [Fact]
-    public async Task Turning_remapping_off_disables_suppression_and_turning_it_on_again_re_arms()
+    public async Task Turning_remapping_off_does_not_disable_always_on_oem1()
     {
         var (composition, _, mapping) = BuildArmable();
         IHandheldRoutingComposition handheld = composition;
@@ -345,8 +344,7 @@ public sealed class MsiClawRoutingCompositionOem1ActionPathTests
         await composition.TestOnly_Oem1ActivationTask;
 
         var disabled = composition.CenterMOem1Coordinator.GetSnapshot();
-        Assert.False(disabled.SuppressionReady);
-        Assert.True(disabled.NativeBehaviorGuaranteed);
+        Assert.True(disabled.SuppressionReady);
         // The mappings themselves are untouched by the lifecycle transition.
         Assert.Equal(Oem1Action.SteamBigPicture, mapping.Oem1Mapping.NormalSingle.Action);
 

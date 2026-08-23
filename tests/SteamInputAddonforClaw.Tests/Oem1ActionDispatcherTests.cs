@@ -157,7 +157,7 @@ public sealed class Oem1ActionDispatcherTests
     }
 
     [Fact]
-    public void Routing_active_default_double_is_none()
+    public void Routing_active_double_is_fixed_quick_access()
     {
         var pulseCount = 0;
         var dispatcher = CreateDispatcher(
@@ -166,7 +166,7 @@ public sealed class Oem1ActionDispatcherTests
 
         dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Double));
 
-        Assert.Equal(0, pulseCount);
+        Assert.Equal(1, pulseCount);
     }
 
     [Fact]
@@ -200,8 +200,8 @@ public sealed class Oem1ActionDispatcherTests
 
         Assert.Equal(1, bigPictures);
         Assert.Equal(1, hotkeys);
-        Assert.Equal(1, pulses);
-        Assert.Equal(1, launches);
+        Assert.Equal(2, pulses);
+        Assert.Equal(0, launches);
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public sealed class Oem1ActionDispatcherTests
     }
 
     [Fact]
-    public void Launch_application_action_receives_the_slots_own_persisted_path_and_arguments()
+    public void Routing_active_launch_mapping_cannot_override_quick_access()
     {
         Oem1LaunchApplicationBinding? launched = null;
         var expected = new Oem1LaunchApplicationBinding(@"C:\fake\app.exe", "--windowed");
@@ -235,7 +235,7 @@ public sealed class Oem1ActionDispatcherTests
             launchApplication: application => launched = application);
 
         Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single)));
-        Assert.Equal(expected, launched);
+        Assert.Null(launched);
     }
 
     [Fact]
@@ -284,7 +284,7 @@ public sealed class Oem1ActionDispatcherTests
     // ---- Global remapping switch ----
 
     [Fact]
-    public void Remapping_off_executes_nothing_at_all()
+    public void Remapping_off_does_not_disable_the_product_policy()
     {
         var pulses = 0;
         var bigPictures = 0;
@@ -310,7 +310,10 @@ public sealed class Oem1ActionDispatcherTests
         Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single)));
         Assert.True(dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Double)));
 
-        Assert.Equal(0, pulses + bigPictures + hotkeys + launches);
+        Assert.Equal(1, bigPictures);
+        Assert.Equal(1, hotkeys);
+        Assert.Equal(2, pulses);
+        Assert.Equal(0, launches);
     }
 
     [Fact]
@@ -325,12 +328,12 @@ public sealed class Oem1ActionDispatcherTests
 
         mapping = mapping with { RemappingEnabled = false };
         dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
-        Assert.Equal(0, bigPictures);
+        Assert.Equal(1, bigPictures);
         Assert.Equal(Oem1Action.SteamBigPicture, mapping.NormalSingle.Action);
 
         mapping = mapping with { RemappingEnabled = true };
         dispatcher.Dispatch(new Oem1GesturePolicyRequest(Oem1Gesture.Single));
-        Assert.Equal(1, bigPictures);
+        Assert.Equal(2, bigPictures);
     }
 
     // ---- Capability validation ----
@@ -354,7 +357,7 @@ public sealed class Oem1ActionDispatcherTests
         // must not be revoked over a configuration problem.
         Assert.True(ok);
         Assert.Equal(0, bigPictures);
-        Assert.Equal(0, pulses);
+        Assert.Equal(1, pulses);
     }
 
     [Fact]
