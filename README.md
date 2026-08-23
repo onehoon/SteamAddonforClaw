@@ -2,9 +2,9 @@
 
 Steam Addon for Claw brings Steam Input and Steam Deck-style controller integration to the built-in controller on supported MSI Claw handhelds.
 
-When a Steam game or Steam Big Picture session needs the controller, the Addon temporarily routes the built-in MSI controller through a virtual Steam Deck controller. When routing is no longer needed, the Claw returns to its normal native Windows controller mode.
+When a Steam game or Steam Big Picture session needs the controller, the Addon can temporarily route the built-in MSI controller through a virtual Steam Deck controller. When routing is no longer needed, the Claw returns to its normal native Windows controller mode.
 
-It also provides Center M button remapping, device-level CPU Boost and TDP controls, per-game performance profiles, and controls inside Steam Quick Access Menu.
+Steam Input Routing is optional. Center M button remapping, device-level CPU Boost and TDP controls, per-game performance profiles, and Steam Quick Access Menu performance controls remain available independently from the routing switch.
 
 ## Supported devices
 
@@ -25,28 +25,36 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 
 - Windows 11 x64
 - A supported MSI Claw model listed above
-- Steam installed and running for Steam Input routing and Quick Access Menu integration
+- Steam installed and running for Steam Input routing, per-game Steam profiles, and Quick Access Menu integration
 - The normal MSI controller environment, including MSI Center M, available on the device
 
 Controller routing is not intended to share ownership of the built-in controller with another controller-routing or virtual-controller manager at the same time.
 
 ## Main features
 
-- Automatic Steam Input routing for Steam games and Steam Big Picture Mode
+- Optional automatic Steam Input routing for Steam games and Steam Big Picture Mode
 - Virtual Steam Deck controller output (`VID 28DE`, `PID 1205`)
 - Built-in controller button, stick, trigger, D-pad, and rear-button mapping
 - Physical rumble support
 - WING button integration as the Steam button during active routing
 - Center M / OEM1 integration as Steam Quick Access during active routing
 - Configurable Center M normal action outside active routing
-- Device-level CPU Boost and TDP control
-- Per-game CPU Boost and TDP profiles
+- Device-level CPU Boost and TDP control independent from Steam Input Routing
+- Per-game CPU Boost and TDP profiles independent from Steam Input Routing
+- Event-driven Steam game detection without periodic game/process polling
+- Per-game profiles for installed Steam games and Non-Steam games added to Steam
 - Steam Quick Access Menu controls
+- Automatic silent update checks at application startup
 - Background tray operation and lifecycle recovery
 
 ## Steam Input Routing
 
-Open the **Controller** tab and enable **Steam Input Routing**.
+> [!NOTE]
+> **Steam Input Routing is optional.**
+>
+> This switch controls only the built-in controller's virtual Steam Deck routing. Center M remapping, Device CPU Boost / TDP Control, and per-game performance profiles remain available when Steam Input Routing is disabled.
+
+Open the **Controller** tab and enable **Steam Input Routing** only if you want the built-in controller to be presented to Steam as a virtual Steam Deck controller.
 
 When enabled, the Addon automatically routes the built-in controller when a Steam game or Steam Big Picture Mode requires Steam Input.
 
@@ -58,7 +66,7 @@ MSI Claw built-in controller
 Native MSI / Windows controller mode
 ```
 
-Outside an active Steam route, the Claw remains in its normal controller mode.
+Outside an active Steam route, or when Steam Input Routing is disabled, the Claw remains in its normal controller mode.
 
 ### During Steam Input Routing
 
@@ -114,6 +122,8 @@ The routing-time assignments are fixed. They are not user-remappable because the
 
 The **Controller** tab also contains the Center M button settings used when Steam Input Routing is inactive.
 
+Center M remapping does not require Steam Input Routing to be enabled. When routing is disabled or inactive, Center M uses the configured **Normal Action**.
+
 Center M remapping is managed by the Addon and is shown as **Always enabled**. The editable **Normal Action** controls what a normal Center M press does outside an active Steam route.
 
 Available Normal Actions are:
@@ -136,6 +146,8 @@ When Steam Input Routing is inactive, manually opening the real MSI Center M app
 ## Device tab
 
 The **Device** tab contains global performance settings for the handheld.
+
+Device CPU Boost and TDP Control operate independently from Steam Input Routing. You can use these features without enabling controller routing.
 
 These settings are the normal device-level values used when no enabled game profile is taking priority.
 
@@ -207,6 +219,51 @@ When the game exits:
 
 Performance profiles use the actual Steam AppID and operate independently from the controller-routing switch. A game profile can therefore apply even when Steam Input Routing itself is disabled.
 
+## Game detection and Non-Steam games
+
+Steam Addon for Claw does not continuously poll running processes to detect games.
+
+Steam game detection is event-driven. The Addon listens for changes to Steam's `RunningAppID` state and reacts when Steam reports that a game has started, changed, or stopped.
+
+This means the Addon does not repeatedly scan running `.exe` files or periodically ask whether a Steam game is running.
+
+The detected Steam AppID is used for two separate purposes:
+
+- **Steam Input Routing** — when enabled, a detected Steam session can activate the virtual Steam Deck controller route.
+- **Performance Profiles** — CPU Boost and TDP profiles use the actual running Steam AppID independently from Steam Input Routing.
+
+Because these are separate features, disabling **Steam Input Routing** does not disable game detection or per-game performance profiles.
+
+```text
+Steam RunningAppID
+        │
+        ├── Steam Input Routing enabled? ──→ Virtual Steam Deck routing
+        │
+        └── Matching enabled Profile? ─────→ CPU Boost / TDP profile
+```
+
+### Non-Steam games
+
+Non-Steam games can use the same routing and per-game performance features when they are added to the Steam library as a **Non-Steam Game**.
+
+The Profile tab reads Non-Steam shortcuts registered in Steam, so those shortcuts can have their own CPU Boost and TDP profiles just like regular Steam games.
+
+When a Non-Steam game is launched through Steam and Steam reports that shortcut as the current running AppID:
+
+- its enabled CPU Boost / TDP profile can be applied;
+- Steam Input Routing can activate if **Steam Input Routing** is enabled;
+- if Steam Input Routing is disabled, the game profile can still apply normally.
+
+### Games that use a launcher
+
+Some Non-Steam games first start a separate launcher, which then starts the actual game.
+
+These games are supported only while Steam continues to recognize the Non-Steam shortcut as running after the actual game is launched.
+
+If Steam considers the shortcut finished when the launcher exits, even though the actual game continues running, Steam no longer provides that shortcut as the active `RunningAppID`. In that case, the Addon cannot keep the corresponding routing session or game profile active.
+
+This behavior intentionally follows Steam's own running-game state. The Addon does not scan for the child game process separately or use executable polling as a fallback.
+
 ## Steam Quick Access Menu support
 
 Steam Addon for Claw integrates its performance controls into Steam's GamepadUI / Quick Access Menu.
@@ -223,17 +280,32 @@ When no game is active, the QAM surface exposes Device-level controls. When a su
 
 The QAM integration uses Steam's native GamepadUI components. If a Steam client update changes those internal components in an incompatible way, the Addon disables the affected QAM integration rather than injecting an unsupported fallback UI.
 
+## Automatic updates
+
+Steam Addon for Claw checks for updates automatically when the application starts.
+
+When a new stable release is available:
+
+1. The update is downloaded automatically.
+2. Installation is scheduled silently without requiring user interaction.
+3. The current process exits and the update is applied.
+4. Steam Addon for Claw restarts automatically with the new version.
+
+There is no separate manual update step for normal releases.
+
+If the update service is temporarily unavailable, the update check times out, or the update operation fails, the Addon continues normal startup instead of preventing the application from running.
+
 ## Quick start
 
 1. Install the official release package.
 2. Launch **Steam Addon for Claw**.
-3. Keep Steam running.
-4. Open the **Controller** tab.
-5. Enable **Steam Input Routing**.
-6. Start a Steam game or enter Steam Big Picture Mode.
-7. Use **WING** for the Steam menu and **Center M** for Steam Quick Access while routing is active.
-8. Configure optional CPU Boost / TDP defaults in **Device**.
-9. Configure game-specific performance settings in **Profile** if desired.
+3. Keep Steam running for Steam-related features.
+4. Configure optional CPU Boost / TDP defaults in **Device**.
+5. Configure game-specific performance settings in **Profile** if desired.
+6. Configure the Center M **Normal Action** in **Controller** if desired.
+7. If you want Steam Deck controller routing, enable **Steam Input Routing** in **Controller**.
+8. Start a Steam game, a Non-Steam game added to Steam, or enter Steam Big Picture Mode.
+9. While routing is active, use **WING** for the Steam menu and **Center M** for Steam Quick Access.
 
 ## Background operation
 
@@ -259,6 +331,7 @@ The Addon does not intentionally replay a stale routed session after startup. Co
 
 - Physical hardware validation is currently complete on the MSI Claw 8 EX AI+ CG3EM (`MS-1T91`); A2VM models are supported but still awaiting physical-device validation.
 - Motion / gyro output is not currently supported by the Steam Deck virtual-controller mapping.
+- Launcher-based Non-Steam games depend on Steam continuing to report the shortcut as the active `RunningAppID` after the actual game starts.
 - QAM integration depends on Steam GamepadUI internals and may require an Addon update after a major Steam client UI change.
 - Running another application that independently takes ownership of the same physical controller can prevent Steam Input Routing from becoming active.
 
@@ -268,9 +341,11 @@ If Steam Input Routing does not activate:
 
 1. Confirm the device is one of the supported board IDs listed above.
 2. Confirm **Steam Input Routing** is enabled in the Controller tab.
-3. Confirm Steam is running.
+3. Confirm Steam is running and recognizes the game or Non-Steam shortcut as currently running.
 4. Close other controller-routing or virtual-controller tools that may be managing the built-in controller.
 5. If MSI Center M was opened or the controller was re-enumerated, allow the Addon to return to a stable native state and then start the Steam session again.
+
+If a Non-Steam game profile stops applying after a launcher closes, check whether Steam still shows that Non-Steam shortcut as running. The Addon intentionally follows Steam's active AppID rather than scanning the child game executable.
 
 If the Steam Quick Access Addon tab is missing after a Steam client update, the Steam GamepadUI integration may need a compatibility update. Core settings remain available from the desktop UI.
 
