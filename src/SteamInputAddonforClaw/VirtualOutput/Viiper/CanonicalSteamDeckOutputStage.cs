@@ -581,7 +581,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         ViiperVirtualDeviceResolution result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear");
         IReadOnlyList<ControllerDeviceInfo> snapshot;
         var firstCandidateLogged = false;
-        string? pendingLogicalKey = null;
+        string? pendingIdentitySignature = null;
         while (true)
         {
             snapshot = _enumerator.EnumeratePresentDevices(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId);
@@ -596,19 +596,29 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
                 return (result, snapshot);
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved)
             {
-                var logicalKey = ControllerLogicalIdentity.GetLogicalKey(result.Devices[0]);
-                if (string.Equals(pendingLogicalKey, logicalKey, StringComparison.OrdinalIgnoreCase))
+                var identitySignature = BuildResolvedIdentitySignature(result);
+                if (string.Equals(pendingIdentitySignature, identitySignature, StringComparison.OrdinalIgnoreCase))
                     return (result, snapshot);
-                pendingLogicalKey = logicalKey;
+                pendingIdentitySignature = identitySignature;
             }
             else
             {
-                pendingLogicalKey = null;
+                pendingIdentitySignature = null;
             }
             if (DateTime.UtcNow >= deadline) break;
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
         }
         return (new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear"), snapshot);
+    }
+
+    private static string BuildResolvedIdentitySignature(ViiperVirtualDeviceResolution resolved)
+    {
+        var logicalKey = ControllerLogicalIdentity.GetLogicalKey(resolved.Devices[0]);
+        var instanceIds = resolved.Devices
+            .Select(device => device.InstanceId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(instanceId => instanceId, StringComparer.OrdinalIgnoreCase);
+        return $"{logicalKey}\u001f{string.Join("\u001f", instanceIds)}";
     }
 
     private bool TryResolveCachedIdentity(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds,

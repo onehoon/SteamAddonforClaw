@@ -101,6 +101,8 @@ internal sealed class MsiClawModeController(
         }
 
         var oldPid = source.ProductId; var oldGone = false; var targetSeen = false; var firstPid1902Logged = false; var poll = 0;
+        var logPid1902Arrival = target == MsiClawNativeMode.DirectInput
+            && targetTopology.ProductId == MsiClawHardware.DirectInputProductId;
         while (_now() < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -118,7 +120,7 @@ internal sealed class MsiClawModeController(
             var targets = current.Where(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId && d.UsagePage == targetTopology.UsagePage && d.Usage == targetTopology.Usage).ToArray();
             var targetGroups = targets.GroupBy(MsiClawLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase).ToArray();
             targetSeen = targetGroups.Length > 0;
-            if (targetPidPresent && !firstPid1902Logged)
+            if (logPid1902Arrival && targetPidPresent && !firstPid1902Logged)
             {
                 firstPid1902Logged = true;
                 AppLog.Debug("RoutingTrace", "PID1902 first seen.", ("Event", "Pid1902FirstSeen"), ("TargetPID", targetTopology.ProductId));

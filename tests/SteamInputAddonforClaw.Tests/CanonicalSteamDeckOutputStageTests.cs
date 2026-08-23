@@ -1010,6 +1010,11 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
         Assert.True(result.Succeeded, result.Reason);
 
+        var cache = File.ReadAllText(CanonicalSteamDeckOutputStage.TestOnlyIdentityCachePath!);
+        Assert.Contains("CONTROLLER", cache, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("KBD", cache, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MOUSE", cache, StringComparison.OrdinalIgnoreCase);
+
         var rollback = await stage.RollbackMutationAsync(CancellationToken.None);
         Assert.True(rollback.Succeeded, rollback.Reason);
         Assert.Equal(1, session.RemoveCalls);
