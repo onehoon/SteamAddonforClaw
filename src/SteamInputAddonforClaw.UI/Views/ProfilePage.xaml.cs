@@ -46,7 +46,23 @@ public sealed partial class ProfilePage : UserControl
         if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
         sender.ItemsSource = FilterCatalog(sender.Text);
     }
-    private void GameSelector_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) { if (args.ChosenSuggestion is FrontendProfileGameCatalogEntry game) _ = SelectGameAsync(game); else if (FilterCatalog(sender.Text).FirstOrDefault() is { } exact) _ = SelectGameAsync(exact); }
+    private void GameSelector_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        if (args.ChosenSuggestion is FrontendProfileGameCatalogEntry chosen)
+        {
+            _ = SelectGameAsync(chosen);
+            return;
+        }
+
+        var query = sender.Text.Trim();
+        var exact = _catalog.FirstOrDefault(game =>
+            string.Equals(game.Name, query, StringComparison.OrdinalIgnoreCase) ||
+            game.AppId.ToString(System.Globalization.CultureInfo.InvariantCulture) == query ||
+            string.Equals(FormatGame(game), query, StringComparison.OrdinalIgnoreCase));
+
+        if (exact is not null)
+            _ = SelectGameAsync(exact);
+    }
     private void GameSelector_GotFocus(object sender, RoutedEventArgs e) => OpenGameList();
     private void OpenGameSelectorButton_Click(object sender, RoutedEventArgs e) { GameSelector.Focus(FocusState.Programmatic); OpenGameList(); }
     private void OpenGameList() { GameSelector.ItemsSource = FilterCatalog(GameSelector.Text); GameSelector.IsSuggestionListOpen = _catalog.Count > 0; }
