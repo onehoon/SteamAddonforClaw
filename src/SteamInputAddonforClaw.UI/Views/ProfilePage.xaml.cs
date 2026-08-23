@@ -33,9 +33,9 @@ public sealed partial class ProfilePage : UserControl
         if (_frontend is null) return;
         try
         {
-            var selected = _selectedGame?.AppId; _catalog = await _frontend.ScanProfileGamesAsync(); GameSelector.ItemsSource = _catalog; ApplyCatalogFilter();
+            var selected = _selectedGame?.AppId; _catalog = await _frontend.ScanProfileGamesAsync(); ApplyCatalogFilter();
             _selectedGame = selected is { } id ? _catalog.FirstOrDefault(x => x.AppId == id) : null;
-            if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo("No installed Steam games were found."); else ClearError(); } else { GameSelector.Text = FormatGame(_selectedGame); await CaptureSelectedAsync(_selectedGame.AppId); }
+            if (_selectedGame is null) { ClearSelection(); if (_catalog.Count == 0) ShowInfo("No installed Steam games were found."); else ClearError(); } else { await CaptureSelectedAsync(_selectedGame.AppId); }
         }
         catch (Exception exception) { ShowError("Game catalog could not be refreshed.", exception); }
     }
@@ -45,9 +45,22 @@ public sealed partial class ProfilePage : UserControl
     {
         var query = GameSearchBox.Text.Trim();
         GameGrid.ItemsSource = _catalog.Where(x => query.Length == 0 || x.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || x.AppId.ToString().Contains(query, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(x => x.Favorite).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.AppId).ToArray();
+            .OrderByDescending(x => x.Favorite).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.AppId).Select(x => new GameCardItem(x)).ToArray();
     }
-    private void GameGrid_ItemClick(object sender, ItemClickEventArgs e) { if (e.ClickedItem is FrontendProfileGameCatalogEntry game) _ = SelectGameAsync(game); }
+    private void GameGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (GameGrid.ItemsPanelRoot is not ItemsWrapGrid panel) return;
+        const double minimumCardWidth = 220;
+        var columns = e.NewSize.Width >= minimumCardWidth * 3 ? 3 : e.NewSize.Width >= minimumCardWidth * 2 ? 2 : 1;
+        panel.MaximumRowsOrColumns = columns; panel.ItemWidth = Math.Max(minimumCardWidth, e.NewSize.Width / columns); panel.ItemHeight = 80;
+    }
+    private async void GameGrid_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not GameCardItem card) return;
+        CancelTdpDebounce(); SelectedGameNameText.Text = card.Name; CatalogPanel.Visibility = Visibility.Collapsed; DetailPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Collapsed;
+        await SelectGameAsync(card.Game);
+    }
+    private void BackButton_Click(object sender, RoutedEventArgs e) { CancelTdpDebounce(); DetailPanel.Visibility = Visibility.Collapsed; CatalogPanel.Visibility = Visibility.Visible; RefreshGamesButton.Visibility = Visibility.Visible; }
     private async void FavoriteButton_Click(object sender, RoutedEventArgs e)
     {
         if (_frontend is null || (sender as Button)?.Tag is not FrontendProfileGameCatalogEntry game) return;
@@ -60,40 +73,10 @@ public sealed partial class ProfilePage : UserControl
         catch (Exception exception) { ShowError("Favorite could not be saved.", exception); }
     }
 
-    private void GameSelector_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
-    {
-        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
-        sender.ItemsSource = FilterCatalog(sender.Text);
-    }
-    private void GameSelector_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
-    {
-        if (args.ChosenSuggestion is FrontendProfileGameCatalogEntry chosen)
-        {
-            _ = SelectGameAsync(chosen);
-            DispatcherQueue.TryEnqueue(() => GameSelector.Text = FormatGame(chosen));
-            return;
-        }
-
-        var query = sender.Text.Trim();
-        var exact = _catalog.FirstOrDefault(game =>
-            string.Equals(game.Name, query, StringComparison.OrdinalIgnoreCase) ||
-            game.AppId.ToString(System.Globalization.CultureInfo.InvariantCulture) == query ||
-            string.Equals(FormatGame(game), query, StringComparison.OrdinalIgnoreCase));
-
-        if (exact is not null)
-        {
-            _ = SelectGameAsync(exact);
-            DispatcherQueue.TryEnqueue(() => GameSelector.Text = FormatGame(exact));
-        }
-    }
-    private void GameSelector_GotFocus(object sender, RoutedEventArgs e) => OpenGameList();
-    private void OpenGameList() { GameSelector.ItemsSource = FilterCatalog(GameSelector.Text); GameSelector.IsSuggestionListOpen = _catalog.Count > 0; }
-    private IReadOnlyList<FrontendProfileGameCatalogEntry> FilterCatalog(string? query) { if (string.IsNullOrWhiteSpace(query) || (_selectedGame is not null && string.Equals(query, FormatGame(_selectedGame), StringComparison.Ordinal))) return _catalog; return _catalog.Where(x => x.Name.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase) || x.AppId.ToString().Contains(query.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray(); }
-    private static string FormatGame(FrontendProfileGameCatalogEntry game) => $"{game.Name} ({game.AppId})";
-    private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = game; GameSelector.Text = FormatGame(game); BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
+    private async Task SelectGameAsync(FrontendProfileGameCatalogEntry game) { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = game; BeginProfileLoad(game); await CaptureSelectedAsync(game.AppId, preserveDirtyTdpDraft: false); }
     private void BeginProfileLoad(FrontendProfileGameCatalogEntry game) { _snapshot = null; _suppressEvents = _suppressTdpEvents = true; try { ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; CpuBoostAcComboBox.SelectedItem = null; CpuBoostDcComboBox.SelectedItem = null; _acPl1 = _acPl2 = _dcPl1 = _dcPl2 = null; SetTdpText(); } finally { _suppressEvents = _suppressTdpEvents = false; } SetEditorsEnabled(false); }
     private async Task CaptureSelectedAsync(uint appId, bool preserveDirtyTdpDraft = true) { if (_frontend is null) return; try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (!IsCurrentProfileResponse(_selectedGame?.AppId, appId)) return; Render(snapshot, preserveDirtyTdpDraft && _tdpDraftDirty); } catch (Exception exception) { if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) ShowError("Profile settings could not be loaded.", exception); } }
-    private void ClearSelection() { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; GameSelector.Text = string.Empty; ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; SetEditorsEnabled(false); }
+    private void ClearSelection() { CancelTdpDebounce(); _tdpDraftDirty = false; _selectedGame = null; _snapshot = null; ProfileEnabledToggle.IsOn = false; ProfileEnabledToggle.IsEnabled = false; SetEditorsEnabled(false); }
 
     private void Render(FrontendGameProfileSnapshot snapshot, bool preserveDirtyTdpDraft = false)
     {
@@ -158,4 +141,11 @@ public sealed partial class ProfilePage : UserControl
         try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (_selectedGame?.AppId == appId) { Render(snapshot); ShowError(message, null); } } catch { }
     }
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
+    private sealed record GameCardItem(FrontendProfileGameCatalogEntry Game)
+    {
+        public uint AppId => Game.AppId;
+        public string Name => Game.Name;
+        public bool Favorite => Game.Favorite;
+        public string FavoriteGlyph => Game.Favorite ? "★" : "☆";
+    }
 }
