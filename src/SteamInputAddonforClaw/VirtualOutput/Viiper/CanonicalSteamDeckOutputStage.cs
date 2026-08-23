@@ -581,6 +581,7 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         ViiperVirtualDeviceResolution result = new(ViiperVirtualDeviceResolutionStatus.NoNewCandidate, [], "VirtualDeviceDidNotAppear");
         IReadOnlyList<ControllerDeviceInfo> snapshot;
         var firstCandidateLogged = false;
+        string? pendingLogicalKey = null;
         while (true)
         {
             snapshot = _enumerator.EnumeratePresentDevices(SteamDeckVirtualDeviceIdentityPolicy.VendorId, SteamDeckVirtualDeviceIdentityPolicy.ProductId);
@@ -594,7 +595,16 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Ambiguous)
                 return (result, snapshot);
             if (result.Status == ViiperVirtualDeviceResolutionStatus.Resolved)
-                return (result, snapshot);
+            {
+                var logicalKey = ControllerLogicalIdentity.GetLogicalKey(result.Devices[0]);
+                if (string.Equals(pendingLogicalKey, logicalKey, StringComparison.OrdinalIgnoreCase))
+                    return (result, snapshot);
+                pendingLogicalKey = logicalKey;
+            }
+            else
+            {
+                pendingLogicalKey = null;
+            }
             if (DateTime.UtcNow >= deadline) break;
             await Task.Delay(_pollInterval, token).ConfigureAwait(false);
         }

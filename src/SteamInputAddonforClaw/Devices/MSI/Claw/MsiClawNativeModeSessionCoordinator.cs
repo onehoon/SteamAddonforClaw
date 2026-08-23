@@ -272,13 +272,18 @@ internal sealed class MsiClawNativeModeSessionCoordinator : IMsiClawNativeModeSt
 
     private async Task<MsiClawNativeModeEnterResult> StartCoreLockedAsync(CancellationToken cancellationToken)
     {
-        var preflight = InspectCoreLocked();
-        if (!preflight.Succeeded) return MsiClawNativeModeEnterResult.Failure(_recoveryBoundaryOwned, preflight.Reason);
+        if (_active) return MsiClawNativeModeEnterResult.Failure(false, "AlreadyActive");
+        if (_recoveryBoundaryOwned) return MsiClawNativeModeEnterResult.Failure(true, "RecoveryBoundaryAlreadyOwned");
+        if (_routingFaultLatched) return MsiClawNativeModeEnterResult.Failure(false, "RoutingFaultLatched");
+        if (_recoverySafety.Current != RecoverySafety.Safe)
+            return MsiClawNativeModeEnterResult.Failure(false, "RecoverySafetyNotSafe");
         if (!_powerGate.TryAcquire(out var token)) return MsiClawNativeModeEnterResult.Failure(false, "PowerGateClosed");
         var captured = _nativeState.CaptureSnapshot();
         if (!captured.AllowsMutation || captured.Snapshot is null) return MsiClawNativeModeEnterResult.Failure(false, "SnapshotUnavailable");
         var original = captured.Snapshot.Payload.Deserialize<MsiClawNativeStatePayload>();
         if (original is null) return MsiClawNativeModeEnterResult.Failure(false, "PayloadInvalid");
+        if (original.IdentityConfidence != MsiClawIdentityConfidence.Strong)
+            return MsiClawNativeModeEnterResult.Failure(false, "PhysicalIdentityNotStrong");
         if (original.Mode != MsiClawNativeMode.XInput) return MsiClawNativeModeEnterResult.Failure(false, "OriginalModeUnsupported");
         if (!_powerGate.IsCurrent(token)) return MsiClawNativeModeEnterResult.Failure(false, "PowerGateClosed");
         if (_recoverySafety.Current != RecoverySafety.Safe) return MsiClawNativeModeEnterResult.Failure(false, "RecoverySafetyNotSafe");

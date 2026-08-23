@@ -72,14 +72,21 @@ internal sealed class MsiClawModeController(
         var deadline = started + _timeout;
         MsiClawControlHidDevice? control = source.Control;
         var commandWrittenAt = Stopwatch.GetTimestamp();
+        var commandStartLogged = false;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AppLog.Debug("RoutingTrace", "Native mode command starting.",
-                ("Event", "NativeModeCommandStarted"), ("TargetMode", target));
+            if (!commandStartLogged)
+            {
+                commandStartLogged = true;
+                AppLog.Debug("RoutingTrace", "Native mode command starting.",
+                    ("Event", "NativeModeCommandStarted"), ("TargetMode", target));
+            }
             if (await writer.WriteAsync(control!, target, cancellationToken).ConfigureAwait(false))
             {
                 commandWrittenAt = Stopwatch.GetTimestamp();
+                AppLog.Debug("RoutingTrace", "Native mode command written.",
+                    ("Event", "NativeModeCommandWritten"), ("TargetMode", target));
                 AppLog.Debug("NativeMode", "NativeModeCommandWriteSucceeded", ("TargetMode", target));
                 break;
             }
@@ -111,7 +118,7 @@ internal sealed class MsiClawModeController(
             var targets = current.Where(d => d.Present && d.VendorId == MsiClawHardware.VendorId && d.ProductId == targetTopology.ProductId && d.UsagePage == targetTopology.UsagePage && d.Usage == targetTopology.Usage).ToArray();
             var targetGroups = targets.GroupBy(MsiClawLogicalIdentity.GetLogicalKey, StringComparer.OrdinalIgnoreCase).ToArray();
             targetSeen = targetGroups.Length > 0;
-            if (targetSeen && !firstPid1902Logged)
+            if (targetPidPresent && !firstPid1902Logged)
             {
                 firstPid1902Logged = true;
                 AppLog.Debug("RoutingTrace", "PID1902 first seen.", ("Event", "Pid1902FirstSeen"), ("TargetPID", targetTopology.ProductId));
