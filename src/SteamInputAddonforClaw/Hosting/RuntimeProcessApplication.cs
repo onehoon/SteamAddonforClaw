@@ -24,6 +24,7 @@ internal sealed class RuntimeProcessApplication
         _messageLoop = new NativeMessageLoop();
         _processHost = new AddonProcessHost(_shouldLaunchFrontend ? null : ["--background"]);
         _singleInstanceGate.RegisterActivation(() => _processHost?.RequestFrontendOpen(FrontendOpenReason.RuntimeActivation));
+        _singleInstanceGate.RegisterUninstallRequest(RequestExitForUninstall);
         if (_shouldLaunchFrontend)
             _processHost.RequestFrontendOpen(FrontendOpenReason.InitialManualLaunch);
 
@@ -69,6 +70,12 @@ internal sealed class RuntimeProcessApplication
         }
 
         AppLog.Info("Lifecycle", "Exit request accepted.");
+        BeginShutdownAndRequestLoopExit();
+    }
+
+    private void RequestExitForUninstall()
+    {
+        AppLog.Info("Lifecycle", "Uninstall shutdown request accepted.");
         BeginShutdownAndRequestLoopExit();
     }
 

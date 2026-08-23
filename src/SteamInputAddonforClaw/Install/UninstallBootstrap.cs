@@ -8,6 +8,8 @@ using SteamInputAddonforClaw.Devices.MSI.Claw;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.HidHide;
+using SteamInputAddonforClaw.Lifecycle;
+using SteamInputAddonforClaw.VirtualOutput.Viiper;
 
 namespace SteamInputAddonforClaw.Install;
 
@@ -18,12 +20,13 @@ internal static class UninstallBootstrap
     internal static void Run()
     {
         AppLog.Info("Uninstall", "Velopack uninstall cleanup started.", ("FastCallback", true));
+        RequestRunningRuntimeShutdown();
         try
         {
             var processPath = Environment.ProcessPath;
             if (!string.IsNullOrWhiteSpace(processPath))
             {
-                var result = new ElevatedProcessRunner().RunAsync(processPath, ElevatedArgument, CancellationToken.None).GetAwaiter().GetResult();
+                var result = RequestElevatedCleanupAsync(() => new ElevatedProcessRunner().RunAsync(processPath, ElevatedArgument, CancellationToken.None)).GetAwaiter().GetResult();
                 AppLog.Info("Uninstall", "Elevated cleanup completed.", ("Result", result.Kind), ("ExitCode", result.ExitCode));
             }
         }
@@ -37,6 +40,33 @@ internal static class UninstallBootstrap
         TryDeleteDirectory(VelopackAppPaths.CefMarkerOwnershipDirectory);
         AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
         AppLog.Info("Uninstall", "User-level Addon cleanup completed.");
+    }
+
+    internal static async Task<ElevatedProcessResult> RequestElevatedCleanupAsync(Func<Task<ElevatedProcessResult>> request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await request().ConfigureAwait(false);
+    }
+
+    private static void RequestRunningRuntimeShutdown()
+    {
+        try
+        {
+            if (!SingleInstanceGate.RequestPrimaryUninstall()) return;
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                try
+                {
+                    using var probe = SingleInstanceGate.CreateForCurrentUser();
+                    if (probe.IsPrimaryInstance) return;
+                }
+                catch { return; }
+                Thread.Sleep(100);
+            }
+            AppLog.Warn("Uninstall", "Running Addon did not release its single-instance ownership before the bounded shutdown wait expired.", null, ("Action", "PreserveDependencySafety"));
+        }
+        catch (Exception exception) { AppLog.Warn("Uninstall", "Running Addon shutdown request failed.", exception); }
     }
 
     internal static int RunElevated()
@@ -110,7 +140,25 @@ internal static class UninstallSafetyCoordinator
     {
         var journalStore = new RecoveryJournalStore(AddonDataPaths.RecoveryJournalPath);
         var loaded = new RecoveryManager(journalStore).LoadJournal();
-        if (loaded.Status == RecoveryStatus.NoRecoveryNeeded) return true;
+        if (loaded.Status == RecoveryStatus.NoRecoveryNeeded)
+        {
+            try
+            {
+                var liveVirtual = new WindowsControllerDeviceEnumerator().EnumeratePresentDevices()
+                    .Any(device => device.Present && device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId && device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId);
+                if (liveVirtual)
+                {
+                    AppLog.Warn("Uninstall", "An exact Steam Deck virtual output is present without recovery ownership evidence; dependency removal is blocked.", null, ("Action", "PreserveDependencySafety"));
+                    return false;
+                }
+            }
+            catch (Exception exception)
+            {
+                AppLog.Warn("Uninstall", "Virtual-output safety probe failed without recovery evidence; dependency removal is blocked.", exception);
+                return false;
+            }
+            return true;
+        }
         if (loaded.Status != RecoveryStatus.Success || loaded.Journal is not { } journal) return false;
 
         var devices = new WindowsControllerDeviceEnumerator();
