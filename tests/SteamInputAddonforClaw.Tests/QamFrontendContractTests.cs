@@ -349,7 +349,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("disabled: !modeWritable", source);
         Assert.DoesNotContain("value: value == null ? 0 : value", source);
         Assert.Contains("const failClosed", source);
-        Assert.Contains("setStatus(null); setCpu(null); setTdp(null); setProfile(null); setTdpDraft(null)", source);
+        Assert.Contains("setStatus(null); setCpu(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null", source);
         Assert.Contains("cpu.lastFailure", source);
         Assert.Contains("CPU Boost settings could not be loaded, so changes are disabled.", source);
         Assert.Contains("QAM required native controls/layout unavailable", source);
@@ -413,7 +413,7 @@ public sealed class QamFrontendContractTests
         Assert.Contains("\"setActiveGameCpuBoostAc\"", source);
         Assert.Contains("\"setActiveGameCpuBoostDc\"", source);
         Assert.Contains("\"setActiveGameTdp\"", source);
-        Assert.Contains("disabled: !writable || !enabled", source);
+        Assert.Contains("disabled: !profile.persistenceWritable || !enabled", source);
         Assert.Contains("profile.cpuBoost?.ac", source);
         Assert.Contains("profile.tdp?.dc?.pl2Watts", source);
         Assert.DoesNotContain("setInterval", source);

@@ -98,10 +98,14 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         (await _scanProfileGames(cancellationToken).ConfigureAwait(false)).Select(x => new FrontendProfileGameCatalogEntry(x.AppId, x.Name, x.Source == ProfileGameSource.Steam ? FrontendProfileGameSource.Steam : FrontendProfileGameSource.NonSteam)).ToArray();
 
     public Task<FrontendGameProfileSnapshot> CaptureGameProfileAsync(uint appId, CancellationToken cancellationToken = default) => Task.FromResult(CaptureGameProfile(appId));
-    public Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default)
+    public async Task<FrontendGameProfileSnapshot> CaptureActiveGameProfileAsync(CancellationToken cancellationToken = default)
     {
         var appId = _actualRunningAppIdSource();
-        return Task.FromResult(appId == 0 ? UnavailableGameProfile(0) : CaptureGameProfile(appId));
+        if (appId == 0) return UnavailableGameProfile(0);
+        var snapshot = CaptureGameProfile(appId);
+        if (!string.IsNullOrWhiteSpace(snapshot.DisplayName)) return snapshot;
+        var game = (await _scanProfileGames(cancellationToken).ConfigureAwait(false)).FirstOrDefault(x => x.AppId == appId);
+        return game is null ? snapshot : snapshot with { DisplayName = game.Name };
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileEnabledAsync(uint appId, bool enabled, string? displayName, CancellationToken cancellationToken = default)
