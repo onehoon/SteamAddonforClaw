@@ -436,6 +436,26 @@ public sealed class QamFrontendContractTests
     }
 
     [Fact]
+    public void Qam_active_profile_renders_power_mode_in_its_own_section()
+    {
+        var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
+
+        var profileStart = source.IndexOf("const profileCpuControls", StringComparison.Ordinal);
+        var tdpSection = source.IndexOf("key: \"profile-tdp-section\"", profileStart, StringComparison.Ordinal);
+        Assert.True(profileStart >= 0 && tdpSection > profileStart);
+        var profileLayout = source[profileStart..tdpSection];
+
+        Assert.Contains("const profilePowerControls", profileLayout);
+        Assert.Contains("key: \"profile-power-section\", title: \"Windows Power Mode\"", profileLayout);
+        Assert.Contains("key: \"profile-cpu-section\", title: \"CPU Boost\"", profileLayout);
+        var cpuSection = profileLayout.IndexOf("key: \"profile-cpu-section\"", StringComparison.Ordinal);
+        var powerSection = profileLayout.IndexOf("key: \"profile-power-section\"", StringComparison.Ordinal);
+        var cpuLayout = profileLayout[cpuSection..powerSection];
+        Assert.Contains("profileCpuControls.filter", cpuLayout);
+        Assert.DoesNotContain("profilePowerControls.filter", cpuLayout);
+    }
+
+    [Fact]
     public void Qam_cpu_boost_panel_reuses_its_descriptor_and_retires_settled_mode_work()
     {
         var source = ReadSource("src", "SteamInputAddonforClaw.QamHost", "Frontend", "qam.js");
