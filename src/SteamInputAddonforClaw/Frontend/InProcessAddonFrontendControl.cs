@@ -171,6 +171,56 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
             CaptureGameProfile(appId)));
     }
 
+    public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var outcome = _gameProfileMutations?.SetCpuBoostEnabled(appId, enabled) ?? GameProfileMutations.MutationOutcome.Unavailable;
+        if (outcome != GameProfileMutations.MutationOutcome.Succeeded)
+            return Task.FromResult(MutateGame(appId, outcome, cpu: false, tdp: false));
+
+        if (appId == _actualRunningAppIdSource() && _cpuBoostRuntime is { } runtime)
+        {
+            var applied = runtime.ReconcileWithResult(appId);
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+            if (!applied.Succeeded)
+                return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.ApplyFailed, applied.FailureMessage ?? "CPU Boost apply failed.", CaptureGameProfile(appId)));
+        }
+        else
+        {
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+
+        return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Succeeded, null, CaptureGameProfile(appId)));
+    }
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfileTdpEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        return Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetTdpEnabled(appId, enabled) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: true));
+    }
+
+    public Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeEnabledAsync(uint appId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        var outcome = _gameProfileMutations?.SetPowerModeEnabled(appId, enabled) ?? GameProfileMutations.MutationOutcome.Unavailable;
+        if (outcome != GameProfileMutations.MutationOutcome.Succeeded)
+            return Task.FromResult(MutateGame(appId, outcome, cpu: false, tdp: false));
+
+        if (appId == _actualRunningAppIdSource() && _powerModeRuntime is { } runtime)
+        {
+            var applied = runtime.ReconcileWithResult(appId);
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+            if (!applied.Succeeded)
+                return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.ApplyFailed, applied.FailureMessage ?? "Power Mode apply failed.", CaptureGameProfile(appId)));
+        }
+        else
+        {
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+
+        return Task.FromResult(new FrontendGameProfileMutationResult(FrontendGameProfileMutationOutcome.Succeeded, null, CaptureGameProfile(appId)));
+    }
+
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
         MutateCpuBoostAfterShutdownCheck(appId, static (mutations, id, value) => mutations.SetCpuBoostAc(id, value), mode);
 
@@ -238,10 +288,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         var profile = captured.Profile;
         var limits = _tdpRuntime?.CaptureSnapshot().Policy is { } policy ? new FrontendTdpLimits(policy.Pl1MinimumWatts, policy.Pl1MaximumWatts, policy.Pl2MinimumWatts, policy.Pl2MaximumWatts) : null;
         return new(appId, profile.DisplayName, captured.Exists, captured.Exists && profile.Enabled,
-            new(profile.Performance.CpuBoost!.Ac, profile.Performance.CpuBoost.Dc),
-            new(new(profile.Performance.Tdp!.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts), new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)), captured.PersistenceWritable, limits,
+            new(profile.Performance.CpuBoost!.Enabled, profile.Performance.CpuBoost.Ac, profile.Performance.CpuBoost.Dc),
+            new(profile.Performance.Tdp!.Enabled, new(profile.Performance.Tdp.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts), new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)), captured.PersistenceWritable, limits,
             profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
-            profile.Performance.PowerMode is { } power ? new(power.Ac, power.Dc) : null,
+            profile.Performance.PowerMode is { } power ? new(power.Enabled, power.Ac, power.Dc) : null,
             new(profile.Performance.FpsLimit?.Enabled == true, profile.Performance.FpsLimit?.AcFps ?? 60, profile.Performance.FpsLimit?.DcFps ?? 60, _intelFpsRuntime?.Available == true, _intelFpsRuntime?.UnavailableReason));
     }
 
@@ -264,7 +314,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         if (power) try { _powerModeRuntime?.Reconcile(appId); } catch (Exception ex) { AppLog.Error("Profiles.PowerMode", "Game Profile Power Mode reconcile failed.", ex); }
     }
 
-    private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(new(20, 22), new(20, 22)), false, null, FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
+    private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(false, CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(false, new(20, 22), new(20, 22)), false, null, FpsLimit: new(false, 60, 60, false, "Intel FPS Limit is unavailable."));
     private FrontendGameProfileMutationResult UnavailableMutation(uint appId, string message) => new(FrontendGameProfileMutationOutcome.Unavailable, message, CaptureGameProfile(appId));
 
     public Task<FrontendBootstrapSnapshot> GetBootstrapAsync(CancellationToken cancellationToken = default) => Task.FromResult(new FrontendBootstrapSnapshot(MapSettings(), _registrationMessage, new(_developer.IsEnabled), AppLog.DirectoryPath, _oem1MappingAvailable, _oem1MappingAvailable));

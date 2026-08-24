@@ -101,6 +101,20 @@ public sealed class UiArchitectureTests
     }
 
     [Fact]
+    public void Profile_power_mode_enable_mutation_preserves_apply_failure_contract()
+    {
+        var root = FindRepositoryRoot();
+        var control = File.ReadAllText(Path.Combine(root, "src/SteamInputAddonforClaw/Frontend/InProcessAddonFrontendControl.cs"));
+        var start = control.IndexOf("SetGameProfilePowerModeEnabledAsync", StringComparison.Ordinal);
+        var end = control.IndexOf("SetGameProfileCpuBoostAcAsync", start, StringComparison.Ordinal);
+        var method = control[start..end];
+
+        Assert.Contains("ReconcileWithResult", method, StringComparison.Ordinal);
+        Assert.Contains("FrontendGameProfileMutationOutcome.ApplyFailed", method, StringComparison.Ordinal);
+        Assert.Contains("Power Mode apply failed.", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Developer_cards_have_unique_gyro_icon_and_requested_order()
     {
         var root = FindRepositoryRoot();

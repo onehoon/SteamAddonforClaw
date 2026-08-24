@@ -303,7 +303,7 @@ internal sealed class TdpRuntime : IAsyncDisposable
     private DeviceTdpSettings? ResolveEffectiveTdp(ProfileDocument document, uint actualAppId)
     {
         if (actualAppId > 0 && document.Games.TryGetValue(actualAppId.ToString(), out var game)
-            && game.Enabled && game.Performance.Tdp is { } gameTdp)
+            && game.Enabled && game.Performance.Tdp is { Enabled: true } gameTdp)
         {
             if (!MsiClawTdpPolicy.TryResolve(_modelId!.Value, out var policy)
                 || !policy.IsValid(gameTdp.Ac) || !policy.IsValid(gameTdp.Dc))

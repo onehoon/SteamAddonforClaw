@@ -84,7 +84,7 @@ internal sealed class PowerModeRuntime
     private PowerModeApplyResult ApplyEffective(ProfileDocument document, DevicePowerModeSettings? device, bool? mutatedAcSide)
     {
         var appId = _actualAppIdSource();
-        if (appId > 0 && document.Games.TryGetValue(appId.ToString(CultureInfo.InvariantCulture), out var game) && game.Enabled && game.Performance.PowerMode is { } gamePower) return _policy.Apply(gamePower.Ac, gamePower.Dc);
+        if (appId > 0 && document.Games.TryGetValue(appId.ToString(CultureInfo.InvariantCulture), out var game) && game.Enabled && game.Performance.PowerMode is { Enabled: true } gamePower) return _policy.Apply(gamePower.Ac, gamePower.Dc);
         if (device is not { Enabled: true }) return PowerModeApplyResult.NoOp;
         return mutatedAcSide switch { true => _policy.Apply(device.Ac, null), false => _policy.Apply(null, device.Dc), _ => _policy.Apply(device.Ac, device.Dc) };
     }
