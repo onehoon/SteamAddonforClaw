@@ -16,7 +16,20 @@ public sealed class UninstallBootstrapTests
     [Fact]
     public void Bounded_local_cleanup_preserves_artifacts_when_runtime_release_failed()
     {
-        UninstallBootstrap.RunBoundedLocalCleanup(runtimeReleased: false);
+        var root = Path.Combine(Path.GetTempPath(), $"uninstall-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var evidencePath = Path.Combine(root, "steam-cef-marker.json");
+        File.WriteAllText(evidencePath, "owned-evidence");
+
+        try
+        {
+            UninstallBootstrap.RunBoundedLocalCleanup(runtimeReleased: false);
+            Assert.True(File.Exists(evidencePath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
