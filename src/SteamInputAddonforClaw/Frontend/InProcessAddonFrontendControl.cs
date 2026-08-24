@@ -128,7 +128,31 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     {
         ThrowIfShuttingDown();
         var outcome = _gameProfileMutations?.SetEnabled(appId, enabled, displayName) ?? GameProfileMutations.MutationOutcome.Unavailable;
-        return Task.FromResult(MutateGame(appId, outcome, cpu: true, tdp: true, power: true));
+        if (outcome != GameProfileMutations.MutationOutcome.Succeeded)
+            return Task.FromResult(MutateGame(appId, outcome, cpu: true, tdp: true));
+
+        // Keep the existing CPU/TDP reconcile behavior, then surface an active-profile
+        // Power Mode apply failure without rolling back the persisted profile toggle.
+        ReconcileGame(appId, cpu: true, tdp: true);
+        if (appId == _actualRunningAppIdSource() && _powerModeRuntime is { } powerModeRuntime)
+        {
+            var applied = powerModeRuntime.ReconcileWithResult(appId);
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+            if (!applied.Succeeded)
+                return Task.FromResult(new FrontendGameProfileMutationResult(
+                    FrontendGameProfileMutationOutcome.ApplyFailed,
+                    applied.FailureMessage,
+                    CaptureGameProfile(appId)));
+        }
+        else
+        {
+            StateInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+
+        return Task.FromResult(new FrontendGameProfileMutationResult(
+            FrontendGameProfileMutationOutcome.Succeeded,
+            null,
+            CaptureGameProfile(appId)));
     }
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostAcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
