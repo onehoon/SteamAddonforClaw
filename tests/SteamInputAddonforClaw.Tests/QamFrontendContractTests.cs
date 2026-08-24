@@ -473,8 +473,13 @@ public sealed class QamFrontendContractTests
         Assert.Contains("cancelQamSliderCommits();", source);
         Assert.Contains("scheduleQamSliderCommit(`profile-fps-${side}`", source);
         Assert.Contains("\"device-power-ac\"", source);
+        var powerSchedule = source[source.IndexOf("const schedulePowerMode", StringComparison.Ordinal)..source.IndexOf("const powerSlider", StringComparison.Ordinal)];
+        Assert.Contains("setPowerPreview(current => ({ ...current, [key]: value }))", powerSchedule);
+        Assert.True(powerSchedule.IndexOf("setPowerPreview", StringComparison.Ordinal)
+            < powerSchedule.IndexOf("scheduleQamSliderCommit", StringComparison.Ordinal));
         var powerSlider = source[source.IndexOf("const powerSlider", StringComparison.Ordinal)..source.IndexOf("const powerControls", StringComparison.Ordinal)];
         Assert.Contains("schedulePowerMode", powerSlider);
+        Assert.Contains("powerPreview[key] ?? pendingValue ?? value", powerSlider);
         Assert.DoesNotContain("runPowerMutation", powerSlider);
         Assert.Contains("setDevicePowerModeEnabled", source);
         Assert.Contains("setActiveGameFpsLimitEnabled", source);

@@ -522,6 +522,7 @@
       const [tdpDraft, setTdpDraft] = React.useState(null);
       const [previewAc, setPreviewAc] = React.useState(null);
       const [previewDc, setPreviewDc] = React.useState(null);
+      const [powerPreview, setPowerPreview] = React.useState({});
       const [busy, setBusy] = React.useState(false);
       const [error, setError] = React.useState(null);
       const refreshInFlight = React.useRef(false);
@@ -539,7 +540,7 @@
       const failClosed = React.useCallback(message => {
         cancelQamSliderCommits();
         activeProfileAppIdRef.current = 0;
-          setStatus(null); setCpu(null); setPowerMode(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
+          setStatus(null); setCpu(null); setPowerMode(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setPowerPreview({}); setError(message);
           setFpsDraft({ ac: 60, dc: 60 });
       }, []);
 
@@ -552,6 +553,7 @@
           const nextAppId = Number(nextProfile?.appId || 0);
           if (activeProfileAppIdRef.current !== nextAppId) {
             cancelQamSliderCommits(key => key.startsWith("profile-"));
+            setPowerPreview(current => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith("profile-"))));
             profileTdpDraftRef.current = null;
             setProfileTdpDraft(null);
           }
@@ -596,7 +598,10 @@
       }, [refresh]);
       const runPowerMutation = React.useCallback(async (method, payload) => {
         if (!state.installed) return;
-        if (method.endsWith("PowerModeEnabled") && payload?.enabled === false) cancelQamSliderCommits(key => key.includes("power-"));
+        if (method.endsWith("PowerModeEnabled") && payload?.enabled === false) {
+          cancelQamSliderCommits(key => key.includes("power-"));
+          setPowerPreview(current => Object.fromEntries(Object.entries(current).filter(([key]) => !key.includes("power-"))));
+        }
         try {
           beginMutation();
           setError(null);
@@ -753,7 +758,9 @@
       const powerInitialized = powerMode?.ac?.desired != null && powerMode?.dc?.desired != null;
       const powerWritable = !!powerMode?.persistenceWritable && powerInitialized && !status?.steam?.appId && !busy;
       const schedulePowerMode = (key, method, value, appId = 0) => {
+        setPowerPreview(current => ({ ...current, [key]: value }));
         scheduleQamSliderCommit(key, { value, appId }, method, { mode: powerModeValue(value) }, async (result, failure) => {
+          setPowerPreview(current => { const next = { ...current }; delete next[key]; return next; });
           if (failure) { failClosed("Power Mode update failed"); return; }
           await refresh();
           if (!result?.succeeded) setError(result?.failureMessage || "Power Mode update failed");
@@ -762,7 +769,7 @@
       const powerSlider = (label, value, key, method, disabled) => {
         if (value == null) return null;
         const pendingValue = state.qamSliderCommits?.get(key)?.value;
-        const currentValue = pendingValue ?? value;
+        const currentValue = powerPreview[key] ?? pendingValue ?? value;
         return React.createElement(native.SliderField, { label: React.createElement(React.Fragment, null, React.createElement("div", { className: native.FieldLabelRowClass }, React.createElement("span", { className: native.FieldLabelClass }, label), React.createElement("span", { className: native.FieldLabelValueClass }, powerModeLabels[powerModeIndex(currentValue)] ?? "Unknown"))), min: 0, max: 2, step: 1, value: powerModeIndex(currentValue), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => schedulePowerMode(key, method, Number(next), activeProfile ? Number(profile?.appId || 0) : 0) });
       };
       const powerControls = [{ key: "power-toggle", node: React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!powerMode?.enabled, disabled: !powerWritable, onChange: value => void runPowerMutation("setDevicePowerModeEnabled", { enabled: !!value }) }) }];
@@ -801,6 +808,7 @@
         const toggleProfile = async value => {
           if (!state.installed || !writable) return;
           cancelQamSliderCommits(key => key.startsWith("profile-"));
+          setPowerPreview(current => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith("profile-"))));
           setPreviewAc(null); setPreviewDc(null);
           setBusy(true); setError(null);
           try {
