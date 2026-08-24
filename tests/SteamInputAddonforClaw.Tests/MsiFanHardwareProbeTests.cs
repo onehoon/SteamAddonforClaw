@@ -16,6 +16,20 @@ public sealed class MsiFanHardwareProbeTests
     }
 
     [Fact]
+    public void SetData_diagnostic_request_uses_value_field_without_fan_payload()
+    {
+        var request = TdpHelperClient.EncodeDiagnosticRequest("SetData", 212, [0x80]);
+        var package = TdpHelperProtocol.BuildPackage(212, request.Value, request.EncodedPayload is null ? null : Convert.FromBase64String(request.EncodedPayload));
+
+        Assert.Equal(0x80, request.Value);
+        Assert.Null(request.EncodedPayload);
+        Assert.Equal(32, package.Length);
+        Assert.Equal(212, package[0]);
+        Assert.Equal(0x80, package[1]);
+        Assert.All(package[2..], value => Assert.Equal(0, value));
+    }
+
+    [Fact]
     public void Thirty_one_byte_raw_fan_response_is_normalized_to_the_first_eight_bytes()
     {
         var raw = new byte[] { 58, 70, 74, 76, 78, 80, 84, 94 }.Concat(new byte[23]).ToArray();

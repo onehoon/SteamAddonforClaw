@@ -51,7 +51,21 @@ internal sealed class TdpHelperClient : IAsyncDisposable, IMsiFanDiagnosticTrans
 
     public MsiFanOperationResult InvokeFanDiagnostic(string operation, int block, byte[]? payload)
     {
-        var response = InvokeDetailed(new(operation, block, 0, payload is null ? null : Convert.ToBase64String(payload)));
+        Response response;
+        try
+        {
+            var request = EncodeDiagnosticRequest(operation, block, payload);
+            response = InvokeDetailed(new(operation, block, request.Value, request.EncodedPayload));
+        }
+        catch (ArgumentException exception)
+        {
+            return new(false, operation, operation switch
+            {
+                "GetAp" => "Get_AP", "SetData" => "Set_Data", "GetFan" => "Get_Fan", "SetFan" => "Set_Fan",
+                "GetTemperature" => "Get_Temperature", "GetThermal" => "Get_Thermal", "GetData" => "Get_Data", _ => operation
+            }, block, [], [], 0, 32, "PRE_WMI_PROTOCOL_FAIL", exception.GetType().Name,
+                exception.HResult, null, false, false, false);
+        }
         return new(response.Ok, operation, operation switch
         {
             "GetAp" => "Get_AP", "SetData" => "Set_Data", "GetFan" => "Get_Fan", "SetFan" => "Set_Fan",
@@ -59,6 +73,18 @@ internal sealed class TdpHelperClient : IAsyncDisposable, IMsiFanDiagnosticTrans
         }, block, response.Payload is null ? [] : Convert.FromBase64String(response.Payload), response.RequestPackage is null ? [] : Convert.FromBase64String(response.RequestPackage),
             response.LogicalPayloadLength, response.WmiPackageLength, response.Stage ?? "HelperProtocol", response.ExceptionType,
             response.HResult, response.ManagementStatus, response.UsedFallback, response.InvokeReturnedNormally, response.OutputObjectPresent);
+    }
+
+    internal static (byte Value, string? EncodedPayload) EncodeDiagnosticRequest(string operation, int block, byte[]? payload)
+    {
+        if (operation == "SetData")
+        {
+            if (payload is not { Length: 1 })
+                throw new ArgumentException("Set_Data requires one value byte.", nameof(payload));
+            return (payload[0], null);
+        }
+
+        return (0, payload is null ? null : Convert.ToBase64String(payload));
     }
 
     private bool Invoke(Request request, out byte[] payload)
