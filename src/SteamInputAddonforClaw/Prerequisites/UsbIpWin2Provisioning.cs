@@ -13,7 +13,7 @@ internal static class UsbIpWin2PackageMetadata
     public static bool VerifyInstaller() => File.Exists(InstallerPath) && string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(InstallerPath))), InstallerSha256, StringComparison.OrdinalIgnoreCase);
 }
 
-internal sealed record UsbIpWin2PackageState(bool Installed, string? Version, bool InspectionSucceeded, bool PackageEntryPresent, string? QuietUninstallString = null);
+internal sealed record UsbIpWin2PackageState(bool Installed, string? Version, bool InspectionSucceeded, bool PackageEntryPresent);
 internal interface IUsbIpWin2PackageProbe { UsbIpWin2PackageState Inspect(); }
 internal sealed class WindowsUsbIpWin2PackageProbe : IUsbIpWin2PackageProbe
 {
@@ -24,7 +24,7 @@ internal sealed class WindowsUsbIpWin2PackageProbe : IUsbIpWin2PackageProbe
         {
             using var key = Registry.LocalMachine.OpenSubKey(Key);
             var version = key?.GetValue("DisplayVersion") as string;
-            return new(!string.IsNullOrWhiteSpace(version), version, true, key is not null, key?.GetValue("QuietUninstallString") as string);
+            return new(!string.IsNullOrWhiteSpace(version), version, true, key is not null);
         }
         catch { return new(false, null, false, false); }
     }
