@@ -33,6 +33,14 @@ public sealed class UninstallDependencyOwnershipPolicyTests
         Assert.False(UninstallDependencyOwnershipPolicy.CanRemoveHidHide(HidReceipt(), new(true, "1.5.231.0", true)));
     }
 
+    [Fact]
+    public void HidHide_ambiguous_authoritative_probe_is_not_removal_eligible()
+    {
+        Assert.False(UninstallDependencyOwnershipPolicy.CanRemoveHidHide(
+            HidReceipt(),
+            new HidHidePackageState(false, null, false)));
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, true)]

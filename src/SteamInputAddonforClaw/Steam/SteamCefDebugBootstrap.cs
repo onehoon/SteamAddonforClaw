@@ -77,8 +77,8 @@ internal static class SteamCefDebugBootstrap
                 return true;
             }
 
-            Directory.CreateDirectory(VelopackAppPaths.CefMarkerOwnershipDirectory);
-            File.WriteAllText(VelopackAppPaths.CefMarkerOwnershipPath, JsonSerializer.Serialize(new CefMarkerOwnership(normalizedDirectory)));
+            Directory.CreateDirectory(Path.GetDirectoryName(OwnershipPath)!);
+            File.WriteAllText(OwnershipPath, JsonSerializer.Serialize(new CefMarkerOwnership(normalizedDirectory)));
 
             AppLog.Info(
                 "QAM.Bootstrap",
@@ -101,13 +101,16 @@ internal static class SteamCefDebugBootstrap
     {
         try
         {
-            if (!File.Exists(VelopackAppPaths.CefMarkerOwnershipPath)) return;
-            var ownership = JsonSerializer.Deserialize<CefMarkerOwnership>(File.ReadAllText(VelopackAppPaths.CefMarkerOwnershipPath));
+            if (!File.Exists(OwnershipPath)) return;
+            var ownership = JsonSerializer.Deserialize<CefMarkerOwnership>(File.ReadAllText(OwnershipPath));
             if (ownership is { SteamDirectory.Length: > 0 }) File.Delete(Path.Combine(ownership.SteamDirectory, MarkerFileName));
         }
         catch (Exception exception) { AppLog.Warn("Uninstall", "Owned Steam CEF marker cleanup failed.", exception); }
-        finally { try { File.Delete(VelopackAppPaths.CefMarkerOwnershipPath); } catch { } }
+        finally { try { File.Delete(OwnershipPath); } catch { } }
     }
+
+    internal static Func<string> OwnershipPathProvider { get; set; } = static () => AddonDataPaths.CefMarkerOwnershipPath;
+    private static string OwnershipPath => OwnershipPathProvider();
 
     private sealed record CefMarkerOwnership(string SteamDirectory);
 }

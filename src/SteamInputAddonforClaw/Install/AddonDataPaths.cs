@@ -12,6 +12,8 @@ internal static class AddonDataPaths
 
     internal static string LogDirectory => ResolveLogDirectory(VelopackAppPaths.RootAppDirectory);
 
+    internal static string CefMarkerOwnershipPath => Path.Combine(RootDirectory, "steam-cef-marker.json");
+
     /// <summary>Path to the Device/Profile document (see SteamInputAddonforClaw.Profiles.ProfileStore) --
     /// a separate storage domain from <see cref="SettingsPath"/>, but the same canonical
     /// persistent <c>-Data</c> root.</summary>

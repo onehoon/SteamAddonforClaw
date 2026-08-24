@@ -10,6 +10,7 @@ using SteamInputAddonforClaw.Startup;
 using SteamInputAddonforClaw.HidHide;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.VirtualOutput.Viiper;
+using SteamInputAddonforClaw.Status;
 
 namespace SteamInputAddonforClaw.Install;
 
@@ -20,7 +21,13 @@ internal static class UninstallBootstrap
     internal static void Run()
     {
         AppLog.Info("Uninstall", "Velopack uninstall cleanup started.", ("FastCallback", true));
-        RequestRunningRuntimeShutdown();
+        var runtimeReleased = RequestRunningRuntimeShutdown();
+        try { new WindowsTaskSchedulerStartupManager().Synchronize(false); } catch (Exception exception) { AppLog.Warn("Uninstall", "Startup registration cleanup failed.", exception); }
+        if (!UninstallRuntimeReleasePolicy.AllowsSensitiveCleanup(runtimeReleased))
+        {
+            AppLog.Warn("Uninstall", "Runtime ownership was not released; dependency, routing-helper, marker, and data cleanup were preserved.", null, ("Action", "StopCleanup"));
+            return;
+        }
         try
         {
             var processPath = Environment.ProcessPath;
@@ -32,12 +39,9 @@ internal static class UninstallBootstrap
         }
         catch (Exception exception) { AppLog.Warn("Uninstall", "Elevated cleanup could not be completed; continuing safe user cleanup.", exception); }
 
-        try { new WindowsTaskSchedulerStartupManager().Synchronize(false); } catch (Exception exception) { AppLog.Warn("Uninstall", "Startup registration cleanup failed.", exception); }
         TryDeleteDirectory(CenterM.CenterMHelperStaging.RuntimeDirectory);
         SteamCefDebugBootstrap.RemoveOwnedMarker();
-        TryDeleteDirectory(VelopackAppPaths.ProvisioningStateDirectory);
         TryDeleteFile(VelopackAppPaths.LegacyHidHideProvisioningReceiptPath);
-        TryDeleteDirectory(VelopackAppPaths.CefMarkerOwnershipDirectory);
         AddonDataPaths.DeleteFullResetRoot(VelopackAppPaths.RootAppDirectory);
         AppLog.Info("Uninstall", "User-level Addon cleanup completed.");
     }
@@ -48,25 +52,31 @@ internal static class UninstallBootstrap
         return await request().ConfigureAwait(false);
     }
 
-    private static void RequestRunningRuntimeShutdown()
+    private static bool RequestRunningRuntimeShutdown()
     {
         try
         {
-            if (!SingleInstanceGate.RequestPrimaryUninstall()) return;
+            using (var initialProbe = SingleInstanceGate.CreateForCurrentUser())
+            {
+                if (initialProbe.IsPrimaryInstance) return true;
+            }
+
+            if (!SingleInstanceGate.RequestPrimaryUninstall()) return false;
             var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
             while (DateTimeOffset.UtcNow < deadline)
             {
                 try
                 {
                     using var probe = SingleInstanceGate.CreateForCurrentUser();
-                    if (probe.IsPrimaryInstance) return;
+                    if (probe.IsPrimaryInstance) return true;
                 }
-                catch { return; }
+                catch { return false; }
                 Thread.Sleep(100);
             }
             AppLog.Warn("Uninstall", "Running Addon did not release its single-instance ownership before the bounded shutdown wait expired.", null, ("Action", "PreserveDependencySafety"));
+            return false;
         }
-        catch (Exception exception) { AppLog.Warn("Uninstall", "Running Addon shutdown request failed.", exception); }
+        catch (Exception exception) { AppLog.Warn("Uninstall", "Running Addon shutdown request failed.", exception); return false; }
     }
 
     internal static int RunElevated()
@@ -85,28 +95,30 @@ internal static class UninstallBootstrap
             return 0;
         }
         catch (Exception exception) { AppLog.Error("Uninstall", "Elevated dependency cleanup failed.", exception); return 1; }
+        finally { TryDeleteDirectory(VelopackAppPaths.ProvisioningStateDirectory); }
     }
 
     private static void RemoveHidHideIfExact(HidHideProvisioningReceipt receipt)
     {
-        if (receipt.PreProvisioningStatus != PrerequisiteStatus.Missing) return;
+        var package = new WindowsHidHidePackageProbe().Inspect();
+        if (!UninstallDependencyOwnershipPolicy.CanRemoveHidHide(receipt, package)) return;
+
+        var matches = new List<HidHideUninstallCandidate>();
+        var registry = new WindowsHidHideUninstallRegistry();
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
-            using var root = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
-            using var uninstall = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
-            foreach (var name in uninstall?.GetSubKeyNames() ?? [])
-            {
-                using var key = uninstall!.OpenSubKey(name);
-                if (key is null || !string.Equals(key.GetValue("DisplayName") as string, "HidHide", StringComparison.Ordinal) ||
-                    !string.Equals(key.GetValue("Publisher") as string, "Nefarius Software Solutions e.U.", StringComparison.Ordinal) ||
-                    !HidHidePackageVersionPolicy.AreEquivalent(key.GetValue("DisplayVersion") as string, receipt.InstallerVersion) ||
-                    !UninstallDependencyOwnershipPolicy.CanRemoveHidHide(receipt, new(true, key.GetValue("DisplayVersion") as string, true))) continue;
-                RunUninstaller(key.GetValue("QuietUninstallString") as string, "HidHide");
-                var after = new WindowsHidHidePackageProbe().Inspect();
-                AppLog.Info("Uninstall", "HidHide package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version), ("VerifiedRemoved", UninstallPackageRemovalPolicy.IsVerifiedRemoved(null, after.Installed)));
-                return;
-            }
+            matches.AddRange(registry.Enumerate(view).Where(candidate => WindowsHidHidePackageProbe.IsExactCandidate(candidate) && HidHidePackageVersionPolicy.AreEquivalent(candidate.DisplayVersion, receipt.InstallerVersion)));
         }
+
+        if (matches.Count != 1 || string.IsNullOrWhiteSpace(matches[0].QuietUninstallString))
+        {
+            AppLog.Warn("Uninstall", "HidHide uninstall evidence is ambiguous or has no safe command; package preserved.", null, ("CandidateCount", matches.Count));
+            return;
+        }
+
+        RunUninstaller(matches[0].QuietUninstallString, "HidHide");
+        var after = new WindowsHidHidePackageProbe().Inspect();
+        AppLog.Info("Uninstall", "HidHide package removal was re-probed.", ("Installed", after.Installed), ("Version", after.Version), ("VerifiedRemoved", UninstallPackageRemovalPolicy.IsVerifiedRemoved(null, after.Installed)));
     }
 
     private static void RemoveUsbIfExact(UsbIpWin2ProvisioningReceipt receipt)
@@ -139,6 +151,11 @@ internal static class UninstallPackageRemovalPolicy
     internal static bool IsVerifiedRemoved(int? exitCode, bool packageStillPresent) => !packageStillPresent;
 }
 
+internal static class UninstallRuntimeReleasePolicy
+{
+    internal static bool AllowsSensitiveCleanup(bool runtimeReleased) => runtimeReleased;
+}
+
 internal static class UninstallSafetyCoordinator
 {
     internal static bool Prepare()
@@ -166,6 +183,13 @@ internal static class UninstallSafetyCoordinator
         }
         if (loaded.Status != RecoveryStatus.Success || loaded.Journal is not { } journal) return false;
 
+        if ((journal.OriginalDeviceState is not null || journal.Mutations.DeviceNativeStateChanged || StartupHidHideRecoveryCleaner.RequiresCleanup(journal)) &&
+            !IsStockCenterMEnvironment())
+        {
+            AppLog.Warn("Uninstall", "Controller environment is externally managed or indeterminate; stale native/HidHide recovery was preserved.", null, ("Action", "PreserveDependencySafety"));
+            return false;
+        }
+
         var devices = new WindowsControllerDeviceEnumerator();
         if (journal.OriginalDeviceState is not null || journal.Mutations.DeviceNativeStateChanged)
         {
@@ -190,6 +214,29 @@ internal static class UninstallSafetyCoordinator
         journalStore.Delete();
         return !journalStore.Exists();
     }
+
+    private static bool IsStockCenterMEnvironment()
+    {
+        try
+        {
+            var provider = new ControllerEnvironmentAssessmentProvider([
+                new MsiCenterMSoftwareStatusProvider(),
+                new ClawTweaksSoftwareStatusProvider(new ClawTweaksInstallationProbe(), new ClawTweaksRuntimeDetector()),
+                new HandheldCompanionSoftwareStatusProvider(new HandheldCompanionRuntimeDetector())
+            ]);
+            return UninstallSafetyEnvironmentPolicy.AllowsRecovery(StartupControllerEnvironmentMapper.Map(provider.Capture()).Mode);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn("Uninstall", "Controller environment assessment failed; stale recovery was preserved.", exception, ("Action", "PreserveDependencySafety"));
+            return false;
+        }
+    }
+}
+
+internal static class UninstallSafetyEnvironmentPolicy
+{
+    internal static bool AllowsRecovery(ControllerEnvironmentMode mode) => mode == ControllerEnvironmentMode.StockCenterM;
 }
 
 internal static class UninstallDependencyOwnershipPolicy

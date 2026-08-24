@@ -3,6 +3,7 @@ using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
 
+[Collection("SteamCefDebug")]
 public sealed class SteamCefDebugBootstrapTests
 {
     [Fact]
@@ -62,13 +63,22 @@ public sealed class SteamCefDebugBootstrapTests
             Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "steam-cef-bootstrap-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Path);
             File.WriteAllText(System.IO.Path.Combine(Path, "steam.exe"), string.Empty);
+            OwnershipPath = System.IO.Path.Combine(Path, "addon-ownership.json");
+            SteamCefDebugBootstrap.OwnershipPathProvider = () => OwnershipPath;
         }
 
         internal string Path { get; }
+        internal string OwnershipPath { get; }
 
         public void Dispose()
         {
+            SteamCefDebugBootstrap.OwnershipPathProvider = static () => SteamInputAddonforClaw.Install.AddonDataPaths.CefMarkerOwnershipPath;
             if (Directory.Exists(Path)) Directory.Delete(Path, recursive: true);
         }
     }
+}
+
+[CollectionDefinition("SteamCefDebug", DisableParallelization = true)]
+public sealed class SteamCefDebugCollection
+{
 }
