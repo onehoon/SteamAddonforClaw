@@ -138,6 +138,7 @@ public sealed record FrontendFanProbeSnapshot(bool Available, FrontendFanProbeSt
 /// UI and runtime capability validation must never be able to disagree.</remarks>
 public sealed record FrontendSettingsSnapshot(bool LaunchAtWindowsStartup, FrontendLogLevel LogLevel, bool SteamInputRoutingEnabled, bool SuppressDeveloperMenuWarning, Oem1MappingSettings Oem1Mapping)
 {
+    public bool DeveloperMenuEnabled { get; init; }
     public WingMappingSettings WingMapping { get; init; } = WingMappingSettings.Default;
 }
 public sealed record FrontendDeveloperSnapshot(bool TestModeEnabled);

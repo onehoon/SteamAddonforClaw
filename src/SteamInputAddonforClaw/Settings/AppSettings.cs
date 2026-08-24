@@ -11,6 +11,8 @@ public sealed record AppSettings(
     bool SteamInputRoutingEnabled = true,
     bool SuppressDeveloperMenuWarning = false)
 {
+    public bool DeveloperMenuEnabled { get; init; }
+
     /// <summary>
     /// The OEM1 (Center M button) remapping switch and the four slot bindings, persisted through
     /// this same settings file rather than a second store. Declared as an init-only property, not a

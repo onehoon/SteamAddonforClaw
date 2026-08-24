@@ -94,6 +94,47 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_WhenDeveloperMenuEnabledIsMissing_DefaultsToFalse()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"LaunchAtWindowsStartup\":false}");
+
+        Assert.False(new SettingsStore(path).Load().DeveloperMenuEnabled);
+    }
+
+    [Fact]
+    public void Load_ReadsExplicitDeveloperMenuEnabled()
+    {
+        var path = Path.Combine(_testDirectory, "settings.json");
+        Directory.CreateDirectory(_testDirectory);
+        File.WriteAllText(path, "{\"DeveloperMenuEnabled\":true}");
+
+        Assert.True(new SettingsStore(path).Load().DeveloperMenuEnabled);
+    }
+
+    [Fact]
+    public void SaveAndLoad_PreservesDeveloperMenuEnabled()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+
+        store.Save(new AppSettings { DeveloperMenuEnabled = true });
+
+        Assert.True(store.Load().DeveloperMenuEnabled);
+    }
+
+    [Fact]
+    public void ExistingSettingsSaveOperations_PreserveDeveloperMenuEnabled()
+    {
+        var store = new SettingsStore(Path.Combine(_testDirectory, "settings.json"));
+        var coordinator = new StartupSettingsCoordinator(new AppSettings { DeveloperMenuEnabled = true }, store, new FakeStartupManager());
+
+        coordinator.ChangeLaunchAtWindowsStartup(false);
+
+        Assert.True(store.Load().DeveloperMenuEnabled);
+    }
+
+    [Fact]
     public void SuppressionIsNotPersistedUntilExplicitlyRequested()
     {
         var path = Path.Combine(_testDirectory, "settings.json");

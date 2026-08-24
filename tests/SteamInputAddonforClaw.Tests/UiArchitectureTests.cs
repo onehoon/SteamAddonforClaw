@@ -1,4 +1,6 @@
 using System.Xml.Linq;
+using Microsoft.UI.Xaml;
+using SteamInputAddonforClaw.Views;
 using Xunit;
 
 namespace SteamInputAddonforClaw.Tests;
@@ -109,6 +111,14 @@ public sealed class UiArchitectureTests
         Assert.True(page.IndexOf("Text=\"Environment Discovery\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Header=\"Vibration Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Header=\"Gyro / Sensor Test\"", StringComparison.Ordinal) < page.IndexOf("Header=\"Logging\"", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false, Visibility.Collapsed)]
+    [InlineData(true, Visibility.Visible)]
+    public void Settings_developer_menu_card_visibility_follows_bootstrap_flag(bool enabled, Visibility expected)
+    {
+        Assert.Equal(expected, SettingsPage.GetDeveloperMenuCardVisibility(enabled));
     }
 
     private static IReadOnlyList<string> References(string relativeProjectPath)

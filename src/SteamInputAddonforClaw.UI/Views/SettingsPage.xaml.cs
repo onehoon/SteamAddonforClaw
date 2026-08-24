@@ -20,12 +20,16 @@ public sealed partial class SettingsPage : UserControl
     internal void Initialize(IAddonFrontendControl frontend, FrontendBootstrapSnapshot bootstrap)
     {
         _frontend = frontend;
+        DeveloperMenuCard.Visibility = GetDeveloperMenuCardVisibility(bootstrap.Settings.DeveloperMenuEnabled);
         _isLoadingStartupSettings = true;
         LaunchAtWindowsStartupToggleSwitch.IsOn = bootstrap.Settings.LaunchAtWindowsStartup;
         _lastKnownLaunchAtWindowsStartup = bootstrap.Settings.LaunchAtWindowsStartup;
         _isLoadingStartupSettings = false;
         LaunchAtStartupCard.Description = bootstrap.StartupRegistrationMessage;
     }
+
+    internal static Visibility GetDeveloperMenuCardVisibility(bool developerMenuEnabled) =>
+        developerMenuEnabled ? Visibility.Visible : Visibility.Collapsed;
 
     private async void LaunchAtWindowsStartupToggleSwitch_Toggled(object sender, RoutedEventArgs args)
     {

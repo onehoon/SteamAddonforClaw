@@ -19,6 +19,7 @@
             </ctcontrols:SettingsCard>
 
             <ctcontrols:SettingsCard
+                x:Name="DeveloperMenuCard"
                 Click="DeveloperMenuButton_Click"
                 Description="Developer-only diagnostics. General users should not use this menu."
                 Header="Developer Menu"
