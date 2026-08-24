@@ -49,6 +49,15 @@ public sealed class MsiFanHardwareProbeTests
     public void Readback_mismatch_fails() { var t = new FakeFanTransport { DoNotPersistFanWrites = true }; var r = NewProbe(t).AutomaticTest("EX", "MS-1T91", "test"); Assert.False(r.Succeeded); }
 
     [Fact]
+    public void Restore_does_not_blind_write_when_ownership_read_fails_after_writes() { var t = new FakeFanTransport { FailApOnRestore = true }; var r = NewProbe(t).AutomaticTest("EX", "MS-1T91", "test"); Assert.False(r.Succeeded); Assert.DoesNotContain(t.Writes, x => x.Block == 212); }
+
+    [Fact]
+    public void Duty_above_conservative_limit_is_skipped_without_downward_clamp() { var t = new FakeFanTransport { HighDuty = true }; var r = NewProbe(t).AutomaticTest("EX", "MS-1T91", "test"); Assert.False(r.Succeeded); Assert.DoesNotContain(t.Writes, x => x.Block == 1 && x.Payload.Length > 2 && x.Payload[2] < 100); }
+
+    [Fact]
+    public void Divergent_curves_do_not_enable_custom_ownership() { var t = new FakeFanTransport { DivergentFan2 = true }; var r = NewProbe(t).AutomaticTest("EX", "MS-1T91", "test"); Assert.False(r.Succeeded); Assert.DoesNotContain(t.Writes, x => x.Block == 212 && x.Payload.Length > 0 && (x.Payload[0] & 0x80) != 0); }
+
+    [Fact]
     public void Restore_failure_is_reported_as_failure() { var t = new FakeFanTransport { FailRestoreWrite = true }; var r = NewProbe(t).RestoreAuto("EX", "MS-1T91", "test"); Assert.False(r.Succeeded); Assert.Contains("FAIL", File.ReadAllText(r.ReportPath!)); }
 
     [Fact]
@@ -59,12 +68,12 @@ public sealed class MsiFanHardwareProbeTests
     private sealed class FakeFanTransport : IMsiClawTdpTransport
     {
         internal readonly List<(int Block, byte[] Payload)> Writes = []; internal readonly List<string> Reads = [];
-        internal bool FailTemperature; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite;
+        internal bool FailTemperature; internal bool FailFan1Read; internal bool FailFan2Write; internal bool FailAp212; internal bool DoNotPersistFanWrites; internal bool FailRestoreWrite; internal bool FailApOnRestore; internal bool HighDuty; internal bool DivergentFan2;
         private readonly Dictionary<int, byte[]> _fans = new() { [1] = [70, 0, 40, 49, 58, 67, 75, 84], [2] = [71, 0, 40, 49, 58, 67, 75, 85] };
         private byte _ownership;
-        public bool TryGetAp(int index, out byte[] payload) { Reads.Add($"AP{index}"); if (index == 1 && FailAp212) { payload = []; return false; } payload = index == 1 ? [_ownership] : [0x00, 0x01]; return true; }
+        public bool TryGetAp(int index, out byte[] payload) { Reads.Add($"AP{index}"); if (index == 1 && (FailAp212 || (FailApOnRestore && Writes.Any(x => x.Block == 1 || x.Block == 2)))) { payload = []; return false; } payload = index == 1 ? [_ownership] : [0x00, 0x01]; return true; }
         public bool TrySetData(int block, byte value) { Writes.Add((block, [value])); if (block == 212 && FailRestoreWrite) return false; if (block == 212) _ownership = value; return true; }
-        public bool TryGetFan(int block, out byte[] payload) { Reads.Add($"Fan{block}"); if (block == 1 && FailFan1Read) { payload = []; return false; } if (_fans.TryGetValue(block, out var value)) { payload = (byte[])value.Clone(); return true; } payload = []; return false; }
+        public bool TryGetFan(int block, out byte[] payload) { Reads.Add($"Fan{block}"); if (block == 1 && FailFan1Read) { payload = []; return false; } if (_fans.TryGetValue(block, out var value)) { payload = (byte[])value.Clone(); if (block == 1 && HighDuty) payload[2] = 100; if (block == 2 && DivergentFan2) payload[3] = 50; return true; } payload = []; return false; }
         public bool TrySetFan(int block, byte[] payload) { if (block == 2 && FailFan2Write) return false; Writes.Add((block, (byte[])payload.Clone())); if (!DoNotPersistFanWrites) _fans[block] = (byte[])payload.Clone(); return true; }
         public bool TryGetTemperature(int index, out byte[] payload) { Reads.Add($"Temp{index}"); payload = FailTemperature ? [] : [47, 50, 57, 64, 71, 78]; return !FailTemperature; }
         public bool TryGetData(int block, out byte[] payload) { Reads.Add($"Data{block}"); payload = [0]; return true; }

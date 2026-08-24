@@ -81,10 +81,15 @@ internal sealed class MsiFanHardwareProbe
         var fan1Duties = fan1.Skip(1).Take(6).ToArray(); var fan2Duties = fan2.Skip(1).Take(6).ToArray();
         if (!fan1Duties.SequenceEqual(fan2Duties))
         {
-            report.AppendLine("Shared curve test: SKIPPED - Fan 1 and Fan 2 curves differ; restored per-fan tables are preserved.");
-            var ownershipOnly = SetOwnership(true); report.AppendLine($"Custom ownership with restored per-fan tables: {(ownershipOnly ? "PASS" : "FAIL")}"); return ownershipOnly;
+            report.AppendLine("Shared curve test: SKIPPED - Fan 1 and Fan 2 curves differ; custom ownership was not enabled.");
+            return false;
         }
-        var curve = (byte[])fan1Duties.Clone(); curve[2] = (byte)Math.Min(75, curve[2] + 1);
+        if (!TryGetSafeIncrement(fan1Duties[2], out var sharedPoint))
+        {
+            report.AppendLine($"Shared curve test: SKIPPED - current duty {fan1Duties[2]} is outside the conservative test range.");
+            return false;
+        }
+        var curve = (byte[])fan1Duties.Clone(); curve[2] = sharedPoint;
         report.AppendLine("=== SHARED CURVE TEST ==="); _hardwareWritesStarted = true; var shared1 = _transport.TrySetFan(1, WithDuties(fan1, curve)) && TryReadFan(1, out var after1) && after1.Skip(1).Take(6).SequenceEqual(curve); var shared2 = shared1 && _transport.TrySetFan(2, WithDuties(fan2, curve)) && TryReadFan(2, out var after2) && after2.Skip(1).Take(6).SequenceEqual(curve);
         report.AppendLine($"Fan 1/Fan 2 shared curve verification: {(shared1 && shared2 ? "PASS" : "FAIL")}"); if (!(shared1 && shared2)) return false;
         var ownership = SetOwnership(true); report.AppendLine($"Custom ownership enable: {(ownership ? "PASS" : "FAIL")}"); if (!ownership) return false;
@@ -93,7 +98,7 @@ internal sealed class MsiFanHardwareProbe
     private bool WriteRestore(StringBuilder report, FanProbeModel model) { var restored = RestoreFirmwareAuto(); report.AppendLine($"Firmware Auto hand-back: {(restored ? "PASS" : "FAIL")}"); return restored; }
     private bool TestBlock(StringBuilder report, int block, byte[] original)
     {
-        if (original.Length < 8) { report.AppendLine($"Fan {block}: FAIL short payload"); return false; } var point = 2; var next = (byte)Math.Min(75, original[point] + 1); if (next == original[point]) { report.AppendLine($"Fan {block}: SKIPPED bounded delta"); return true; }
+        if (original.Length < 8) { report.AppendLine($"Fan {block}: FAIL short payload"); return false; } var point = 2; if (!TryGetSafeIncrement(original[point], out var next)) { report.AppendLine($"Fan {block}: SKIPPED bounded delta; current duty {original[point]} is outside the conservative test range."); return true; }
         var otherBlock = block == 1 ? 2 : 1; var otherBefore = TryReadFan(otherBlock, out var otherPayload) ? otherPayload : null;
         var requested = (byte[])original.Clone(); requested[point] = next; _hardwareWritesStarted = true; var wrote = _transport.TrySetFan(block, requested); byte[] back = []; var read = wrote && TryReadFan(block, out back); var requestBoundaries = requested[0] == original[0] && requested[7] == original[7]; var dutiesVerified = read && back.Length >= 8 && back.Skip(1).Take(6).SequenceEqual(requested.Skip(1).Take(6)); report.AppendLine($"Fan {block} RMW point {point} {original[point]} -> {next}: request byte0/byte7 preserved: {requestBoundaries}; owned duty readback: {(dutiesVerified ? "PASS" : "FAIL")}");
         var otherAfter = TryReadFan(otherBlock, out var otherPayloadAfter) ? otherPayloadAfter : null; var unexpected = otherBefore is null || otherAfter is null ? "UNKNOWN" : otherBefore.Skip(1).Take(6).SequenceEqual(otherAfter.Skip(1).Take(6)) ? "NO" : "YES"; report.AppendLine($"Fan {otherBlock} changed unexpectedly during Fan {block} write: {unexpected}");
@@ -102,8 +107,14 @@ internal sealed class MsiFanHardwareProbe
     private bool RestoreFirmwareAuto()
     {
         if (!_transport.TryGetData(152, out var cooler) || cooler.Length == 0) return false;
-        if ((cooler[0] & 0x80) != 0 && !_transport.TrySetData(152, (byte)(cooler[0] & 0x7F))) return false;
-        if (!_transport.TrySetData(212, 0)) return false;
+        if ((cooler[0] & 0x80) != 0)
+        {
+            var requestedCooler = (byte)(cooler[0] & 0x7F);
+            if (!_transport.TrySetData(152, requestedCooler) || !_transport.TryGetData(152, out var coolerVerify) || coolerVerify.Length == 0 || (coolerVerify[0] & 0x80) != 0) return false;
+        }
+        if (!_transport.TryGetAp(1, out var ap) || ap.Length == 0) return false;
+        var requestedOwnership = (byte)(ap[0] & 0x7F);
+        if (!_transport.TrySetData(212, requestedOwnership)) return false;
         return _transport.TryGetAp(1, out var verify) && verify.Length > 0 && (verify[0] & 0x80) == 0;
     }
     private bool SetOwnership(bool enabled)
@@ -114,6 +125,8 @@ internal sealed class MsiFanHardwareProbe
         return _transport.TryGetAp(1, out var verify) && verify.Length > 0 && (((verify[0] & 0x80) != 0) == enabled);
     }
     private bool TryReadFan(int block, out byte[] payload) => _transport.TryGetFan(block, out payload) && payload.Length >= 8;
+    private static bool TryGetSafeIncrement(byte current, out byte next)
+    { next = current; if (current >= 75) return false; next = (byte)(current + 1); return true; }
     private bool ReadFan(StringBuilder report, int block, bool required) { if (TryReadFan(block, out var p)) { DescribeFan(report, block, p); return true; } report.AppendLine($"Get_Fan({block}): {(required ? "FAIL" : "UNAVAILABLE")}"); return !required; }
     private static void DescribeFan(StringBuilder report, int block, byte[] payload) => report.AppendLine($"Get_Fan({block}) HEX: {string.Join(" ", payload.Select(x => x.ToString("X2", CultureInfo.InvariantCulture)))} DEC: {string.Join(" ", payload.Select(x => x.ToString(CultureInfo.InvariantCulture)))} Duties[1..6]: {string.Join(",", payload.Skip(1).Take(6))} byte0 preserved: {payload[0]} byte7 preserved: {payload[7]}");
     private static byte[] WithDuties(byte[] original, byte[] duties) { var copy = (byte[])original.Clone(); duties.CopyTo(copy, 1); return copy; }
