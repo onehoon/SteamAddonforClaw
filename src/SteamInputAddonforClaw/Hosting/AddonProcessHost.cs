@@ -8,6 +8,7 @@ using SteamInputAddonforClaw.Developer;
 using SteamInputAddonforClaw.Install;
 using SteamInputAddonforClaw.Lifecycle;
 using SteamInputAddonforClaw.Profiles;
+using SteamInputAddonforClaw.Profiles.Display;
 using SteamInputAddonforClaw.Recovery;
 using SteamInputAddonforClaw.Routing;
 using SteamInputAddonforClaw.Runtime;
@@ -61,6 +62,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly ProfileMutationGate _profileMutationGate = new();
     private readonly CpuBoostRuntime _cpuBoostRuntime;
     private readonly GameProfileMutations _gameProfileMutations;
+    private readonly GameDisplayResolutionRuntime _displayResolutionRuntime;
     private TdpRuntime? _tdpRuntime;
     private HelperMsiClawTdpTransport? _tdpTransport;
     private TdpPowerLifecycleWatcher? _tdpPowerLifecycleWatcher;
@@ -87,6 +89,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         _profileStore = new(profilePath);
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
+        _displayResolutionRuntime = new(_profileStore, _profileMutationGate, testOnlyDataRoot);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
         _qamHostController = new QamHostProcessController(AppContext.BaseDirectory, logDirectory);
         _gameBarForegroundWatcher = new GameBarForegroundWatcher();
@@ -109,6 +112,18 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         if (_startupOutcome is not null) return _startupOutcome.Value;
         if (Interlocked.Exchange(ref _startupStarted, 1) != 0)
             throw new InvalidOperationException("Startup has already been started.");
+
+        try
+        {
+            // Display recovery is independent of controller hardware compatibility. Restore any
+            // outstanding Addon-owned mode before startup can exit for an unsupported or
+            // indeterminate device result.
+            _displayResolutionRuntime.StartupRecover();
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Display", "Display resolution startup recovery failed.", exception);
+        }
 
         AppLog.Info("Startup coordination started.");
         var startupComposition = AddonStartupCompositionFactory.Create(_updateRestartArguments);
@@ -212,7 +227,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
-            actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0);
+            actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
@@ -291,6 +306,11 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     /// </summary>
     internal void ReconcileDeviceProfileStartup()
     {
+        try
+        {
+            _displayResolutionRuntime.Reconcile(_runtimeHost?.ActualRunningAppId ?? 0);
+        }
+        catch (Exception exception) { AppLog.Error("Profiles.Display", "Display resolution startup reconcile failed.", exception); }
         try
         {
             _cpuBoostRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0);
@@ -425,6 +445,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             _runtimeHost.ActualRunningAppIdChanged -= OnActualRunningAppIdChanged;
         if (_frontendControl is SteamInputAddonforClaw.Frontend.InProcessAddonFrontendControl control)
             control.BeginProcessShutdown();
+        try { _displayResolutionRuntime.Shutdown(); } catch (Exception exception) { AppLog.Error("Profiles.Display", "Display resolution shutdown restore failed.", exception); }
         _runtimeHost?.PrepareForShutdown();
     }
 
@@ -437,6 +458,16 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         catch (Exception exception)
         {
             AppLog.Error("Profiles.CpuBoost", "CPU Boost game-profile reconcile failed after Actual RunningAppID changed.", exception,
+                ("RunningAppID", appId));
+        }
+
+        try
+        {
+            _displayResolutionRuntime.Reconcile(appId);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("Profiles.Display", "Display resolution reconcile failed after Actual RunningAppID changed.", exception,
                 ("RunningAppID", appId));
         }
 
