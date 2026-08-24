@@ -607,19 +607,31 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
 
     private static bool HasRequiredSteamDeckInterfaces(ViiperVirtualDeviceResolution resolved)
     {
-        var identities = resolved.Devices
-            .SelectMany(device => device.HardwareIds.Append(device.InstanceId));
-        var values = identities.ToArray();
-        var advertisesCompositeInterfaces = values.Any(value =>
-            value.Contains("&MI_", StringComparison.OrdinalIgnoreCase));
-        // Legacy/synthetic single-node identities do not advertise interface numbers. Keep the
-        // resolver policy authoritative for those records; enforce the semantic composite shape
-        // whenever Windows has exposed canonical MI metadata.
-        return !advertisesCompositeInterfaces ||
-            (HasInterface("MI_00") && HasInterface("MI_01") && HasInterface("MI_02"));
+        var devices = resolved.Devices;
+        // Records without a container identity are legacy test/synthetic records; the resolver
+        // policy remains authoritative for that compatibility shape. Real Windows composite
+        // records carry a container identity and must satisfy the canonical descriptor layers.
+        if (devices.Count > 0 && devices.All(device => device.ContainerId is null || device.ContainerId == Guid.Empty))
+            return true;
 
-        bool HasInterface(string interfaceId) => identities.Any(value =>
-            value.Contains($"&{interfaceId}", StringComparison.OrdinalIgnoreCase));
+        static bool IsTarget(ControllerDeviceInfo device) =>
+            device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId &&
+            device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId;
+
+        static bool HasMi(ControllerDeviceInfo device, string mi) =>
+            device.InstanceId.Contains($"&{mi}", StringComparison.OrdinalIgnoreCase) ||
+            device.HardwareIds.Any(id => id.Contains($"&{mi}", StringComparison.OrdinalIgnoreCase));
+
+        static bool HasLayer(IEnumerable<ControllerDeviceInfo> candidates, string prefix, string mi) =>
+            candidates.Any(device => IsTarget(device) &&
+                device.InstanceId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                HasMi(device, mi));
+
+        var hasRoot = devices.Any(device => IsTarget(device) &&
+            device.InstanceId.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase) &&
+            !device.InstanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase));
+        return hasRoot && new[] { "MI_00", "MI_01", "MI_02" }.All(mi =>
+            HasLayer(devices, "USB\\", mi) && HasLayer(devices, "HID\\", mi));
     }
 
     private async ValueTask<(bool Success, ViiperVirtualDeviceResolution Result, IReadOnlyList<ControllerDeviceInfo> Snapshot)> TryResolveCachedIdentityAsync(IReadOnlyList<ControllerDeviceInfo> before, IReadOnlySet<string> cachedIds, DateTime deadline, CancellationToken token)

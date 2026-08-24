@@ -1011,8 +1011,8 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
             [], // before
-            [UsbIpHost(), controllerLeaf], // first composite member
-            [UsbIpHost(), controllerLeaf, keyboardLeaf, keyboardHid], // growing logical group
+            [UsbIpHost(), root], // composite root only
+            [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf], // USB interface layer only
             [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid], // complete group
             [UsbIpHost(), root, keyboardLeaf, mouseLeaf, controllerLeaf, keyboardHid, mouseHid, controllerHid],
             [], // rollback: all three verified absent after native remove
