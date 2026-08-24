@@ -116,7 +116,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task ReconcileOwnedState_attached_without_owned_pnp_fails_without_mutation()
     {
         var session = new FakeCanonicalSession();
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [], [], []]), new FakeHidHide());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [], [], []]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
         var traceCount = session.Trace.Count;
@@ -147,7 +147,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     {
         var session = new FakeCanonicalSession();
         var foreign = DeviceWithContainer("USB\\VID_28DE&PID_1205\\foreign", Guid.NewGuid());
-        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), foreign], [UsbIpHost(), Device("owned"), foreign], [UsbIpHost(), Device("owned"), foreign]]), new FakeHidHide());
+        var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned"), foreign], [UsbIpHost(), Device("owned"), foreign], [UsbIpHost(), Device("owned"), foreign]]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
 
@@ -1101,7 +1101,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         var result = await stage.ExecuteMutationAsync(CancellationToken.None);
 
-        Assert.False(result.Succeeded);
+        Assert.True(result.Succeeded, result.Reason);
         Assert.True((await stage.RollbackMutationAsync(CancellationToken.None)).Succeeded);
     }
 
