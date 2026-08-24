@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SteamInputAddonforClaw.Contracts.DeviceProfiles;
 using SteamInputAddonforClaw.Contracts.Frontend;
 using SteamInputAddonforClaw.QamHost;
 using Xunit;
@@ -16,6 +17,17 @@ public sealed class QamFrontendBridgeTests
         var actual = QamFrontendBridge.DecodeTdpConfiguration(document.RootElement);
 
         Assert.Equal(expected, actual);
+    }
+
+    [Theory]
+    [InlineData(0, WindowsPowerMode.BestPowerEfficiency)]
+    [InlineData(1, WindowsPowerMode.Balanced)]
+    [InlineData(2, WindowsPowerMode.BestPerformance)]
+    public void Power_mode_ordinal_payload_decodes_through_bridge(int ordinal, WindowsPowerMode expected)
+    {
+        using var document = JsonDocument.Parse($"{{\"mode\":{ordinal}}}");
+
+        Assert.Equal(expected, QamFrontendBridge.DecodePowerMode(document.RootElement));
     }
 
     [Fact]

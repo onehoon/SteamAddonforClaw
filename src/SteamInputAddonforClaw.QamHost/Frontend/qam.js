@@ -539,7 +539,7 @@
       const powerModeLabels = ["Best power efficiency", "Balanced", "Best performance"];
       const powerModeNames = ["BestPowerEfficiency", "Balanced", "BestPerformance"];
       const powerModeIndex = value => typeof value === "number" ? value : powerModeNames.indexOf(value);
-      const powerModeValue = value => powerModeNames[Number(value)] ?? "Balanced";
+      const powerModeValue = value => Number(value);
 
       const failClosed = React.useCallback(message => {
         for (const key of ["ac", "dc"]) {
