@@ -25,8 +25,15 @@ internal interface IIntelFrameLimiter : IDisposable
     bool Available { get; }
     string? UnavailableReason { get; }
     IntelFpsCapability? Capability { get; }
-    bool Enable(int fps, FpsPowerSource source, uint appId);
+    IntelFpsApplyOutcome Enable(int fps, FpsPowerSource source, uint appId);
     bool Disable(FpsPowerSource? source, uint appId);
+}
+
+internal enum IntelFpsApplyOutcome
+{
+    Verified,
+    SetFailed,
+    SetSucceededButUnverified
 }
 
 internal sealed class IntelFrameLimiter : IIntelFrameLimiter
@@ -37,8 +44,8 @@ internal sealed class IntelFrameLimiter : IIntelFrameLimiter
     public bool Available => _native.Available;
     public string? UnavailableReason => _native.UnavailableReason;
     public IntelFpsCapability? Capability => _native.Capability;
-    public bool Enable(int fps, FpsPowerSource source, uint appId) => _native.Set(true, fps, source, appId);
-    public bool Disable(FpsPowerSource? source, uint appId) => _native.Set(false, 60, source, appId);
+    public IntelFpsApplyOutcome Enable(int fps, FpsPowerSource source, uint appId) => _native.Set(true, fps, source, appId);
+    public bool Disable(FpsPowerSource? source, uint appId) => _native.Set(false, 60, source, appId) == IntelFpsApplyOutcome.Verified;
     public void Dispose() => _native.Dispose();
 }
 
@@ -48,7 +55,7 @@ internal sealed class UnavailableIntelFrameLimiter : IIntelFrameLimiter
     public bool Available => false;
     public string? UnavailableReason => "Intel IGCL is unavailable in this test host.";
     public IntelFpsCapability? Capability => null;
-    public bool Enable(int fps, FpsPowerSource source, uint appId) => false;
+    public IntelFpsApplyOutcome Enable(int fps, FpsPowerSource source, uint appId) => IntelFpsApplyOutcome.SetFailed;
     public bool Disable(FpsPowerSource? source, uint appId) => false;
     public void Dispose() { }
 }
@@ -76,7 +83,13 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
         var source = _power(); if (source is null) return FailClosedOwnedState(appId, reason, "UnknownPowerSource");
         var value = source == FpsPowerSource.AC ? target.AcFps : target.DcFps;
         if (value is < 40 or > 120) return FailClosedOwnedState(appId, reason, "InvalidTarget");
-        if (!_limiter.Enable(value, source.Value, appId)) return FailClosedOwnedState(appId, reason, "EnableFailed");
+        var outcome = _limiter.Enable(value, source.Value, appId);
+        if (outcome != IntelFpsApplyOutcome.Verified)
+        {
+            if (outcome == IntelFpsApplyOutcome.SetSucceededButUnverified)
+                _ownsGlobalState = true;
+            return FailClosedOwnedState(appId, reason, "EnableFailed", value);
+        }
         _ownsGlobalState = true;
         try { Directory.CreateDirectory(Path.GetDirectoryName(_marker)!); File.WriteAllText(_marker, $"{{\"fps\":{value}}}"); return true; }
         catch (Exception e)
@@ -88,18 +101,34 @@ internal sealed class IntelFrameLimiterRuntime : IDisposable
             return false;
         }
     }
-    private bool FailClosedOwnedState(uint appId, string reason, string cause)
+    private bool FailClosedOwnedState(uint appId, string reason, string cause, int? recoveryFps = null)
     {
         if (!_ownsGlobalState && !File.Exists(_marker)) return false;
         var disabled = _limiter.Disable(_power(), appId);
         if (!disabled)
+        {
+            if (_ownsGlobalState && !File.Exists(_marker))
+                TryPersistOwnershipMarker(recoveryFps ?? DefaultFps, reason, appId);
             AppLog.Warn("Profiles.IntelFps", "FPS fail-close disable failed; keeping ownership marker.", null, ("Reason", reason), ("Cause", cause), ("RunningAppID", appId));
+        }
         else
         {
             _ownsGlobalState = false;
             TryDeleteOwnershipMarker(reason, appId);
         }
         return false;
+    }
+    private void TryPersistOwnershipMarker(int fps, string reason, uint appId)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_marker)!);
+            File.WriteAllText(_marker, $"{{\"fps\":{fps}}}");
+        }
+        catch (Exception e)
+        {
+            AppLog.Error("Profiles.IntelFps", "FPS ownership marker persistence for recovery failed.", e, ("Reason", reason), ("RunningAppID", appId));
+        }
     }
     private bool Release(uint appId, string reason)
     {
@@ -200,10 +229,10 @@ internal sealed class NativeIgcl : IDisposable
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
-    internal bool Set(bool enable, int fps, FpsPowerSource? source, uint appId)
+    internal IntelFpsApplyOutcome Set(bool enable, int fps, FpsPowerSource? source, uint appId)
     {
         var adapter = enable ? _adapter : _cleanupAdapter;
-        if (adapter == 0 || (enable && !Available)) return false;
+        if (adapter == 0 || (enable && !Available)) return IntelFpsApplyOutcome.SetFailed;
         // Cleanup only needs a valid INT32 value. Enable=false is the actual off semantic,
         // so it remains possible after a driver update narrows the user-facing range.
         var nativeFps = enable ? fps : _cleanupCapability?.Minimum ?? fps;
@@ -216,7 +245,7 @@ internal sealed class NativeIgcl : IDisposable
         var failureReason = FrameLimitVerificationFailureReason(enable, setResult, getResult, readbackEnabled, readbackFps, nativeFps);
         var verified = failureReason is null;
         LogFrameLimitVerification(enable, source, appId, nativeFps, setResult, getResult, readbackEnabled, readbackFps, verified, failureReason);
-        return verified;
+        return setResult != 0 ? IntelFpsApplyOutcome.SetFailed : verified ? IntelFpsApplyOutcome.Verified : IntelFpsApplyOutcome.SetSucceededButUnverified;
     }
     private static FeatureGetSet CreateFrameLimitSetFeature(bool enable, int fps) => new()
     {

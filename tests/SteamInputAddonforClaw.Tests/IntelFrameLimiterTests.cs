@@ -166,7 +166,7 @@ public sealed class IntelFrameLimiterTests
         fixture.Store.Save(new ProfileDocument { Games = new() { ["42"] = EnabledProfile(new GameFpsLimitSettings { Enabled = true, AcFps = 47, DcFps = 47 }) } });
         Directory.CreateDirectory(fixture.DirectoryPath);
         File.WriteAllText(fixture.Marker, "{\"fps\":73}");
-        var fake = new FakeLimiter { EnableResult = false };
+        var fake = new FakeLimiter { EnableOutcome = IntelFpsApplyOutcome.SetFailed };
         using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
 
         Assert.False(runtime.ReconcileWithResult(42));
@@ -182,7 +182,7 @@ public sealed class IntelFrameLimiterTests
         fixture.Store.Save(new ProfileDocument { Games = new() { ["42"] = EnabledProfile(new GameFpsLimitSettings { Enabled = true, AcFps = 47, DcFps = 47 }) } });
         Directory.CreateDirectory(fixture.DirectoryPath);
         File.WriteAllText(fixture.Marker, "{\"fps\":73}");
-        var fake = new FakeLimiter { EnableResult = false, DisableResult = false };
+        var fake = new FakeLimiter { EnableOutcome = IntelFpsApplyOutcome.SetFailed, DisableResult = false };
         using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
 
         Assert.False(runtime.ReconcileWithResult(42));
@@ -207,6 +207,20 @@ public sealed class IntelFrameLimiterTests
         Assert.Equal(2, fake.DisableCalls);
     }
 
+    [Fact]
+    public void Set_success_with_unverified_readback_fail_closes_and_persists_recovery_marker()
+    {
+        using var fixture = new FpsFixture();
+        fixture.Store.Save(new ProfileDocument { Games = new() { ["42"] = EnabledProfile(new GameFpsLimitSettings { Enabled = true, AcFps = 73, DcFps = 47 }) } });
+        var fake = new FakeLimiter { EnableOutcome = IntelFpsApplyOutcome.SetSucceededButUnverified, DisableResult = false };
+        using var runtime = new IntelFrameLimiterRuntime(fixture.Store, new ProfileMutationGate(), fake, () => FpsPowerSource.AC, fixture.Marker);
+
+        Assert.False(runtime.ReconcileWithResult(42));
+        Assert.Equal(1, fake.EnableCalls);
+        Assert.Equal(1, fake.DisableCalls);
+        Assert.True(File.Exists(fixture.Marker));
+    }
+
     private static GameProfile EnabledProfile(GameFpsLimitSettings? fps = null) => new() { Enabled = true, Performance = new GamePerformanceOverrides { CpuBoost = new() { Ac = SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode.Enabled, Dc = SteamInputAddonforClaw.Contracts.DeviceProfiles.CpuBoostMode.Enabled }, Tdp = new() { Ac = new() { Pl1Watts = 20, Pl2Watts = 22 }, Dc = new() { Pl1Watts = 20, Pl2Watts = 22 } }, FpsLimit = fps } };
 
     private sealed class FpsFixture : IDisposable
@@ -218,8 +232,8 @@ public sealed class IntelFrameLimiterTests
     private sealed class FakeLimiter : IIntelFrameLimiter
     {
         public void Initialize() { }
-        public bool Available => AvailableValue; public bool AvailableValue = true; public string? UnavailableReason => null; public IntelFpsCapability? Capability => new(30, 300, 1, 2, 1 << 4, true); public bool LastEnable; public bool LastDisable; public int LastFps; public int EnableCalls; public int DisableCalls; public bool EnableResult = true; public bool DisableResult = true;
-        public bool Enable(int fps, FpsPowerSource source, uint appId) { EnableCalls++; LastEnable = true; LastDisable = false; LastFps = fps; return EnableResult; }
+        public bool Available => AvailableValue; public bool AvailableValue = true; public string? UnavailableReason => null; public IntelFpsCapability? Capability => new(30, 300, 1, 2, 1 << 4, true); public bool LastEnable; public bool LastDisable; public int LastFps; public int EnableCalls; public int DisableCalls; public IntelFpsApplyOutcome EnableOutcome = IntelFpsApplyOutcome.Verified; public bool DisableResult = true;
+        public IntelFpsApplyOutcome Enable(int fps, FpsPowerSource source, uint appId) { EnableCalls++; LastEnable = true; LastDisable = false; LastFps = fps; return EnableOutcome; }
         public bool Disable(FpsPowerSource? source, uint appId) { DisableCalls++; LastDisable = true; LastEnable = false; return DisableResult; }
         public void Dispose() { }
     }
