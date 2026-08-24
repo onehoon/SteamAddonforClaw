@@ -42,8 +42,8 @@ The Addon identifies supported models by their exact MSI board ID. Unsupported o
 - WING button integration as the Steam button during active routing
 - Center M / OEM1 integration as Steam Quick Access during active routing
 - Configurable Center M normal action outside active routing
-- Device-level CPU Boost and TDP control independent from Steam Input Routing
-- Per-game CPU Boost and TDP profiles independent from Steam Input Routing
+- Device-level CPU Boost, Windows 11 Power Mode, and TDP control independent from Steam Input Routing
+- Per-game CPU Boost, Windows 11 Power Mode, and TDP profiles independent from Steam Input Routing
 - Event-driven Steam game detection without periodic game/process polling
 - Per-game profiles for installed Steam games and Non-Steam games added to Steam
 - Steam Quick Access Menu controls

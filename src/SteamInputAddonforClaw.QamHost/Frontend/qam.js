@@ -511,6 +511,7 @@
     function CpuBoostPanel() {
       const [status, setStatus] = React.useState(null);
       const [cpu, setCpu] = React.useState(null);
+      const [powerMode, setPowerMode] = React.useState(null);
       const [tdp, setTdp] = React.useState(null);
       const [profile, setProfile] = React.useState(null);
       const [profileTdpDraft, setProfileTdpDraft] = React.useState(null);
@@ -548,7 +549,7 @@
         profileTdpTimer.current = null;
         profileTdpGeneration.current = 0;
         activeProfileAppIdRef.current = 0;
-        setStatus(null); setCpu(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
+          setStatus(null); setCpu(null); setPowerMode(null); setTdp(null); setProfile(null); profileTdpDraftRef.current = null; setProfileTdpDraft(null); setTdpDraft(null); tdpDraftRef.current = null; setPreviewAc(null); setPreviewDc(null); setError(message);
       }, []);
 
       const refresh = React.useCallback(async () => {
@@ -568,13 +569,14 @@
           activeProfileAppIdRef.current = nextAppId;
           const activeGame = nextAppId > 0;
           const nextCpu = activeGame ? null : await request("captureCpuBoost");
+          const nextPowerMode = activeGame ? null : await request("capturePowerMode");
           const nextTdp = activeGame ? null : await request("captureTdp");
           const nextDraft = nextTdp?.configuration ? {
             enabled: nextTdp.configuration.enabled,
             ac: { ...nextTdp.configuration.ac },
             dc: { ...nextTdp.configuration.dc },
           } : null;
-          setStatus(nextStatus); setCpu(nextCpu); setTdp(nextTdp); setProfile(nextProfile);
+          setStatus(nextStatus); setCpu(nextCpu); setPowerMode(nextPowerMode); setTdp(nextTdp); setProfile(nextProfile);
           if (nextProfile?.tdp && profileTdpGeneration.current === 0) {
             const nextProfileDraft = { ac: { ...nextProfile.tdp.ac }, dc: { ...nextProfile.tdp.dc } };
             profileTdpDraftRef.current = nextProfileDraft;
@@ -767,6 +769,10 @@
         controls.push({ key: "cpu-on-battery", node: slider("On battery", "dc", sideValue(cpu.dc, previewDc), "standard") });
       }
 
+      const powerSlider = (label, value, onChange, disabled) => value == null ? null : React.createElement(native.SliderField, { label, min: 0, max: 2, step: 1, value: Number(value), notchCount: 3, notchTicksVisible: true, disabled, onChange: next => onChange(Number(next)) });
+      const powerControls = [{ key: "power-toggle", node: React.createElement(native.ToggleField, { label: "Windows Power Mode", checked: !!powerMode?.enabled, disabled: !!status?.steam?.appId, onChange: value => void request("setDevicePowerModeEnabled", { enabled: !!value }).then(refresh) }) }];
+      if (powerMode?.enabled) { powerControls.push({ key: "power-ac", node: powerSlider("Plugged in", powerMode.ac?.desired ?? powerMode.ac?.current, value => void request("setDevicePowerModeAc", { mode: value }).then(refresh), !!status?.steam?.appId) }); powerControls.push({ key: "power-dc", node: powerSlider("On battery", powerMode.dc?.desired ?? powerMode.dc?.current, value => void request("setDevicePowerModeDc", { mode: value }).then(refresh), !!status?.steam?.appId) }); }
+
       const tdpControls = [{ key: "tdp-toggle", node: React.createElement(native.ToggleField, {
         label: "TDP Control",
         checked: !!tdpDraft?.enabled,
@@ -867,6 +873,8 @@
           { key: "profile-toggle", node: React.createElement(native.ToggleField, { label: "Profile", checked: enabled, disabled: !writable, onChange: value => void toggleProfile(value) }) },
           { key: "profile-ac", node: profileSlider("Plugged in", "ac", profile.cpuBoost?.ac, previewAc, "none") },
           { key: "profile-dc", node: profileSlider("On battery", "dc", profile.cpuBoost?.dc, previewDc, "standard") },
+          { key: "profile-power-ac", node: profile.powerMode ? powerSlider("Power Mode plugged in", profile.powerMode.ac, value => void request("setActiveGamePowerModeAc", { mode: value }).then(refresh), !enabled || !writable) : null },
+          { key: "profile-power-dc", node: profile.powerMode ? powerSlider("Power Mode on battery", profile.powerMode.dc, value => void request("setActiveGamePowerModeDc", { mode: value }).then(refresh), !enabled || !writable) : null },
         ];
         const profileTdpControls = profile.limits ? [
           { key: "profile-tdp-ac-heading", node: React.createElement("div", null, "Plugged in") },
@@ -888,6 +896,8 @@
         displayError ? React.createElement("p", { key: "error" }, displayError) : null,
         React.createElement(native.PanelSection, { key: "cpu-section" },
           ...controls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))),
+        React.createElement(native.PanelSection, { key: "power-section", title: "Windows Power Mode" },
+          ...powerControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key }, control.node))),
         React.createElement(native.PanelSection, { key: "tdp-section" },
           ...tdpControls.filter(control => control.node).map(control => React.createElement(native.PanelSectionRow, { key: control.key, style: control.compact ? { marginTop: "-4px" } : undefined }, control.node))));
     }

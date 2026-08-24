@@ -39,9 +39,18 @@ public sealed record DevicePerformanceSettings
     /// <summary><see langword="null"/> means Device TDP has not been initialized or configured by
     /// the Addon. A non-null value always contains complete AC and DC power pairs.</summary>
     public DeviceTdpSettings? Tdp { get; init; }
+    public DevicePowerModeSettings? PowerMode { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed record DevicePowerModeSettings
+{
+    public bool Enabled { get; init; } = true;
+    public required WindowsPowerMode Ac { get; init; }
+    public required WindowsPowerMode Dc { get; init; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
 
 /// <summary>Persisted Device-wide TDP configuration. Values are desired watts only; hardware

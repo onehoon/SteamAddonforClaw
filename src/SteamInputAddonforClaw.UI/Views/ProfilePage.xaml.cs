@@ -22,7 +22,7 @@ public sealed partial class ProfilePage : UserControl
 
     public ProfilePage()
     {
-        InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; ResolutionComboBox.ItemsSource = ResolutionItems; SetEditorsEnabled(false);
+        InitializeComponent(); CpuBoostAcComboBox.ItemsSource = Modes; CpuBoostDcComboBox.ItemsSource = Modes; PowerModeAcComboBox.ItemsSource = PowerModes; PowerModeDcComboBox.ItemsSource = PowerModes; ResolutionComboBox.ItemsSource = ResolutionItems; SetEditorsEnabled(false);
 }
     internal void Initialize(IAddonFrontendControl frontend) => _frontend = frontend;
     internal void Activate() { _active = true; if (_frontend is not null) _frontend.StateInvalidated += OnStateInvalidated; if (_selectedGame is not null) _ = CaptureSelectedAsync(_selectedGame.AppId); }
@@ -78,7 +78,7 @@ public sealed partial class ProfilePage : UserControl
         try
         {
             ProfileEnabledToggle.IsOn = snapshot.Enabled; ProfileEnabledToggle.IsEnabled = snapshot.PersistenceWritable;
-            CpuBoostAcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Ac); CpuBoostDcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Dc);
+            CpuBoostAcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Ac); CpuBoostDcComboBox.SelectedItem = Modes.FirstOrDefault(x => x.Mode == snapshot.CpuBoost.Dc); PowerModeAcComboBox.SelectedItem = snapshot.PowerMode is { } power ? PowerModes.FirstOrDefault(x => x.Mode == power.Ac) : null; PowerModeDcComboBox.SelectedItem = snapshot.PowerMode is { } powerDc ? PowerModes.FirstOrDefault(x => x.Mode == powerDc.Dc) : null;
             ResolutionComboBox.SelectedItem = ResolutionItems.FirstOrDefault(x => x.Width == snapshot.Resolution?.Width && x.Height == snapshot.Resolution?.Height);
             if (!preserveDirtyTdpDraft || !_tdpDraftDirty)
             {
@@ -91,7 +91,7 @@ public sealed partial class ProfilePage : UserControl
         SetEditorsEnabled(snapshot.Exists && snapshot.Enabled && snapshot.PersistenceWritable); ResolutionComboBox.IsEnabled = snapshot.PersistenceWritable; RenderProfileStatus(snapshot);
     }
     private void RenderProfileStatus(FrontendGameProfileSnapshot snapshot) { if (!snapshot.PersistenceWritable) { ShowError("Profile settings could not be loaded, so changes are disabled to avoid overwriting the existing profile.", null); return; } if (snapshot.Exists && snapshot.Enabled && snapshot.Limits is null) { ProfileInfoBar.Severity = InfoBarSeverity.Warning; ProfileInfoBar.Message = "TDP Control is unavailable on this device."; ProfileInfoBar.IsOpen = true; return; } ClearError(); }
-    private void SetEditorsEnabled(bool enabled) { CpuBoostAcComboBox.IsEnabled = CpuBoostDcComboBox.IsEnabled = enabled; var tdp = enabled && _snapshot?.Limits is not null; foreach (var slider in new[] { AcPl1Slider, AcPl2Slider, DcPl1Slider, DcPl2Slider }) slider.IsEnabled = tdp; }
+    private void SetEditorsEnabled(bool enabled) { CpuBoostAcComboBox.IsEnabled = CpuBoostDcComboBox.IsEnabled = enabled; PowerModeAcComboBox.IsEnabled = PowerModeDcComboBox.IsEnabled = enabled; var tdp = enabled && _snapshot?.Limits is not null; foreach (var slider in new[] { AcPl1Slider, AcPl2Slider, DcPl1Slider, DcPl2Slider }) slider.IsEnabled = tdp; }
     private static void ConfigureSlider(Slider slider, int? minimum, int? maximum, int value) { if (minimum is not { } min || maximum is not { } max) { slider.IsEnabled = false; return; } slider.Minimum = min; slider.Maximum = max; slider.StepFrequency = 1; slider.Value = Math.Clamp(value, min, max); }
 
     private async void ProfileEnabledToggle_Toggled(object sender, RoutedEventArgs e)
@@ -103,6 +103,14 @@ public sealed partial class ProfilePage : UserControl
     }
     private async void CpuBoostAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(true);
     private async void CpuBoostDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutateCpuAsync(false);
+    private async void PowerModeAcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutatePowerModeAsync(true);
+    private async void PowerModeDcComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => await MutatePowerModeAsync(false);
+    private async Task MutatePowerModeAsync(bool ac)
+    {
+        if (_suppressEvents || _frontend is null || _selectedGame is null) return;
+        var item = (ac ? PowerModeAcComboBox : PowerModeDcComboBox).SelectedItem as PowerModeItem; if (item is null) return;
+        try { var appId = _selectedGame.AppId; var result = ac ? await _frontend.SetGameProfilePowerModeAcAsync(appId, item.Mode) : await _frontend.SetGameProfilePowerModeDcAsync(appId, item.Mode); if (IsCurrentProfileResponse(_selectedGame?.AppId, appId)) Render(result.Snapshot); if (!result.Succeeded) ShowError(result.FailureMessage ?? "Power Mode could not be updated.", null); } catch (Exception exception) { await RestoreSelectedAfterMutationFailureAsync(_selectedGame.AppId, "Power Mode could not be updated.", exception); }
+    }
     private async void ResolutionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressEvents || _frontend is null || _selectedGame is null || ResolutionComboBox.SelectedItem is not ResolutionItem item) return;
@@ -143,6 +151,8 @@ public sealed partial class ProfilePage : UserControl
         try { var snapshot = await _frontend.CaptureGameProfileAsync(appId); if (_selectedGame?.AppId == appId) { Render(snapshot); ShowError(message, null); } } catch { }
     }
     private sealed record CpuBoostModeItem(CpuBoostMode Mode, string Label);
+    private static readonly PowerModeItem[] PowerModes = [new(WindowsPowerMode.BestPowerEfficiency, "Best power efficiency"), new(WindowsPowerMode.Balanced, "Balanced"), new(WindowsPowerMode.BestPerformance, "Best performance")];
+    private sealed record PowerModeItem(WindowsPowerMode Mode, string Label);
     private sealed record ResolutionItem(int? Width, int? Height, string Label);
     private sealed record GameCardItem(FrontendProfileGameCatalogEntry Game)
     {

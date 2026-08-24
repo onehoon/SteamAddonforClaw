@@ -40,16 +40,22 @@ internal sealed class QamFrontendBridge : IAsyncDisposable
                 "captureStatus" => await _client.CaptureStatusAsync(token),
                 "captureCpuBoost" => await _client.CaptureCpuBoostAsync(token),
                 "captureTdp" => await _client.CaptureTdpAsync(token),
+                "capturePowerMode" => await _client.CapturePowerModeAsync(token),
                 "captureActiveGameProfile" => await _client.CaptureActiveGameProfileAsync(token),
                 "setActiveGameProfileEnabled" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileEnabledAsync(id, p.GetProperty("enabled").GetBoolean(), p.TryGetProperty("displayName", out var name) ? name.GetString() : null, t)),
                 "setActiveGameCpuBoostAc" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileCpuBoostAcAsync(id, p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
                 "setActiveGameCpuBoostDc" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileCpuBoostDcAsync(id, p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
                 "setActiveGameTdp" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfileTdpAsync(id, p.GetProperty("configuration").Deserialize<FrontendGameTdpConfiguration>(BridgeJson)!, t)),
+                "setActiveGamePowerModeAc" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfilePowerModeAcAsync(id, p.GetProperty("mode").Deserialize<WindowsPowerMode>(), t)),
+                "setActiveGamePowerModeDc" => await ActiveMutationAsync(root, token, static async (c, id, p, t) => (object)await c.SetGameProfilePowerModeDcAsync(id, p.GetProperty("mode").Deserialize<WindowsPowerMode>(), t)),
                 "setDeviceCpuBoostEnabled" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostEnabledAsync(p.GetProperty("enabled").GetBoolean(), t)),
                 "setDeviceCpuBoostAc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostAcAsync(p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
                 "setDeviceCpuBoostDc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceCpuBoostDcAsync(p.GetProperty("mode").Deserialize<CpuBoostMode>(), t)),
                 "setDeviceTdp" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceTdpAsync(DecodeTdpConfiguration(p), t)),
                 "setDeviceTdpEnabled" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDeviceTdpEnabledAsync(p.GetProperty("enabled").GetBoolean(), t)),
+                "setDevicePowerModeEnabled" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDevicePowerModeEnabledAsync(p.GetProperty("enabled").GetBoolean(), t)),
+                "setDevicePowerModeAc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDevicePowerModeAcAsync(p.GetProperty("mode").Deserialize<WindowsPowerMode>(), t)),
+                "setDevicePowerModeDc" => await MutateAsync(root, token, static async (c, p, t) => (object)await c.SetDevicePowerModeDcAsync(p.GetProperty("mode").Deserialize<WindowsPowerMode>(), t)),
                 _ => throw new InvalidOperationException("Unsupported QAM method.")
             };
             return new Response(id, true, result);

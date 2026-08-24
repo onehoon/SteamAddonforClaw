@@ -61,6 +61,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
     private readonly ProfileStore _profileStore;
     private readonly ProfileMutationGate _profileMutationGate = new();
     private readonly CpuBoostRuntime _cpuBoostRuntime;
+    private readonly PowerModeRuntime _powerModeRuntime;
     private readonly GameProfileMutations _gameProfileMutations;
     private readonly GameDisplayResolutionRuntime _displayResolutionRuntime;
     private TdpRuntime? _tdpRuntime;
@@ -88,6 +89,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             : Path.Combine(testOnlyDataRoot, "logs");
         _profileStore = new(profilePath);
         _cpuBoostRuntime = new(_profileStore, mutationGate: _profileMutationGate);
+        _powerModeRuntime = new(_profileStore, mutationGate: _profileMutationGate);
         _gameProfileMutations = new(_profileStore, _profileMutationGate);
         _displayResolutionRuntime = new(_profileStore, _profileMutationGate, testOnlyDataRoot);
         _frontendLauncher = new FrontendProcessLauncher(AppContext.BaseDirectory, logDirectory);
@@ -227,7 +229,7 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             // routing composition above -- passed here as the SAME instance ReconcileDeviceProfileStartup()
             // reconciles, so the frontend and the Runtime never observe two different owners.
             cpuBoostRuntime: _cpuBoostRuntime, tdpRuntime: _tdpRuntime, gameProfileMutations: _gameProfileMutations,
-            actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime);
+            actualRunningAppIdSource: () => _runtimeHost?.ActualRunningAppId ?? 0, displayResolutionRuntime: _displayResolutionRuntime, powerModeRuntime: _powerModeRuntime);
         var pipeName = _frontendPipeNameFactory?.Invoke() ?? FrontendPipeEndpoint.CreateForCurrentUser();
         _frontendServer = new NamedPipeAddonFrontendServer(pipeName, _frontendControl);
         var qamPipeName = FrontendPipeEndpoint.CreateQamForCurrentUser();
@@ -319,6 +321,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
         {
             AppLog.Error("Profiles.CpuBoost", "CPU Boost startup reconcile failed.", exception);
         }
+        try { _powerModeRuntime.StartupReconcile(_runtimeHost?.ActualRunningAppId ?? 0); }
+        catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode startup reconcile failed.", exception); }
 
         try
         {
@@ -460,6 +464,8 @@ internal sealed class AddonProcessHost : IAsyncDisposable
             AppLog.Error("Profiles.CpuBoost", "CPU Boost game-profile reconcile failed after Actual RunningAppID changed.", exception,
                 ("RunningAppID", appId));
         }
+        try { _powerModeRuntime.Reconcile(appId); }
+        catch (Exception exception) { AppLog.Error("Profiles.PowerMode", "Power Mode game-profile reconcile failed after Actual RunningAppID changed.", exception); }
 
         try
         {

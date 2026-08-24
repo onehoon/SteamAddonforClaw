@@ -68,6 +68,8 @@ internal sealed class GameProfileMutations
 
     internal MutationOutcome SetCpuBoostDc(uint appId, CpuBoostMode mode)
         => SetCpuBoost(appId, cpu => cpu with { Dc = mode });
+    internal MutationOutcome SetPowerModeAc(uint appId, WindowsPowerMode mode) => SetPowerMode(appId, p => p with { Ac = mode });
+    internal MutationOutcome SetPowerModeDc(uint appId, WindowsPowerMode mode) => SetPowerMode(appId, p => p with { Dc = mode });
 
     internal IReadOnlySet<uint> CaptureFavoriteAppIds()
     {
@@ -128,6 +130,18 @@ internal sealed class GameProfileMutations
         }
     }
 
+    private MutationOutcome SetPowerMode(uint appId, Func<GamePowerModeSettings, GamePowerModeSettings> update)
+    {
+        lock (_gate.Sync)
+        {
+            var loaded = _store.Load(); if (!loaded.CanSafelyReplace) return MutationOutcome.PersistenceFailed;
+            var key = appId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!loaded.Document.Games.TryGetValue(key, out var profile) || profile.Performance.PowerMode is not { } current) return MutationOutcome.Unavailable;
+            loaded.Document.Games[key] = profile with { Performance = profile.Performance with { PowerMode = update(current) } };
+            try { _store.Save(loaded.Document); return MutationOutcome.Succeeded; } catch { return MutationOutcome.PersistenceFailed; }
+        }
+    }
+
     internal MutationOutcome SetTdp(uint appId, TdpPowerPair ac, TdpPowerPair dc)
     {
         if (_modelId is not { } model || !MsiClawTdpPolicy.TryResolve(model, out var policy) || !policy.IsValid(ac) || !policy.IsValid(dc)) return MutationOutcome.InvalidTarget;
@@ -164,6 +178,9 @@ internal sealed class GameProfileMutations
         var existingTdp = profile.Performance.Tdp is { Ac: { }, Dc: { } } existing
             ? existing
             : tdp;
-        return profile with { Performance = profile.Performance with { CpuBoost = profile.Performance.CpuBoost ?? cpu, Tdp = existingTdp } };
+        var power = device.Performance.PowerMode is { Ac: { } powerAc, Dc: { } powerDc }
+            ? new GamePowerModeSettings { Ac = powerAc, Dc = powerDc }
+            : null;
+        return profile with { Performance = profile.Performance with { CpuBoost = profile.Performance.CpuBoost ?? cpu, Tdp = existingTdp, PowerMode = profile.Performance.PowerMode ?? power } };
     }
 }

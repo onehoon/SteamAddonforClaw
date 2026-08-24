@@ -56,6 +56,7 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     // PR277 section 1): this projection deliberately has NO dependency on _runtime/routing status
     // and must keep working when _runtime is null (no routing composition at all).
     private readonly CpuBoostRuntime? _cpuBoostRuntime;
+    private readonly PowerModeRuntime? _powerModeRuntime;
     private readonly TdpRuntime? _tdpRuntime;
     private readonly GameProfileMutations? _gameProfileMutations;
     private readonly Func<uint> _actualRunningAppIdSource;
@@ -71,10 +72,11 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
     /// <c>AddonProcessHost</c>, independent of <paramref name="runtime"/>). Null is a valid, passive
     /// state -- CPU Boost frontend operations simply report unavailable, exactly like every other
     /// null-runtime fallback on this class.</param>
-    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null)
+    internal InProcessAddonFrontendControl(StartupSettingsCoordinator settings, ISystemStatusProvider status, AddonRuntimeHost? runtime, DeveloperTestModeState developer, string registrationMessage, IFrontendPrerequisiteSetupExecutor? setupExecutor = null, Func<string?>? processPath = null, Func<RoutingRuntimeStatusSnapshot>? captureRoutingStatus = null, bool oem1MappingAvailable = false, CpuBoostRuntime? cpuBoostRuntime = null, TdpRuntime? tdpRuntime = null, GameProfileMutations? gameProfileMutations = null, Func<uint>? actualRunningAppIdSource = null, Func<CancellationToken, Task<IReadOnlyList<ProfileGameCatalogEntry>>>? scanProfileGames = null, GameDisplayResolutionRuntime? displayResolutionRuntime = null, PowerModeRuntime? powerModeRuntime = null)
     {
         _oem1MappingAvailable = oem1MappingAvailable;
         _cpuBoostRuntime = cpuBoostRuntime;
+        _powerModeRuntime = powerModeRuntime;
         _tdpRuntime = tdpRuntime;
         _gameProfileMutations = gameProfileMutations;
         _actualRunningAppIdSource = actualRunningAppIdSource ?? (() => _runtime?.ActualRunningAppId ?? 0);
@@ -134,6 +136,10 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileCpuBoostDcAsync(uint appId, CpuBoostMode mode, CancellationToken cancellationToken = default) =>
         MutateCpuBoostAfterShutdownCheck(appId, static (mutations, id, value) => mutations.SetCpuBoostDc(id, value), mode);
+    public Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeAcAsync(uint appId, WindowsPowerMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetPowerModeAc(appId, mode) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: false, power: true));
+    public Task<FrontendGameProfileMutationResult> SetGameProfilePowerModeDcAsync(uint appId, WindowsPowerMode mode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(MutateGame(appId, _gameProfileMutations?.SetPowerModeDc(appId, mode) ?? GameProfileMutations.MutationOutcome.Unavailable, cpu: false, tdp: false, power: true));
 
     public Task<FrontendGameProfileMutationResult> SetGameProfileTdpAsync(uint appId, FrontendGameTdpConfiguration configuration, CancellationToken cancellationToken = default) =>
         MutateTdpAfterShutdownCheck(appId, configuration);
@@ -166,25 +172,27 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         return new(appId, profile.DisplayName, captured.Exists, captured.Exists && profile.Enabled,
             new(profile.Performance.CpuBoost!.Ac, profile.Performance.CpuBoost.Dc),
             new(new(profile.Performance.Tdp!.Ac.Pl1Watts, profile.Performance.Tdp.Ac.Pl2Watts), new(profile.Performance.Tdp.Dc.Pl1Watts, profile.Performance.Tdp.Dc.Pl2Watts)), captured.PersistenceWritable, limits,
-            profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null);
+            profile.Display.Resolution is { } resolution ? new(resolution.Width, resolution.Height) : null,
+            profile.Performance.PowerMode is { } power ? new(power.Ac, power.Dc) : null);
     }
 
-    private FrontendGameProfileMutationResult MutateGame(uint appId, GameProfileMutations.MutationOutcome outcome, bool cpu, bool tdp, bool display = false)
+    private FrontendGameProfileMutationResult MutateGame(uint appId, GameProfileMutations.MutationOutcome outcome, bool cpu, bool tdp, bool display = false, bool power = false)
     {
         var mapped = outcome switch { GameProfileMutations.MutationOutcome.Succeeded => FrontendGameProfileMutationOutcome.Succeeded, GameProfileMutations.MutationOutcome.InvalidTarget => FrontendGameProfileMutationOutcome.InvalidTarget, GameProfileMutations.MutationOutcome.PersistenceFailed => FrontendGameProfileMutationOutcome.PersistenceFailed, _ => FrontendGameProfileMutationOutcome.Unavailable };
         if (outcome == GameProfileMutations.MutationOutcome.Succeeded)
         {
-            ReconcileGame(appId, cpu, tdp, display); StateInvalidated?.Invoke(this, EventArgs.Empty);
+            ReconcileGame(appId, cpu, tdp, display, power); StateInvalidated?.Invoke(this, EventArgs.Empty);
         }
         return new(mapped, mapped == FrontendGameProfileMutationOutcome.Succeeded ? null : "Game Profile mutation failed.", CaptureGameProfile(appId));
     }
 
-    private void ReconcileGame(uint appId, bool cpu, bool tdp, bool display = false)
+    private void ReconcileGame(uint appId, bool cpu, bool tdp, bool display = false, bool power = false)
     {
         if (appId != _actualRunningAppIdSource()) return;
         if (cpu) try { _cpuBoostRuntime?.Reconcile(appId); } catch (Exception ex) { AppLog.Error("Profiles.CpuBoost", "Game Profile CPU reconcile failed.", ex); }
         if (tdp) try { _tdpRuntime?.ReconcileCurrent(true, false, "GameProfileMutation"); } catch (Exception ex) { AppLog.Error("Profiles.Tdp", "Game Profile TDP reconcile failed.", ex); }
         if (display) try { _displayResolutionRuntime?.Reconcile(appId); } catch (Exception ex) { AppLog.Error("Profiles.Display", "Game Profile display reconcile failed.", ex); }
+        if (power) try { _powerModeRuntime?.Reconcile(appId); } catch (Exception ex) { AppLog.Error("Profiles.PowerMode", "Game Profile Power Mode reconcile failed.", ex); }
     }
 
     private static FrontendGameProfileSnapshot UnavailableGameProfile(uint appId) => new(appId, null, false, false, new(CpuBoostMode.Enabled, CpuBoostMode.Enabled), new(new(20, 22), new(20, 22)), false, null);
@@ -777,6 +785,29 @@ internal sealed class InProcessAddonFrontendControl : IAddonFrontendControl
         StateInvalidated?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(new FrontendCpuBoostMutationResult(MapMutationOutcome(result.Outcome), result.FailureMessage, snapshot));
     }
+
+    public Task<FrontendPowerModeSnapshot> CapturePowerModeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(_powerModeRuntime is null ? FrontendPowerModeSnapshot.Unavailable : MapPowerModeSnapshot(_powerModeRuntime.Snapshot));
+    public Task<FrontendPowerModeMutationResult> SetDevicePowerModeAcAsync(WindowsPowerMode mode, CancellationToken cancellationToken = default) => Task.FromResult(MutatePowerMode(true, mode));
+    public Task<FrontendPowerModeMutationResult> SetDevicePowerModeDcAsync(WindowsPowerMode mode, CancellationToken cancellationToken = default) => Task.FromResult(MutatePowerMode(false, mode));
+    public Task<FrontendPowerModeMutationResult> SetDevicePowerModeEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        if (_powerModeRuntime is null) return Task.FromResult(new FrontendPowerModeMutationResult(FrontendPowerModeMutationOutcome.PersistenceFailed, "Power Mode is unavailable.", FrontendPowerModeSnapshot.Unavailable));
+        var result = _powerModeRuntime.SetEnabled(enabled); StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(new FrontendPowerModeMutationResult(MapPowerModeOutcome(result.Outcome), result.FailureMessage, MapPowerModeSnapshot(_powerModeRuntime.Snapshot)));
+    }
+    private FrontendPowerModeMutationResult MutatePowerMode(bool ac, WindowsPowerMode mode)
+    {
+        ThrowIfShuttingDown();
+        if (_powerModeRuntime is null) return new(FrontendPowerModeMutationOutcome.PersistenceFailed, "Power Mode is unavailable.", FrontendPowerModeSnapshot.Unavailable);
+        var result = ac ? _powerModeRuntime.SetDeviceAc(mode) : _powerModeRuntime.SetDeviceDc(mode);
+        StateInvalidated?.Invoke(this, EventArgs.Empty);
+        return new(MapPowerModeOutcome(result.Outcome), result.FailureMessage, MapPowerModeSnapshot(_powerModeRuntime.Snapshot));
+    }
+    private static FrontendPowerModeMutationOutcome MapPowerModeOutcome(PowerModeMutationOutcome outcome) => outcome switch { PowerModeMutationOutcome.Succeeded => FrontendPowerModeMutationOutcome.Succeeded, PowerModeMutationOutcome.ApplyFailed => FrontendPowerModeMutationOutcome.ApplyFailed, _ => FrontendPowerModeMutationOutcome.PersistenceFailed };
+    private static FrontendPowerModeSnapshot MapPowerModeSnapshot(PowerModeRuntimeSnapshot s) => new(MapPowerModeSide(s.AcCurrent, s.AcDesired), MapPowerModeSide(s.DcCurrent, s.DcDesired), s.Enabled, s.PersistenceWritable, s.LastFailure);
+    private static FrontendPowerModeSideSnapshot MapPowerModeSide(PowerModeSideReading r, WindowsPowerMode? desired) => new(r.Status switch { PowerModeReadStatus.Known => FrontendPowerModeReadStatus.Known, PowerModeReadStatus.Unknown => FrontendPowerModeReadStatus.Unknown, _ => FrontendPowerModeReadStatus.Unavailable }, r.Mode, desired);
 
     private FrontendCpuBoostMutationResult MutateCpuBoost(bool ac, CpuBoostMode mode)
     {
