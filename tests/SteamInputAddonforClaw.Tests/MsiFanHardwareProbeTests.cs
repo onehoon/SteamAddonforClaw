@@ -97,6 +97,16 @@ public sealed class MsiFanHardwareProbeTests
     public void Required_capture_read_failure_does_not_write() { var t = new FakeFanTransport { FailTemperature = true }; var r = NewProbe(t).Capture("EX", "MS-1T91", "test"); Assert.False(r.Succeeded); Assert.Empty(t.Writes); }
 
     [Fact]
+    public void Automatic_preflight_failure_reports_unchanged_state_without_claiming_auto()
+    {
+        var t = new FakeFanTransport { FailTemperature = true };
+        var result = NewProbe(t).AutomaticTest("EX", "MS-1T91", "test");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("FINAL STATE: UNCHANGED (no hardware writes performed)", File.ReadAllText(result.ReportPath!));
+    }
+
+    [Fact]
     public void Required_fan_capture_read_failure_does_not_report_success() { var t = new FakeFanTransport { FailFan1Read = true }; var r = NewProbe(t).Capture("EX", "MS-1T91", "test"); Assert.False(r.Succeeded); Assert.Empty(t.Writes); }
 
     [Fact]
@@ -148,9 +158,41 @@ public sealed class MsiFanHardwareProbeTests
     }
 
     [Fact]
-    public void Unsupported_model_does_not_touch_transport() { var t = new FakeFanTransport(); var r = NewProbe(t).Capture("unknown", "unknown", "test"); Assert.False(r.Succeeded); Assert.Empty(t.Writes); Assert.Empty(t.Reads); }
+    public void Unsupported_model_does_not_touch_transport_or_diagnostic_helper()
+    {
+        var t = new DiagnosticSpyTransport();
+        var r = new MsiFanHardwareProbe(t, Path.Combine(Path.GetTempPath(), "MsiFanProbeTests", Guid.NewGuid().ToString("N"))).Capture("unknown", "unknown", "test");
+
+        Assert.False(r.Succeeded);
+        Assert.Empty(t.Writes);
+        Assert.Empty(t.Reads);
+        Assert.Equal(0, t.HelperInfoCalls);
+        Assert.Equal(0, t.WmiVersionCalls);
+        Assert.Equal(0, t.MethodInventoryCalls);
+    }
 
     private static MsiFanHardwareProbe NewProbe(FakeFanTransport transport) => new(transport, Path.Combine(Path.GetTempPath(), "MsiFanProbeTests", Guid.NewGuid().ToString("N")));
+
+    private sealed class DiagnosticSpyTransport : IMsiClawTdpTransport, IMsiFanDiagnosticTransport
+    {
+        internal readonly List<(int Block, byte[] Payload)> Writes = [];
+        internal readonly List<string> Reads = [];
+        internal int HelperInfoCalls;
+        internal int WmiVersionCalls;
+        internal int MethodInventoryCalls;
+
+        public bool TryGetAp(int index, out byte[] payload) { Reads.Add($"AP{index}"); payload = []; return false; }
+        public bool TrySetData(int block, byte value) { Writes.Add((block, [value])); return false; }
+        public bool TryGetFan(int block, out byte[] payload) { Reads.Add($"Fan{block}"); payload = []; return false; }
+        public bool TrySetFan(int block, byte[] payload) { Writes.Add((block, payload)); return false; }
+        public bool TryGetTemperature(int index, out byte[] payload) { Reads.Add($"Temp{index}"); payload = []; return false; }
+        public bool TryGetThermal(int index, out byte[] payload) { Reads.Add($"Thermal{index}"); payload = []; return false; }
+        public bool TryGetData(int block, out byte[] payload) { Reads.Add($"Data{block}"); payload = []; return false; }
+        public bool TryGetHelperInfo(out MsiFanHelperInfo info) { HelperInfoCalls++; info = new(0, "", false, "", ""); return false; }
+        public bool TryGetWmiVersion(out MsiFanWmiVersion version) { WmiVersionCalls++; version = new(false, [], null, null, "", null); return false; }
+        public bool TryGetMethodInventory(out string[] methods) { MethodInventoryCalls++; methods = []; return false; }
+        public MsiFanOperationResult InvokeFanDiagnostic(string operation, int block, byte[]? payload) => throw new InvalidOperationException("Unsupported board must not invoke diagnostic operations.");
+    }
 
     private sealed class FakeFanTransport : IMsiClawTdpTransport
     {

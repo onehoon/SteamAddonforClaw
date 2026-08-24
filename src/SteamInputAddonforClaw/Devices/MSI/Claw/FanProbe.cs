@@ -99,12 +99,12 @@ internal sealed class MsiFanHardwareProbe
             report.AppendLine($"Board: {board}");
             report.AppendLine($"Probe model: {model}");
             report.AppendLine($"BIOS/EC/Firmware: {firmware}");
-            WriteEnvironment(report);
             if (model == FanProbeModel.Unsupported)
             {
                 report.AppendLine("PRECHECK: FAIL - unsupported board");
                 return Finish(path, report, false, status, model, board);
             }
+            WriteEnvironment(report);
             success = action(report, model);
             status = success ? "PASS" : "FAILED";
         }
@@ -128,7 +128,7 @@ internal sealed class MsiFanHardwareProbe
             }
         }
         if (operation == FanProbeOperation.AutomaticTest && !_hardwareWritesStarted)
-            report.AppendLine("FINAL STATE: AUTO (no hardware writes performed)");
+            report.AppendLine("FINAL STATE: UNCHANGED (no hardware writes performed)");
         if (!handback) { success = false; status = "FAILED"; }
         return Finish(path, report, success && status == "PASS", success && status == "PASS" ? "PASS" : "FAILED", model, board);
     }
