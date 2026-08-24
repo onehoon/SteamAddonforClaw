@@ -159,14 +159,15 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     [Fact]
     public async Task ReconcileOwnedState_allows_exact_preexisting_matching_pnp()
     {
-        var preExisting = Device("preexisting");
+        var preExisting = CanonicalDeckGroup(Guid.NewGuid(), "PREEXISTING");
+        var owned = CanonicalDeckGroup(Guid.NewGuid(), "OWNED");
         var session = new FakeCanonicalSession();
         var stage = Create(session, new FakeEnumerator([
-            [UsbIpHost(), preExisting],
-            [UsbIpHost(), preExisting, Device("owned")],
-            [UsbIpHost(), preExisting, Device("owned")],
-            [UsbIpHost(), preExisting, Device("owned")],
-            [UsbIpHost(), preExisting, Device("owned")]
+            [UsbIpHost(), ..preExisting],
+            [UsbIpHost(), ..preExisting, ..owned],
+            [UsbIpHost(), ..preExisting, ..owned],
+            [UsbIpHost(), ..preExisting, ..owned],
+            [UsbIpHost(), ..preExisting, ..owned]
         ]), new FakeHidHide());
         Assert.True((await stage.PrepareMutationAsync(CancellationToken.None)).Succeeded);
         Assert.True((await stage.ExecuteMutationAsync(CancellationToken.None)).Succeeded);
@@ -375,7 +376,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
     public async Task PreExistingHidHideOutputBlockIsPreserved()
     {
         var session = new FakeCanonicalSession();
-        var hidHide = new FakeHidHide { Inspection = new(HidHideInspectionStatus.Available, new HashSet<string>(), ["owned"]) };
+        var hidHide = new FakeHidHide { Inspection = new(HidHideInspectionStatus.Available, new HashSet<string>(), ["USB\\VID_28DE&PID_1205\\owned"]) };
         var stage = Create(session, new FakeEnumerator([[], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], [UsbIpHost(), Device("owned")], []]), hidHide);
         await stage.PrepareMutationAsync(CancellationToken.None);
 
@@ -383,7 +384,7 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.Contains("HidHideOutputAlreadyBlocked", result.Reason);
-        Assert.Contains("owned", hidHide.Inspection.HiddenDeviceEntries!);
+        Assert.Contains("USB\\VID_28DE&PID_1205\\owned", hidHide.Inspection.HiddenDeviceEntries!);
         Assert.Equal(1, session.RemoveCalls);
     }
 
@@ -1295,7 +1296,20 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
 
     private const string UsbIpHostInstanceId = "ROOT\\USB\\0000";
     private static ControllerDeviceInfo UsbIpHost() => new(UsbIpHostInstanceId, null, null, [], "ROOT", ["ROOT\\USBIP_WIN2\\UDE"], [], "System", null, "usbip2_ude", null, null, true);
-    private static ControllerDeviceInfo Device(string id) => new(id, Guid.Empty, null, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
+    private static IReadOnlyList<ControllerDeviceInfo> CanonicalDeckGroup(Guid container, string suffix)
+    {
+        var nodes = new List<ControllerDeviceInfo>
+        {
+            new($"USB\\VID_28DE&PID_1205\\{suffix}_ROOT", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205"], [], "USB", null, null, 0x28DE, 0x1205, true)
+        };
+        foreach (var (mi, name) in new[] { ("00", "KBD"), ("01", "MOUSE"), ("02", "CONTROLLER") })
+        {
+            nodes.Add(new($"USB\\VID_28DE&PID_1205&MI_{mi}\\{suffix}_{name}", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", [$"USB\\VID_28DE&PID_1205&MI_{mi}"], [], "USB", null, null, 0x28DE, 0x1205, true));
+            nodes.Add(new($"HID\\VID_28DE&PID_1205&MI_{mi}\\{suffix}_{name}", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", [$"HID\\VID_28DE&PID_1205&MI_{mi}"], [], "HIDClass", null, null, 0x28DE, 0x1205, true));
+        }
+        return nodes;
+    }
+    private static ControllerDeviceInfo Device(string id) => new(id.Contains('\\') ? id : $"USB\\VID_28DE&PID_1205\\{id}", Guid.Empty, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
     private static ControllerDeviceInfo DeviceWithContainer(string id, Guid container) => new(id, container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["HID\\VID_28DE&PID_1205"], [], "HIDClass", null, null, 0x28DE, 0x1205, true);
 
     public CanonicalSteamDeckOutputStageTests()
@@ -1315,26 +1329,61 @@ public sealed class CanonicalSteamDeckOutputStageTests : IDisposable
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
     }
 
-    private sealed class FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states, bool directLookup = false) : IControllerDeviceEnumerator
+    private sealed class FakeEnumerator : IControllerDeviceEnumerator
     {
+        private readonly IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> _states;
+        private readonly bool _directLookup;
         private int _index;
+        public FakeEnumerator(IReadOnlyList<IReadOnlyList<ControllerDeviceInfo>> states, bool directLookup = false)
+        {
+            _directLookup = directLookup;
+            _states = states.Select(CanonicalizeSyntheticState).ToArray();
+        }
         public int DirectLookupCalls { get; private set; }
         public int EnumerateCalls { get; private set; }
         public IReadOnlyList<ControllerDeviceInfo> EnumeratePresentDevices()
         {
             EnumerateCalls++;
-            return states[Math.Min(_index++, states.Count - 1)];
+            return _states[Math.Min(_index++, _states.Count - 1)];
         }
         public ControllerDeviceInfo? FindPresentDevice(string instanceId)
         {
             DirectLookupCalls++;
-            if (!directLookup) return null;
-            return states.SelectMany(state => state).FirstOrDefault(device =>
+            if (!_directLookup) return null;
+            return _states.SelectMany(state => state).FirstOrDefault(device =>
                 string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase));
         }
         public IReadOnlyList<string> EnumeratePresentInstanceIds(ushort vendorId, ushort productId) =>
-            states[^1].Where(device => device.Present && device.VendorId == vendorId && device.ProductId == productId)
+            _states[^1].Where(device => device.Present && device.VendorId == vendorId && device.ProductId == productId)
                 .Select(device => device.InstanceId).ToArray();
+
+        private static IReadOnlyList<ControllerDeviceInfo> CanonicalizeSyntheticState(IReadOnlyList<ControllerDeviceInfo> state)
+        {
+            var targets = state.Where(device => device.Present
+                && device.VendorId == SteamDeckVirtualDeviceIdentityPolicy.VendorId
+                && device.ProductId == SteamDeckVirtualDeviceIdentityPolicy.ProductId).ToArray();
+            if (targets.Length == 0 || targets.Any(device => device.ContainerId != Guid.Empty)
+                || targets.Any(device => device.InstanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase)))
+                return state;
+
+            // Keep one-node fixtures in the same parent-based logical group so their original
+            // instance ID remains available for cache assertions. Multi-node fixtures retain
+            // their independent synthetic identities for ambiguity/reconciliation coverage.
+            var container = targets.All(device => device.ContainerId == Guid.Empty) ? Guid.Empty : Guid.NewGuid();
+            var nodes = new List<ControllerDeviceInfo>();
+            if (!targets.Any(device => device.InstanceId.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase)
+                && device.InstanceId.Contains("VID_28DE&PID_1205\\", StringComparison.OrdinalIgnoreCase)
+                && !device.InstanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase)))
+            {
+                nodes.Add(new("USB\\VID_28DE&PID_1205\\SYNTH_ROOT", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", ["USB\\VID_28DE&PID_1205"], [], "USB", null, null, 0x28DE, 0x1205, true));
+            }
+            foreach (var (mi, name) in new[] { ("00", "KBD"), ("01", "MOUSE"), ("02", "CONTROLLER") })
+            {
+                nodes.Add(new($"USB\\VID_28DE&PID_1205&MI_{mi}\\SYNTH_{name}", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "USB", [$"USB\\VID_28DE&PID_1205&MI_{mi}"], [], "USB", null, null, 0x28DE, 0x1205, true));
+                nodes.Add(new($"HID\\VID_28DE&PID_1205&MI_{mi}\\SYNTH_{name}", container, UsbIpHostInstanceId, [UsbIpHostInstanceId], "HID", [$"HID\\VID_28DE&PID_1205&MI_{mi}"], [], "HIDClass", null, null, 0x28DE, 0x1205, true));
+            }
+            return state.Concat(nodes).ToArray();
+        }
     }
 
     // Returns [] for the very first call (the "before" snapshot) and thereafter either [deck] or []

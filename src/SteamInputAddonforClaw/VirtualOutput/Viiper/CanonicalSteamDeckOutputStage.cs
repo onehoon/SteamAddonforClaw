@@ -615,11 +615,6 @@ internal sealed class CanonicalSteamDeckOutputStage : IRoutingPipelineStage
         bool IsUsb(ControllerDeviceInfo device) => device.InstanceId.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase);
         bool IsHid(ControllerDeviceInfo device) => device.InstanceId.StartsWith("HID\\", StringComparison.OrdinalIgnoreCase);
 
-        // Synthetic controller identities used by resolver-only tests have no real container
-        // identity. They cannot claim partial canonical topology; production SetupAPI identities
-        // always take the strict topology path below.
-        if (targets.Length > 0 && targets.All(device => device.ContainerId == Guid.Empty)) return true;
-
         var hasCompositeRoot = targets.Any(device =>
             IsUsb(device)
             && device.InstanceId.Contains("VID_28DE&PID_1205\\", StringComparison.OrdinalIgnoreCase)
