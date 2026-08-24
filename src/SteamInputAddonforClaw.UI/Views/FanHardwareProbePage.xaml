@@ -5,11 +5,18 @@
     <TextBlock Opacity="0.7" Text="Developer-only MSI fan EC/WMI diagnostics. This is not production Fan Control." TextWrapping="Wrap" />
     <TextBlock x:Name="DeviceText" /><TextBlock x:Name="BoardText" /><TextBlock x:Name="ModelText" />
     <TextBlock x:Name="StatusText" FontWeight="SemiBold" TextWrapping="Wrap" />
+    <TextBlock Text="Basic Diagnostics" FontWeight="SemiBold" Margin="0,8,0,0" />
     <StackPanel Orientation="Horizontal" Spacing="8">
       <Button x:Name="CaptureButton" Content="Capture Current State" Click="Capture_Click" />
       <Button x:Name="AutomaticButton" Content="Run Automatic Hardware Test" Click="Automatic_Click" />
       <Button x:Name="RestoreButton" Content="Restore Firmware Auto" Click="Restore_Click" />
       <Button x:Name="ReportButton" Content="Open Report Folder" Click="Report_Click" IsEnabled="False" />
+    </StackPanel>
+    <TextBlock Text="Production Validation" FontWeight="SemiBold" Margin="0,8,0,0" />
+    <TextBlock Text="Close games and other heavy workloads before running this test. The test is bounded and always returns control to MSI firmware Auto." TextWrapping="Wrap" Opacity="0.8" />
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <Button x:Name="PhysicalButton" Content="Run Physical Fan Response Test" Click="Physical_Click" />
+      <Button x:Name="SuspendButton" Content="Arm Suspend / Resume Fan Test" Click="Suspend_Click" />
     </StackPanel>
     <TextBlock x:Name="ResultText" TextWrapping="Wrap" /><TextBlock x:Name="ErrorText" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" />
   </StackPanel></ScrollViewer>

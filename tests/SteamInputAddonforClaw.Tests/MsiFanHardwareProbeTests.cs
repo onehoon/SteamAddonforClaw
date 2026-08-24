@@ -137,6 +137,47 @@ public sealed class MsiFanHardwareProbeTests
     public void Restore_failure_is_reported_as_failure() { var t = new FakeFanTransport { FailRestoreWrite = true }; var r = NewProbe(t).RestoreAuto("EX", "MS-1T91", "test"); Assert.False(r.Succeeded); Assert.Contains("FAIL", File.ReadAllText(r.ReportPath!)); }
 
     [Fact]
+    public void Physical_response_uses_only_bounded_10_to_75_duties_and_restores_auto()
+    {
+        var t = new FakeFanTransport();
+        var r = new MsiFanHardwareProbe(t, Path.Combine(Path.GetTempPath(), "MsiFanProbeTests", Guid.NewGuid().ToString("N")), _ => { }).PhysicalResponse("EX", "MS-1T91", "test");
+        Assert.True(r.Succeeded);
+        Assert.Contains(t.Writes, x => x.Block == 1 && x.Payload.Skip(1).Take(6).All(v => v == 75));
+        Assert.Contains(t.Writes, x => x.Block == 1 && x.Payload.Skip(1).Take(6).All(v => v == 10));
+        Assert.All(t.Writes.Where(x => x.Block is 1 or 2 && x.Payload.Skip(1).Take(6).Any(v => v < 10)), x => Assert.Equal(new byte[] { 0, 40, 49, 58, 67, 75 }, x.Payload.Skip(1).Take(6)));
+        Assert.Contains("FINAL STATE: AUTO", File.ReadAllText(r.ReportPath!));
+    }
+
+    [Theory]
+    [InlineData(75, 40, "DECREASED")]
+    [InlineData(40, 10, "DECREASED")]
+    [InlineData(10, 75, "INCREASED")]
+    [InlineData(null, 10, "INCONCLUSIVE")]
+    public void Physical_directional_classification_is_conservative(int? before, int? after, string expected)
+        => Assert.Equal(expected, FanProbeLogic.ClassifyDirectionalResponse(before, after));
+
+    [Fact]
+    public void Suspend_resume_arm_requires_resume_cleanup_and_returns_auto()
+    {
+        var t = new FakeFanTransport();
+        var probe = new MsiFanHardwareProbe(t, Path.Combine(Path.GetTempPath(), "MsiFanProbeTests", Guid.NewGuid().ToString("N")), _ => { });
+        var armed = probe.ArmSuspendResume("EX", "MS-1T91", "test");
+        Assert.True(armed.Succeeded); Assert.Equal("ARMED", armed.Status);
+        var resumed = probe.CompleteSuspendResumeAfterResume();
+        Assert.True(resumed.Succeeded); Assert.Contains("FINAL STATE: AUTO", File.ReadAllText(resumed.ReportPath!));
+    }
+
+    [Fact]
+    public void Restore_auto_cancels_an_armed_suspend_test_before_sleep()
+    {
+        var t = new FakeFanTransport();
+        var probe = new MsiFanHardwareProbe(t, Path.Combine(Path.GetTempPath(), "MsiFanProbeTests", Guid.NewGuid().ToString("N")), _ => { });
+        Assert.Equal("ARMED", probe.ArmSuspendResume("EX", "MS-1T91", "test").Status);
+        var result = probe.RestoreAuto("EX", "MS-1T91", "test");
+        Assert.True(result.Succeeded); Assert.Contains("CANCEL BEFORE SUSPEND", File.ReadAllText(result.ReportPath!));
+    }
+
+    [Fact]
     public void Cooler_cleanup_failure_does_not_skip_ownership_release()
     {
         var t = new FakeFanTransport { InitialOwnership = 0x80, FailCoolerRead = true };

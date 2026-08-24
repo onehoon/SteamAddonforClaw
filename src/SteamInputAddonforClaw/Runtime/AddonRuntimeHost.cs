@@ -122,7 +122,8 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
                 _routingRuntime is null || await _routingRuntime.RetryResidualCleanupForResumeAsync(token).ConfigureAwait(false),
             hasPreservedRoutingSession: () => _routingRuntime?.HasPreservedSession == true,
             reconcilePreservedRoutingSession: token => ReconcilePreservedRoutingSessionAsync(token),
-            afterPreservedRecoveryCommit: DrainPreservedResumeDeferredReconcileAsync);
+            afterPreservedRecoveryCommit: DrainPreservedResumeDeferredReconcileAsync,
+            resumeObserved: () => PowerResumeObserved?.Invoke());
         _powerWatcher = new PowerTransitionWatcher(notificationSource ?? new WindowsSuspendResumeNotificationSource(), powerGate, _powerCoordinator,
             () => _routingRuntime?.CancelInFlightTransition());
 
@@ -138,6 +139,7 @@ internal sealed class AddonRuntimeHost : IAsyncDisposable
     internal event EventHandler<SteamSessionStateChangedEventArgs>? SteamSessionStateChanged;
     internal event Action<uint>? ActualRunningAppIdChanged;
     internal event EventHandler? StatusRefreshRequested;
+    internal event Action? PowerResumeObserved;
 
     internal uint ActualRunningAppId => _steamRuntime.ActualRunningAppId;
 
